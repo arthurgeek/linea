@@ -1607,6 +1607,11 @@ call. Places
 overlap when they share a root and one path is a prefix of the other; path
 steps are treated as equal whenever they may select the same place. The check
 uses only the arguments at each call site, without inference or lifetimes.
+Assigning includes every compound assignment, so `pair({ value += 1; 0 }, value)`
+is refused as the same call written with `value = value + 1` is. Evaluating a
+lent place or an assignment's target runs the indexes along its path, so a write
+made in one counts: `set(&cells[bump(&value)], value)` writes `value` beside a
+read of it. A name or a field step computes nothing.
 
 Mutation counts anywhere inside an argument. Both `f(g(&p), p)` and `f(&p, p)`
 access one place twice, as does `f(p, { p.x = 9  0 })`: an assignment inside a
@@ -3491,7 +3496,11 @@ the diagnostic says the type takes `N to M` arguments. A substituted `where`
 subject must satisfy every requirement of its predicate. Applying arguments to a
 type that declares none also violates this rule, and so does a call naming a
 number of type arguments other than the number of type parameters its function
-declares, as `double[UInt8](2)` does where `double` declares none.
+declares, as `double[UInt8](2)` does where `double` declares none. A bound
+supplies as many arguments as its trait declares and one list of bounds names
+no capability twice, whatever it bounds: `where Box[T]: Mark` is held to the
+trait's arity and `where Box[T]: Copyable + Copyable` is refused, as the same
+bounds written on `T` are.
 
 Where the unmet requirement is `Discardable` written on a function's own `where`
 clause for a subject the clause spells out, such as `Self.Iter.Item`, the help
@@ -5356,7 +5365,9 @@ Projection access has three distinct properties:
   determines this: a reading position reads, an assignment writes, and a marked
   argument lends `inout`.
 - **The ceiling**: the mode on the implementation's `self`, which limits access
-  through the resulting place.
+  through the resulting place. A marked argument is a write the callee may
+  make whatever is called: a declared function, a callable value, or a closure
+  held in a local, so `change(&f[0])` needs the same ceiling as `set(&f[0])`.
 
 | Site | Evaluation | Place access | Requires |
 | --- | --- | --- | --- |
@@ -6081,7 +6092,9 @@ independent Copyable aggregate part.
 moving part of a binding; moving from a `read` parameter; moving from a
 `match read` or `let read` binder; and moving a binding that another argument
 of the same call lends. Use-after-free and double-free both access a moved
-root, so they share this rule and diagnostic code.
+root, so they share this rule and diagnostic code. A selection whose root is a
+value, such as a call's result, evaluates that root before its bracket indexes,
+so in `row(token)[at(token)]` the index reads a `token` that `row` has taken.
 
 A call lends every argument it does not take, and its receiver, for as long as
 the callee runs, which is after every argument has been evaluated. A place such
@@ -6116,7 +6129,11 @@ terminates the process.
 scope exit, a consuming `match` leaves its contents unnamed, a write overwrites
 it, or a structure literal writes over a field of its base that holds one.
 `let _ = k` is not exempt: `_` marks intentional non-use, not permission to
-discard a Linear value. The report names the operations that settle the value,
+discard a Linear value. A consuming `_` settles a value only when nothing the
+value holds owes anything, and that is asked of everything it owns directly: its
+fields, a variant's payloads, a tuple's components, a newtype's base and an
+array's elements, so `match keys { _ => 0 }` over a `[Key; 2]` of linear keys
+leaks both. The report names the operations that settle the value,
 and where it is left on an early exit and its type implements `Release`, the
 schedule that settles it on every path: `defer let` or `defer var` for a
 single-name binding, and `defer name.release()` where it is bound otherwise.
