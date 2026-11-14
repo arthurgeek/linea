@@ -82,6 +82,8 @@ fn symbolFor(
     const scope: []const u8 = if (owner == TokenId.none) "" else ast.tokenText(owner);
     var spelled: std.ArrayList(u8) = .empty;
     defer spelled.deinit(gpa);
+    var shared: types_mod.SharedSpelling = .{};
+    defer shared.deinit(gpa);
 
     const enclosing = pool.view().implementationOf(d);
     const member_of = if (enclosing) |i|
@@ -99,17 +101,17 @@ fn symbolFor(
         // A trait's provided operation is one body per type implementing the
         // trait, so it is named as that type's member is: the type first,
         // then the trait.
-        const head = try typing.mangledName(gpa, self_ty);
+        const head = try typing.mangledNameWith(gpa, self_ty, &shared);
         defer gpa.free(head);
         try spelled.appendSlice(gpa, head);
         try spelled.append(gpa, route_end);
         try appendRoute(&typing, gpa, &spelled, @intCast(program.moduleOf(d).index()));
         try spelled.appendSlice(gpa, scope);
-        try typing.appendArguments(gpa, &spelled, impl_args);
+        try typing.appendArgumentsWith(gpa, &spelled, impl_args, &shared);
         try spelled.append(gpa, '.');
     } else if (enclosing != null and enclosing.?.ofATrait()) {
         const i = enclosing.?;
-        const head = try typing.mangledName(gpa, member_of);
+        const head = try typing.mangledNameWith(gpa, member_of, &shared);
         defer gpa.free(head);
         try spelled.appendSlice(gpa, head);
         try spelled.append(gpa, route_end);
@@ -117,18 +119,18 @@ fn symbolFor(
         const trait = DeclId.at(i.trait);
         try appendRoute(&typing, gpa, &spelled, @intCast(program.moduleOf(trait).index()));
         try spelled.appendSlice(gpa, ast.tokenText(ast.declName(trait)));
-        try typing.appendArguments(gpa, &spelled, supplied);
+        try typing.appendArgumentsWith(gpa, &spelled, supplied, &shared);
         try spelled.append(gpa, '.');
     } else {
         try appendRoute(&typing, gpa, &spelled, @intCast(program.moduleOf(d).index()));
         if (scope.len > 0) {
             try spelled.appendSlice(gpa, scope);
-            try typing.appendArguments(gpa, &spelled, typing.appliedTo(member_of));
+            try typing.appendArgumentsWith(gpa, &spelled, typing.appliedTo(member_of), &shared);
             try spelled.append(gpa, '.');
         }
     }
     try spelled.appendSlice(gpa, written);
-    try typing.appendArguments(gpa, &spelled, args);
+    try typing.appendArgumentsWith(gpa, &spelled, args, &shared);
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
@@ -319,8 +321,10 @@ fn spellGenerated(
     try spelled.appendSlice(gpa, @tagName(kind));
     try spelled.append(gpa, '@');
     const view = pool.view();
+    var shared: types_mod.SharedSpelling = .{};
+    defer shared.deinit(gpa);
     switch (identity) {
-        .type => |ty| try view.appendArguments(gpa, spelled, &.{ty}),
+        .type => |ty| try view.appendArgumentsWith(gpa, spelled, &.{ty}, &shared),
         .closure => |closure| try Typing.appendBodyName(gpa, spelled, view.closure_names, closure.index()),
         .constructor => |constructor| try Typing.appendBodyName(gpa, spelled, view.constructor_names, @intFromEnum(constructor)),
         .member => |at| {
@@ -331,11 +335,11 @@ fn spellGenerated(
             try spelled.appendSlice(gpa, ast.tokenText(ast.declName(at.member)));
         },
     }
-    try view.appendArguments(gpa, spelled, args);
-    if (self_ty != .poison) try view.appendArguments(gpa, spelled, &.{self_ty});
+    try view.appendArgumentsWith(gpa, spelled, args, &shared);
+    if (self_ty != .poison) try view.appendArgumentsWith(gpa, spelled, &.{self_ty}, &shared);
     if (impl_args.len > 0) {
         try spelled.appendSlice(gpa, ".impl");
-        try view.appendArguments(gpa, spelled, impl_args);
+        try view.appendArgumentsWith(gpa, spelled, impl_args, &shared);
     }
 }
 
