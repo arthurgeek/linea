@@ -1,0 +1,36 @@
+error[O-Leak]: `keys` (a linear `[Key; 2]`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_does_not_dispose_of_an_array_or_a_newtype.lin:15:9
+   |
+14 |     match keys {
+   |           ---- taken apart here
+15 |         _ => 0,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: walk it with `for`, so each element can be settled
+error[O-Leak]: `rows` (a linear `[[Key; 1]; 1]`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_does_not_dispose_of_an_array_or_a_newtype.lin:22:9
+   |
+21 |     match rows {
+   |           ---- taken apart here
+22 |         _ => 0,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: walk it with `for`, so each element can be settled
+error[O-Leak]: `spare` (a linear `Spare`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_does_not_dispose_of_an_array_or_a_newtype.lin:29:9
+   |
+28 |     match spare {
+   |           ----- taken apart here
+29 |         _ => 0,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: name what it holds in the arm, so something can settle it
+error[O-Leak]: `values` (a linear `[T; 1]`) is taken apart and what it holds is never settled
+  --> tests/ownership/a_wildcard_does_not_dispose_of_an_array_or_a_newtype.lin:35:9
+   |
+34 |     match values {
+   |           ------ taken apart here
+35 |         _ => 0,
+   |         ^ `_` does not settle what it holds
+   |
+   = help: walk it with `for`, so each element can be settled
