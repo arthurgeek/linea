@@ -200,6 +200,14 @@ pub fn emit(
         if (!try verify(gpa, module, sink)) return false;
     }
 
+    // Every C-callable entry is built and checked before anything is
+    // written, so a module refused for one leaves nothing behind.
+    const entries = (try foreignEntries(gpa, module, sink)) orelse return false;
+    defer {
+        for (entries) |one| one.body.deinit(gpa);
+        gpa.free(entries);
+    }
+
     // A type alias is declared outside the module it is used in.
     for (module.statics, 0..) |entry, i| try writeStaticType(w, module, entry, i);
     try w.writeAll("module {\n");
@@ -344,42 +352,10 @@ pub fn emit(
     if (module.entry != .none) try emitEntryWrapper(w, module, options.sanitize);
 
     // What a library is entered through instead: one thunk per export, after
-    // every body, so a reader meets a symbol only once its callee is defined.
-    for (module.functions, 0..) |*f, i| {
-        const id = FunctionId.at(@intCast(i));
-        if (module.isExternal(id)) continue;
-        const name = module.exportedNameOf(id) orelse continue;
-        const body = try checkedForeignBody(gpa, module, f, id, .{ .exported = name }, sink) orelse return false;
-        defer body.deinit(gpa);
-        try emitForeignEntry(w, module, f, id, .{ .exported = name }, options.sanitize, body);
-    }
-
-    // One C-callable entry per function passed to C as a callback, found in
-    // one scan of the instructions.
-    const called_back = try gpa.alloc(u2, module.functions.len);
-    defer gpa.free(called_back);
-    @memset(called_back, 0);
-    for (module.functions, 0..) |*f, i| {
-        if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
-        const callbacks = try runtimeCallbacks(gpa, module, f);
-        defer gpa.free(callbacks);
-        if (callbacks.len == 0) continue;
-        for (0..f.insts.len) |at| {
-            const inst = InstId.at(@intCast(at));
-            if (f.tagOf(inst) == .foreign_function_addr) {
-                const mask: u2 = if (isRuntimeCallback(callbacks, inst)) 2 else 1;
-                called_back[f.functionOf(inst).index()] |= mask;
-            }
-        }
-    }
-    for (module.functions, called_back, 0..) |*f, wanted, i| {
-        const id = FunctionId.at(@intCast(i));
-        for ([_]struct { bit: u2, entry: ForeignEntry }{ .{ .bit = 1, .entry = .called_back }, .{ .bit = 2, .entry = .runtime_called_back } }) |one| {
-            if (wanted & one.bit == 0) continue;
-            const body = try checkedForeignBody(gpa, module, f, id, one.entry, sink) orelse return false;
-            defer body.deinit(gpa);
-            try emitForeignEntry(w, module, f, id, one.entry, options.sanitize, body);
-        }
+    // every body, so a reader meets a symbol only once its callee is defined,
+    // then one C-callable entry per function passed to C as a callback.
+    for (entries) |one| {
+        try emitForeignEntry(w, module, &module.functions[one.id.index()], one.id, one.entry, options.sanitize, one.body);
     }
 
     try w.writeAll("}\n");
@@ -887,6 +863,15 @@ const ForeignBody = struct {
             if (narrow) |at| if (at < called) return "an entry narrows an answer its body has not given";
         } else if (narrow != null) return "an entry narrows the answer of a body that never returns";
 
+        // A step names a parameter, and one the entry has.
+        for (self.steps) |step| switch (step) {
+            .widen, .canonical_value, .canonical_at => |n| if (n >= mir.param_count) return "an entry prepares a parameter its body does not take",
+            else => {},
+        };
+        // The answer is narrowed after foreign execution is left, which is
+        // the last thing the body's own code does.
+        if (narrow != null and leave != null and narrow.? < leave.?) return "an entry narrows its answer before leaving foreign execution";
+
         // Each parameter reaches the body in the body's convention.
         for (self.arguments, 0..) |argument, index| {
             const ty = mir.locals[index];
@@ -913,8 +898,8 @@ const ForeignBody = struct {
             };
             if (narrow_in != widened) return "a parameter narrower than the body's convention is not widened, or one of its width is";
             if ((argument == .widened) != narrow_in) return "an entry passes its body a parameter's unwidened value, or a widened one it never made";
-            if (float and by_address != canonical_at) return "a float handed over by address reaches the body without being made canonical there";
-            if (float and !by_address and !canonical_value) return "a float handed over by value reaches the body without being made canonical";
+            if (float and by_address != canonical_at) return "a float is made canonical at an address it did not arrive by, or not where it did";
+            if (float and by_address == canonical_value) return "a float is made canonical as a value it did not arrive as, or not where it did";
             if (!float and (canonical_value or canonical_at)) return "a value that is no float is made canonical";
             if ((argument == .canonical) != (float and !by_address)) return "an entry passes its body a float's raw value, or a canonical one it never made";
         }
@@ -925,6 +910,71 @@ const ForeignBody = struct {
         return null;
     }
 };
+
+/// One C-callable entry of a module and its checked body.
+const CheckedForeignEntry = struct { id: FunctionId, entry: ForeignEntry, body: ForeignBody };
+
+/// Every C-callable entry `module` needs, in the order they are written: one
+/// per export in function order, then one per function passed to C as a
+/// callback, found in one scan of the instructions. Null, with the defect
+/// reported, where a body breaks an obligation. The caller frees each body
+/// and the slice.
+fn foreignEntries(gpa: std.mem.Allocator, module: *const Module, sink: *Sink) std.mem.Allocator.Error!?[]CheckedForeignEntry {
+    var entries: std.ArrayList(CheckedForeignEntry) = .empty;
+    errdefer {
+        for (entries.items) |one| one.body.deinit(gpa);
+        entries.deinit(gpa);
+    }
+    var sound = true;
+
+    for (module.functions, 0..) |*f, i| {
+        const id = FunctionId.at(@intCast(i));
+        if (module.isExternal(id)) continue;
+        const name = module.exportedNameOf(id) orelse continue;
+        const body = try checkedForeignBody(gpa, module, f, id, .{ .exported = name }, sink) orelse {
+            sound = false;
+            continue;
+        };
+        errdefer body.deinit(gpa);
+        try entries.append(gpa, .{ .id = id, .entry = .{ .exported = name }, .body = body });
+    }
+
+    const called_back = try gpa.alloc(u2, module.functions.len);
+    defer gpa.free(called_back);
+    @memset(called_back, 0);
+    for (module.functions, 0..) |*f, i| {
+        if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
+        const callbacks = try runtimeCallbacks(gpa, module, f);
+        defer gpa.free(callbacks);
+        if (callbacks.len == 0) continue;
+        for (0..f.insts.len) |at| {
+            const inst = InstId.at(@intCast(at));
+            if (f.tagOf(inst) == .foreign_function_addr) {
+                const mask: u2 = if (isRuntimeCallback(callbacks, inst)) 2 else 1;
+                called_back[f.functionOf(inst).index()] |= mask;
+            }
+        }
+    }
+    for (module.functions, called_back, 0..) |*f, wanted, i| {
+        const id = FunctionId.at(@intCast(i));
+        for ([_]struct { bit: u2, entry: ForeignEntry }{ .{ .bit = 1, .entry = .called_back }, .{ .bit = 2, .entry = .runtime_called_back } }) |one| {
+            if (wanted & one.bit == 0) continue;
+            const body = try checkedForeignBody(gpa, module, f, id, one.entry, sink) orelse {
+                sound = false;
+                continue;
+            };
+            errdefer body.deinit(gpa);
+            try entries.append(gpa, .{ .id = id, .entry = one.entry, .body = body });
+        }
+    }
+
+    if (!sound) {
+        for (entries.items) |one| one.body.deinit(gpa);
+        entries.deinit(gpa);
+        return null;
+    }
+    return try entries.toOwnedSlice(gpa);
+}
 
 /// Builds the body of the entry about to be written for `mir` and holds it
 /// to what the boundary requires. Null, with the defect reported, where it
@@ -3597,7 +3647,9 @@ test "a parameter of a C-callable entry is widened or made canonical as its type
     var builder = Mir.Builder.init(gpa);
     defer builder.deinit();
     for ([_]TypeId{ .u8, .u64, .f64 }) |ty| _ = try builder.addLocal(ty, .value);
-    builder.param_count = 3;
+    // And a float handed over by address, as an `inout` parameter is.
+    _ = try builder.addLocal(.f64, .managed_address);
+    builder.param_count = 4;
     const block = try builder.addBlock();
     _ = try builder.setTerminator(block, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = .none } });
     var mir = try builder.finish(block, .from(0));
@@ -3627,7 +3679,26 @@ test "a parameter of a C-callable entry is widened or made canonical as its type
     const body = try ForeignBody.of(gpa, &module, &mir, .called_back);
     defer body.deinit(gpa);
     try testing.expectEqual(@as(?[]const u8, null), body.broken(&module, &mir, .called_back));
-    try testing.expectEqualSlices(ForeignArgument, &.{ .widened, .as_given, .canonical }, body.arguments);
+    try testing.expectEqualSlices(ForeignArgument, &.{ .widened, .as_given, .canonical, .as_given }, body.arguments);
+    const lent = ForeignParameter.of(&module, &mir, 3);
+    try testing.expect(lent.by_address and !lent.widened and lent.canonical == .at_address);
+
+    // A step added before the call that the boundary does not ask for: one
+    // naming no parameter, a by-address float made canonical as a value, and
+    // a by-value float made canonical at an address.
+    for ([_]ForeignStep{ .{ .widen = 4 }, .{ .widen = 9 }, .{ .canonical_at = 7 }, .{ .canonical_value = 3 }, .{ .canonical_at = 2 } }) |extra| {
+        const more = try std.mem.concat(gpa, ForeignStep, &.{ &.{body.steps[0]}, &.{extra}, body.steps[1..] });
+        defer gpa.free(more);
+        const padded: ForeignBody = .{ .steps = more, .arguments = body.arguments };
+        try testing.expect(padded.broken(&module, &mir, .called_back) != null);
+    }
+    // The by-address float's own step taken out is refused too.
+    for (body.steps, 0..) |step, at| if (std.meta.activeTag(step) == .canonical_at) {
+        const fewer = try std.mem.concat(gpa, ForeignStep, &.{ body.steps[0..at], body.steps[at + 1 ..] });
+        defer gpa.free(fewer);
+        const without: ForeignBody = .{ .steps = fewer, .arguments = body.arguments };
+        try testing.expect(without.broken(&module, &mir, .called_back) != null);
+    };
     // Passing the body what C handed over, in place of what the entry made
     // of it, is refused for the narrow integer and for the float.
     for ([_]usize{ 0, 2 }) |index| {
@@ -3745,6 +3816,14 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
                 const doubled: ForeignBody = .{ .steps = twice, .arguments = body.arguments };
                 try testing.expect(doubled.broken(&module, &mir, entry) != null);
             }
+            // Narrowing the answer before foreign execution is left is refused.
+            for (body.steps, 0..) |step, at| if (step == .leave and at + 1 < body.steps.len and body.steps[at + 1] == .narrow) {
+                const swapped = try gpa.dupe(ForeignStep, body.steps);
+                defer gpa.free(swapped);
+                std.mem.swap(ForeignStep, &swapped[at], &swapped[at + 1]);
+                const early: ForeignBody = .{ .steps = swapped, .arguments = body.arguments };
+                try testing.expect(early.broken(&module, &mir, entry) != null);
+            };
             if (body.steps.len > 2) {
                 const moved = try gpa.dupe(ForeignStep, body.steps);
                 defer gpa.free(moved);
