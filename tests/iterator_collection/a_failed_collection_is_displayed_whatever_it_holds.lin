@@ -1,0 +1,12 @@
+// A `CollectFailure` displays the allocation that was refused. It prints
+// nothing of the item it could not keep, so it is displayed whatever the
+// item's type is, with no `Display` asked of it.
+import std.iter
+
+fn _render[I: Iterator, A: Allocator, T, W: Writer](failure: iter.CollectFailure[I, A, T], inout writer: W) -> Result[(), W.Error] where carries(.Err: writer) {
+    failure.fmt(&writer)
+}
+
+fn main() -> UInt8 {
+    0
+}

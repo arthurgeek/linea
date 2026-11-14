@@ -1,0 +1,34 @@
+// [N-Immutable]. Lending a place `inout` is a write the callee may make, so
+// a bracket lent to a call must reach as far as writing. `Fixed` declares
+// `at` over a read `self`, and lending `f[0]` is refused whatever is called:
+// a closure held in a local, as much as a function or a callable parameter.
+struct Fixed {
+    cells: [UInt8; 2],
+}
+
+impl Index[UInt64] for Fixed {
+    type Elem = UInt8
+
+    proj at(self: Fixed, i: UInt64) -> UInt8 {
+        self.cells[i]
+    }
+}
+
+fn set(inout value: UInt8) {
+    value = 1
+}
+
+fn through[F: fn(inout value: UInt8)](f: F, inout fixed: Fixed) {
+    f(&fixed[0])
+}
+
+fn main() -> UInt8 {
+    var f: Fixed = .{ cells = [5, 6] }
+    let change = |inout value: UInt8| {
+        value = 1
+    }
+    change(&f[0])
+    set(&f[0])
+    through(set, &f)
+    f[1]
+}
