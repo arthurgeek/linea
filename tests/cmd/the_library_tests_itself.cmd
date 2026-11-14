@@ -1150,6 +1150,7 @@ The library tests itself.
   ok    mem.an_arena_over_an_arena_is_rewound_in_place
   ok    mem.an_arena_over_an_arena_takes_its_whole_size_from_it
   ok    mem.an_arena_refuses_what_it_cannot_hold
+  ok    mem.an_arena_smaller_than_its_cursor_rewinds_to_nothing
   ok    mem.an_arena_the_backing_refused_refuses_everything
   ok    mem.an_empty_buffer_is_allocated_rather_than_refused
   ok    mem.an_empty_slice_accepts_its_empty_subspan
@@ -1635,4 +1636,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1632 passed, 0 failed
+  1633 passed, 0 failed
