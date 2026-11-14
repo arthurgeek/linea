@@ -1,0 +1,24 @@
+error[O-Move]: `token` has already been moved
+  --> tests/ownership/a_receiver_runs_before_its_index.lin:35:19
+   |
+35 |     row(token)[at(token)]
+   |         ----- it was taken here
+   |                   ^^^^^ it was already taken, and a value is taken once
+error[O-Move]: `token` has already been moved
+  --> tests/ownership/a_receiver_runs_before_its_index.lin:40:29
+   |
+40 |     holder(token).values[at(token)]
+   |            ----- it was taken here
+   |                             ^^^^^ it was already taken, and a value is taken once
+error[O-Move]: `token` has already been moved
+  --> tests/ownership/a_receiver_runs_before_its_index.lin:45:20
+   |
+45 |     grid(token)[at(token)][at(token)]
+   |          ----- it was taken here
+   |                    ^^^^^ it was already taken, and a value is taken once
+error[O-Move]: `token` has already been moved
+  --> tests/ownership/a_receiver_runs_before_its_index.lin:45:31
+   |
+45 |     grid(token)[at(token)][at(token)]
+   |          ----- it was taken here
+   |                               ^^^^^ it was already taken, and a value is taken once
