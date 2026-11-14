@@ -117,6 +117,14 @@ pub const Handler = struct {
     /// outside the editor, which the client's watch reports and which drops
     /// the analysis of the module that holds it.
     cached: ?Cached = null,
+    /// The files each program was last published with something wrong in,
+    /// by the program's entry. An editor shows a file's diagnostics until
+    /// others are published for it, so a file the program no longer holds is
+    /// published once more, with none.
+    ///
+    /// **Bound:** the files that had a diagnostic when their program was
+    /// last published, over the programs the session has published.
+    flagged: std.StringHashMapUnmanaged(std.ArrayList([]u8)) = .empty,
     /// What every program under the workspace exports, held for the session.
     ///
     /// Built on the first request that reads it, so a session that never asks
@@ -802,6 +810,13 @@ pub const Handler = struct {
     /// now does once per case.
     pub fn deinit(handler: *Handler) void {
         handler.drop();
+        var flagged = handler.flagged.iterator();
+        while (flagged.next()) |kept| {
+            for (kept.value_ptr.items) |path| handler.gpa.free(path);
+            kept.value_ptr.deinit(handler.gpa);
+            handler.gpa.free(kept.key_ptr.*);
+        }
+        handler.flagged.deinit(handler.gpa);
         for (handler.embeds_watched.items) |path| handler.gpa.free(path);
         handler.embeds_watched.deinit(handler.gpa);
         handler.documents.deinit();
@@ -1010,6 +1025,7 @@ pub const Handler = struct {
     /// session reads the same whatever order they were opened in.
     ///
     /// **Bound:** the open documents, sorted, and one check per program
+    /// among them; then one resolution per remembered program that was not
     /// among them.
     fn reportOpen(handler: *Handler, arena: std.mem.Allocator) !void {
         var paths: std.ArrayList([]const u8) = .empty;
@@ -1026,6 +1042,30 @@ pub const Handler = struct {
             const entry = (try handler.rootFor(arena, path)).entry;
             if ((try published.getOrPut(arena, entry)).found_existing) continue;
             try handler.report(arena, path);
+        }
+
+        // A manifest decides which program a file belongs to. A program
+        // that was not checked again, and whose files now resolve to another
+        // program or to none, is one the change did away with: what it was
+        // last published with is taken down. One no document is open in,
+        // that its files still resolve to, keeps what it showed.
+        var gone: std.ArrayList([]const u8) = .empty;
+        var remembered = handler.flagged.iterator();
+        while (remembered.next()) |kept| {
+            const entry = kept.key_ptr.*;
+            if (published.contains(entry)) continue;
+            const now = handler.rootFor(arena, kept.value_ptr.items[0]) catch null;
+            if (now) |root| if (std.mem.eql(u8, root.entry, entry)) continue;
+            try gone.append(arena, try arena.dupe(u8, entry));
+        }
+        std.mem.sort([]const u8, gone.items, {}, struct {
+            fn before(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.before);
+        for (gone.items) |entry| {
+            try handler.clearLeft(arena, entry, null);
+            try handler.remember(entry, &.{});
         }
     }
 
@@ -1130,21 +1170,71 @@ pub const Handler = struct {
         const checked = try handler.check(arena, path);
 
         const publication = try publish.Publication.init(arena, checked);
+        var held: std.StringHashMapUnmanaged(void) = .empty;
+        var wrong: std.ArrayList([]const u8) = .empty;
         var it = publish.files(&checked.program);
         while (it.next()) |file| {
             const diagnostics = try publication.forFile(arena, file, handler.offset_encoding);
-            try handler.transport.writeNotification(
-                handler.io,
-                arena,
-                "textDocument/publishDiagnostics",
-                lsp.types.publish_diagnostics.Params,
-                .{
-                    .uri = try uri_mod.uriOf(arena, checked.table.get(file).path),
-                    .diagnostics = diagnostics,
-                },
-                .{ .emit_null_optional_fields = false },
-            );
+            const file_path = checked.table.get(file).path;
+            try held.put(arena, file_path, {});
+            if (diagnostics.len != 0) try wrong.append(arena, file_path);
+            try handler.publishFor(arena, file_path, diagnostics);
         }
+        const entry = (try handler.rootFor(arena, path)).entry;
+        try handler.clearLeft(arena, entry, &held);
+        try handler.remember(entry, wrong.items);
+    }
+
+    fn publishFor(handler: *Handler, arena: std.mem.Allocator, path: []const u8, diagnostics: []const lsp.types.Diagnostic) !void {
+        try handler.transport.writeNotification(
+            handler.io,
+            arena,
+            "textDocument/publishDiagnostics",
+            lsp.types.publish_diagnostics.Params,
+            .{
+                .uri = try uri_mod.uriOf(arena, path),
+                .diagnostics = diagnostics,
+            },
+            .{ .emit_null_optional_fields = false },
+        );
+    }
+
+    /// Publishes no diagnostics for each file the program at `entry` was
+    /// last published with something wrong in and no longer holds. `held`
+    /// is every file just published, or null where the program itself is
+    /// gone.
+    ///
+    /// **Bound:** the files remembered for this one program.
+    fn clearLeft(handler: *Handler, arena: std.mem.Allocator, entry: []const u8, held: ?*const std.StringHashMapUnmanaged(void)) !void {
+        const before = handler.flagged.getPtr(entry) orelse return;
+        for (before.items) |old| {
+            if (held) |now| if (now.contains(old)) continue;
+            try handler.publishFor(arena, old, &.{});
+        }
+    }
+
+    /// Replaces what is remembered for the program at `entry` with `wrong`,
+    /// the files just published with a diagnostic.
+    fn remember(handler: *Handler, entry: []const u8, wrong: []const []const u8) !void {
+        const gpa = handler.gpa;
+        if (handler.flagged.getPtr(entry)) |before| {
+            for (before.items) |old| gpa.free(old);
+            before.clearRetainingCapacity();
+            if (wrong.len == 0) {
+                var removed = handler.flagged.fetchRemove(entry).?;
+                removed.value.deinit(gpa);
+                gpa.free(removed.key);
+                return;
+            }
+        } else {
+            if (wrong.len == 0) return;
+            const key = try gpa.dupe(u8, entry);
+            errdefer gpa.free(key);
+            try handler.flagged.put(gpa, key, .empty);
+        }
+        const list = handler.flagged.getPtr(entry).?;
+        try list.ensureTotalCapacity(gpa, wrong.len);
+        for (wrong) |file_path| list.appendAssumeCapacity(try gpa.dupe(u8, file_path));
     }
 };
 
