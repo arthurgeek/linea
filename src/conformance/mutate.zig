@@ -20,7 +20,6 @@ const typecheckTree = @import("../sema/typecheck.zig").typecheckTree;
 const Typing = @import("../sema/types.zig").Typing;
 const CallIndex = @import("../sema/types.zig").CallIndex;
 const namesAVariant = @import("../sema/typecheck.zig").namesAVariant;
-const isCatchAll = @import("../sema/typecheck.zig").isCatchAll;
 const selectsFromAValue = @import("../sema/typecheck.zig").selectsFromAValue;
 const fieldBase = @import("../sema/typecheck.zig").fieldBase;
 const loader = @import("../driver/loader.zig");
@@ -387,7 +386,7 @@ pub const Mutation = enum {
             .copyable_holds_linear => copyableHoldsLinear(gpa, ast, text),
             .abrupt_after_a_transfer => abruptAfterATransfer(gpa, ast, res, types_of, calls, text),
             .dropped_phantom => droppedPhantom(gpa, ast, text),
-            .narrowed_range => narrowedRange(gpa, ast, text),
+            .narrowed_range => narrowedRange(gpa, ast, res, types_of, text),
             .narrowed_refinement => narrowedRefinement(gpa, ast, res, text),
             .summed_newtype => summedNewtype(gpa, ast, types_of, text),
         };
@@ -1172,50 +1171,110 @@ fn droppedPhantom(
     return null;
 }
 
-/// Respells the first `..=` found in a covering match's arms to `..`.
+/// The whole numbers one arm takes, where the arm is an integer literal or a
+/// range between two; null for any other pattern.
+const Interval = struct { lo: i128, hi: i128 };
+
+/// What a match's arms are read through: the text for a literal, and the
+/// checker's constant table for a bound that names a constant.
+const Arms = struct {
+    ast: *const Ast,
+    res: *const Resolution,
+    types_of: *const Typing,
+    text: []const u8,
+
+    /// The integer a bound is: written as one, or the value of the constant
+    /// its name reaches. Null for anything else.
+    fn integerAt(self: Arms, id: ExprId) ?i128 {
+        const at = self.ast.exprSpan(id);
+        if (std.fmt.parseInt(i128, self.text[at.start..at.end], 10)) |written| return written else |_| {}
+        const named = self.res.targetOf(self.ast.withoutGroups(id));
+        if (named == BindingId.none) return null;
+        return switch (self.types_of.constantValue(named) orelse return null) {
+            .integer => |value| value,
+            .truth, .string, .aggregate => null,
+        };
+    }
+
+    fn intervalOf(self: Arms, pattern: ExprId) ?Interval {
+        if (self.ast.exprTag(pattern) != .range) {
+            const value = self.integerAt(pattern) orelse return null;
+            return .{ .lo = value, .hi = value };
+        }
+        const ends = self.ast.rangeEnds(pattern);
+        const lo = self.integerAt(ends.lhs) orelse return null;
+        const hi = self.integerAt(ends.rhs) orelse return null;
+        return .{ .lo = lo, .hi = if (self.ast.rangeInclusive(pattern)) hi else hi -| 1 };
+    }
+};
+
+/// Respells to `..` the first `..=` in a covering match whose top value no
+/// other arm of the match takes.
 ///
-/// A match with a `_` is left alone: the wildcard still answers for the value
-/// the flag stops covering, so nothing becomes a gap and the rejection this
-/// mutation exists to provoke never arrives. Every arm an accepted match
-/// holds already covers a disjoint interval -- two that overlapped would be
-/// `[T-Unreachable]` -- so the one value an inclusive arm's flag adds is
-/// covered by that arm alone, and losing the flag uncovers exactly that
-/// value.
+/// The accepted match covers its type, so a value one arm alone takes is a
+/// gap once that arm stops taking it. That the value is one arm's alone is
+/// read from the arms as written, not asked of the checker this mutation
+/// tests: every arm must be an integer, or a range between two, each written
+/// as a literal or as the name of a constant, and
+/// none but the narrowed arm may hold its top value, and the arms above it
+/// must leave it a value below that one. Two ranges may share
+/// values in an accepted match -- the later one is useful for the rest -- so
+/// an arm whose top value another takes is passed over, and a match holding
+/// a `_`, a binding or any pattern this cannot read is left alone.
 ///
 /// Only a pattern's `..=`, never an expression's: `3..=7` and `3..7` are two
 /// values of the same type, and the checker refuses neither -- narrowing one
 /// would mutate an accepted program into another it is right to accept, which
 /// answers for no rule at all.
-fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]const u8 {
-    for (0..ast.exprCount()) |i| {
+fn narrowedRange(gpa: std.mem.Allocator, ast: *const Ast, res: *const Resolution, types_of: *const Typing, text: []const u8) !?[]const u8 {
+    const arms_of: Arms = .{ .ast = ast, .res = res, .types_of = types_of, .text = text };
+    matches: for (0..ast.exprCount()) |i| {
         const id = ExprId.at(@intCast(i));
         if (!ast.exprTag(id).isMatch()) continue;
 
         const args = ast.call(id).args;
-        var has_wildcard = false;
         var j: usize = 0;
         while (j < args.len) : (j += 2) {
-            if (isCatchAll(ast, args[j])) has_wildcard = true;
+            if (arms_of.intervalOf(args[j]) == null) continue :matches;
         }
-        if (has_wildcard) continue;
 
         j = 0;
-        while (j < args.len) : (j += 2) {
+        arms: while (j < args.len) : (j += 2) {
             const pattern = args[j];
             if (ast.exprTag(pattern) != .range) continue;
             if (!ast.rangeInclusive(pattern)) continue;
 
             // An arm holding one value respells to an empty one, and an empty
             // arm is [T-Unreachable] before the match is uncovering -- a
-            // rejection under a different rule than the one this claims. The
-            // flag on any other arm covers one value on its own, which is the
-            // premise the narrowing rests on.
-            const ends = ast.rangeEnds(pattern);
-            const lo_at = ast.exprSpan(ends.lhs);
-            const hi_at = ast.exprSpan(ends.rhs);
-            const lo = std.fmt.parseInt(i128, text[lo_at.start..lo_at.end], 10) catch null;
-            const hi = std.fmt.parseInt(i128, text[hi_at.start..hi_at.end], 10) catch null;
-            if (lo != null and lo == hi) continue;
+            // rejection under a different rule than the one this claims.
+            const taken = arms_of.intervalOf(pattern).?;
+            if (taken.lo >= taken.hi) continue;
+
+            var k: usize = 0;
+            while (k < args.len) : (k += 2) {
+                if (k == j) continue;
+                const other = arms_of.intervalOf(args[k]).?;
+                if (other.lo <= taken.hi and taken.hi <= other.hi) continue :arms;
+            }
+
+            // The arms above may between them take every value below the
+            // top, leaving the narrowed arm one no value reaches:
+            // [T-Unreachable], a rule this does not claim. `free` is the
+            // lowest value none of them takes, moved past each arm that
+            // holds it until none does.
+            var free = taken.lo;
+            search: while (free < taken.hi) {
+                k = 0;
+                while (k < j) : (k += 2) {
+                    const above = arms_of.intervalOf(args[k]).?;
+                    if (above.lo <= free and free <= above.hi) {
+                        free = above.hi + 1;
+                        continue :search;
+                    }
+                }
+                break;
+            }
+            if (free >= taken.hi) continue;
 
             const at = ast.tokenSpan(ast.exprMain(pattern));
             std.debug.assert(std.mem.eql(u8, text[at.start..at.end], "..="));
@@ -2353,6 +2412,124 @@ test "a wildcard beside a range arm is left alone" {
         \\    match 3 { 0..=127 => 1, _ => 2 }
         \\}
     )) == null);
+}
+
+test "an arm whose top value a later arm also takes is not the arm narrowed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // `50..=255` takes 100 once `0..=100` stops at 99, so that narrowing
+    // leaves the match covering. 255 belongs to the second arm alone.
+    const out = (try mutated(gpa, .narrowed_range,
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 0..=100 => 1, 50..=255 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )).?;
+
+    try testing.expect(std.mem.indexOf(u8, out, "0..=100") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "50..255") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
+}
+
+test "an arm whose top value an earlier literal takes is not the arm narrowed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const out = (try mutated(gpa, .narrowed_range,
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 100 => 0, 0..=100 => 1, 101..=255 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )).?;
+
+    try testing.expect(std.mem.indexOf(u8, out, "0..=100") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "101..255") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
+}
+
+test "an arm an earlier arm leaves only its top value is not the arm narrowed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // `0..=99` takes everything `0..=100` holds but 100, so `0..100` would
+    // be an arm no value reaches: [T-Unreachable] beside the uncovering.
+    const out = (try mutated(gpa, .narrowed_range,
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 0..=99 => 1, 0..=100 => 2, 101..=255 => 3 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )).?;
+
+    try testing.expect(std.mem.indexOf(u8, out, "0..=100") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "101..255") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
+}
+
+test "a range ended by a named constant is read through the constant it names" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // `Thing.top` is 9, which the first arm alone holds.
+    const out = (try mutated(gpa, .narrowed_range,
+        \\struct Thing {
+        \\    count: UInt8,
+        \\}
+        \\impl Thing {
+        \\    pub let top: UInt8 = 9
+        \\}
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 0..=Thing.top => 1, 10..=255 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )).?;
+
+    try testing.expect(std.mem.indexOf(u8, out, "0..Thing.top") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .narrowed_range));
+}
+
+test "a match where every top value is taken twice is left alone" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    try testing.expect((try mutated(gpa, .narrowed_range,
+        \\fn classify(b: UInt8) -> UInt8 {
+        \\    match read b { 255 => 0, 0..=100 => 1, 50..=255 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(200)
+        \\}
+    )) == null);
+}
+
+test "a range below zero is narrowed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const signed = (try mutated(gpa, .narrowed_range,
+        \\fn classify(b: Int8) -> UInt8 {
+        \\    match read b { -128..=-1 => 1, 0..=127 => 2 }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    classify(-5)
+        \\}
+    )).?;
+    try testing.expect(std.mem.indexOf(u8, signed, "-128..-1") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, signed, .program), .narrowed_range));
 }
 
 test "a refinement narrowed past a proven construction is refused" {
