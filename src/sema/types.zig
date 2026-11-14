@@ -2713,7 +2713,7 @@ pub const ClosureDescriptor = struct {
 /// The target and parameter-order arguments are semantic facts and live in the
 /// call's `NormalizedCall`; this record survives only so source tools can map
 /// the receiver back to the spelling before the dot.
-pub const Postfix = struct { call: u32, args: []const ExprId };
+pub const Postfix = struct { call: ExprId, args: []const ExprId };
 
 pub const array_view_name = "as_slice";
 
@@ -3131,7 +3131,7 @@ const not_an_interpolation = std.math.maxInt(u32);
 /// `Lookup` at `UInt64`, so a body bounded on `Fancy` may hand its parameter
 /// to one bounded `Lookup[UInt64]` and to nothing else.
 pub const BoundTrait = struct {
-    trait: u32,
+    trait: DeclId,
     args: []const TypeId = &.{},
     /// The bound as it was written, kept so a reader holding one written bound
     /// finds the entry that bound made rather than the first entry naming its
@@ -3923,7 +3923,7 @@ pub const ImplIndex = struct {
         defer bounds.deinit(gpa);
         try pool.appendBoundsWithin(gpa, scope, held, &bounds);
         for (bounds.items) |bound| {
-            if (bound.trait == trait.index()) try appendKey(gpa, out, bound.args);
+            if (bound.trait == trait) try appendKey(gpa, out, bound.args);
         }
         var open = false;
         var rows = self.candidates(impls, trait.index(), pool.headOf(held), true);
@@ -4958,8 +4958,8 @@ pub const ImplIndex = struct {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);
             for (required.args, args) |written, *argument| argument.* = try pool.substitute(written, im.decl.index(), bindings);
-            if (decided.grants(.{ .ty = given, .lacks = .{ .trait = .{ .decl = DeclId.at(required.trait), .args = args } } })) continue;
-            if (try self.findOnce(impls, pool, decided, required.trait, args, given) == null) return false;
+            if (decided.grants(.{ .ty = given, .lacks = .{ .trait = .{ .decl = required.trait, .args = args } } })) continue;
+            if (try self.findOnce(impls, pool, decided, required.trait.index(), args, given) == null) return false;
         }
         for (demand.callables) |required| {
             if (try self.meetsCallableDemand(
@@ -5083,7 +5083,7 @@ pub const Traversal = struct {
     positions: TraversalPositions = .{ .expression = .none },
     impl_args: []const TypeId = &.{},
     /// The loop, by expression.
-    at: u32,
+    at: ExprId,
     /// The `trav` member, by declaration. What lowering reads the positions
     /// expression off.
     decl: DeclId,
@@ -5099,7 +5099,7 @@ pub const Projected = struct {
     requires_write: bool = false,
     impl_args: []const TypeId = &.{},
     /// The bracket, by expression.
-    at: u32,
+    at: ExprId,
     /// Which entry of `Typing.expansions` it becomes.
     expansion: u32,
 };
@@ -5115,7 +5115,7 @@ pub const Projected = struct {
 /// which is a program accepted for a place nothing can emit.
 pub const RangePlace = struct {
     /// The bracket, by expression.
-    at: u32,
+    at: ExprId,
     /// The index of the first element the place names.
     first: u32,
 };
@@ -5376,7 +5376,7 @@ pub const ContextualConstraints = struct {
             for (self.run(scope)) |constraint| {
                 if (constraint.subject != subject) continue;
                 for (constraint.demand.traits) |held| {
-                    if (held.trait != trait) continue;
+                    if (held.trait.index() != trait) continue;
                     if (args == null or std.mem.eql(TypeId, held.args, args.?)) return true;
                 }
             }
@@ -5399,7 +5399,7 @@ pub const ContextualConstraints = struct {
             for (self.run(scope)) |constraint| {
                 if (constraint.subject != subject) continue;
                 for (constraint.demand.traits) |held| {
-                    if (held.trait == trait) try out.append(gpa, held.args);
+                    if (held.trait.index() == trait) try out.append(gpa, held.args);
                 }
             }
         }
@@ -5553,19 +5553,19 @@ pub const CallIndex = struct {
             if (records.items[at].recovered_calls == absent) records.items[at].recovered_calls = @intCast(i);
         }
         for (typing.postfix, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.call) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.call.index()) orelse continue;
             if (records.items[at].postfix == absent) records.items[at].postfix = @intCast(i);
         }
         for (typing.projected, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.at) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.at.index()) orelse continue;
             if (records.items[at].projected == absent) records.items[at].projected = @intCast(i);
         }
         for (typing.traversals, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.at) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.at.index()) orelse continue;
             if (records.items[at].traversals == absent) records.items[at].traversals = @intCast(i);
         }
         for (typing.range_places, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.at) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.at.index()) orelse continue;
             if (records.items[at].range_places == absent) records.items[at].range_places = @intCast(i);
         }
         for (typing.function_values, 0..) |rec, i| {
@@ -7578,7 +7578,7 @@ pub const Typing = struct {
             else => return false,
         };
         for (p.traits) |named| {
-            if (named.trait != trait) continue;
+            if (named.trait.index() != trait) continue;
             if (args == null or std.mem.eql(TypeId, named.args, args.?)) return true;
         }
         return false;
@@ -7600,7 +7600,7 @@ pub const Typing = struct {
         out: *std.ArrayList([]const TypeId),
     ) std.mem.Allocator.Error!void {
         for (self.boundsOn(t)) |named| {
-            if (named.trait == trait) try out.append(gpa, named.args);
+            if (named.trait.index() == trait) try out.append(gpa, named.args);
         }
         try self.contextual_constraints.boundArguments(gpa, owner, t, trait, out);
     }
@@ -9939,7 +9939,7 @@ pub const Typing = struct {
                 @intCast(promise.traits.len),
             });
             for (promise.traits) |bound| {
-                try words.appendSlice(self.gpa, &.{ bound.trait, @intCast(bound.args.len) });
+                try words.appendSlice(self.gpa, &.{ bound.trait.index(), @intCast(bound.args.len) });
                 for (bound.args) |bound_arg| try self.encodeRenamed(&words, bound_arg, args);
             }
             try words.append(self.gpa, @intCast(promise.callables.len));
@@ -12604,12 +12604,12 @@ pub const Typing = struct {
                         var handed_off = false;
                         defer if (!handed_off) self.gpa.free(required_args);
                         for (required.args, required_args) |written, *argument| argument.* = try self.substitute(written, im.decl.index(), bindings);
-                        if (try self.implementationChoice(DeclId.at(required.trait), required_args, subject) != null) continue;
+                        if (try self.implementationChoice(required.trait, required_args, subject) != null) continue;
                         const unmet: UnmetRequirement = .{
                             .head = im.ty,
                             .subject = predicate.subject,
                             .argument = subject,
-                            .trait = DeclId.at(required.trait),
+                            .trait = required.trait,
                             .args = required_args,
                         };
                         if (self.holdsType(subject, receiver)) {
@@ -14571,11 +14571,11 @@ test "call index accessors recover forged typing rows" {
             .{ .call = ExprId.at(1), .argument = ExprId.at(3), .parameter = null, .convention = .sink },
         },
         .recovered_calls = &.{.{ .at = ExprId.at(2), .target = .{ .declared = DeclId.at(9) } }},
-        .postfix = &.{.{ .call = 3, .args = &.{} }},
-        .projected = &.{.{ .at = 4, .expansion = 0 }},
+        .postfix = &.{.{ .call = ExprId.at(3), .args = &.{} }},
+        .projected = &.{.{ .at = ExprId.at(4), .expansion = 0 }},
         .expansions = &.{.{ .member = DeclId.at(10), .path = .none, .receiver = 0, .index = Expansion.no_binding }},
-        .traversals = &.{.{ .at = 5, .decl = DeclId.at(11) }},
-        .range_places = &.{.{ .at = 6, .first = 13 }},
+        .traversals = &.{.{ .at = ExprId.at(5), .decl = DeclId.at(11) }},
+        .range_places = &.{.{ .at = ExprId.at(6), .first = 13 }},
         .function_values = &.{.{ .at = ExprId.at(7), .target = .{ .declared = DeclId.at(15) }, .signature = .u8 }},
     };
 
@@ -14589,7 +14589,7 @@ test "call index accessors recover forged typing rows" {
     try testing.expectEqual(ExprId.at(2), recovered[0].argument);
     try testing.expectEqual(ExprId.at(3), recovered[1].argument);
     try testing.expectEqual(DeclId.at(9), index.recoveredCallOf(&typing, ExprId.at(2)).?.target.declared);
-    try testing.expectEqual(@as(u32, 3), index.postfixOf(&typing, ExprId.at(3)).?.call);
+    try testing.expectEqual(ExprId.at(3), index.postfixOf(&typing, ExprId.at(3)).?.call);
     try testing.expectEqual(DeclId.at(10), index.projectionOf(&typing, ExprId.at(4)).?.member);
     try testing.expectEqual(DeclId.at(11), index.traversalPlan(&typing, ExprId.at(5)).?.decl);
     try testing.expectEqual(@as(u32, 13), index.rangePlaceOf(&typing, ExprId.at(6)).?.first);
