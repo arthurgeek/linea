@@ -1799,20 +1799,35 @@ test "watched dependency changes and missing imports invalidate analysis" {
     try std.testing.expect(!repaired.sink.hasErrors());
 }
 
-test "a file the program never reaches is not read, and one it reaches is read from disk" {
+test "a file the program never reaches is not read, and one it reaches is read once" {
+    // Comment lines, so each file is a program however long it is.
+    const megabyte = "// " ++ "x" ** 60 ++ "\n";
+    const reached = megabyte ** (1 << 14);
+    const unreached = megabyte ** (1 << 15);
     var ws = try Rooted.initFiles(std.testing.allocator, &.{
         .{ .at = "main.lin", .text = "import kept\n\nfn main() -> UInt8 {\n    kept.size()\n}\n" },
-        .{ .at = "kept/kept.lin", .text = "pub fn size() -> UInt8 {\n    4\n}\n" },
-        .{ .at = "notes/notes.lin", .text = "this is no program at all\n" },
+        .{ .at = "kept/kept.lin", .text = reached ++ "pub fn size() -> UInt8 {\n    4\n}\n" },
+        .{ .at = "notes/notes.lin", .text = unreached ++ "this is no program at all\n" },
     });
     defer ws.deinit();
     const a = ws.arena.allocator();
 
-    // `notes` holds text that would not parse. No import names it, so it is
-    // never read and nothing is reported; `kept` is read when `main` imports
-    // it, though the editor never opened it.
-    const checked = try ws.handler.check(a, try ws.main());
+    const main_path = try ws.main();
+    const listed_before = ws.arena.queryCapacity();
+    const checked = try ws.handler.check(a, main_path);
+    const listed = ws.arena.queryCapacity() - listed_before;
+
+    // `notes` would not parse, and no import names it: nothing is reported
+    // and it is no file of the program. `kept` is one, though the editor
+    // never opened it.
     try std.testing.expectEqual(@as(usize, 0), checked.sink.items().len);
     try std.testing.expect(checked.fileNamed(try loader.canonical(a, try ws.pathAt("kept/kept.lin"))) != null);
     try std.testing.expect(checked.fileNamed(try loader.canonical(a, try ws.pathAt("notes/notes.lin"))) == null);
+
+    // Listing the files read neither: what the request's arena grew by is
+    // under either file's size. And the reached file is held once, though
+    // two loads read the program: under twice its megabyte.
+    try std.testing.expect(listed < reached.len);
+    try std.testing.expect(checked.source_arena.queryCapacity() < 2 * reached.len);
+    try std.testing.expect(checked.source_arena.queryCapacity() >= reached.len);
 }

@@ -129,10 +129,33 @@ pub const MemoryOwnership = union(enum) {
     copy_reading_disk: CopyReadingDisk,
     /// The texts supplied are borrowed, and a file supplied without one
     /// (`InMemoryFile.deferred`) is read from disk into `allocator` when the
-    /// program reaches it. Files an `embed` names are read from disk too.
+    /// program reaches it. A file an `embed` names is looked for among the
+    /// files supplied, as under `borrow`.
     borrow_reading_disk: CopyReadingDisk,
 
-    pub const CopyReadingDisk = struct { allocator: std.mem.Allocator, io: std.Io };
+    pub const CopyReadingDisk = struct {
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        /// The deferred files read so far, where two loads of one program
+        /// share their reads: the second is given what the first read and
+        /// reads nothing again. Kept in `allocator`, with the texts.
+        read: ?*ReadOnce = null,
+    };
+
+    /// The text of each deferred file a load has read, by its path.
+    pub const ReadOnce = struct {
+        texts: std.StringHashMapUnmanaged([]const u8) = .empty,
+    };
+
+    /// The text of the deferred file at `path`, read from disk the first
+    /// time it is asked for and kept in the reader's allocator.
+    fn readDeferred(reading: CopyReadingDisk, path: []const u8) ![]const u8 {
+        const shared = reading.read orelse return source_mod.readFileAlloc(reading.io, reading.allocator, path);
+        if (shared.texts.get(path)) |text| return text;
+        const text = try source_mod.readFileAlloc(reading.io, reading.allocator, path);
+        try shared.texts.put(reading.allocator, try reading.allocator.dupe(u8, path), text);
+        return text;
+    }
 };
 
 const Input = union(enum) { disk: std.Io, memory: MemoryOwnership };
@@ -325,10 +348,18 @@ pub const CheckedLibrary = struct {
         return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, true, self);
     }
 
+    /// `reading`, with its reads shared through `shared` unless the caller
+    /// already shares them.
+    fn sharing(reading: MemoryOwnership.CopyReadingDisk, shared: *MemoryOwnership.ReadOnce) MemoryOwnership.CopyReadingDisk {
+        var with = reading;
+        if (with.read == null) with.read = shared;
+        return with;
+    }
+
     fn loadInputs(
         self: *const CheckedLibrary,
         gpa: std.mem.Allocator,
-        input: Input,
+        given: Input,
         table: *FileTable,
         sink: *Sink,
         interner: *Interner,
@@ -340,7 +371,7 @@ pub const CheckedLibrary = struct {
         std.debug.assert(table.count() == 0 and interner.count() == 0);
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
-        if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, input, table, sink, interner, entry, module, files, purpose, true, null);
+        if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, given, table, sink, interner, entry, module, files, purpose, true, null);
         const diagnostic_count = sink.list.items.len;
         const error_count = sink.error_count;
         const warning_count = sink.warning_count;
@@ -350,11 +381,21 @@ pub const CheckedLibrary = struct {
         // caller and cannot be reclaimed through Program or FileTable. A disk
         // load owns what it reads, so its candidate is the answer when it can
         // resume.
+        // A load that may read deferred files keeps its reader while it
+        // decides, since the files the program reaches are what decide it,
+        // and the load that follows is given what this one read: each file
+        // is read once and the decision and the load see one text.
+        var read_once: MemoryOwnership.ReadOnce = .{};
+        const input: Input = switch (given) {
+            .memory => |ownership| switch (ownership) {
+                .copy_reading_disk => |reading| .{ .memory = .{ .copy_reading_disk = sharing(reading, &read_once) } },
+                .borrow_reading_disk => |reading| .{ .memory = .{ .borrow_reading_disk = sharing(reading, &read_once) } },
+                .borrow, .copy => given,
+            },
+            .disk => given,
+        };
         const candidate_input: Input = switch (input) {
             .memory => |ownership| switch (ownership) {
-                // A load that may read deferred files keeps its reader while
-                // it decides, since the files the program reaches are what
-                // decide it.
                 .copy_reading_disk, .borrow_reading_disk => |reading| .{ .memory = .{ .borrow_reading_disk = reading } },
                 .borrow, .copy => .{ .memory = .borrow },
             },
@@ -2551,7 +2592,7 @@ const Loader = struct {
                 },
                 .borrow_reading_disk => |reading| {
                     if (!file.deferred) return .{ .path = file.path, .text = file.text };
-                    return .{ .path = file.path, .text = try source_mod.readFileAlloc(reading.io, reading.allocator, file.path) };
+                    return .{ .path = file.path, .text = try MemoryOwnership.readDeferred(reading, file.path) };
                 },
                 .copy => |allocator| allocator,
                 .copy_reading_disk => |reading| reading.allocator,
@@ -2564,7 +2605,9 @@ const Loader = struct {
             .memory => |ownership| if (!file.deferred)
                 try storage.dupe(u8, file.text)
             else switch (ownership) {
-                .copy_reading_disk => |reading| try source_mod.readFileAlloc(reading.io, storage, path),
+                // Read into the same allocator the copy would go to, so what
+                // an earlier load of this program read is the text itself.
+                .copy_reading_disk => |reading| try MemoryOwnership.readDeferred(reading, path),
                 .copy, .borrow, .borrow_reading_disk => return error.FileNotFound,
             },
             .disk => |io| try source_mod.readFileAlloc(io, storage, path),
@@ -2790,7 +2833,8 @@ const Loader = struct {
             .memory => |ownership| switch (ownership) {
                 .borrow => .{ null, null },
                 .copy => |allocator| .{ null, allocator },
-                .copy_reading_disk, .borrow_reading_disk => |reading| .{ reading.io, reading.allocator },
+                .borrow_reading_disk => .{ null, null },
+                .copy_reading_disk => |reading| .{ reading.io, reading.allocator },
             },
         };
         // A file the program names is one a change to which changes the
