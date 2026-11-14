@@ -1,0 +1,20 @@
+// [S-Entry]. A token that begins no declaration is reported once, and the
+// trait written after it is read as a trait.
+?
+trait Shape {
+    fn area(self: Self) -> UInt8
+}
+
+struct Square {
+    side: UInt8,
+}
+
+impl Shape for Square {
+    fn area(self: Self) -> UInt8 {
+        self.side
+    }
+}
+
+fn main() -> UInt8 {
+    Square { side = 3 }.area()
+}

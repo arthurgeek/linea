@@ -2003,6 +2003,7 @@ const Parser = struct {
             .keyword_impl,
             .keyword_fn,
             .keyword_extern,
+            .keyword_trait,
             .keyword_import,
             .keyword_use,
             .keyword_enum,
