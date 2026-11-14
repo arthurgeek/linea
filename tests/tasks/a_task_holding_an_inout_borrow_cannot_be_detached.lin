@@ -15,7 +15,7 @@ fn main() -> UInt8 {
     }
     let slot = task.prepare(body).unwrap()
     let handle = slot.start()
-    let detached = session.detach(handle)
+    let detached = handle.detach()
     let (first, done) = detached.recv()
     let premature = count
     done.close()

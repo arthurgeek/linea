@@ -514,7 +514,7 @@ pub fn all[T: Owned, F: Owned + Discardable + fn() -> T](sink policy: Policy, si
                                 me.send(job()).close()
                             }
                             let handle = prepare(body).unwrap().start()
-                            &handles.push(session.detach(handle)).unwrap()
+                            &handles.push(handle.detach()).unwrap()
                         },
                         None => {
                             running = false
@@ -645,7 +645,7 @@ pub fn map[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T
                     me.send(chunk_res).close()
                 }
                 let handle = prepare(body).unwrap().start()
-                &handles.push(session.detach(handle)).unwrap()
+                &handles.push(handle.detach()).unwrap()
             }
             drained.finish().unwrap()
 
@@ -793,7 +793,7 @@ pub fn map_results[T: Owned, R: Owned, E: Owned, F: Owned + Copyable + Shareable
                     me.send(chunk_res).close()
                 }
                 let handle = prepare(body).unwrap().start()
-                &handles.push(session.detach(handle)).unwrap()
+                &handles.push(handle.detach()).unwrap()
             }
             drained.finish().unwrap()
 
