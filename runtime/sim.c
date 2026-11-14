@@ -75,6 +75,9 @@ struct sim {
     int short_writes;
     uint64_t trace;
     unsigned next_port;
+    /* How many of its ends hold each dynamic port, so finding a free one
+     * asks each port once and not every end for every port. */
+    uint32_t held_dynamic[65536 - 49152];
     unsigned long made;
     /* Its descriptors' entry indices, in the order they were made, which is
      * the order deliveries are made in. */
@@ -214,6 +217,10 @@ static struct entry *at(long index) {
 }
 
 /* A new entry of `s`, or -ENOMEM. Called locked. */
+static unsigned port_of(unsigned long address) {
+    return (unsigned)(address & 0xffffUL);
+}
+
 static long make_entry(struct sim *s, int listening, unsigned long address) {
     if (reserve(&s->members, &s->member_capacity, s->member_count + 1) != 0) return -ENOMEM;
     struct entry *e = calloc(1, sizeof *e);
@@ -238,6 +245,7 @@ static long make_entry(struct sim *s, int listening, unsigned long address) {
     e->number = s->made++;
     e->listening = listening;
     e->address = address;
+    if (port_of(address) >= first_dynamic_port) s->held_dynamic[port_of(address) - first_dynamic_port] += 1;
     e->peer = -1;
     e->listener = -1;
     entries[index] = e;
@@ -267,6 +275,7 @@ static void drop_entry(long index) {
     struct entry *e = entries[index];
     if (e->sim != NULL) {
         if (e->forgotten) e->sim->forgotten_count -= 1;
+        if (port_of(e->address) >= first_dynamic_port) e->sim->held_dynamic[port_of(e->address) - first_dynamic_port] -= 1;
         remove_index(e->sim->members, &e->sim->member_count, index);
     }
     free_contents(e);
@@ -360,10 +369,6 @@ static unsigned long next_event(struct sim *s) {
     return next;
 }
 
-static unsigned port_of(unsigned long address) {
-    return (unsigned)(address & 0xffffUL);
-}
-
 static unsigned long host_of(unsigned long address) {
     return address >> 16;
 }
@@ -384,7 +389,7 @@ static unsigned long free_port(struct sim *s) {
     for (unsigned tried = first_dynamic_port; tried <= 65535; tried++) {
         const unsigned port = s->next_port;
         s->next_port = port == 65535 ? first_dynamic_port : port + 1;
-        if (!port_in_use(s, port, 0)) return port;
+        if (s->held_dynamic[port - first_dynamic_port] == 0) return port;
     }
     return 0;
 }
