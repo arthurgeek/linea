@@ -936,6 +936,42 @@ test "an embed reads a file supplied beside the source, once however often it is
     try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
 }
 
+test "a file's bytes are checked as text for the first site that asks, and not again" {
+    var read: Loader.EmbedRead = .{ .id = .from(0) };
+    try testing.expectEqual(@as(?Loader.TextCheck, null), read.text);
+    try testing.expectEqual(Loader.TextCheck.valid, read.textCheck("page"));
+    // The answer is the file's, so bytes that are not text do not change it.
+    try testing.expectEqual(Loader.TextCheck.valid, read.textCheck("\xff"));
+
+    var broken: Loader.EmbedRead = .{ .id = .from(0) };
+    const found = broken.textCheck("one\ntwo \xff");
+    try testing.expectEqual(@as(usize, 8), found.invalid.at);
+    try testing.expectEqual(@as(usize, 2), found.invalid.line);
+    try testing.expectEqual(@as(usize, 5), found.invalid.column);
+    try testing.expectEqual(found, broken.textCheck("page"));
+}
+
+test "a file that is not text is refused at each site embedding it as text, and embeds as bytes" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var table: FileTable = .empty;
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const program = try loadFromMemory(gpa, &table, &sink, &interner, "app", &.{
+        .{ .path = "app/linea.json", .text = "{}" },
+        .{ .path = "app/main.lin", .text = "let a = embed(\"raw.bin\")\nlet b = embed_bytes(\"raw.bin\")\nlet c = embed(\"raw.bin\")\n" },
+        .{ .path = "app/raw.bin", .text = "ok \xff" },
+    }, .program, false, .borrow);
+    try testing.expectEqual(@as(usize, 1), program.embeds.files.len);
+    try testing.expectEqual(EmbedId.none, program.embeds.sites[0].embed);
+    try testing.expectEqualStrings("ok \xff", program.embeds.bytesOf(program.embeds.sites[1].expr).?);
+    try testing.expectEqual(EmbedId.none, program.embeds.sites[2].embed);
+    try testing.expectEqual(@as(usize, 2), sink.items().len);
+    for (sink.items()) |item| try testing.expectEqual(Code.m_embed_text, item.code.?);
+    try testing.expect(sink.items()[0].primaryLabel().?.span.start != sink.items()[1].primaryLabel().?.span.start);
+}
+
 test "a path naming no file is refused as that path" {
     const gpa = testing.allocator;
 
@@ -2247,7 +2283,35 @@ const Loader = struct {
         primary_key: ?Span = null,
     };
     const BoundKind = enum { program, library, alone };
-    const EmbedState = union(enum) { read: EmbedId, unread: embedded.Unread };
+    const EmbedState = union(enum) { read: EmbedRead, unread: embedded.Unread };
+
+    /// A file an embed read, and whether its bytes are UTF-8.
+    const EmbedRead = struct {
+        id: EmbedId,
+        /// Null until a site embeds the file as text. A file embedded only as
+        /// bytes is never scanned.
+        text: ?TextCheck = null,
+
+        /// Whether `bytes`, the bytes of this file, are UTF-8. The bytes are
+        /// scanned for the first site that asks and never again: a file's
+        /// bytes are the same at every site of one load.
+        fn textCheck(read: *EmbedRead, bytes: []const u8) TextCheck {
+            if (read.text) |known| return known;
+            const check: TextCheck = if (firstInvalidUtf8(bytes)) |at| blk: {
+                const place = lineColumnOf(bytes, at);
+                break :blk .{ .invalid = .{ .at = at, .line = place.line, .column = place.column } };
+            } else .valid;
+            read.text = check;
+            return check;
+        }
+    };
+
+    /// Whether a file's bytes are UTF-8, and where the first byte that is not
+    /// sits.
+    const TextCheck = union(enum) {
+        valid,
+        invalid: struct { at: usize, line: usize, column: usize },
+    };
 
     fn seedLibrary(self: *Loader, prefix: *const LibraryPrefix) !void {
         try self.modules.ensureTotalCapacity(self.gpa, prefix.program.modules.len);
@@ -2632,10 +2696,10 @@ const Loader = struct {
         // file spelled `std/x.txt` from a root in the working directory is
         // never the library's `std/x.txt`.
         const states = if (library_bound) &self.library_embed_states else &self.embed_states;
-        if (states.get(full)) |known| switch (known) {
-            .read => |already| {
-                if (ast.exprTag(id) == .embed and !try self.isText(id, self.embed_files.items[already.index()].bytes)) return .none;
-                return already;
+        if (states.getPtr(full)) |known| switch (known.*) {
+            .read => |*already| {
+                if (ast.exprTag(id) == .embed and !try self.isText(id, self.embed_files.items[already.id.index()].bytes, already)) return .none;
+                return already.id;
             },
             .unread => |why| {
                 try self.refuseRead(id, why, where);
@@ -2676,9 +2740,13 @@ const Loader = struct {
         } else unreachable;
         const embed_id: EmbedId = .from(self.embed_files.items.len);
         try self.embed_files.append(self.gpa, .{ .path = path, .bytes = bytes });
-        try states.put(self.gpa, full, .{ .read = embed_id });
+        var read_state: EmbedRead = .{ .id = embed_id };
+        const as_text = ast.exprTag(id) == .embed;
+        // Asked before the state is filed, so the answer is filed with it.
+        if (as_text) _ = read_state.textCheck(bytes);
+        try states.put(self.gpa, full, .{ .read = read_state });
         full_owned = false;
-        if (ast.exprTag(id) == .embed and !try self.isText(id, bytes)) return .none;
+        if (as_text and !try self.isText(id, bytes, &read_state)) return .none;
         return embed_id;
     }
 
@@ -2694,10 +2762,13 @@ const Loader = struct {
     /// Every embed diagnostic names the path as the literal wrote it, which is
     /// what the reader has in front of them and what reads the same wherever
     /// the program sits.
-    fn isText(self: *Loader, id: node.ExprId, bytes: []const u8) LoadError!bool {
-        const at = firstInvalidUtf8(bytes) orelse return true;
+    fn isText(self: *Loader, id: node.ExprId, bytes: []const u8, read: *EmbedRead) LoadError!bool {
+        const place = switch (read.textCheck(bytes)) {
+            .valid => return true,
+            .invalid => |found| found,
+        };
+        const at = place.at;
         const ast = self.trees.view();
-        const place = lineColumnOf(bytes, at);
         const arena = self.sink.arena;
         const written = ast.tokenText(ast.exprMain(id));
         const remarks = try arena.alloc([]const u8, 1);
