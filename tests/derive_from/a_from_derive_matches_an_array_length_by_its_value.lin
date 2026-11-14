@@ -1,0 +1,32 @@
+// An array length is compared by what it counts, so a source spelled
+// `1 + 1`, or with a constant's name, selects the variant holding an array
+// of two.
+let pair_length: UInt64 = 2
+
+@derive(From[[UInt8; 1 + 1]])
+enum Frame {
+    Pair([UInt8; 2]),
+    Unknown,
+}
+
+@derive(From[[UInt16; pair_length]])
+enum Wide {
+    Pair([UInt16; 4 - 2]),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let bytes: [UInt8; 2] = [1, 2]
+    let frame: Frame = bytes.into()
+    let words: [UInt16; 2] = [3, 4]
+    let wide: Wide = words.into()
+    let narrow = match frame {
+        Pair(pair) => pair[1],
+        Unknown => 0,
+    }
+    let broad = match wide {
+        Pair(pair) => UInt8(pair[1]),
+        Unknown => 0,
+    }
+    narrow + broad
+}

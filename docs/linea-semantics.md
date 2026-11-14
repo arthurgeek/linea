@@ -3185,7 +3185,8 @@ source, so no variant converts without being named, and each entry names one
 conversion: two entries of one source are refused as two implementations of one
 key are. A struct or newtype target, a source no variant holds, and a source two
 variants hold are [T-Derive] at the entry; a conversion that does more than wrap
-is written as an `impl`. The generated implementation is the same as a
+is written as an `impl`. An array length in the source and in a payload is
+compared by what it counts, so `[UInt8; 2]` and `[UInt8; 1 + 1]` are one source. The generated implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.
 

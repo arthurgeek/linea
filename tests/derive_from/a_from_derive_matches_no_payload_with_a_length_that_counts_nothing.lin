@@ -1,4 +1,4 @@
-@derive(From[[UInt8; 1 + 1]])
+@derive(From[[UInt8; true]])
 enum Frame {
     Pair([UInt8; 2]),
     Unknown,
