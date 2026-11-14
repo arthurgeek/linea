@@ -53,7 +53,9 @@ module.exports = grammar({
     [$.borrow_type, $._type_only],
     [$.grouped_type, $._type_only],
     [$.tuple_type, $._type_only],
-    [$._call_listed_type, $.call_generic_arguments],
+    // A generic type among a call's type arguments holds listed types too,
+    // so its brackets read both as its own arguments and as a call's.
+    [$.call_type_arguments, $.call_generic_arguments],
     [$._result_type, $._call_listed_type],
     [$._expression, $._call_type],
     [$._expression, $._call_type, $.literal_type],
@@ -868,7 +870,7 @@ module.exports = grammar({
     _type_only: $ => choice($.array_type, $.callable_type, $.unit_type, alias($.call_only_generic_type, $.generic_type)),
     call_only_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_type_arguments, $.type_arguments)),
     call_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_generic_arguments, $.type_arguments)),
-    call_generic_arguments: $ => seq('[', commaSep1($._call_type), ']'),
+    call_generic_arguments: $ => seq('[', commaSep1($._call_listed_type), ']'),
 
     // `Name?(e)`, a newtype's construction declining. One node, because the
     // parser reads it as one form and not as a `?` applied to something that

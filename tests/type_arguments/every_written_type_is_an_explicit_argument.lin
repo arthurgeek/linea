@@ -1,10 +1,13 @@
 // A call's explicit type arguments take any type a signature can write: a
-// selected associated type, a parenthesised type, a tuple and a borrow.
+// selected associated type, a parenthesised type, a tuple and a borrow, and a
+// generic type holding any of them.
 trait Source {
     type Item
 }
 
 struct Value {}
+
+struct Box[phantom T] {}
 
 impl Source for Value {
     type Item = UInt8
@@ -20,5 +23,9 @@ fn main() -> UInt8 {
     let grouped = first[(UInt8), UInt8](1, 2)
     let paired = first[(UInt8, UInt8), UInt8]((1, 2), 3)
     let lent = first[borrow UInt8, UInt8](borrow value, 2)
-    selected + grouped + paired + lent
+    let boxed: Box[UInt8] = .{}
+    let pairs: Box[(UInt8, UInt8)] = .{}
+    let held = first[Box[Value.Item], UInt8](boxed, 2)
+    let both = first[UInt8, Box[(UInt8, UInt8)]](1, pairs)
+    selected + grouped + paired + lent + held + both
 }
