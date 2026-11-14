@@ -8377,6 +8377,79 @@ pub const Typing = struct {
         return self.arrangement().layoutOf(t);
     }
 
+    /// The types a value of one type owns directly, in the order
+    /// `CapabilityFacts.recordParts` links them.
+    pub const OwnedParts = struct {
+        typing: *const Typing,
+        /// A structure's fields, or the fields of the enum variant being
+        /// walked.
+        run: []const TypeId = &.{},
+        /// The enum variants not yet walked, as indexes into the pool's
+        /// variant table.
+        next_variant: u32 = 0,
+        variants_end: u32 = 0,
+        /// A newtype's base, an array's element or a closure's environment.
+        single: ?TypeId = null,
+        /// The element certified storage holds, which no field names.
+        stored: ?TypeId = null,
+
+        pub fn next(self: *OwnedParts) ?TypeId {
+            while (self.run.len == 0 and self.next_variant != self.variants_end) {
+                const first = self.typing.variants.items(.first_field)[self.next_variant];
+                const count = self.typing.variants.items(.field_count)[self.next_variant];
+                self.run = self.typing.fields.items(.ty)[first..][0..count];
+                self.next_variant += 1;
+            }
+            if (self.run.len != 0) {
+                defer self.run = self.run[1..];
+                return self.run[0];
+            }
+            if (self.single) |part| {
+                self.single = null;
+                return part;
+            }
+            if (self.stored) |part| {
+                self.stored = null;
+                return part;
+            }
+            return null;
+        }
+    };
+
+    /// Every part a value of `t` owns directly: a structure's fields, each
+    /// enum variant's payload, a newtype's base, the element of an array that
+    /// has one, a closure's environment, and the element certified storage
+    /// holds. Whatever asks what a value holds walks these, so a kind of type
+    /// that owns something is added here and in `CapabilityFacts.recordParts`
+    /// together; a test holds the two to the same answer.
+    ///
+    /// A parameter, a borrow, a callable and a scalar own nothing they could
+    /// name. An alike instantiation is asked through `partsSource`.
+    pub fn ownedParts(self: *const Typing, t: TypeId) OwnedParts {
+        self.readsParts(t);
+        var parts: OwnedParts = .{ .typing = self };
+        switch (self.get(t)) {
+            .struct_ => |record| parts.run = self.fields.items(.ty)[record.first_field..][0..record.field_count],
+            .enum_ => |sum| {
+                parts.next_variant = sum.first_variant;
+                parts.variants_end = sum.first_variant + sum.variant_count;
+            },
+            .newtype => |nominal| parts.single = nominal.base,
+            .array => |array| if (array.count != 0) {
+                parts.single = array.element;
+            },
+            .closure => |closure| parts.single = closure.environment,
+            .parameter, .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
+        }
+        if (self.raw_accesses.storage != .none and self.declOfType(t) == self.raw_accesses.storage) {
+            if (self.instanceOf(t)) |instance| {
+                const arguments = self.argsOf(instance);
+                if (arguments.len != 0) parts.stored = arguments[0];
+            }
+        }
+        return parts;
+    }
+
     pub fn fieldCount(self: *const Typing, t: TypeId) u32 {
         return switch (self.get(t)) {
             .struct_ => |x| x.field_count,
@@ -15627,6 +15700,37 @@ fn exerciseScopedCapabilities(gpa: std.mem.Allocator) !void {
         .items = &.{.{ .subject = parameter, .demand = .{ .requirement = .copyable } }},
     });
     try testing.expectEqual(Capability.copyable, try builder.capabilityOfWithin(owner, record));
+}
+
+test "owned parts are the parts the capability facts link" {
+    const gpa = testing.allocator;
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const parameter = try builder.addParameter("T", 0, 0, .unrestricted, &.{});
+    const ticket = try builder.addStruct("Ticket", .linear, &.{});
+    const record = try builder.addStruct("Pair", .affine, &.{
+        .{ .name = "first", .ty = ticket },
+        .{ .name = "second", .ty = parameter },
+    });
+    const filled = try builder.arrayOf(ticket, 2);
+    const empty = try builder.arrayOf(ticket, 0);
+    const nested = try builder.arrayOf(filled, 1);
+    const spare = try builder.addNewtype("Spare", .affine, ticket, false, 0, 0);
+    const state = try builder.addEnum("State", .copyable, &.{ .{ .name = "Idle" }, .{ .name = "Busy" } });
+
+    for ([_]TypeId{ parameter, ticket, record, filled, empty, nested, spare, state }) |ty| {
+        _ = try builder.capabilityOf(ty);
+        const facts = &builder.capability_facts;
+        try testing.expect(facts.isRecorded(ty));
+        const first = facts.first_parts.items[ty.index()];
+        const count = facts.part_counts.items[ty.index()];
+        var view = builder.view();
+        var parts = view.ownedParts(ty);
+        for (facts.edges.items[first..][0..count]) |linked| {
+            try testing.expectEqual(@as(?TypeId, linked.child), parts.next());
+        }
+        try testing.expectEqual(@as(?TypeId, null), parts.next());
+    }
 }
 
 test "affine scoped capabilities survive freezing and reopening" {

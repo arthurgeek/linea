@@ -939,35 +939,12 @@ struct ScopedOption {
     def: OptionDef,
 }
 
-// A flag found in the arguments, and the depth of the command it belongs to.
-@(copyable, derive(Release))
-struct FoundFlag {
-    depth: UInt64,
-    name: Str,
-}
-
-// An option value found in the arguments, and the depth of the command it
-// belongs to.
-@(copyable, derive(Release))
-struct FoundOption {
-    depth: UInt64,
-    record: OptionMatch,
-}
-
-// A positional found in the arguments, and the depth of the command it
-// belongs to.
-@(copyable, derive(Release))
-struct FoundPositional {
-    depth: UInt64,
-    record: PositionalMatch,
-}
-
 // What `Command.parse` has read so far. `flags` and `options` hold every
 // switch the current command accepts: its own and the global ones of the
-// commands above it. The `found_` vectors hold what the arguments supplied,
-// each record marked with the depth of the command it belongs to, so a
-// global switch given after a subcommand is recorded for the command that
-// declared it. `ended` is set by `--`, after which every argument is a
+// commands above it. `found` holds what the arguments supplied, as the
+// matches of each command entered and not yet settled, indexed by the
+// command's depth, so a global switch given after a subcommand is recorded
+// for the command that declared it. `ended` is set by `--`, after which every argument is a
 // positional; `help_path` is set by a registered `help` subcommand, after
 // which every argument names a subcommand. A lenient parse, for
 // `help_for_arguments`, returns the matches read so far instead of an error,
@@ -976,9 +953,7 @@ struct FoundPositional {
 struct ParseState[A: Allocator] {
     flags: Vec[ScopedFlag, A],
     options: Vec[ScopedOption, A],
-    found_flags: Vec[FoundFlag, A],
-    found_options: Vec[FoundOption, A],
-    found_positionals: Vec[FoundPositional, A],
+    found: Vec[Matches[A], A],
     ended: Bool,
     help: Bool,
     help_path: Bool,
@@ -991,9 +966,7 @@ fn parse_state[A: Allocator](allocator: A, lenient: Bool) -> ParseState[A] where
     .{
         flags = Vec.new_in(allocator),
         options = Vec.new_in(allocator),
-        found_flags = Vec.new_in(allocator),
-        found_options = Vec.new_in(allocator),
-        found_positionals = Vec.new_in(allocator),
+        found = Vec.new_in(allocator),
         ended = false,
         help = false,
         help_path = false,
@@ -1099,8 +1072,8 @@ impl[A: Allocator] ParseState[A] {
 
     // Return whether option `name` of the command at `depth` was supplied.
     fn supplied(self: Self, depth: UInt64, name: Str) -> Bool {
-        for read found in self.found_options {
-            if found.depth == depth && found.record.name == name {
+        for read found in self.found[depth].options {
+            if found.name == name {
                 return true
             }
         }
@@ -1123,7 +1096,7 @@ impl[A: Allocator] ParseState[A] {
 
     // Record a present flag for the command that declared it.
     fn record_flag(inout self: Self, scoped: ScopedFlag) -> Result[(), CliError] where retains(self: scoped) {
-        &self.found_flags.push(.{ depth = scoped.depth, name = copy(scoped.def.name) }).settled()?
+        &self.found[scoped.depth].flags.push(copy(scoped.def.name)).settled()?
         .Ok(())
     }
 
@@ -1134,7 +1107,7 @@ impl[A: Allocator] ParseState[A] {
             return .Err(.DuplicateOption(copy(def.long)))
         }
         let record: OptionMatch = .{ name = copy(def.name), flag = copy(def.long), value = .Some(copy(value)), supplied = true }
-        &self.found_options.push(.{ depth = scoped.depth, record }).settled()?
+        &self.found[scoped.depth].options.push(record).settled()?
         .Ok(())
     }
 
@@ -1717,31 +1690,34 @@ impl[A: Allocator] Command[A] {
             filled += 1
         }
         let record: PositionalMatch = .{ name = copy(def.name), value = copy(token) }
-        &state.found_positionals.push(.{ depth, record }).settled()?
+        &state.found[depth].positionals.push(record).settled()?
         .Ok(())
     }
 
     // Match the arguments left in `cursor` against this command, the one at
     // `depth`, and return its matches.
     fn descend(self: Self, depth: UInt64, inout state: ParseState[A], inout cursor: ArgCursor) -> Result[Matches[A], CliError] where retains(state: self, cursor), carries(.Ok: self, cursor, state), carries(.Err: self, cursor, state) {
+        // What the arguments supply for this command is recorded at its depth.
+        &state.found.push(empty_matches(self.allocator, false)).settled()?
         // A parent's own flags and options do not reach its subcommands; its
-        // global ones do.
+        // global ones do. The global ones move to the front in their order,
+        // which decides the one a name shadowed by a deeper command reaches.
         var kept: UInt64 = 0
-        while kept < state.flags.length() {
-            if state.flags[kept].def.global {
+        for index in 0..state.flags.length() {
+            if state.flags[index].def.global {
+                state.flags[kept] = copy(state.flags[index])
                 kept += 1
-            } else {
-                let _ = &state.flags.remove(kept)
             }
         }
+        &state.flags.truncate(kept)
         kept = 0
-        while kept < state.options.length() {
-            if state.options[kept].def.global {
+        for index in 0..state.options.length() {
+            if state.options[index].def.global {
+                state.options[kept] = copy(state.options[index])
                 kept += 1
-            } else {
-                let _ = &state.options.remove(kept)
             }
         }
+        &state.options.truncate(kept)
         for read f in self.flags {
             &state.flags.push(.{ depth, def = copy(f) }).settled()?
         }
@@ -1838,25 +1814,13 @@ impl[A: Allocator] Command[A] {
     // unless help was requested or a lenient parse stopped, and record every
     // option it was not given: its default, or no value.
     fn settle(self: Self, depth: UInt64, filled: UInt64, help_here: Bool, sink child: Option[SubcommandMatch[A]], inout state: ParseState[A]) -> Result[Matches[A], CliError] where carries(.Ok: self, state, child), carries(.Err: self) {
-        defer var matches = empty_matches(self.allocator, help_here)
+        // Every deeper command has settled, so this command's matches are the
+        // last ones recorded.
+        defer var matches = &state.found.pop().unwrap()
+        matches.help_requested = help_here
         match child {
             Some(sub) => &matches.subcommands.push(sub).settled()?,
             None => {},
-        }
-        for read found in state.found_flags {
-            if found.depth == depth {
-                &matches.flags.push(copy(found.name)).settled()?
-            }
-        }
-        for read found in state.found_options {
-            if found.depth == depth {
-                &matches.options.push(copy(found.record)).settled()?
-            }
-        }
-        for read found in state.found_positionals {
-            if found.depth == depth {
-                &matches.positionals.push(copy(found.record)).settled()?
-            }
         }
         for index in filled..self.positionals.length() {
             let def = copy(self.positionals[index])

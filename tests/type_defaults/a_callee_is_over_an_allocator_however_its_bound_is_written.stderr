@@ -1,0 +1,10 @@
+error[T-DefaultedAllocator]: `after` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_callee_is_over_an_allocator_however_its_bound_is_written.lin:45:5
+   |
+45 |     after(8)
+   |     ^^^^^ write the allocator: `B`, or `mem.SystemAllocator` where the system allocator is meant
+error[T-DefaultedAllocator]: `beside` leaves its allocator `A` to a default, and this declaration is generic over an allocator itself
+  --> tests/type_defaults/a_callee_is_over_an_allocator_however_its_bound_is_written.lin:49:5
+   |
+49 |     beside(8)
+   |     ^^^^^^ write the allocator: `B`, or `mem.SystemAllocator` where the system allocator is meant

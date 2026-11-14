@@ -1,0 +1,57 @@
+// An alias names a type, and an alias of an alias names the same one. A
+// chain of them that ends at an array is that array: the value indexes as
+// one, and the chain's length changes nothing.
+alias Row0 = [UInt8; 2]
+alias Row1 = Row0
+alias Row2 = Row1
+alias Row3 = Row2
+alias Row4 = Row3
+alias Row5 = Row4
+alias Row6 = Row5
+alias Row7 = Row6
+alias Row8 = Row7
+alias Row9 = Row8
+alias Row10 = Row9
+alias Row11 = Row10
+alias Row12 = Row11
+alias Row13 = Row12
+alias Row14 = Row13
+alias Row15 = Row14
+alias Row16 = Row15
+alias Row17 = Row16
+alias Row18 = Row17
+alias Row19 = Row18
+alias Row20 = Row19
+alias Row21 = Row20
+alias Row22 = Row21
+alias Row23 = Row22
+alias Row24 = Row23
+alias Row25 = Row24
+alias Row26 = Row25
+alias Row27 = Row26
+alias Row28 = Row27
+alias Row29 = Row28
+alias Row30 = Row29
+alias Row31 = Row30
+alias Row32 = Row31
+alias Row33 = Row32
+alias Row34 = Row33
+alias Row35 = Row34
+alias Row36 = Row35
+alias Row37 = Row36
+alias Row38 = Row37
+alias Row39 = Row38
+alias Row40 = Row39
+alias Row41 = Row40
+alias Row42 = Row41
+alias Row43 = Row42
+alias Row44 = Row43
+alias Row45 = Row44
+alias Row46 = Row45
+alias Row47 = Row46
+alias Row48 = Row47
+
+fn main() -> UInt8 {
+    let row: Row48 = [3, 4]
+    row[0] + row[1]
+}
