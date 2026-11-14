@@ -10444,9 +10444,9 @@ const Checker = struct {
         const allocator = self.allocator_decl orelse return false;
         const parameters = self.ast.declTypeParams(decl);
         const omitted = for (parameters[written..], written..) |parameter, i| {
-            if (self.isBoundedBy(parameter, allocator)) break i;
+            if (try self.isAllocatorParameter(decl, parameter, allocator)) break i;
         } else return false;
-        const declared = self.allocatorParameterOf(owner, allocator) orelse {
+        const declared = try self.allocatorParameterOf(owner, allocator) orelse {
             // A call takes its type's or its function's default wherever it
             // is written; only a written type is held to a library's rule.
             if (callee != ExprId.none) return false;
@@ -10631,7 +10631,7 @@ const Checker = struct {
         const allocator = self.allocator_decl orelse return;
         for (self.ast.declTypeParams(d)) |parameter| {
             if (!parameter.default.wasWritten()) continue;
-            if (!self.isAllocatorParameter(d, parameter, allocator)) continue;
+            if (!try self.isAllocatorParameter(d, parameter, allocator)) continue;
             if (!try self.publicLibrarySignature(d, parameter.name)) return;
             if (self.refusedBefore(parameter.default.at)) continue;
             try self.noteRefused(parameter.default.at);
@@ -10648,13 +10648,13 @@ const Checker = struct {
 
     /// Whether a type parameter of `owner` is bounded by `Allocator`, where it
     /// is declared or in `owner`'s `where` clause.
-    fn isAllocatorParameter(self: *const Checker, owner: node.DeclId, parameter: node.TypeParam, allocator: node.DeclId) bool {
-        if (self.isBoundedBy(parameter, allocator)) return true;
+    fn isAllocatorParameter(self: *const Checker, owner: node.DeclId, parameter: node.TypeParam, allocator: node.DeclId) std.mem.Allocator.Error!bool {
+        if (try self.boundsReach(self.ast.boundsOf(parameter), allocator)) return true;
         for (self.ast.declWherePredicates(owner)) |predicate| {
             const subject = predicate.subject;
             if (subject.kind != .named or subject.args.len() != 0 or subject.name == TokenId.none) continue;
             if (self.ast.tokenName(subject.name) != self.ast.tokenName(parameter.name)) continue;
-            if (self.boundsReach(self.ast.boundsIn(predicate.bounds), allocator, 0)) return true;
+            if (try self.boundsReach(self.ast.boundsIn(predicate.bounds), allocator)) return true;
         }
         return false;
     }
@@ -10808,7 +10808,7 @@ const Checker = struct {
     fn takeDefault(self: *Checker, call: ExprId, decl: node.DeclId, index: usize) std.mem.Allocator.Error!TypeId {
         const parameters = self.ast.declTypeParams(decl);
         if (self.allocator_decl) |allocator| {
-            if (self.isBoundedBy(parameters[index], allocator)) {
+            if (try self.isAllocatorParameter(decl, parameters[index], allocator)) {
                 // A type's default is blamed on the type the call names, a
                 // function's on the whole path that names the function.
                 const callee: ExprId = if (self.ast.declTag(decl) == .function) self.ast.withoutGroups(self.ast.call(call).callee) else .none;
@@ -10856,30 +10856,34 @@ const Checker = struct {
         return null;
     }
 
-    /// Whether a parameter is bounded by the library's `Allocator`, written on
-    /// the parameter.
-    fn isBoundedBy(self: *const Checker, parameter: node.TypeParam, allocator: node.DeclId) bool {
-        return self.boundsReach(self.ast.boundsOf(parameter), allocator, 0);
-    }
-
-    /// Whether a run of bounds names `Allocator` or a trait that requires it.
+    /// Whether a run of bounds names `Allocator` or a trait that requires it,
+    /// directly or through any chain of required traits.
     ///
-    /// **Bound:** the supertrait chain of each bound, cut at a fixed depth
-    /// because a trait cannot require itself.
-    fn boundsReach(self: *const Checker, bounds: []const node.TraitBound, allocator: node.DeclId, depth: u32) bool {
-        for (bounds) |bound| {
-            if (bound.kind != .named) continue;
-            const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
-            if (trait == allocator) return true;
-            if (depth < 8 and self.boundsReach(self.ast.declBounds(trait), allocator, depth + 1)) return true;
+    /// **Bound:** each trait the bounds reach is visited once.
+    fn boundsReach(self: *const Checker, bounds: []const node.TraitBound, allocator: node.DeclId) std.mem.Allocator.Error!bool {
+        var seen: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        var pending: std.ArrayList(node.DeclId) = .empty;
+        defer pending.deinit(self.gpa);
+
+        var run = bounds;
+        while (true) {
+            for (run) |bound| {
+                if (bound.kind != .named) continue;
+                const trait = traitAt(self.ast, self.res, bound.named.name) orelse continue;
+                if (trait == allocator) return true;
+                if ((try seen.getOrPut(self.gpa, trait)).found_existing) continue;
+                try pending.append(self.gpa, trait);
+            }
+            const next = pending.pop() orelse return false;
+            run = self.ast.declBounds(next);
         }
-        return false;
     }
 
     /// The name of the first parameter bounded by `Allocator` that `owner`
     /// declares, on itself or on the implementation or trait it is a member
     /// of: bounded where it is declared or in a trailing `where` clause.
-    fn allocatorParameterOf(self: *const Checker, owner: node.DeclId, allocator: node.DeclId) ?TokenId {
+    fn allocatorParameterOf(self: *const Checker, owner: node.DeclId, allocator: node.DeclId) std.mem.Allocator.Error!?TokenId {
         const scopes = [_]node.DeclId{
             owner,
             self.implEnclosing(owner) orelse node.DeclId.none,
@@ -10888,7 +10892,7 @@ const Checker = struct {
         for (scopes) |scope| {
             if (scope == node.DeclId.none) continue;
             for (self.ast.declTypeParams(scope)) |parameter| {
-                if (self.isAllocatorParameter(scope, parameter, allocator)) return parameter.name;
+                if (try self.isAllocatorParameter(scope, parameter, allocator)) return parameter.name;
             }
         }
         return null;
@@ -24120,7 +24124,7 @@ const Checker = struct {
             differing = i;
         }
         const at = differing orelse return null;
-        if (!self.isAllocatorParameter(want.decl, parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
+        if (!try self.isAllocatorParameter(want.decl, parameters[at], allocator)) return self.allocatorMismatchNote(wanted[at], had[at]);
         // An argument that is no allocator was refused for its bound, and
         // the two do not differ in allocator.
         if (!try self.answersTrait(wanted[at], allocator) or !try self.answersTrait(had[at], allocator)) return null;
