@@ -8637,6 +8637,17 @@ fn checkGeneratedProgram(
             }
             break :generated;
         }
+        // A signal the runtime did not raise came from the machine, so the
+        // run is no answer to hold the program's rewrites to.
+        if (signalOf(ran.text).len != 0) {
+            try failures.append(scratch, .{
+                .path = display_path,
+                .what = "a generated program was stopped by a signal",
+                .expected = "a program that exits or traps by the runtime's own report",
+                .actual = ran.text,
+            });
+            break :generated;
+        }
         result.generated = true;
 
         const properties_zone = tracy.beginZone(@src(), "generated.properties");
@@ -8908,6 +8919,9 @@ test "a sanitizer report is found wherever it sits on standard error" {
 fn uncleanRun(ran: Ran) ?[]const u8 {
     if (ran.timed_out) return "did not finish";
     if (sanitizerReported(ran.errors)) return "a sanitizer reported a fault";
+    // A signal the runtime did not raise is a crash whatever the program had
+    // said by then, a line beginning `linea: ` included.
+    if (signalOf(ran.text).len != 0) return "crashed";
     if (std.mem.startsWith(u8, ran.text, trap_answer) and std.mem.indexOf(u8, ran.errors, "linea: ") == null) return "crashed";
     return null;
 }
@@ -19026,24 +19040,24 @@ fn checkDamage(
             continue;
         }
 
-        if (!std.mem.eql(u8, answerOf(program.answer), answerOf(ran.text))) {
+        if (!sameEnding(program.answer, ran.text)) {
             try failures.append(gpa, .{
                 .path = program.display_path,
                 .what = d.why(),
-                .expected = answerOf(program.answer),
-                .actual = answerOf(ran.text),
+                .expected = program.answer,
+                .actual = ran.text,
             });
         }
 
         // What the program said, on the same terms: a damaged module that
         // changed which bytes reach a programmer changed what the program does,
         // whatever status it went on to answer with.
-        if (!std.mem.eql(u8, saidOf(program.answer, program.errors), saidOf(ran.text, ran.errors))) {
+        if (!sameSaid(program.answer, program.errors, ran.text, ran.errors)) {
             try failures.append(gpa, .{
                 .path = program.display_path,
                 .what = d.why(),
-                .expected = saidOf(program.answer, program.errors),
-                .actual = saidOf(ran.text, ran.errors),
+                .expected = program.errors,
+                .actual = ran.errors,
             });
         }
     }
@@ -19147,12 +19161,12 @@ fn checkMaterializedDerives(
     }
 
     count.* += 1;
-    if (!std.mem.eql(u8, answerOf(original_answer), answerOf(ran.text))) {
+    if (!sameEnding(original_answer, ran.text)) {
         try failures.append(gpa, .{
             .path = display_path,
             .what = "derives replaced by ordinary source",
-            .expected = answerOf(original_answer),
-            .actual = answerOf(ran.text),
+            .expected = original_answer,
+            .actual = ran.text,
         });
     }
     if (!std.mem.eql(u8, original_output, ran.output)) {
@@ -19163,12 +19177,12 @@ fn checkMaterializedDerives(
             .actual = ran.output,
         });
     }
-    if (!std.mem.eql(u8, saidOf(original_answer, original_errors), saidOf(ran.text, ran.errors))) {
+    if (!sameSaid(original_answer, original_errors, ran.text, ran.errors)) {
         try failures.append(gpa, .{
             .path = display_path,
             .what = "derives replaced by ordinary source stderr",
-            .expected = saidOf(original_answer, original_errors),
-            .actual = saidOf(ran.text, ran.errors),
+            .expected = original_errors,
+            .actual = ran.errors,
         });
     }
 }
@@ -19371,12 +19385,12 @@ fn compareRewrittenRun(
 
     // What the program answered, and not where a trap said it happened --
     // the rewrite moves the lines, and the location is not the answer.
-    if (!std.mem.eql(u8, answerOf(program.answer), answerOf(ran.text))) {
+    if (!sameEnding(program.answer, ran.text)) {
         try failures.append(gpa, .{
             .path = program.display_path,
             .what = why,
-            .expected = answerOf(program.answer),
-            .actual = answerOf(ran.text),
+            .expected = program.answer,
+            .actual = ran.text,
         });
     }
 
@@ -19398,12 +19412,12 @@ fn compareRewrittenRun(
     // Left uncompared, a case whose only observation is what it said would
     // be rewritten against nothing but its status -- which a program that
     // says nothing at all answers with too.
-    if (!std.mem.eql(u8, saidOf(program.answer, program.errors), saidOf(ran.text, ran.errors))) {
+    if (!sameSaid(program.answer, program.errors, ran.text, ran.errors)) {
         try failures.append(gpa, .{
             .path = program.display_path,
             .what = why,
-            .expected = saidOf(program.answer, program.errors),
-            .actual = saidOf(ran.text, ran.errors),
+            .expected = program.errors,
+            .actual = ran.errors,
         });
     }
     return true;
@@ -19684,7 +19698,7 @@ fn outcomeOf(
                     // forever, and the trap it invents is indistinguishable
                     // from one the program means.
                     if (sig != std.posix.SIG.ABRT) return .{
-                        .text = try std.fmt.allocPrint(gpa, "{s}stopped by signal {d}\n", .{ got.written(), @intFromEnum(sig) }),
+                        .text = try std.fmt.allocPrint(gpa, "{s}{s}{d}\n", .{ got.written(), signal_note, @intFromEnum(sig) }),
                         .output = printed,
                         .errors = said,
                         .tool_failed = false,
@@ -19824,6 +19838,105 @@ const trap_answer = "trap\n";
 /// here would be asking the question `answerOf` deliberately declines.
 fn saidOf(answer: []const u8, errors: []const u8) []const u8 {
     return if (std.mem.startsWith(u8, answer, trap_answer)) "" else errors;
+}
+
+/// What the runner writes after a trap's explanation where a signal other
+/// than the runtime's own abort stopped the program, before the signal's
+/// number.
+const signal_note = "stopped by signal ";
+
+/// The line naming the signal that stopped a program the runtime did not
+/// abort, or nothing where the program exited or the runtime aborted it.
+fn signalOf(text: []const u8) []const u8 {
+    if (!std.mem.startsWith(u8, text, trap_answer)) return "";
+    const body = std.mem.trimEnd(u8, text, "\n");
+    const start = if (std.mem.lastIndexOfScalar(u8, body, '\n')) |nl| nl + 1 else 0;
+    const last = body[start..];
+    return if (std.mem.startsWith(u8, last, signal_note)) last else "";
+}
+
+/// Whether two runs ended the same way: with the same status, or both
+/// aborted by the runtime, or both stopped by the same signal. Where a trap
+/// said it happened is not part of it, since a rewrite moves the lines; why
+/// it happened is `sameSaid`'s to compare.
+fn sameEnding(a: []const u8, b: []const u8) bool {
+    return std.mem.eql(u8, answerOf(a), answerOf(b)) and std.mem.eql(u8, signalOf(a), signalOf(b));
+}
+
+/// A line of standard error without the source position a runtime trap
+/// report ends with: `linea: REASON at PATH:LINE:COLUMN` is `linea: REASON`.
+/// Any other line is itself, so text that only resembles a report is compared
+/// whole.
+fn withoutTrapPosition(line: []const u8) []const u8 {
+    if (!std.mem.startsWith(u8, line, "linea: ")) return line;
+    const at = std.mem.lastIndexOf(u8, line, " at ") orelse return line;
+    var fields = std.mem.splitBackwardsScalar(u8, line[at + " at ".len ..], ':');
+    const column = fields.next() orelse return line;
+    const row = fields.next() orelse return line;
+    if (fields.rest().len == 0) return line;
+    for ([_][]const u8{ column, row }) |number| {
+        if (number.len == 0) return line;
+        for (number) |digit| if (!std.ascii.isDigit(digit)) return line;
+    }
+    return line[0..at];
+}
+
+/// Whether two runs said the same on standard error, as far as a rewrite of
+/// the source must keep it. Every byte counts, except that between two runs
+/// that trapped a trap report is compared without its source position, which
+/// the rewrite moves: the reason for the trap and everything the program
+/// said before it are still compared.
+fn sameSaid(a_text: []const u8, a_errors: []const u8, b_text: []const u8, b_errors: []const u8) bool {
+    const trapped = std.mem.startsWith(u8, a_text, trap_answer) and std.mem.startsWith(u8, b_text, trap_answer);
+    if (!trapped) return std.mem.eql(u8, a_errors, b_errors);
+    var a_lines = std.mem.splitScalar(u8, a_errors, '\n');
+    var b_lines = std.mem.splitScalar(u8, b_errors, '\n');
+    while (true) {
+        const a = a_lines.next();
+        const b = b_lines.next();
+        if (a == null or b == null) return a == null and b == null;
+        if (!std.mem.eql(u8, withoutTrapPosition(a.?), withoutTrapPosition(b.?))) return false;
+    }
+}
+
+test "two runs end alike only with one status, one abort or one signal" {
+    try testing.expect(sameEnding("exit 0\n", "exit 0\n"));
+    try testing.expect(!sameEnding("exit 0\n", "exit 1\n"));
+    try testing.expect(!sameEnding("exit 0\n", "trap\nlinea: integer overflow at a.lin:3:5\n"));
+    // The runtime's abort at two positions is one ending.
+    try testing.expect(sameEnding("trap\nlinea: index out of bounds at a.lin:3:5\n", "trap\nlinea: index out of bounds at a.lin:9:1\n"));
+    // An abort and a signal the machine sent are not, and neither are two
+    // different signals.
+    try testing.expect(!sameEnding("trap\nlinea: index out of bounds at a.lin:3:5\n", "trap\nstopped by signal 11\n"));
+    try testing.expect(!sameEnding("trap\nstopped by signal 11\n", "trap\nstopped by signal 7\n"));
+    try testing.expect(sameEnding("trap\nstopped by signal 11\n", "trap\nsaid first\nstopped by signal 11\n"));
+    try testing.expectEqualStrings("stopped by signal 11", signalOf("trap\nsaid first\nstopped by signal 11\n"));
+    try testing.expectEqualStrings("", signalOf("exit 3\n"));
+    try testing.expectEqualStrings("", signalOf("trap\nlinea: not a number at a.lin:1:1\n"));
+}
+
+test "a trap report is compared by its reason, and everything else said is compared whole" {
+    const at_three = "linea: index out of bounds at a.lin:3:5\n";
+    const at_nine = "linea: index out of bounds at dir/b c.lin:9:12\n";
+    const trap = "trap\n";
+    // The same reason at a moved position.
+    try testing.expect(sameSaid(trap, at_three, trap, at_nine));
+    // Another reason.
+    try testing.expect(!sameSaid(trap, at_three, trap, "linea: integer overflow at a.lin:3:5\n"));
+    // What the program said before it trapped.
+    try testing.expect(!sameSaid(trap, "before\n" ++ at_three, trap, at_three));
+    try testing.expect(sameSaid(trap, "before\n" ++ at_three, trap, "before\n" ++ at_nine));
+    // A report beside none.
+    try testing.expect(!sameSaid(trap, at_three, trap, ""));
+    // Text that is no report, and a report in a run that did not trap.
+    try testing.expect(!sameSaid(trap, "linea: a stack overflowed\n", trap, "linea: a stack overflowed twice\n"));
+    try testing.expect(!sameSaid(trap, "note at a.lin:3:5\n", trap, "note at a.lin:9:1\n"));
+    try testing.expect(!sameSaid("exit 0\n", at_three, "exit 0\n", at_nine));
+    try testing.expect(sameSaid("exit 0\n", "warned\n", "exit 0\n", "warned\n"));
+
+    try testing.expectEqualStrings("linea: panic: stopped at once", withoutTrapPosition("linea: panic: stopped at once at a.lin:2:9"));
+    try testing.expectEqualStrings("linea: stopped at once", withoutTrapPosition("linea: stopped at once"));
+    try testing.expectEqualStrings("linea: at a.lin:x:9", withoutTrapPosition("linea: at a.lin:x:9"));
 }
 
 /// How a built case program ended.
