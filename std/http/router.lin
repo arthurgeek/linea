@@ -800,16 +800,47 @@ test fn path_values_belong_to_the_request_answered() {
     .Ok(())
 }
 
+// Count the `{name}` and `{name...}` segments of `pattern`, the path of a
+// registered pattern stored without its leading `/`. Each records one field
+// when the pattern matches, so this is how many fields a match needs.
+fn capture_count(pattern: Str) -> UInt64 {
+    var count: UInt64 = 0
+    var start: UInt64 = 0
+    while start < pattern.length() {
+        let end = segment_end(pattern, start)
+        match segment_of(pattern.slice(start, end).unwrap()).unwrap() {
+            Literal(_) => {},
+            Parameter(_) => {
+                count += 1
+            },
+            Remainder(_) => {
+                count += 1
+            },
+        }
+        start = end + 1
+    }
+    count
+}
+
+test fn a_pattern_has_one_capture_for_each_named_segment() {
+    testing.assert_eq(capture_count(""), UInt64(0), "the root pattern captured something")?
+    testing.assert_eq(capture_count("static/site.css"), UInt64(0), "a literal path captured something")?
+    testing.assert_eq(capture_count(r"users/{id}/posts/{post}"), UInt64(2), "two names were not two captures")?
+    testing.assert_eq(capture_count(r"files/{path...}"), UInt64(1), "a remainder was not one capture")?
+    .Ok(())
+}
+
 // Record the value of each `{name}` and `{name...}` in `pattern`, the path of
 // the pattern that matched `path`, percent-decoded with `+` kept, in `matched`
 // with its ranges in `fields`. A value that is not percent-encoded UTF-8 is
 // refused with `Escape` or `Encoding`, and running out of memory with
 // `Allocation`. `pattern` is stored without its leading `/`, and `path`
 // has one; they have the same segments up to the pattern's end, because the
-// one matched the other. Storage for both is reserved once, since the names
-// and values take no more bytes than the pattern and the path.
+// one matched the other. Storage for both is reserved once: the names and
+// values take no more bytes than the pattern and the path, and there is one
+// field for each name.
 fn record_path_values[P: Allocator](inout matched: Vec[UInt8, P], inout fields: Vec[Field, P], pattern: Str, path: Str) -> Result[(), PercentError] where carries() {
-    let reserved = &matched.reserve(pattern.length() + path.length()).is_ok() && &fields.reserve(pattern.length()).is_ok()
+    let reserved = &matched.reserve(pattern.length() + path.length()).is_ok() && &fields.reserve(capture_count(pattern)).is_ok()
     if !reserved {
         return .Err(.Allocation(.Exhausted))
     }
