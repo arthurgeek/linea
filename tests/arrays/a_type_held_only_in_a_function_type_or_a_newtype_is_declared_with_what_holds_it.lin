@@ -1,0 +1,30 @@
+// A program holds the types its values are made of. `Handler` reaches `Cell`
+// only as the parameter of a function it keeps, and `Sealed` reaches `Seal`
+// only as the type it is a new name for; both are held all the same.
+@copyable
+struct Cell {
+    value: UInt8,
+}
+
+struct Handler {
+    run: fn(cell: Cell) -> UInt8,
+}
+
+@copyable
+struct Seal {
+    mark: UInt8,
+}
+
+type Sealed = Seal
+
+struct Envelope {
+    seals: [Sealed; 0],
+}
+
+fn weigh(_handler: Handler, _envelope: Envelope) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    weigh(Handler { run = |cell| cell.value }, Envelope { seals = [] })
+}

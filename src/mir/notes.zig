@@ -75,7 +75,8 @@ pub fn settle(
 ///
 /// A signature, a slot or an instruction naming a type is the program holding
 /// one, and what it holds is made of the types its parts are -- so the set
-/// closes over fields, payloads and array elements: a declaration written
+/// closes over fields, payloads, array elements, what a newtype names, what a
+/// borrow observes and what a function type takes and answers: a declaration written
 /// below writes its parts, and a part names a type that has to be declared
 /// beside it.
 ///
@@ -98,10 +99,10 @@ pub fn typesHeld(gpa: std.mem.Allocator, module: *const mir.Module) ![]bool {
     module.markNamedTypes(held);
 
     // Each type reached is asked once for the types its declaration writes:
-    // its fields, its variants' payloads, and the element of an array, which
-    // a field written `[Cell; 2]` names though no instruction builds a
-    // `Cell`. A part is itself made of parts, so each newly reached type is
-    // asked in turn.
+    // its fields, its variants' payloads, and the types a written type is
+    // made of, which a field written `[Cell; 2]` or `fn(cell: Cell)` names
+    // though no instruction builds a `Cell`. A part is itself made of parts,
+    // so each newly reached type is asked in turn.
     var pending: std.ArrayList(types.TypeId) = .empty;
     defer pending.deinit(gpa);
     for (held, 0..) |in, i| {
@@ -119,6 +120,12 @@ pub fn typesHeld(gpa: std.mem.Allocator, module: *const mir.Module) ![]bool {
         }
         switch (module.types.get(t)) {
             .array => |array| try reach(gpa, held, &pending, array.element),
+            .newtype => |newtype| try reach(gpa, held, &pending, newtype.base),
+            .borrow => |borrow| try reach(gpa, held, &pending, borrow.referent),
+            .callable => |signature| {
+                for (module.types.callableParams(signature)) |param| try reach(gpa, held, &pending, param.ty);
+                try reach(gpa, held, &pending, signature.result);
+            },
             else => {},
         }
     }
