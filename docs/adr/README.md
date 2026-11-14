@@ -278,7 +278,8 @@ ones most likely to be superseded as the compiler grows.
 | [0225](0225-a-library-signature-states-its-allocator.md) | A library's public signature states its allocator | Accepted; extends 0215 and 0219; supersedes the server-parent clause of 0220 |
 | [0206](0206-allocator-spelling-is-shortened-by-alias-never-by-default.md) | Allocator spelling is shortened by an alias, never by a default type argument | Superseded by 0215; extends 0098 and 0194; extended by 0211 |
 | [0209](0209-a-from-derive-converts-the-variant-the-source-names.md) | A `From` derive converts the variant its source type names | Accepted; extends 0113 and 0145 |
-| [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148 |
+| [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148; parameter cap superseded by 0271 |
+| [0271](0271-a-callable-head-of-any-length-has-a-shape.md) | A callable head of any length has a shape | Accepted; supersedes the parameter cap of 0213 |
 | [0214](0214-a-route-takes-a-function-whose-parameters-name-its-inputs.md) | A route is a function whose parameters name its inputs | Accepted; refines 0185; extends 0180; `where carries(request)` clause superseded by 0216 |
 | [0216](0216-a-carrier-type-supplies-its-signatures-default-contract.md) | A carrier type supplies its signatures' default contract | Accepted; supersedes the `where carries(request)` clause of 0214 |
 | [0099](0099-a-phantom-parameter-carries-its-bound.md) | A phantom parameter carries its bound | Accepted; supersedes the bound clause of 0065; extended by 0254 |

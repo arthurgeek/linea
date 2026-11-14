@@ -1,0 +1,39 @@
+// A callable head is keyed by its invocation and its parameters'
+// conventions, however many parameters it names. Two heads of sixty-one
+// parameters that differ only in the last one's convention are two shapes,
+// and each function reaches the implementation written for its own.
+trait Describe {
+    fn describe(self: Self) -> UInt8
+}
+
+impl Describe for fn(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UInt8, p6: UInt8, p7: UInt8, p8: UInt8, p9: UInt8, p10: UInt8, p11: UInt8, p12: UInt8, p13: UInt8, p14: UInt8, p15: UInt8, p16: UInt8, p17: UInt8, p18: UInt8, p19: UInt8, p20: UInt8, p21: UInt8, p22: UInt8, p23: UInt8, p24: UInt8, p25: UInt8, p26: UInt8, p27: UInt8, p28: UInt8, p29: UInt8, p30: UInt8, p31: UInt8, p32: UInt8, p33: UInt8, p34: UInt8, p35: UInt8, p36: UInt8, p37: UInt8, p38: UInt8, p39: UInt8, p40: UInt8, p41: UInt8, p42: UInt8, p43: UInt8, p44: UInt8, p45: UInt8, p46: UInt8, p47: UInt8, p48: UInt8, p49: UInt8, p50: UInt8, p51: UInt8, p52: UInt8, p53: UInt8, p54: UInt8, p55: UInt8, p56: UInt8, p57: UInt8, p58: UInt8, p59: UInt8, p60: UInt8) -> UInt8 {
+    fn describe(self: Self) -> UInt8 {
+        self(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1) + 1
+    }
+}
+
+impl Describe for fn(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UInt8, p6: UInt8, p7: UInt8, p8: UInt8, p9: UInt8, p10: UInt8, p11: UInt8, p12: UInt8, p13: UInt8, p14: UInt8, p15: UInt8, p16: UInt8, p17: UInt8, p18: UInt8, p19: UInt8, p20: UInt8, p21: UInt8, p22: UInt8, p23: UInt8, p24: UInt8, p25: UInt8, p26: UInt8, p27: UInt8, p28: UInt8, p29: UInt8, p30: UInt8, p31: UInt8, p32: UInt8, p33: UInt8, p34: UInt8, p35: UInt8, p36: UInt8, p37: UInt8, p38: UInt8, p39: UInt8, p40: UInt8, p41: UInt8, p42: UInt8, p43: UInt8, p44: UInt8, p45: UInt8, p46: UInt8, p47: UInt8, p48: UInt8, p49: UInt8, p50: UInt8, p51: UInt8, p52: UInt8, p53: UInt8, p54: UInt8, p55: UInt8, p56: UInt8, p57: UInt8, p58: UInt8, p59: UInt8, sink p60: UInt8) -> UInt8 {
+    fn describe(self: Self) -> UInt8 {
+        self(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1) + 2
+    }
+}
+
+fn borrowed(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UInt8, p6: UInt8, p7: UInt8, p8: UInt8, p9: UInt8, p10: UInt8, p11: UInt8, p12: UInt8, p13: UInt8, p14: UInt8, p15: UInt8, p16: UInt8, p17: UInt8, p18: UInt8, p19: UInt8, p20: UInt8, p21: UInt8, p22: UInt8, p23: UInt8, p24: UInt8, p25: UInt8, p26: UInt8, p27: UInt8, p28: UInt8, p29: UInt8, p30: UInt8, p31: UInt8, p32: UInt8, p33: UInt8, p34: UInt8, p35: UInt8, p36: UInt8, p37: UInt8, p38: UInt8, p39: UInt8, p40: UInt8, p41: UInt8, p42: UInt8, p43: UInt8, p44: UInt8, p45: UInt8, p46: UInt8, p47: UInt8, p48: UInt8, p49: UInt8, p50: UInt8, p51: UInt8, p52: UInt8, p53: UInt8, p54: UInt8, p55: UInt8, p56: UInt8, p57: UInt8, p58: UInt8, p59: UInt8, p60: UInt8) -> UInt8 {
+    p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 + p10 + p11 + p12 + p13 + p14 + p15 + p16 + p17 + p18 + p19 + p20 + p21 + p22 + p23 + p24 + p25 + p26 + p27 + p28 + p29 + p30 + p31 + p32 + p33 + p34 + p35 + p36 + p37 + p38 + p39 + p40 + p41 + p42 + p43 + p44 + p45 + p46 + p47 + p48 + p49 + p50 + p51 + p52 + p53 + p54 + p55 + p56 + p57 + p58 + p59 + p60
+}
+
+fn consumed(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UInt8, p6: UInt8, p7: UInt8, p8: UInt8, p9: UInt8, p10: UInt8, p11: UInt8, p12: UInt8, p13: UInt8, p14: UInt8, p15: UInt8, p16: UInt8, p17: UInt8, p18: UInt8, p19: UInt8, p20: UInt8, p21: UInt8, p22: UInt8, p23: UInt8, p24: UInt8, p25: UInt8, p26: UInt8, p27: UInt8, p28: UInt8, p29: UInt8, p30: UInt8, p31: UInt8, p32: UInt8, p33: UInt8, p34: UInt8, p35: UInt8, p36: UInt8, p37: UInt8, p38: UInt8, p39: UInt8, p40: UInt8, p41: UInt8, p42: UInt8, p43: UInt8, p44: UInt8, p45: UInt8, p46: UInt8, p47: UInt8, p48: UInt8, p49: UInt8, p50: UInt8, p51: UInt8, p52: UInt8, p53: UInt8, p54: UInt8, p55: UInt8, p56: UInt8, p57: UInt8, p58: UInt8, p59: UInt8, sink p60: UInt8) -> UInt8 {
+    p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 + p10 + p11 + p12 + p13 + p14 + p15 + p16 + p17 + p18 + p19 + p20 + p21 + p22 + p23 + p24 + p25 + p26 + p27 + p28 + p29 + p30 + p31 + p32 + p33 + p34 + p35 + p36 + p37 + p38 + p39 + p40 + p41 + p42 + p43 + p44 + p45 + p46 + p47 + p48 + p49 + p50 + p51 + p52 + p53 + p54 + p55 + p56 + p57 + p58 + p59 + p60
+}
+
+fn describe[H: Describe](handler: H) -> UInt8 {
+    handler.describe()
+}
+
+fn main() -> UInt8 {
+    if describe(borrowed) == 62 && describe(consumed) == 63 {
+        0
+    } else {
+        1
+    }
+}

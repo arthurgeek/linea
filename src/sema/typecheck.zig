@@ -4660,9 +4660,14 @@ fn collectImplementations(
         const head = written_head.at;
         var names: ?node.DeclId = null;
         const parameter_head = ast.declHasParameterHead(d);
-        // A callable head of too many parameters was refused where it was
-        // written, and has no shape to key a row by.
-        if (written_head.kind == .callable and ast.callableShape(written_head) == null) continue;
+        // A callable head is keyed by its shape: packed where it fits, and
+        // otherwise by the type that stands for the shape in the pool, which
+        // is the number a callable type of that shape is looked up under.
+        const shape: ?node.CallableShape = if (written_head.kind != .callable) null else ast.callableShape(written_head) orelse numbered: {
+            const callable = ast.callableType(written_head);
+            const standing = try pool.longShapeOf(ast.params[callable.params.start..callable.params.end], callable.invocation);
+            break :numbered node.CallableShape.long(@intFromEnum(standing));
+        };
         // A tuple head applies the prelude's declaration of its arity to its
         // components, which is the declaration the resolver keyed the head
         // under. An arity the prelude does not publish was reported there,
@@ -4688,7 +4693,7 @@ fn collectImplementations(
         const applies = ast.declHead(d).args.len() > 0;
         try out.append(gpa, .{
             .trait = trait,
-            .head = if (ast.declIsDefault(d)) .default_ else if (parameter_head) .parameter else if (written_head.kind == .borrow) .borrow_ else if (written_head.kind == .callable) .{ .callable_ = ast.callableShape(written_head).? } else if (applies and names != null)
+            .head = if (ast.declIsDefault(d)) .default_ else if (parameter_head) .parameter else if (written_head.kind == .borrow) .borrow_ else if (shape) |keyed| .{ .callable_ = keyed } else if (applies and names != null)
                 .{ .applied = names.? }
             else
                 .{ .whole = ty },

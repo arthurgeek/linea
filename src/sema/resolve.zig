@@ -260,6 +260,9 @@ const Seed = struct {
     module_runs: []const ModuleRun,
     members: []const Member,
     implementations: []const Implementation,
+    /// The spelling of each long callable shape `implementations` numbers, in
+    /// the order they were numbered.
+    long_shapes: []const []const u8,
     builtins: []const BindingId,
     prelude: []const BindingId,
     scope_bindings: []const BindingId,
@@ -279,6 +282,11 @@ const Seed = struct {
             .module_runs = try gpa.dupe(ModuleRun, r.module_runs.items),
             .members = try gpa.dupe(Member, r.members.items),
             .implementations = try gpa.dupe(Implementation, r.impls.items),
+            .long_shapes = shapes: {
+                const spellings = try gpa.alloc([]const u8, r.long_shapes.spellings.items.len);
+                for (spellings, r.long_shapes.spellings.items) |*kept, spelling| kept.* = try gpa.dupe(u8, spelling);
+                break :shapes spellings;
+            },
             .builtins = try gpa.dupe(BindingId, r.builtins.items),
             .prelude = try gpa.dupe(BindingId, prelude),
             .scope_bindings = try gpa.dupe(BindingId, r.scope_bindings.items),
@@ -4038,6 +4046,7 @@ fn resolveInternal(
     defer r.members.deinit(gpa);
     defer r.member_at.deinit(gpa);
     defer r.impls.deinit(gpa);
+    defer r.long_shapes.deinit(gpa);
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
@@ -6374,6 +6383,10 @@ const Resolver = struct {
     /// declarations it names. Collected as the headers are resolved, so that
     /// coherence is asked of the whole program at once.
     impls: std.ArrayList(Implementation) = .empty,
+    /// The callable heads too long to pack, numbered; see
+    /// `node.LongCallableShapes`. Kept with a library's seed, so a program
+    /// resumed from it numbers the library's shapes as the library did.
+    long_shapes: node.LongCallableShapes = .{},
     /// The namespaces a primitive's name opens: one row per primitive, module
     /// and spelling, however many inherent blocks that module writes. Built
     /// once from `impls` after every header is resolved, and handed on as
@@ -6554,6 +6567,9 @@ const Resolver = struct {
         try self.module_runs.appendSlice(gpa, seed.module_runs);
         try self.module_runs.appendNTimes(gpa, .{ .from = 0, .to = 0 }, self.program.modules.len - seed.module_runs.len);
         try appendRelocated(Member, gpa, &self.members, seed.members, relocation);
+        // Numbered first and in the library's order, so the numbers its
+        // implementations carry name the same shapes here.
+        for (seed.long_shapes) |spelling| _ = try self.long_shapes.intern(gpa, spelling);
         try appendRelocated(Implementation, gpa, &self.impls, seed.implementations, relocation);
         try self.builtins.appendSlice(gpa, seed.builtins);
         for (self.builtins.items) |id| {
@@ -8155,9 +8171,14 @@ const Resolver = struct {
                 try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "a callable type has no declaring module", .{});
                 return;
             }
-            const shape = self.ast.callableShape(written_head) orelse {
-                try self.refused_impls.put(self.gpa, d, {});
-                return self.sink.addErrorFmt(.t_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "name a callable type with fewer parameters", "a callable head names at most {d} parameters", .{node.CallableShape.max_shape_parameters});
+            // A head of more parameters than pack is numbered by its exact
+            // spelling, so it keys a chain of its own as any other shape does.
+            const shape = self.ast.callableShape(written_head) orelse numbered: {
+                const callable = self.ast.callableType(written_head);
+                var spelled: std.ArrayList(u8) = .empty;
+                defer spelled.deinit(self.gpa);
+                try node.LongCallableShapes.spell(self.gpa, &spelled, callable.invocation, self.ast.params[callable.params.start..callable.params.end]);
+                break :numbered try self.long_shapes.intern(self.gpa, spelled.items);
             };
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .{ .callable_ = shape }, .decl = d });
         }

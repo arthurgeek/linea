@@ -2644,6 +2644,11 @@ pub const CallableSignature = struct {
     param_count: u32,
     result: TypeId,
     name: []const u8,
+    /// For a signature of more parameters than a shape packs, the callable
+    /// type that stands for its shape: the same invocation and conventions
+    /// over `Unit`, answering `Unit`. Every signature of one shape names the
+    /// same one, which is what numbers the shape. Poison otherwise.
+    shape_of: TypeId = .poison,
 };
 
 /// A lambda source identity applied to its enclosing type arguments.
@@ -7328,6 +7333,7 @@ pub const Typing = struct {
                 var shape: node.CallableShape.Builder = .begin(signature.invocation);
                 for (self.callableParams(signature)) |parameter| shape.parameter(parameter.convention);
                 if (shape.finish()) |exact| return .{ .callable_ = exact };
+                if (signature.shape_of != .poison) return .{ .callable_ = .long(@intFromEnum(signature.shape_of)) };
             },
             .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
         }
@@ -12024,7 +12030,7 @@ pub const Typing = struct {
         /// The names stored are those of the first signature interned, kept
         /// for spelling the type in a message. A call reads the labels it
         /// names arguments by from where its callee was declared.
-        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) !TypeId {
+        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) std.mem.Allocator.Error!TypeId {
             var effective: std.ArrayList(CallableContract) = .empty;
             defer effective.deinit(self.gpa);
             const contracts = filtered: {
@@ -12095,7 +12101,25 @@ pub const Typing = struct {
                 .name = name,
             } });
             try self.interned_callables.note(self.gpa, key, @intFromEnum(id));
+            if (params.len > node.CallableShape.max_packed_parameters) {
+                const standing = try self.longShapeOf(self.callableParams(self.pool.items[@intFromEnum(id)].callable), invocation);
+                self.pool.items[@intFromEnum(id)].callable.shape_of = standing;
+            }
             return id;
+        }
+
+        /// The callable type that stands for a shape too long to pack: the
+        /// invocation and each parameter's convention, over `Unit` and
+        /// answering `Unit`. Interned like any callable type, so two
+        /// signatures of one shape reach one type and its number is exact,
+        /// kept with the pool and found again when the pool is reopened.
+        pub fn longShapeOf(self: *Builder, conventions: anytype, invocation: Convention) std.mem.Allocator.Error!TypeId {
+            const standing = try self.gpa.alloc(CallableParam, conventions.len);
+            defer self.gpa.free(standing);
+            for (standing, conventions) |*param, each| {
+                param.* = .{ .spelling = "", .convention = each.convention, .ty = .unit, .default = .absent };
+            }
+            return self.internCallable(standing, .unit, &.{}, invocation);
         }
 
         fn callableKey(params: []const CallableParam, result: TypeId, contracts: []const CallableContract, invocation: Convention) u64 {
