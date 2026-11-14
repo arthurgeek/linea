@@ -573,21 +573,33 @@ pub fn Coverage(comptime Context: type) type {
                 .absent => |choices| return choices,
                 .ctor => |c| {
                     const arity = try self.context.arity(step.ty, c);
-                    var combos: std.ArrayList([]Witness) = .empty;
-                    try combos.append(self.arena, try self.arena.alloc(Witness, arity));
-                    for (0..arity) |i| {
-                        const options = try self.build(path, at);
-                        var next: std.ArrayList([]Witness) = .empty;
-                        for (combos.items) |combo| for (options) |o| {
-                            if (next.items.len == max_witnesses) break;
-                            const copy = try self.arena.dupe(Witness, combo);
-                            copy[i] = o;
-                            try next.append(self.arena, copy);
-                        };
-                        combos = next;
+                    // What each part may be, read once, and how many ways
+                    // they combine, up to `max_witnesses`.
+                    const options = try self.arena.alloc([]const Witness, arity);
+                    var count: usize = 1;
+                    for (options) |*o| {
+                        o.* = try self.build(path, at);
+                        count = @min(max_witnesses, count *| o.len);
                     }
-                    const out = try self.arena.alloc(Witness, combos.items.len);
-                    for (combos.items, 0..) |parts, n| out[n] = .{ .ty = step.ty, .shape = switch (c) {
+                    // The combinations in order, the first part varying
+                    // slowest: `picks` names the option each part takes in
+                    // the one being written, and steps as an odometer does.
+                    const picks = try self.arena.alloc(usize, arity);
+                    @memset(picks, 0);
+                    const combos = try self.arena.alloc([]Witness, count);
+                    for (combos) |*combo| {
+                        combo.* = try self.arena.alloc(Witness, arity);
+                        for (combo.*, options, picks) |*slot, o, pick| slot.* = o[pick];
+                        var i = arity;
+                        while (i > 0) {
+                            i -= 1;
+                            picks[i] += 1;
+                            if (picks[i] < options[i].len) break;
+                            picks[i] = 0;
+                        }
+                    }
+                    const out = try self.arena.alloc(Witness, combos.len);
+                    for (combos, 0..) |parts, n| out[n] = .{ .ty = step.ty, .shape = switch (c) {
                         .variant => |k| .{ .variant = .{ .index = k, .args = parts } },
                         .product => .{ .product = parts },
                         .integers => |atom| .{ .integers = atom },
@@ -797,6 +809,42 @@ test "a match whose check outgrows its budget is refused" {
         try rowOf(arena, try pairOf(arena, &wild, try some(arena, &wild)), .pair),
     };
     try testing.expectError(error.TooIntricate, c.check(&rows, .pair));
+}
+
+/// A product of `width` parts, each matched only by a wildcard.
+const WideTypes = struct {
+    width: u32,
+
+    pub const Ty = enum { wide, part };
+
+    pub fn kind(self: WideTypes, ty: Ty) Kind {
+        return if (ty == .wide) .{ .product = self.width } else .opaque_;
+    }
+
+    pub fn arity(self: WideTypes, _: Ty, c: Ctor) error{}!u32 {
+        return if (c == .product) self.width else 0;
+    }
+
+    pub fn part(_: WideTypes, _: Ty, _: Ctor, _: u32) error{}!Ty {
+        return .part;
+    }
+};
+
+test "the one witness of a wide product no arm covers is built in storage that grows with its width" {
+    const Wide = Coverage(WideTypes);
+    for ([_]u32{ 256, 1024 }) |width| {
+        var state = std.heap.ArenaAllocator.init(testing.allocator);
+        defer state.deinit();
+        var coverage: Wide = .{ .context = .{ .width = width }, .arena = state.allocator() };
+        const result = try coverage.check(&.{}, .wide);
+        try testing.expectEqual(@as(usize, 1), result.missing.len);
+        try testing.expect(result.missing[0].isWild());
+        // The witness holds one part per field. Thirty-two witnesses' worth
+        // of bytes per field is above what building it keeps, the arena's
+        // spare capacity included, and far below a copy of every part for
+        // every field, which at 256 fields is over four hundred per field.
+        try testing.expect(state.queryCapacity() < @as(usize, width) * 32 * @sizeOf(Wide.Witness));
+    }
 }
 
 test "witnesses are ordered by variant, then by what each part holds" {
