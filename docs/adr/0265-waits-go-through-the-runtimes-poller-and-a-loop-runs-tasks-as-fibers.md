@@ -1,8 +1,8 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
-Status: Phases 1 to 5 accepted and built; phase 5 is a validated library
-pattern using the existing task and owner implementation, with permanent
-regression coverage; phases 6 and 7 proposed — 2026-11-13. It builds on
+Status: Phases 1 to 5 accepted and built; phase 5 correctness, platform
+validation and measurement closeout recorded in §§9.5–9.6; phases 6 and 7
+proposed — 2026-11-13. It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
 state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and
@@ -26,10 +26,13 @@ HTTP `on:` arguments. `io.inherited` resolves the default execution choice
 when a task is prepared; `io.current()` captures it when called. Simulation
 tasks are fibers on the calling thread, scheduled from the seed. Foreign calls
 still run on the carrier, and a live foreign frame prevents a fiber switch.
-Phase 5 is complete as an existing-API library pattern: explicit system-thread
+Phase 5 correctness and platform validation are complete for the existing-API
+library pattern: explicit system-thread
 execution, thread-bound resource ownership, and permanent positive, negative
 and stress coverage, validated on macOS arm64 and both Linux ABIs, with Linux
-ASan and TSan results recorded in §9.5. It adds no compiler, runtime or public
+ASan and TSan results recorded in §9.5. Section 9.6 completes the measurement
+closeout with fresh execution-choice observations and an explicit historical
+carry-forward disposition for unchanged network/session implementation. It adds no compiler, runtime or public
 standard-library mechanism. The proposed manifest booleans, automatic offload,
 persistent fiber leases and borrowed callback mode are withdrawn. Phases 6
 and 7 remain proposed; phase 6 is deferred pending its migration-safety design.
@@ -1621,7 +1624,8 @@ macOS sanitizer execution is excluded by the toolchain policy. Independent
 mutation probes also confirmed that the nonreturning watchdog rejects an
 escaped join and unexpected sanitizer output.
 
-This satisfies Phase 5's library-pattern acceptance gate. It establishes the
+This satisfies Phase 5's correctness/platform acceptance gate, separately
+from the §13 measurement requirement recorded in §9.6. It establishes the
 reviewed wrapper's lifecycle and explicit admission behavior, not general
 foreign thread-transfer safety, performance, production admission/shutdown
 policy, or every allocation-failure path. The hundred-client execution is one
@@ -1629,9 +1633,88 @@ observed schedule, supplemented by varied-order lifecycle stress and static
 refusals; it is not an exhaustive shutdown-interleaving proof. Native failure
 paths are deterministic mocks, and the impossible-stack refusal covers the
 public preparation-error path rather than all allocation, thread creation or
-owner-start failures. Targeted fault injection and measurements remain
-follow-up work; they do not require a new API, executor, manifest key or
-callback mode for the demonstrated pattern.
+owner-start failures. Targeted fault injection remains follow-up work; the
+demonstrated pattern needs no new API, executor, manifest key or callback mode.
+
+#### 9.6 Execution-choice costs and measurement closeout
+
+The accepted design adds no execution mechanism beyond phase 4. Its fresh
+measurement question is the cost of selecting direct execution, a short-lived
+system task, or a persistent system-thread owner for the same tiny native
+operation. The retained acquisition is
+`linea-design/spikes/2026-11-13-explicit-ffi-measurements/`: `README.md` is the
+report, `trials.csv` and `results.json` retain every trial and summary, and
+`runs/final-02/` holds raw output, resource/host samples and immutable build
+provenance. There are 26 attempts: **24 included matched trials and two
+retained contention exclusions**, three repetitions per toolchain/mode.
+
+Both tools built the same 8-byte increment workload at O2 against regular
+unsanitized archives: the preserved phase 4 compiler at `a1d6d7ce` and the
+current tools from `b6c4bb65`. Production `src`, `runtime` and `std` tree IDs
+are identical to measured phase 4 head `59cc456c`, and the regular archive
+hash matches. The compiler hashes also match; benchmark executable hashes
+differ and are retained. These are matched execution-choice observations,
+not evidence of a new implementation speedup.
+
+The measured windows are two seconds after 100 untimed operations. Every
+operation's result, count and checksum is checked. A preallocated 30,000-entry
+pseudorandom reservoir retains latency observations across each window. Its
+sampling call is outside the latency interval; throughput includes validation
+and sampling overhead. One carrier, one outstanding System task per call, or
+one persistent System owner bounds these experiments; task stack requests
+are 2 MiB. This does not establish recoverable owner-queue admission.
+
+| Execution | Tools | Operations/s range | p50 µs | p95 µs | p99 µs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Direct System | phase4 | 11,413,548–11,476,002 | <1 (resolution) | <1 (resolution) | 1–1 |
+| Direct System | phase5 | 11,337,372–11,519,123 | <1 (resolution) | <1 (resolution) | 1–1 |
+| Direct one-carrier fiber | phase4 | 9,459,252–9,568,636 | <1 (resolution) | <1 (resolution) | 1–1 |
+| Direct one-carrier fiber | phase5 | 9,431,868–9,538,652 | <1 (resolution) | <1 (resolution) | 1–1 |
+| New System task per call | phase4 | 14,034–14,548 | 64–65 | 95–105 | 132–149 |
+| New System task per call | phase5 | 13,441–14,630 | 64–66 | 92–119 | 134–165 |
+| Persistent System owner | phase4 | 58,172–60,075 | 15–15 | 22–26 | 42–49 |
+| Persistent System owner | phase5 | 59,106–60,338 | 15–15 | 21–22 | 41–44 |
+
+The host's `CLOCK_MONOTONIC` advertises and exhibits 1 µs resolution. Zero
+raw direct-call quantiles mean below that resolution, not zero-cost calls.
+Owner latency includes its private handle/thread checks and request/reply;
+System-task latency includes preparation, start, result receipt and join.
+Owner creation and retained-authority cleanup/retry are recorded separately.
+Three repetitions support observed ranges, not statistical significance,
+maximum capacity or a causal claim about the toolchains.
+
+The full CSV records lifetime CPU and voluntary/involuntary context switches,
+sampled resident/virtual memory and OS-thread peaks, lifecycle times,
+supervised process wall and package-idle/interrupt wakeups. CPU/context-switch
+counts include warmup, printing and cleanup; sampled memory/thread peaks can
+miss short transients, and mapped VM is not physical memory. Total scheduler
+wakeups are unsupported on this profiling path and remain null. Available
+wakeup-class deltas have their own sampled interval and are not substitutes.
+
+Acquisition waited for a clean host and rejected known build processes at
+any CPU and other competing processes at the established 50%-CPU threshold.
+Both exclusions were candidate-owner attempts: Chrome activity and Spotlight
+activity. They remain in raw data/CSV and were retried after clearance. The
+initial wait-only `final-01` run admitted no trials; its disposition records
+the pre-data gate adjustment. Shared-host sampling cannot prove isolation or
+exclude brief unsampled activity.
+
+The broader §13 network/session matrix is carried forward as **historical
+unchanged-implementation evidence**, not a fresh full HTTP acquisition. The
+phase 4 report retains 65 raw trials, 64 included and one excluded, covering
+10,000 idle/staggered-periodic connections, mixed CPU/I/O, deadlines, churn,
+listener contention and session/owner characterization. All 210 referenced
+raw/provenance files and its CSV hash were verified. Its capped pthread
+transport reference held 2,048 connections, not 10,000, and is not equivalent
+parser/ownership/deadline work. Its material HTTP/session/four-carrier-owner
+regressions remain visible and unexplained. Historical and fresh populations,
+workloads and counter intervals are not pooled. No new compiler clock sweep
+or repaired historical scaling failure is claimed.
+
+This closes the applicable measurement work for the existing-API pattern,
+within those explicit carry-forward, timer and counter limits. Real-library
+ergonomics, broader fault injection, an executor's resource/admission policy,
+migration safety and io_uring remain separate questions and phases.
 
 ### 10. Timeouts without cancellation
 
@@ -1875,18 +1958,19 @@ in. Phase 1 does not wait for the questions later phases raise.
    pattern, not a compiler-wide thread-affinity guarantee or a new runtime
    subsystem.
 
-   **Three separate milestones:**
+   **Validation and measurement milestones:**
 
    | Milestone | Status |
    | --- | --- |
    | Architecture approved | complete: explicit system-thread execution and resource ownership; no new compiler/runtime mechanism |
    | Existing-API local feasibility | complete for the tested macOS arm64 configuration in §9.5, with source, logs and provenance retained |
    | Permanent regression and cross-platform validation | complete for the configurations in §9.5: merged fixtures, Linux x86-64/arm64 and Linux ASan/TSan results |
+   | Measurement closeout | complete within §9.6: 24 fresh matched trials, two retained exclusions, and explicitly historical unchanged-implementation network/session evidence |
 
    The original compiling-demonstration and permanent-regression gates are
    satisfied within the tested configurations and limits in §9.5. Broader
-   fault injection, real-library ergonomics and measurements remain separate
-   follow-up work. A failed new case must identify its exact missing invariant
+   fault injection and real-library ergonomics remain separate follow-up
+   work; measurement results and their limits are recorded in §9.6. A failed new case must identify its exact missing invariant
    before any API extension is proposed. The observation requirements remain:
 
    | Case | Required observation |
