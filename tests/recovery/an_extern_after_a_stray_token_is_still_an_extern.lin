@@ -1,0 +1,10 @@
+// [S-Entry]. A token that begins no declaration is reported, and reading
+// resumes at the next declaration. An `extern fn` is one: it is read as the
+// declaration without a body that it is, so it is held to what an `extern`
+// is held to and asked for no body.
+?
+extern fn _foreign(value: UInt8) -> UInt8
+
+fn main() -> UInt8 {
+    0
+}
