@@ -36532,9 +36532,10 @@ const Checker = struct {
     /// Whether `ty` holds a parameter `settling` has not yet settled, or a
     /// poison.
     ///
-    /// **Bound:** each type `ty` reaches is asked once. One found to hold none
-    /// is kept for the rest of the question, so a type named by many of the
-    /// types above it is not walked once per path to it.
+    /// **Bound:** each type `ty` reaches that names other types is walked
+    /// once. One found to hold none is kept for the rest of the question, so
+    /// a type named by many of the types above it is not walked once per
+    /// path to it; a type naming no other is answered where it is met.
     fn hasOpenParameter(self: *const Checker, ty: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
         var closed: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
         defer closed.deinit(self.gpa);
@@ -36547,10 +36548,22 @@ const Checker = struct {
         settling: []const Settling,
         closed: *std.AutoHashMapUnmanaged(TypeId, void),
     ) std.mem.Allocator.Error!bool {
+        // A type naming no other answers in one step and is not kept, so a
+        // question about a scalar or a parameter allocates nothing.
+        if (!self.namesTypes(ty)) return self.holdsOpenParameter(ty, settling, closed);
         if (closed.contains(ty)) return false;
         if (try self.holdsOpenParameter(ty, settling, closed)) return true;
         try closed.put(self.gpa, ty, {});
         return false;
+    }
+
+    /// Whether `ty` is made of other types `holdsOpenParameter` walks into.
+    fn namesTypes(self: *const Checker, ty: TypeId) bool {
+        if (self.builder.standinOf(ty) != null) return true;
+        return switch (self.builder.get(ty)) {
+            .array, .borrow, .callable, .closure => true,
+            else => if (self.builder.instanceOf(ty)) |origin| self.builder.argsOf(origin).len != 0 else false,
+        };
     }
 
     fn holdsOpenParameter(
