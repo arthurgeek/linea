@@ -4041,6 +4041,7 @@ fn resolveInternal(
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
+    defer r.aliases_settle.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
     defer r.type_parameter_bindings.deinit(gpa);
@@ -6400,6 +6401,9 @@ const Resolver = struct {
     /// walk reads each alias's text once however many uses and implementations
     /// reach it, and its size is the aliases the program declares.
     settled_aliases: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases `writtenSettled` found to name a type whose every name
+    /// settled.
+    aliases_settle: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// Every binding the program declares, in declaration order. Append-only:
     /// a `BindingId` indexes it, and every later pass keys side tables by one.
     bindings: std.ArrayList(Binding) = .empty,
@@ -11509,10 +11513,12 @@ const Resolver = struct {
     /// have each been reported where they are written. A chain of aliases of
     /// any length settles when it ends at a type.
     ///
-    /// **Bound:** the written type's own nodes, and each alias on a chain
-    /// once per time the chain is followed; a chain is compared against the
-    /// aliases already on it, so one of n aliases costs n squared at most.
-    fn writtenSettled(self: *const Resolver, ref: node.TypeRef, path: ?*const AliasOnPath) bool {
+    /// **Bound:** the written type's own nodes, and each alias's named type
+    /// once: an alias found to settle is kept in `aliases_settle`, so one
+    /// named twice by each of those above it is still walked once. An alias
+    /// is compared against the aliases on the path to it, so a chain of n
+    /// costs n squared at most.
+    fn writtenSettled(self: *Resolver, ref: node.TypeRef, path: ?*const AliasOnPath) std.mem.Allocator.Error!bool {
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
         switch (x.kind) {
@@ -11520,20 +11526,21 @@ const Resolver = struct {
                 const binding = self.writtenBinding(x.name);
                 if (binding == BindingId.none) return false;
                 const held = self.bindings.items[binding.index()];
-                if (held.kind == .type_alias) {
+                if (held.kind == .type_alias and !self.aliases_settle.contains(held.decl)) {
                     var on_path = path;
                     while (on_path) |alias| : (on_path = alias.outer) {
                         if (alias.decl == held.decl) return false;
                     }
                     const next: AliasOnPath = .{ .decl = held.decl, .outer = path };
-                    if (!self.writtenSettled(ast.declReturnRef(held.decl), &next)) return false;
+                    if (!try self.writtenSettled(ast.declReturnRef(held.decl), &next)) return false;
+                    try self.aliases_settle.put(self.gpa, held.decl, {});
                 }
             },
-            .selection => if (!self.writtenSettled(ast.selectionBase(x), path)) return false,
+            .selection => if (!try self.writtenSettled(ast.selectionBase(x), path)) return false,
             .callable, .array, .tuple, .borrow, .grouped => {},
         }
         for (ast.typeArgs(x.args)) |argument| {
-            if (!self.writtenSettled(argument, path)) return false;
+            if (!try self.writtenSettled(argument, path)) return false;
         }
         return true;
     }
@@ -11593,10 +11600,10 @@ const Resolver = struct {
                 // A source or a payload that failed to resolve has its own
                 // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                for (written_arguments) |argument| settled = settled and self.writtenSettled(argument, null);
+                for (written_arguments) |argument| settled = settled and try self.writtenSettled(argument, null);
                 for (variants) |variant| {
                     const fields = ast.variantFields(variant);
-                    if (fields.len == 1) settled = settled and self.writtenSettled(fields[0].written, null);
+                    if (fields.len == 1) settled = settled and try self.writtenSettled(fields[0].written, null);
                 }
                 if (!settled) return false;
                 const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else wrapped);
