@@ -487,6 +487,33 @@ static void a_listener_closed_between_runs_frees_its_port(void) {
     linea_sim_close(sim);
 }
 
+/* A listener bound to port 0 is given a dynamic port no other end holds.
+ * When every dynamic port is held the listener is refused, as a second
+ * listener on a held port is, and a port given back is given out again. */
+static void a_listener_is_refused_once_every_dynamic_port_is_held(void) {
+    enum { dynamic_ports = 65535 - 49152 + 1 };
+    static long listeners[dynamic_ports];
+    static unsigned char given[65536];
+    const unsigned long sim = plain(ms);
+    (void)linea_io_switch(sim);
+    for (size_t i = 0; i < dynamic_ports; i++) {
+        listeners[i] = linea_net_listen(loopback(0), 1);
+        assert(listeners[i] >= LINEA_SIM_FIRST_DESCRIPTOR);
+        const unsigned port = (unsigned)(linea_net_local_address((int)listeners[i]) & 0xffff);
+        assert(port >= 49152 && !given[port]);
+        given[port] = 1;
+    }
+    assert(linea_net_listen(loopback(0), 1) == -(long)EADDRINUSE);
+    const unsigned freed = (unsigned)(linea_net_local_address((int)listeners[7]) & 0xffff);
+    assert(linea_net_close((int)listeners[7]) == 0);
+    listeners[7] = linea_net_listen(loopback(0), 1);
+    assert(listeners[7] >= LINEA_SIM_FIRST_DESCRIPTOR);
+    assert((unsigned)(linea_net_local_address((int)listeners[7]) & 0xffff) == freed);
+    for (size_t i = 0; i < dynamic_ports; i++) assert(linea_net_close((int)listeners[i]) == 0);
+    (void)linea_io_switch(0);
+    linea_sim_close(sim);
+}
+
 static long held_elsewhere;
 
 static void *release_held(void *unused) {
@@ -561,6 +588,7 @@ int main(void) {
     different_bytes_of_one_length_give_different_fingerprints();
     a_connection_closed_between_runs_ends_its_peers_input();
     a_listener_closed_between_runs_frees_its_port();
+    a_listener_is_refused_once_every_dynamic_port_is_held();
     a_session_wait_and_a_foreign_world_trap_inside();
     puts("native sim: loop identities, virtual clocks, tie rules, deadlines, chunks, resets, seeds, closes between runs and traps passed");
     return 0;

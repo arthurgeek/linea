@@ -181,7 +181,8 @@ WRAPS_MODULO_2_64 static void note_bytes(struct sim *s, const unsigned char *byt
  * and macOS, so one seed gives one trace on both. */
 static unsigned long traced_answer(long answer) {
     static const int errors[] = { EAGAIN, ETIMEDOUT, ECONNRESET, ECONNREFUSED, EPIPE,
-                                  ENOTCONN, EINVAL, EADDRINUSE, ENOMEM, EMFILE, EBADF };
+                                  ENOTCONN, EINVAL, EADDRINUSE, ENOMEM, EMFILE, EBADF,
+                                  EADDRNOTAVAIL };
     if (answer >= 0) return (unsigned long)answer;
     for (size_t i = 0; i < sizeof errors / sizeof *errors; i++) {
         if (answer == -(long)errors[i]) return ULONG_MAX - i;
@@ -371,11 +372,15 @@ static int port_in_use(struct sim *s, unsigned port, int listeners_only) {
     return 0;
 }
 
+/* The next dynamic port no end holds, counting up from the last one given
+ * and back round to the first, or 0 when every dynamic port is held. */
 static unsigned long free_port(struct sim *s) {
-    while (port_in_use(s, s->next_port, 0) && s->next_port < 65535) s->next_port += 1;
-    const unsigned port = s->next_port;
-    if (s->next_port < 65535) s->next_port += 1;
-    return port;
+    for (unsigned tried = first_dynamic_port; tried <= 65535; tried++) {
+        const unsigned port = s->next_port;
+        s->next_port = port == 65535 ? first_dynamic_port : port + 1;
+        if (!port_in_use(s, port, 0)) return port;
+    }
+    return 0;
 }
 
 /* The listener of `s` a connection to `address` reaches: one bound to its
@@ -465,7 +470,9 @@ static long attempt_connect(struct sim *s, struct linea_op *op) {
         const long listener = listener_for(s, op->address);
         if (listener < 0 || at(listener)->pending_count >= at(listener)->backlog) return -(long)ECONNREFUSED;
         const unsigned long host = host_of(op->address) == 0 ? 0x7f000001UL : host_of(op->address);
-        const long client = make_entry(s, 0, (host << 16) | free_port(s));
+        const unsigned long port = free_port(s);
+        if (port == 0) return -(long)EADDRNOTAVAIL;
+        const long client = make_entry(s, 0, (host << 16) | port);
         if (client < 0) return client;
         const long server = make_entry(s, 0, (host << 16) | port_of(op->address));
         if (server < 0) { drop_entry(client); return server; }
@@ -745,10 +752,9 @@ long linea_sim_listen(unsigned long address, unsigned long backlog) {
     settle(s);
     unsigned long bound = address;
     long answer;
-    if (port_of(address) == 0) {
-        bound = (host_of(address) << 16) | free_port(s);
-    }
-    if (port_of(address) != 0 && port_in_use(s, port_of(address), 1)) {
+    const unsigned long given = port_of(address) == 0 ? free_port(s) : 0;
+    if (port_of(address) == 0) bound = (host_of(address) << 16) | given;
+    if (port_of(address) == 0 ? given == 0 : port_in_use(s, port_of(address), 1)) {
         answer = -(long)EADDRINUSE;
     } else {
         const long index = make_entry(s, 1, bound);
