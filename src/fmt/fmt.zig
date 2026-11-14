@@ -238,6 +238,17 @@ fn positionNoteLength(text: []const u8) usize {
     return if (i == first + 2) 0 else i;
 }
 
+test positionNoteLength {
+    // A node's position, as the dump writes it after `tokens `.
+    try testing.expectEqual(@as(usize, 6), positionNoteLength("12..34 rest"));
+    try testing.expectEqual(@as(usize, 4), positionNoteLength("0..7\n"));
+    // The same word in a literal's text is followed by no range, and stays.
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("alpha\""));
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("12 more"));
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("12.."));
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("..34"));
+}
+
 /// One past the end of the region opened at `from`.
 ///
 /// The whole rule, in one place: the region runs to the end of the line
