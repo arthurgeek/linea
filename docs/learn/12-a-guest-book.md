@@ -880,10 +880,10 @@ fn limits() -> http.Limits {
 }
 ```
 
-`main` in `examples/guest-book/main.lin` checks the routes once, makes room
-for its open files, and serves the loopback port with those limits through
-`http.listen_and_serve`. Each serving task builds its own router on
-`http.Router[Ctx]`, lent a `Ctx` that holds the connection the task opened:
+`main` in `examples/guest-book/main.lin` makes room for its open files and
+serves the loopback port with those limits through `http.listen_and_serve`.
+Each serving task builds its own router on `http.Router[Ctx]`, lent a `Ctx`
+that holds the connection the task opened:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -894,8 +894,53 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
 }
 ```
 
+Opening a task's connection can fail, and so can registering a route, so
+`start` does both and answers with the connection and the router or with a
+`StartError` saying which failed. A route that is refused releases what was
+already built:
+
+<!-- guide: excerpt examples/guest-book/main.lin -->
+```linea
+// Why a serving task could not start: its connection to the guest book did
+// not open, or one of its routes was refused.
+@derive(Debug, Release)
+enum StartError {
+    Book(BookError),
+    Route(http.RouteError),
+}
+
+impl Display for StartError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Book(error) => error.fmt(&w),
+            Route(error) => "cannot register a route: {error}".fmt(&w),
+        }
+    }
+}
+
+// Open a serving task's connection to the guest book at `path` and build its
+// router. A route that is refused releases the router and the connection
+// before the reason is returned.
+fn start(path: Str) -> Result[(Ctx, http.Router[Ctx]), StartError] where carries() {
+    let ctx = Ctx.connect(path) else |error| {
+        return .Err(.Book(error))
+    }
+    var router: http.Router[Ctx] = http.Router.new()
+    match routes(&router) {
+        Ok(_) => .Ok((ctx, router)),
+        Err(error) => {
+            router.release()
+            ctx.release()
+            .Err(.Route(error))
+        },
+    }
+}
+```
+
 The tests of the routes follow `routes` in the file, and `main` comes after
-them:
+`start`. Its `serving` closure hands each task's `start` to `map`, which wraps
+a connection and a router in the handler, and when one task's is `.Err`,
+serving ends before a connection is accepted:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -913,15 +958,6 @@ fn main() -> UInt8 {
         return 64
     }
     let logger = log.to_stderr(minimum: .Info)
-    // The routes are registered once here, so a refused pattern is reported
-    // before anything is served.
-    var checked: http.Router[Ctx] = http.Router.new()
-    let _ = routes(&checked) else |error| {
-        logger.error("cannot register a route", log.field("error", error))
-        checked.release()
-        return 2
-    }
-    checked.release()
     // The guest book starts in three steps: it prepares what every task
     // shares, the room for open files and the database file, then each
     // serving task opens its own connection, and only then is a connection
@@ -955,16 +991,14 @@ fn main() -> UInt8 {
     }
     // Each serving task builds its own handler with this closure: a router
     // lent the task's own `Ctx` by `http.with_state`, inside `http.logged`.
-    // Opening the task's connection can fail, so the closure returns the
-    // `Result` of `Ctx.connect`, whose `map` turns an opened `Ctx` into the
-    // handler and keeps a `BookError` as it is. When one task's is `.Err`,
-    // serving ends before accepting anything and reports it. The routes were
-    // checked above, so registering them again cannot fail.
+    // Opening the task's connection and registering its routes can each
+    // fail, so the closure returns the `Result` of `start`, whose `map` turns
+    // an opened `Ctx` and a finished router into the handler and keeps a
+    // `StartError` as it is. When one task's is `.Err`, serving ends before
+    // accepting anything and reports it.
     let serving = [sink logger, path] || {
-        Ctx.connect(path).map(
-            [sink logger = copy(logger)] |sink ctx: Ctx| {
-                var router: http.Router[Ctx] = http.Router.new()
-                routes(&router).unwrap()
+        start(path).map(
+            [sink logger = copy(logger)] |sink (ctx, router): (Ctx, http.Router[Ctx])| {
                 http.logged(copy(logger), http.with_state(ctx, router))
             },
         )
