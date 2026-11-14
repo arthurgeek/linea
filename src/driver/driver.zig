@@ -358,27 +358,32 @@ const BuildRequest = struct {
     foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
-/// Writes IR, assembles it and links it against the runtime.
+/// Writes IR and assembles it, and for a program links it against the
+/// runtime. A library is left as its object, which links nothing, so no
+/// runtime is looked for.
 ///
 /// Returns a status when the build could not finish, and null when it did.
 /// A tool's own message is quoted rather than summarised, because a user
 /// should not have to run the tool again to find out why it refused -- but the
 /// line saying which tool failed is ours, since the tool does not know it is
 /// part of a Linea build.
-fn compileToExecutable(
+fn compileArtifact(
     gpa: std.mem.Allocator,
     io: std.Io,
     environ: std.process.Environ,
     err: *std.Io.Writer,
     req: BuildRequest,
 ) !?u8 {
-    const runtime = try toolchain.findRuntime(gpa, io, environ, req.storage) orelse {
-        try err.print("error: cannot find {s} beside the compiler\n", .{
-            req.storage.archive(),
-        });
-        return exit_io;
+    const runtime: ?[]const u8 = switch (req.artifact) {
+        .executable => try toolchain.findRuntime(gpa, io, environ, req.storage) orelse {
+            try err.print("error: cannot find {s} beside the compiler\n", .{
+                req.storage.archive(),
+            });
+            return exit_io;
+        },
+        .object => null,
     };
-    defer gpa.free(runtime);
+    defer if (runtime) |path| gpa.free(path);
 
     // A runtime named by `LINEA_RUNTIME` decides whether storage is checked,
     // so a checked build linking one without the checking allocator says so.
@@ -390,13 +395,13 @@ fn compileToExecutable(
         try err.print("error: {s}={s} names a sanitizer the compiler cannot instrument for; use address or thread\n", .{ toolchain.sanitize_override, named });
         return exit_usage;
     };
-    if (req.storage == .checked and sanitize == null) {
-        const bytes = std.Io.Dir.cwd().readFileAlloc(io, runtime, gpa, .unlimited) catch "";
+    if (req.storage == .checked and sanitize == null) if (runtime) |path| {
+        const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited) catch "";
         if (!runtime_symbols.holdsStorageChecks(bytes)) try err.print(
             "warning: {s} holds no checking allocator, so storage is not checked\n",
-            .{runtime},
+            .{path},
         );
-    }
+    };
 
     const mid = try toolchain.Intermediates.of(gpa, req.out_path);
     defer mid.deinit(gpa);
@@ -896,7 +901,7 @@ pub fn run(process: std.process.Init) !u8 {
                             const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-test");
                             defer gpa.free(target);
 
-                            const stopped = try compileToExecutable(gpa, io, process.minimal.environ, stderr_w, .{
+                            const stopped = try compileArtifact(gpa, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,
                                 .table = &table,
                                 .sink = &sink,
@@ -995,7 +1000,7 @@ pub fn run(process: std.process.Init) !u8 {
                                 return exit_io;
                             } else |_| {}
 
-                            const stopped = try compileToExecutable(gpa, io, process.minimal.environ, stderr_w, .{
+                            const stopped = try compileArtifact(gpa, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,
                                 .table = &table,
                                 .sink = &sink,
