@@ -1,0 +1,33 @@
+// A callable type is written `fn(...) -> T`, or with how it is invoked in
+// front: `read fn`, `inout fn`, `sink fn`. A function's result and an enum's
+// payload take any of them as written, without grouping.
+enum Step {
+    Once(sink fn() -> UInt8),
+    Again(read fn() -> UInt8),
+}
+
+fn observer() -> read fn() -> UInt8 {
+    read [] || 1
+}
+
+fn counter() -> inout fn() -> UInt8 {
+    inout [] || 2
+}
+
+fn finisher() -> sink fn() -> UInt8 {
+    sink [] || 3
+}
+
+fn run(sink step: Step) -> UInt8 {
+    match step {
+        Once(f) => f(),
+        Again(f) => f(),
+    }
+}
+
+fn main() -> UInt8 {
+    let observe = observer()
+    var count = counter()
+    let finish = finisher()
+    observe() + &count() + finish() + run(.Once(sink [] || 4)) + run(.Again(read [] || 5))
+}

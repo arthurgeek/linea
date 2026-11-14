@@ -300,7 +300,9 @@ pub const Options = struct {
     mid: Intermediates,
     /// The file to produce.
     out_path: []const u8,
-    runtime_path: []const u8,
+    /// The runtime a program is linked against. An object links nothing and
+    /// names none.
+    runtime_path: ?[]const u8,
     /// What to produce, and so whether anything is linked.
     ///
     /// A library has no entry point, so there is nothing for a linker to start
@@ -420,7 +422,7 @@ pub fn build(
     if (opts.artifact == .executable) {
         try argv.appendSlice(gpa, &.{ "-x", "none" });
         try argv.appendSlice(gpa, objects);
-        try argv.append(gpa, opts.runtime_path);
+        try argv.append(gpa, opts.runtime_path.?);
         // After the runtime and the objects that reference them, which is the
         // order a static archive among the libraries needs.
         for (opts.link) |name| try argv.append(gpa, try std.fmt.allocPrint(gpa, "-l{s}", .{name}));

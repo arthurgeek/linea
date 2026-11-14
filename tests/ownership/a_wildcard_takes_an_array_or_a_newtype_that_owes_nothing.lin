@@ -1,0 +1,27 @@
+// A consuming `_` takes a value whose contents owe nothing. An array of no
+// elements holds no `Key`, an array of numbers holds nothing linear, and a
+// linear newtype over a number is settled by being taken, as a linear
+// structure with no linear field is.
+@linear
+struct Key {
+    id: UInt8,
+}
+
+@linear
+type Badge = UInt8
+
+fn main() -> UInt8 {
+    let none: [Key; 0] = []
+    let numbers: [UInt8; 2] = [1, 2]
+    let badge = Badge(3)
+    let empty = match none {
+        _ => 0,
+    }
+    let plain = match numbers {
+        _ => 0,
+    }
+    let worn = match badge {
+        _ => 0,
+    }
+    empty + plain + worn
+}

@@ -626,6 +626,10 @@ pub const Phase = struct {
             .applied = applied,
             .exit_mark = exit_mark,
         };
+        errdefer {
+            phase.nodes.deinit(gpa);
+            phase.marks.deinit(gpa);
+        }
         // The empty set is node zero, which no chain reaches.
         try phase.nodes.append(gpa, .{
             .dep = .{ .hoff = 0, .hlen = 0, .root = no_entity, .off = 0, .len = 0 },
@@ -1972,9 +1976,11 @@ pub const Phase = struct {
         for (order) |b| for (mir.successorsOf(mir.terminatorOf(b))) |s| {
             if (s != null) edges += 1;
         };
+        // Each table belongs to the phase as soon as it exists, so `deinit`
+        // frees the first when allocating the second fails.
         const pred_next = try gpa.alloc(u32, edges);
-        const pred_block = try gpa.alloc(u32, edges);
         self.pred_next = pred_next;
+        const pred_block = try gpa.alloc(u32, edges);
         self.pred_block = pred_block;
         var at: u32 = 0;
         for (order) |b| for (mir.successorsOf(mir.terminatorOf(b))) |successor| {
@@ -2726,6 +2732,29 @@ fn expectAccepted(functions: []Mir) !void {
     const got = try h.run();
     for (got.said) |d| std.debug.print("  {s}\n", .{d.message});
     try testing.expect(got.ok);
+}
+
+fn jumpThenReturn(gpa: std.mem.Allocator) !Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    const entry = try b.addBlock();
+    const exit = try b.addBlock();
+    _ = try b.setTerminator(entry, .{ .tag = .jump, .ty = .unit, .span = Span.empty, .data = .{ .target = exit } });
+    const value = try constant(&b, exit, 0);
+    try ret(&b, exit, value);
+    return b.finish(entry, .from(0));
+}
+
+fn initThenControlFlow(gpa: std.mem.Allocator, mir: *const Mir) !void {
+    var phase = try Phase.init(gpa, undefined, mir, .at(0), undefined);
+    defer phase.deinit();
+    try phase.controlFlow();
+}
+
+test "a phase that runs out of memory while it is built or numbers its blocks frees what it allocated" {
+    var mir = try jumpThenReturn(testing.allocator);
+    defer mir.deinit(testing.allocator);
+    try testing.checkAllAllocationFailures(testing.allocator, initThenControlFlow, .{&mir});
 }
 
 test "a value carried out of a slot is stale once the slot is lent for writing" {

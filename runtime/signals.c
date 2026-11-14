@@ -57,6 +57,14 @@ static void check(uint8_t signal) {
 /* The handler: count, wake, chain to the host's handler, and leave `errno`
  * as the interrupted code had it. Only async-signal-safe calls are made. A
  * full pipe is already awake, so a failed write is ignored. */
+/* Whether an action calls a handler, and neither ignores its signal nor
+ * leaves it its default. `SIG_IGN` and `SIG_DFL` are read first: SA_SIGINFO
+ * says how a handler is called and may be set beside either, and the two
+ * handler fields share their storage. */
+static int names_a_handler(const struct sigaction *action) {
+    return action->sa_handler != SIG_DFL && action->sa_handler != SIG_IGN;
+}
+
 static void route(int number, siginfo_t *info, void *context) {
     const int interrupted_errno = errno;
     int which = 0;
@@ -72,10 +80,9 @@ static void route(int number, siginfo_t *info, void *context) {
 #endif
     (void)written;
     const struct sigaction *host = &saved[which];
-    if ((host->sa_flags & SA_SIGINFO) != 0) {
-        if (host->sa_sigaction != 0) host->sa_sigaction(number, info, context);
-    } else if (host->sa_handler != SIG_DFL && host->sa_handler != SIG_IGN) {
-        host->sa_handler(number);
+    if (names_a_handler(host)) {
+        if ((host->sa_flags & SA_SIGINFO) != 0) host->sa_sigaction(number, info, context);
+        else host->sa_handler(number);
     }
     errno = interrupted_errno;
 }
@@ -122,7 +129,7 @@ long linea_signal_acquire(uint8_t signal) {
             unlock();
             return -(long)error;
         }
-        if ((old.sa_flags & SA_SIGINFO) == 0 && old.sa_handler == SIG_IGN) {
+        if (old.sa_handler == SIG_IGN) {
             unlock();
             return 1;
         }

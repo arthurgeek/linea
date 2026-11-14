@@ -358,27 +358,32 @@ const BuildRequest = struct {
     foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
-/// Writes IR, assembles it and links it against the runtime.
+/// Writes IR and assembles it, and for a program links it against the
+/// runtime. A library is left as its object, which links nothing, so no
+/// runtime is looked for.
 ///
 /// Returns a status when the build could not finish, and null when it did.
 /// A tool's own message is quoted rather than summarised, because a user
 /// should not have to run the tool again to find out why it refused -- but the
 /// line saying which tool failed is ours, since the tool does not know it is
 /// part of a Linea build.
-fn compileToExecutable(
+fn compileArtifact(
     gpa: std.mem.Allocator,
     io: std.Io,
     environ: std.process.Environ,
     err: *std.Io.Writer,
     req: BuildRequest,
 ) !?u8 {
-    const runtime = try toolchain.findRuntime(gpa, io, environ, req.storage) orelse {
-        try err.print("error: cannot find {s} beside the compiler\n", .{
-            req.storage.archive(),
-        });
-        return exit_io;
+    const runtime: ?[]const u8 = switch (req.artifact) {
+        .executable => try toolchain.findRuntime(gpa, io, environ, req.storage) orelse {
+            try err.print("error: cannot find {s} beside the compiler\n", .{
+                req.storage.archive(),
+            });
+            return exit_io;
+        },
+        .object => null,
     };
-    defer gpa.free(runtime);
+    defer if (runtime) |path| gpa.free(path);
 
     // A runtime named by `LINEA_RUNTIME` decides whether storage is checked,
     // so a checked build linking one without the checking allocator says so.
@@ -390,13 +395,13 @@ fn compileToExecutable(
         try err.print("error: {s}={s} names a sanitizer the compiler cannot instrument for; use address or thread\n", .{ toolchain.sanitize_override, named });
         return exit_usage;
     };
-    if (req.storage == .checked and sanitize == null) {
-        const bytes = std.Io.Dir.cwd().readFileAlloc(io, runtime, gpa, .unlimited) catch "";
+    if (req.storage == .checked and sanitize == null) if (runtime) |path| {
+        const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited) catch "";
         if (!runtime_symbols.holdsStorageChecks(bytes)) try err.print(
             "warning: {s} holds no checking allocator, so storage is not checked\n",
-            .{runtime},
+            .{path},
         );
-    }
+    };
 
     const mid = try toolchain.Intermediates.of(gpa, req.out_path);
     defer mid.deinit(gpa);
@@ -651,69 +656,97 @@ pub fn run(process: std.process.Init) !u8 {
     var program = loaded catch |e| {
         // A manifest that was read and says what its root cannot be is not a
         // read failure, so it is said on its own.
-        if (e == error.ManifestNamesTheLibrary) {
-            try stderr_w.print(
-                "error: a program may not be named `std`\n" ++
-                    "  the {s} for '{s}' names it `std`, the library every program depends on: give it another name, or make it a library\n",
+        const named_std = e == error.ManifestNamesTheLibrary;
+        const message = if (named_std)
+            try gpa.dupe(u8, "a program may not be named `std`")
+        else
+            try std.fmt.allocPrint(gpa, "cannot read '{s}'", .{file_path});
+        // The reason, for a missing path and for each thing a manifest may
+        // not say. The entry path may name a directory, so these do not
+        // claim to identify the individual source or manifest that failed.
+        const reason: ?[]const u8 = switch (e) {
+            error.ManifestNamesTheLibrary => try std.fmt.allocPrint(
+                gpa,
+                "the {s} for '{s}' names it `std`, the library every program depends on: give it another name, or make it a library",
                 .{ loader.manifest_name, file_path },
-            );
-            return exit_usage;
-        }
-        try stderr_w.print("error: cannot read '{s}'\n", .{file_path});
-        // Add specific explanations for a missing path and loader validation
-        // failures. The entry path may name a directory, so these errors do
-        // not claim to identify the individual source or manifest that failed.
-        switch (e) {
-            error.FileNotFound => try stderr_w.writeAll(
-                "  no file or directory of that name\n",
             ),
-            error.SourceTooLarge => try stderr_w.print(
-                "  a source is larger than the {d} bytes a position can address\n",
+            error.FileNotFound => "no file or directory of that name",
+            error.SourceTooLarge => try std.fmt.allocPrint(
+                gpa,
+                "a source is larger than the {d} bytes a position can address",
                 .{source_mod.max_bytes},
             ),
-            error.ManifestNotJson => try stderr_w.print(
-                "  the {s} marking its program is not JSON\n",
+            error.ManifestNotJson => try std.fmt.allocPrint(
+                gpa,
+                "the {s} marking its program is not JSON",
                 .{loader.manifest_name},
             ),
-            error.ManifestKindUnknown => try stderr_w.print(
-                "  the {s} names a kind that is not `program` or `library`\n",
+            error.ManifestKindUnknown => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names a kind that is not `program` or `library`",
                 .{loader.manifest_name},
             ),
-            error.ManifestSourceLeavesRoot => try stderr_w.print(
-                "  the `source` in its {s} leaves the directory holding it; name a directory inside that one\n",
+            error.ManifestSourceLeavesRoot => try std.fmt.allocPrint(
+                gpa,
+                "the `source` in its {s} leaves the directory holding it; name a directory inside that one",
                 .{loader.manifest_name},
             ),
-            error.ManifestExternNotModules => try stderr_w.print(
-                "  the {s} grants `extern` to something other than a list of modules, such as [\"store\"] or [\".\"] for the root module\n",
+            error.ManifestExternNotModules => try std.fmt.allocPrint(
+                gpa,
+                "the {s} grants `extern` to something other than a list of modules, such as [\"store\"] or [\".\"] for the root module",
                 .{loader.manifest_name},
             ),
-            error.ManifestNativeNotSource => try stderr_w.print(
-                "  the {s} names under `native` something other than a C source below it, such as \"store/bind.c\"\n",
+            error.ManifestNativeNotSource => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `native` something other than a C source below it, such as \"store/bind.c\"",
                 .{loader.manifest_name},
             ),
-            error.ManifestNativeMissing => try stderr_w.print(
-                "  the {s} names under `native` a C source that does not exist\n",
+            error.ManifestNativeMissing => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `native` a C source that does not exist",
                 .{loader.manifest_name},
             ),
-            error.ManifestLinkNotLibrary => try stderr_w.print(
-                "  the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3\n",
+            error.ManifestLinkNotLibrary => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `link` something other than a library name, such as \"sqlite3\" for -lsqlite3",
                 .{loader.manifest_name},
             ),
-            error.ManifestHeaderNotHeader => try stderr_w.print(
-                "  the {s} names under `headers` something other than a C header as an include names it, such as \"sqlite3.h\" or \"store/shim.h\"\n",
+            error.ManifestHeaderNotHeader => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names under `headers` something other than a C header as an include names it, such as \"sqlite3.h\" or \"store/shim.h\"",
                 .{loader.manifest_name},
             ),
-            error.ManifestLinksWithoutExtern => try stderr_w.print(
-                "  the {s} names C to build or link but grants no module `extern`, so nothing could call it\n",
+            error.ManifestLinksWithoutExtern => try std.fmt.allocPrint(
+                gpa,
+                "the {s} names C to build or link but grants no module `extern`, so nothing could call it",
                 .{loader.manifest_name},
             ),
-            error.ManifestGrantsNoModule => try stderr_w.print(
-                "  the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it\n",
+            error.ManifestGrantsNoModule => try std.fmt.allocPrint(
+                gpa,
+                "the {s} grants `extern` to a module the root does not hold: each entry names a directory of source, as an import inside the root names it",
                 .{loader.manifest_name},
             ),
-            else => {},
+            else => null,
+        };
+        switch (error_format) {
+            .human => {
+                try stderr_w.print("error: {s}\n", .{message});
+                if (reason) |why| try stderr_w.print("  {s}\n", .{why});
+            },
+            // The format a consumer asked for carries this as it carries
+            // every other problem: an object with no file, since no source
+            // was loaded to point into.
+            .json => {
+                var unread = Sink.init(gpa);
+                try unread.add(.{
+                    .severity = .err,
+                    .message = message,
+                    .remarks = if (reason) |why| try gpa.dupe([]const u8, &.{why}) else &.{},
+                });
+                try report.emit(&table, &unread);
+            },
         }
-        return exit_io;
+        return if (named_std) exit_usage else exit_io;
     };
     const ast = program.ast;
 
@@ -896,7 +929,7 @@ pub fn run(process: std.process.Init) !u8 {
                             const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-test");
                             defer gpa.free(target);
 
-                            const stopped = try compileToExecutable(gpa, io, process.minimal.environ, stderr_w, .{
+                            const stopped = try compileArtifact(gpa, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,
                                 .table = &table,
                                 .sink = &sink,
@@ -995,7 +1028,7 @@ pub fn run(process: std.process.Init) !u8 {
                                 return exit_io;
                             } else |_| {}
 
-                            const stopped = try compileToExecutable(gpa, io, process.minimal.environ, stderr_w, .{
+                            const stopped = try compileArtifact(gpa, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,
                                 .table = &table,
                                 .sink = &sink,

@@ -3484,9 +3484,11 @@ fn sameWrittenCallable(
     const a = ast.params[x.params.start..x.params.end];
     const b = ast.params[y.params.start..y.params.end];
     if (a.len != b.len) return false;
+    // A parameter's name is no part of the type: it labels a call of
+    // whatever declares the callable, and two callable types that differ
+    // only in those names are one type.
     for (a, b) |p, q| {
         if (p.convention != q.convention) return false;
-        if (ast.tokenName(p.name) != ast.tokenName(q.name)) return false;
         if (!try sameType(ast, ctx, p.written, ra, q.written, rb, left)) return false;
         if ((p.default == ExprId.none) != (q.default == ExprId.none)) return false;
         if (p.default != ExprId.none and !try ctx.sameValue(p.default, q.default)) return false;
@@ -3495,7 +3497,7 @@ fn sameWrittenCallable(
     // a different result, as `()` is never written.
     if (x.result.wasWritten() != y.result.wasWritten()) return false;
     if (x.result.wasWritten() and !try sameType(ast, ctx, x.result, ra, y.result, rb, left)) return false;
-    return sameWrittenContracts(ast, x.contracts, y.contracts);
+    return sameWrittenContracts(ast, x.contracts, a, y.contracts, b);
 }
 
 /// Hashes what `sameWrittenArgs` compares, reading the text as it does: two
@@ -3582,8 +3584,6 @@ fn hashType(
             for (params) |param| {
                 const convention: u8 = @intFromEnum(param.convention);
                 h.update(std.mem.asBytes(&convention));
-                const name = ast.tokenName(param.name);
-                h.update(std.mem.asBytes(&name));
                 try hashType(ast, ctx, h, param.written, read, left);
                 const has_default = param.default != ExprId.none;
                 h.update(std.mem.asBytes(&has_default));
@@ -3594,7 +3594,7 @@ fn hashType(
             }
             // As `sameWrittenCallable` reads it: an omitted result is `()`.
             if (callable.result.wasWritten()) try hashType(ast, ctx, h, callable.result, read, left) else h.update("()");
-            hashWrittenContracts(ast, h, callable.contracts);
+            hashWrittenContracts(ast, h, callable.contracts, params);
         },
     }
 }
@@ -3776,9 +3776,34 @@ test "aliases nested deep and used twice at each level are read without expandin
     try testing.expectEqual(try hashBoundArgs(ast, settled, first), try hashBoundArgs(ast, settled, second));
 }
 
-fn sameContractNames(ast: *const Ast, a: node.ContractPath, b: node.ContractPath) bool {
+/// What a contract path starts at: the position of the parameter its root
+/// names, or the name itself where no parameter of the callable has it.
+const ContractRoot = union(enum) {
+    position: u32,
+    name: StringId,
+};
+
+/// A callable type's contract names its parameters, and the names are no
+/// part of the type, so a root is read as the position it names.
+///
+/// **Bound:** the callable's own parameters.
+fn contractRoot(ast: *const Ast, params: []const node.Param, root: TokenId) ContractRoot {
+    const name = ast.tokenName(root);
+    for (params, 0..) |param, at| {
+        if (ast.tokenName(param.name) == name) return .{ .position = @intCast(at) };
+    }
+    return .{ .name = name };
+}
+
+fn sameContractNames(
+    ast: *const Ast,
+    a: node.ContractPath,
+    a_params: []const node.Param,
+    b: node.ContractPath,
+    b_params: []const node.Param,
+) bool {
     if ((a.root == .none) != (b.root == .none)) return false;
-    if (a.root != .none and ast.tokenName(a.root) != ast.tokenName(b.root)) return false;
+    if (a.root != .none and !std.meta.eql(contractRoot(ast, a_params, a.root), contractRoot(ast, b_params, b.root))) return false;
     const x = ast.contractSteps(a);
     const y = ast.contractSteps(b);
     if (x.len != y.len) return false;
@@ -3792,20 +3817,26 @@ fn sameContractNames(ast: *const Ast, a: node.ContractPath, b: node.ContractPath
     return true;
 }
 
-fn sameWrittenContracts(ast: *const Ast, a: node.ContractRange, b: node.ContractRange) bool {
+fn sameWrittenContracts(
+    ast: *const Ast,
+    a: node.ContractRange,
+    a_params: []const node.Param,
+    b: node.ContractRange,
+    b_params: []const node.Param,
+) bool {
     const x = ast.contracts[a.start..a.end];
     const y = ast.contracts[b.start..b.end];
     if (x.len != y.len) return false;
     for (x, y) |first, second| {
         if (first.kind != second.kind or first.borrows_source != second.borrows_source or
-            !sameContractNames(ast, first.source, second.source) or
-            !sameContractNames(ast, first.destination, second.destination) or
-            !sameContractNames(ast, first.target, second.target)) return false;
+            !sameContractNames(ast, first.source, a_params, second.source, b_params) or
+            !sameContractNames(ast, first.destination, a_params, second.destination, b_params) or
+            !sameContractNames(ast, first.target, a_params, second.target, b_params)) return false;
     }
     return true;
 }
 
-fn hashWrittenContracts(ast: *const Ast, hash: *std.hash.Wyhash, range: node.ContractRange) void {
+fn hashWrittenContracts(ast: *const Ast, hash: *std.hash.Wyhash, range: node.ContractRange, params: []const node.Param) void {
     for (ast.contracts[range.start..range.end]) |contract| {
         const kind: u8 = @intFromEnum(contract.kind);
         hash.update(std.mem.asBytes(&kind));
@@ -3813,10 +3844,16 @@ fn hashWrittenContracts(ast: *const Ast, hash: *std.hash.Wyhash, range: node.Con
         for ([_]node.ContractPath{ contract.source, contract.destination, contract.target }) |path| {
             const present = path.root != .none;
             hash.update(std.mem.asBytes(&present));
-            if (present) {
-                const root = ast.tokenName(path.root);
-                hash.update(std.mem.asBytes(&root));
-            }
+            if (present) switch (contractRoot(ast, params, path.root)) {
+                .position => |at| {
+                    hash.update("position");
+                    hash.update(std.mem.asBytes(&at));
+                },
+                .name => |name| {
+                    hash.update("name");
+                    hash.update(std.mem.asBytes(&name));
+                },
+            };
             const steps = ast.contractSteps(path);
             hash.update(std.mem.asBytes(&steps.len));
             for (steps) |step| {
@@ -10353,12 +10390,20 @@ const Resolver = struct {
         return .{ .start = ast.declName(derive), .end = TokenId.at(end) };
     }
 
+    /// The brace that opens a target's body: the first one outside every
+    /// bracket and parenthesis of its header. A parameter's default may hold
+    /// a record literal, whose braces sit inside the parameter list.
+    ///
+    /// **Bound:** the tokens of the target's header.
     fn attachedHeaderEnd(self: *const Resolver, target: DeclId) TokenId {
         const ast = &self.program.ast;
         const range = ast.declTokens(target);
+        var depth: i32 = 0;
         for (ast.declName(target).index() + 1..range.end.index()) |i| {
             const at = TokenId.at(@intCast(i));
-            if (ast.tokenTag(at) == .l_brace) return at;
+            const tag = ast.tokenTag(at);
+            if (tag == .l_brace and depth == 0) return at;
+            depth += tag.nesting();
         }
         return range.end;
     }
@@ -13065,29 +13110,35 @@ const Resolver = struct {
     /// program's own is. Each alias is followed once: a chain is walked to
     /// its end and every alias on it answered from there.
     ///
+    /// An alias no name heads, such as one of an array or a callable, is
+    /// recorded as headed by nothing, so a chain that ends at one is answered
+    /// once as well and a later alias naming it stops there.
+    ///
     /// **Bound:** one step per alias on each chain, with every alias answered
     /// once, so linear in the aliases.
     fn recordAliasHeads(self: *Resolver) std.mem.Allocator.Error!void {
         var chain: std.ArrayList(DeclId) = .empty;
         defer chain.deinit(self.gpa);
+        var on_chain: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
+        defer on_chain.deinit(self.gpa);
         for (self.program.modules, 0..) |_, i| {
             for (self.expanded.?.declsOf(.from(i))) |root| {
                 if (self.ast.declTag(root) != .alias or self.alias_heads.contains(root)) continue;
                 chain.clearRetainingCapacity();
+                on_chain.clearRetainingCapacity();
                 var at = root;
                 const head: BindingId = while (true) {
                     try chain.append(self.gpa, at);
+                    try on_chain.put(self.gpa, at, {});
                     const b = self.writtenHead(at);
                     if (b == BindingId.none or self.bindings.items[b.index()].kind != .type_alias) break b;
                     const next = self.bindings.items[b.index()].decl;
                     if (self.alias_heads.get(next)) |known| break known;
                     // A cycle was refused where it was found, and heads nothing.
-                    if (std.mem.indexOfScalar(DeclId, chain.items, next) != null) break .none;
+                    if (on_chain.contains(next)) break .none;
                     at = next;
                 };
-                for (chain.items) |alias| {
-                    if (head != BindingId.none) try self.alias_heads.put(self.gpa, alias, head);
-                }
+                for (chain.items) |alias| try self.alias_heads.put(self.gpa, alias, head);
             }
         }
     }

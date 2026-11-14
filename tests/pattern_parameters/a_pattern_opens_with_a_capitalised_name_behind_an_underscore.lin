@@ -1,0 +1,25 @@
+// A name's case is its first letter's, so `_Point` and `_1Point` are
+// capitalised names. A parameter's pattern opens with a capitalised name
+// wherever a parameter is written: in a function's list behind a label, and
+// in a lambda's.
+struct _Point {
+    x: UInt8,
+}
+
+struct _1Point {
+    y: UInt8,
+}
+
+fn first(value _Point { x }: _Point) -> UInt8 {
+    x
+}
+
+fn second(value _1Point { y }: _1Point) -> UInt8 {
+    y
+}
+
+fn main() -> UInt8 {
+    let third = |_Point { x }: _Point| x
+    let fourth = |_1Point { y }: _1Point| y
+    first(_Point { x = 1 }) + second(_1Point { y = 2 }) + third(_Point { x = 3 }) + fourth(_1Point { y = 4 })
+}
