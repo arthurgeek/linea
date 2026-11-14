@@ -2583,6 +2583,9 @@ pub fn build(b: *std.Build) void {
         .filters = test_filters,
     });
     source_tests.root_module.addAnonymousImport("runtime_archive", .{ .root_source_file = runtime_archive });
+    // The gates' worker pool is tested here, and it runs children through
+    // the conformance runner's process module.
+    source_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
     // The runtime's signature table and every source it describes, so a test
     // holds the one to the other.
     source_tests.root_module.addAnonymousImport("runtime_symbols", .{ .root_source_file = b.path("src/support/runtime_symbols.zig") });

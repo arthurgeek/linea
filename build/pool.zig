@@ -15,12 +15,30 @@ pub fn workers(count: usize, wanted: ?usize) usize {
 /// on `workers(count, wanted)` threads. Each thread allocates from an arena of
 /// its own that is never freed, because what `work` stores in `context` for the
 /// caller to read afterwards lives in it until the process exits.
+///
+/// Every index is worked however many threads the host starts. A thread it
+/// declines to start leaves its share to the others and to the calling
+/// thread, and the call returns only once every thread that did start has
+/// been joined: each borrows this call's counter and the caller's context.
 pub fn forEach(
     gpa: std.mem.Allocator,
     count: usize,
     wanted: ?usize,
     context: anytype,
     comptime work: fn (@TypeOf(context), std.mem.Allocator, usize) void,
+) !void {
+    return forEachSpawning(gpa, count, wanted, context, work, std.Thread.spawn);
+}
+
+/// `forEach`, starting its threads through `spawn`, so a test can have the
+/// host decline one.
+fn forEachSpawning(
+    gpa: std.mem.Allocator,
+    count: usize,
+    wanted: ?usize,
+    context: anytype,
+    comptime work: fn (@TypeOf(context), std.mem.Allocator, usize) void,
+    comptime spawn: anytype,
 ) !void {
     const n = workers(count, wanted);
     var next: std.atomic.Value(usize) = .init(0);
@@ -36,8 +54,48 @@ pub fn forEach(
     const arenas = try gpa.alloc(std.heap.ArenaAllocator, n);
     for (arenas) |*arena| arena.* = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const threads = try gpa.alloc(std.Thread, n);
-    for (threads, arenas) |*thread, *arena| thread.* = try std.Thread.spawn(.{}, Thread.run, .{ context, &next, count, arena });
-    for (threads) |thread| thread.join();
+
+    var started: usize = 0;
+    while (started < n) : (started += 1) {
+        threads[started] = spawn(.{}, Thread.run, .{ context, &next, count, &arenas[started] }) catch break;
+    }
+    // Indexes are handed out one at a time from the shared counter, so the
+    // calling thread working until none is left covers every thread that
+    // never started.
+    if (started < n) Thread.run(context, &next, count, &arenas[started]);
+    for (threads[0..started]) |thread| thread.join();
+}
+
+test "every index is worked once, however many threads the host starts" {
+    const gpa = std.testing.allocator;
+    const jobs = 200;
+
+    // Starts `allowed` threads and declines every one after.
+    const Declining = struct {
+        var allowed: usize = 0;
+
+        fn spawn(config: std.Thread.SpawnConfig, comptime function: anytype, args: anytype) std.Thread.SpawnError!std.Thread {
+            if (allowed == 0) return error.SystemResources;
+            allowed -= 1;
+            return std.Thread.spawn(config, function, args);
+        }
+    };
+    const Tally = struct {
+        worked: *[jobs]std.atomic.Value(u32),
+
+        fn work(self: @This(), _: std.mem.Allocator, index: usize) void {
+            _ = self.worked[index].fetchAdd(1, .monotonic);
+        }
+    };
+
+    for ([_]usize{ 0, 1, 3 }) |allowed| {
+        var worked: [jobs]std.atomic.Value(u32) = @splat(.init(0));
+        Declining.allowed = allowed;
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        try forEachSpawning(arena.allocator(), jobs, 4, Tally{ .worked = &worked }, Tally.work, Declining.spawn);
+        for (&worked) |*times| try std.testing.expectEqual(@as(u32, 1), times.load(.monotonic));
+    }
 }
 
 pub const Finished = struct {
