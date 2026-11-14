@@ -1,0 +1,48 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:27:9
+   |
+24 |             value += 1
+   |             ---------- assigned by this argument
+27 |         value,
+   |         ^^^^^ already assigned here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:34:9
+   |
+31 |             value -= 1
+   |             ---------- assigned by this argument
+34 |         value,
+   |         ^^^^^ already assigned here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:41:9
+   |
+38 |             value *= 2
+   |             ---------- assigned by this argument
+41 |         value,
+   |         ^^^^^ already assigned here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:48:9
+   |
+45 |             value /= 2
+   |             ---------- assigned by this argument
+48 |         value,
+   |         ^^^^^ already assigned here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:55:9
+   |
+52 |             value %= 3
+   |             ---------- assigned by this argument
+55 |         value,
+   |         ^^^^^ already assigned here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:57:31
+   |
+57 |     set(&cells[bump(&value)], value)
+   |                     ------ mutated by this argument
+   |                               ^^^^^ already passed `&` here
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/assign/an_argument_that_writes_a_place_excludes_its_other_uses.lin:63:9
+   |
+60 |             cells[bump(&value)] = 1
+   |                        ------ mutated by this argument
+63 |         value,
+   |         ^^^^^ already passed `&` here

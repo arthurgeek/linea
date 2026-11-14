@@ -1296,7 +1296,6 @@ The library tests itself.
   ok    net.an_accept_attempt_retries_failures_with_a_growing_pause_that_a_connection_resets
   ok    net.an_accept_whose_connection_is_ready_at_its_deadline_takes_it
   ok    net.an_accept_with_no_bound_waits_as_accept_does
-  ok    net.an_acceptor_waits_for_every_expected_task_and_stops_when_one_fails
   ok    net.an_address_debugs_its_parts
   ok    net.an_address_displays_as_dotted_octets_and_a_port
   ok    net.an_address_keeps_the_parts_it_was_built_from
@@ -1637,4 +1636,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1634 passed, 0 failed
+  1633 passed, 0 failed

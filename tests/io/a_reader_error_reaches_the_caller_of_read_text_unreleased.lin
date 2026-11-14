@@ -1,0 +1,66 @@
+// `read_text_in` reads a reader to its end as text. When a read fails it
+// releases the bytes read so far and hands the reader's error back as it
+// was, so an error the caller must settle, here a linear `Ticket`, is the
+// caller's to settle.
+import std.io
+import std.mem
+
+use io.InputFailure
+
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+struct Source {
+    position: UInt64,
+}
+
+impl io.Reader for Source {
+    type Error = Ticket
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, Ticket] where carries() {
+        if self.position == 2 {
+            return .Err(Ticket { number = 9 })
+        }
+        if count == 0 {
+            return .Ok(0)
+        }
+        &buffer.store_byte(offset, UInt8(97))
+        self.position += 1
+        .Ok(1)
+    }
+}
+
+fn settled(sink error: io.ReadTextError[Ticket]) -> UInt64 {
+    match error {
+        Read(Input(failure)) => {
+            let InputFailure { reason: ticket, stream_offset: offset } = failure
+            let Ticket { number } = ticket
+            number + offset
+        },
+        Read(Allocation(_)) => 100,
+        Read(Limit) => 101,
+        Read(InvalidProgress) => 102,
+        Encoding(_) => 103,
+    }
+}
+
+fn main() -> UInt8 {
+    let log = mem.AllocationLog.open(mem.system(), 16).unwrap()
+    var source = Source { position = 0 }
+    let answer = match io.read_text_in(log.allocator(), &source, max_bytes: 8) {
+        Ok(text) => {
+            text.release()
+            UInt64(0)
+        },
+        Err(error) => settled(error),
+    }
+    let disposed = log.all_disposed()
+    log.release()
+    if disposed {
+        UInt8(answer)
+    } else {
+        0
+    }
+}

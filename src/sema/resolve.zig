@@ -10353,12 +10353,20 @@ const Resolver = struct {
         return .{ .start = ast.declName(derive), .end = TokenId.at(end) };
     }
 
+    /// The brace that opens a target's body: the first one outside every
+    /// bracket and parenthesis of its header. A parameter's default may hold
+    /// a record literal, whose braces sit inside the parameter list.
+    ///
+    /// **Bound:** the tokens of the target's header.
     fn attachedHeaderEnd(self: *const Resolver, target: DeclId) TokenId {
         const ast = &self.program.ast;
         const range = ast.declTokens(target);
+        var depth: i32 = 0;
         for (ast.declName(target).index() + 1..range.end.index()) |i| {
             const at = TokenId.at(@intCast(i));
-            if (ast.tokenTag(at) == .l_brace) return at;
+            const tag = ast.tokenTag(at);
+            if (tag == .l_brace and depth == 0) return at;
+            depth += tag.nesting();
         }
         return range.end;
     }

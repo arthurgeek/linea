@@ -1,0 +1,23 @@
+// [T-Mismatch]. An array literal builds an array: its type is its elements'
+// type and their count. Where something else is expected, the literal is still
+// an array and the two types disagree, whether the expectation is a scalar, a
+// structure or a parameter. An empty literal has no element to name, so the
+// report says only that it is an array.
+struct Box {
+    number: UInt8,
+}
+
+fn double(n: UInt8) -> UInt8 {
+    n * 2
+}
+
+fn main() -> UInt8 {
+    let count: UInt8 = [1, 2]
+    let flag: Bool = [true]
+    let box: Box = [1, 2]
+    let none: UInt8 = []
+    if flag {
+        return box.number + none
+    }
+    count + double([3, 4])
+}
