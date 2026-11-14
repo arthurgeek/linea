@@ -679,6 +679,11 @@ const ForeignParameter = struct {
             .canonical = if (!float) .none else if (by_address) .at_address else .value,
         };
     }
+
+    /// Which value of the parameter the entry hands the body.
+    fn argument(self: ForeignParameter) ForeignArgument {
+        return if (self.widened) .widened else if (self.canonical == .value) .canonical else .as_given;
+    }
 };
 
 /// What a C-callable entry does around the body it calls. `emitForeignEntry`
@@ -746,8 +751,10 @@ const ForeignArgument = enum { as_given, widened, canonical };
 /// The body of a C-callable entry as the steps it runs and the arguments it
 /// passes, built from the plan and held to what the boundary requires before
 /// any of it is written. An entry is generated code no pass over the
-/// module's functions sees, so it is checked here, as what will be printed
-/// and not as the answers it was made from.
+/// module's functions sees, so it is checked here, as what will be printed.
+/// What the boundary requires of an entry and of each parameter is answered
+/// once, by `ForeignPlan.of` and `ForeignParameter.of`: the builder writes
+/// steps from those answers and the check holds the steps to them.
 const ForeignBody = struct {
     steps: []const ForeignStep,
     arguments: []const ForeignArgument,
@@ -770,7 +777,7 @@ const ForeignBody = struct {
                 .value => try steps.append(gpa, .{ .canonical_value = @intCast(i) }),
                 .at_address => try steps.append(gpa, .{ .canonical_at = @intCast(i) }),
             }
-            argument.* = if (parameter.widened) .widened else if (parameter.canonical == .value) .canonical else .as_given;
+            argument.* = parameter.argument();
         }
         try steps.append(gpa, .call);
         if (plan.never) {
@@ -794,12 +801,15 @@ const ForeignBody = struct {
         gpa.free(self.arguments);
     }
 
-    /// The obligation of the boundary these steps break, or null. Read from
-    /// the steps and from the body's signature, never from the plan.
+    /// The obligation of the boundary these steps break, or null. The steps
+    /// are read as they stand, in the order they would be printed, and held
+    /// to what `ForeignPlan.of` and `ForeignParameter.of` answer for this
+    /// body: a step missing, doubled, misplaced or naming the wrong
+    /// parameter is refused whichever routine built the list.
     ///
-    /// **Bound:** the steps once, and each parameter's steps once more, so
-    /// the steps times the parameters at most; an entry has a few steps per
-    /// parameter.
+    /// **Bound:** the steps twice and the parameters once. A parameter's
+    /// steps are found without a search because each kind is written in the
+    /// parameters' order, which is itself held.
     fn broken(self: ForeignBody, module: *const Module, mir: *const Mir, entry: ForeignEntry) ?[]const u8 {
         if (self.arguments.len != mir.param_count) return "an entry passes its body another number of arguments than it takes";
 
@@ -829,6 +839,7 @@ const ForeignBody = struct {
                 else => {},
             }
         }
+        const plan = ForeignPlan.of(module, mir, entry);
         const called = call orelse return "an entry never calls its body";
         if (self.steps.len == 0 or !self.steps[self.steps.len - 1].ends()) return "an entry does not end";
         const end = self.steps[self.steps.len - 1];
@@ -836,7 +847,7 @@ const ForeignBody = struct {
         // C reaching Linea code enters foreign execution before anything
         // else. The runtime's own callbacks start a task with no C frame
         // above them and enter nothing.
-        if (entry == .runtime_called_back) {
+        if (!plan.enters) {
             if (enter != null or leave != null) return "an entry only the runtime calls enters or leaves foreign execution";
         } else {
             if (enter == null or enter.? != 0) return "an entry C calls does not enter foreign execution first";
@@ -844,7 +855,7 @@ const ForeignBody = struct {
 
         // What is entered is left once, after the body and before the return
         // to C. A body that never returns has no such path.
-        const never = mir.return_type == .never;
+        const never = plan.never;
         if (never != (end == .unreachable_)) return "an entry disagrees with its body about whether the body returns";
         if (never) {
             if (leave != null) return "an entry leaves foreign execution after a body that never returns";
@@ -855,11 +866,9 @@ const ForeignBody = struct {
 
         // The answer C is given has the declared type's width.
         if (!never) {
-            const answers = mir.return_type != .unit;
-            const narrows = answers and adaptsAtBoundary(module, mir.return_type);
-            const wanted: ForeignStep = if (!answers) .return_nothing else if (narrows) .return_narrowed else .return_answer;
+            const wanted: ForeignStep = if (!plan.answers) .return_nothing else if (plan.narrows) .return_narrowed else .return_answer;
             if (std.meta.activeTag(end) != std.meta.activeTag(wanted)) return "an entry answers C something other than its body's declared result";
-            if (narrows != (narrow != null)) return "an entry narrows an answer of the declared width, or does not narrow a wider one";
+            if (plan.narrows != (narrow != null)) return "an entry narrows an answer of the declared width, or does not narrow a wider one";
             if (narrow) |at| if (at < called) return "an entry narrows an answer its body has not given";
         } else if (narrow != null) return "an entry narrows the answer of a body that never returns";
 
@@ -872,36 +881,45 @@ const ForeignBody = struct {
         // the last thing the body's own code does.
         if (narrow != null and leave != null and narrow.? < leave.?) return "an entry narrows its answer before leaving foreign execution";
 
-        // Each parameter reaches the body in the body's convention.
+        // Each parameter reaches the body in the body's convention. A kind
+        // of step is written once per parameter that needs it, in the
+        // parameters' order, so a step out of order is a doubled or a
+        // misplaced one, and a count short of the parameters that need the
+        // step is a missing one.
+        var last_widened: ?u32 = null;
+        var last_canonical: ?u32 = null;
+        var widened: usize = 0;
+        var canonical: usize = 0;
+        for (self.steps[0..called]) |step| switch (step) {
+            .widen => |n| {
+                if (last_widened) |before| if (n <= before) return "a parameter is widened twice, or out of the parameters' order";
+                last_widened = n;
+                widened += 1;
+                if (!ForeignParameter.of(module, mir, n).widened) return "a parameter of the body's width, or one handed over by address, is widened";
+            },
+            .canonical_value, .canonical_at => |n| {
+                if (last_canonical) |before| if (n <= before) return "a float is made canonical twice, or out of the parameters' order";
+                last_canonical = n;
+                canonical += 1;
+                switch (ForeignParameter.of(module, mir, n).canonical) {
+                    .none => return "a value that is no float is made canonical",
+                    .value => if (step != .canonical_value) return "a float handed over as a value is made canonical at an address",
+                    .at_address => if (step != .canonical_at) return "a float handed over by address is made canonical as a value",
+                }
+            },
+            else => {},
+        };
         for (self.arguments, 0..) |argument, index| {
-            const ty = mir.locals[index];
-            const by_address = module.arrivesByAddress(mir, index);
-            const narrow_in = !by_address and adaptsAtBoundary(module, ty);
-            const float = floatBitsOf(module.representationOf(ty).computation) != null;
-            var widened = false;
-            var canonical_value = false;
-            var canonical_at = false;
-            for (self.steps[0..called]) |step| switch (step) {
-                .widen => |n| if (n == index) {
-                    if (widened) return "a parameter is widened twice";
-                    widened = true;
-                },
-                .canonical_value => |n| if (n == index) {
-                    if (canonical_value) return "a float is made canonical twice";
-                    canonical_value = true;
-                },
-                .canonical_at => |n| if (n == index) {
-                    if (canonical_at) return "a float is made canonical twice";
-                    canonical_at = true;
-                },
-                else => {},
-            };
-            if (narrow_in != widened) return "a parameter narrower than the body's convention is not widened, or one of its width is";
-            if ((argument == .widened) != narrow_in) return "an entry passes its body a parameter's unwidened value, or a widened one it never made";
-            if (float and by_address != canonical_at) return "a float is made canonical at an address it did not arrive by, or not where it did";
-            if (float and by_address == canonical_value) return "a float is made canonical as a value it did not arrive as, or not where it did";
-            if (!float and (canonical_value or canonical_at)) return "a value that is no float is made canonical";
-            if ((argument == .canonical) != (float and !by_address)) return "an entry passes its body a float's raw value, or a canonical one it never made";
+            const parameter = ForeignParameter.of(module, mir, index);
+            if (parameter.widened) {
+                if (widened == 0) return "a parameter narrower than the body's convention is not widened";
+                widened -= 1;
+            }
+            if (parameter.canonical != .none) {
+                if (canonical == 0) return "a float is not made canonical before the body reads it";
+                canonical -= 1;
+            }
+            if (argument != parameter.argument()) return "an entry passes its body another value of a parameter than the one it prepared";
         }
         for (self.steps[called..]) |step| switch (step) {
             .widen, .canonical_value, .canonical_at => return "an entry prepares a parameter after its body has run",
