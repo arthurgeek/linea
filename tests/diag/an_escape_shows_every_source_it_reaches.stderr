@@ -1,0 +1,29 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/diag/an_escape_shows_every_source_it_reaches.lin:6:9
+   |
+6  |         b0.view()
+   |         ^^^^^^^^^ escape observations only from the signature's declared sources
+8  |         b1.view()
+   |         --------- this leaves the function as well
+10 |         b2.view()
+   |         --------- this leaves the function as well
+12 |         b3.view()
+   |         --------- this leaves the function as well
+14 |         b4.view()
+   |         --------- this leaves the function as well
+16 |         b5.view()
+   |         --------- this leaves the function as well
+18 |         b6.view()
+   |         --------- this leaves the function as well
+20 |         b7.view()
+   |         --------- this leaves the function as well
+22 |         b8.view()
+   |         --------- this leaves the function as well
+24 |         b9.view()
+   |         --------- this leaves the function as well
+26 |         b10.view()
+   |         ---------- this leaves the function as well
+   |
+   = help: the value comes from `b0`, `b1`, `b2`, `b3`, `b4`, `b5`, `b6`, `b7`, `b8`, `b9` and `b10`; write `where borrows(_a, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10)` to say so
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+   = help: the types this names are reached with `import std.mem`

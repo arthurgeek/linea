@@ -1503,7 +1503,6 @@ const Builder = struct {
     }
 
     fn selection(self: *Builder, id: ExprId, position: Position) std.mem.Allocator.Error!void {
-        try self.walkIndexes(id);
         var steps = self.ast.placeSteps(id);
         var depth: u32 = 0;
         var rejected = false;
@@ -1512,6 +1511,13 @@ const Builder = struct {
             if (!self.typing.selected_places.contains(step)) rejected = true;
         }
         const at = steps.at;
+
+        // A path rooted at a place evaluates nothing at its root: its indexes
+        // run, and then the place is used. A root that is a value, such as a
+        // call's result, is evaluated first and its indexes run after it,
+        // which is the order the program runs them in.
+        const rooted_at_place = self.ast.refersToBinding(at);
+        if (rooted_at_place) try self.walkIndexes(id);
         if (self.res.constantReached(self.ast, id)) try self.staticRead(id);
 
         // An invalid path transfers no field; an incompatible expected type
@@ -1525,9 +1531,10 @@ const Builder = struct {
         // keeps it partial.
         if (rejected) {
             try self.expr(at, .reading);
-            if (!self.ast.refersToBinding(at) or self.placeOperation(id, position) != .consume) return;
+            if (!rooted_at_place) return self.walkIndexes(id);
+            if (self.placeOperation(id, position) != .consume) return;
             depth = @max(depth, 1);
-        } else if (!self.ast.refersToBinding(at)) {
+        } else if (!rooted_at_place) {
             // The path is rooted at a value no place names. Taking a part out
             // of it takes the value: a branch of the root that names a place
             // gives that place up, as a branch does wherever its construct
@@ -1538,6 +1545,7 @@ const Builder = struct {
                 try self.expr(at, .consuming);
                 try self.yielded(at, .reading);
             } else try self.expr(at, .reading);
+            try self.walkIndexes(id);
             try self.emit(operation, .{ .root = .none }, id);
             return;
         }
