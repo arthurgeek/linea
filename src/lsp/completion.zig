@@ -447,13 +447,7 @@ fn namesShadowingImports(
         if (declared == .none or ast.fileOf(declared) != file) continue;
         if (ast.tokenSpan(declared).start >= offset) continue;
         const statement = res.stmtOf(b);
-        if (statement != .none) {
-            const init = ast.stmtData(statement).init;
-            if (init != .none) {
-                const extent = ast.exprSpan(init);
-                if (extent.start <= offset and offset <= extent.end) continue;
-            }
-        }
+        if (statement != .none and !endedBefore(ast, statement, file, offset)) continue;
         try into.put(gpa, ast.tokenText(declared), {});
     }
 }
@@ -482,20 +476,15 @@ fn endedBefore(ast: *const Ast, statement: node.StmtId, file: FileId, offset: u3
     const extent = ast.stmtSpan(statement);
     if (offset <= extent.end) return false;
 
-    // Something written past the statement begins the next one.
-    var before = positions.tokenBefore(ast, file, offset);
-    while (before != .none and ast.tokenTag(before).isTrivia() and ast.tokenSpan(before).start >= extent.end) {
-        if (before.index() == 0) break;
-        before = TokenId.at(before.index() - 1);
-    }
-    if (before != .none and ast.tokenSpan(before).start >= extent.end) return true;
-
-    // Nothing is: the cursor is still in the statement on its own line, and
-    // on a later one unless the statement is whole, since a line break after
-    // `=` or an operator continues it.
-    const init = ast.stmtData(statement).init;
-    if (init == .none or ast.exprTag(init) == .err) return false;
-    if (ast.exprSpan(init).end != extent.end) return false;
+    // The statement's last token says whether it can have ended, by the rule
+    // the parser reads: a `;` ends it where it stands, and a line break ends
+    // it only after a token an expression can end with. One left at `=`, an
+    // operator, a comma or an open bracket goes on to the next line.
+    const last = positions.tokenBefore(ast, file, extent.end);
+    if (last == .none) return false;
+    const tag = ast.tokenTag(last);
+    if (tag == .semicolon) return true;
+    if (!tag.endsAStatement()) return false;
     const source = ast.partOfFile(file).?.source;
     return std.mem.indexOfScalar(u8, source[extent.end..offset], '\n') != null;
 }
@@ -2490,6 +2479,13 @@ test "a local is offered from the statement after the one that declares it" {
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = |\n}\n",
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool =| x\n    2\n}\n",
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: UInt8 = x + |\n}\n",
+        // Left at an operator, an open call or a comment after one, the
+        // statement goes on to the next line.
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = 1 ==\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: UInt8 = 1 +\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = !\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = main(1,\n        |\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = 1 == // why\n        |\n}\n",
     }) |marked| {
         const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
         const unfinished = marked[0..at] ++ marked[at + 1 ..];
@@ -2498,6 +2494,20 @@ test "a local is offered from the statement after the one that declares it" {
         const offered = try offeredReading(gpa, &partial, partial.fileNamed("main.lin").?, at, .unsupported);
         defer free(gpa, offered);
         try testing.expectEqualStrings("UInt8", (try requireItem(offered, "x")).detail.?);
+    }
+
+    // A `;` ends the statement where it stands, on its own line or not.
+    inline for (.{
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;\n    |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true; |\n    2\n}\n",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const ended = marked[0..at] ++ marked[at + 1 ..];
+        var whole = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = ended }}, "main.lin");
+        defer whole.deinit();
+        const offered = try offeredReading(gpa, &whole, whole.fileNamed("main.lin").?, at, .unsupported);
+        defer free(gpa, offered);
+        try testing.expectEqualStrings("Bool", (try requireItem(offered, "x")).detail.?);
     }
 
     // On the line after a whole statement, its local is offered.
