@@ -818,6 +818,7 @@ fn typecheckInternal(
     defer {
         for (c.function_values.items) |value| value.deinit(gpa);
         c.function_values.deinit(gpa);
+        c.settled_pairs.deinit(gpa);
         for (c.pending_values.items) |pending| pending.deinit(gpa);
         c.pending_values.deinit(gpa);
         c.binding_labels.deinit(gpa);
@@ -5944,6 +5945,10 @@ const Checker = struct {
     recovered_call_args: std.ArrayList(types_mod.RecoveredCallArg) = .empty,
     recovered_calls: std.ArrayList(types_mod.RecoveredCall) = .empty,
     function_values: std.ArrayList(types_mod.FunctionValue) = .empty,
+    /// The nominal pairs the settlement in progress has matched, and how many
+    /// matches of it are open. Empty between settlements.
+    settled_pairs: std.AutoHashMapUnmanaged(SettledPair, void) = .empty,
+    settling_pairs: u32 = 0,
     /// The function values named without a written type in the bodies being
     /// checked, innermost last. Each leaves when its body closes, so the list
     /// holds what the open bodies named rather than what the program does.
@@ -11148,7 +11153,7 @@ const Checker = struct {
             _ = try self.settle(pattern, got, heading.alias, heading.found, &clash);
         }
         for (heading.written, found) |pattern, *slot| {
-            if (slot.* != .poison or !self.writesParameter(heading, pattern) or self.hasOpenParameter(pattern, &open)) continue;
+            if (slot.* != .poison or !self.writesParameter(heading, pattern) or try self.hasOpenParameter(pattern, &open)) continue;
             slot.* = try self.builder.substitute(pattern, @intCast(heading.alias.index()), heading.found);
         }
     }
@@ -12890,7 +12895,7 @@ const Checker = struct {
                 if (!self.mentionsParameter(param.ty, trait, .stops)) continue;
                 const value = if (self.ast.exprTag(args[j]) == .marked) self.ast.unaryOperand(args[j]) else args[j];
                 if (self.determinesItsOwnType(value) != speaking) continue;
-                if (!speaking and !self.hasOpenParameter(param.ty, &settling)) continue;
+                if (!speaking and !try self.hasOpenParameter(param.ty, &settling)) continue;
                 const got = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
                 walked[j] = true;
                 if (got == .poison) {
@@ -16951,7 +16956,7 @@ const Checker = struct {
             const resolved = try self.callableContext(want.ty, settling);
             var context = want;
             context.ty = resolved;
-            if (!self.hasOpenParameter(resolved, settling)) {
+            if (!try self.hasOpenParameter(resolved, settling)) {
                 context.inference = null;
                 return self.checkInner(id, context);
             }
@@ -22891,7 +22896,7 @@ const Checker = struct {
         // body settled, or the inferred type parameter as they solved it.
         const answered = if (result_expected) |want| if (want.inference) |settling| solved: {
             const solved = try self.callableContext(want.ty, settling);
-            break :solved if (self.hasOpenParameter(solved, settling)) TypeId.never else solved;
+            break :solved if (try self.hasOpenParameter(solved, settling)) TypeId.never else solved;
         } else result else result;
         for (deferred_tries.items) |pending| {
             // Read again: what the operand left open, the body may since have settled.
@@ -34921,6 +34926,17 @@ const Checker = struct {
         return self.settleByInContext(declared, actual, d, found, clash, settlement, null);
     }
 
+    /// One pair of nominal types a settlement matched, argument by argument,
+    /// and the settlement it was matched in: whose parameters, which slots,
+    /// and which kind.
+    const SettledPair = struct {
+        declared: TypeId,
+        actual: TypeId,
+        owner: node.DeclId,
+        slots: usize,
+        settlement: Settlement,
+    };
+
     fn settleByInContext(
         self: *Checker,
         declared: TypeId,
@@ -34933,7 +34949,7 @@ const Checker = struct {
     ) std.mem.Allocator.Error!bool {
         switch (self.builder.get(declared)) {
             .parameter => |p| {
-                if (open_context) |slots| if (self.hasOpenParameter(actual, slots)) return true;
+                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) return true;
                 if (p.owner != d.index() or p.index >= found.len or actual == .never) return true;
                 if (found[p.index] == .poison) {
                     found[p.index] = actual;
@@ -34996,13 +35012,36 @@ const Checker = struct {
         const got = self.builder.instanceOf(actual) orelse return true;
         if (want.decl != got.decl) return true;
 
+        // A type is one entry however often it is named, so a pair of types
+        // can be reached along many paths: `P[A, A]` against `P[B, B]` meets
+        // `A` against `B` twice, and aliases that each name the last twice
+        // meet their innermost pair once per path. A pair matched once holds
+        // however it is reached again, since a slot keeps the type it was
+        // given: matching it again would read the same slots and change none.
+        // Kept only where nothing can differ on a second visit: no open
+        // context, whose slots a later step may fill, and no open type on
+        // either side, which a later meeting may settle.
+        const repeatable = open_context == null and
+            !try self.builder.mentionsOpen(declared) and !try self.builder.mentionsOpen(actual);
+        const pair: SettledPair = .{ .declared = declared, .actual = actual, .owner = d, .slots = @intFromPtr(found.ptr), .settlement = settlement };
+        if (repeatable and self.settled_pairs.contains(pair)) return true;
+
         const wanted = try self.sink.arena.dupe(TypeId, self.builder.argsOf(want));
         const given = try self.sink.arena.dupe(TypeId, self.builder.argsOf(got));
         if (wanted.len != given.len) return true;
 
+        // The pairs are forgotten when the outermost match of a settlement
+        // returns: the slots they were matched against belong to that call.
+        const outermost = self.settling_pairs == 0;
+        self.settling_pairs += 1;
+        defer {
+            self.settling_pairs -= 1;
+            if (outermost) self.settled_pairs.clearRetainingCapacity();
+        }
         for (wanted, given) |w, g| {
             if (!try self.settlePartInContext(w, g, d, found, clash, settlement, open_context)) return false;
         }
+        if (repeatable) try self.settled_pairs.put(self.gpa, pair, {});
         return true;
     }
 
@@ -35023,7 +35062,7 @@ const Checker = struct {
     ) std.mem.Allocator.Error!bool {
         if (actual == .never) switch (self.builder.get(declared)) {
             .parameter => |p| {
-                if (open_context) |slots| if (self.hasOpenParameter(actual, slots)) return true;
+                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) return true;
                 if (p.owner != d.index() or p.index >= found.len) return true;
                 if (found[p.index] == .poison or found[p.index] == .never) {
                     found[p.index] = .never;
@@ -35123,7 +35162,8 @@ const Checker = struct {
     /// parameter is shown with what the call did settle, and an open one by
     /// its name. Whether it reported one.
     ///
-    /// **Bound:** the call's arguments, each type walked once.
+    /// **Bound:** the call's arguments, each pair of types they reach compared
+    /// once.
     fn reportShapeBeforeOpen(
         self: *Checker,
         d: node.DeclId,
@@ -35132,13 +35172,17 @@ const Checker = struct {
         walked: []const bool,
         settling: []const Settling,
     ) std.mem.Allocator.Error!bool {
+        // The pairs found to hold no clash, for every argument: what the call
+        // settled does not change while they are compared.
+        var agreeing: std.AutoHashMapUnmanaged(ShapePair, void) = .empty;
+        defer agreeing.deinit(self.gpa);
         for (args, 0..) |a, j| {
             if (j >= params.len or a == ExprId.none or !walked[j]) continue;
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
             const got = self.builder.exprType(value);
             if (got == .poison) continue;
             const declared = try paramType(self, d, j);
-            if (!self.shapeClashAroundOpen(declared, got, settling)) continue;
+            if (!try self.shapeClashAroundOpen(declared, got, settling, &agreeing)) continue;
             var shown = declared;
             for (settling) |s| {
                 const own: []const TypeId = if (s.owner.index() < self.param_types.len) self.param_types[s.owner.index()] else &.{};
@@ -35160,7 +35204,11 @@ const Checker = struct {
 
     /// Whether `got` is built, somewhere `declared` writes a type parameter
     /// the call left open, by another constructor than the one around it.
-    fn shapeClashAroundOpen(self: *Checker, declared: TypeId, got: TypeId, settling: []const Settling) bool {
+    ///
+    /// `agreeing` holds the pairs already found to hold no clash. A type is one
+    /// entry however often it is named, so `P[A, A]` against `P[B, B]` reaches
+    /// `A` against `B` twice, and the answer is the same both times.
+    fn shapeClashAroundOpen(self: *Checker, declared: TypeId, got: TypeId, settling: []const Settling, agreeing: *std.AutoHashMapUnmanaged(ShapePair, void)) std.mem.Allocator.Error!bool {
         const want = self.builder.instanceOf(declared) orelse return false;
         const have = self.builder.instanceOf(got) orelse return false;
         if (want.decl != have.decl) {
@@ -35172,9 +35220,14 @@ const Checker = struct {
         const wanted = self.builder.argsOf(want);
         const had = self.builder.argsOf(have);
         if (wanted.len != had.len) return false;
-        for (wanted, had) |w, h| if (self.shapeClashAroundOpen(w, h, settling)) return true;
+        const pair: ShapePair = .{ .declared = declared, .got = got };
+        if (agreeing.contains(pair)) return false;
+        for (wanted, had) |w, h| if (try self.shapeClashAroundOpen(w, h, settling, agreeing)) return true;
+        try agreeing.put(self.gpa, pair, {});
         return false;
     }
+
+    const ShapePair = struct { declared: TypeId, got: TypeId };
 
     /// What a call settled, per list.
     ///
@@ -35274,7 +35327,7 @@ const Checker = struct {
                 // nothing to add to, and checking it here would ask it for a
                 // type with nothing flowing in -- the very thing the walk below
                 // is about to do properly.
-                if (!speaking and !self.hasOpenParameter(declared, settling)) continue;
+                if (!speaking and !try self.hasOpenParameter(declared, settling)) continue;
 
                 const observed = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
                 const got = if (over != .none and readsSelf(self.ast, params[j])) try self.inherentReceiver(d, observed) else observed;
@@ -35422,7 +35475,7 @@ const Checker = struct {
                     delayed_refused = true;
                     continue;
                 }
-            } else if (bound == .poison or !self.callableInputsKnown(bound, settling)) {
+            } else if (bound == .poison or !try self.callableInputsKnown(bound, settling)) {
                 if (!try self.reportArgumentThatSettledNothing(d, args, params, walked, settling)) self.reportCallbackInputs(value);
                 _ = try self.check(value, .{ .ty = .poison, .at = self.locOf(value), .reason = .parameter, .callable_context = true });
                 walked[j] = true;
@@ -35431,7 +35484,7 @@ const Checker = struct {
             }
 
             if (!from_callback) {
-                const infer_result = self.hasOpenParameter(bound, settling);
+                const infer_result = try self.hasOpenParameter(bound, settling);
                 var signature = try self.callableContext(bound, settling);
                 const at_parameter: Loc = .{ .file = self.ast.fileOf(params[j].name), .span = self.ast.tokenSpan(params[j].name) };
                 if (infer_result and !self.isLambda(value)) {
@@ -35474,7 +35527,7 @@ const Checker = struct {
                         // it left open standing for themselves. Settling them
                         // from it would answer each with itself, so they stay
                         // open and the call reports them as undetermined.
-                        if (self.hasOpenParameter(supplied, settling)) {
+                        if (try self.hasOpenParameter(supplied, settling)) {
                             try unsettled_lambdas.append(self.gpa, .{ .value = value, .param = j, .bound = bound });
                             walked[j] = true;
                             continue;
@@ -35769,7 +35822,7 @@ const Checker = struct {
         defer self.gpa.free(wanted_params);
         if (lambda.params.len != wanted_params.len) return;
         for (lambda.params, wanted_params) |param, wanted| {
-            if (!param.written.wasWritten() or !self.hasOpenParameter(wanted.ty, settling)) continue;
+            if (!param.written.wasWritten() or !try self.hasOpenParameter(wanted.ty, settling)) continue;
             const diagnostics_start = self.sink.items().len;
             const errors_before = self.sink.error_count;
             const warnings_before = self.sink.warning_count;
@@ -35800,7 +35853,7 @@ const Checker = struct {
             if (j >= params.len or a == ExprId.none or !walked[j]) continue;
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
             const declared = try paramType(self, d, j);
-            if (self.callbackParameter(declared) != null or !self.hasOpenParameter(declared, settling)) continue;
+            if (self.callbackParameter(declared) != null or !try self.hasOpenParameter(declared, settling)) continue;
             const got = self.builder.exprType(value);
             if (got == .poison or !self.builtFromAnotherDeclaration(declared, got)) continue;
             const at_parameter: Loc = .{ .file = self.ast.fileOf(params[j].name), .span = self.ast.tokenSpan(params[j].name) };
@@ -35837,7 +35890,7 @@ const Checker = struct {
             return;
         }
         switch (self.builder.get(ty)) {
-            .parameter => if (self.hasOpenParameter(ty, settling)) {
+            .parameter => if (try self.hasOpenParameter(ty, settling)) {
                 try out.put(self.gpa, ty, {});
             },
             .array => |array| try self.openCallbackParameters(array.element, settling, out, visited),
@@ -35857,13 +35910,13 @@ const Checker = struct {
         }
     }
 
-    fn callableInputsKnown(self: *const Checker, ty: TypeId, settling: []const Settling) bool {
+    fn callableInputsKnown(self: *const Checker, ty: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
         const signature = switch (self.builder.get(ty)) {
             .callable => |signature| signature,
             else => return false,
         };
         for (self.builder.callableParams(signature)) |parameter| {
-            if (self.hasOpenParameter(parameter.ty, settling)) return false;
+            if (try self.hasOpenParameter(parameter.ty, settling)) return false;
         }
         return true;
     }
@@ -35990,7 +36043,7 @@ const Checker = struct {
     /// type disagrees with what the call settled, which is reported here.
     fn settleUnsettledLambda(self: *Checker, lambda: UnsettledLambda, declared: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
         const signature = try self.callableContext(lambda.bound, settling);
-        if (self.hasOpenParameter(signature, settling)) return true;
+        if (try self.hasOpenParameter(signature, settling)) return true;
         const at = self.ast.withoutGroups(lambda.value);
         const closure = self.res.closures.closureOf(at);
         const descriptor = &self.closure_descriptors[closure.index()];
@@ -36372,8 +36425,37 @@ const Checker = struct {
         return self.ast.exprTag(at) == .variant_ref and self.ast.unaryOperand(at) == .none and self.res.targetOf(at) == .none;
     }
 
-    fn hasOpenParameter(self: *const Checker, ty: TypeId, settling: []const Settling) bool {
-        if (self.builder.standinOf(ty)) |standin| return self.hasOpenParameter(standin.held, settling);
+    /// Whether `ty` holds a parameter `settling` has not yet settled, or a
+    /// poison.
+    ///
+    /// **Bound:** each type `ty` reaches is asked once. One found to hold none
+    /// is kept for the rest of the question, so a type named by many of the
+    /// types above it is not walked once per path to it.
+    fn hasOpenParameter(self: *const Checker, ty: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
+        var closed: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer closed.deinit(self.gpa);
+        return self.hasOpenParameterPast(ty, settling, &closed);
+    }
+
+    fn hasOpenParameterPast(
+        self: *const Checker,
+        ty: TypeId,
+        settling: []const Settling,
+        closed: *std.AutoHashMapUnmanaged(TypeId, void),
+    ) std.mem.Allocator.Error!bool {
+        if (closed.contains(ty)) return false;
+        if (try self.holdsOpenParameter(ty, settling, closed)) return true;
+        try closed.put(self.gpa, ty, {});
+        return false;
+    }
+
+    fn holdsOpenParameter(
+        self: *const Checker,
+        ty: TypeId,
+        settling: []const Settling,
+        closed: *std.AutoHashMapUnmanaged(TypeId, void),
+    ) std.mem.Allocator.Error!bool {
+        if (self.builder.standinOf(ty)) |standin| return self.hasOpenParameterPast(standin.held, settling, closed);
         switch (self.builder.get(ty)) {
             .poison => return true,
             .parameter => |parameter| {
@@ -36383,28 +36465,28 @@ const Checker = struct {
                 }
                 return false;
             },
-            .array => |array| return self.hasOpenParameter(array.element, settling),
-            .borrow => |b| return self.hasOpenParameter(b.referent, settling),
+            .array => |array| return self.hasOpenParameterPast(array.element, settling, closed),
+            .borrow => |b| return self.hasOpenParameterPast(b.referent, settling, closed),
             .callable => |signature| {
                 for (self.builder.callableParams(signature)) |parameter| {
-                    if (self.hasOpenParameter(parameter.ty, settling)) return true;
+                    if (try self.hasOpenParameterPast(parameter.ty, settling, closed)) return true;
                 }
-                return self.hasOpenParameter(signature.result, settling);
+                return self.hasOpenParameterPast(signature.result, settling, closed);
             },
             .closure => |closure| {
                 for (self.builder.closureArgs(closure)) |arg| {
-                    if (self.hasOpenParameter(arg, settling)) return true;
+                    if (try self.hasOpenParameterPast(arg, settling, closed)) return true;
                 }
                 for (self.builder.closureImplArgs(closure)) |arg| {
-                    if (self.hasOpenParameter(arg, settling)) return true;
+                    if (try self.hasOpenParameterPast(arg, settling, closed)) return true;
                 }
-                return closure.self_ty != .poison and self.hasOpenParameter(closure.self_ty, settling);
+                return closure.self_ty != .poison and try self.hasOpenParameterPast(closure.self_ty, settling, closed);
             },
             else => {},
         }
         const origin = self.builder.instanceOf(ty) orelse return false;
         for (self.builder.argsOf(origin)) |arg| {
-            if (self.hasOpenParameter(arg, settling)) return true;
+            if (try self.hasOpenParameterPast(arg, settling, closed)) return true;
         }
         return false;
     }
