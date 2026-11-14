@@ -1,0 +1,30 @@
+// [S-Defer]. A closure written inside a deferred expression has a body of
+// its own, and its captures are not part of it: a capture is evaluated where
+// the closure is written, which is while the scope is ending. A `?` or a
+// `return` in one would leave from inside the `defer`.
+fn maybe(present: Bool) -> Option[UInt8] {
+    if present {
+        .Some(1)
+    } else {
+        .None
+    }
+}
+
+fn run[F: fn() -> UInt8](f: F) {
+    let _n = f()
+}
+
+fn questions(present: Bool) -> Option[UInt8] {
+    defer run([sink y = maybe(present)?] || y)
+    .Some(0)
+}
+
+fn returns(present: Bool) -> UInt8 {
+    defer run([sink y = if present { return 1 } else { 5 }] || y + 0)
+    2
+}
+
+fn main() -> UInt8 {
+    let _answered = questions(false)
+    returns(true)
+}

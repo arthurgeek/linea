@@ -1,0 +1,10 @@
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_capture_in_a_deferred_closure_may_not_leave.lin:18:25
+   |
+18 |     defer run([sink y = maybe(present)?] || y)
+   |                         ^^^^^^^^^^^^^^^ `?` inside a `defer`
+error[S-Defer]: a `defer` runs where control leaves, so what it schedules may not leave as well
+  --> tests/defer/a_capture_in_a_deferred_closure_may_not_leave.lin:23:38
+   |
+23 |     defer run([sink y = if present { return 1 } else { 5 }] || y + 0)
+   |                                      ^^^^^^^^ `return` inside a `defer`

@@ -5716,7 +5716,7 @@ const Leave = struct {
     what: []const u8,
     /// Whether this is a `defer` rather than an expression that leaves.
     schedules: bool = false,
-    /// The first token of the innermost closure whose body holds this, or
+    /// The first token of the innermost closure body that holds this, or
     /// `outside_closures`. A closure's body is a scope of its own, so this
     /// leaves or schedules there and not in a `defer` the closure is written
     /// inside.
@@ -16414,15 +16414,18 @@ const Checker = struct {
             }
         }.before);
 
-        // Every closure's extent, in the order they are written, so a closure
-        // comes before the ones written inside it.
+        // Every closure body's extent, in the order they are written, so a
+        // body comes before the ones written inside it.
         const Extent = struct { start: u32, end: u32 };
         var closures: std.ArrayList(Extent) = .empty;
         defer closures.deinit(self.gpa);
         for (0..self.ast.exprCount()) |i| {
             const id = ExprId.at(@intCast(i));
             if (self.ast.exprTag(id) != .lambda) continue;
-            const tokens = self.ast.exprTokens(id);
+            // The body alone. A capture's initialiser and a parameter's
+            // default are written inside the closure's brackets and are
+            // evaluated where it is written, so they leave from there.
+            const tokens = self.ast.exprTokens(self.ast.lambda(id).body);
             try closures.append(self.gpa, .{ .start = tokens.start.index(), .end = tokens.end.index() });
         }
         std.mem.sort(Extent, closures.items, {}, struct {
@@ -16437,7 +16440,7 @@ const Checker = struct {
         defer open.deinit(self.gpa);
         var next: usize = 0;
         for (self.leaves.items) |*leave| {
-            while (next < closures.items.len and closures.items[next].start < leave.at) : (next += 1) {
+            while (next < closures.items.len and closures.items[next].start <= leave.at) : (next += 1) {
                 while (open.items.len != 0 and open.items[open.items.len - 1].end <= closures.items[next].start) _ = open.pop();
                 try open.append(self.gpa, closures.items[next]);
             }
@@ -22968,6 +22971,11 @@ const Checker = struct {
                 self.loops = enclosing_loops;
                 self.closure_hides_loops = hid_loops;
             }
+            // The body is a scope of its own: a schedule refused around the
+            // closure says nothing about what is written in it.
+            const refused_outside = self.schedule_refused;
+            defer self.schedule_refused = refused_outside;
+            self.schedule_refused = false;
             break :checked try self.check(lambda.body, result_expected);
         };
         // Reported once the body is checked, because the capture it suggests
