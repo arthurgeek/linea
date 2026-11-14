@@ -5615,6 +5615,52 @@ test "checked library session resumes independent application checks" {
     }
 }
 
+test "checked library session resumes a program whose callable heads are too long to pack" {
+    var prefix = try CheckedLibrary.init(testing.allocator);
+    defer prefix.deinit();
+
+    // Sixty-one parameters, written once for the plain head and once with
+    // the last one taken: two shapes, numbered after the library's.
+    const plain = comptime params: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else ", ") ++ std.fmt.comptimePrint("p{d}: UInt8", .{i});
+        break :params text;
+    };
+    const taking = comptime params: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else ", ") ++ (if (i == 60) "sink " else "") ++ std.fmt.comptimePrint("p{d}: UInt8", .{i});
+        break :params text;
+    };
+    const sum = comptime terms: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else " + ") ++ std.fmt.comptimePrint("p{d}", .{i});
+        break :terms text;
+    };
+    const text = "trait Describe {\n    fn describe(_self: Self) -> UInt8\n}\n" ++
+        "impl Describe for fn(" ++ plain ++ ") -> UInt8 {\n    fn describe(_self: Self) -> UInt8 {\n        1\n    }\n}\n" ++
+        "impl Describe for fn(" ++ taking ++ ") -> UInt8 {\n    fn describe(_self: Self) -> UInt8 {\n        2\n    }\n}\n" ++
+        "fn borrowed(" ++ plain ++ ") -> UInt8 {\n    " ++ sum ++ "\n}\n" ++
+        "fn describe[H: Describe](handler: H) -> UInt8 {\n    handler.describe()\n}\n" ++
+        "fn main() -> UInt8 {\n    describe(borrowed)\n}\n";
+
+    for (0..2) |_| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try prefix.loadFromMemory(gpa, &table, &sink, &interner, "main.lin", &.{.{ .path = "main.lin", .text = text }}, .program, .borrow);
+        var semantics = try prefix.checkProgram(gpa, testing.allocator, &program, &interner, &sink, .program);
+        defer semantics.deinit(gpa);
+        try testing.expect(semantics.reused_library);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+    }
+}
+
 test "slow: checked library resumes a program that derives, with the diagnostics and MLIR of a fresh check" {
     try slow_tests.skipUnlessRun();
     const prelude = try CheckedLibrary.init(testing.allocator);
