@@ -1,0 +1,32 @@
+// `Wrap[T].Element` is settled to `T`, so the implementation's key is
+// `Gives[T]` and `T` is recovered from it: a call with a `UInt16` and a call
+// with a `Bool` each reach the implementation at that type.
+trait Source {
+    type Element
+}
+
+struct Wrap[T] {
+    item: T,
+}
+
+impl[T] Source for Wrap[T] {
+    type Element = T
+}
+
+trait Gives[U] {
+    fn give(self: Self, given: U) -> UInt8
+}
+
+struct Scale {}
+
+impl[T] Gives[Wrap[T].Element] for Scale {
+    fn give(_self: Self, _given: T) -> UInt8 {
+        5
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    let wide: UInt16 = 1
+    scale.give(wide) + scale.give(true)
+}

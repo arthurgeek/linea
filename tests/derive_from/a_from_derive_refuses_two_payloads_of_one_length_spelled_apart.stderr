@@ -1,0 +1,11 @@
+error[T-Derive]: `Frame` has two variants wrapping `[UInt8; 2]`
+ --> tests/derive_from/a_from_derive_refuses_two_payloads_of_one_length_spelled_apart.lin:1:9
+  |
+1 | @derive(From[[UInt8; 2]])
+  |         ^^^^^^^^^^^^^^^^ the conversion would wrap the source in either variant
+3 |     Pair([UInt8; 1 + 1]),
+  |     ---- this variant holds the source's type
+4 |     Twin([UInt8; 4 - 2]),
+  |     ---- this variant holds the source's type
+  |
+  = help: write the conversion by hand, or give each variant its own type

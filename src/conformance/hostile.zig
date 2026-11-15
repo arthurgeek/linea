@@ -873,14 +873,6 @@ pub const Finding = struct {
 
 pub const known_findings = [_]Finding{
     .{
-        .seed = 3,
-        .limit = .answer_links,
-        .positions = &.{ .implementation_argument, .derive_argument, .implementation_head },
-        .reports = &.{},
-        .requires = "[T-AnswerDepth] refuses a chain of 1001 aliases wherever its last alias is written, " ++
-            "as it does in a `let`, a parameter, a field and a payload",
-    },
-    .{
         .seed = 11,
         .limit = .tree_height,
         .positions = &.{ .let_annotation, .parameter, .field, .payload, .implementation_argument, .implementation_head },

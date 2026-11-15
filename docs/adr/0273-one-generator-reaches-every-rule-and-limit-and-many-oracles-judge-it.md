@@ -305,12 +305,10 @@ Each line is its own change, with the generator parts it needs.
 ## Consequences
 
 The generator found defects on the day it ran, and those still standing are
-recorded in `known_findings` and not fixed here: a chain of 1001 aliases
-accepted in an `impl`'s trait argument, in a derive argument and inside an
-`impl`'s head; a type nested past the limit reported and then reported again
-as a consequence; and a raw literal opened with nine `#` and a literal that
-interpolates seventeen deep, each followed by reports of the code around
-them.
+recorded in `known_findings` and not fixed here: a type nested past the limit
+reported and then reported again as a consequence, and a raw literal opened
+with nine `#` and a literal that interpolates seventeen deep, each followed
+by reports of the code around them.
 
 `not_yet_generated` holds 127 of the 151 rules. That is the measure of how
 little of the language's refusals a generated program reaches, written where a

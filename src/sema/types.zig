@@ -42,10 +42,6 @@ pub const BindingTypes = Table(ids.BindingId, TypeId);
 const Chain = @import("../support/chain.zig").Chain;
 const Limit = @import("../support/limits.zig").Limit;
 
-/// How many settled references and aliases a chain of declared answers may
-/// pass through ([T-AnswerDepth]).
-pub const max_answer_links: u32 = Limit.answer_links.most();
-
 /// A format spec lays a value out through one of three routines, chosen by
 /// the value's type.
 pub const LayoutShape = enum { integer, float, general };
@@ -86,6 +82,10 @@ pub const IntegerProperty = struct {
     receiver: TypeId,
     endpoint: IntegerEndpoint,
 };
+
+/// How many settled references and aliases a chain of declared answers may
+/// pass through before it is refused ([T-AnswerDepth]).
+pub const max_answer_links: u32 = Limit.answer_links.most();
 
 /// A handle into the type pool.
 ///
@@ -2991,9 +2991,11 @@ pub const Implementation = struct {
     /// What the head names, which is what every type this implementation could
     /// answer for reaches it by.
     head: Head,
-    /// What the head applies, position by position, which is what tells the
-    /// members of the family this implementation answers for from the rest.
-    /// Empty for a head applying nothing, which is the whole of its own family.
+    /// False once the implementation is refused for its key: a parameter the
+    /// head and trait arguments do not name, or a default implementation
+    /// written with another head. Nothing is selected through such a row.
+    /// Decided when the key is known, so a row whose head or trait arguments
+    /// name a settled type still holds true while those are unanswered.
     valid_key: bool = true,
     /// Projected requirements checked after the receiver binds the head.
     predicates: []const Predicate = &.{},

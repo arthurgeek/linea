@@ -340,6 +340,46 @@ entry is a request. Converting every variant that holds one field would give
 `TimeError` a `From[Str]` the moment it gained a `Key(Str)` variant, and then a
 `?` on any `Str` error anywhere would convert into it without a word.
 
+A source that is an array is matched by what its length counts, not by how it
+is written. Here the entry names the length with a constant and the variant
+writes it out:
+
+```linea
+import std.io
+
+let header_length: UInt64 = 2
+
+// The source's length is written with a constant's name and the variant's
+// with a literal. Both count two, so the derive wraps the source in `Header`.
+@derive(From[[UInt8; header_length]])
+enum Packet {
+    Header([UInt8; 2]),
+    Empty,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let bytes: [UInt8; 2] = [7, 9]
+    let packet: Packet = bytes.into()
+    match packet {
+        Header(header) => {
+            let version = header[0]
+            let kind = header[1]
+            io.println("version {version}, kind {kind}")?
+        },
+        Empty => io.println("nothing to read")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+version 7, kind 9
+```
+
+`header_length` and `2` are one length, so `[UInt8; header_length]` and
+`[UInt8; 2]` are one type and `bytes.into()` builds a `Header`. The same holds
+for a length written as arithmetic, such as `1 + 1`.
+
 The derive refuses a source it cannot place. A source that two variants hold
 has no single variant to wrap it in. Reading the hours and the minutes both
 fail with a `text.ParseError`, so `From[text.ParseError]` cannot tell `Hours`
