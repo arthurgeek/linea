@@ -7,6 +7,7 @@ enum linea_fiber_pause_point {
     linea_fiber_parked,
     linea_fiber_entering,
     linea_fiber_finishing,
+    linea_fiber_transfer_ready,
 };
 
 #if defined(LINEA_FIBER_PAUSES)

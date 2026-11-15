@@ -7,6 +7,10 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+/* This unit isolates live-frame accounting. Real fiber binding is covered
+ * by the scheduler fixture linked with fiber.c. */
+static __thread unsigned restrictions;
+void linea_fiber_restrict_current(void) { restrictions += 1; }
 #include "foreign.c"
 
 static void *other_thread(void *unused) {
@@ -14,6 +18,7 @@ static void *other_thread(void *unused) {
     assert(linea_foreign_depth() == 0);
     linea_foreign_enter();
     assert(linea_foreign_depth() == 1);
+    assert(restrictions == 1);
     linea_foreign_leave();
     return NULL;
 }

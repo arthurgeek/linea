@@ -973,10 +973,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{"source_test.zig"},
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig" },
     },
     .{
         .dir = "runtime",
@@ -1861,6 +1861,21 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
         .{ .file = "runtime/fiber_test.c", .flags = runtime_flags.items },
     });
+    const native_migration_step = b.step("test-native-fiber-migration", "Check scheduler authority and native migration safety");
+    native_task_step.dependOn(native_migration_step);
+    native.add(native_migration_step, "native-fiber-migration-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_migration_test.c", .flags = runtime_flags.items, .includes = &.{"runtime/fiber.c"} },
+    });
     native.add(native_task_step, "native-fiber-failure-tests", &.{
         .{ .file = "runtime/net.c", .flags = runtime_flags.items },
         .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
@@ -2269,6 +2284,60 @@ pub fn build(b: *std.Build) void {
     };
     const exe = heavy.compiler();
     b.installArtifact(exe);
+
+    const call_coverage_module = b.createModule(.{
+        .root_source_file = b.path("build/fiber_call_coverage.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    call_coverage_module.addAnonymousImport("runtime_symbols", .{ .root_source_file = b.path("src/support/runtime_symbols.zig") });
+    const call_coverage_tests = b.addTest(.{ .root_module = call_coverage_module });
+    const run_coverage_tests = b.addRunArtifact(call_coverage_tests);
+    const call_coverage_step = b.step("test-fiber-call-coverage", "Check emitted native-call coverage and omission refusals");
+    call_coverage_step.dependOn(&run_coverage_tests.step);
+    native_task_step.dependOn(call_coverage_step);
+    const call_coverage_tool = b.addExecutable(.{ .name = "fiber-call-coverage", .root_module = call_coverage_module });
+
+    const owner_watchdog_step = b.step("test-foreign-owner-watchdog", "Check foreign-owner watchdog deadlines and refusal paths");
+    const owner_watchdog_module = b.createModule(.{
+        .root_source_file = b.path("tests/cmd/foreign_owner/watchdog.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+        .link_libc = true,
+    });
+    const owner_watchdog_tests = b.addTest(.{ .root_module = owner_watchdog_module });
+    owner_watchdog_step.dependOn(&b.addRunArtifact(owner_watchdog_tests).step);
+    native_task_step.dependOn(owner_watchdog_step);
+
+    const handoff_proof = b.step("test-fiber-handoff-proof", "Compile and force one started Linea continuation across two carriers");
+    if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
+        const files = b.addWriteFiles();
+        const main_source = files.addCopyFile(b.path("tests/native/fiber_migration/continuation.fixture"), "main.lin");
+        _ = files.add("linea.json", "{\"extern\":[\".\"],\"native\":[\"probe.c\"]}");
+        _ = files.addCopyFile(b.path("tests/native/fiber_migration/probe.c"), "probe.c");
+        _ = files.addCopyDirectory(b.path("runtime"), "runtime", .{ .include_extensions = &.{ ".c", ".h" } });
+        const compile = b.addSystemCommand(&.{"env"});
+        compile.addPrefixedFileArg("LINEA_RUNTIME=", checked_runtime_archive);
+        compile.addFileArg(exe.getEmittedBin());
+        compile.addArgs(&.{ "build", "--keep" });
+        compile.addFileArg(main_source);
+        compile.addArg("-o");
+        const binary = compile.addOutputFileArg("fiber-handoff");
+        const check_calls = b.addRunArtifact(call_coverage_tool);
+        check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
+        check_calls.step.dependOn(&compile.step);
+        check_calls.step.dependOn(&run_coverage_tests.step);
+        const manifest = check_calls.captureStdOut(.{});
+        const run_proof = b.addSystemCommand(&.{"env"});
+        run_proof.addFileArg(binary);
+        run_proof.addFileInput(manifest);
+        run_proof.has_side_effects = true;
+        run_proof.step.dependOn(&check_calls.step);
+        handoff_proof.dependOn(&run_proof.step);
+    } else {
+        const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'forced handoff proof is unavailable on this target or sanitizer' >&2; exit 1" });
+        handoff_proof.dependOn(&unavailable.step);
+    }
 
     const run_step = b.step("run", "Run the compiler");
     const run_cmd = b.addRunArtifact(exe);

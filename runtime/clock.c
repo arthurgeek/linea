@@ -24,6 +24,9 @@ long linea_clock_read(uint8_t clock, long *seconds, unsigned long *nanoseconds) 
 }
 
 long linea_clock_sleep(unsigned long nanoseconds) {
+    /* Only zero duration reaches the audited clean yield. Other invocations
+     * retain affinity before creating timer or operation state. */
+    if (nanoseconds != 0) linea_fiber_restrict_current();
     if (linea_sim_running()) return linea_sim_sleep(nanoseconds);
     if (linea_fiber_active()) return linea_fiber_sleep(nanoseconds);
     struct timespec deadline;

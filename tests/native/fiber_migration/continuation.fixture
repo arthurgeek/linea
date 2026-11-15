@@ -1,0 +1,25 @@
+import std.io
+import std.task
+import std.time
+import std.session
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let seed = if io.current() == io.system() { UInt64(91) } else { UInt64(92) }
+    var entries = UInt64(0)
+    var result = UInt64(0)
+    let body = sink [seed, inout entries, inout result] |sink me: Chan[End]| {
+        entries += 1
+        var value = seed
+        time.sleep(time.Duration.from_nanoseconds(0))
+        value = value * 3 + 7
+        time.sleep(time.Duration.from_nanoseconds(0))
+        result = value + 11
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    if entries == 1 && result == seed * 3 + 18 { 0 } else { 1 }
+}

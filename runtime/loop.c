@@ -42,6 +42,7 @@ static void fail(const char *message) {
 }
 
 static void lock(void) {
+    if (linea_fiber_metadata_held()) fail("linea: the loop table followed scheduler metadata\n");
     if (pthread_mutex_lock(&table_lock) != 0) fail("linea: the loop table's lock failed\n");
 }
 

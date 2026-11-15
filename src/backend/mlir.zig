@@ -283,6 +283,9 @@ pub fn emit(
             break;
         }
     }
+    // Generated arithmetic and cleanup can cross a native boundary even
+    // when the source function contains no extern declaration.
+    try declareOwned(w, runtime_symbols.fiber_restrict_signature);
     // `noreturn` states interprocedurally what every call site already says
     // locally with `llvm.unreachable`: the trap does not come back. Without
     // it the optimiser must plan a continuation after every trap call it
@@ -651,6 +654,14 @@ fn writeForeignGuard(w: *std.Io.Writer, enter: bool) std.Io.Writer.Error!void {
     const signature = if (enter) runtime_symbols.foreign_enter_signature else runtime_symbols.foreign_leave_signature;
     try w.print("    func.call @{s}()", .{signature.symbol});
     try writeOwnedCallType(w, signature);
+    try w.writeByte('\n');
+}
+
+fn writeMigrationGuard(w: *std.Io.Writer, signature: runtime_symbols.Signature) std.Io.Writer.Error!void {
+    if (signature.migration_contract == .neutral or signature.migration_contract == .runtime_guarded) return;
+    const guard = runtime_symbols.fiber_restrict_signature;
+    try w.print("    func.call @{s}()", .{guard.symbol});
+    try writeOwnedCallType(w, guard);
     try w.writeByte('\n');
 }
 
@@ -1791,6 +1802,7 @@ const FunctionEmitter = struct {
             },
             .float_math => {
                 const math = mir.floatMathOf(id);
+                try writeMigrationGuard(self.w, runtime_symbols.math_functions[@intFromEnum(math.operation)]);
                 try self.w.print("    %nr{d} = func.call @{s}(%v{d}", .{ id.index(), math.operation.symbol(), math.lhs.index() });
                 if (math.operation.arity() == 2) try self.w.print(", %v{d}", .{math.rhs.index()});
                 try self.w.writeAll(")");
@@ -1983,7 +1995,9 @@ const FunctionEmitter = struct {
             try self.here(span);
         };
 
-        if (foreign_frame) try writeForeignGuard(w, true);
+        if (foreign_frame) try writeForeignGuard(w, true) else if (external) {
+            try writeMigrationGuard(w, runtime_symbols.signatureOf(module.nameOf(c.func)).?.*);
+        }
         if (is_noreturn or indirect or (external and ty == .unit)) {
             try w.writeAll("    func.call @");
         } else if (widens) {
@@ -2739,6 +2753,7 @@ const FunctionEmitter = struct {
         try self.here(span);
         try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_col_name, n, at.column, runtime_int });
         try self.here(span);
+        try writeMigrationGuard(self.w, runtime_symbols.trap_signature);
         try self.w.print("    func.call @{s}(%tk{d}, %{s}{d}, %{s}{d}, %{s}{d})", .{
             runtime_symbols.trap, n, trap_file_name, n, trap_line_name, n, trap_col_name, n,
         });
@@ -2760,6 +2775,7 @@ const FunctionEmitter = struct {
         try self.here(span);
         try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_col_name, n, at.column, runtime_int });
         try self.here(span);
+        try writeMigrationGuard(self.w, runtime_symbols.panic_signature);
         try self.w.print("    func.call @{s}(%pva{d}, %pvl{d}, %{s}{d}, %{s}{d}, %{s}{d})", .{
             runtime_symbols.panic, n, n, panic_file_name, n, trap_line_name, n, trap_col_name, n,
         });
@@ -3661,6 +3677,17 @@ test "allocator zero facts require the exact library producer" {
     }
 }
 
+test "native migration guards defer only to explicit neutral or runtime-guarded entries" {
+    for (std.enums.values(runtime_symbols.MigrationContract)) |contract| {
+        var output: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer output.deinit();
+        var signature = runtime_symbols.fiber_restrict_signature;
+        signature.migration_contract = contract;
+        try writeMigrationGuard(&output.writer, signature);
+        try testing.expectEqual(@as(usize, if (contract == .neutral or contract == .runtime_guarded) 0 else 1), std.mem.count(u8, output.written(), "func.call @linea_fiber_restrict_current()"));
+    }
+}
+
 test "a parameter of a C-callable entry is widened or made canonical as its type requires, and not otherwise" {
     const gpa = testing.allocator;
     var types = try types_mod.Typing.Builder.init(gpa);
@@ -3822,6 +3849,12 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
             try emitter.call(call, ty == .never);
             try testing.expectEqual(@as(usize, if (trusted) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_enter()"));
             try testing.expectEqual(@as(usize, if (trusted or ty == .never) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_leave()"));
+            try testing.expectEqual(@as(usize, if (trusted) 1 else 0), std.mem.count(u8, out.written(), "func.call @linea_fiber_restrict_current()"));
+            if (trusted) {
+                const guard_at = std.mem.indexOf(u8, out.written(), "func.call @linea_fiber_restrict_current()").?;
+                const native_at = std.mem.indexOf(u8, out.written(), "func.call @linea_available_parallelism(").?;
+                try testing.expect(guard_at < native_at);
+            }
             if (ty == .never) try testing.expect(std.mem.indexOf(u8, out.written(), "llvm.unreachable") != null);
         }
         for ([_]ForeignEntry{ .{ .exported = "published" }, .called_back, .runtime_called_back }) |entry| {

@@ -55,6 +55,7 @@ static const size_t no_timer = (size_t)-1;
 
 enum scheduling { running, parking, parked, notified, runnable, finished };
 enum waiting { waiting_none, waiting_park, waiting_yield, waiting_io };
+enum scheduling_claim { no_claim, dispatch_claim, transfer_claimed };
 
 struct carrier;
 struct fiber_loop;
@@ -91,6 +92,15 @@ struct linea_fiber_waiter {
 struct linea_fiber {
     struct linea_context context;
     struct carrier *home;
+    struct fiber_loop *loop;
+    struct carrier *bound;
+    int queued, started, saved, retired;
+    enum scheduling_claim claimed;
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    int proven, transfer_ready;
+#endif
+    struct carrier *claimant;
+    unsigned source_claims;
     struct linea_fiber *next;
     unsigned state;
     enum waiting waiting;
@@ -144,6 +154,7 @@ struct fiber_loop {
     unsigned long count;
     unsigned long next;
     struct carrier *carriers;
+    pthread_mutex_t metadata;
     pthread_mutex_t startup_lock;
     pthread_cond_t startup;
     unsigned long began;
@@ -163,6 +174,47 @@ static void must(int status) {
     if (status != 0) fail("linea: a carrier's synchronization failed\n");
 }
 
+/* Carrier-owned debug state: no context switch may carry this lock. */
+static __thread struct fiber_loop *metadata_owner;
+
+int linea_fiber_metadata_held(void) { return metadata_owner != NULL; }
+
+static void lock_metadata(struct fiber_loop *loop) {
+    if (metadata_owner != NULL) fail("linea: scheduler metadata locks were nested\n");
+    must(pthread_mutex_lock(&loop->metadata));
+    metadata_owner = loop;
+}
+
+static void unlock_metadata(struct fiber_loop *loop) {
+    if (metadata_owner != loop) fail("linea: scheduler metadata was unlocked by a nonowner\n");
+    metadata_owner = NULL;
+    must(pthread_mutex_unlock(&loop->metadata));
+}
+
+static void lock_carrier(struct carrier *c) {
+    if (c->loop != NULL) lock_metadata(c->loop);
+    else must(pthread_mutex_lock(&c->queue_lock));
+}
+
+static void unlock_carrier(struct carrier *c) {
+    if (c->loop != NULL) unlock_metadata(c->loop);
+    else must(pthread_mutex_unlock(&c->queue_lock));
+}
+
+static void lock_fiber(struct linea_fiber *f) {
+    if (f->loop != NULL) lock_metadata(f->loop);
+    else must(pthread_mutex_lock(&f->home->queue_lock));
+}
+
+static void unlock_fiber(struct linea_fiber *f) {
+    if (f->loop != NULL) unlock_metadata(f->loop);
+    else must(pthread_mutex_unlock(&f->home->queue_lock));
+}
+
+static void require_metadata(struct linea_fiber *f) {
+    if (f->loop != NULL && metadata_owner != f->loop) fail("linea: scheduler metadata was used without its lock\n");
+}
+
 static void make_carrier_key(void) {
     must(pthread_key_create(&carrier_key, NULL));
 }
@@ -175,6 +227,22 @@ static struct carrier *current_carrier(void) {
 static struct linea_fiber *current_fiber(void) {
     struct carrier *c = current_carrier();
     return c == NULL ? NULL : c->executing;
+}
+
+/* Foreign code can leave a thread dependency after returning. This is a
+ * logical fiber restriction, independent of the live native-frame depth. */
+void linea_fiber_restrict_current(void) {
+    const int error = errno;
+    struct carrier *c = current_carrier();
+    struct linea_fiber *f = c == NULL ? NULL : c->executing;
+    if (f != NULL && f->loop != NULL) {
+        lock_fiber(f);
+        if (f->state != running || f->home != c || (f->bound != NULL && f->bound != c))
+            fail("linea: a native restriction disagreed with the executing carrier\n");
+        f->bound = c;
+        unlock_fiber(f);
+    }
+    errno = error;
 }
 
 int linea_fiber_active(void) {
@@ -204,9 +272,13 @@ static void wake_carrier(struct carrier *c) {
 #endif
 }
 
-static void enqueue(struct linea_fiber *f) {
+/* Called with the loop metadata lock, or the simulation's existing queue
+ * lock. Waking the carrier happens only after that lock is released. */
+static void enqueue_locked(struct linea_fiber *f) {
+    require_metadata(f);
     struct carrier *c = f->home;
-    must(pthread_mutex_lock(&c->queue_lock));
+    if (f->state != runnable || f->queued || f->claimed || !f->saved) fail("linea: a runnable queue entry has no exclusive saved context\n");
+    f->queued = 1;
     if (c->simulation != 0) {
         if (c->ready_count == c->ready_capacity) {
             size_t capacity = c->ready_capacity == 0 ? 16 : c->ready_capacity * 2;
@@ -216,53 +288,134 @@ static void enqueue(struct linea_fiber *f) {
             c->ready = ready; c->ready_capacity = capacity;
         }
         c->ready[c->ready_count++] = f;
-        must(pthread_mutex_unlock(&c->queue_lock));
         return;
     }
     f->next = NULL;
     if (c->last == NULL) c->first = f;
     else c->last->next = f;
     c->last = f;
-    must(pthread_mutex_unlock(&c->queue_lock));
-    wake_carrier(c);
 }
 
 static struct linea_fiber *dequeue(struct carrier *c) {
-    must(pthread_mutex_lock(&c->queue_lock));
+    lock_carrier(c);
+    struct linea_fiber *f = NULL;
     if (c->simulation != 0) {
-        struct linea_fiber *chosen = NULL;
         if (c->ready_count != 0) {
             size_t index = (size_t)linea_sim_choice((unsigned long)c->ready_count);
-            chosen = c->ready[index];
+            f = c->ready[index];
             c->ready[index] = c->ready[--c->ready_count];
         }
-        must(pthread_mutex_unlock(&c->queue_lock));
-        return chosen;
+    } else {
+        f = c->first;
+        if (f != NULL) {
+            c->first = f->next;
+            if (c->first == NULL) c->last = NULL;
+            f->next = NULL;
+        }
     }
-    struct linea_fiber *f = c->first;
     if (f != NULL) {
-        c->first = f->next;
-        if (c->first == NULL) c->last = NULL;
-        f->next = NULL;
+        require_metadata(f);
+        if (!f->queued || f->claimed || f->state != runnable || !f->saved) fail("linea: dispatch did not claim one saved runnable entry\n");
+        f->queued = 0;
+        f->claimed = dispatch_claim;
+        f->claimant = c;
     }
-    must(pthread_mutex_unlock(&c->queue_lock));
+    unlock_carrier(c);
     return f;
 }
 
-/* Only a saved context is queued. A notification during the switch records
- * Notified; the saving carrier is then the only party allowed to queue it. */
-static void notify(struct linea_fiber *f) {
-    unsigned state = __atomic_load_n(&f->state, __ATOMIC_ACQUIRE);
-    for (;;) {
-        unsigned next;
-        if (state == parking) next = notified;
-        else if (state == parked) next = runnable;
-        else return;
-        if (__atomic_compare_exchange_n(&f->state, &state, next, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-            if (next == runnable) enqueue(f);
-            return;
-        }
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+/* The bounded prototype has no production entry-provenance grant yet. Its
+ * claims are exercised only in the native fixture until handoff is reviewed. */
+struct transfer_claim {
+    struct linea_fiber *fiber;
+    struct carrier *source;
+};
+
+static int clean_runnable(struct linea_fiber *f, struct carrier *source) {
+    require_metadata(f);
+    return f->home == source && f->loop == source->loop && f->proven &&
+        f->transfer_ready && f->bound == NULL && f->state == runnable && f->saved &&
+        f->waiting == waiting_yield && f->timer_index == no_timer &&
+        f->source_claims == 0 && f->park == NULL && f->waiter == NULL && f->operation == NULL;
+}
+
+static struct transfer_claim reserve_ready_runnable(struct carrier *source) {
+    struct transfer_claim claim = { NULL, source };
+    if (source->loop == NULL) return claim;
+    lock_carrier(source);
+    struct linea_fiber *previous = NULL;
+    for (struct linea_fiber *f = source->first; f != NULL; f = f->next) {
+        if (!clean_runnable(f, source)) { previous = f; continue; }
+        if (!f->queued || f->claimed) fail("linea: transfer found a nonexclusive runnable entry\n");
+        if (previous == NULL) source->first = f->next;
+        else previous->next = f->next;
+        if (source->last == f) source->last = previous;
+        f->next = NULL;
+        f->queued = 0;
+        f->claimed = transfer_claimed;
+        f->claimant = source;
+        claim.fiber = f;
+        break;
     }
+    unlock_carrier(source);
+    return claim;
+}
+
+static void require_transfer(struct transfer_claim *claim) {
+    struct linea_fiber *f = claim->fiber;
+    if (f == NULL) fail("linea: a consumed transfer claim was reused\n");
+    require_metadata(f);
+    if (f->queued || f->claimed != transfer_claimed || f->claimant != claim->source ||
+        f->home != claim->source || f->state != runnable || !f->saved)
+        fail("linea: a transfer lost exclusive scheduling authority\n");
+}
+
+static void abort_transfer(struct transfer_claim *claim) {
+    lock_carrier(claim->source);
+    require_transfer(claim);
+    struct linea_fiber *f = claim->fiber;
+    f->claimed = no_claim;
+    f->claimant = NULL;
+    enqueue_locked(f);
+    claim->fiber = NULL;
+    unlock_carrier(claim->source);
+    wake_carrier(claim->source);
+}
+
+static int commit_transfer(struct transfer_claim *claim, struct carrier *target) {
+    struct carrier *source = claim->source;
+    lock_carrier(source);
+    require_transfer(claim);
+    struct linea_fiber *f = claim->fiber;
+    if (target == source || target->loop != source->loop || !clean_runnable(f, source)) {
+        unlock_carrier(source);
+        return 0;
+    }
+    f->home = target;
+    f->claimed = no_claim;
+    f->claimant = NULL;
+    enqueue_locked(f);
+    claim->fiber = NULL;
+    unlock_carrier(source);
+    wake_carrier(target);
+    return 1;
+}
+#endif
+
+/* A source lock protects this pointer. M owns the scheduling transition and
+ * queue publication together; the source never independently queues it. */
+static void notify(struct linea_fiber *f) {
+    struct carrier *wake = NULL;
+    lock_fiber(f);
+    if (f->state == parking) f->state = notified;
+    else if (f->state == parked) {
+        f->state = runnable;
+        enqueue_locked(f);
+        if (f->home->simulation == 0) wake = f->home;
+    }
+    unlock_fiber(f);
+    if (wake != NULL) wake_carrier(wake);
 }
 
 static void timer_exchange(struct carrier *c, size_t a, size_t b) {
@@ -282,7 +435,8 @@ static void timer_up(struct carrier *c, size_t i) {
     }
 }
 
-static void timer_remove(struct linea_fiber *f) {
+static void timer_remove_locked(struct linea_fiber *f) {
+    require_metadata(f);
     struct carrier *c = f->home;
     const size_t i = f->timer_index;
     if (i == no_timer) return;
@@ -308,7 +462,8 @@ static void timer_remove(struct linea_fiber *f) {
     }
 }
 
-static int timer_add(struct linea_fiber *f) {
+static int timer_add_locked(struct linea_fiber *f) {
+    require_metadata(f);
     struct carrier *c = f->home;
     if (f->deadline == 0) return 0;
     if (c->timer_count == c->timer_capacity) {
@@ -323,6 +478,19 @@ static int timer_add(struct linea_fiber *f) {
     c->timers[c->timer_count++] = f;
     timer_up(c, f->timer_index);
     return 0;
+}
+
+static void timer_remove(struct linea_fiber *f) {
+    lock_fiber(f);
+    timer_remove_locked(f);
+    unlock_fiber(f);
+}
+
+static int timer_add(struct linea_fiber *f) {
+    lock_fiber(f);
+    const int error = timer_add_locked(f);
+    unlock_fiber(f);
+    return error;
 }
 
 static void unlink_waiter(struct linea_park *p, struct linea_fiber_waiter *w) {
@@ -350,21 +518,30 @@ static void complete_operation(struct pending_operation *pending, int readable);
 
 static void expire_timers(struct carrier *c) {
     const unsigned long instant = now();
-    while (c->timer_count != 0 && c->timers[0]->deadline <= instant) {
+    for (;;) {
+        lock_carrier(c);
+        if (c->timer_count == 0 || c->timers[0]->deadline > instant) { unlock_carrier(c); return; }
         struct linea_fiber *f = c->timers[0];
-        timer_remove(f);
-        if (f->waiting == waiting_io) {
-            complete_operation(f->operation, 0);
-            continue;
+        timer_remove_locked(f);
+        f->source_claims += 1;
+        const enum waiting kind = f->waiting;
+        struct pending_operation *operation = f->operation;
+        struct linea_park *park = f->park;
+        struct linea_fiber_waiter *waiter = f->waiter;
+        unlock_carrier(c);
+        if (kind == waiting_io) complete_operation(operation, 0);
+        else {
+            linea_park_lock(park);
+            if (waiter->linked) {
+                unlink_waiter(park, waiter);
+                waiter->expired = 1;
+                notify(f);
+            }
+            linea_park_unlock(park);
         }
-        linea_park_lock(f->park);
-        struct linea_fiber_waiter *w = f->waiter;
-        if (w->linked) {
-            unlink_waiter(f->park, w);
-            w->expired = 1;
-            notify(f);
-        }
-        linea_park_unlock(f->park);
+        lock_fiber(f);
+        f->source_claims -= 1;
+        unlock_fiber(f);
     }
 }
 
@@ -378,7 +555,11 @@ static void finish_switch(void *asan_stack) {
 }
 
 static void leave_fiber(struct linea_fiber *f, int ending) {
+    lock_fiber(f);
     struct carrier *c = f->home;
+    const enum waiting kind = f->waiting;
+    unlock_fiber(f);
+    if (linea_fiber_metadata_held()) fail("linea: a context switch retained scheduler metadata\n");
     linea_thread_guard_prepare(c->scheduler_guard_low, c->scheduler_guard_high);
     if (ending) linea_fiber_pause(linea_fiber_finishing);
 #if __has_feature(address_sanitizer)
@@ -389,7 +570,7 @@ static void leave_fiber(struct linea_fiber *f, int ending) {
 #if __has_feature(thread_sanitizer)
     __tsan_switch_to_fiber(c->tsan_fiber, 0);
 #endif
-    if (f->waiting == waiting_park) linea_fiber_pause(linea_fiber_before_switch);
+    if (kind == waiting_park) linea_fiber_pause(linea_fiber_before_switch);
     linea_context_switch(&f->context, &c->scheduler);
     finish_switch(f->asan_stack);
 }
@@ -397,10 +578,15 @@ static void leave_fiber(struct linea_fiber *f, int ending) {
 void linea_fiber_yield(void) {
     struct linea_fiber *f = current_fiber();
     if (f == NULL || linea_foreign_depth() != 0) return;
+    lock_fiber(f);
+    if (f->state != running) fail("linea: a nonrunning fiber yielded\n");
     f->waiting = waiting_yield;
-    __atomic_store_n(&f->state, parking, __ATOMIC_RELEASE);
+    f->state = parking;
+    unlock_fiber(f);
     leave_fiber(f, 0);
+    lock_fiber(f);
     f->waiting = waiting_none;
+    unlock_fiber(f);
 }
 
 int linea_fiber_park(struct linea_park *p, unsigned long deadline) {
@@ -413,20 +599,26 @@ int linea_fiber_park(struct linea_park *p, unsigned long deadline) {
         return 1;
     }
     struct linea_fiber_waiter waiter = { .next = p->fibers, .fiber = f, .linked = 1, .expired = 0 };
+    lock_fiber(f);
     f->waiting = waiting_park;
     f->park = p;
     f->waiter = &waiter;
     f->deadline = deadline;
+    unlock_fiber(f);
     if (timer_add(f) != 0) fail("linea: a fiber's deadline could not be allocated\n");
-    __atomic_store_n(&f->state, parking, __ATOMIC_RELEASE);
+    lock_fiber(f);
+    f->state = parking;
+    unlock_fiber(f);
     p->fibers = &waiter;
     linea_park_unlock(p);
     leave_fiber(f, 0);
     linea_park_lock(p);
     unlink_waiter(p, &waiter);
+    lock_fiber(f);
     f->park = NULL;
     f->waiter = NULL;
     f->waiting = waiting_none;
+    unlock_fiber(f);
     return waiter.expired;
 }
 
@@ -434,7 +626,9 @@ static void fiber_entry(void *argument) {
     struct linea_fiber *f = argument;
     finish_switch(f->asan_stack);
     f->entry(f->argument);
-    __atomic_store_n(&f->state, finished, __ATOMIC_RELEASE);
+    lock_fiber(f);
+    f->state = finished;
+    unlock_fiber(f);
     leave_fiber(f, 1);
     fail("linea: a finished fiber resumed\n");
 }
@@ -617,29 +811,38 @@ static void complete_operation(struct pending_operation *pending, int readable) 
 long linea_fiber_perform(struct linea_op *op, linea_fiber_attempt attempt) {
     struct linea_fiber *f = current_fiber();
     if (f == NULL) fail("linea: an operation has no executing fiber\n");
+    /* The callback can later run on the scheduler stack with no current
+     * fiber. Retain its unknown thread effects before the first attempt. */
+    linea_fiber_restrict_current();
     if (op->deadline_ns != 0 && now() >= op->deadline_ns) return op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;
     struct pending_operation pending = { .operation = op, .attempt = attempt, .fiber = f,
         .state = operation_idle, .slot = 0, .registered = 0, .result = 0 };
     const long immediate = attempt_operation(&pending);
     if (immediate != -(long)EAGAIN) return immediate;
+    lock_fiber(f);
     f->waiting = waiting_io;
     f->operation = &pending;
     f->deadline = op->deadline_ns;
-    __atomic_store_n(&f->state, parking, __ATOMIC_RELEASE);
+    f->state = parking;
+    unlock_fiber(f);
     int error = arm_operation(&pending);
     if (error == 0) error = timer_add(f);
     if (error != 0) {
         disarm_operation(&pending);
-        __atomic_store_n(&f->state, running, __ATOMIC_RELEASE);
+        lock_fiber(f);
+        f->state = running;
         f->waiting = waiting_none;
         f->operation = NULL;
+        unlock_fiber(f);
         return -(long)error;
     }
     __atomic_store_n(&pending.state, operation_armed, __ATOMIC_RELEASE);
     leave_fiber(f, 0);
     if (__atomic_load_n(&pending.state, __ATOMIC_ACQUIRE) != operation_complete) fail("linea: an incomplete operation resumed\n");
+    lock_fiber(f);
     f->waiting = waiting_none;
     f->operation = NULL;
+    unlock_fiber(f);
     return pending.result;
 }
 
@@ -658,7 +861,9 @@ long linea_fiber_sleep(unsigned long nanoseconds) {
 
 static void poll_carrier(struct carrier *c, int poll_only) {
     enum { batch = 32 };
+    lock_carrier(c);
     const unsigned long deadline = c->timer_count == 0 ? 0 : c->timers[0]->deadline;
+    unlock_carrier(c);
     uint64_t cookies[batch];
 #if defined(__linux__)
     struct epoll_event events[batch];
@@ -707,15 +912,20 @@ static void poll_carrier(struct carrier *c, int poll_only) {
 
 static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     timer_remove(f);
-    unsigned expected = runnable;
-    if (!__atomic_compare_exchange_n(&f->state, &expected, running, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-        fail("linea: a carrier dequeued a fiber that was not runnable\n");
-    }
+    lock_fiber(f);
+    if (f->state != runnable || f->claimed != dispatch_claim || f->claimant != c || f->home != c || f->queued || !f->saved) fail("linea: dispatch lost its saved runnable claim\n");
+    f->claimed = 0;
+    f->claimant = NULL;
+    f->saved = 0;
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    f->transfer_ready = 0;
+#endif
+    f->state = running;
+    c->executing = f;
+    unlock_fiber(f);
 #if __has_feature(thread_sanitizer)
-    /* A prepared task may be canceled without ever executing. */
     if (f->tsan_fiber == NULL) f->tsan_fiber = __tsan_create_fiber(0);
 #endif
-    c->executing = f;
     linea_thread_guard_prepare((unsigned long)f->mapping, (unsigned long)f->mapping + guard_bytes);
     linea_fiber_pause(linea_fiber_entering);
 #if __has_feature(address_sanitizer)
@@ -724,26 +934,50 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
 #if __has_feature(thread_sanitizer)
     __tsan_switch_to_fiber(f->tsan_fiber, 0);
 #endif
+    if (linea_fiber_metadata_held()) fail("linea: dispatch retained scheduler metadata\n");
     linea_context_switch(&c->scheduler, &f->context);
     finish_switch(c->asan_stack);
+    lock_fiber(f);
     c->executing = NULL;
-    if (f->waiting == waiting_park) linea_fiber_pause(linea_fiber_context_saved);
-    expected = parking;
-    if (__atomic_compare_exchange_n(&f->state, &expected, parked, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-        if (f->waiting == waiting_park) linea_fiber_pause(linea_fiber_parked);
-        if (f->waiting == waiting_yield) notify(f);
-    } else if (expected == notified) {
-        expected = notified;
-        if (!__atomic_compare_exchange_n(&f->state, &expected, runnable, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-            fail("linea: a notified fiber changed before its context was saved\n");
+    f->saved = 1;
+    const enum waiting kind = f->waiting;
+    unlock_fiber(f);
+    if (kind == waiting_park) linea_fiber_pause(linea_fiber_context_saved);
+    struct carrier *wake = NULL;
+    void (*ended)(void *) = NULL;
+    void *argument = NULL;
+    int became_parked = 0;
+    lock_fiber(f);
+    if (f->state == parking) {
+        f->state = parked;
+        became_parked = 1;
+        if (kind == waiting_yield) {
+            f->state = runnable;
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+            f->transfer_ready = f->proven && f->bound == NULL && f->timer_index == no_timer &&
+                f->source_claims == 0 && f->park == NULL && f->waiter == NULL && f->operation == NULL;
+#endif
+            enqueue_locked(f);
+            if (c->simulation == 0) wake = c;
         }
-        enqueue(f);
-    } else if (expected == finished) {
-        /* The callback can wake a joiner that immediately frees f. */
-        f->finished(f->argument);
-    } else {
-        fail("linea: a fiber switched in an invalid scheduling state\n");
-    }
+    } else if (f->state == notified) {
+        f->state = runnable;
+        enqueue_locked(f);
+        if (c->simulation == 0) wake = c;
+    } else if (f->state == finished) {
+        if (f->source_claims != 0) fail("linea: a finished fiber retained a source reference\n");
+        f->retired = 1;
+        ended = f->finished;
+        argument = f->argument;
+    } else fail("linea: a fiber switched in an invalid scheduling state\n");
+    unlock_fiber(f);
+    if (became_parked && kind == waiting_park) linea_fiber_pause(linea_fiber_parked);
+    if (wake != NULL) wake_carrier(wake);
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    if (kind == waiting_yield) linea_fiber_pause(linea_fiber_transfer_ready);
+#endif
+    /* Publication may let the joiner immediately reclaim the fiber. */
+    if (ended != NULL) ended(argument);
 }
 
 static void *run_carrier(void *argument) {
@@ -803,11 +1037,14 @@ long linea_loop_open(unsigned long carriers) {
     if (loop == NULL) return -(long)ENOMEM;
     loop->carriers = calloc(carriers, sizeof *loop->carriers);
     if (loop->carriers == NULL) { free(loop); return -(long)ENOMEM; }
-    int error = pthread_mutex_init(&loop->startup_lock, NULL);
+    int error = pthread_mutex_init(&loop->metadata, NULL);
     if (error != 0) { free(loop->carriers); free(loop); return -(long)error; }
+    error = pthread_mutex_init(&loop->startup_lock, NULL);
+    if (error != 0) { must(pthread_mutex_destroy(&loop->metadata)); free(loop->carriers); free(loop); return -(long)error; }
     error = pthread_cond_init(&loop->startup, NULL);
     if (error != 0) {
         must(pthread_mutex_destroy(&loop->startup_lock));
+        must(pthread_mutex_destroy(&loop->metadata));
         free(loop->carriers); free(loop); return -(long)error;
     }
     unsigned long initialized = 0, started = 0;
@@ -846,6 +1083,7 @@ cleanup:
     if (loop->identity != 0) linea_loop_retire(loop->identity);
     must(pthread_cond_destroy(&loop->startup));
     must(pthread_mutex_destroy(&loop->startup_lock));
+    must(pthread_mutex_destroy(&loop->metadata));
     free(loop->carriers); free(loop);
     return -(long)error;
 }
@@ -874,31 +1112,42 @@ struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long sta
         __atomic_fetch_add(&f->home->live, 1UL, __ATOMIC_ACQ_REL);
     } else {
     struct fiber_loop *loop = linea_loop_find(identity);
-    must(pthread_mutex_lock(&loop->startup_lock));
+    f->loop = loop;
+    lock_metadata(loop);
     f->home = &loop->carriers[loop->next];
     loop->next = loop->next + 1 == loop->count ? 0 : loop->next + 1;
-    must(pthread_mutex_unlock(&loop->startup_lock));
+    unlock_metadata(loop);
     }
     f->stack = (char *)f->mapping + guard_bytes;
     f->stack_bytes = usable;
     f->entry = entry; f->finished = ended; f->argument = argument;
     f->timer_index = no_timer;
     f->state = parked;
+    f->saved = 1;
     linea_context_init(&f->context, f->stack, usable, fiber_entry, f);
     *error = 0;
     return f;
 }
 
 void linea_fiber_start(struct linea_fiber *f) {
-    unsigned expected = parked;
-    if (!__atomic_compare_exchange_n(&f->state, &expected, runnable, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-        fail("linea: a fiber was started twice\n");
-    }
-    enqueue(f);
+    struct carrier *wake = NULL;
+    lock_fiber(f);
+    if (f->state != parked || f->started || !f->saved) fail("linea: a fiber was started twice\n");
+    f->started = 1;
+    f->state = runnable;
+    enqueue_locked(f);
+    if (f->home->simulation == 0) wake = f->home;
+    unlock_fiber(f);
+    if (wake != NULL) wake_carrier(wake);
 }
 
 void linea_fiber_destroy(struct linea_fiber *f) {
+    lock_fiber(f);
+    if (f->queued || f->claimed || f->source_claims != 0 || !f->saved ||
+        !((!f->started && f->state == parked) || (f->state == finished && f->retired))) fail("linea: a fiber was reclaimed before scheduler retirement\n");
+    f->claimed = dispatch_claim;
     struct carrier *home = f->home;
+    unlock_fiber(f);
     const int simulated = home->simulation != 0;
 #if __has_feature(thread_sanitizer)
     if (f->tsan_fiber != NULL) __tsan_destroy_fiber(f->tsan_fiber);

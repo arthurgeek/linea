@@ -25,6 +25,7 @@ static unsigned returned, released, barriers;
  * held here: the controller must be able to publish the wake while the
  * carrier is stopped at each handoff boundary. */
 void fiber_test_pause(enum linea_fiber_pause_point point) {
+    assert(!linea_fiber_metadata_held());
     assert(pthread_mutex_lock(&control_lock) == 0);
     if (enabled && point == target && !reached) {
         reached = 1;

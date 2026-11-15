@@ -190,12 +190,15 @@ pub const DeclaredBy = union(enum) {
 /// Migration behavior of a compiler-owned native boundary. Conditional
 /// callbacks still require invocation-level coverage; a symbol alone cannot
 /// certify its callbacks or the suspension paths reached by an invocation.
-pub const MigrationContract = enum { neutral, conditional_callbacks, bound_by_context, unknown };
-
-/// Unclassified native entries conservatively establish thread affinity.
-pub fn migrationContract(name: []const u8) MigrationContract {
-    return if (signatureOf(name)) |signature| signature.migration_contract else .unknown;
-}
+pub const MigrationContract = enum {
+    neutral,
+    /// The runtime checks each invocation before any native effects. This
+    /// does not certify every path through the symbol as migration-neutral.
+    runtime_guarded,
+    conditional_callbacks,
+    bound_by_context,
+    unknown,
+};
 
 /// One function in the `linea_` namespace and the signature it has.
 pub const Signature = struct {
@@ -307,6 +310,8 @@ pub const thread_end_signature: Signature = .{
     .result = .unit,
 };
 
+pub const fiber_restrict_signature: Signature = .{ .symbol = "linea_fiber_restrict_current", .declared_by = .compiler, .parameters = &.{}, .result = .unit };
+
 pub const foreign_enter = "linea_foreign_enter";
 pub const foreign_leave = "linea_foreign_leave";
 pub const foreign_depth = "linea_foreign_depth";
@@ -338,6 +343,7 @@ pub const math_functions = math: {
 /// declaration names them; they are owned so that no `export` takes their
 /// names.
 pub const internal_functions = [_]Signature{
+    .{ .symbol = "linea_fiber_metadata_held", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_fiber_sim_create", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_fiber_sim_switch", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
     .{ .symbol = "linea_fiber_sim_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
@@ -346,6 +352,7 @@ pub const internal_functions = [_]Signature{
     .{ .symbol = "linea_sim_carrier", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_sim_choice", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
     .{ .symbol = "linea_sim_attempt", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i64 },
+    fiber_restrict_signature,
     foreign_enter_signature,
     foreign_leave_signature,
     foreign_depth_signature,
@@ -516,7 +523,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = io_simulation },
     .{ .symbol = "linea_clock_read", .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, written }, .result = .i64, .declared_by = .granted },
-    .{ .symbol = "linea_clock_sleep", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .granted },
+    .{ .symbol = "linea_clock_sleep", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .granted, .migration_contract = .runtime_guarded },
     // A wait set, which a linear `task.WaitSet` keeps; a share of a signal's
     // disposition, which a linear `io.SignalShare` keeps.
     .{ .symbol = "linea_waitset_open", .parameters = &.{}, .result = .u64, .declared_by = task_wait_set },
@@ -631,7 +638,7 @@ test "an allocation, a descriptor and an address of bytes are confined to the mo
     try testing.expect(signatureOf("linea_clock_sleep").?.declared_by == .granted);
 }
 
-test "migration certification: unreviewed runtime symbols default to unknown" {
+test "unclassified native boundaries have unknown migration behavior" {
     for (internal_functions) |signature| try testing.expectEqual(MigrationContract.unknown, signature.migration_contract);
-    try testing.expectEqual(MigrationContract.unknown, migrationContract("unclassified_user_ffi"));
+    try testing.expect(signatureOf("unclassified_user_ffi") == null);
 }

@@ -19,6 +19,10 @@ struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long sta
 void linea_fiber_start(struct linea_fiber *fiber);
 void linea_fiber_destroy(struct linea_fiber *fiber);
 int linea_fiber_active(void);
+/* Preserve errno; system contexts have no fiber to bind. */
+void linea_fiber_restrict_current(void);
+/* Internal lock-order diagnostic; never called from a signal handler. */
+int linea_fiber_metadata_held(void);
 
 /* These are called holding the record's lock. The waiter is published before
  * that lock is released, and the lock is reacquired before park answers. */

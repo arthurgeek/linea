@@ -277,7 +277,7 @@ static void refuse(enum failure kind, unsigned nth) {
 }
 static void startup_unwinds(void) {
     const struct { enum failure kind; unsigned count; long error; } cases[] = {
-        { allocation_failure, 2, ENOMEM }, { mutex_failure, 3, EAGAIN },
+        { allocation_failure, 2, ENOMEM }, { mutex_failure, 4, EAGAIN },
         { condition_failure, 1, EAGAIN }, { claim_failure, 1, ENOMEM },
 #if defined(__linux__)
         { poller_failure, 4, EMFILE },
@@ -307,6 +307,7 @@ static void fiber_preparation_unwinds(void) {
     memset(&loop, 0, sizeof loop);
     loop.count = 1; loop.carriers = &carrier;
     assert(pthread_mutex_init(&loop.startup_lock, NULL) == 0);
+    assert(pthread_mutex_init(&loop.metadata, NULL) == 0);
     const unsigned long identity = linea_loop_claim_kind(&loop, LINEA_LOOP_FIBERS);
     assert(identity != 0);
     const enum failure cases[] = { allocation_failure, mapping_failure, protection_failure };
@@ -325,6 +326,7 @@ static void fiber_preparation_unwinds(void) {
     balanced();
     linea_loop_retire(identity);
     assert(pthread_mutex_destroy(&loop.startup_lock) == 0);
+    assert(pthread_mutex_destroy(&loop.metadata) == 0);
 }
 
 static unsigned operation_attempts;
