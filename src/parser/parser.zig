@@ -3252,7 +3252,7 @@ const Parser = struct {
             const at = self.cursor.current();
             if (self.depth == max_nesting) {
                 try self.refuseToDescend(at, "this borrow type nests too deeply");
-                return .{ .at = at, .name = .none };
+                return self.steppedOverType(at);
             }
             self.depth += 1;
             if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3290,13 +3290,13 @@ const Parser = struct {
             const selected = self.cursor.current();
             if (!measure.wrap()) {
                 try self.refuseToDescend(selected, "this selected type nests too deeply");
-                return .{ .at = base.at, .name = .none };
+                return self.steppedOverType(base.at);
             }
             const name = self.cursor.eat(.identifier) orelse blk: {
                 try self.reportAt(.s_type, selected, "expected a name", "a selected type names a member after the dot");
                 break :blk TokenId.none;
             };
-            if (name != .none and try self.refuseArgumentsPastTheLimit()) return .{ .at = base.at, .name = .none };
+            if (name != .none and try self.refuseArgumentsPastTheLimit()) return self.steppedOverType(base.at);
             const arguments = if (name != .none) try self.parseTypeArgs() else node.TypeRefRange.empty;
             measure.operand();
             const base_id = node.TypeRefId.at(self.builder.typeRefMark());
@@ -3323,8 +3323,15 @@ const Parser = struct {
             return .{ .at = head, .name = .none };
         }
         _ = self.cursor.advance();
-        if (try self.refuseArgumentsPastTheLimit()) return .{ .at = head, .name = .none };
+        if (try self.refuseArgumentsPastTheLimit()) return self.steppedOverType(head);
         return .{ .at = head, .name = head, .args = try self.parseTypeArgs() };
+    }
+
+    /// The type that stands where [S-Nesting] refused one beginning at `at`:
+    /// it names nothing, and records how far the parser stepped, so the names
+    /// written in the tokens it holds no node for can still be found.
+    fn steppedOverType(self: *const Parser, at: TokenId) node.TypeRef {
+        return .{ .at = at, .name = .none, .stepped_to = self.cursor.current() };
     }
 
     /// Refuses an argument list that opens at the nesting limit, and says
@@ -3346,7 +3353,7 @@ const Parser = struct {
         const at = self.cursor.current();
         if (self.depth == max_nesting) {
             try self.refuseToDescend(at, "this callable type nests too deeply");
-            return .{ .at = at, .name = .none };
+            return self.steppedOverType(at);
         }
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3397,7 +3404,7 @@ const Parser = struct {
             // refused type rather than whatever encloses it.
             try self.refuseToDescend(open, "this grouped type nests too deeply");
             _ = self.cursor.eat(.r_paren);
-            return .{ .at = open, .name = .none };
+            return self.steppedOverType(open);
         }
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3477,7 +3484,7 @@ const Parser = struct {
         const open = self.cursor.current();
         if (self.depth == max_nesting) {
             try self.refuseToDescend(open, "this type nests too deeply");
-            return .{ .at = open, .name = .none };
+            return self.steppedOverType(open);
         }
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);

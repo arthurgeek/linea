@@ -1,0 +1,10 @@
+error[S-Nesting]: this type nests too deeply
+  --> tests/recovery/a_name_inside_a_refused_type_is_used.lin:30:7023
+   |
+30 | ... Option[Option[Option[Option[Option[Option[Option[Option[Leaf[UInt8]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
+   |                                                                 ^ the limit is 1000 levels
+error[N-Unused]: `Spare` is never used
+  --> tests/recovery/a_name_inside_a_refused_type_is_used.lin:28:8
+   |
+28 | struct Spare {}
+   |        ^^^^^ name it in an annotation, or remove it

@@ -867,8 +867,13 @@ known type, so a use of it is not [N-Undefined], and a name used there counts
 as used, so it is not [N-Unused]. A type whose arguments stand past the limit
 is refused with them, wherever it is written, so it is not reported for the
 arguments it lacks ([T-Bound]), and a derive naming it as a source is not
-reported for the variant that source would need ([T-Derive]). A control header
-stops at the brace that opens its body, so the body is still read.
+reported for the variant that source would need ([T-Derive]). A name written
+inside a refused type, the head of the refused level included, counts as used
+as one in a refused expression does: a type, an alias, a type parameter or an
+import named only there is not [N-Unused] or [M-Unused], and is resolved for
+no other purpose. A declaration the program never writes is still unused. A
+control header stops at the brace that opens its body, so the body is still
+read.
 
 **[S-Paren]** A parenthesised expression or type, and a tuple, is closed.
 

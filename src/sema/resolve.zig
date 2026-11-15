@@ -12378,6 +12378,7 @@ const Resolver = struct {
     }
 
     fn useRefIn(self: *Resolver, ref: node.TypeRef, context: TypeUseContext) std.mem.Allocator.Error!void {
+        if (ref.stepped_to != .none) return self.useSteppedOverType(ref);
         if (try self.reflectionComponentType(ref)) return;
         if (ref.kind == .callable) return self.useCallableTypeIn(self.ast.callableType(ref), context.ofArguments());
         if (ref.kind == .selection) {
@@ -15108,6 +15109,37 @@ const Resolver = struct {
                 .binding => |b| self.bindings.items[b.index()].used = true,
                 .type_parameter, .unresolved_use => {},
             }
+        }
+    }
+
+    /// The names written inside a type [S-Nesting] refused and stepped over.
+    ///
+    /// The parser keeps no node inside such a type, so what its names reach
+    /// is marked used: a type parameter in scope, a type the enclosing trait
+    /// declares, a type of this module, a module the file imports, or any
+    /// other name in scope, such as a constant written as a length.
+    /// [N-Unused] for one of them would be a consequence of the error already
+    /// reported. No name is recorded as reaching anything, and nothing inside
+    /// is reported. Each token of the type is read once.
+    fn useSteppedOverType(self: *Resolver, ref: node.TypeRef) void {
+        for (ref.at.index()..ref.stepped_to.index()) |i| {
+            const tok = TokenId.at(@intCast(i));
+            if (self.ast.tokenTag(tok) != .identifier) continue;
+            const name = self.ast.tokenName(tok);
+            if (self.typeParamNamedInScope(name)) |found| {
+                if (self.marks_for == found.of and found.at < self.used_type_params.items.len) {
+                    self.used_type_params.items[found.at] = true;
+                }
+            } else if (self.declaredTypeHere(name)) |declared| {
+                self.bindings.items[declared.index()].used = true;
+            } else if (self.type_in_module.get(name)) |declared| {
+                self.bindings.items[declared.index()].used = true;
+            } else if (self.moduleNamed(name, self.ast.fileOf(tok))) |module| {
+                self.bindings.items[module.index()].used = true;
+            } else if (self.lookupName(name)) |found| switch (found) {
+                .binding, .unresolved_use => |b| self.bindings.items[b.index()].used = true,
+                .type_parameter => {},
+            };
         }
     }
 
