@@ -13830,7 +13830,7 @@ const Checker = struct {
             self.folds.set(waiting.expr, .absent);
             switch (waiting.rule) {
                 .literal, .negation => {
-                    const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {d}", .{ (try self.typeName(t)), waiting.value });
+                    const message = try std.fmt.allocPrint(self.sink.arena, "`{s}` cannot hold {d}", .{ (try self.typeName(t)), waiting.value });
                     const primary = if (waiting.rule == .literal) "literal is out of range for its type" else "value is out of range for its type";
                     _ = try self.reportWithOrigin(.t_literal, waiting.expr, message, primary, try self.chosenLabel(waiting.v));
                 },
@@ -13857,9 +13857,9 @@ const Checker = struct {
             .file = chosen.site.file,
             .span = chosen.site.span,
             .message = if (chosen.forced)
-                try std.fmt.allocPrint(self.gpa, "fell back to `{s}` here, where an operation needed a type", .{(try self.typeName(t))})
+                try std.fmt.allocPrint(self.sink.arena, "fell back to `{s}` here, where an operation needed a type", .{(try self.typeName(t))})
             else
-                try std.fmt.allocPrint(self.gpa, "settled to `{s}` here", .{(try self.typeName(t))}),
+                try std.fmt.allocPrint(self.sink.arena, "settled to `{s}` here", .{(try self.typeName(t))}),
             .style = .secondary,
         };
     }
@@ -14812,11 +14812,11 @@ const Checker = struct {
         // the headline states why they differ instead.
         const closures = self.builder.get(want.ty) == .closure and self.builder.get(actual) == .closure;
         const at_expr = try (if (closures)
-            std.fmt.allocPrint(self.gpa, "each closure has its own type, so this closure is not the one expected", .{})
+            std.fmt.allocPrint(self.sink.arena, "each closure has its own type, so this closure is not the one expected", .{})
         else if (want.reason == .unwrapped)
-            std.fmt.allocPrint(self.gpa, "expected a block that leaves or yields `{s}`, found `{s}`", .{ wanted, found })
+            std.fmt.allocPrint(self.sink.arena, "expected a block that leaves or yields `{s}`, found `{s}`", .{ wanted, found })
         else
-            std.fmt.allocPrint(self.gpa, "expected `{s}`, found `{s}`", .{ wanted, found }));
+            std.fmt.allocPrint(self.sink.arena, "expected `{s}`, found `{s}`", .{ wanted, found }));
 
         const at_source = try self.expectationSource(want);
 
@@ -14840,7 +14840,7 @@ const Checker = struct {
 
         // The sink holds the slice rather than copying it, so the labels
         // outlive this call and cannot live on the stack.
-        const labels = try self.gpa.alloc(Label, if (chosen == null) 2 else 3);
+        const labels = try self.sink.arena.alloc(Label, if (chosen == null) 2 else 3);
         labels[0] = expr_label;
         labels[1] = source_label;
         if (chosen) |label| labels[2] = label;
@@ -15016,7 +15016,7 @@ const Checker = struct {
         if (origin) |o| {
             // Built here, ordered by the renderer. A `Label` carries the file
             // its span belongs to and comparing the spans alone ignores it.
-            const labels = try self.gpa.alloc(Label, 2);
+            const labels = try self.sink.arena.alloc(Label, 2);
             labels[0] = here;
             labels[1] = o;
             try self.sink.add(.{
@@ -15027,7 +15027,7 @@ const Checker = struct {
                 .notes = notes,
             });
         } else {
-            const labels = try self.gpa.alloc(Label, 1);
+            const labels = try self.sink.arena.alloc(Label, 1);
             labels[0] = here;
             try self.sink.add(.{
                 .severity = .err,
@@ -17485,7 +17485,7 @@ const Checker = struct {
     /// literal or a negation of it, and the report names the signed value.
     fn reportFloatLiteralRange(self: *Checker, written: ExprId, t: TypeId, refusal: FloatLiteralRefusal, origin: ?Label) std.mem.Allocator.Error!TypeId {
         const spelling = self.literalSpelling(written, .float_literal).?;
-        const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {s}{s}", .{
+        const message = try std.fmt.allocPrint(self.sink.arena, "`{s}` cannot hold {s}{s}", .{
             (try self.typeName(t)),
             if (spelling.negated) "-" else "",
             self.ast.tokenText(self.ast.exprMain(spelling.literal)),
@@ -17542,7 +17542,7 @@ const Checker = struct {
 
         if (!open and !self.integerLiteralFits(t, v)) {
             self.folds.set(id, .absent);
-            const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {d}", .{
+            const message = try std.fmt.allocPrint(self.sink.arena, "`{s}` cannot hold {d}", .{
                 (try self.typeName(t)), v,
             });
 
@@ -17828,7 +17828,7 @@ const Checker = struct {
         if (self.folds.get(operand).valueOf()) |v| {
             if (!self.builder.holds(target, v)) {
                 self.folds.set(id, .absent);
-                const message = try std.fmt.allocPrint(self.gpa, "`{s}` cannot hold {d}", .{
+                const message = try std.fmt.allocPrint(self.sink.arena, "`{s}` cannot hold {d}", .{
                     (try self.typeName(target)), v,
                 });
                 return try self.reportWithOrigin(
@@ -18037,7 +18037,7 @@ const Checker = struct {
                 // spelling that appears nowhere in the program.
                 const spelling = self.ast.exprText(operand);
                 const fix = try std.fmt.allocPrint(
-                    self.gpa,
+                    self.sink.arena,
                     "make it fallible: `{s}?({s})`",
                     .{ self.ast.exprText(c.callee), spelling },
                 );
@@ -23745,7 +23745,7 @@ const Checker = struct {
             .message = primary,
             .style = .primary,
         };
-        const labels = try self.gpa.alloc(Label, if (origin == null) 1 else 2);
+        const labels = try self.sink.arena.alloc(Label, if (origin == null) 1 else 2);
         labels[0] = here;
         if (origin) |o| labels[1] = o;
         try self.sink.add(.{
@@ -23773,7 +23773,7 @@ const Checker = struct {
             try self.reportAtToken(
                 .t_unknown_parameter,
                 name,
-                try std.fmt.allocPrint(self.gpa, "`{s}` declares no parameter `{s}`", .{
+                try std.fmt.allocPrint(self.sink.arena, "`{s}` declares no parameter `{s}`", .{
                     what,
                     self.ast.tokenText(name),
                 }),
@@ -23972,7 +23972,7 @@ const Checker = struct {
                 try self.reportAtToken(
                     .t_unknown_parameter,
                     name,
-                    try std.fmt.allocPrint(self.gpa, "`{s}` declares no parameter `{s}`", .{
+                    try std.fmt.allocPrint(self.sink.arena, "`{s}` declares no parameter `{s}`", .{
                         owner.name(self),
                         self.ast.tokenText(name),
                     }),
@@ -23999,7 +23999,7 @@ const Checker = struct {
                 try self.reportAtToken(
                     .t_duplicate_parameter,
                     name,
-                    try std.fmt.allocPrint(self.gpa, "`{s}` is already given", .{self.ast.tokenText(name)}),
+                    try std.fmt.allocPrint(self.sink.arena, "`{s}` is already given", .{self.ast.tokenText(name)}),
                     "given twice",
                     .{
                         .file = self.ast.fileOfExpr(filled[at]),
@@ -24109,7 +24109,7 @@ const Checker = struct {
         _ = try self.reportWithOriginNotes(
             .t_arity,
             id,
-            try std.fmt.allocPrint(self.gpa, "expected {d} argument(s), found {d}", .{ wanted -| receiver, found -| receiver }),
+            try std.fmt.allocPrint(self.sink.arena, "expected {d} argument(s), found {d}", .{ wanted -| receiver, found -| receiver }),
             "the wrong number of arguments",
             owner.origin(self),
             notes,
@@ -24316,7 +24316,7 @@ const Checker = struct {
         _ = try self.reportWithOrigin(
             .t_missing_argument,
             id,
-            try std.fmt.allocPrint(self.gpa, "`{s}` receives no argument", .{owner.paramSpelling(self, at)}),
+            try std.fmt.allocPrint(self.sink.arena, "`{s}` receives no argument", .{owner.paramSpelling(self, at)}),
             "every parameter receives one",
             if (owner.paramToken(self, at)) |param| .{
                 .file = self.ast.fileOf(param),
@@ -24586,8 +24586,8 @@ const Checker = struct {
                 "`{s}` declares no `{s}`, and implements no trait in scope that does",
                 .{ spelled, name },
                 switch (try self.editFor(declaring[0], &.{}, held, false, 0)) {
-                    .edit => |edit| try std.fmt.allocPrint(self.gpa, "`{s}` declares `{s}`; {s} to reach it here", .{ self.ast.tokenText(self.ast.declName(declaring[0])), name, edit }),
-                    .refused => |refusal| try std.fmt.allocPrint(self.gpa, "`{s}` declares `{s}`, and {s}", .{ self.ast.tokenText(self.ast.declName(declaring[0])), name, refusal.reason }),
+                    .edit => |edit| try std.fmt.allocPrint(self.sink.arena, "`{s}` declares `{s}`; {s} to reach it here", .{ self.ast.tokenText(self.ast.declName(declaring[0])), name, edit }),
+                    .refused => |refusal| try std.fmt.allocPrint(self.sink.arena, "`{s}` declares `{s}`, and {s}", .{ self.ast.tokenText(self.ast.declName(declaring[0])), name, refusal.reason }),
                 },
             );
         }
@@ -26167,9 +26167,9 @@ const Checker = struct {
                 "`{s}` has no field `{s}`",
                 .{ (try self.typeName(of)), name },
                 if (own.takes_receiver)
-                    try std.fmt.allocPrint(self.gpa, "`{s}` is an operation of `{s}`, not a field; where a function is expected, write `{s}.{s}`, which takes the receiver as its first argument", .{ name, owner, path, name })
+                    try std.fmt.allocPrint(self.sink.arena, "`{s}` is an operation of `{s}`, not a field; where a function is expected, write `{s}.{s}`, which takes the receiver as its first argument", .{ name, owner, path, name })
                 else
-                    try std.fmt.allocPrint(self.gpa, "`{s}` is an operation of `{s}`, not a field; where a function is expected, write `{s}.{s}`", .{ name, owner, path, name }),
+                    try std.fmt.allocPrint(self.sink.arena, "`{s}` is an operation of `{s}`, not a field; where a function is expected, write `{s}.{s}`", .{ name, owner, path, name }),
             );
         }
 
@@ -26204,23 +26204,23 @@ const Checker = struct {
         const missing = visible == null and declaring != .none and !try self.answersDeclared(of, declaring);
         const help: []const u8 = if (visible) |held| help: {
             if (!self.holdsACallable(held))
-                break :help try std.fmt.allocPrint(self.gpa, "`{s}` is a field holding `{s}`, and a call does not reach a field", .{ name, (try self.typeName(held)) });
-            break :help try std.fmt.allocPrint(self.gpa, "`{s}` is a field; to call the function it holds, write `({s})(...)`", .{ name, self.ast.exprText(id) });
+                break :help try std.fmt.allocPrint(self.sink.arena, "`{s}` is a field holding `{s}`, and a call does not reach a field", .{ name, (try self.typeName(held)) });
+            break :help try std.fmt.allocPrint(self.sink.arena, "`{s}` is a field; to call the function it holds, write `({s})(...)`", .{ name, self.ast.exprText(id) });
         } else if (declaring != .none) help: {
             const trait_name = self.ast.tokenText(self.ast.declName(declaring));
             // Where the receiver's type implements the trait, the operation is
             // one this receiver cannot take, such as a mutating one through an
             // observation; otherwise the missing implementation is the reason.
             if (try self.answersDeclared(of, declaring))
-                break :help try std.fmt.allocPrint(self.gpa, "`{s}` declares it, but not for this receiver", .{trait_name});
+                break :help try std.fmt.allocPrint(self.sink.arena, "`{s}` declares it, but not for this receiver", .{trait_name});
             // A collection that does not implement the trait may offer a view
             // that does, as a `Vec` and an array offer their elements as a
             // slice; naming the view is the step the call is missing.
             if (try self.viewImplementing(of, declaring)) {
                 const receiver = self.ast.exprText(self.ast.unaryOperand(id));
-                break :help try std.fmt.allocPrint(self.gpa, "`{s}` declares it, and `{s}` does not implement `{s}`; `{s}.as_slice()` does", .{ trait_name, (try self.typeName(of)), trait_name, receiver });
+                break :help try std.fmt.allocPrint(self.sink.arena, "`{s}` declares it, and `{s}` does not implement `{s}`; `{s}.as_slice()` does", .{ trait_name, (try self.typeName(of)), trait_name, receiver });
             }
-            break :help try std.fmt.allocPrint(self.gpa, "`{s}` declares it, and `{s}` does not implement `{s}`", .{ trait_name, (try self.typeName(of)), trait_name });
+            break :help try std.fmt.allocPrint(self.sink.arena, "`{s}` declares it, and `{s}` does not implement `{s}`", .{ trait_name, (try self.typeName(of)), trait_name });
         } else "no operation of this name is declared for this type";
         const before = self.sink.items().len;
         const reported = try self.report(
@@ -27195,11 +27195,11 @@ const Checker = struct {
             "`{s}` is declared by `{s}`, which is not in scope here",
             .{ name, declares },
             if (writing.import_path) |needed| try std.fmt.allocPrint(
-                self.gpa,
+                self.sink.arena,
                 "write `import {s}` and `use {s}`: an operation is reached through the trait that declares it",
                 .{ needed, writing.path },
             ) else try std.fmt.allocPrint(
-                self.gpa,
+                self.sink.arena,
                 "write `use {s}`: an operation is reached through the trait that declares it",
                 .{writing.path},
             ),
@@ -37417,7 +37417,7 @@ const Checker = struct {
                 return try self.reportWithOrigin(
                     .t_arms,
                     self.resultOf(c.then),
-                    try std.fmt.allocPrint(self.gpa, "expected `()`, found `{s}`", .{(try self.typeName(then))}),
+                    try std.fmt.allocPrint(self.sink.arena, "expected `()`, found `{s}`", .{(try self.typeName(then))}),
                     "this arm produces a value",
                     .{
                         .file = self.ast.fileOf(self.ast.exprMain(id)),
@@ -37444,7 +37444,7 @@ const Checker = struct {
             return try self.reportWithOrigin(
                 .t_arms,
                 c.otherwise,
-                try std.fmt.allocPrint(self.gpa, "expected `{s}`, found `{s}`", .{ (try self.typeName(then)), (try self.typeName(otherwise)) }),
+                try std.fmt.allocPrint(self.sink.arena, "expected `{s}`, found `{s}`", .{ (try self.typeName(then)), (try self.typeName(otherwise)) }),
                 "the arms disagree",
                 .{
                     .file = self.ast.fileOfExpr(c.then),
@@ -37480,7 +37480,7 @@ const Checker = struct {
             return try self.reportWithOrigin(
                 .t_arms,
                 c.then,
-                try std.fmt.allocPrint(self.gpa, "expected `{s}`, found `{s}`", .{ (try self.typeName(otherwise)), (try self.typeName(then)) }),
+                try std.fmt.allocPrint(self.sink.arena, "expected `{s}`, found `{s}`", .{ (try self.typeName(otherwise)), (try self.typeName(then)) }),
                 "the arms disagree",
                 .{
                     .file = self.ast.fileOfExpr(c.otherwise),
@@ -37875,11 +37875,7 @@ test "a refused allocation fails the check instead of dropping a report" {
             var refusing: RefusesOne = .{ .backing = scratch.allocator(), .refuse_at = refuse_at };
             var sink = Sink.init(refusing.allocator());
             if (typecheckTree(refusing.allocator(), &res, &sink)) |_| {
-                // Counted from what the sink holds: its total rises before
-                // the report is stored, so it counts one that was lost.
-                var held: u32 = 0;
-                for (sink.items()) |diagnostic| held += @intFromBool(diagnostic.severity == .err);
-                try testing.expectEqual(@as(u32, 1), held);
+                try testing.expectEqual(@as(u32, 1), sink.error_count);
             } else |err| {
                 try testing.expectEqual(error.OutOfMemory, err);
                 try testing.expect(refusing.refused);
@@ -37889,6 +37885,38 @@ test "a refused allocation fails the check instead of dropping a report" {
         // The loop ended on a run no allocation was refused in, so every
         // allocation the check makes was refused in one run before it.
         try testing.expect(refuse_at > 0);
+    }
+}
+
+test "a report is kept in the sink's storage, not the checker's" {
+    // The checker runs on an allocator that reports what is never freed, and
+    // the sink on an arena that outlives it. A label or a message the
+    // checker allocated for itself and handed to the sink would leak here.
+    const rejected = [_][]const u8{
+        "fn main() -> UInt8 { true }\n",
+        "fn main() -> UInt8 {\n    let wide: UInt8 = 300\n    wide\n}\n",
+        "fn _take(_given: [UInt8; _]) -> UInt8 { 0 }\nfn main() -> UInt8 { 0 }\n",
+    };
+    for (rejected) |text| {
+        var kept = std.heap.ArenaAllocator.init(testing.allocator);
+        defer kept.deinit();
+        const gpa = kept.allocator();
+        const source: Source = .{ .path = "t.lin", .text = text };
+        var interner: Interner = .empty;
+        var sink = Sink.init(gpa);
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        const res = try resolveTree(gpa, &ast, &sink);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+
+        var typing = try typecheckTree(testing.allocator, &res, &sink);
+        typing.deinit(testing.allocator);
+        try testing.expect(sink.error_count > 0);
+        // Read after the checker released everything it held.
+        for (sink.items()) |diagnostic| {
+            try testing.expect(diagnostic.message.len > 0);
+            for (diagnostic.labels) |label| try testing.expect(label.message.len > 0);
+        }
     }
 }
 
