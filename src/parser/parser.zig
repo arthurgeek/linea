@@ -3296,7 +3296,6 @@ const Parser = struct {
                 try self.reportAt(.s_type, selected, "expected a name", "a selected type names a member after the dot");
                 break :blk TokenId.none;
             };
-            if (name != .none and try self.refuseArgumentsPastTheLimit()) return self.steppedOverType(base.at);
             const arguments = if (name != .none) try self.parseTypeArgs() else node.TypeRefRange.empty;
             measure.operand();
             const base_id = node.TypeRefId.at(self.builder.typeRefMark());

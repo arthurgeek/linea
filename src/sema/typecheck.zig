@@ -15997,13 +15997,13 @@ const Checker = struct {
         /// referent, and an open type's settlement. Only the head is
         /// settled, since each part is asked about where its own column is
         /// split, so a column costs the same at every depth.
-        fn settled(self: PatternTypes, ty: TypeId) TypeId {
+        fn settled(self: PatternTypes, ty: TypeId) std.mem.Allocator.Error!TypeId {
             var t = ty;
             while (true) switch (self.checker.builder.get(t)) {
                 .borrow => |observation| t = observation.referent,
                 .open_integer => return TypeId.literal_default,
                 .open_type => {
-                    const resolved = self.checker.builder.resolveOpen(t, &self.checker.open_types) catch return t;
+                    const resolved = try self.checker.builder.resolveOpen(t, &self.checker.open_types);
                     if (resolved == t) return t;
                     t = resolved;
                 },
@@ -16011,8 +16011,8 @@ const Checker = struct {
             };
         }
 
-        pub fn kind(self: PatternTypes, ty: TypeId) usefulness.Kind {
-            const t = self.settled(ty);
+        pub fn kind(self: PatternTypes, ty: TypeId) std.mem.Allocator.Error!usefulness.Kind {
+            const t = try self.settled(ty);
             if (t.bounds()) |b| return .{ .integer = .{ .lo = b.min, .hi = b.max } };
             return switch (self.checker.builder.get(t)) {
                 .enum_ => |e| if (e.variant_count == 0) .uninhabited else .{ .variants = e.variant_count },
@@ -16031,7 +16031,7 @@ const Checker = struct {
         }
 
         pub fn arity(self: PatternTypes, ty: TypeId, c: usefulness.Ctor) std.mem.Allocator.Error!u32 {
-            const t = self.settled(ty);
+            const t = try self.settled(ty);
             return switch (c) {
                 .variant => |k| try self.checker.builder.variantFieldCount(t, k),
                 .product => if (self.checker.builder.get(t) == .newtype) 1 else self.checker.builder.fieldCount(t),
@@ -16040,7 +16040,7 @@ const Checker = struct {
         }
 
         pub fn part(self: PatternTypes, ty: TypeId, c: usefulness.Ctor, i: u32) std.mem.Allocator.Error!TypeId {
-            const t = self.settled(ty);
+            const t = try self.settled(ty);
             return switch (c) {
                 .variant => |k| try self.checker.builder.variantFieldType(t, k, i),
                 .product => if (self.checker.builder.get(t) == .newtype) try self.checker.builder.baseOf(t) else (try self.checker.builder.fieldType(t, i)),
@@ -16062,11 +16062,11 @@ const Checker = struct {
                 // A variant leaving its payload unnamed names no part.
                 const count: u32 = if (self.ast.patternForm(pattern) == .call) try types.arity(of, .{ .variant = k }) else 0;
                 out.* = .{ .variant = .{ .index = k, .args = try self.coverageParts(arena, pattern, of, .{ .variant = k }, count) } };
-            } else if (self.builder.get(types.settled(of)) == .newtype and types.kind(of) == .integer) {
+            } else if (self.builder.get(try types.settled(of)) == .newtype and try types.kind(of) == .integer) {
                 // A refined newtype's column is its base's integers, so the
                 // pattern is what it holds.
                 return self.coveragePattern(arena, self.ast.patternParts(pattern).first().?.node, of);
-            } else if (types.kind(of) == .refused and self.takesAnything(self.ast.patternParts(pattern).first().?.node)) {
+            } else if (try types.kind(of) == .refused and self.takesAnything(self.ast.patternParts(pattern).first().?.node)) {
                 // A refused refinement's values are unknown, but `_` or a
                 // binder inside its name takes any of them, as a bare `_`
                 // does, so it names no value coverage would have to know.
@@ -16119,7 +16119,7 @@ const Checker = struct {
     fn witnessText(self: *Checker, w: PatternCoverage.Witness, out: *std.ArrayList(u8)) std.mem.Allocator.Error!void {
         if (w.isWild()) return out.append(self.gpa, '_');
         const types: PatternTypes = .{ .checker = self };
-        const t = types.settled(w.ty);
+        const t = try types.settled(w.ty);
         switch (w.shape) {
             .wild => try out.append(self.gpa, '_'),
             .integers => |iv| {
@@ -23650,7 +23650,7 @@ const Checker = struct {
             };
         }
 
-        fn name(owner: CallParameters, self: *const Checker) []const u8 {
+        fn name(owner: CallParameters, self: *const Checker) std.mem.Allocator.Error![]const u8 {
             return switch (owner) {
                 .declaration => |decl| self.ast.tokenText(self.ast.declName(decl)),
                 .closure => "this lambda",
@@ -23659,9 +23659,9 @@ const Checker = struct {
                 // A signature described through a value is spelled with the
                 // labels its calls use.
                 .labelled => |labelled| spelled: {
-                    const names = self.sink.arena.alloc([]const u8, labelled.params.len) catch break :spelled self.builder.nameOf(labelled.signature);
+                    const names = try self.sink.arena.alloc([]const u8, labelled.params.len);
                     for (labelled.params, names) |param, *spelled| spelled.* = self.ast.paramSpelling(param);
-                    break :spelled self.builder.view().spellCallable(self.sink.arena, labelled.signature, names) catch self.builder.nameOf(labelled.signature);
+                    break :spelled try self.builder.view().spellCallable(self.sink.arena, labelled.signature, names);
                 },
             };
         }
@@ -23973,7 +23973,7 @@ const Checker = struct {
                     .t_unknown_parameter,
                     name,
                     try std.fmt.allocPrint(self.sink.arena, "`{s}` declares no parameter `{s}`", .{
-                        owner.name(self),
+                        try owner.name(self),
                         self.ast.tokenText(name),
                     }),
                     "no such parameter",
@@ -31299,10 +31299,11 @@ const Checker = struct {
                 .style = .primary,
             };
             if (unwrapped.holders) |holders| {
-                for (holders, 1..) |index, slot| {
+                for (holders, 1..) |holder, slot| {
+                    const variant = variants[@intFromEnum(holder)];
                     labels[slot] = .{
-                        .file = ast.fileOf(variants[index].name),
-                        .span = ast.tokenSpan(variants[index].name),
+                        .file = ast.fileOf(variant.name),
+                        .span = ast.tokenSpan(variant.name),
                         .message = "this variant holds the source's type",
                         .style = .secondary,
                     };

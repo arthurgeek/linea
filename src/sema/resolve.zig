@@ -571,7 +571,6 @@ pub const Scope = struct {
     to: u32,
 };
 
-/// Which binding each name reference names.
 /// A derive entry whose template wraps a source that no single variant of
 /// the target holds: none has it as its only field, or two do.
 pub const UnwrappedSource = struct {
@@ -585,9 +584,10 @@ pub const UnwrappedSource = struct {
     wrapped: node.TypeRef,
     /// The first two variants holding the source, by position in the
     /// target, or null where none holds it.
-    holders: ?[2]u32,
+    holders: ?[2]expanded_mod.CaseOrdinal,
 };
 
+/// Which binding each name reference names.
 pub const Resolution = struct {
     /// Qualified variant selections, in declaration order. Generic
     /// substitution preserves these ordinals. Storage follows selections,
@@ -8449,7 +8449,7 @@ const Resolver = struct {
         const head = self.ast.declHead(d);
         if (self.isTupleHead(d)) return tuple_names[head.args.len() - node.min_tuple_arity];
         if (head.kind == .tuple or head.kind == .callable) return self.ast.writtenText(head);
-        if (self.ast.tokenTag(head.at) == .l_paren) return "()";
+        if (self.ast.isUnitType(head)) return "()";
         return self.ast.tokenText(head.at);
     }
 
@@ -11714,7 +11714,7 @@ const Resolver = struct {
                     .owner = if (attached) target else derive,
                     .trait = derive_trait,
                     .wrapped = wrapped,
-                    .holders = if (second) |later| .{ @intCast(selected.?), @intCast(later) } else null,
+                    .holders = if (second) |later| .{ @enumFromInt(selected.?), @enumFromInt(later) } else null,
                 });
                 return false;
             }

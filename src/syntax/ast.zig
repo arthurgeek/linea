@@ -387,7 +387,7 @@ pub const Ast = struct {
     pub fn implHeadText(self: *const Ast, id: DeclId) []const u8 {
         const head = self.declHead(id);
         if (head.kind == .tuple or head.kind == .callable) return self.writtenText(head);
-        if (self.tokenTag(head.at) == .l_paren) return "()";
+        if (self.isUnitType(head)) return "()";
         return self.tokenText(self.declName(id));
     }
 
