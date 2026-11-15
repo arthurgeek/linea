@@ -3476,7 +3476,8 @@ const PreparedImplementations = struct {
 /// Keyed by the trait and the head but not by the arguments, because the
 /// arguments are part of the answer rather than of the question: `TryFrom[Int64]
 /// for UInt8` and `TryFrom[UInt8] for UInt8` share a key and are told apart on
-/// the chain, which coherence keeps short.
+/// the chain, which holds one row for each argument list and each application
+/// of the head's declaration the trait is implemented for.
 ///
 /// By the head rather than by the type, because an implementation whose head
 /// applies arguments answers for a family and no interned type is that family.
@@ -3900,7 +3901,7 @@ pub const ImplIndex = struct {
     /// with a walk is how a module of many `impl` blocks pays the product twice.
     ///
     /// **Bound:** the implementations of one trait for one head, which coherence
-    /// holds to one per set of trait arguments, times the pairs of a trait and a
+    /// holds to one per set of trait arguments and type, times the pairs of a trait and a
     /// type the discharge below reaches -- which the table it carries holds to
     /// the traits the program declares times the types nested inside `held`.
     pub fn any(

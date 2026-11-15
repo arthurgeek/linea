@@ -1275,6 +1275,61 @@ test "a trait operation is used wherever it is supplied" {
     }
 }
 
+/// One trait operation supplied for two applications of one generic type.
+const two_applications =
+    \\struct Crate[T] {
+    \\    item: T,
+    \\}
+    \\
+    \\trait Measure {
+    \\    fn of(x: Self) -> UInt8
+    \\}
+    \\
+    \\impl Measure for Crate[UInt8] {
+    \\    fn of(x: Self) -> UInt8 {
+    \\        x.item
+    \\    }
+    \\}
+    \\
+    \\impl Measure for Crate[Bool] {
+    \\    fn of(_x: Self) -> UInt8 {
+    \\        2
+    \\    }
+    \\}
+    \\
+    \\fn main() -> UInt8 {
+    \\    let a: Crate[UInt8] = .{ item = 1 }
+    \\    let w: Crate[Bool] = .{ item = true }
+    \\    a.of() + w.of()
+    \\}
+    \\
+;
+
+test "a trait operation supplied for two applications of one type is used at both" {
+    const gpa = testing.allocator;
+
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
+        .{ .path = "main.lin", .text = two_applications },
+    }, "main.lin");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+
+    const signature = std.mem.indexOf(u8, two_applications, "fn of(x: Self) -> UInt8\n").? + 3;
+    const first = std.mem.indexOf(u8, two_applications, "fn of(x: Self) -> UInt8 {").? + 3;
+    const second = std.mem.indexOf(u8, two_applications, "fn of(_x: Self) -> UInt8 {").? + 3;
+    const dotted = std.mem.indexOf(u8, two_applications, "a.of()").? + 2;
+    const other = std.mem.indexOf(u8, two_applications, "w.of()").? + 2;
+
+    for ([_]usize{ signature, first, second, dotted, other }) |offset| {
+        const found = (try forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(two_applications, offset), .@"utf-16", "", true, null)).?;
+        defer free(gpa, found);
+
+        try testing.expectEqual(@as(usize, 5), found.len);
+        const lines = [_]u32{ 5, 9, 15, 23, 23 };
+        for (found, lines) |l, line| try testing.expectEqual(line, l.range.start.line);
+    }
+}
+
 test "reference families remain unique after malformed implementation recovery" {
     const gpa = testing.allocator;
     const text =

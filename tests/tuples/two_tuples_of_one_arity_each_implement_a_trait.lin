@@ -1,0 +1,30 @@
+// Two tuples of one arity are two types where a component differs, so each
+// may implement a trait with a body of its own. A triple is a third type.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (UInt8, Bool) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Show for (UInt8, UInt16) {
+    fn show(_self: Self) -> UInt8 {
+        20
+    }
+}
+
+impl Show for (UInt8, Bool, Bool) {
+    fn show(_self: Self) -> UInt8 {
+        100
+    }
+}
+
+fn main() -> UInt8 {
+    let flagged: (UInt8, Bool) = (1, true)
+    let sized: (UInt8, UInt16) = (2, 300)
+    let triple: (UInt8, Bool, Bool) = (3, true, false)
+    flagged.show() + sized.show() + triple.show()
+}

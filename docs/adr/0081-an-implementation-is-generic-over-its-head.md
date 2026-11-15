@@ -19,6 +19,11 @@ Partially superseded by
 own implementation may fix some of its type arguments, so the head rule below
 governs trait implementations only.
 
+The constructor coherence key is superseded by
+[0272](0272-two-applications-of-one-type-may-each-implement-a-trait.md): two
+implementations whose heads apply one constructor to different types are two
+implementations, and overlap alone decides whether two may coexist.
+
 ## Context
 
 An implementation named a head and was not generic over it, so a generic type

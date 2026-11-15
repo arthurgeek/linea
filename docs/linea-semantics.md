@@ -2931,8 +2931,7 @@ conventions, result and contract, and the implementation's parameters are
 recovered from it as from any other head. Coherence keys a callable head by its
 **shape**: the invocation and each parameter's convention, in order. Two
 implementations of one trait at one shape and one argument list are
-[N-Duplicate], whatever types the signatures write, as two tuple heads of one
-arity are, which refuses
+[N-Duplicate], whatever types the signatures write, which refuses
 `fn(x: UInt64)` beside `fn(x: UInt8)`; implementations at different shapes never
 meet, and a head of any number of parameters has a shape of its own. A function
 value implements the trait where its signature matches the written head exactly,
@@ -2943,9 +2942,18 @@ required is [T-Bound].
 
 Two implementations of one trait overlap if a substitution over both
 declarations' parameters makes both their heads and trait arguments
-structurally equal. Overlap between open headers is checked at declaration time
-and rejected without ranking either declaration by specificity among ordinary
-implementations. An explicitly marked default
+structurally equal. Overlap is checked at declaration time and rejected
+([T-Impl]) without ranking either declaration by specificity among ordinary
+implementations, and it is the one rule that decides whether two different
+implementations may coexist. Two heads that apply one constructor to different
+types have no such substitution, so `impl Weigh for Crate[UInt8]` and
+`impl Weigh for Crate[UInt16]` are both valid, as are
+`Crate[Option[UInt8]]` beside `Crate[Option[UInt16]]` and `(UInt8, Bool)`
+beside `(UInt8, UInt16)`; a family and one application of its constructor
+overlap, so `impl[T] Weigh for Crate[T]` beside `impl Weigh for Crate[UInt8]`
+is refused in either order, naming `Crate[UInt8]` as the type both answer for
+([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
+An explicitly marked default
 occupies a separate fallback tier, described below. For example,
 `impl[T] Give[T] for Holder[T]` and `impl[U] Give[Bool] for Holder[U]` agree
 when `T = U` and both are `Bool`, so both would implement the trait for
@@ -3064,20 +3072,36 @@ Capability bounds are compared by the strongest requirement the complete list
 demands ([T-Bound]); Copyable includes Discardable.
 
 At most one ordinary implementation may answer a given trait declaration, trait
-argument list and head constructor. Repeating the same implementation is
-[N-Duplicate]; potential overlap between distinct open headers is checked as
-described above. Distinct concrete trait arguments describe distinct
-relationships, so `TryFrom[Int64] for UInt8` may coexist with
-`TryFrom[UInt8] for UInt8`. Compiler-provided implementations also count when
-detecting duplicates.
+argument list and receiver type. Writing the same implementation twice is
+[N-Duplicate], reported at the second and naming the head as written: the same
+trait, the same head and the same trait arguments, up to the names of the
+parameters each declares. Two implementations that declare no parameters are
+the same where their heads name one type and their trait arguments name the
+same types, however each is spelled: through an alias, a qualified name, a
+tuple's long form or a length that folds to the same value. Two that declare
+parameters are the same where the head and the arguments of one, with its
+parameters read as what the other's head applies in the same positions, are
+the other's, so `impl[T] Show for Holder[T]` and `impl[U] Show for Holder[U]`
+are one implementation. An implementation that declares parameters and one
+that declares none are never the same implementation; where a type exists that
+both answer for they overlap, as described above. Distinct heads and distinct
+concrete trait arguments describe distinct relationships, so
+`Weigh for Crate[UInt8]` may coexist with `Weigh for Crate[UInt16]`, and
+`TryFrom[Int64] for UInt8` with `TryFrom[UInt8] for UInt8`. A callable head is
+the exception stated above: its shape is its head. Compiler-provided
+implementations also count when detecting duplicates.
 
-The head key uses the constructor. A generic implementation describes a family
-of its instantiations; its own bounds determine which family members it
-supports, but do not distinguish overlapping implementations or choose between
-them. For any concrete trait arguments and receiver there is at most one
-ordinary implementation; a default is considered only under the separate
-fallback rules above. Specialisation among ordinary implementations is
-forbidden.
+A generic implementation describes a family of its instantiations; its own
+bounds determine which family members it supports, but do not distinguish
+overlapping implementations or choose between them. A type that no
+implementation's head matches does not implement the trait: with `Weigh`
+implemented for `Crate[UInt8]` and `Crate[UInt16]` only, requiring it of
+`Crate[Bool]` is [T-Bound]. For any concrete trait arguments and receiver
+there is at most one ordinary implementation; a default is considered only
+under the separate fallback rules above. Specialisation among ordinary
+implementations is forbidden: `impl Weigh for Crate[UInt8]` cannot stand
+beside `impl[T] Weigh for Crate[T]` to answer in its place
+([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
 
 Trait identity is declaration identity. Two modules may each declare `Measure`;
 implementing one does not implement the other. Bound checking and call dispatch

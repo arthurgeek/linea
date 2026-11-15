@@ -1,0 +1,12 @@
+error[T-Impl]: an implementation's head is the constructor applied to its own parameters
+  --> tests/traits/a_pattern_head_is_refused_beside_an_application.lin:14:19
+   |
+14 | impl[T] Count for Crate[Option[T]] {
+   |                   ^^^^^ receiver arguments are distinct bare parameters in declaration order
+error[T-Impl]: these two both answer `Count` for `Crate[Option[UInt8]]`
+  --> tests/traits/a_pattern_head_is_refused_beside_an_application.lin:20:6
+   |
+14 | impl[T] Count for Crate[Option[T]] {
+   |         ----- the other implementation
+20 | impl Count for Crate[Option[UInt8]] {
+   |      ^^^^^ no instantiation may answer to two implementations of one trait

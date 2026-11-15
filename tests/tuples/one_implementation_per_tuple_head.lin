@@ -1,0 +1,22 @@
+// A trait is implemented once for a tuple type. Two implementations for
+// `(UInt8, Bool)` are one implementation written twice.
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl Show for (UInt8, Bool) {
+    fn show(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Show for (UInt8, Bool) {
+    fn show(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let pair: (UInt8, Bool) = (4, true)
+    pair.show()
+}

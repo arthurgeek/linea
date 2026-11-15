@@ -8426,22 +8426,16 @@ const Resolver = struct {
         return ownsAnImplSide(self.current, self.program.get(self.current).library, side, trait_module);
     }
 
-    /// How a report quotes an implementation's head: a tuple by the
-    /// declaration its arity names, since every tuple of one arity shares that
-    /// head, unit as `()`, and a name by its text.
+    /// How a report quotes an implementation's head: as it is written, with
+    /// the arguments it applies, since two applications of one constructor
+    /// are two heads. Unit is `()`.
     fn headText(self: *const Resolver, d: DeclId) []const u8 {
         const head = self.ast.declHead(d);
-        if (self.isTupleHead(d)) return tuple_names[head.args.len() - node.min_tuple_arity];
-        if (head.kind == .tuple or head.kind == .callable) return self.ast.writtenText(head);
-        if (self.ast.tokenTag(head.at) == .l_paren) return "()";
-        return self.ast.tokenText(head.at);
-    }
-
-    /// Whether an implementation's head is a tuple of an admitted arity,
-    /// which coherence reads as the tuple declaration of that arity.
-    fn isTupleHead(self: *const Resolver, d: DeclId) bool {
-        const head = self.ast.declHead(d);
-        return head.kind == .tuple and node.isTupleArity(head.args.len());
+        if (head.kind == .named and head.args.len() == 0) {
+            if (self.ast.tokenTag(head.at) == .l_paren) return "()";
+            return self.ast.tokenText(head.at);
+        }
+        return self.ast.writtenText(head);
     }
 
     /// Records what the prelude publishes, once the library is resolved: the
@@ -8588,17 +8582,26 @@ const Resolver = struct {
         return if (self.ast.declTag(d) == .trait_) d else null;
     }
 
-    /// At most one implementation of a trait for a type, across the program.
+    /// Reports each implementation written twice, across the program.
     ///
-    /// What licenses every consumer to take the first implementation it finds
-    /// rather than search among candidates: a bound is discharged by one and a
-    /// call runs one, and two would let those two answers differ. Asked of the
-    /// whole program at once because either module owning a side may write it,
-    /// so neither sees both on its own.
+    /// Two implementations of one trait with one head and one argument list
+    /// are two answers for every type the head names: a bound is discharged by
+    /// one and a call runs one, and two would let those two answers differ.
+    /// Asked of the whole program at once because either module owning a side
+    /// may write it, so neither sees both on its own. Two implementations
+    /// that differ and still answer for one type are the checker's to refuse,
+    /// which unifies their headers.
+    ///
+    /// **Bound:** each implementation is compared with the earlier ones of its
+    /// trait and head constructor whose written type at one chosen position
+    /// has the same root, or none. Applications of one constructor that
+    /// differ at that position are never compared; ones that agree there and
+    /// differ beneath it are compared pairwise.
     fn checkCoherence(self: *Resolver) !void {
-        // One argument position per trait/head chain separates distinct written
-        // constructors. Choosing it scans the represented arguments once; a
-        // bare parameter or structural form remains in every candidate set.
+        // One position per trait/head chain separates distinct written types,
+        // among the arguments given the trait and then the arguments the head
+        // applies. Choosing it scans the represented arguments once; a bare
+        // parameter or structural form remains in every candidate set.
         const Columns = struct {
             roots: std.ArrayList(?u64) = .empty,
             position: ?usize = null,
@@ -8614,14 +8617,14 @@ const Resolver = struct {
             const entry = try columns.getOrPut(self.gpa, self.coherenceKey(it));
             if (!entry.found_existing) entry.value_ptr.* = .{};
             const choice = entry.value_ptr;
-            const args = self.ast.typeArgs(it.args);
-            if (args.len > choice.roots.items.len) {
+            const count = self.coherencePositions(it);
+            if (count > choice.roots.items.len) {
                 const old_len = choice.roots.items.len;
-                try choice.roots.resize(self.gpa, args.len);
+                try choice.roots.resize(self.gpa, count);
                 @memset(choice.roots.items[old_len..], null);
             }
-            for (args, 0..) |arg, position| {
-                const root = self.coherenceArgumentRoot(arg) orelse continue;
+            for (0..count) |position| {
+                const root = self.coherenceRootAt(it, position) orelse continue;
                 if (choice.roots.items[position]) |prior| {
                     if (prior != root) choice.position = @min(choice.position orelse position, position);
                 } else choice.roots.items[position] = root;
@@ -8660,11 +8663,7 @@ const Resolver = struct {
 
             const key = self.coherenceKey(it);
             const position = if (columns.get(key)) |choice| choice.position orelse 0 else 0;
-            const args = self.ast.typeArgs(it.args);
-            const root = if (it.decl != DeclId.none and position < args.len)
-                self.coherenceArgumentRoot(args[position])
-            else
-                null;
+            const root = self.coherenceRootAt(it, position);
             var chain = if (root) |r| named.get(.{ .group = key, .root = r }) else first.get(key);
             var wildcard = if (root != null) wildcards.get(key) else null;
             var found: ?Implementation = null;
@@ -8756,8 +8755,6 @@ const Resolver = struct {
                         "a trait has at most one default implementation"
                     else if (generic)
                         "a trait is implemented once per arguments and type"
-                    else if (self.isTupleHead(it.decl))
-                        "a trait is implemented once for all tuples of one arity"
                     else if (it.head == .callable_)
                         "a trait is implemented once for each callable shape"
                     else
@@ -8792,10 +8789,41 @@ const Resolver = struct {
         }
     }
 
-    /// An explicitly applied name cannot be replaced by one of a family's
-    /// parameters, and a name that reaches a type fails `sameWrittenArgs`
-    /// against one that reaches another, whatever the reading. Hash collisions
-    /// retain extra candidates; equality remains that routine's decision.
+    /// How many positions an implementation is filed by: the arguments it
+    /// gives the trait, then the arguments its head applies. A row the
+    /// compiler provides writes neither.
+    fn coherencePositions(self: *const Resolver, it: Implementation) usize {
+        if (it.decl == DeclId.none) return 0;
+        return it.args.len() + self.coherenceHeadArgs(it).len;
+    }
+
+    /// The arguments a head applies to the declaration or the primitive it
+    /// names. A callable head is one head per shape, so it applies none.
+    fn coherenceHeadArgs(self: *const Resolver, it: Implementation) []const node.TypeRef {
+        return switch (it.head) {
+            .declared, .builtin => self.ast.typeArgs(self.ast.declHead(it.decl).args),
+            .array, .borrow_, .callable_, .parameter, .default_ => &.{},
+        };
+    }
+
+    /// The root of the type an implementation writes at one of its positions,
+    /// or null where it writes none or one with no root.
+    fn coherenceRootAt(self: *const Resolver, it: Implementation, position: usize) ?u64 {
+        if (it.decl == DeclId.none) return null;
+        const args = self.ast.typeArgs(it.args);
+        if (position < args.len) return self.coherenceArgumentRoot(args[position]);
+        const applied = self.coherenceHeadArgs(it);
+        if (position - args.len >= applied.len) return null;
+        return self.coherenceArgumentRoot(applied[position - args.len]);
+    }
+
+    /// A name that reaches a type cannot be replaced by one of a family's
+    /// parameters, and it fails `sameWrittenArgs` against a name that reaches
+    /// another type, whatever the reading. Hash collisions retain extra
+    /// candidates; equality remains that routine's decision.
+    ///
+    /// A bare name that reaches no type is a parameter or names nothing, and
+    /// has no root.
     ///
     /// An alias with arguments is the type it names, so its root is the head
     /// of that type; an alias that is not headed by a name -- one naming a
@@ -8804,7 +8832,11 @@ const Resolver = struct {
     fn coherenceArgumentRoot(self: *const Resolver, arg: node.TypeRef) ?u64 {
         var h: std.hash.Wyhash = .init(0);
         switch (arg.kind) {
-            .named => if (arg.args.len() == 0) return null,
+            .named => if (arg.args.len() == 0) {
+                const identity = self.reachedType(arg.name) orelse return null;
+                h.update(std.mem.asBytes(&identity));
+                return h.final();
+            },
             // A tuple is rooted where its long form is, so the two spellings
             // of one argument sit in one chain and are compared.
             .tuple => {
@@ -8827,20 +8859,26 @@ const Resolver = struct {
         return h.final();
     }
 
-    /// Whether two implementations are the same one: the trait, the head
-    /// constructor, and the arguments supplied to the trait once a family's
-    /// own parameters are read at the other's head.
+    /// Whether two implementations are the same one written twice: the trait,
+    /// the head and the arguments supplied to the trait, up to the names of
+    /// the parameters each declares.
     ///
-    /// A family supplies the trait whatever its head was applied to, so
-    /// `Give[T] for Holder[T]` supplies `Give[UInt8]` at `Holder[UInt8]` and
-    /// is the same implementation as one that writes those arguments out.
-    /// Comparing what was written made those two keys, which let a settled
-    /// head sit under a family that already answers for it and never be
-    /// reached by anything.
+    /// Two implementations that declare no parameters are the same where
+    /// their heads name one type and their arguments name the same types, so
+    /// `Weigh for Crate[UInt8]` and `Weigh for Crate[UInt16]` are two.
     ///
-    /// One side is read at the other's head and never both: two families read
-    /// at each other would each be renamed into the other's parameters, and a
-    /// family read at a settled head is already the whole comparison.
+    /// Two families are the same where the head and the arguments of one,
+    /// with its parameters read as what the other's head applies in the same
+    /// positions, are the other's. One side is read and never both: two
+    /// families read at each other would each be renamed into the other's
+    /// parameters.
+    ///
+    /// A family and an implementation declaring no parameters are never the
+    /// same one. Whether a type exists that both answer for is the overlap
+    /// question, which the checker decides by unifying the two headers.
+    ///
+    /// A callable head is one head per shape, whatever types its signature
+    /// writes, so only the arguments tell two of one shape apart.
     fn sameImplementation(self: *const Resolver, a: Implementation, b: Implementation) bool {
         if (a.trait != b.trait) return false;
         if (a.head == .default_ or b.head == .default_) return a.head == .default_ and b.head == .default_;
@@ -8853,9 +8891,17 @@ const Resolver = struct {
             return self.sameArgumentsProvided(a, b);
         }
         const ctx: Coherence = .{ .res = self };
-        if (self.ast.declTypeParams(a.decl).len != 0) return sameWrittenArgs(self.ast, ctx, a.args, self.reading(a.decl, b), b.args, .{}) catch unreachable;
-        if (self.ast.declTypeParams(b.decl).len != 0) return sameWrittenArgs(self.ast, ctx, b.args, self.reading(b.decl, a), a.args, .{}) catch unreachable;
-        return sameWrittenArgs(self.ast, ctx, a.args, .{}, b.args, .{}) catch unreachable;
+        const a_family = self.ast.declTypeParams(a.decl).len != 0;
+        const b_family = self.ast.declTypeParams(b.decl).len != 0;
+        if (a.head == .callable_) {
+            if (a_family) return sameWrittenArgs(self.ast, ctx, a.args, self.reading(a.decl, b), b.args, .{}) catch unreachable;
+            if (b_family) return sameWrittenArgs(self.ast, ctx, b.args, self.reading(b.decl, a), a.args, .{}) catch unreachable;
+            return sameWrittenArgs(self.ast, ctx, a.args, .{}, b.args, .{}) catch unreachable;
+        }
+        if (a_family != b_family) return false;
+        const read: Reading = if (a_family) self.reading(a.decl, b) else .{};
+        if (!(sameWrittenType(self.ast, ctx, self.ast.declHead(a.decl), read, self.ast.declHead(b.decl), .{}) catch unreachable)) return false;
+        return sameWrittenArgs(self.ast, ctx, a.args, read, b.args, .{}) catch unreachable;
     }
 
     /// What `sameWrittenArgs` reads while implementations are keyed: the
@@ -8941,8 +8987,9 @@ const Resolver = struct {
     /// The trait and the head constructor and nothing else. What a family
     /// supplies the trait is settled by the head it is read at, so the
     /// arguments are not a property of one implementation and cannot be part
-    /// of a key. A shared hash is verified before anything is reported, so a
-    /// coarse one costs a comparison and never an answer.
+    /// of a key; what the head applies is filed beneath the key, by the root
+    /// of one position. A shared hash is verified before anything is
+    /// reported, so a coarse one costs a comparison and never an answer.
     fn coherenceKey(_: *const Resolver, it: Implementation) u64 {
         var h: std.hash.Wyhash = .init(0);
         const trait: u32 = @intFromEnum(it.trait);
@@ -17690,8 +17737,7 @@ test "a trait is implemented once for a type" {
     defer arena.deinit();
     const gpa = arena.allocator();
 
-    // What lets a bound and a call each take the first implementation they
-    // find rather than search among candidates.
+    // One implementation written twice is one answer given twice.
     const twice = try resolveSource(gpa,
         \\struct Account { balance: UInt8 }
         \\trait Measure { fn of(x: Self) -> UInt8 }
@@ -17711,6 +17757,31 @@ test "a trait is implemented once for a type" {
         \\fn main() -> UInt8 { let a: Account = .{ balance = 1 }; Measure.of(a) + Weigh.of(a) }
     );
     try testing.expectEqual(@as(u32, 0), distinct.errors);
+
+    // Two applications of one constructor are two types, and so are two
+    // tuples of one arity.
+    const applications = try resolveSource(gpa,
+        \\struct Crate[T] { item: T }
+        \\trait Measure { fn of(x: Self) -> UInt8 }
+        \\impl Measure for Crate[UInt8] { fn of(x: Self) -> UInt8 { x.item } }
+        \\impl Measure for Crate[UInt16] { fn of(_x: Self) -> UInt8 { 2 } }
+        \\impl Measure for Crate[Crate[UInt8]] { fn of(_x: Self) -> UInt8 { 3 } }
+        \\impl Measure for Crate[Crate[UInt16]] { fn of(_x: Self) -> UInt8 { 4 } }
+        \\fn main() -> UInt8 { let a: Crate[UInt8] = .{ item = 1 }; Measure.of(a) }
+    );
+    try testing.expectEqual(@as(u32, 0), applications.errors);
+
+    // The same application twice is one implementation written twice, however
+    // deep the repeated argument sits.
+    const repeated = try resolveSource(gpa,
+        \\struct Crate[T] { item: T }
+        \\trait Measure { fn of(x: Self) -> UInt8 }
+        \\impl Measure for Crate[Crate[UInt8]] { fn of(_x: Self) -> UInt8 { 3 } }
+        \\impl Measure for Crate[UInt16] { fn of(_x: Self) -> UInt8 { 2 } }
+        \\impl Measure for Crate[Crate[UInt8]] { fn of(_x: Self) -> UInt8 { 4 } }
+        \\fn main() -> UInt8 { 0 }
+    );
+    try testing.expectEqual(@as(u32, 1), repeated.errors);
 
     // And a type still takes as many inherent blocks as it likes, which is a
     // different question with the same shape.

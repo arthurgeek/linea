@@ -1,0 +1,43 @@
+// An implementation is told from another by its whole header: the type it is
+// for and the arguments it gives the trait. `Crate[UInt8]` answers `Fill` at
+// two arguments, and `Crate[UInt16]` answers it at one of them again.
+struct Crate[T] {
+    item: T,
+}
+
+trait Fill[U] {
+    fn fill(self: Self, with: U) -> UInt8
+}
+
+impl Fill[UInt8] for Crate[UInt8] {
+    fn fill(self: Self, with: UInt8) -> UInt8 {
+        self.item + with
+    }
+}
+
+impl Fill[Bool] for Crate[UInt8] {
+    fn fill(self: Self, with: Bool) -> UInt8 {
+        if with {
+            self.item
+        } else {
+            0
+        }
+    }
+}
+
+impl Fill[Bool] for Crate[UInt16] {
+    fn fill(self: Self, with: Bool) -> UInt8 {
+        if with {
+            UInt8(self.item / 100)
+        } else {
+            0
+        }
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 1 }
+    let large: Crate[UInt16] = .{ item = 300 }
+    let one: UInt8 = 1
+    Fill.fill(small, one) * 100 + Fill.fill(small, true) * 10 + Fill.fill(large, true)
+}

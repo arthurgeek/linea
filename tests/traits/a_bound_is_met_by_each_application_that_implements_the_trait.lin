@@ -1,0 +1,32 @@
+// A bound asks whether the type it is given implements the trait. Both
+// applications of `Crate` do, each through its own implementation, so `ask`
+// takes either and runs the body written for the type it was given.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Weigh for Crate[UInt16] {
+    fn weigh(self: Self) -> UInt8 {
+        UInt8(self.item / 100)
+    }
+}
+
+fn ask[T: Weigh](x: T) -> UInt8 {
+    x.weigh()
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    let large: Crate[UInt16] = .{ item = 300 }
+    ask(small) * 10 + ask(large)
+}

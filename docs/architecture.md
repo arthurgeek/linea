@@ -838,9 +838,14 @@ trait arguments through `ImplIndex.matchHeader`, which lookups and the reports
 naming a culprit implementation both ask, then the shared constraint solver
 decides applicability. `any` and `find` are the two answers of one ladder,
 `ImplIndex.selectOnce`.
-Coherence keys a constructor-headed implementation by (trait, constructor) and
-a callable head by (trait, shape), where the shape is the invocation convention
-and each parameter's convention; different keys cannot unify. Parameter heads
+Coherence files a constructor-headed implementation under (trait, constructor)
+and a callable head under (trait, shape), where the shape is the invocation
+convention and each parameter's convention; implementations filed apart cannot
+unify. Within one (trait, constructor) the resolver's `sameImplementation`
+reports the same header written twice, comparing the written heads and trait
+arguments, and the checker's `refuseOverlappingImplementations` refuses two
+headers that unify, so two applications of one constructor are two
+implementations. Parameter heads
 are compared with the same trait's other parameter heads and with its ordinary
 implementations in every constructor chain, and never against other traits; open predicates do not establish disjointness. Unification
 uses an occurs check, so an equation that would make a type contain itself has

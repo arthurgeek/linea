@@ -32238,6 +32238,17 @@ const Checker = struct {
     /// however many settled arguments one type implements a trait at --
     /// whatever its head's own parameters do, since an argument list written
     /// out is ground however generic the type it is written for.
+    ///
+    /// A head that is ground as well is hashed with the list, because two
+    /// ground headers unify only where they are one header: a constructor
+    /// implementing a trait for many of its applications,
+    /// `Weigh for Crate[UInt8]` beside `Weigh for Crate[UInt16]`, costs one
+    /// lookup each. An implementation with ground arguments and an open head
+    /// is unified against every member sharing its list. Such a head applies
+    /// its constructor to its own parameters and so answers for every
+    /// application, which makes each of those pairs an overlap: an accepted
+    /// program holds one member per list beside it, and a refused one pays a
+    /// unification per report.
     fn refuseOverlappingImplementations(
         self: *Checker,
         implementations: []const types_mod.Implementation,
@@ -32250,14 +32261,17 @@ const Checker = struct {
         var ground_list: std.ArrayList(u32) = .empty;
         defer ground_list.deinit(self.gpa);
 
-        // The ground members sharing one argument list, as a chain per list:
-        // the head of each is in `alike`, keyed by a hash of the list, and
-        // `next` walks the rest. Positions are into `ground_list`, so both
-        // are sized by the chain being examined and not by the program.
-        var alike: std.AutoHashMapUnmanaged(u64, u32) = .empty;
+        // The ground members sharing one argument list, as chains per list:
+        // `alike` holds the head of each chain and `next` walks the rest.
+        // Members whose head is ground too are chained by header, the head
+        // hashed with the list; the others are chained by the list alone,
+        // and so is every member a second time, for an open head to meet.
+        // Positions are into `ground_list`, so all are sized by the chain
+        // being examined and not by the program.
+        var alike: GroundChains = .{};
         defer alike.deinit(self.gpa);
-        var next: std.ArrayList(u32) = .empty;
-        defer next.deinit(self.gpa);
+        var settled_heads: std.ArrayList(bool) = .empty;
+        defer settled_heads.deinit(self.gpa);
 
         for (implementations, 0..) |im, i| {
             if (im.isAmbient() or !im.ofATrait()) continue;
@@ -32349,24 +32363,36 @@ const Checker = struct {
                 }
             }
 
-            alike.clearRetainingCapacity();
-            next.clearRetainingCapacity();
-            try next.resize(self.gpa, ground_list.items.len);
+            try alike.reset(self.gpa, ground_list.items.len);
+            settled_heads.clearRetainingCapacity();
             for (ground_list.items, 0..) |at, gi| {
-                const key = hashOfTypes(implementations[at].args);
-                var walk = alike.get(key);
-                while (walk) |j| {
-                    const other = ground_list.items[j];
-                    // Hashed and then compared, so a collision costs a
-                    // comparison rather than a report about two lists that
-                    // are not the same.
-                    if (std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
+                const im_at = implementations[at];
+                const settled_head = try self.builder.allGround(&.{im_at.ty});
+                try settled_heads.append(self.gpa, settled_head);
+                const list_key = hashOfTypes(im_at.args);
+                const header_key = hashOfHeader(im_at.ty, im_at.args);
+                // A ground header meets the ground headers equal to it and
+                // the open heads sharing its list; an open head meets every
+                // member sharing its list.
+                const chains: [2]GroundChains.Walk = if (settled_head)
+                    .{ alike.walk(.by_header, header_key), alike.walk(.open_by_list, list_key) }
+                else
+                    .{ alike.walk(.by_list, list_key), .{} };
+                for (chains) |chain| {
+                    var walk = chain;
+                    while (walk.next()) |j| {
+                        const other = ground_list.items[j];
+                        const im_other = implementations[other];
+                        // Hashed and then compared, so a collision costs a
+                        // comparison rather than a report about two lists
+                        // that are not the same.
+                        if (!std.mem.eql(TypeId, im_other.args, im_at.args)) continue;
+                        if (settled_head and settled_heads.items[j] and im_other.ty != im_at.ty) continue;
                         try self.refuseIfOverlapping(implementations, other, at);
                     }
-                    walk = if (next.items[j] == j) null else next.items[j];
                 }
-                next.items[gi] = alike.get(key) orelse @intCast(gi);
-                try alike.put(self.gpa, key, @intCast(gi));
+                try alike.note(self.gpa, .by_list, list_key, @intCast(gi));
+                try alike.note(self.gpa, if (settled_head) .by_header else .open_by_list, if (settled_head) header_key else list_key, @intCast(gi));
             }
         }
     }
@@ -32596,6 +32622,70 @@ const Checker = struct {
     fn declaredInLibrary(self: *const Checker, d: node.DeclId) bool {
         const module = self.program.moduleOf(d);
         return module != .none and self.program.get(module).library;
+    }
+
+    /// The members of one chain with ground argument lists, grouped three
+    /// ways: every member by its list, the members whose head is ground by
+    /// head and list, and the members whose head is open by list. A member is
+    /// a position in the chain's ground list, and is in the first grouping
+    /// and one of the other two.
+    ///
+    /// **Bound:** three links per member.
+    const GroundChains = struct {
+        heads: [groupings]std.AutoHashMapUnmanaged(u64, u32) = @splat(.empty),
+        links: [groupings]std.ArrayList(u32) = @splat(.empty),
+
+        const groupings = 3;
+        const Grouping = enum(u2) { by_list, by_header, open_by_list };
+
+        fn deinit(self: *GroundChains, gpa: std.mem.Allocator) void {
+            for (&self.heads) |*heads| heads.deinit(gpa);
+            for (&self.links) |*links| links.deinit(gpa);
+        }
+
+        fn reset(self: *GroundChains, gpa: std.mem.Allocator, members: usize) !void {
+            for (&self.heads) |*heads| heads.clearRetainingCapacity();
+            for (&self.links) |*links| {
+                links.clearRetainingCapacity();
+                try links.resize(gpa, members);
+            }
+        }
+
+        /// Puts `member` first in the chain `key` names. A member that ends
+        /// its chain links to itself.
+        fn note(self: *GroundChains, gpa: std.mem.Allocator, grouping: Grouping, key: u64, member: u32) !void {
+            const g = @intFromEnum(grouping);
+            self.links[g].items[member] = self.heads[g].get(key) orelse member;
+            try self.heads[g].put(gpa, key, member);
+        }
+
+        fn walk(self: *const GroundChains, grouping: Grouping, key: u64) Walk {
+            const g = @intFromEnum(grouping);
+            return .{ .links = self.links[g].items, .at = self.heads[g].get(key) };
+        }
+
+        const Walk = struct {
+            links: []const u32 = &.{},
+            at: ?u32 = null,
+
+            fn next(self: *Walk) ?u32 {
+                const member = self.at orelse return null;
+                self.at = if (self.links[member] == member) null else self.links[member];
+                return member;
+            }
+        };
+    };
+
+    /// A head and the arguments given the trait as one number.
+    fn hashOfHeader(head: TypeId, args: []const TypeId) u64 {
+        var h: std.hash.Wyhash = .init(args.len);
+        const head_id: u32 = @intFromEnum(head);
+        h.update(std.mem.asBytes(&head_id));
+        for (args) |t| {
+            const id: u32 = @intFromEnum(t);
+            h.update(std.mem.asBytes(&id));
+        }
+        return h.final();
     }
 
     /// A run of types as one number, so a caller grouping runs that are equal
@@ -38233,11 +38323,11 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         .{ .declarations =
         \\impl Route[Tag[UInt8]] for Pair[Bool, UInt8] {}
         \\impl[A, B] Route[Tag[B]] for Pair[A, B] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\impl[A, B] Route[Tag[B]] for Pair[A, B] {}
         \\impl Route[Tag[UInt8]] for Pair[Bool, UInt8] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\impl[A, B] Route[Tag[B]] for Pair[A, B] {}
         \\impl[A, B] Route[Other[B]] for Pair[A, B] {}
@@ -38261,11 +38351,11 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         .{ .declarations =
         \\impl[A, B] Route[A] for Pair[A, B] {}
         \\impl Route[Tag[UInt8]] for Pair[Tag[UInt8], Bool] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\impl Route[Tag[UInt8]] for Pair[Tag[UInt8], Bool] {}
         \\impl[A, B] Route[A] for Pair[A, B] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\trait Family { type Item }
         \\impl[A: Family, B] Route[A.Item] for Pair[A, B] {}
@@ -38283,6 +38373,27 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         \\impl[A, B] Route[fn(read left: A) -> A] for Pair[A, B] {}
         \\impl[A, B] Route[fn(sink right: B) -> B] for Pair[A, B] {}
         },
+        // Two applications of one constructor are two headers, at one
+        // argument list and at none.
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt16] {}
+        \\impl Route[UInt8] for Pair[Tag[Bool], UInt8] {}
+        \\impl Route[UInt8] for Pair[Tag[UInt8], UInt8] {}
+        },
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt16] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        , .duplicates = 1 },
+        // A family with a ground argument list meets every application
+        // sharing the list, and no application at another list.
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt16] for Pair[Bool, UInt8] {}
+        \\impl[A, B] Route[UInt8] for Pair[A, B] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt16] {}
+        , .overlaps = 2 },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);

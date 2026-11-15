@@ -1,0 +1,27 @@
+// A trait implemented for `Crate[UInt8]` and `Crate[UInt16]` is implemented
+// for those two types. `Crate[Bool]` is a third type, and nothing implements
+// `Weigh` for it.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Weigh for Crate[UInt16] {
+    fn weigh(self: Self) -> UInt8 {
+        UInt8(self.item / 100)
+    }
+}
+
+fn main() -> UInt8 {
+    let flag: Crate[Bool] = .{ item = true }
+    Weigh.weigh(flag)
+}

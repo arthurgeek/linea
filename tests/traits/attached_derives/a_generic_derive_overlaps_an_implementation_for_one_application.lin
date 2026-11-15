@@ -1,0 +1,26 @@
+// A derive attached to a generic type implements the trait for every
+// application of it, so an implementation written for `Mark[UInt8]` would be
+// a second answer for that type.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+@derive(Score)
+struct Mark[T] { value: T }
+
+impl Score for Mark[UInt8] {
+    fn score(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+fn main() -> UInt8 {
+    let m: Mark[UInt8] = .{ value = 3 }
+    m.score()
+}

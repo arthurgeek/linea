@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Score` for `Mark[UInt8]`
+  --> tests/traits/attached_derives/a_generic_derive_overlaps_an_implementation_for_one_application.lin:14:9
+   |
+14 | @derive(Score)
+   |         ^^^^^ no instantiation may answer to two implementations of one trait
+17 | impl Score for Mark[UInt8] {
+   |      ----- the other implementation

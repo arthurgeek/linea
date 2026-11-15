@@ -1,0 +1,35 @@
+// An ordinary implementation takes precedence over the default for the types
+// its head matches. `Crate[UInt8]` and `Crate[UInt16]` each have one, and
+// `Crate[Bool]` matches neither head, so it takes the default.
+trait Selected {
+    fn selected(self: Self) -> UInt8
+}
+
+struct Crate[T] {
+    item: T,
+}
+
+default impl[T] Selected for T {
+    fn selected(_self: T) -> UInt8 {
+        1
+    }
+}
+
+impl Selected for Crate[UInt8] {
+    fn selected(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Selected for Crate[UInt16] {
+    fn selected(self: Self) -> UInt8 {
+        UInt8(self.item / 100)
+    }
+}
+
+fn main() -> UInt8 {
+    let byte: Crate[UInt8] = .{ item = 2 }
+    let word: Crate[UInt16] = .{ item = 300 }
+    let flag: Crate[Bool] = .{ item = true }
+    byte.selected() * 100 + word.selected() * 10 + flag.selected()
+}

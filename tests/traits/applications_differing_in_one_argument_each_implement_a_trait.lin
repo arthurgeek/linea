@@ -1,0 +1,33 @@
+// One differing argument is enough to make two applications two types. Both
+// heads below apply `Pair` to `UInt8` first, and the second argument tells
+// them apart.
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+trait Total {
+    fn total(self: Self) -> UInt8
+}
+
+impl Total for Pair[UInt8, Bool] {
+    fn total(self: Self) -> UInt8 {
+        if self.b {
+            self.a
+        } else {
+            0
+        }
+    }
+}
+
+impl Total for Pair[UInt8, UInt8] {
+    fn total(self: Self) -> UInt8 {
+        self.a + self.b
+    }
+}
+
+fn main() -> UInt8 {
+    let gated: Pair[UInt8, Bool] = .{ a = 3, b = true }
+    let summed: Pair[UInt8, UInt8] = .{ a = 2, b = 5 }
+    gated.total() * 10 + summed.total()
+}

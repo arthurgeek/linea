@@ -1,6 +1,6 @@
-// One implementation per trait, trait arguments and head constructor. Two that
-// could answer for one type is refused where the second is written, not where a
-// call reaches it.
+// One implementation per trait, trait arguments and head. A family written
+// twice is refused where the second is written, not where a call reaches it,
+// and the report names the head.
 trait Show {
     fn show(self: Self) -> UInt8
 }
