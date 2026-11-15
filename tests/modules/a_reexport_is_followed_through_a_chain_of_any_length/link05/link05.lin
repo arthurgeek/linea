@@ -1,0 +1,3 @@
+import link06
+
+pub use link06.value
