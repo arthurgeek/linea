@@ -769,6 +769,7 @@ The library tests itself.
   ok    io.read_exact_allocates_from_the_system_allocator
   ok    io.read_exact_allocates_the_body_from_its_allocator
   ok    io.read_exact_collects_a_body_split_across_reads
+  ok    io.read_exact_keeps_its_bytes_apart_from_the_reader_allocator
   ok    io.read_exact_refuses_past_its_limit_before_reading
   ok    io.read_exact_refuses_while_a_line_read_needs_recovery
   ok    io.read_exact_reports_a_reader_that_overruns_its_destination
