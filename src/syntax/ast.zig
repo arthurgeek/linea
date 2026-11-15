@@ -1002,7 +1002,7 @@ pub const Ast = struct {
         if (ref.kind == .array or ref.kind == .tuple) return self.firstBracketsSpan(ref.at);
         if (ref.name == TokenId.none) return self.tokenSpan(ref.at);
         const head = self.tokenSpan(ref.name);
-        if (ref.kind == .named and ref.name != TokenId.none and self.tokenTag(ref.name) == .l_paren) {
+        if (self.isUnitType(ref)) {
             const close = TokenId.at(ref.name.index() + 1);
             if (self.tokenTag(close) == .r_paren) return .{ .start = head.start, .end = self.tokenSpan(close).end };
         }
@@ -1216,6 +1216,13 @@ pub const Ast = struct {
             self.tokenText(ref.inferred_length)
         else
             self.exprText(ref.length);
+    }
+
+    /// Whether a written type is `()`. Unit is a named type whose name is the
+    /// `(` that opens it, so it names no declaration and no lookup answers
+    /// for it.
+    pub fn isUnitType(self: *const Ast, ref: node.TypeRef) bool {
+        return ref.kind == .named and ref.name != TokenId.none and self.tokenTag(ref.name) == .l_paren;
     }
 
     /// The semantic type inside explicit type parentheses.

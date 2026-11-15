@@ -10388,7 +10388,7 @@ const Resolver = struct {
         const not_a_declaration = "derive targets a concrete declaration, not a primitive or another kind of name";
         if (binding == BindingId.none) {
             // Unit reaches no binding, and is no declaration either.
-            if (ast.tokenTag(head.at) == .l_paren) try self.refuseUnsupportedDerive(derive, not_a_declaration);
+            if (ast.isUnitType(head)) try self.refuseUnsupportedDerive(derive, not_a_declaration);
             return null;
         }
         const held = self.bindings.items[binding.index()];
@@ -11599,7 +11599,8 @@ const Resolver = struct {
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
         switch (x.kind) {
-            .named => if (x.name != TokenId.none) {
+            // Unit names no declaration, so there is nothing of it to settle.
+            .named => if (x.name != TokenId.none and !ast.isUnitType(x)) {
                 const binding = self.writtenBinding(x.name);
                 if (binding == BindingId.none) return false;
                 const held = self.bindings.items[binding.index()];
