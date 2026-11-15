@@ -20,8 +20,8 @@
 //! the tree, so a trait's argument has one level fewer, and an enum is wider
 //! than its payload by its tag.
 //!
-//! Every program is also held to a bound on the allocation work its check
-//! adds, see `Work`.
+//! Every program is also held to a bound on the allocation work of its
+//! check, see `Work`.
 
 const std = @import("std");
 const testing = std.testing;
@@ -36,6 +36,7 @@ const choices_mod = @import("choices.zig");
 const Choices = choices_mod.Choices;
 const Counting = @import("counting.zig").Counting;
 const generate = @import("generate.zig");
+const Layout = @import("../sema/types.zig").Layout;
 
 /// Where a program writes what it counts.
 pub const Position = enum {
@@ -51,6 +52,8 @@ pub const Position = enum {
     implementation_head,
     /// The initialiser of a `let` in `main`, for a limit on an expression.
     value,
+    /// The same, where the count is a format's precision and not its width.
+    value_precision,
 
     pub fn describe(self: Position) []const u8 {
         return switch (self) {
@@ -62,6 +65,7 @@ pub const Position = enum {
             .derive_argument => "a derive argument",
             .implementation_head => "the head of an `impl`",
             .value => "a `let` initialiser",
+            .value_precision => "a `let` initialiser, as a precision",
         };
     }
 
@@ -69,6 +73,10 @@ pub const Position = enum {
     /// level of the written type that names the trait.
     fn isTraitArgument(self: Position) bool {
         return self == .implementation_argument or self == .derive_argument;
+    }
+
+    fn isValue(self: Position) bool {
+        return self == .value or self == .value_precision;
     }
 
     /// Whether the position is, or needs beside it, an enum's payload.
@@ -170,31 +178,89 @@ fn inWords(n: u64) []const u8 {
     return words[@intCast(n)];
 }
 
-/// The sentence of `docs/linea-semantics.md` that states `limit`, written
-/// from the table's number.
-fn statedAs(buffer: []u8, limit: Limit) ![]const u8 {
+/// A count as the semantics document groups a long one: `16 777 216`.
+fn inGroups(buffer: []u8, n: u64) ![]const u8 {
+    var digits: [24]u8 = undefined;
+    const plain = try std.fmt.bufPrint(&digits, "{d}", .{n});
+    var w = std.Io.Writer.fixed(buffer);
+    for (plain, 0..) |digit, i| {
+        if (i != 0 and (plain.len - i) % 3 == 0) try w.writeByte(' ');
+        try w.writeByte(digit);
+    }
+    return w.buffered();
+}
+
+/// The `at`th sentence of `docs/linea-semantics.md` that states `limit`,
+/// written from the table's number, or null past the last one. The first is
+/// the sentence under the limit's own rule.
+fn statedAs(buffer: []u8, limit: Limit, at: usize) !?[]const u8 {
     const most = limit.most();
+    var groups: [32]u8 = undefined;
     return switch (limit) {
-        .tree_height => std.fmt.bufPrint(buffer, "nests at most {d} levels deep", .{most}),
-        .tuple_components => std.fmt.bufPrint(buffer, "at least {s} components and at most {s}", .{
-            inWords(limit.fewest().?),
-            inWords(most),
-        }),
-        .answer_links => std.fmt.bufPrint(buffer, "passes through at most {d} links", .{most}),
-        .coverage_cells => std.fmt.bufPrint(buffer, "more than 2^{d} cells", .{std.math.log2_int(u64, most)}),
-        .array_length => std.fmt.bufPrint(buffer, "The maximum length is {d}", .{most}),
-        .type_bytes => std.fmt.bufPrint(buffer, "A type is at most {d} bytes", .{most}),
-        .raw_literal_hashes => std.fmt.bufPrint(buffer, "A raw literal opens with at most {s} `#`", .{inWords(most)}),
-        .interpolation_depth => std.fmt.bufPrint(buffer, "at most {d} interpolations open at once", .{most}),
-        .format_count => std.fmt.bufPrint(buffer, "a width or precision above {d}", .{most}),
-        .embedded_bytes => std.fmt.bufPrint(buffer, "more than {d} MiB", .{most >> 20}),
+        .tree_height => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "nests at most {d} levels deep", .{most}),
+            else => null,
+        },
+        .tuple_components => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "at least {s} components and at most {s}", .{
+                inWords(limit.fewest().?),
+                inWords(most),
+            }),
+            1 => try std.fmt.bufPrint(buffer, "| `Tuple{d}` | a tuple of {s} components constructs this type |", .{ most, inWords(most) }),
+            2 => try std.fmt.bufPrint(buffer, "and likewise through `Tuple{d}`", .{most}),
+            else => null,
+        },
+        .answer_links => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "passes through at most {d} links", .{most}),
+            1 => try std.fmt.bufPrint(buffer, "chain of {d} settled references", .{most}),
+            2 => try std.fmt.bufPrint(buffer, "and one of {d} is refused where the chain starts", .{most + 1}),
+            3 => try std.fmt.bufPrint(buffer, "A plain chain of {d} aliases is refused as well", .{most + 1}),
+            else => null,
+        },
+        .coverage_cells => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "more than 2^{d} cells", .{std.math.log2_int(u64, most)}),
+            else => null,
+        },
+        .array_length => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "The maximum length is {d}", .{most}),
+            else => null,
+        },
+        .type_bytes => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "A type is at most {d} bytes (2^{d} - 1, just under {d} GiB)", .{
+                most,
+                std.math.log2_int(u64, most + 1),
+                (most + 1) >> 30,
+            }),
+            else => null,
+        },
+        .raw_literal_hashes => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "A raw literal opens with at most {s} `#`", .{inWords(most)}),
+            1 => try std.fmt.bufPrint(buffer, "Up to {s} hashes may open one", .{inWords(most)}),
+            else => null,
+        },
+        .interpolation_depth => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "with at most {d} interpolations open at once", .{most}),
+            else => null,
+        },
+        .format_count => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "a width or precision above {d}", .{most}),
+            else => null,
+        },
+        .embedded_bytes => switch (at) {
+            0 => try std.fmt.bufPrint(buffer, "and when the file holds more than {d} MiB ({s} bytes), which is refused before the file is read", .{
+                most >> 20,
+                try inGroups(&groups, most),
+            }),
+            else => null,
+        },
     };
 }
 
 test "the semantics document states every limit as the table holds it" {
     // The compiler and the generator read one table, so a wrong number in it
     // is accepted by both. The document is the third statement of each limit
-    // and the only one the table is not derived from.
+    // and the only one the table is not derived from. Every sentence of it
+    // that writes a limit's number is listed in `statedAs`.
     const semantics = @embedFile("semantics");
     const joined = try testing.allocator.dupe(u8, semantics);
     defer testing.allocator.free(joined);
@@ -204,19 +270,23 @@ test "the semantics document states every limit as the table holds it" {
     }
 
     try testing.expect(std.math.isPowerOfTwo(Limit.coverage_cells.most()));
+    try testing.expect(std.math.isPowerOfTwo(Limit.type_bytes.most() + 1));
     try testing.expectEqual(@as(u64, 0), Limit.embedded_bytes.most() % (1 << 20));
 
     var missing: u32 = 0;
     for (std.enums.values(Limit)) |limit| {
-        var buffer: [128]u8 = undefined;
-        const sentence = try statedAs(&buffer, limit);
-        if (std.mem.indexOf(u8, joined, sentence) == null) {
+        var at: usize = 0;
+        while (true) : (at += 1) {
+            var buffer: [192]u8 = undefined;
+            const sentence = (try statedAs(&buffer, limit, at)) orelse break;
+            if (std.mem.indexOf(u8, joined, sentence) != null) continue;
             std.debug.print("docs/linea-semantics.md does not say \"{s}\", which is `{s}` as the limit table holds it\n", .{
                 sentence,
                 @tagName(limit),
             });
             missing += 1;
         }
+        try testing.expect(at > 0);
     }
     try testing.expectEqual(@as(u32, 0), missing);
 }
@@ -246,26 +316,23 @@ pub fn unwritten(limit: Limit) ?[]const u8 {
 pub fn writes(limit: Limit, position: Position) bool {
     if (unwritten(limit) != null) return false;
     return switch (limit) {
-        .tree_height, .tuple_components, .answer_links => position != .value,
+        .tree_height, .tuple_components, .answer_links => !position.isValue(),
         // An implementation's head is a named type, a tuple or a callable,
         // and both of these are written as arrays.
-        .array_length, .type_bytes => position != .value and position != .implementation_head,
-        .raw_literal_hashes, .interpolation_depth, .format_count => position == .value,
+        .array_length, .type_bytes => !position.isValue() and position != .implementation_head,
+        .raw_literal_hashes, .interpolation_depth => position == .value,
+        .format_count => position.isValue(),
         .coverage_cells, .embedded_bytes => false,
     };
 }
-
-/// The bytes a tag adds before an enum's payload, which is also what the
-/// enum's size is rounded up to.
-const word_bytes = 8;
 
 /// The count a program of `cell` writes.
 fn countOf(cell: Shape.AtLimit) u64 {
     const most = cell.limit.most();
     if (cell.limit == .type_bytes and cell.position.isPayload()) {
         // The widest payload whose enum, a tag and the payload rounded up to
-        // a word, is still within the limit.
-        const widest = most - most % word_bytes - word_bytes;
+        // the tag's width, is still within the limit.
+        const widest = most - most % Layout.tag_width - Layout.tag_width;
         return widest + @intFromBool(cell.past);
     }
     return most + @intFromBool(cell.past);
@@ -298,19 +365,11 @@ test "a limit has a cell unless it says why it has none" {
     }
 }
 
-/// The depths a doubling chain is generated at. A chain's check is held to
-/// add at most `Work.growth` times what half the depth adds, and
-/// `Work.slack` above that. A type of two to the twentieth names, spelled
-/// out once at a few bytes a name, is several times the slack, so a pass
-/// that walks the names and not the declarations is over its bound at every
-/// depth here. The deepest keeps the type's size under [L-Size].
+/// The depths a doubling chain is generated at. The deepest keeps the
+/// type's size under [L-Size].
 pub const shared_depths = [_]u32{ 20, 21, 22, 23, 24 };
 
 /// The depths a doubling chain is generated at with a mistake planted in it.
-///
-/// At the shallow ones the whole name is a few kilobytes, so the check is
-/// within its bound however the name is built and the one report is what
-/// the program is held to.
 pub const mistaken_depths = [_]u32{ 4, 8, 16, 18 };
 
 /// Every shape a seed can select.
@@ -377,8 +436,32 @@ const Written = struct {
     alias: bool = false,
 };
 
-/// What every position writes in a program with nothing hostile in it.
-const plain: Written = .{ .text = "UInt8", .held = "UInt8", .once = true };
+/// Which of a shape's two programs is written.
+const Form = enum {
+    /// The program the shape names.
+    whole,
+    /// The program the shape's work is compared with, see `Work`.
+    reference,
+};
+
+/// The count a limit's reference program writes where the count is not
+/// material: a number in the text, or too few parts to regroup. Null where
+/// the reference regroups the same parts into two halves.
+fn referenceCount(limit: Limit) ?u64 {
+    return switch (limit) {
+        .tree_height, .answer_links => null,
+        .tuple_components => limit.fewest().?,
+        .array_length, .type_bytes => 2,
+        .raw_literal_hashes, .interpolation_depth, .format_count => 1,
+        .coverage_cells, .embedded_bytes => unreachable,
+    };
+}
+
+fn writeNested(t: *std.Io.Writer, levels: u64, leaf: []const u8) !void {
+    for (0..levels) |_| try t.writeAll("Option[");
+    try t.writeAll(leaf);
+    for (0..levels) |_| try t.writeAll("]");
+}
 
 /// Writes the declarations a program counting `n` at `limit` needs, and
 /// returns how `position` spells what it counts.
@@ -388,66 +471,91 @@ fn writeLimit(
     limit: Limit,
     n: u64,
     position: Position,
+    form: Form,
 ) !Written {
     std.debug.assert(writes(limit, position));
     var text: std.Io.Writer.Allocating = .init(gpa);
     const t = &text.writer;
+    const count = if (form == .reference) referenceCount(limit) orelse n else n;
     switch (limit) {
         .tree_height => {
             // A trait's argument stands one level below the written type
             // that names the trait.
-            const levels = if (position.isTraitArgument()) n - 1 else n;
-            for (0..levels) |_| try t.writeAll("Option[");
-            try t.writeAll("UInt8");
-            for (0..levels) |_| try t.writeAll("]");
+            const levels = if (position.isTraitArgument()) count - 1 else count;
+            switch (form) {
+                .whole => try writeNested(t, levels, "UInt8"),
+                // The same wrappers in two types, with leaves that keep the
+                // two halves from being one type.
+                .reference => {
+                    try t.writeAll("(");
+                    try writeNested(t, levels / 2, "UInt8");
+                    try t.writeAll(", ");
+                    try writeNested(t, levels - levels / 2, "Bool");
+                    try t.writeAll(")");
+                },
+            }
             return .{ .text = text.written(), .held = text.written(), .once = true };
         },
         .tuple_components => {
             try t.writeAll("(");
-            for (0..n) |i| try t.writeAll(if (i == 0) "UInt8" else ", UInt8");
+            for (0..count) |i| try t.writeAll(if (i == 0) "UInt8" else ", UInt8");
             try t.writeAll(")");
             return .{ .text = text.written(), .held = text.written(), .once = false };
         },
         .answer_links => {
-            // Each alias is one link, the first included.
-            try w.writeAll("alias _Link0 = UInt8\n");
-            for (1..n) |i| try w.print("alias _Link{d} = _Link{d}\n", .{ i, i - 1 });
+            // Each alias is one link, the last included. Every alias names
+            // the one declared after it, so the first is settled through all
+            // of them and not one at a time as each is declared. The
+            // reference declares the same aliases as two chains of half the
+            // length.
+            const last = if (form == .reference) count / 2 - 1 else count - 1;
+            for (0..count) |i| {
+                if (i == last or i == count - 1) {
+                    try w.print("alias _Link{d} = UInt8\n", .{i});
+                } else {
+                    try w.print("alias _Link{d} = _Link{d}\n", .{ i, i + 1 });
+                }
+            }
             try w.writeAll("\n");
-            try t.print("_Link{d}", .{n - 1});
+            try t.writeAll("_Link0");
             return .{ .text = text.written(), .held = "UInt8", .once = true, .alias = true };
         },
         .array_length => {
             // The unit type has no bytes, so the length is the only limit
             // the array reaches.
-            try t.print("[(); {d}]", .{n});
+            try t.print("[(); {d}]", .{count});
             return .{ .text = text.written(), .held = text.written(), .once = false };
         },
         .type_bytes => {
             // Bytes while the count is a length an array may have, and
             // two-byte elements past that.
-            if (n <= Limit.array_length.most()) {
-                try t.print("[UInt8; {d}]", .{n});
+            if (count <= Limit.array_length.most()) {
+                try t.print("[UInt8; {d}]", .{count});
             } else {
-                std.debug.assert(n % 2 == 0);
-                try t.print("[UInt16; {d}]", .{n / 2});
+                std.debug.assert(count % 2 == 0);
+                try t.print("[UInt16; {d}]", .{count / 2});
             }
             return .{ .text = text.written(), .held = text.written(), .once = true };
         },
         .raw_literal_hashes => {
             try t.writeAll("r");
-            for (0..n) |_| try t.writeAll("#");
+            for (0..count) |_| try t.writeAll("#");
             try t.writeAll("\"text\"");
-            for (0..n) |_| try t.writeAll("#");
+            for (0..count) |_| try t.writeAll("#");
             return .{ .text = text.written(), .held = text.written(), .once = true };
         },
         .interpolation_depth => {
-            for (0..n) |_| try t.writeAll("\"{");
+            for (0..count) |_| try t.writeAll("\"{");
             try t.writeAll("1");
-            for (0..n) |_| try t.writeAll("}\"");
+            for (0..count) |_| try t.writeAll("}\"");
             return .{ .text = text.written(), .held = text.written(), .once = true };
         },
         .format_count => {
-            try t.print("\"{{1:{d}}}\"", .{n});
+            if (position == .value_precision) {
+                try t.print("\"{{1.5:.{d}}}\"", .{count});
+            } else {
+                try t.print("\"{{1:{d}}}\"", .{count});
+            }
             return .{ .text = text.written(), .held = text.written(), .once = true };
         },
         .coverage_cells, .embedded_bytes => unreachable,
@@ -455,16 +563,29 @@ fn writeLimit(
 }
 
 /// Writes the declarations of a doubling chain `depth` aliases above its
-/// first, and returns the use of the last.
-fn writeShared(gpa: std.mem.Allocator, w: *std.Io.Writer, depth: u32) !Written {
+/// first, and returns the use of the last. The reference declares the same
+/// aliases as two chains of half the depth and uses both.
+fn writeShared(gpa: std.mem.Allocator, w: *std.Io.Writer, depth: u32, form: Form) !Written {
+    const restart = if (form == .reference) (depth + 1) / 2 else depth + 1;
     try w.writeAll("struct _Pair[A, B] {\n    _left: A,\n    _right: B,\n}\n\n");
-    try w.writeAll("alias _Twice0[T] = _Pair[T, T]\n");
-    for (1..depth + 1) |i| {
-        try w.print("alias _Twice{d}[T] = _Pair[_Twice{d}[T], _Twice{d}[T]]\n", .{ i, i - 1, i - 1 });
+    for (0..depth + 1) |i| {
+        if (i == 0 or i == restart) {
+            try w.print("alias _Twice{d}[T] = _Pair[T, T]\n", .{i});
+        } else {
+            try w.print("alias _Twice{d}[T] = _Pair[_Twice{d}[T], _Twice{d}[T]]\n", .{ i, i - 1, i - 1 });
+        }
     }
     try w.writeAll("\n");
-    const used = try std.fmt.allocPrint(gpa, "_Twice{d}[UInt8]", .{depth});
-    return .{ .text = used, .held = used, .once = true, .alias = true };
+    switch (form) {
+        .whole => {
+            const used = try std.fmt.allocPrint(gpa, "_Twice{d}[UInt8]", .{depth});
+            return .{ .text = used, .held = used, .once = true, .alias = true };
+        },
+        .reference => {
+            const used = try std.fmt.allocPrint(gpa, "_Pair[_Twice{d}[UInt8], _Twice{d}[Bool]]", .{ restart - 1, depth });
+            return .{ .text = used, .held = used, .once = true };
+        },
+    }
 }
 
 /// Writes the declaration that holds `written` at `position` and the `main`
@@ -481,13 +602,8 @@ fn place(w: *std.Io.Writer, position: Position, written: Written, mistaken: bool
             });
             return writings;
         },
-        .value => {
-            // A scalar's plain form is a number; every limit written here is
-            // on a string literal.
-            const plain_value = "\"text\"";
-            try w.print("fn main() -> UInt8 {{\n    let _held = {s}\n    0\n}}\n", .{
-                if (written.text.ptr == plain.text.ptr) plain_value else written.text,
-            });
+        .value, .value_precision => {
+            try w.print("fn main() -> UInt8 {{\n    let _held = {s}\n    0\n}}\n", .{written.text});
             return writings;
         },
         .parameter => {
@@ -539,33 +655,18 @@ fn place(w: *std.Io.Writer, position: Position, written: Written, mistaken: bool
     return writings;
 }
 
-fn positionOf(shape: Shape) Position {
-    return switch (shape) {
-        .shared => |s| s.position,
-        .limit => |l| l.position,
-    };
-}
-
-/// The count `shape` grows with: a chain's depth or a limit's count.
-fn sizeOf(shape: Shape) u64 {
-    return switch (shape) {
-        .shared => |s| s.depth,
-        .limit => |l| countOf(l),
-    };
-}
-
-/// The text of `shape` written at `size` in place of its own.
-fn writeSized(gpa: std.mem.Allocator, shape: Shape, size: u64) !struct { text: []const u8, writings: u32, once: bool } {
+/// The text of one of `shape`'s two programs.
+fn writeForm(gpa: std.mem.Allocator, shape: Shape, form: Form) !struct { text: []const u8, writings: u32, once: bool } {
     var out: std.Io.Writer.Allocating = .init(gpa);
     const w = &out.writer;
     switch (shape) {
         .shared => |s| {
-            const written = try writeShared(gpa, w, @intCast(size));
+            const written = try writeShared(gpa, w, s.depth, form);
             const writings = try place(w, s.position, written, s.mistaken);
             return .{ .text = out.written(), .writings = writings, .once = true };
         },
         .limit => |l| {
-            const written = try writeLimit(gpa, w, l.limit, size, l.position);
+            const written = try writeLimit(gpa, w, l.limit, countOf(l), l.position, form);
             const writings = try place(w, l.position, written, false);
             return .{ .text = out.written(), .writings = writings, .once = written.once };
         },
@@ -583,12 +684,12 @@ pub fn refusingRule(shape: Shape) ?Code {
 
 /// The program of `shape`, and what the compiler must say of it.
 pub fn write(gpa: std.mem.Allocator, shape: Shape) !Program {
-    const sized = try writeSized(gpa, shape, sizeOf(shape));
+    const whole = try writeForm(gpa, shape, .whole);
     const expectation: Expectation = if (refusingRule(shape)) |rule|
-        .{ .refused = .{ .rule = rule, .reports = if (sized.once) 1 else sized.writings } }
+        .{ .refused = .{ .rule = rule, .reports = if (whole.once) 1 else whole.writings } }
     else
         .accepted;
-    return .{ .shape = shape, .text = sized.text, .expectation = expectation };
+    return .{ .shape = shape, .text = whole.text, .expectation = expectation };
 }
 
 /// The program a seed selects.
@@ -596,74 +697,68 @@ pub fn fromSeed(gpa: std.mem.Allocator, seed: u64) !Program {
     return write(gpa, shapeOfSeed(seed));
 }
 
-/// `shape` at half its size, which is within every limit.
-fn writeHalf(gpa: std.mem.Allocator, shape: Shape) ![]const u8 {
-    const least: u64 = switch (shape) {
-        .shared => 1,
-        .limit => |l| l.limit.fewest() orelse 1,
-    };
-    return (try writeSized(gpa, shape, @max(least, sizeOf(shape) / 2))).text;
-}
-
-/// The declarations and the `main` of `shape` with `UInt8`, or a plain
-/// string, where the hostile thing is written, and nothing else.
-fn writePlain(gpa: std.mem.Allocator, shape: Shape) ![]const u8 {
-    var out: std.Io.Writer.Allocating = .init(gpa);
-    _ = try place(&out.writer, positionOf(shape), plain, false);
-    return out.written();
-}
-
-/// The allocation work of three checks, from which a program's bound is
-/// taken.
+/// The allocation work of a shape's program and of its reference.
 ///
 /// Work is the sum of what a check asks its allocator for, counted above a
 /// fresh arena over whole pages with growth in place refused. No clock is
 /// read, and two checks of one program in one build count the same.
 ///
-/// `plain` is the program's position with nothing hostile written in it, so
-/// `whole - plain` is the work the hostile thing adds beside the library.
-/// `half` is the same shape at half its size. A check whose work is linear
-/// in what is written adds about twice at the whole size what it adds at
-/// half; one that is quadratic adds four times, and one that follows the
-/// names of a doubling chain adds two to the half depth times. The bound
-/// allows three times, and `slack` above that.
+/// The reference is the same position holding the same material arranged
+/// so that nothing in it is deep, shared or large:
+///
+///   - a chain of declared answers, a nested type and a doubling chain are
+///     written as two of half the length, over the same number of
+///     declarations and of written levels;
+///   - an array's length, a type's bytes, a format's count and a raw
+///     literal's `#` are a number or a run in one token, and the reference
+///     writes a small one;
+///   - a tuple's components and an interpolation's depth are too few to
+///     regroup, and the reference writes the fewest.
+///
+/// The two programs are within a few tokens of each other, so every table
+/// that grows as a file is read, tokens, nodes, declarations and names,
+/// reaches the same capacity in both, with the same declarations before
+/// them or none. What is left in `whole - reference` is the work the
+/// arrangement itself costs.
+///
+/// So the bound fails a check whose work grows faster than the depth of a
+/// chain or a nesting, or with the names a shared type spells out, or with
+/// an array's length. A cost `c * n^k` in the depth `n` costs the reference
+/// `2 * c * (n / 2)^k`, and fails once `c * n^k * (1 - 2^(1 - k))` passes
+/// the allowance: at a thousand nested levels, four bytes for each pair of a
+/// level and a level around it fails and two bytes passes.
+///
+/// It does not fail work in proportion to the material, however much: a pass
+/// that wastes the same bytes for every alias or level costs the reference
+/// as much. Nor work that grows with how many declarations a file holds, of
+/// which both programs hold the same number.
 pub const Work = struct {
-    plain: usize,
-    half: usize,
+    reference: usize,
     whole: usize,
 
-    /// How many times the work the half size adds the whole size may add.
-    pub const growth = 3;
-
-    /// The share of `plain` every program is allowed above `growth`.
+    /// The share of `reference` that `whole` may exceed it by.
     ///
-    /// A check appends to tables that already hold the library, and a table
-    /// that grows is charged its whole new size. Which of the three programs
-    /// crosses a table's capacity is an accident of the library's size, so
-    /// their differences carry an error that grows with `plain`: a few tenths
-    /// of a percent of it over the libraries measured. The allowance is a
-    /// share of `plain` for that reason, so a larger library widens it by
-    /// what it widens the error. Added work under it is not held to `growth`
-    /// at all, which is also what a size that does not lengthen the program
-    /// needs: an array's length adds the same few allocations at half.
-    pub const slack_share = 64;
+    /// The two programs are a few tokens apart, not none, so once in a while
+    /// one of them crosses a table's capacity and the other does not, and a
+    /// table that grows is charged its whole new size. That error is a share
+    /// of everything the check holds: the largest seen is 0.17% of the
+    /// reference, over 22 shapes after 0, 500, 1500, 4000 and 8000 unrelated
+    /// declarations, and with nothing before them no legal shape differs by
+    /// more than 0.06%.
+    pub const allowance_share = 128;
 
-    /// How far past its bound a check runs before it is stopped. The reports
-    /// of a program over its bound are still read, so a check is ended only
-    /// where finishing it would take memory the walk does not have.
-    pub const room: usize = 1 << 30;
+    /// The most one check may take, the reference's and the whole's alike.
+    /// Four times what the largest library measured costs a check that
+    /// writes nothing, and what a walker can hold beside its other checks.
+    /// A check stopped here is not answered, and the program fails.
+    pub const cap: usize = 1 << 30;
 
-    pub fn slack(self: Work) usize {
-        return self.plain / slack_share;
-    }
-
-    /// The most the whole program's check may take.
-    pub fn bound(self: Work) usize {
-        return self.plain + self.slack() + growth * (self.half -| self.plain);
+    pub fn allowance(self: Work) usize {
+        return self.reference / allowance_share;
     }
 
     pub fn over(self: Work) bool {
-        return self.whole > self.bound();
+        return self.whole > self.reference + self.allowance();
     }
 };
 
@@ -680,7 +775,7 @@ const Measured = struct {
 /// allocated from `gpa`; everything else the check held is released.
 fn measure(
     gpa: std.mem.Allocator,
-    library: ?*const loader.CheckedLibrary,
+    library: *const loader.CheckedLibrary,
     text: []const u8,
     most: usize,
 ) !Measured {
@@ -714,12 +809,12 @@ test "two checks of one program count the same work" {
     const gpa = arena.allocator();
     const program = try write(gpa, .{ .limit = .{ .limit = .tuple_components, .past = false, .position = .field } });
 
-    const first = try measure(gpa, test_library.get(), program.text, std.math.maxInt(usize));
+    const first = try measure(gpa, test_library.get(), program.text, Work.cap);
     // Allocations between the two move every address the second check is
     // given.
     _ = try gpa.alloc(u8, 12345);
     _ = try std.heap.page_allocator.alloc(u8, 3 << 20);
-    const second = try measure(gpa, test_library.get(), program.text, std.math.maxInt(usize));
+    const second = try measure(gpa, test_library.get(), program.text, Work.cap);
     try testing.expectEqual(first.took, second.took);
 }
 
@@ -729,25 +824,25 @@ pub const Observed = struct {
     /// was stopped.
     reports: []const ?Code,
     work: Work,
-    /// Whether the check was ended `Work.room` past its bound, so what the
-    /// compiler says of the program is not known.
+    /// Whether a check was ended at `Work.cap`, so what the compiler says of
+    /// the program is not known.
     stopped: bool,
 };
 
-/// Checks the program of `shape` and the two programs its bound is taken
-/// from. Allocates from `gpa` and frees nothing it returns.
+/// Checks `program` and its reference. Allocates from `gpa` and frees
+/// nothing it returns.
 pub fn observe(
     gpa: std.mem.Allocator,
-    library: ?*const loader.CheckedLibrary,
+    library: *const loader.CheckedLibrary,
     program: Program,
 ) !Observed {
-    const unbounded = std.math.maxInt(usize);
-    const plain_work = try measure(gpa, library, try writePlain(gpa, program.shape), unbounded);
-    const half_work = try measure(gpa, library, try writeHalf(gpa, program.shape), unbounded);
-    var work: Work = .{ .plain = plain_work.took, .half = half_work.took, .whole = 0 };
-    const whole = try measure(gpa, library, program.text, work.bound() + Work.room);
-    work.whole = whole.took;
-    return .{ .reports = whole.reports, .work = work, .stopped = whole.stopped };
+    const reference = try measure(gpa, library, (try writeForm(gpa, program.shape, .reference)).text, Work.cap);
+    const whole = try measure(gpa, library, program.text, Work.cap);
+    return .{
+        .reports = whole.reports,
+        .work = .{ .reference = reference.took, .whole = whole.took },
+        .stopped = reference.stopped or whole.stopped,
+    };
 }
 
 /// A defect a generated program shows in the compiler, recorded so the walk
@@ -755,106 +850,67 @@ pub fn observe(
 ///
 /// A finding records everything the compiler says of the programs it covers.
 /// A program that says anything else, one more report or one under another
-/// rule, fails as a program with no finding does.
+/// rule, fails as a program with no finding does, and so does one whose
+/// check is over its bound.
 pub const Finding = struct {
     /// A seed whose program shows it.
     seed: u64,
-    covers: Covers,
-    /// The rule of each error the compiler reports, in order.
+    limit: Limit,
+    positions: []const Position,
+    /// The rule of each error the compiler reports of the program one past
+    /// the limit, in order.
     reports: []const Code,
-    /// Whether the check takes more work than its bound.
-    over: bool = false,
     /// What the language requires of the program.
     requires: []const u8,
 
-    pub const Covers = union(enum) {
-        limit: struct { limit: Limit, past: bool, positions: []const Position },
-        /// A doubling chain with a planted mistake, at these depths.
-        mistaken: []const u32,
-    };
-
     pub fn covering(self: Finding, shape: Shape) bool {
-        switch (self.covers) {
-            .limit => |c| {
-                if (shape != .limit) return false;
-                const l = shape.limit;
-                if (l.limit != c.limit or l.past != c.past) return false;
-                return std.mem.indexOfScalar(Position, c.positions, l.position) != null;
-            },
-            .mistaken => |depths| {
-                if (shape != .shared or !shape.shared.mistaken) return false;
-                return std.mem.indexOfScalar(u32, depths, shape.shared.depth) != null;
-            },
-        }
+        if (shape != .limit) return false;
+        const l = shape.limit;
+        if (l.limit != self.limit or !l.past) return false;
+        return std.mem.indexOfScalar(Position, self.positions, l.position) != null;
     }
 };
 
 pub const known_findings = [_]Finding{
     .{
-        .seed = 2,
-        .covers = .{ .limit = .{
-            .limit = .answer_links,
-            .past = true,
-            .positions = &.{ .implementation_argument, .derive_argument, .implementation_head },
-        } },
+        .seed = 3,
+        .limit = .answer_links,
+        .positions = &.{ .implementation_argument, .derive_argument, .implementation_head },
         .reports = &.{},
         .requires = "[T-AnswerDepth] refuses a chain of 1001 aliases wherever its last alias is written, " ++
             "as it does in a `let`, a parameter, a field and a payload",
     },
     .{
         .seed = 11,
-        .covers = .{ .limit = .{
-            .limit = .tree_height,
-            .past = true,
-            .positions = &.{ .let_annotation, .parameter, .field, .payload, .implementation_argument, .implementation_head },
-        } },
+        .limit = .tree_height,
+        .positions = &.{ .let_annotation, .parameter, .field, .payload, .implementation_argument, .implementation_head },
         .reports = &.{ .s_nesting, .t_bound },
         .requires = "[S-Nesting] is the only report of a type nested 1001 levels: what stands past the limit " ++
             "is stepped over, so the `Option` at the cut is not reported as given no argument",
     },
     .{
         .seed = 217,
-        .covers = .{ .limit = .{ .limit = .tree_height, .past = true, .positions = &.{.derive_argument} } },
+        .limit = .tree_height,
+        .positions = &.{.derive_argument},
         .reports = &.{ .s_nesting, .t_derive },
         .requires = "[S-Nesting] is the only report of a type nested 1001 levels: a derive naming the type " ++
             "does not also say that no variant wraps it",
     },
     .{
-        .seed = 61,
-        .covers = .{ .limit = .{ .limit = .tuple_components, .past = true, .positions = &.{.derive_argument} } },
-        .reports = &.{ .s_tuple, .s_tuple, .s_tuple },
-        .requires = "a tuple of nine components written twice, as a derive's argument and as the payload " ++
-            "the derive finds, earns two reports under [S-Tuple]",
-    },
-    .{
-        .seed = 81,
-        .covers = .{ .limit = .{ .limit = .array_length, .past = true, .positions = &.{.derive_argument} } },
-        .reports = &.{ .t_array_size, .t_array_size, .t_array_size },
-        .requires = "an array type one element too long written twice, as a derive's argument and as the " ++
-            "payload the derive finds, earns two reports under [T-ArraySize]",
-    },
-    .{
-        .seed = 8,
-        .covers = .{ .limit = .{ .limit = .raw_literal_hashes, .past = true, .positions = &.{.value} } },
+        .seed = 65,
+        .limit = .raw_literal_hashes,
+        .positions = &.{.value},
         .reports = &.{ .s_string, .t_mismatch },
         .requires = "[S-String] is the only report of a raw literal opened with nine `#`: the binding it " ++
             "initialises and the function around it are not reported as a consequence",
     },
     .{
-        .seed = 54,
-        .covers = .{ .limit = .{ .limit = .interpolation_depth, .past = true, .positions = &.{.value} } },
+        .seed = 8,
+        .limit = .interpolation_depth,
+        .positions = &.{.value},
         .reports = &.{ .s_string, .s_string, .s_entry, .t_mismatch },
         .requires = "[S-String] reports a literal that opens a seventeenth interpolation once, and the rest " ++
             "of the file is read as it is without it",
-    },
-    .{
-        .seed = 32,
-        .covers = .{ .mistaken = &.{ 16, 18 } },
-        .reports = &.{.t_mismatch},
-        .over = true,
-        .requires = "a `UInt8` given where a doubling alias chain's type is wanted is refused under " ++
-            "[T-Mismatch] with work that grows with the chain's declarations, not with the names the " ++
-            "type spells out",
     },
 };
 
@@ -903,7 +959,7 @@ fn statedReports(gpa: std.mem.Allocator, expectation: Expectation) ![]const Code
     };
 }
 
-fn describe(gpa: std.mem.Allocator, reports: anytype, over: bool, work: ?Work) ![]const u8 {
+fn describe(gpa: std.mem.Allocator, reports: anytype, work: ?Work) ![]const u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     const w = &out.writer;
     if (reports.len == 0) try w.writeAll("accepted");
@@ -911,14 +967,15 @@ fn describe(gpa: std.mem.Allocator, reports: anytype, over: bool, work: ?Work) !
         const code: ?Code = report;
         try w.print("{s}[{s}]", .{ if (i == 0) "refused: " else ", ", if (code) |c| c.ruleName() else "no rule" });
     }
-    try w.print("; {s} the bound on its work", .{if (over) "over" else "within"});
     if (work) |measured| {
-        try w.print(" (adds {d} bytes to {d}, {d} at half its size, bound {d})", .{
-            measured.whole -| measured.plain,
-            measured.plain,
-            measured.half -| measured.plain,
-            measured.bound() - measured.plain,
+        try w.print("; {s} the bound on its work ({d} bytes, {d} for its reference, {d} allowed above it)", .{
+            if (measured.over()) "over" else "within",
+            measured.whole,
+            measured.reference,
+            measured.allowance(),
         });
+    } else {
+        try w.writeAll("; within the bound on its work");
     }
     return out.written();
 }
@@ -929,28 +986,29 @@ fn describe(gpa: std.mem.Allocator, reports: anytype, over: bool, work: ?Work) !
 pub fn judge(gpa: std.mem.Allocator, program: Program, observed: Observed) !?Disagreement {
     const stated = try statedReports(gpa, program.expectation);
     const said = if (observed.stopped)
-        try std.fmt.allocPrint(gpa, "stopped {d} bytes past the bound on its work, before it answered", .{Work.room})
+        try std.fmt.allocPrint(gpa, "stopped after {d} bytes of allocation work, before it answered", .{Work.cap})
     else
-        try describe(gpa, observed.reports, observed.work.over(), observed.work);
-    const as_stated = !observed.stopped and !observed.work.over() and sameReports(observed.reports, stated);
+        try describe(gpa, observed.reports, observed.work);
+    const within = !observed.stopped and !observed.work.over();
+    const as_stated = within and sameReports(observed.reports, stated);
 
     const finding = findingOf(program.shape) orelse {
         if (as_stated) return null;
         return .{
             .what = "a hostile program is not answered as it states",
-            .expected = try std.fmt.allocPrint(gpa, "{s}\n{s}", .{ try describe(gpa, stated, false, null), excerpt(program.text) }),
+            .expected = try std.fmt.allocPrint(gpa, "{s}\n{s}", .{ try describe(gpa, stated, null), excerpt(program.text) }),
             .actual = said,
         };
     };
     if (as_stated) return .{
         .what = "a recorded finding no longer reproduces, so its entry in `known_findings` is removed",
-        .expected = try std.fmt.allocPrint(gpa, "{s}\n{s}", .{ try describe(gpa, finding.reports, finding.over, null), finding.requires }),
+        .expected = try std.fmt.allocPrint(gpa, "{s}\n{s}", .{ try describe(gpa, finding.reports, null), finding.requires }),
         .actual = said,
     };
-    if (!observed.stopped and observed.work.over() == finding.over and sameReports(observed.reports, finding.reports)) return null;
+    if (within and sameReports(observed.reports, finding.reports)) return null;
     return .{
         .what = "a program with a recorded finding is answered another way",
-        .expected = try std.fmt.allocPrint(gpa, "{s}\n{s}", .{ try describe(gpa, finding.reports, finding.over, null), finding.requires }),
+        .expected = try std.fmt.allocPrint(gpa, "{s}\n{s}", .{ try describe(gpa, finding.reports, null), finding.requires }),
         .actual = said,
     };
 }
@@ -999,4 +1057,86 @@ test "slow: every hostile shape is answered as it states, or as a finding record
         }
     }
     try testing.expectEqual(@as(u32, 0), disagreed);
+}
+
+/// Declarations with nothing to do with any shape, in the three kinds a file
+/// mostly holds.
+fn writeFiller(w: *std.Io.Writer, count: u32) !void {
+    for (0..count) |i| {
+        switch (i % 3) {
+            0 => try w.print("fn _pad{d}(_x: UInt8) -> UInt8 {{\n    _x\n}}\n\n", .{i}),
+            1 => try w.print("struct _PadS{d} {{\n    _f: UInt8,\n}}\n\n", .{i}),
+            else => try w.print("alias _PadA{d} = UInt8\n\n", .{i}),
+        }
+    }
+}
+
+/// The shapes the filler test checks: each limit's accepted side in its
+/// first and last position, and the doubling chain at both ends of its
+/// depths in two positions, with and without its mistake.
+fn fillerSample(gpa: std.mem.Allocator) ![]const Shape {
+    var sample: std.ArrayList(Shape) = .empty;
+    for (std.enums.values(Limit)) |limit| {
+        var first: ?Shape.AtLimit = null;
+        var last: ?Shape.AtLimit = null;
+        for (cells) |cell| {
+            if (cell.limit != limit or cell.past) continue;
+            if (first == null) first = cell;
+            last = cell;
+        }
+        if (first) |cell| try sample.append(gpa, .{ .limit = cell });
+        if (last) |cell| {
+            if (!std.meta.eql(first, last)) try sample.append(gpa, .{ .limit = cell });
+        }
+    }
+    for ([_]u32{ shared_depths[0], shared_depths[shared_depths.len - 1] }) |depth| {
+        try sample.append(gpa, .{ .shared = .{ .depth = depth, .position = .field } });
+        try sample.append(gpa, .{ .shared = .{ .depth = depth, .position = .derive_argument } });
+    }
+    for (mistaken_depths) |depth| {
+        try sample.append(gpa, .{ .shared = .{ .depth = depth, .position = .parameter, .mistaken = true } });
+    }
+    return sample.items;
+}
+
+test "slow: a legal shape stays within its bound whatever is declared before it" {
+    try slow_tests.skipUnlessRun();
+    // A table that grows as a file is read is charged its whole new size when
+    // it grows, so the same shape costs a different amount after a different
+    // number of declarations. A shape's two programs differ by a few tokens,
+    // so both cross the same capacities and the difference stays what it is
+    // with nothing before them.
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const sample = try fillerSample(arena.allocator());
+
+    var per_program = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer per_program.deinit();
+    var over: u32 = 0;
+    for ([_]u32{ 0, 500, 1500, 4000, 8000 }) |fillers| {
+        var filler: std.Io.Writer.Allocating = .init(arena.allocator());
+        try writeFiller(&filler.writer, fillers);
+        for (sample) |shape| {
+            _ = per_program.reset(.retain_capacity);
+            const scratch = per_program.allocator();
+            var took: [2]usize = undefined;
+            for ([_]Form{ .reference, .whole }, 0..) |form, i| {
+                const text = try std.mem.concat(scratch, u8, &.{ filler.written(), (try writeForm(scratch, shape, form)).text });
+                const measured = try measure(scratch, test_library.get(), text, Work.cap);
+                try testing.expect(!measured.stopped);
+                took[i] = measured.took;
+            }
+            const work: Work = .{ .reference = took[0], .whole = took[1] };
+            if (work.over()) {
+                over += 1;
+                std.debug.print("after {d} filler declaration(s), {f}: {d} bytes, {d} for its reference\n", .{
+                    fillers,
+                    shape,
+                    work.whole,
+                    work.reference,
+                });
+            }
+        }
+    }
+    try testing.expectEqual(@as(u32, 0), over);
 }

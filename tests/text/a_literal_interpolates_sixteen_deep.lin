@@ -1,0 +1,6 @@
+// A literal inside an interpolation may interpolate in turn, with sixteen
+// interpolations open at once.
+fn main() -> UInt8 {
+    let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
+    0
+}

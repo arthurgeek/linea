@@ -1,0 +1,5 @@
+// A literal that opens a seventeenth interpolation inside sixteen is refused.
+fn main() -> UInt8 {
+    let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
+    0
+}

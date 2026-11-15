@@ -8441,6 +8441,9 @@ const GeneratedSettings = struct {
     library: *const loader.CheckedLibrary,
     cache: *const OutcomeCache,
     env: Env,
+    /// Whether each seed's hostile program is checked beside its generated
+    /// one. A test of how seeds are scheduled leaves it out.
+    hostile: bool = true,
 };
 
 fn checkGeneratedProgram(
@@ -8677,8 +8680,10 @@ fn checkGeneratedProgram(
         };
     }
 
-    try checkHostileProgram(scratch, &failures, settings.library, at_seed);
-    result.hostile = true;
+    if (settings.hostile) {
+        try checkHostileProgram(scratch, &failures, settings.library, at_seed);
+        result.hostile = true;
+    }
 
     result.failures = try retainFailures(keep, failures.items);
     result.diagnostics = try keep.dupe(u8, diagnostics.written());
@@ -10209,8 +10214,7 @@ fn expectFailuresEqual(expected: []const Failure, actual: []const Failure) !void
     }
 }
 
-test "slow: generated workers preserve serial results" {
-    try slow_tests.skipUnlessRun();
+test "generated workers preserve serial results" {
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const root = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -10219,7 +10223,7 @@ test "slow: generated workers preserve serial results" {
     defer testing.allocator.free(runtime);
     const cache = try OutcomeCache.init(testing.allocator, testing.io, null, root, runtime, null);
     defer testing.allocator.free(cache.dir);
-    const settings: GeneratedSettings = .{ .library = test_library.get(), .cache = &cache, .env = .{
+    const settings: GeneratedSettings = .{ .library = test_library.get(), .cache = &cache, .hostile = false, .env = .{
         .scratch = root,
         .runtime = runtime,
         .sanitize = null,

@@ -144,6 +144,31 @@ pub fn generate(gpa: std.mem.Allocator, bytes: []const u8, opts: Options) ![]con
     return g.program();
 }
 
+/// The fewest and the most bindings `typedBindings` writes. Four is one for
+/// each position a written type is moved to.
+const min_typed_bindings = 4;
+const max_typed_bindings = 6;
+
+/// A written type `typedBindings` annotates a binding with, and two values of
+/// it.
+const TypedBinding = struct {
+    written: []const u8,
+    one: []const u8,
+    other: []const u8,
+};
+
+const typed_bindings = [_]TypedBinding{
+    .{ .written = "[UInt8; 2]", .one = "[1, 2]", .other = "[3, 4]" },
+    .{ .written = "(UInt8, Bool)", .one = "(UInt8(1), true)", .other = "(UInt8(2), false)" },
+    .{ .written = "Option[UInt8]", .one = ".Some(1)", .other = ".None" },
+    .{ .written = "_Kept", .one = ".{ _part = 1 }", .other = ".{ _part = 2 }" },
+    .{ .written = "_Named", .one = "1", .other = "2" },
+    .{ .written = "_Boxed[UInt8]", .one = ".{ _item = 1 }", .other = ".{ _item = 2 }" },
+};
+
+/// The form of a typed binding's initialiser. None is a constant expression.
+const TypedForm = enum { conditional, match, block };
+
 /// A generated interpolation chooses each value's spec from this table. Every
 /// spec is valid on a `UInt8`, and each entry records the format it parses to.
 pub const interpolation_specs = [_]struct { text: []const u8, format: node.InterpolationFormat }{
@@ -890,6 +915,7 @@ const Gen = struct {
         }
 
         try self.tupleFunctions(&out.writer);
+        try self.typedBindings(&out.writer);
 
         try out.writer.writeAll("fn main() -> UInt8 ");
         self.scope.clear();
@@ -1434,6 +1460,46 @@ const Gen = struct {
                 returns[1].spelling(),
             });
         }
+    }
+
+    /// A function of annotated bindings, each of a written type and an
+    /// initialiser drawn from `typed_bindings` and `TypedForm`.
+    ///
+    /// Every other binding the generator annotates is a `UInt8`, and most are
+    /// initialised by a literal, which makes them constants. These are what a
+    /// rewrite that moves a written type has to move: a type that is an
+    /// array, a tuple, an `Option`, a struct, an alias or a generic
+    /// application, on a `let` whose initialiser no constant expression has
+    /// the form of.
+    ///
+    /// The choices are read from the stream at a place of their own and
+    /// advance neither cursor, so no other axis changes phase.
+    fn typedBindings(self: *Gen, w: *std.Io.Writer) Error!void {
+        var own: Choices = .{ .bytes = self.choices.bytes, .at = self.choices.bytes.len / 3 };
+        try w.writeAll(
+            \\struct _Kept {
+            \\    _part: UInt8,
+            \\}
+            \\
+            \\struct _Boxed[T] {
+            \\    _item: T,
+            \\}
+            \\
+            \\alias _Named = UInt8
+            \\
+            \\fn _typed(_seen: Bool, _count: UInt8) -> UInt8 {
+            \\
+        );
+        for (0..own.between(min_typed_bindings, max_typed_bindings)) |i| {
+            const binding = typed_bindings[own.below(typed_bindings.len)];
+            try w.print("    let _typed{d}: {s} = ", .{ i, binding.written });
+            switch (@as(TypedForm, @enumFromInt(own.below(std.enums.values(TypedForm).len)))) {
+                .conditional => try w.print("if _seen {{\n        {s}\n    }} else {{\n        {s}\n    }}\n", .{ binding.one, binding.other }),
+                .match => try w.print("match _count {{\n        0 => {s},\n        _ => {s},\n    }}\n", .{ binding.one, binding.other }),
+                .block => try w.print("{{\n        {s}\n    }}\n", .{binding.one}),
+            }
+        }
+        try w.writeAll("    0\n}\n\n");
     }
 
     fn itemType(self: *Gen) ItemType {

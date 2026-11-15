@@ -123,9 +123,8 @@ the numeric types, which are values and not counts of what a program writes.
 
 The compiler and the generator read one table, so a wrong number in it would
 be accepted by both. The semantics document is the third statement of each
-limit, and a test writes the sentence that states each one from the table's
-number and fails when the document does not hold it. Stating the
-interpolation limit there was part of this change; the document had not.
+limit, and a test writes every sentence of it that states one from the
+table's number and fails when the document does not hold it.
 
 The generator switches over the table exhaustively. A limit added to it does
 not compile into the generator until it is given a shape, written at N and at
@@ -138,45 +137,93 @@ of an embedded file, which is a second file.
 Each is a property of every generated program, checked without a recorded
 answer.
 
-**(a) Work bound.** The check of a program adds allocation work that grows no
-faster than linearly in what the program writes. Work is the sum of the
-sizes a check asks its allocator for, counted above a fresh arena with growth
-in place refused; no clock is read. Three programs are checked: the shape,
-the same shape at half its size, and the shape's position with a plain
-`UInt8` in it. The plain program's work is everything the library and the
-position cost, so the differences are what the hostile thing adds. The shape
-may add three times what its half adds, where linear work adds twice and
-quadratic work four times, and above that an allowance of one sixty-fourth of
-the plain program's work.
+**(a) Work bound.** The check of a hostile program takes no more allocation
+work than the check of the same material arranged so that nothing in it is
+deep, shared or large, plus one part in 128. Work is the sum of the sizes a
+check asks its allocator for, counted above a fresh arena with growth in
+place refused; no clock is read, and two checks of one program in one build
+count the same.
 
-The allowance is what the count's own error needs. A check appends to tables
-that already hold the library, a table that grows is charged its whole new
-size, and which of the three programs crosses a capacity is an accident. The
-error is a few tenths of a percent of the plain work and grows with the
-library, so the allowance is a share of the plain work and not a number of
-bytes. It sets what the bound can see: added work under it is not held to the
-ratio. Measured with a cost planted in the compiler, a pass that spells out a
-doubling chain's name is fifty-nine times its bound at depth twenty, the
-shallowest generated; a pass that allocates thirty-two bytes for each
-enclosing level at each level of a type nested a thousand deep, sixteen
-megabytes, is over its bound, and one that allocates four bytes, two
-megabytes, is not. A check that passes its bound runs on, so its reports are still
-compared, and is stopped a gibibyte later.
+Each shape has a reference program in the same position:
 
-The count is the same for two checks of one program in one build. It is not
-claimed to be the same number across builds or targets, and nothing compares
-it against a recorded number.
+- a chain of declared answers, a nested type and a doubling chain are written
+  as two of half the length, over the same number of aliases or of written
+  levels;
+- an array's length, a type's bytes, a format's count and a raw literal's `#`
+  are a number or a run inside one token, and the reference writes a small
+  one;
+- a tuple's components and an interpolation's depth are too few to regroup,
+  and the reference writes the fewest.
+
+The two programs are a few tokens apart. A check appends to tables that hold
+everything read so far, and a table that grows is charged its whole new size,
+so the cost of one program depends on what was declared before it; the tables
+that grow as a file is read reach the same capacity in both programs, and the
+difference does not. With nothing before them the largest difference of a
+legal shape is 56 KB against a reference of 95 MB, 0.06%. After 500, 1500,
+4000 and 8000 unrelated declarations, over 22 shapes, the largest is 208 KB,
+0.17%, which is one table that one program grew and the other did not. The
+allowance is 0.78%, a share because that residue is a share of what the
+check holds. A test keeps the 22 shapes within it at each of those sizes.
+
+Every check, a reference's as well, is stopped at one gibibyte of work, and
+a stopped check fails its shape. The number is four times what the largest
+library measured costs a check that writes nothing.
+
+What the bound holds a check to, measured with a cost planted in the
+compiler and removed again:
+
+- At each level of a type nested a thousand deep, an allocation for each
+  enclosing level: two bytes a pair, half a megabyte more than the reference,
+  passes; four bytes, one megabyte against 0.74 allowed, fails; thirty-two
+  bytes fails ten times over.
+- A walk that visits every name of a doubling chain, eight bytes a name:
+  34 MB over its reference at depth twenty, the shallowest generated, where
+  0.73 MB is allowed.
+- One byte for each element of an array type: every array-length and
+  type-bytes cell is stopped at the gibibyte and fails.
+
+What it does not hold a check to:
+
+- Work in proportion to the material, whatever the amount. A pass that wastes
+  a kilobyte for every alias, level or token costs the reference the same and
+  passes.
+- Work that is superlinear in how many declarations a file holds and not in
+  how deep one of them is. Both programs hold the same number; the sweep's
+  dimensions are the check for width.
+- A superlinear term smaller than the allowance. A cost `c·n^k` in the depth
+  `n` costs the reference `2·c·(n/2)^k`, so it fails once
+  `c·n^k·(1 − 2^(1−k))` passes the allowance: a quadratic cost once it passes
+  twice the allowance, about 1.5 MB at these sizes, and a cost of exponent
+  1.58 once it passes three times. Every exponent above one fails at some
+  cost, and none fails below about a megabyte.
+- The same for a chain of a thousand links is computed and not measured: no
+  cost I planted in the settling of declared answers ran once per link of a
+  plain alias chain.
+
+The count is not claimed to be the same number across builds or targets, and
+nothing compares it against a recorded number.
 
 **(b) Rewrite invariance.** The rewrites of 0026 and 0134 hold a program to
 the same answer under changes that cannot alter its meaning. Moving a written
 type between positions is one of them. For a hostile shape the generator
 writes the type in each position and states one expectation. For every other
-program a rewrite moves a binding's annotation to the parameter and result of
-a function the initialiser passes through; the rewritten program must be
-accepted, build, and answer alike. It applies to a binding that is not a
-constant, a `var` or a `let` whose initialiser no constant expression has the
-form of, because a call is not a constant expression and a constant may be
-read as an array length, a pattern's bound or a default.
+program four rewrites move a binding's annotation: to the parameter and
+result of a function the initialiser passes through, to the field of a struct
+it is wrapped in and read out of, to the payload of an enum it is wrapped in
+and matched out of, and to an alias the annotation then names. Each is its
+own rewrite with its own floor, and each takes a different binding where a
+program has several. The rewritten program must be accepted, build, and
+answer alike. The first three pass the initialiser through an expression that
+is no constant expression, so they apply to a binding that is not a constant:
+a `var`, or a `let` whose initialiser no constant expression has the form of.
+A constant may be read as an array length, a pattern's bound or a default.
+The types moved own what they hold: scalars, arrays, tuples, `Option`, and
+the file's own structs and aliases of those. A type that borrows, a linear
+struct and an enum are left alone. The generator writes four to six such
+bindings in every program, of an array, a tuple, an `Option`, a struct, an
+alias and a generic application, initialised by an `if`, a `match` or a
+block.
 
 **(c) One mistake, one report, and its fixes apply.** A program with one
 planted mistake earns exactly the reports its statement counts, all under its
@@ -212,7 +259,8 @@ more report, or one under another rule, fails as it does for a program with no
 finding. When the program is answered as it states, the finding fails as no
 longer reproducing and its entry is removed with the fix. The walk is green
 while a recorded defect stands, and red for a new defect, a recorded one that
-changed, and a recorded one that was fixed.
+changed, and a recorded one that was fixed. A check over its work bound is
+never recorded; it fails.
 
 ### What this does not cover
 
@@ -232,11 +280,6 @@ large enough to show it.
 **Pure computation with no allocation.** The bound counts allocation. A loop
 that is exponential in time and allocates nothing passes it; the sweep's
 timed dimensions and the per-case timeout remain the checks for that.
-
-**Superlinear work under the allowance.** A quadratic pass whose cost at a
-limit is under a sixty-fourth of the plain program's work passes the bound.
-The sweep's dimensions, which grow a shape until its slope shows, remain the
-check for a small constant.
 
 ### Order
 
@@ -261,15 +304,13 @@ Each line is its own change, with the generator parts it needs.
 
 ## Consequences
 
-The generator found defects on the day it ran, and they are recorded in
-`known_findings` and not fixed here: a chain of 1001 aliases accepted in an
-`impl`'s trait argument, in a derive argument and inside an `impl`'s head; a
-type nested past the limit reported and then reported again as a consequence;
-a nine-component tuple and an over-long array written twice, in a derive and
-its payload, and reported three times; a raw literal opened with nine `#` and
-a literal that interpolates seventeen deep each followed by reports of the
-code around them; and a mismatch against a doubling chain whose work doubles
-with each alias.
+The generator found defects on the day it ran, and those still standing are
+recorded in `known_findings` and not fixed here: a chain of 1001 aliases
+accepted in an `impl`'s trait argument, in a derive argument and inside an
+`impl`'s head; a type nested past the limit reported and then reported again
+as a consequence; and a raw literal opened with nine `#` and a literal that
+interpolates seventeen deep, each followed by reports of the code around
+them.
 
 `not_yet_generated` holds 127 of the 151 rules. That is the measure of how
 little of the language's refusals a generated program reaches, written where a
@@ -277,15 +318,15 @@ build fails if it is wrong. It is a list of work, grouped by what reaching
 each group takes.
 
 Every seed now checks the well-typed program and a hostile one. A hostile
-program is checked, not built or run, and its bound takes two more checks, so
-the walk grows by three checks per seed.
+program is checked, not built or run, and its bound takes one more check, so
+the walk grows by two checks per seed.
 
-The bound is relative on both sides, a ratio against the half size and an
-allowance against the plain program, so it holds no number that was right
-for one library. The cost is sensitivity: it sees work that is a visible
-share of a check, not a small superlinear term.
+The bound compares two programs checked beside the same library, so it holds
+no number that was right for one library. What it gives up for that is
+stated under oracle (a): it sees the cost of an arrangement and not the cost
+of an amount.
 
-The eight positions are written by hand. A position the language adds is not
+The nine positions are written by hand. A position the language adds is not
 generated until it is added to `Position`.
 
 A limit's count is a number in the table, and the words of a diagnostic that
