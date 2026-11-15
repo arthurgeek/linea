@@ -1,5 +1,5 @@
 error[T-AnswerDepth]: `A0` starts a chain of declared answers longer than 1000 links
- --> tests/derive_from/a_source_behind_too_long_a_chain_is_refused.lin:4:12
+ --> tests/derive_from/a_source_behind_too_long_a_chain_is_refused.lin:5:12
   |
-4 | alias A0 = A1
+5 | alias A0 = A1
   |            ^^ write a type directly in one of the declarations along the chain

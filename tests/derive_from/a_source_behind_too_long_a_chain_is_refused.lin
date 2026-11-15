@@ -1,6 +1,7 @@
 // [T-AnswerDepth]. The derive's source is named through 1001 aliases, one link
-// more than a chain of declared answers may pass through. The chain is refused
-// where the derive names it, as it is anywhere else a type is written.
+// more than a chain of declared answers may pass through. A derive's argument
+// counts the chain as any other written type does, and the alias that starts
+// it is refused.
 alias A0 = A1
 alias A1 = A2
 alias A2 = A3
