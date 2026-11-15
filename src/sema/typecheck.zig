@@ -27143,8 +27143,7 @@ const Checker = struct {
         const declaration = self.declaringType(result) orelse return null;
         if (self.ast.declTag(declaration) != .enum_) return null;
         const spelling = self.ast.tokenText(self.ast.exprMain(id));
-        // Out of memory for the index, the variants are scanned instead.
-        const ordinal = (self.variantNamed(result, spelling) catch self.builder.variantIndexOf(result, spelling)) orelse {
+        const ordinal = (try self.variantNamed(result, spelling)) orelse {
             if (!report_missing) return null;
             _ = try self.report(.n_variant, id, "`{s}` is not a variant of `{s}`", .{ spelling, try self.typeName(result) }, "not a variant of the expected constructor result");
             return .{ .declaration = declaration, .result = .poison, .ordinal = 0, .qualified = false };

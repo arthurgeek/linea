@@ -1163,12 +1163,21 @@ fn checkTreeIsTidy(b: *std.Build, tree: Tree, failed: *bool) void {
         }
     };
 
-    // A report whose failure is discarded.
+    // An error a pass hands to no one.
     //
-    // A call a pass reports through fails only when an allocation is
-    // refused. Discarding that failure loses the report, and a program whose
-    // one error was lost checks clean.
+    // Inside a pass an error is a refused allocation, and one that is
+    // discarded can lose a report, so a program whose one error was lost
+    // checks clean. Every discard in a pass file is refused unless
+    // `discards_allowed` names it with a reason.
+    if (std.mem.eql(u8, tree.dir, "src")) for (source.unexplainedDiscards(b.allocator, files, &source.discards_allowed)) |discard| {
+        std.debug.print("discarded failure: src/{s}\n", .{discard});
+        failed.* = true;
+    };
+
+    // Outside the passes, where an error is often the answer to a question
+    // put to the file system, only a report whose failure is discarded.
     for (files) |f| {
+        if (std.mem.eql(u8, tree.dir, "src") and source.isPassFile(f.path)) continue;
         if (std.mem.indexOf(u8, f.text, "catch") == null) continue;
         for (source.swallowedReports(b.allocator, f)) |swallow| {
             std.debug.print("swallowed report: {s}/{s}, {s}\n", .{ tree.dir, f.path, swallow });

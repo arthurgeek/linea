@@ -590,6 +590,263 @@ pub fn swallowedReports(gpa: std.mem.Allocator, file: SourceFile) []const []cons
     return found.toOwnedSlice(gpa) catch @panic("OOM");
 }
 
+/// The directories of `src/` that hold a pass, a representation or the
+/// diagnostics. An error inside one is a refused allocation, so discarding
+/// one is the exception there, and each exception is named.
+const pass_directories = [_][]const u8{ "lexer/", "parser/", "syntax/", "sema/", "ownership/", "mir/", "diagnostics/", "backend/" };
+
+/// Whether `path`, relative to `src/`, is a file of a pass.
+pub fn isPassFile(path: []const u8) bool {
+    for (pass_directories) |directory| if (std.mem.startsWith(u8, path, directory)) return true;
+    return false;
+}
+
+/// One place a pass file may discard an error or call it impossible.
+pub const DiscardAllowed = struct {
+    /// The file, relative to `src/`.
+    path: []const u8,
+    /// The function the `catch` is written in.
+    function: []const u8,
+    /// The call before `catch` as it is written, receiver included, or
+    /// `else` for an `else |…|` branch.
+    callee: []const u8,
+    /// Why no report or answer is lost.
+    reason: []const u8,
+};
+
+/// A `catch` or `else |…|` in a pass file that does not hand the error on.
+pub const Discard = struct {
+    line: usize,
+    function: []const u8,
+    callee: []const u8,
+    /// What is written in the error's place.
+    form: []const u8,
+};
+
+/// Every place a file leaves an error unhanded-on outside its `test`
+/// blocks, in the order written:
+///
+/// - `catch {}` and any other `catch { … }` whose block has no
+///   `return error.…`;
+/// - `catch return`, `catch break` and `catch continue` with no error value;
+/// - `catch` followed by a value;
+/// - `catch unreachable`, which is undefined behaviour in a ReleaseFast
+///   build where the call can fail;
+/// - `catch |e| …` and `else |e| …` whose body returns neither `e` nor an
+///   `error.…` value.
+///
+/// `catch return error.…`, `catch @panic(…)` and a capture whose body returns
+/// the error hand it on and are not listed. Nothing is decided by the name
+/// of what is called: the tokens do not say what a call returns, so every
+/// discard is listed and the caller says which are explained.
+///
+/// One pass over the tokens, each `catch` matched back to its call through
+/// that call's own parentheses and forward to the end of what follows it.
+pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Discard {
+    const z = gpa.dupeZ(u8, file.text) catch @panic("OOM");
+    var tree = std.zig.Ast.parse(gpa, z, .zig) catch @panic("OOM");
+    defer tree.deinit(gpa);
+
+    const tags = tree.tokens.items(.tag);
+    // The opener each closer closes and the closer each opener reaches.
+    const partner = gpa.alloc(u32, tags.len) catch @panic("OOM");
+    @memset(partner, 0);
+    var open: std.ArrayList(u32) = .empty;
+    for (tags, 0..) |tag, i| switch (tag) {
+        .l_paren, .l_brace, .l_bracket => open.append(gpa, @intCast(i)) catch @panic("OOM"),
+        .r_paren, .r_brace, .r_bracket => if (open.pop()) |opener| {
+            partner[i] = opener;
+            partner[opener] = @intCast(i);
+        },
+        else => {},
+    };
+
+    // The function each token is written in, and whether it is in a test.
+    const Enclosing = struct { first: u32, last: u32, name: []const u8, is_test: bool };
+    var enclosing: std.ArrayList(Enclosing) = .empty;
+    for (tree.nodes.items(.tag), 0..) |tag, i| {
+        if (tag != .fn_decl and tag != .test_decl) continue;
+        const at: std.zig.Ast.Node.Index = @enumFromInt(i);
+        const first = tree.firstToken(at);
+        var name: []const u8 = "test";
+        if (tag == .fn_decl) {
+            var token = first;
+            while (tags[token] != .keyword_fn) token += 1;
+            name = if (tags[token + 1] == .identifier) tree.tokenSlice(token + 1) else "fn";
+        }
+        enclosing.append(gpa, .{ .first = first, .last = tree.lastToken(at), .name = name, .is_test = tag == .test_decl }) catch @panic("OOM");
+    }
+
+    var found: std.ArrayList(Discard) = .empty;
+    for (tags, 0..) |tag, at| {
+        const i: u32 = @intCast(at);
+        const is_catch = tag == .keyword_catch;
+        const is_else = tag == .keyword_else and i + 1 < tags.len and tags[i + 1] == .pipe;
+        if ((!is_catch and !is_else) or i + 1 >= tags.len) continue;
+
+        var function: []const u8 = "";
+        var innermost: u32 = 0;
+        var in_test = false;
+        for (enclosing.items) |e| {
+            if (i < e.first or i > e.last) continue;
+            if (e.is_test) in_test = true;
+            if (e.first >= innermost) {
+                innermost = e.first;
+                function = e.name;
+            }
+        }
+        if (in_test) continue;
+
+        const form: []const u8 = form: switch (tags[i + 1]) {
+            .pipe => {
+                // `|e|`, then what is done with it.
+                const name = if (tags[i + 2] == .identifier) tree.tokenSlice(i + 2) else "";
+                if (returnsTheError(&tree, partner, i + 4, name)) continue;
+                break :form if (is_else) "else |…| that does not return the error" else "catch |…| that does not return the error";
+            },
+            .keyword_unreachable => "catch unreachable",
+            .builtin => {
+                if (std.mem.eql(u8, tree.tokenSlice(i + 1), "@panic")) continue;
+                break :form "catch with a value";
+            },
+            .keyword_return => {
+                if (i + 2 < tags.len and tags[i + 2] == .keyword_error) continue;
+                break :form "catch return";
+            },
+            .keyword_break => "catch break",
+            .keyword_continue => "catch continue",
+            .l_brace => {
+                if (partner[i + 1] == i + 2) break :form "catch {}";
+                if (returnsTheError(&tree, partner, i + 1, "")) continue;
+                break :form "catch { … } that does not return an error";
+            },
+            else => "catch with a value",
+        };
+
+        var callee: []const u8 = if (is_else) "else" else "";
+        if (is_catch and i > 0) {
+            var last: u32 = i - 1;
+            if (tags[last] == .r_paren and partner[last] > 0) last = partner[last] - 1;
+            if (tags[last] == .identifier) {
+                var first = last;
+                while (first >= 2 and tags[first - 1] == .period and tags[first - 2] == .identifier) first -= 2;
+                callee = file.text[tree.tokenStart(first) .. tree.tokenStart(last) + tree.tokenSlice(last).len];
+            }
+        }
+        found.append(gpa, .{
+            .line = tree.tokenLocation(0, i).line + 1,
+            .function = function,
+            .callee = callee,
+            .form = form,
+        }) catch @panic("OOM");
+    }
+    return found.toOwnedSlice(gpa) catch @panic("OOM");
+}
+
+/// Whether what begins at `start` returns the error named `name`, or an
+/// `error.…` value: a block through its closing brace, or an expression
+/// through the `;` or `,` that ends it.
+fn returnsTheError(tree: *const std.zig.Ast, partner: []const u32, start: u32, name: []const u8) bool {
+    const tags = tree.tokens.items(.tag);
+    var end: u32 = start;
+    if (start < tags.len and tags[start] == .l_brace and partner[start] != 0) {
+        end = partner[start];
+    } else while (end < tags.len) : (end += 1) switch (tags[end]) {
+        .l_paren, .l_brace, .l_bracket => if (partner[end] != 0) {
+            end = partner[end];
+        },
+        .r_paren, .r_brace, .r_bracket, .semicolon, .comma => break,
+        else => {},
+    };
+    var i = start;
+    while (i < end and i + 1 < tags.len) : (i += 1) {
+        if (tags[i] != .keyword_return) continue;
+        if (tags[i + 1] == .keyword_error) return true;
+        if (name.len != 0 and tags[i + 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(i + 1), name)) return true;
+    }
+    return false;
+}
+
+/// What is wrong between the pass files and `allowed`: each discard no
+/// entry explains, and each entry that explains none, so the list holds
+/// exactly the exceptions the source makes.
+///
+/// **Bound:** each file's tokens once, and each discard against the entries
+/// for its file.
+pub fn unexplainedDiscards(gpa: std.mem.Allocator, files: []const SourceFile, allowed: []const DiscardAllowed) []const []const u8 {
+    var wrong: std.ArrayList([]const u8) = .empty;
+    const used = gpa.alloc(bool, allowed.len) catch @panic("OOM");
+    @memset(used, false);
+    for (files) |file| {
+        if (!isPassFile(file.path)) continue;
+        if (std.mem.indexOf(u8, file.text, "catch") == null and std.mem.indexOf(u8, file.text, "else |") == null) continue;
+        for (discardedFailures(gpa, file)) |discard| {
+            const explained = for (allowed, used) |entry, *was_used| {
+                if (!std.mem.eql(u8, entry.path, file.path) or !std.mem.eql(u8, entry.function, discard.function) or
+                    !std.mem.eql(u8, entry.callee, discard.callee)) continue;
+                was_used.* = true;
+                break true;
+            } else false;
+            if (explained) continue;
+            wrong.append(gpa, std.fmt.allocPrint(
+                gpa,
+                "{s}, line {d}: `{s}` after `{s}` in `{s}` hands the error to no one; propagate it, or name this place in `discards_allowed` with why nothing is lost",
+                .{ file.path, discard.line, discard.form, discard.callee, discard.function },
+            ) catch @panic("OOM")) catch @panic("OOM");
+        }
+    }
+    for (allowed, used) |entry, was_used| {
+        if (was_used) continue;
+        wrong.append(gpa, std.fmt.allocPrint(
+            gpa,
+            "{s}: `discards_allowed` names `{s}` in `{s}`, where no error is discarded",
+            .{ entry.path, entry.callee, entry.function },
+        ) catch @panic("OOM")) catch @panic("OOM");
+    }
+    return wrong.toOwnedSlice(gpa) catch @panic("OOM");
+}
+
+/// The places a pass file discards an error or calls it impossible, each
+/// with why nothing is lost there.
+pub const discards_allowed = [_]DiscardAllowed{
+    .{ .path = "backend/mlir.zig", .function = "", .callee = "std.fmt.parseInt", .reason = "evaluated at compile time, where a failure stops the build" },
+    .{ .path = "backend/mlir.zig", .function = "writeCanonicalNanAt", .callee = "std.fmt.bufPrint", .reason = "a tag of at most 23 bytes and one letter fit the 32-byte buffer" },
+    .{ .path = "backend/mlir.zig", .function = "emitForeignEntry", .callee = "std.fmt.bufPrint", .reason = "two letters and the digits of one index fit the 32-byte buffer" },
+    .{ .path = "backend/mlir.zig", .function = "call", .callee = "std.fmt.bufPrint", .reason = "three bytes and the digits of two 32-bit indexes fit the 32-byte buffer" },
+    .{ .path = "backend/mlir.zig", .function = "canonicalNan", .callee = "std.fmt.bufPrint", .reason = "two letters and the digits of a 32-bit index fit the 24-byte buffer" },
+    .{ .path = "mir/lower.zig", .function = "layOutOne", .callee = "std.unicode.utf8Encode", .reason = "the fill is a scalar the format specification already decoded, and four bytes hold any scalar" },
+    .{ .path = "mir/lower.zig", .function = "inherentHead", .callee = "instantiate_mod.inherentHead", .reason = "the recorded arguments are read through an empty error set" },
+    .{ .path = "ownership/check.zig", .function = "everyCutRefusesOrReports", .callee = "else", .reason = "a test helper that counts the refusals it induces and checks each is OutOfMemory" },
+    .{ .path = "sema/constants.zig", .function = "display", .callee = "self.writeDisplay", .reason = "the fixed buffer filling is how a long display is cut, and the cut text is what is returned" },
+    .{ .path = "sema/constfold.zig", .function = "literalValue", .callee = "std.fmt.parseInt", .reason = "a literal too wide to parse has no value, which is the answer" },
+    .{ .path = "sema/constfold.zig", .function = "negated", .callee = "else", .reason = "overflow of the negation leaves the constant without a value, which is the answer" },
+    .{ .path = "sema/constfold.zig", .function = "arithmetic", .callee = "std.math.add", .reason = "overflow leaves the constant without a value, which is the answer" },
+    .{ .path = "sema/constfold.zig", .function = "arithmetic", .callee = "std.math.sub", .reason = "overflow leaves the constant without a value, which is the answer" },
+    .{ .path = "sema/constfold.zig", .function = "arithmetic", .callee = "std.math.mul", .reason = "overflow leaves the constant without a value, which is the answer" },
+    .{ .path = "sema/constfold.zig", .function = "divided", .callee = "std.math.divTrunc", .reason = "division by zero or overflow leaves the constant without a value, which is the answer" },
+    .{ .path = "sema/constfold.zig", .function = "spelledTupleComponent", .callee = "std.fmt.parseInt", .reason = "a name whose suffix is no number is not a tuple's name, and the next is tried" },
+    .{ .path = "sema/reflection.zig", .function = "integerLiteral", .callee = "std.fmt.parseInt", .reason = "a literal too wide to parse is no index, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "eql", .callee = "self.lookup.sameArgs", .reason = "a hash context cannot return an error, so it is kept in `failure` and returned by the caller" },
+    .{ .path = "sema/resolve.zig", .function = "sameImplementation", .callee = "sameWrittenArgs", .reason = "the coherence reading has an empty error set" },
+    .{ .path = "sema/resolve.zig", .function = "reserve", .callee = "std.math.add", .reason = "an identifier space that overflows cannot be reserved, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "reserve", .callee = "std.math.mul", .reason = "an identifier space that overflows cannot be reserved, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "nextGeneratedFile", .callee = "std.math.add", .reason = "a file number that overflows leaves no next file, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "componentCount", .callee = "std.math.add", .reason = "a count that overflows is no count, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.fmt.parseInt", .reason = "an alias whose suffix is no number was not generated here, and the next is read" },
+    .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.math.add", .reason = "an origin that overflows is not representable, which the entry is then refused for" },
+    .{ .path = "sema/typecheck.zig", .function = "roundFloatLiteral", .callee = "std.fmt.parseFloat", .reason = "text that is no float rounds to nothing, which is the answer" },
+    .{ .path = "sema/typecheck.zig", .function = "hashArgs", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
+    .{ .path = "sema/typecheck.zig", .function = "hash", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
+    .{ .path = "sema/typecheck.zig", .function = "sameBoundArgs", .callee = "resolve_mod.sameBoundArgs", .reason = "reading settled tables has an empty error set" },
+    .{ .path = "sema/typecheck.zig", .function = "mentionsParameterAt", .callee = "search.visit", .reason = "the search is given no cache, and only caching allocates" },
+    .{ .path = "sema/types.zig", .function = "internInterpolation", .callee = "w.print", .reason = "a specification packed into 64 bits spells at most 21 bytes, which fit the 32-byte buffer" },
+    .{ .path = "sema/types.zig", .function = "arrayOf", .callee = "std.fmt.bufPrint", .reason = "three bytes and the digits of a 32-bit count fit the 16-byte buffer" },
+    .{ .path = "sema/types.zig", .function = "isGround", .callee = "ground", .reason = "the walk is given no memo, and only the memo allocates" },
+    .{ .path = "syntax/format_spec.zig", .function = "format", .callee = "std.unicode.utf8Encode", .reason = "the fill is a scalar the specification decoded, and four bytes hold any scalar" },
+    .{ .path = "syntax/format_spec.zig", .function = "scalarAt", .callee = "std.unicode.utf8ByteSequenceLength", .reason = "bytes that begin no scalar are no fill, which is the answer" },
+    .{ .path = "syntax/format_spec.zig", .function = "scalarAt", .callee = "std.unicode.utf8Decode", .reason = "bytes that decode to no scalar are no fill, which is the answer" },
+};
+
 fn nodeText(tree: *const std.zig.Ast, node: std.zig.Ast.Node.Index) []const u8 {
     const last = tree.lastToken(node);
     return tree.source[tree.tokenStart(tree.firstToken(node)) .. tree.tokenStart(last) + tree.tokenSlice(last).len];

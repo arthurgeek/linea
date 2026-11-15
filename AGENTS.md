@@ -694,13 +694,31 @@ APIs.
   written out where the restriction is intended, and no default on a public
   function's allocator parameter ([T-DefaultedAllocator]). Bodies, private
   helpers and programs keep the short form.
-- A report's failure is propagated, never discarded. A call a pass reports
-  through (a sink's `add…`, `addFix`, `noteRefused`, a `refused` table's `put`,
-  a helper named `report…` or `refuse…`, `record`, `typeName`) fails only when an
-  allocation is refused, and a `catch {}`, `catch return`, `catch break`,
-  `catch continue` or `catch` with a value after it loses the report, so the
-  program checks clean. `build.zig` refuses those forms in every source tree;
-  `catch |err|`, `catch unreachable` and `catch return error.…` keep the failure.
+- A pass hands every error on. Inside a pass an error is a refused
+  allocation, and one that is discarded can lose a report, so the program
+  checks clean. `build.zig` reads the pass directories of `src/` (`lexer`,
+  `parser`, `syntax`, `sema`, `ownership`, `mir`, `diagnostics`, `backend`)
+  and refuses, outside `test` blocks and whatever is called: `catch {}`;
+  `catch { … }` with no `return error.…`; `catch return`, `catch break` and
+  `catch continue` without an error value; `catch` with a value;
+  `catch unreachable`, which is undefined behaviour in a ReleaseFast build
+  where the call can fail; and `catch |e| …` or `else |e| …` whose body
+  returns neither `e` nor an `error.…` value. `try`, `catch |e| return e`,
+  `catch return error.…` and `catch @panic(…)` pass. A discard that loses
+  nothing, such as arithmetic overflow that is itself the answer or a call
+  whose error set is empty, is named in `discards_allowed`
+  (`build/source.zig`) by file, function and the call before `catch` (`else`
+  for an `else |…|`), with the reason; an entry that excuses nothing is
+  refused too. Elsewhere in `src/` and in `build/`, where an error is often
+  the answer to a question put to the file system, only a discard written
+  directly after a call a pass reports through is refused: `add` on a
+  receiver ending in `sink`, `put` on one ending in `refused`, `addError`,
+  `addErrorFmt`, `addNote`, `addFix`, `noteRefused`, `noteRefusedDemand`,
+  `record`, `sealedAt`, `explainShadowedHead`, `typeName`, `helpName`,
+  `poisonPattern`, `settlePatternAs`, any name beginning `report` or `refuse`,
+  and a `catch return` answered with `record` or `recordMismatch`; there
+  `catch |e|`, `catch unreachable`, `catch @panic` and `catch return error.…`
+  pass.
 - Branch names are semantic and describe the code, never a milestone or plan.
 - PR titles and commits use one semantic form, for example `feat(sema): ...`,
   `fix(mir): ...` or `refactor(support): ...`. A merge lands one squashed commit

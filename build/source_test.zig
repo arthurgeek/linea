@@ -4677,69 +4677,194 @@ test "only serve's own signature answers for its default" {
     try testing.expect(!servesConcurrentlyByDefault("x\npub fn listen_and_serve(policy: task.Policy = .Threads(128)) {\n}"));
 }
 
-test "a discarded failure of a report is refused, and a kept one is not" {
+test "each call a pass reports through is refused where its failure is discarded" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
+
+    // One statement for each name and each receiver rule, so dropping any
+    // one of them leaves its statement unrefused.
+    const swallowed = [_][]const u8{
+        "self.sink.add(d) catch {};",
+        "sink.addError(code, file, span, message, label) catch {};",
+        "self.sink.addErrorFmt(code, file, span, label, message, .{}) catch {};",
+        "sink.addNote(code, file, span, message, label) catch {};",
+        "self.addFix(at, kind, 0, edits) catch {};",
+        "self.noteRefused(at) catch {};",
+        "self.noteRefusedDemand(demand) catch {};",
+        "_ = self.record(id, .poison) catch .poison;",
+        "self.sealedAt(file, span, ty, what) catch {};",
+        "self.explainShadowedHead(id, before) catch {};",
+        "const name = self.typeName(t) catch return true;",
+        "const help = self.helpName(t, &missing) catch return true;",
+        "self.poisonPattern(pattern) catch {};",
+        "self.settlePatternAs(pattern, ty) catch {};",
+        "self.refused.put(self.gpa, id, {}) catch {};",
+        "self.reportAtToken(code, at, message, label, null) catch continue;",
+        "self.refuseArrayInference(ref, true) catch break;",
+        "const labels = gpa.alloc(Label, 2) catch return self.record(id, .poison);",
+        "const text = format(name) catch return self.recordMismatch(id);",
+    };
+    for (swallowed) |statement| {
+        const text = try std.fmt.allocPrint(gpa, "fn check(self: *Checker) void {{\n    {s}\n}}\n", .{statement});
+        const found = source.swallowedReports(gpa, .{ .path = "lsp/check.zig", .text = text });
+        testing.expectEqual(@as(usize, 1), found.len) catch |err| {
+            std.debug.print("not refused: {s}\n", .{statement});
+            return err;
+        };
+    }
 
     const kept =
         \\fn check(self: *Checker) !void {
         \\    try self.sink.add(.{ .severity = .err, .message = "no" });
         \\    self.sink.addErrorFmt(.t_bound, file, span, "label", "no", .{}) catch |err| return err;
         \\    const name = self.typeName(t) catch return error.OutOfMemory;
-        \\    const text = render(name) catch unreachable;
         \\    const value = parse(text) catch return null;
-        \\    self.seen.put(self.gpa, value, {}) catch @panic("OOM");
+        \\    self.seen.put(self.gpa, value, {}) catch {};
+        \\    self.names.add(name) catch {};
         \\    _ = self.report(.t_bound, id, "no", .{}, "label") catch @panic("OOM");
         \\}
         \\
     ;
-    try testing.expectEqual(@as(usize, 0), source.swallowedReports(gpa, .{ .path = "sema/typecheck.zig", .text = kept }).len);
+    try testing.expectEqual(@as(usize, 0), source.swallowedReports(gpa, .{ .path = "lsp/check.zig", .text = kept }).len);
+}
 
-    const swallowed =
-        \\fn check(self: *Checker) TypeId {
-        \\    self.sink.add(.{
-        \\        .severity = .err,
-        \\        .message = "no",
-        \\    }) catch {};
-        \\    self.sink.addErrorFmt(.t_bound, file, span, "label", "no", .{}) catch {};
-        \\    self.addFix(at, .where_clause, 0, edits) catch {};
-        \\    self.noteRefused(at) catch return .poison;
-        \\    self.refused.put(self.gpa, id, {}) catch {};
-        \\    const name = self.typeName(t) catch return true;
-        \\    const labels = self.gpa.alloc(Label, 2) catch return self.record(id, .poison);
-        \\    const text = format(name) catch return self.recordMismatch(id);
-        \\    for (items) |item| self.reportAtToken(.t_bound, item, "no", "label", null) catch continue;
-        \\    while (true) self.refuseArrayInference(ref, true) catch break;
-        \\    const reported = self.report(.t_bound, id, "no", .{}, "label") catch .poison;
-        \\    sealedAt(file, span, ty, "no") catch {};
-        \\    return reported;
+test "a pass file hands every error on, whatever is called" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // One statement for each form that leaves an error with no one, with
+    // what the gate calls it. None is told apart by the name of the call.
+    const Planted = struct { statement: []const u8, form: []const u8, callee: []const u8 };
+    const discards = [_]Planted{
+        .{ .statement = "self.emit(d) catch {};", .form = "catch {}", .callee = "self.emit" },
+        .{ .statement = "_ = self.errExpr(at) catch return;", .form = "catch return", .callee = "self.errExpr" },
+        .{ .statement = "self.checkExtern(d) catch {};", .form = "catch {}", .callee = "self.checkExtern" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => {} };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        .{ .statement = "(self.sink.addErrorFmt(code, file, span, label, message, .{})) catch {};", .form = "catch {}", .callee = "" },
+        .{ .statement = "if (self.sink.addErrorFmt(code, file, span, label, message, .{})) |_| {} else |_| {}", .form = "else |…| that does not return the error", .callee = "else" },
+        .{ .statement = "diagnostics.add(d) catch {};", .form = "catch {}", .callee = "diagnostics.add" },
+        .{ .statement = "made catch {};", .form = "catch {}", .callee = "made" },
+        .{ .statement = "for (items) |item| self.visit(item) catch continue;", .form = "catch continue", .callee = "self.visit" },
+        .{ .statement = "while (true) self.step() catch break;", .form = "catch break", .callee = "self.step" },
+        .{ .statement = "const count = self.count(d) catch 0;", .form = "catch with a value", .callee = "self.count" },
+        .{ .statement = "const found = self.find(d) catch null;", .form = "catch with a value", .callee = "self.find" },
+        .{ .statement = "const text = render(d) catch unreachable;", .form = "catch unreachable", .callee = "render" },
+        .{ .statement = "self.visit(d) catch { self.failed = true; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| { self.failure = err; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "if (self.find(d)) |found| use(found) else |err| log(err);", .form = "else |…| that does not return the error", .callee = "else" },
+    };
+    for (discards) |planted| {
+        const text = try std.fmt.allocPrint(gpa, "fn check(self: *Checker) void {{\n    {s}\n}}\n", .{planted.statement});
+        const found = source.discardedFailures(gpa, .{ .path = "sema/check.zig", .text = text });
+        errdefer std.debug.print("not refused as planted: {s}\n", .{planted.statement});
+        try testing.expectEqual(@as(usize, 1), found.len);
+        try testing.expectEqualStrings(planted.form, found[0].form);
+        try testing.expectEqualStrings(planted.callee, found[0].callee);
+        try testing.expectEqualStrings("check", found[0].function);
+        try testing.expectEqual(@as(usize, 2), found[0].line);
+    }
+
+    // Each of these hands the error on, or stops the process.
+    const kept = [_][]const u8{
+        "try self.emit(d);",
+        "self.emit(d) catch |err| return err;",
+        "self.emit(d) catch |err| { self.undo(); return err; };",
+        "self.emit(d) catch return error.OutOfMemory;",
+        "self.emit(d) catch { self.undo(); return error.OutOfMemory; };",
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return error.OutOfMemory, error.Refused => return };",
+        "self.emit(d) catch @panic(\"OOM\");",
+        "if (self.find(d)) |found| use(found) else |err| return err;",
+        "const found = self.find(d) orelse return;",
+    };
+    for (kept) |statement| {
+        const text = try std.fmt.allocPrint(gpa, "fn check(self: *Checker) !void {{\n    {s}\n}}\n", .{statement});
+        const found = source.discardedFailures(gpa, .{ .path = "sema/check.zig", .text = text });
+        errdefer std.debug.print("refused: {s}\n", .{statement});
+        try testing.expectEqual(@as(usize, 0), found.len);
+    }
+
+    // A test is not a pass: it may look at the error it provoked.
+    const in_a_test =
+        \\test "a refused allocation is reported" {
+        \\    sink.add(d) catch {};
+        \\}
+        \\
+        \\fn helper(sink: *Sink) void {
+        \\    sink.add(d) catch {};
         \\}
         \\
     ;
-    const found = source.swallowedReports(gpa, .{ .path = "sema/typecheck.zig", .text = swallowed });
-    try testing.expectEqual(@as(usize, 12), found.len);
-    try testing.expectEqualStrings("line 5: the error of `self.sink.add` is discarded, which loses the report when an allocation is refused", found[0]);
-    try testing.expectEqualStrings("line 6: the error of `self.sink.addErrorFmt` is discarded, which loses the report when an allocation is refused", found[1]);
-    try testing.expectEqualStrings("line 7: the error of `self.addFix` is discarded, which loses the report when an allocation is refused", found[2]);
-    try testing.expectEqualStrings("line 8: the error of `self.noteRefused` is discarded, which loses the report when an allocation is refused", found[3]);
-    try testing.expectEqualStrings("line 9: the error of `self.refused.put` is discarded, which loses the report when an allocation is refused", found[4]);
-    try testing.expectEqualStrings("line 10: the error of `self.typeName` is discarded, which loses the report when an allocation is refused", found[5]);
-    try testing.expectEqualStrings("line 11: a failure is answered with `record`, which records a report that was not made", found[6]);
-    try testing.expectEqualStrings("line 12: a failure is answered with `recordMismatch`, which records a report that was not made", found[7]);
-    try testing.expectEqualStrings("line 13: the error of `self.reportAtToken` is discarded, which loses the report when an allocation is refused", found[8]);
-    try testing.expectEqualStrings("line 14: the error of `self.refuseArrayInference` is discarded, which loses the report when an allocation is refused", found[9]);
-    try testing.expectEqualStrings("line 15: the error of `self.report` is discarded, which loses the report when an allocation is refused", found[10]);
-    try testing.expectEqualStrings("line 16: the error of `sealedAt` is discarded, which loses the report when an allocation is refused", found[11]);
+    const outside = source.discardedFailures(gpa, .{ .path = "diagnostics/sink.zig", .text = in_a_test });
+    try testing.expectEqual(@as(usize, 1), outside.len);
+    try testing.expectEqualStrings("helper", outside[0].function);
 
-    // A table that is not a refusal table and a list that is not a sink are
-    // not reports.
-    const other =
-        \\fn note(self: *Walk) void {
-        \\    self.seen.put(self.gpa, key, {}) catch {};
-        \\    self.names.add(name) catch {};
-        \\}
-        \\
-    ;
-    try testing.expectEqual(@as(usize, 0), source.swallowedReports(gpa, .{ .path = "lsp/walk.zig", .text = other }).len);
+    // Only a file of a pass is held to it.
+    try testing.expect(source.isPassFile("sema/typecheck.zig"));
+    try testing.expect(source.isPassFile("ownership/check.zig"));
+    try testing.expect(source.isPassFile("diagnostics/sink.zig"));
+    try testing.expect(!source.isPassFile("driver/loader.zig"));
+    try testing.expect(!source.isPassFile("lsp/server.zig"));
+    try testing.expect(!source.isPassFile("conformance_main.zig"));
+}
+
+test "a discard in a pass file is explained by exactly one named exception" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const files = [_]source.SourceFile{
+        .{ .path = "sema/fold.zig", .text = "fn add(a: u8, b: u8) ?u8 {\n    return std.math.add(u8, a, b) catch null;\n}\n" },
+        .{ .path = "driver/load.zig", .text = "fn read(path: []const u8) ?[]u8 {\n    return open(path) catch null;\n}\n" },
+    };
+    const explains: source.DiscardAllowed = .{ .path = "sema/fold.zig", .function = "add", .callee = "std.math.add", .reason = "overflow is the answer" };
+    try testing.expectEqual(@as(usize, 0), source.unexplainedDiscards(gpa, &files, &.{explains}).len);
+
+    // With no entry the discard is refused, and the file outside the passes
+    // is not read.
+    const unexplained = source.unexplainedDiscards(gpa, &files, &.{});
+    try testing.expectEqual(@as(usize, 1), unexplained.len);
+    try testing.expectEqualStrings(
+        "sema/fold.zig, line 2: `catch with a value` after `std.math.add` in `add` hands the error to no one; propagate it, or name this place in `discards_allowed` with why nothing is lost",
+        unexplained[0],
+    );
+
+    // An entry is for one file, one function and one call.
+    for ([_]source.DiscardAllowed{
+        .{ .path = "sema/other.zig", .function = "add", .callee = "std.math.add", .reason = "" },
+        .{ .path = "sema/fold.zig", .function = "sub", .callee = "std.math.add", .reason = "" },
+        .{ .path = "sema/fold.zig", .function = "add", .callee = "std.math.sub", .reason = "" },
+    }) |other| {
+        // The discard is unexplained, and the entry explains nothing.
+        try testing.expectEqual(@as(usize, 2), source.unexplainedDiscards(gpa, &files, &.{other}).len);
+    }
+
+    // An entry that explains nothing is refused, so the list never outlives
+    // the code it excuses.
+    const stale = source.unexplainedDiscards(gpa, &files, &.{ explains, .{ .path = "sema/fold.zig", .function = "gone", .callee = "std.math.add", .reason = "" } });
+    try testing.expectEqual(@as(usize, 1), stale.len);
+    try testing.expectEqualStrings("sema/fold.zig: `discards_allowed` names `std.math.add` in `gone`, where no error is discarded", stale[0]);
+}
+
+test "the passes discard no error but where an exception names it, and every exception is needed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const files = source.compilerSource(gpa, testing.io, std.Io.Dir.cwd(), "src");
+    const wrong = source.unexplainedDiscards(gpa, files, &source.discards_allowed);
+    for (wrong) |each| std.debug.print("{s}\n", .{each});
+    try testing.expectEqual(@as(usize, 0), wrong.len);
+
+    // Each entry gives a reason, and without any one of them the source it
+    // excuses is refused.
+    for (source.discards_allowed, 0..) |entry, skipped| {
+        try testing.expect(entry.reason.len != 0);
+        var rest: std.ArrayList(source.DiscardAllowed) = .empty;
+        for (source.discards_allowed, 0..) |other, at| {
+            if (at != skipped) try rest.append(gpa, other);
+        }
+        try testing.expect(source.unexplainedDiscards(gpa, files, rest.items).len != 0);
+    }
 }
