@@ -2865,7 +2865,11 @@ Every trait implementation parameter must be recoverable from injective
 structure in the receiver and requested trait arguments together. Nominal
 applications, array elements, observation referents and callable signature
 structure can determine parameters. An associated projection cannot be inverted
-to recover its subject, and bounds alone determine no parameter. An undetermined
+to recover its subject, and bounds alone determine no parameter. A settled
+type's name in the key is the type it is settled to, so a parameter written
+beside one is recovered as it is beside that type:
+`impl[T] Weighs[Two[T, Probe.Reading]] for Scale` recovers `T` from the first
+argument of `Two`. An undetermined
 implementation parameter is [T-Impl]. The canonical complete key supplies
 implementation arguments in binder declaration order to member checking,
 dispatch and instantiation.

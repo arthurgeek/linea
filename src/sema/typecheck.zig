@@ -1424,7 +1424,13 @@ fn typecheckInternal(
         i.args = try c.traitArgumentsOf(i.decl);
         try c.settleHead(i);
         c.deferring_selections = false;
-        if (c.skipped_selection) try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
+        // Whether the key recovers every parameter is asked of the key, so
+        // of one still to be read again it is asked then.
+        if (c.skipped_selection) {
+            try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
+        } else {
+            try c.requireRecoverableParameters(i);
+        }
         try c.settleImplementationPredicates(i);
     }
 
@@ -29598,7 +29604,11 @@ const Checker = struct {
             self.gpa.free(implementation.args);
             implementation.args = args;
             implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
+            try self.requireRecoverableParameters(implementation);
         }
+        // A selection made while these rows held unanswered arguments was
+        // made against keys that have now changed.
+        if (self.unsettled_heads.items.len != 0) self.builder.invalidateImplementationLookup();
     }
 
     /// Every declared part, every type an implementation settles, every
@@ -32135,8 +32145,8 @@ const Checker = struct {
         return out;
     }
 
-    /// Settle one complete implementation key and verify that structural
-    /// matching can recover every declared parameter without inverting a projection.
+    /// Reads what an implementation's head names, and holds a default
+    /// implementation to the one head it may write.
     fn settleHead(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
         const d = implementation.decl;
         implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
@@ -32151,6 +32161,19 @@ const Checker = struct {
                 try self.sink.addErrorFmt(.t_impl, self.ast.fileOfDecl(d), self.ast.writtenSpan(self.ast.declHead(d)), "use one parameter as the whole head of a zero-argument trait", "a default implementation requires one bare parameter head and a zero-argument trait", .{});
             }
         }
+    }
+
+    /// Verifies that structural matching can recover every parameter an
+    /// implementation declares from its head and trait arguments without
+    /// inverting a projection, and refuses the implementation otherwise.
+    ///
+    /// Asked once per implementation, when its head and trait arguments are
+    /// known: where they are first read, or, for one naming a settled type,
+    /// where they are read again. An argument still unanswered holds no
+    /// parameter, so asking earlier refuses `impl[T] Tr[Two[T, Probe.Reading]]`
+    /// for a `T` its key names.
+    fn requireRecoverableParameters(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
+        const d = implementation.decl;
         var parameters = try types_mod.ImplementationParameters.init(self.gpa, &self.builder, implementation.*);
         defer parameters.deinit(self.gpa);
         for (parameters.origins, 0..) |origin, at| {
