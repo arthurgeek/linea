@@ -10453,6 +10453,15 @@ const Resolver = struct {
         return declaring;
     }
 
+    /// Whether a written type holds, among its arguments at any depth, a
+    /// type the parser began and refused.
+    ///
+    /// **Bound:** the written type's own nodes, once each.
+    fn holdsARefusedType(self: *const Resolver, ref: node.TypeRef) bool {
+        for (self.program.ast.typeArgs(ref.args)) |argument| {
+            if (!argument.wasWritten() and !argument.isOmitted()) return true;
+            if (self.holdsARefusedType(argument)) return true;
+        }
         return false;
     }
 
@@ -10465,8 +10474,10 @@ const Resolver = struct {
         const ast = &self.program.ast;
         const head = ast.declHead(derive);
         // Reported where it was written, as an implementation's refused head
-        // is; it targets nothing, and nothing more is said about it.
-        if (headRefusedByTheParser(head)) return null;
+        // is; it targets nothing, and nothing more is said about it. A head
+        // holding a type the parser refused is the same: expanding it would
+        // write the refused text again and report it again.
+        if (headRefusedByTheParser(head) or self.holdsARefusedType(head)) return null;
         if (head.kind == .tuple) return self.tupleDecl(head);
         const binding = self.writtenBindingAt(ast.declName(derive));
         const not_a_declaration = "derive targets a concrete declaration, not a primitive or another kind of name";

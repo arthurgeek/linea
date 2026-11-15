@@ -10417,6 +10417,27 @@ const Checker = struct {
         return counted;
     }
 
+    /// Whether one of `named`, or a constant one of them is worked out from,
+    /// was refused where it is declared: its initialiser has no type. A
+    /// constant worked out from a refused one has no value only because of
+    /// it. `named` is extended with every constant reached.
+    ///
+    /// **Bound:** each constant reached is read once.
+    fn readsARefusedConstant(self: *Checker, named: *std.ArrayList(BindingId)) std.mem.Allocator.Error!bool {
+        var seen: std.AutoHashMapUnmanaged(BindingId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        var next: usize = 0;
+        while (next < named.items.len) : (next += 1) {
+            const constant = named.items[next];
+            if ((try seen.getOrPut(self.gpa, constant)).found_existing) continue;
+            const initializer = self.ast.declInit(self.res.declaredBy(constant));
+            if (initializer == ExprId.none) continue;
+            if (self.builder.exprType(initializer) == .poison) return true;
+            try self.constantDependenciesWithin(initializer, named, null);
+        }
+        return false;
+    }
+
     /// A length with no count, read before the constants were checked, and
     /// whether reading it then reported anything.
     const WaitingLength = struct { length: ExprId, reported: bool };
@@ -10466,10 +10487,7 @@ const Checker = struct {
         // typed as nothing is not taken as reported: a name read before what
         // it stands for is typed has no type and no report.
         if (reported_already or undeclared or self.sink.error_count != reported_before) return null;
-        for (named.items) |constant| {
-            const initializer = self.ast.declInit(self.res.declaredBy(constant));
-            if (initializer != ExprId.none and self.builder.exprType(initializer) == .poison) return null;
-        }
+        if (try self.readsARefusedConstant(&named)) return null;
 
         // The routine that folds a constant expression wherever one is read,
         // and not this pass's own table of what it has folded so far: which

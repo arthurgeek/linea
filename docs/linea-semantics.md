@@ -867,7 +867,9 @@ known type, so a use of it is not [N-Undefined], and a name used there counts
 as used, so it is not [N-Unused]. A refused written type is stepped over alone,
 whatever its form, so what encloses it still reads what follows it: an array
 its length, a parameter list its next parameter. An array length refused for
-its own depth is not reported again as no constant ([T-ArraySize]). A type whose arguments stand past the limit
+its own depth is not reported again as no constant ([T-ArraySize]). A derive
+request whose head holds a refused type is not expanded, so the refused text is
+not written out and reported a second time. A type whose arguments stand past the limit
 is refused with them, wherever it is written, so it is not reported for the
 arguments it lacks ([T-Bound]), and a derive naming it as a source is not
 reported for the variant that source would need ([T-Derive]). A name written
@@ -3864,8 +3866,9 @@ parentheses around the literal are allowed.
 A length that reads something already refused is not reported again. A name
 nothing declares is reported as that ([N-Undefined]), and a constant whose
 initialiser was refused is reported where it is declared, once, whichever
-declaration reads it first ([T-Mismatch], [T-Convert], [T-Literal]). A length
-naming either has no count only because of that report, in a binding, a
+declaration reads it first ([T-Mismatch], [T-Convert], [T-Literal]). A constant
+worked out from a refused one has no value because of it. A length naming any
+of these has no count only because of that report, in a binding, a
 parameter, a field, a payload, an alias or a derive's argument.
 
 The element type supplies context to every literal element. For example,
