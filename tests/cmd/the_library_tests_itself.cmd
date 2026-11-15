@@ -769,6 +769,7 @@ The library tests itself.
   ok    io.read_exact_allocates_from_the_system_allocator
   ok    io.read_exact_allocates_the_body_from_its_allocator
   ok    io.read_exact_collects_a_body_split_across_reads
+  ok    io.read_exact_keeps_its_bytes_apart_from_the_reader_allocator
   ok    io.read_exact_refuses_past_its_limit_before_reading
   ok    io.read_exact_refuses_while_a_line_read_needs_recovery
   ok    io.read_exact_reports_a_reader_that_overruns_its_destination
@@ -1151,6 +1152,7 @@ The library tests itself.
   ok    mem.an_arena_over_an_arena_is_rewound_in_place
   ok    mem.an_arena_over_an_arena_takes_its_whole_size_from_it
   ok    mem.an_arena_refuses_what_it_cannot_hold
+  ok    mem.an_arena_smaller_than_its_cursor_rewinds_to_nothing
   ok    mem.an_arena_the_backing_refused_refuses_everything
   ok    mem.an_empty_buffer_is_allocated_rather_than_refused
   ok    mem.an_empty_slice_accepts_its_empty_subspan
@@ -1636,4 +1638,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1633 passed, 0 failed
+  1635 passed, 0 failed

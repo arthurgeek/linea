@@ -1,0 +1,6024 @@
+// [T-AnswerDepth]. `Y` names `X`, which names `S0.Reading`, and each `Reading`
+// is settled to the next structure's: 1001 links, one more than a chain of
+// declared answers may pass through. The implementation's head is the only
+// place the program writes `Y`, and the chain is as long there as in a
+// binding's annotation.
+trait Sensor {
+    type Reading
+}
+
+struct S0 {}
+
+impl Sensor for S0 {
+    type Reading = S1.Reading
+}
+
+struct S1 {}
+
+impl Sensor for S1 {
+    type Reading = S2.Reading
+}
+
+struct S2 {}
+
+impl Sensor for S2 {
+    type Reading = S3.Reading
+}
+
+struct S3 {}
+
+impl Sensor for S3 {
+    type Reading = S4.Reading
+}
+
+struct S4 {}
+
+impl Sensor for S4 {
+    type Reading = S5.Reading
+}
+
+struct S5 {}
+
+impl Sensor for S5 {
+    type Reading = S6.Reading
+}
+
+struct S6 {}
+
+impl Sensor for S6 {
+    type Reading = S7.Reading
+}
+
+struct S7 {}
+
+impl Sensor for S7 {
+    type Reading = S8.Reading
+}
+
+struct S8 {}
+
+impl Sensor for S8 {
+    type Reading = S9.Reading
+}
+
+struct S9 {}
+
+impl Sensor for S9 {
+    type Reading = S10.Reading
+}
+
+struct S10 {}
+
+impl Sensor for S10 {
+    type Reading = S11.Reading
+}
+
+struct S11 {}
+
+impl Sensor for S11 {
+    type Reading = S12.Reading
+}
+
+struct S12 {}
+
+impl Sensor for S12 {
+    type Reading = S13.Reading
+}
+
+struct S13 {}
+
+impl Sensor for S13 {
+    type Reading = S14.Reading
+}
+
+struct S14 {}
+
+impl Sensor for S14 {
+    type Reading = S15.Reading
+}
+
+struct S15 {}
+
+impl Sensor for S15 {
+    type Reading = S16.Reading
+}
+
+struct S16 {}
+
+impl Sensor for S16 {
+    type Reading = S17.Reading
+}
+
+struct S17 {}
+
+impl Sensor for S17 {
+    type Reading = S18.Reading
+}
+
+struct S18 {}
+
+impl Sensor for S18 {
+    type Reading = S19.Reading
+}
+
+struct S19 {}
+
+impl Sensor for S19 {
+    type Reading = S20.Reading
+}
+
+struct S20 {}
+
+impl Sensor for S20 {
+    type Reading = S21.Reading
+}
+
+struct S21 {}
+
+impl Sensor for S21 {
+    type Reading = S22.Reading
+}
+
+struct S22 {}
+
+impl Sensor for S22 {
+    type Reading = S23.Reading
+}
+
+struct S23 {}
+
+impl Sensor for S23 {
+    type Reading = S24.Reading
+}
+
+struct S24 {}
+
+impl Sensor for S24 {
+    type Reading = S25.Reading
+}
+
+struct S25 {}
+
+impl Sensor for S25 {
+    type Reading = S26.Reading
+}
+
+struct S26 {}
+
+impl Sensor for S26 {
+    type Reading = S27.Reading
+}
+
+struct S27 {}
+
+impl Sensor for S27 {
+    type Reading = S28.Reading
+}
+
+struct S28 {}
+
+impl Sensor for S28 {
+    type Reading = S29.Reading
+}
+
+struct S29 {}
+
+impl Sensor for S29 {
+    type Reading = S30.Reading
+}
+
+struct S30 {}
+
+impl Sensor for S30 {
+    type Reading = S31.Reading
+}
+
+struct S31 {}
+
+impl Sensor for S31 {
+    type Reading = S32.Reading
+}
+
+struct S32 {}
+
+impl Sensor for S32 {
+    type Reading = S33.Reading
+}
+
+struct S33 {}
+
+impl Sensor for S33 {
+    type Reading = S34.Reading
+}
+
+struct S34 {}
+
+impl Sensor for S34 {
+    type Reading = S35.Reading
+}
+
+struct S35 {}
+
+impl Sensor for S35 {
+    type Reading = S36.Reading
+}
+
+struct S36 {}
+
+impl Sensor for S36 {
+    type Reading = S37.Reading
+}
+
+struct S37 {}
+
+impl Sensor for S37 {
+    type Reading = S38.Reading
+}
+
+struct S38 {}
+
+impl Sensor for S38 {
+    type Reading = S39.Reading
+}
+
+struct S39 {}
+
+impl Sensor for S39 {
+    type Reading = S40.Reading
+}
+
+struct S40 {}
+
+impl Sensor for S40 {
+    type Reading = S41.Reading
+}
+
+struct S41 {}
+
+impl Sensor for S41 {
+    type Reading = S42.Reading
+}
+
+struct S42 {}
+
+impl Sensor for S42 {
+    type Reading = S43.Reading
+}
+
+struct S43 {}
+
+impl Sensor for S43 {
+    type Reading = S44.Reading
+}
+
+struct S44 {}
+
+impl Sensor for S44 {
+    type Reading = S45.Reading
+}
+
+struct S45 {}
+
+impl Sensor for S45 {
+    type Reading = S46.Reading
+}
+
+struct S46 {}
+
+impl Sensor for S46 {
+    type Reading = S47.Reading
+}
+
+struct S47 {}
+
+impl Sensor for S47 {
+    type Reading = S48.Reading
+}
+
+struct S48 {}
+
+impl Sensor for S48 {
+    type Reading = S49.Reading
+}
+
+struct S49 {}
+
+impl Sensor for S49 {
+    type Reading = S50.Reading
+}
+
+struct S50 {}
+
+impl Sensor for S50 {
+    type Reading = S51.Reading
+}
+
+struct S51 {}
+
+impl Sensor for S51 {
+    type Reading = S52.Reading
+}
+
+struct S52 {}
+
+impl Sensor for S52 {
+    type Reading = S53.Reading
+}
+
+struct S53 {}
+
+impl Sensor for S53 {
+    type Reading = S54.Reading
+}
+
+struct S54 {}
+
+impl Sensor for S54 {
+    type Reading = S55.Reading
+}
+
+struct S55 {}
+
+impl Sensor for S55 {
+    type Reading = S56.Reading
+}
+
+struct S56 {}
+
+impl Sensor for S56 {
+    type Reading = S57.Reading
+}
+
+struct S57 {}
+
+impl Sensor for S57 {
+    type Reading = S58.Reading
+}
+
+struct S58 {}
+
+impl Sensor for S58 {
+    type Reading = S59.Reading
+}
+
+struct S59 {}
+
+impl Sensor for S59 {
+    type Reading = S60.Reading
+}
+
+struct S60 {}
+
+impl Sensor for S60 {
+    type Reading = S61.Reading
+}
+
+struct S61 {}
+
+impl Sensor for S61 {
+    type Reading = S62.Reading
+}
+
+struct S62 {}
+
+impl Sensor for S62 {
+    type Reading = S63.Reading
+}
+
+struct S63 {}
+
+impl Sensor for S63 {
+    type Reading = S64.Reading
+}
+
+struct S64 {}
+
+impl Sensor for S64 {
+    type Reading = S65.Reading
+}
+
+struct S65 {}
+
+impl Sensor for S65 {
+    type Reading = S66.Reading
+}
+
+struct S66 {}
+
+impl Sensor for S66 {
+    type Reading = S67.Reading
+}
+
+struct S67 {}
+
+impl Sensor for S67 {
+    type Reading = S68.Reading
+}
+
+struct S68 {}
+
+impl Sensor for S68 {
+    type Reading = S69.Reading
+}
+
+struct S69 {}
+
+impl Sensor for S69 {
+    type Reading = S70.Reading
+}
+
+struct S70 {}
+
+impl Sensor for S70 {
+    type Reading = S71.Reading
+}
+
+struct S71 {}
+
+impl Sensor for S71 {
+    type Reading = S72.Reading
+}
+
+struct S72 {}
+
+impl Sensor for S72 {
+    type Reading = S73.Reading
+}
+
+struct S73 {}
+
+impl Sensor for S73 {
+    type Reading = S74.Reading
+}
+
+struct S74 {}
+
+impl Sensor for S74 {
+    type Reading = S75.Reading
+}
+
+struct S75 {}
+
+impl Sensor for S75 {
+    type Reading = S76.Reading
+}
+
+struct S76 {}
+
+impl Sensor for S76 {
+    type Reading = S77.Reading
+}
+
+struct S77 {}
+
+impl Sensor for S77 {
+    type Reading = S78.Reading
+}
+
+struct S78 {}
+
+impl Sensor for S78 {
+    type Reading = S79.Reading
+}
+
+struct S79 {}
+
+impl Sensor for S79 {
+    type Reading = S80.Reading
+}
+
+struct S80 {}
+
+impl Sensor for S80 {
+    type Reading = S81.Reading
+}
+
+struct S81 {}
+
+impl Sensor for S81 {
+    type Reading = S82.Reading
+}
+
+struct S82 {}
+
+impl Sensor for S82 {
+    type Reading = S83.Reading
+}
+
+struct S83 {}
+
+impl Sensor for S83 {
+    type Reading = S84.Reading
+}
+
+struct S84 {}
+
+impl Sensor for S84 {
+    type Reading = S85.Reading
+}
+
+struct S85 {}
+
+impl Sensor for S85 {
+    type Reading = S86.Reading
+}
+
+struct S86 {}
+
+impl Sensor for S86 {
+    type Reading = S87.Reading
+}
+
+struct S87 {}
+
+impl Sensor for S87 {
+    type Reading = S88.Reading
+}
+
+struct S88 {}
+
+impl Sensor for S88 {
+    type Reading = S89.Reading
+}
+
+struct S89 {}
+
+impl Sensor for S89 {
+    type Reading = S90.Reading
+}
+
+struct S90 {}
+
+impl Sensor for S90 {
+    type Reading = S91.Reading
+}
+
+struct S91 {}
+
+impl Sensor for S91 {
+    type Reading = S92.Reading
+}
+
+struct S92 {}
+
+impl Sensor for S92 {
+    type Reading = S93.Reading
+}
+
+struct S93 {}
+
+impl Sensor for S93 {
+    type Reading = S94.Reading
+}
+
+struct S94 {}
+
+impl Sensor for S94 {
+    type Reading = S95.Reading
+}
+
+struct S95 {}
+
+impl Sensor for S95 {
+    type Reading = S96.Reading
+}
+
+struct S96 {}
+
+impl Sensor for S96 {
+    type Reading = S97.Reading
+}
+
+struct S97 {}
+
+impl Sensor for S97 {
+    type Reading = S98.Reading
+}
+
+struct S98 {}
+
+impl Sensor for S98 {
+    type Reading = S99.Reading
+}
+
+struct S99 {}
+
+impl Sensor for S99 {
+    type Reading = S100.Reading
+}
+
+struct S100 {}
+
+impl Sensor for S100 {
+    type Reading = S101.Reading
+}
+
+struct S101 {}
+
+impl Sensor for S101 {
+    type Reading = S102.Reading
+}
+
+struct S102 {}
+
+impl Sensor for S102 {
+    type Reading = S103.Reading
+}
+
+struct S103 {}
+
+impl Sensor for S103 {
+    type Reading = S104.Reading
+}
+
+struct S104 {}
+
+impl Sensor for S104 {
+    type Reading = S105.Reading
+}
+
+struct S105 {}
+
+impl Sensor for S105 {
+    type Reading = S106.Reading
+}
+
+struct S106 {}
+
+impl Sensor for S106 {
+    type Reading = S107.Reading
+}
+
+struct S107 {}
+
+impl Sensor for S107 {
+    type Reading = S108.Reading
+}
+
+struct S108 {}
+
+impl Sensor for S108 {
+    type Reading = S109.Reading
+}
+
+struct S109 {}
+
+impl Sensor for S109 {
+    type Reading = S110.Reading
+}
+
+struct S110 {}
+
+impl Sensor for S110 {
+    type Reading = S111.Reading
+}
+
+struct S111 {}
+
+impl Sensor for S111 {
+    type Reading = S112.Reading
+}
+
+struct S112 {}
+
+impl Sensor for S112 {
+    type Reading = S113.Reading
+}
+
+struct S113 {}
+
+impl Sensor for S113 {
+    type Reading = S114.Reading
+}
+
+struct S114 {}
+
+impl Sensor for S114 {
+    type Reading = S115.Reading
+}
+
+struct S115 {}
+
+impl Sensor for S115 {
+    type Reading = S116.Reading
+}
+
+struct S116 {}
+
+impl Sensor for S116 {
+    type Reading = S117.Reading
+}
+
+struct S117 {}
+
+impl Sensor for S117 {
+    type Reading = S118.Reading
+}
+
+struct S118 {}
+
+impl Sensor for S118 {
+    type Reading = S119.Reading
+}
+
+struct S119 {}
+
+impl Sensor for S119 {
+    type Reading = S120.Reading
+}
+
+struct S120 {}
+
+impl Sensor for S120 {
+    type Reading = S121.Reading
+}
+
+struct S121 {}
+
+impl Sensor for S121 {
+    type Reading = S122.Reading
+}
+
+struct S122 {}
+
+impl Sensor for S122 {
+    type Reading = S123.Reading
+}
+
+struct S123 {}
+
+impl Sensor for S123 {
+    type Reading = S124.Reading
+}
+
+struct S124 {}
+
+impl Sensor for S124 {
+    type Reading = S125.Reading
+}
+
+struct S125 {}
+
+impl Sensor for S125 {
+    type Reading = S126.Reading
+}
+
+struct S126 {}
+
+impl Sensor for S126 {
+    type Reading = S127.Reading
+}
+
+struct S127 {}
+
+impl Sensor for S127 {
+    type Reading = S128.Reading
+}
+
+struct S128 {}
+
+impl Sensor for S128 {
+    type Reading = S129.Reading
+}
+
+struct S129 {}
+
+impl Sensor for S129 {
+    type Reading = S130.Reading
+}
+
+struct S130 {}
+
+impl Sensor for S130 {
+    type Reading = S131.Reading
+}
+
+struct S131 {}
+
+impl Sensor for S131 {
+    type Reading = S132.Reading
+}
+
+struct S132 {}
+
+impl Sensor for S132 {
+    type Reading = S133.Reading
+}
+
+struct S133 {}
+
+impl Sensor for S133 {
+    type Reading = S134.Reading
+}
+
+struct S134 {}
+
+impl Sensor for S134 {
+    type Reading = S135.Reading
+}
+
+struct S135 {}
+
+impl Sensor for S135 {
+    type Reading = S136.Reading
+}
+
+struct S136 {}
+
+impl Sensor for S136 {
+    type Reading = S137.Reading
+}
+
+struct S137 {}
+
+impl Sensor for S137 {
+    type Reading = S138.Reading
+}
+
+struct S138 {}
+
+impl Sensor for S138 {
+    type Reading = S139.Reading
+}
+
+struct S139 {}
+
+impl Sensor for S139 {
+    type Reading = S140.Reading
+}
+
+struct S140 {}
+
+impl Sensor for S140 {
+    type Reading = S141.Reading
+}
+
+struct S141 {}
+
+impl Sensor for S141 {
+    type Reading = S142.Reading
+}
+
+struct S142 {}
+
+impl Sensor for S142 {
+    type Reading = S143.Reading
+}
+
+struct S143 {}
+
+impl Sensor for S143 {
+    type Reading = S144.Reading
+}
+
+struct S144 {}
+
+impl Sensor for S144 {
+    type Reading = S145.Reading
+}
+
+struct S145 {}
+
+impl Sensor for S145 {
+    type Reading = S146.Reading
+}
+
+struct S146 {}
+
+impl Sensor for S146 {
+    type Reading = S147.Reading
+}
+
+struct S147 {}
+
+impl Sensor for S147 {
+    type Reading = S148.Reading
+}
+
+struct S148 {}
+
+impl Sensor for S148 {
+    type Reading = S149.Reading
+}
+
+struct S149 {}
+
+impl Sensor for S149 {
+    type Reading = S150.Reading
+}
+
+struct S150 {}
+
+impl Sensor for S150 {
+    type Reading = S151.Reading
+}
+
+struct S151 {}
+
+impl Sensor for S151 {
+    type Reading = S152.Reading
+}
+
+struct S152 {}
+
+impl Sensor for S152 {
+    type Reading = S153.Reading
+}
+
+struct S153 {}
+
+impl Sensor for S153 {
+    type Reading = S154.Reading
+}
+
+struct S154 {}
+
+impl Sensor for S154 {
+    type Reading = S155.Reading
+}
+
+struct S155 {}
+
+impl Sensor for S155 {
+    type Reading = S156.Reading
+}
+
+struct S156 {}
+
+impl Sensor for S156 {
+    type Reading = S157.Reading
+}
+
+struct S157 {}
+
+impl Sensor for S157 {
+    type Reading = S158.Reading
+}
+
+struct S158 {}
+
+impl Sensor for S158 {
+    type Reading = S159.Reading
+}
+
+struct S159 {}
+
+impl Sensor for S159 {
+    type Reading = S160.Reading
+}
+
+struct S160 {}
+
+impl Sensor for S160 {
+    type Reading = S161.Reading
+}
+
+struct S161 {}
+
+impl Sensor for S161 {
+    type Reading = S162.Reading
+}
+
+struct S162 {}
+
+impl Sensor for S162 {
+    type Reading = S163.Reading
+}
+
+struct S163 {}
+
+impl Sensor for S163 {
+    type Reading = S164.Reading
+}
+
+struct S164 {}
+
+impl Sensor for S164 {
+    type Reading = S165.Reading
+}
+
+struct S165 {}
+
+impl Sensor for S165 {
+    type Reading = S166.Reading
+}
+
+struct S166 {}
+
+impl Sensor for S166 {
+    type Reading = S167.Reading
+}
+
+struct S167 {}
+
+impl Sensor for S167 {
+    type Reading = S168.Reading
+}
+
+struct S168 {}
+
+impl Sensor for S168 {
+    type Reading = S169.Reading
+}
+
+struct S169 {}
+
+impl Sensor for S169 {
+    type Reading = S170.Reading
+}
+
+struct S170 {}
+
+impl Sensor for S170 {
+    type Reading = S171.Reading
+}
+
+struct S171 {}
+
+impl Sensor for S171 {
+    type Reading = S172.Reading
+}
+
+struct S172 {}
+
+impl Sensor for S172 {
+    type Reading = S173.Reading
+}
+
+struct S173 {}
+
+impl Sensor for S173 {
+    type Reading = S174.Reading
+}
+
+struct S174 {}
+
+impl Sensor for S174 {
+    type Reading = S175.Reading
+}
+
+struct S175 {}
+
+impl Sensor for S175 {
+    type Reading = S176.Reading
+}
+
+struct S176 {}
+
+impl Sensor for S176 {
+    type Reading = S177.Reading
+}
+
+struct S177 {}
+
+impl Sensor for S177 {
+    type Reading = S178.Reading
+}
+
+struct S178 {}
+
+impl Sensor for S178 {
+    type Reading = S179.Reading
+}
+
+struct S179 {}
+
+impl Sensor for S179 {
+    type Reading = S180.Reading
+}
+
+struct S180 {}
+
+impl Sensor for S180 {
+    type Reading = S181.Reading
+}
+
+struct S181 {}
+
+impl Sensor for S181 {
+    type Reading = S182.Reading
+}
+
+struct S182 {}
+
+impl Sensor for S182 {
+    type Reading = S183.Reading
+}
+
+struct S183 {}
+
+impl Sensor for S183 {
+    type Reading = S184.Reading
+}
+
+struct S184 {}
+
+impl Sensor for S184 {
+    type Reading = S185.Reading
+}
+
+struct S185 {}
+
+impl Sensor for S185 {
+    type Reading = S186.Reading
+}
+
+struct S186 {}
+
+impl Sensor for S186 {
+    type Reading = S187.Reading
+}
+
+struct S187 {}
+
+impl Sensor for S187 {
+    type Reading = S188.Reading
+}
+
+struct S188 {}
+
+impl Sensor for S188 {
+    type Reading = S189.Reading
+}
+
+struct S189 {}
+
+impl Sensor for S189 {
+    type Reading = S190.Reading
+}
+
+struct S190 {}
+
+impl Sensor for S190 {
+    type Reading = S191.Reading
+}
+
+struct S191 {}
+
+impl Sensor for S191 {
+    type Reading = S192.Reading
+}
+
+struct S192 {}
+
+impl Sensor for S192 {
+    type Reading = S193.Reading
+}
+
+struct S193 {}
+
+impl Sensor for S193 {
+    type Reading = S194.Reading
+}
+
+struct S194 {}
+
+impl Sensor for S194 {
+    type Reading = S195.Reading
+}
+
+struct S195 {}
+
+impl Sensor for S195 {
+    type Reading = S196.Reading
+}
+
+struct S196 {}
+
+impl Sensor for S196 {
+    type Reading = S197.Reading
+}
+
+struct S197 {}
+
+impl Sensor for S197 {
+    type Reading = S198.Reading
+}
+
+struct S198 {}
+
+impl Sensor for S198 {
+    type Reading = S199.Reading
+}
+
+struct S199 {}
+
+impl Sensor for S199 {
+    type Reading = S200.Reading
+}
+
+struct S200 {}
+
+impl Sensor for S200 {
+    type Reading = S201.Reading
+}
+
+struct S201 {}
+
+impl Sensor for S201 {
+    type Reading = S202.Reading
+}
+
+struct S202 {}
+
+impl Sensor for S202 {
+    type Reading = S203.Reading
+}
+
+struct S203 {}
+
+impl Sensor for S203 {
+    type Reading = S204.Reading
+}
+
+struct S204 {}
+
+impl Sensor for S204 {
+    type Reading = S205.Reading
+}
+
+struct S205 {}
+
+impl Sensor for S205 {
+    type Reading = S206.Reading
+}
+
+struct S206 {}
+
+impl Sensor for S206 {
+    type Reading = S207.Reading
+}
+
+struct S207 {}
+
+impl Sensor for S207 {
+    type Reading = S208.Reading
+}
+
+struct S208 {}
+
+impl Sensor for S208 {
+    type Reading = S209.Reading
+}
+
+struct S209 {}
+
+impl Sensor for S209 {
+    type Reading = S210.Reading
+}
+
+struct S210 {}
+
+impl Sensor for S210 {
+    type Reading = S211.Reading
+}
+
+struct S211 {}
+
+impl Sensor for S211 {
+    type Reading = S212.Reading
+}
+
+struct S212 {}
+
+impl Sensor for S212 {
+    type Reading = S213.Reading
+}
+
+struct S213 {}
+
+impl Sensor for S213 {
+    type Reading = S214.Reading
+}
+
+struct S214 {}
+
+impl Sensor for S214 {
+    type Reading = S215.Reading
+}
+
+struct S215 {}
+
+impl Sensor for S215 {
+    type Reading = S216.Reading
+}
+
+struct S216 {}
+
+impl Sensor for S216 {
+    type Reading = S217.Reading
+}
+
+struct S217 {}
+
+impl Sensor for S217 {
+    type Reading = S218.Reading
+}
+
+struct S218 {}
+
+impl Sensor for S218 {
+    type Reading = S219.Reading
+}
+
+struct S219 {}
+
+impl Sensor for S219 {
+    type Reading = S220.Reading
+}
+
+struct S220 {}
+
+impl Sensor for S220 {
+    type Reading = S221.Reading
+}
+
+struct S221 {}
+
+impl Sensor for S221 {
+    type Reading = S222.Reading
+}
+
+struct S222 {}
+
+impl Sensor for S222 {
+    type Reading = S223.Reading
+}
+
+struct S223 {}
+
+impl Sensor for S223 {
+    type Reading = S224.Reading
+}
+
+struct S224 {}
+
+impl Sensor for S224 {
+    type Reading = S225.Reading
+}
+
+struct S225 {}
+
+impl Sensor for S225 {
+    type Reading = S226.Reading
+}
+
+struct S226 {}
+
+impl Sensor for S226 {
+    type Reading = S227.Reading
+}
+
+struct S227 {}
+
+impl Sensor for S227 {
+    type Reading = S228.Reading
+}
+
+struct S228 {}
+
+impl Sensor for S228 {
+    type Reading = S229.Reading
+}
+
+struct S229 {}
+
+impl Sensor for S229 {
+    type Reading = S230.Reading
+}
+
+struct S230 {}
+
+impl Sensor for S230 {
+    type Reading = S231.Reading
+}
+
+struct S231 {}
+
+impl Sensor for S231 {
+    type Reading = S232.Reading
+}
+
+struct S232 {}
+
+impl Sensor for S232 {
+    type Reading = S233.Reading
+}
+
+struct S233 {}
+
+impl Sensor for S233 {
+    type Reading = S234.Reading
+}
+
+struct S234 {}
+
+impl Sensor for S234 {
+    type Reading = S235.Reading
+}
+
+struct S235 {}
+
+impl Sensor for S235 {
+    type Reading = S236.Reading
+}
+
+struct S236 {}
+
+impl Sensor for S236 {
+    type Reading = S237.Reading
+}
+
+struct S237 {}
+
+impl Sensor for S237 {
+    type Reading = S238.Reading
+}
+
+struct S238 {}
+
+impl Sensor for S238 {
+    type Reading = S239.Reading
+}
+
+struct S239 {}
+
+impl Sensor for S239 {
+    type Reading = S240.Reading
+}
+
+struct S240 {}
+
+impl Sensor for S240 {
+    type Reading = S241.Reading
+}
+
+struct S241 {}
+
+impl Sensor for S241 {
+    type Reading = S242.Reading
+}
+
+struct S242 {}
+
+impl Sensor for S242 {
+    type Reading = S243.Reading
+}
+
+struct S243 {}
+
+impl Sensor for S243 {
+    type Reading = S244.Reading
+}
+
+struct S244 {}
+
+impl Sensor for S244 {
+    type Reading = S245.Reading
+}
+
+struct S245 {}
+
+impl Sensor for S245 {
+    type Reading = S246.Reading
+}
+
+struct S246 {}
+
+impl Sensor for S246 {
+    type Reading = S247.Reading
+}
+
+struct S247 {}
+
+impl Sensor for S247 {
+    type Reading = S248.Reading
+}
+
+struct S248 {}
+
+impl Sensor for S248 {
+    type Reading = S249.Reading
+}
+
+struct S249 {}
+
+impl Sensor for S249 {
+    type Reading = S250.Reading
+}
+
+struct S250 {}
+
+impl Sensor for S250 {
+    type Reading = S251.Reading
+}
+
+struct S251 {}
+
+impl Sensor for S251 {
+    type Reading = S252.Reading
+}
+
+struct S252 {}
+
+impl Sensor for S252 {
+    type Reading = S253.Reading
+}
+
+struct S253 {}
+
+impl Sensor for S253 {
+    type Reading = S254.Reading
+}
+
+struct S254 {}
+
+impl Sensor for S254 {
+    type Reading = S255.Reading
+}
+
+struct S255 {}
+
+impl Sensor for S255 {
+    type Reading = S256.Reading
+}
+
+struct S256 {}
+
+impl Sensor for S256 {
+    type Reading = S257.Reading
+}
+
+struct S257 {}
+
+impl Sensor for S257 {
+    type Reading = S258.Reading
+}
+
+struct S258 {}
+
+impl Sensor for S258 {
+    type Reading = S259.Reading
+}
+
+struct S259 {}
+
+impl Sensor for S259 {
+    type Reading = S260.Reading
+}
+
+struct S260 {}
+
+impl Sensor for S260 {
+    type Reading = S261.Reading
+}
+
+struct S261 {}
+
+impl Sensor for S261 {
+    type Reading = S262.Reading
+}
+
+struct S262 {}
+
+impl Sensor for S262 {
+    type Reading = S263.Reading
+}
+
+struct S263 {}
+
+impl Sensor for S263 {
+    type Reading = S264.Reading
+}
+
+struct S264 {}
+
+impl Sensor for S264 {
+    type Reading = S265.Reading
+}
+
+struct S265 {}
+
+impl Sensor for S265 {
+    type Reading = S266.Reading
+}
+
+struct S266 {}
+
+impl Sensor for S266 {
+    type Reading = S267.Reading
+}
+
+struct S267 {}
+
+impl Sensor for S267 {
+    type Reading = S268.Reading
+}
+
+struct S268 {}
+
+impl Sensor for S268 {
+    type Reading = S269.Reading
+}
+
+struct S269 {}
+
+impl Sensor for S269 {
+    type Reading = S270.Reading
+}
+
+struct S270 {}
+
+impl Sensor for S270 {
+    type Reading = S271.Reading
+}
+
+struct S271 {}
+
+impl Sensor for S271 {
+    type Reading = S272.Reading
+}
+
+struct S272 {}
+
+impl Sensor for S272 {
+    type Reading = S273.Reading
+}
+
+struct S273 {}
+
+impl Sensor for S273 {
+    type Reading = S274.Reading
+}
+
+struct S274 {}
+
+impl Sensor for S274 {
+    type Reading = S275.Reading
+}
+
+struct S275 {}
+
+impl Sensor for S275 {
+    type Reading = S276.Reading
+}
+
+struct S276 {}
+
+impl Sensor for S276 {
+    type Reading = S277.Reading
+}
+
+struct S277 {}
+
+impl Sensor for S277 {
+    type Reading = S278.Reading
+}
+
+struct S278 {}
+
+impl Sensor for S278 {
+    type Reading = S279.Reading
+}
+
+struct S279 {}
+
+impl Sensor for S279 {
+    type Reading = S280.Reading
+}
+
+struct S280 {}
+
+impl Sensor for S280 {
+    type Reading = S281.Reading
+}
+
+struct S281 {}
+
+impl Sensor for S281 {
+    type Reading = S282.Reading
+}
+
+struct S282 {}
+
+impl Sensor for S282 {
+    type Reading = S283.Reading
+}
+
+struct S283 {}
+
+impl Sensor for S283 {
+    type Reading = S284.Reading
+}
+
+struct S284 {}
+
+impl Sensor for S284 {
+    type Reading = S285.Reading
+}
+
+struct S285 {}
+
+impl Sensor for S285 {
+    type Reading = S286.Reading
+}
+
+struct S286 {}
+
+impl Sensor for S286 {
+    type Reading = S287.Reading
+}
+
+struct S287 {}
+
+impl Sensor for S287 {
+    type Reading = S288.Reading
+}
+
+struct S288 {}
+
+impl Sensor for S288 {
+    type Reading = S289.Reading
+}
+
+struct S289 {}
+
+impl Sensor for S289 {
+    type Reading = S290.Reading
+}
+
+struct S290 {}
+
+impl Sensor for S290 {
+    type Reading = S291.Reading
+}
+
+struct S291 {}
+
+impl Sensor for S291 {
+    type Reading = S292.Reading
+}
+
+struct S292 {}
+
+impl Sensor for S292 {
+    type Reading = S293.Reading
+}
+
+struct S293 {}
+
+impl Sensor for S293 {
+    type Reading = S294.Reading
+}
+
+struct S294 {}
+
+impl Sensor for S294 {
+    type Reading = S295.Reading
+}
+
+struct S295 {}
+
+impl Sensor for S295 {
+    type Reading = S296.Reading
+}
+
+struct S296 {}
+
+impl Sensor for S296 {
+    type Reading = S297.Reading
+}
+
+struct S297 {}
+
+impl Sensor for S297 {
+    type Reading = S298.Reading
+}
+
+struct S298 {}
+
+impl Sensor for S298 {
+    type Reading = S299.Reading
+}
+
+struct S299 {}
+
+impl Sensor for S299 {
+    type Reading = S300.Reading
+}
+
+struct S300 {}
+
+impl Sensor for S300 {
+    type Reading = S301.Reading
+}
+
+struct S301 {}
+
+impl Sensor for S301 {
+    type Reading = S302.Reading
+}
+
+struct S302 {}
+
+impl Sensor for S302 {
+    type Reading = S303.Reading
+}
+
+struct S303 {}
+
+impl Sensor for S303 {
+    type Reading = S304.Reading
+}
+
+struct S304 {}
+
+impl Sensor for S304 {
+    type Reading = S305.Reading
+}
+
+struct S305 {}
+
+impl Sensor for S305 {
+    type Reading = S306.Reading
+}
+
+struct S306 {}
+
+impl Sensor for S306 {
+    type Reading = S307.Reading
+}
+
+struct S307 {}
+
+impl Sensor for S307 {
+    type Reading = S308.Reading
+}
+
+struct S308 {}
+
+impl Sensor for S308 {
+    type Reading = S309.Reading
+}
+
+struct S309 {}
+
+impl Sensor for S309 {
+    type Reading = S310.Reading
+}
+
+struct S310 {}
+
+impl Sensor for S310 {
+    type Reading = S311.Reading
+}
+
+struct S311 {}
+
+impl Sensor for S311 {
+    type Reading = S312.Reading
+}
+
+struct S312 {}
+
+impl Sensor for S312 {
+    type Reading = S313.Reading
+}
+
+struct S313 {}
+
+impl Sensor for S313 {
+    type Reading = S314.Reading
+}
+
+struct S314 {}
+
+impl Sensor for S314 {
+    type Reading = S315.Reading
+}
+
+struct S315 {}
+
+impl Sensor for S315 {
+    type Reading = S316.Reading
+}
+
+struct S316 {}
+
+impl Sensor for S316 {
+    type Reading = S317.Reading
+}
+
+struct S317 {}
+
+impl Sensor for S317 {
+    type Reading = S318.Reading
+}
+
+struct S318 {}
+
+impl Sensor for S318 {
+    type Reading = S319.Reading
+}
+
+struct S319 {}
+
+impl Sensor for S319 {
+    type Reading = S320.Reading
+}
+
+struct S320 {}
+
+impl Sensor for S320 {
+    type Reading = S321.Reading
+}
+
+struct S321 {}
+
+impl Sensor for S321 {
+    type Reading = S322.Reading
+}
+
+struct S322 {}
+
+impl Sensor for S322 {
+    type Reading = S323.Reading
+}
+
+struct S323 {}
+
+impl Sensor for S323 {
+    type Reading = S324.Reading
+}
+
+struct S324 {}
+
+impl Sensor for S324 {
+    type Reading = S325.Reading
+}
+
+struct S325 {}
+
+impl Sensor for S325 {
+    type Reading = S326.Reading
+}
+
+struct S326 {}
+
+impl Sensor for S326 {
+    type Reading = S327.Reading
+}
+
+struct S327 {}
+
+impl Sensor for S327 {
+    type Reading = S328.Reading
+}
+
+struct S328 {}
+
+impl Sensor for S328 {
+    type Reading = S329.Reading
+}
+
+struct S329 {}
+
+impl Sensor for S329 {
+    type Reading = S330.Reading
+}
+
+struct S330 {}
+
+impl Sensor for S330 {
+    type Reading = S331.Reading
+}
+
+struct S331 {}
+
+impl Sensor for S331 {
+    type Reading = S332.Reading
+}
+
+struct S332 {}
+
+impl Sensor for S332 {
+    type Reading = S333.Reading
+}
+
+struct S333 {}
+
+impl Sensor for S333 {
+    type Reading = S334.Reading
+}
+
+struct S334 {}
+
+impl Sensor for S334 {
+    type Reading = S335.Reading
+}
+
+struct S335 {}
+
+impl Sensor for S335 {
+    type Reading = S336.Reading
+}
+
+struct S336 {}
+
+impl Sensor for S336 {
+    type Reading = S337.Reading
+}
+
+struct S337 {}
+
+impl Sensor for S337 {
+    type Reading = S338.Reading
+}
+
+struct S338 {}
+
+impl Sensor for S338 {
+    type Reading = S339.Reading
+}
+
+struct S339 {}
+
+impl Sensor for S339 {
+    type Reading = S340.Reading
+}
+
+struct S340 {}
+
+impl Sensor for S340 {
+    type Reading = S341.Reading
+}
+
+struct S341 {}
+
+impl Sensor for S341 {
+    type Reading = S342.Reading
+}
+
+struct S342 {}
+
+impl Sensor for S342 {
+    type Reading = S343.Reading
+}
+
+struct S343 {}
+
+impl Sensor for S343 {
+    type Reading = S344.Reading
+}
+
+struct S344 {}
+
+impl Sensor for S344 {
+    type Reading = S345.Reading
+}
+
+struct S345 {}
+
+impl Sensor for S345 {
+    type Reading = S346.Reading
+}
+
+struct S346 {}
+
+impl Sensor for S346 {
+    type Reading = S347.Reading
+}
+
+struct S347 {}
+
+impl Sensor for S347 {
+    type Reading = S348.Reading
+}
+
+struct S348 {}
+
+impl Sensor for S348 {
+    type Reading = S349.Reading
+}
+
+struct S349 {}
+
+impl Sensor for S349 {
+    type Reading = S350.Reading
+}
+
+struct S350 {}
+
+impl Sensor for S350 {
+    type Reading = S351.Reading
+}
+
+struct S351 {}
+
+impl Sensor for S351 {
+    type Reading = S352.Reading
+}
+
+struct S352 {}
+
+impl Sensor for S352 {
+    type Reading = S353.Reading
+}
+
+struct S353 {}
+
+impl Sensor for S353 {
+    type Reading = S354.Reading
+}
+
+struct S354 {}
+
+impl Sensor for S354 {
+    type Reading = S355.Reading
+}
+
+struct S355 {}
+
+impl Sensor for S355 {
+    type Reading = S356.Reading
+}
+
+struct S356 {}
+
+impl Sensor for S356 {
+    type Reading = S357.Reading
+}
+
+struct S357 {}
+
+impl Sensor for S357 {
+    type Reading = S358.Reading
+}
+
+struct S358 {}
+
+impl Sensor for S358 {
+    type Reading = S359.Reading
+}
+
+struct S359 {}
+
+impl Sensor for S359 {
+    type Reading = S360.Reading
+}
+
+struct S360 {}
+
+impl Sensor for S360 {
+    type Reading = S361.Reading
+}
+
+struct S361 {}
+
+impl Sensor for S361 {
+    type Reading = S362.Reading
+}
+
+struct S362 {}
+
+impl Sensor for S362 {
+    type Reading = S363.Reading
+}
+
+struct S363 {}
+
+impl Sensor for S363 {
+    type Reading = S364.Reading
+}
+
+struct S364 {}
+
+impl Sensor for S364 {
+    type Reading = S365.Reading
+}
+
+struct S365 {}
+
+impl Sensor for S365 {
+    type Reading = S366.Reading
+}
+
+struct S366 {}
+
+impl Sensor for S366 {
+    type Reading = S367.Reading
+}
+
+struct S367 {}
+
+impl Sensor for S367 {
+    type Reading = S368.Reading
+}
+
+struct S368 {}
+
+impl Sensor for S368 {
+    type Reading = S369.Reading
+}
+
+struct S369 {}
+
+impl Sensor for S369 {
+    type Reading = S370.Reading
+}
+
+struct S370 {}
+
+impl Sensor for S370 {
+    type Reading = S371.Reading
+}
+
+struct S371 {}
+
+impl Sensor for S371 {
+    type Reading = S372.Reading
+}
+
+struct S372 {}
+
+impl Sensor for S372 {
+    type Reading = S373.Reading
+}
+
+struct S373 {}
+
+impl Sensor for S373 {
+    type Reading = S374.Reading
+}
+
+struct S374 {}
+
+impl Sensor for S374 {
+    type Reading = S375.Reading
+}
+
+struct S375 {}
+
+impl Sensor for S375 {
+    type Reading = S376.Reading
+}
+
+struct S376 {}
+
+impl Sensor for S376 {
+    type Reading = S377.Reading
+}
+
+struct S377 {}
+
+impl Sensor for S377 {
+    type Reading = S378.Reading
+}
+
+struct S378 {}
+
+impl Sensor for S378 {
+    type Reading = S379.Reading
+}
+
+struct S379 {}
+
+impl Sensor for S379 {
+    type Reading = S380.Reading
+}
+
+struct S380 {}
+
+impl Sensor for S380 {
+    type Reading = S381.Reading
+}
+
+struct S381 {}
+
+impl Sensor for S381 {
+    type Reading = S382.Reading
+}
+
+struct S382 {}
+
+impl Sensor for S382 {
+    type Reading = S383.Reading
+}
+
+struct S383 {}
+
+impl Sensor for S383 {
+    type Reading = S384.Reading
+}
+
+struct S384 {}
+
+impl Sensor for S384 {
+    type Reading = S385.Reading
+}
+
+struct S385 {}
+
+impl Sensor for S385 {
+    type Reading = S386.Reading
+}
+
+struct S386 {}
+
+impl Sensor for S386 {
+    type Reading = S387.Reading
+}
+
+struct S387 {}
+
+impl Sensor for S387 {
+    type Reading = S388.Reading
+}
+
+struct S388 {}
+
+impl Sensor for S388 {
+    type Reading = S389.Reading
+}
+
+struct S389 {}
+
+impl Sensor for S389 {
+    type Reading = S390.Reading
+}
+
+struct S390 {}
+
+impl Sensor for S390 {
+    type Reading = S391.Reading
+}
+
+struct S391 {}
+
+impl Sensor for S391 {
+    type Reading = S392.Reading
+}
+
+struct S392 {}
+
+impl Sensor for S392 {
+    type Reading = S393.Reading
+}
+
+struct S393 {}
+
+impl Sensor for S393 {
+    type Reading = S394.Reading
+}
+
+struct S394 {}
+
+impl Sensor for S394 {
+    type Reading = S395.Reading
+}
+
+struct S395 {}
+
+impl Sensor for S395 {
+    type Reading = S396.Reading
+}
+
+struct S396 {}
+
+impl Sensor for S396 {
+    type Reading = S397.Reading
+}
+
+struct S397 {}
+
+impl Sensor for S397 {
+    type Reading = S398.Reading
+}
+
+struct S398 {}
+
+impl Sensor for S398 {
+    type Reading = S399.Reading
+}
+
+struct S399 {}
+
+impl Sensor for S399 {
+    type Reading = S400.Reading
+}
+
+struct S400 {}
+
+impl Sensor for S400 {
+    type Reading = S401.Reading
+}
+
+struct S401 {}
+
+impl Sensor for S401 {
+    type Reading = S402.Reading
+}
+
+struct S402 {}
+
+impl Sensor for S402 {
+    type Reading = S403.Reading
+}
+
+struct S403 {}
+
+impl Sensor for S403 {
+    type Reading = S404.Reading
+}
+
+struct S404 {}
+
+impl Sensor for S404 {
+    type Reading = S405.Reading
+}
+
+struct S405 {}
+
+impl Sensor for S405 {
+    type Reading = S406.Reading
+}
+
+struct S406 {}
+
+impl Sensor for S406 {
+    type Reading = S407.Reading
+}
+
+struct S407 {}
+
+impl Sensor for S407 {
+    type Reading = S408.Reading
+}
+
+struct S408 {}
+
+impl Sensor for S408 {
+    type Reading = S409.Reading
+}
+
+struct S409 {}
+
+impl Sensor for S409 {
+    type Reading = S410.Reading
+}
+
+struct S410 {}
+
+impl Sensor for S410 {
+    type Reading = S411.Reading
+}
+
+struct S411 {}
+
+impl Sensor for S411 {
+    type Reading = S412.Reading
+}
+
+struct S412 {}
+
+impl Sensor for S412 {
+    type Reading = S413.Reading
+}
+
+struct S413 {}
+
+impl Sensor for S413 {
+    type Reading = S414.Reading
+}
+
+struct S414 {}
+
+impl Sensor for S414 {
+    type Reading = S415.Reading
+}
+
+struct S415 {}
+
+impl Sensor for S415 {
+    type Reading = S416.Reading
+}
+
+struct S416 {}
+
+impl Sensor for S416 {
+    type Reading = S417.Reading
+}
+
+struct S417 {}
+
+impl Sensor for S417 {
+    type Reading = S418.Reading
+}
+
+struct S418 {}
+
+impl Sensor for S418 {
+    type Reading = S419.Reading
+}
+
+struct S419 {}
+
+impl Sensor for S419 {
+    type Reading = S420.Reading
+}
+
+struct S420 {}
+
+impl Sensor for S420 {
+    type Reading = S421.Reading
+}
+
+struct S421 {}
+
+impl Sensor for S421 {
+    type Reading = S422.Reading
+}
+
+struct S422 {}
+
+impl Sensor for S422 {
+    type Reading = S423.Reading
+}
+
+struct S423 {}
+
+impl Sensor for S423 {
+    type Reading = S424.Reading
+}
+
+struct S424 {}
+
+impl Sensor for S424 {
+    type Reading = S425.Reading
+}
+
+struct S425 {}
+
+impl Sensor for S425 {
+    type Reading = S426.Reading
+}
+
+struct S426 {}
+
+impl Sensor for S426 {
+    type Reading = S427.Reading
+}
+
+struct S427 {}
+
+impl Sensor for S427 {
+    type Reading = S428.Reading
+}
+
+struct S428 {}
+
+impl Sensor for S428 {
+    type Reading = S429.Reading
+}
+
+struct S429 {}
+
+impl Sensor for S429 {
+    type Reading = S430.Reading
+}
+
+struct S430 {}
+
+impl Sensor for S430 {
+    type Reading = S431.Reading
+}
+
+struct S431 {}
+
+impl Sensor for S431 {
+    type Reading = S432.Reading
+}
+
+struct S432 {}
+
+impl Sensor for S432 {
+    type Reading = S433.Reading
+}
+
+struct S433 {}
+
+impl Sensor for S433 {
+    type Reading = S434.Reading
+}
+
+struct S434 {}
+
+impl Sensor for S434 {
+    type Reading = S435.Reading
+}
+
+struct S435 {}
+
+impl Sensor for S435 {
+    type Reading = S436.Reading
+}
+
+struct S436 {}
+
+impl Sensor for S436 {
+    type Reading = S437.Reading
+}
+
+struct S437 {}
+
+impl Sensor for S437 {
+    type Reading = S438.Reading
+}
+
+struct S438 {}
+
+impl Sensor for S438 {
+    type Reading = S439.Reading
+}
+
+struct S439 {}
+
+impl Sensor for S439 {
+    type Reading = S440.Reading
+}
+
+struct S440 {}
+
+impl Sensor for S440 {
+    type Reading = S441.Reading
+}
+
+struct S441 {}
+
+impl Sensor for S441 {
+    type Reading = S442.Reading
+}
+
+struct S442 {}
+
+impl Sensor for S442 {
+    type Reading = S443.Reading
+}
+
+struct S443 {}
+
+impl Sensor for S443 {
+    type Reading = S444.Reading
+}
+
+struct S444 {}
+
+impl Sensor for S444 {
+    type Reading = S445.Reading
+}
+
+struct S445 {}
+
+impl Sensor for S445 {
+    type Reading = S446.Reading
+}
+
+struct S446 {}
+
+impl Sensor for S446 {
+    type Reading = S447.Reading
+}
+
+struct S447 {}
+
+impl Sensor for S447 {
+    type Reading = S448.Reading
+}
+
+struct S448 {}
+
+impl Sensor for S448 {
+    type Reading = S449.Reading
+}
+
+struct S449 {}
+
+impl Sensor for S449 {
+    type Reading = S450.Reading
+}
+
+struct S450 {}
+
+impl Sensor for S450 {
+    type Reading = S451.Reading
+}
+
+struct S451 {}
+
+impl Sensor for S451 {
+    type Reading = S452.Reading
+}
+
+struct S452 {}
+
+impl Sensor for S452 {
+    type Reading = S453.Reading
+}
+
+struct S453 {}
+
+impl Sensor for S453 {
+    type Reading = S454.Reading
+}
+
+struct S454 {}
+
+impl Sensor for S454 {
+    type Reading = S455.Reading
+}
+
+struct S455 {}
+
+impl Sensor for S455 {
+    type Reading = S456.Reading
+}
+
+struct S456 {}
+
+impl Sensor for S456 {
+    type Reading = S457.Reading
+}
+
+struct S457 {}
+
+impl Sensor for S457 {
+    type Reading = S458.Reading
+}
+
+struct S458 {}
+
+impl Sensor for S458 {
+    type Reading = S459.Reading
+}
+
+struct S459 {}
+
+impl Sensor for S459 {
+    type Reading = S460.Reading
+}
+
+struct S460 {}
+
+impl Sensor for S460 {
+    type Reading = S461.Reading
+}
+
+struct S461 {}
+
+impl Sensor for S461 {
+    type Reading = S462.Reading
+}
+
+struct S462 {}
+
+impl Sensor for S462 {
+    type Reading = S463.Reading
+}
+
+struct S463 {}
+
+impl Sensor for S463 {
+    type Reading = S464.Reading
+}
+
+struct S464 {}
+
+impl Sensor for S464 {
+    type Reading = S465.Reading
+}
+
+struct S465 {}
+
+impl Sensor for S465 {
+    type Reading = S466.Reading
+}
+
+struct S466 {}
+
+impl Sensor for S466 {
+    type Reading = S467.Reading
+}
+
+struct S467 {}
+
+impl Sensor for S467 {
+    type Reading = S468.Reading
+}
+
+struct S468 {}
+
+impl Sensor for S468 {
+    type Reading = S469.Reading
+}
+
+struct S469 {}
+
+impl Sensor for S469 {
+    type Reading = S470.Reading
+}
+
+struct S470 {}
+
+impl Sensor for S470 {
+    type Reading = S471.Reading
+}
+
+struct S471 {}
+
+impl Sensor for S471 {
+    type Reading = S472.Reading
+}
+
+struct S472 {}
+
+impl Sensor for S472 {
+    type Reading = S473.Reading
+}
+
+struct S473 {}
+
+impl Sensor for S473 {
+    type Reading = S474.Reading
+}
+
+struct S474 {}
+
+impl Sensor for S474 {
+    type Reading = S475.Reading
+}
+
+struct S475 {}
+
+impl Sensor for S475 {
+    type Reading = S476.Reading
+}
+
+struct S476 {}
+
+impl Sensor for S476 {
+    type Reading = S477.Reading
+}
+
+struct S477 {}
+
+impl Sensor for S477 {
+    type Reading = S478.Reading
+}
+
+struct S478 {}
+
+impl Sensor for S478 {
+    type Reading = S479.Reading
+}
+
+struct S479 {}
+
+impl Sensor for S479 {
+    type Reading = S480.Reading
+}
+
+struct S480 {}
+
+impl Sensor for S480 {
+    type Reading = S481.Reading
+}
+
+struct S481 {}
+
+impl Sensor for S481 {
+    type Reading = S482.Reading
+}
+
+struct S482 {}
+
+impl Sensor for S482 {
+    type Reading = S483.Reading
+}
+
+struct S483 {}
+
+impl Sensor for S483 {
+    type Reading = S484.Reading
+}
+
+struct S484 {}
+
+impl Sensor for S484 {
+    type Reading = S485.Reading
+}
+
+struct S485 {}
+
+impl Sensor for S485 {
+    type Reading = S486.Reading
+}
+
+struct S486 {}
+
+impl Sensor for S486 {
+    type Reading = S487.Reading
+}
+
+struct S487 {}
+
+impl Sensor for S487 {
+    type Reading = S488.Reading
+}
+
+struct S488 {}
+
+impl Sensor for S488 {
+    type Reading = S489.Reading
+}
+
+struct S489 {}
+
+impl Sensor for S489 {
+    type Reading = S490.Reading
+}
+
+struct S490 {}
+
+impl Sensor for S490 {
+    type Reading = S491.Reading
+}
+
+struct S491 {}
+
+impl Sensor for S491 {
+    type Reading = S492.Reading
+}
+
+struct S492 {}
+
+impl Sensor for S492 {
+    type Reading = S493.Reading
+}
+
+struct S493 {}
+
+impl Sensor for S493 {
+    type Reading = S494.Reading
+}
+
+struct S494 {}
+
+impl Sensor for S494 {
+    type Reading = S495.Reading
+}
+
+struct S495 {}
+
+impl Sensor for S495 {
+    type Reading = S496.Reading
+}
+
+struct S496 {}
+
+impl Sensor for S496 {
+    type Reading = S497.Reading
+}
+
+struct S497 {}
+
+impl Sensor for S497 {
+    type Reading = S498.Reading
+}
+
+struct S498 {}
+
+impl Sensor for S498 {
+    type Reading = S499.Reading
+}
+
+struct S499 {}
+
+impl Sensor for S499 {
+    type Reading = S500.Reading
+}
+
+struct S500 {}
+
+impl Sensor for S500 {
+    type Reading = S501.Reading
+}
+
+struct S501 {}
+
+impl Sensor for S501 {
+    type Reading = S502.Reading
+}
+
+struct S502 {}
+
+impl Sensor for S502 {
+    type Reading = S503.Reading
+}
+
+struct S503 {}
+
+impl Sensor for S503 {
+    type Reading = S504.Reading
+}
+
+struct S504 {}
+
+impl Sensor for S504 {
+    type Reading = S505.Reading
+}
+
+struct S505 {}
+
+impl Sensor for S505 {
+    type Reading = S506.Reading
+}
+
+struct S506 {}
+
+impl Sensor for S506 {
+    type Reading = S507.Reading
+}
+
+struct S507 {}
+
+impl Sensor for S507 {
+    type Reading = S508.Reading
+}
+
+struct S508 {}
+
+impl Sensor for S508 {
+    type Reading = S509.Reading
+}
+
+struct S509 {}
+
+impl Sensor for S509 {
+    type Reading = S510.Reading
+}
+
+struct S510 {}
+
+impl Sensor for S510 {
+    type Reading = S511.Reading
+}
+
+struct S511 {}
+
+impl Sensor for S511 {
+    type Reading = S512.Reading
+}
+
+struct S512 {}
+
+impl Sensor for S512 {
+    type Reading = S513.Reading
+}
+
+struct S513 {}
+
+impl Sensor for S513 {
+    type Reading = S514.Reading
+}
+
+struct S514 {}
+
+impl Sensor for S514 {
+    type Reading = S515.Reading
+}
+
+struct S515 {}
+
+impl Sensor for S515 {
+    type Reading = S516.Reading
+}
+
+struct S516 {}
+
+impl Sensor for S516 {
+    type Reading = S517.Reading
+}
+
+struct S517 {}
+
+impl Sensor for S517 {
+    type Reading = S518.Reading
+}
+
+struct S518 {}
+
+impl Sensor for S518 {
+    type Reading = S519.Reading
+}
+
+struct S519 {}
+
+impl Sensor for S519 {
+    type Reading = S520.Reading
+}
+
+struct S520 {}
+
+impl Sensor for S520 {
+    type Reading = S521.Reading
+}
+
+struct S521 {}
+
+impl Sensor for S521 {
+    type Reading = S522.Reading
+}
+
+struct S522 {}
+
+impl Sensor for S522 {
+    type Reading = S523.Reading
+}
+
+struct S523 {}
+
+impl Sensor for S523 {
+    type Reading = S524.Reading
+}
+
+struct S524 {}
+
+impl Sensor for S524 {
+    type Reading = S525.Reading
+}
+
+struct S525 {}
+
+impl Sensor for S525 {
+    type Reading = S526.Reading
+}
+
+struct S526 {}
+
+impl Sensor for S526 {
+    type Reading = S527.Reading
+}
+
+struct S527 {}
+
+impl Sensor for S527 {
+    type Reading = S528.Reading
+}
+
+struct S528 {}
+
+impl Sensor for S528 {
+    type Reading = S529.Reading
+}
+
+struct S529 {}
+
+impl Sensor for S529 {
+    type Reading = S530.Reading
+}
+
+struct S530 {}
+
+impl Sensor for S530 {
+    type Reading = S531.Reading
+}
+
+struct S531 {}
+
+impl Sensor for S531 {
+    type Reading = S532.Reading
+}
+
+struct S532 {}
+
+impl Sensor for S532 {
+    type Reading = S533.Reading
+}
+
+struct S533 {}
+
+impl Sensor for S533 {
+    type Reading = S534.Reading
+}
+
+struct S534 {}
+
+impl Sensor for S534 {
+    type Reading = S535.Reading
+}
+
+struct S535 {}
+
+impl Sensor for S535 {
+    type Reading = S536.Reading
+}
+
+struct S536 {}
+
+impl Sensor for S536 {
+    type Reading = S537.Reading
+}
+
+struct S537 {}
+
+impl Sensor for S537 {
+    type Reading = S538.Reading
+}
+
+struct S538 {}
+
+impl Sensor for S538 {
+    type Reading = S539.Reading
+}
+
+struct S539 {}
+
+impl Sensor for S539 {
+    type Reading = S540.Reading
+}
+
+struct S540 {}
+
+impl Sensor for S540 {
+    type Reading = S541.Reading
+}
+
+struct S541 {}
+
+impl Sensor for S541 {
+    type Reading = S542.Reading
+}
+
+struct S542 {}
+
+impl Sensor for S542 {
+    type Reading = S543.Reading
+}
+
+struct S543 {}
+
+impl Sensor for S543 {
+    type Reading = S544.Reading
+}
+
+struct S544 {}
+
+impl Sensor for S544 {
+    type Reading = S545.Reading
+}
+
+struct S545 {}
+
+impl Sensor for S545 {
+    type Reading = S546.Reading
+}
+
+struct S546 {}
+
+impl Sensor for S546 {
+    type Reading = S547.Reading
+}
+
+struct S547 {}
+
+impl Sensor for S547 {
+    type Reading = S548.Reading
+}
+
+struct S548 {}
+
+impl Sensor for S548 {
+    type Reading = S549.Reading
+}
+
+struct S549 {}
+
+impl Sensor for S549 {
+    type Reading = S550.Reading
+}
+
+struct S550 {}
+
+impl Sensor for S550 {
+    type Reading = S551.Reading
+}
+
+struct S551 {}
+
+impl Sensor for S551 {
+    type Reading = S552.Reading
+}
+
+struct S552 {}
+
+impl Sensor for S552 {
+    type Reading = S553.Reading
+}
+
+struct S553 {}
+
+impl Sensor for S553 {
+    type Reading = S554.Reading
+}
+
+struct S554 {}
+
+impl Sensor for S554 {
+    type Reading = S555.Reading
+}
+
+struct S555 {}
+
+impl Sensor for S555 {
+    type Reading = S556.Reading
+}
+
+struct S556 {}
+
+impl Sensor for S556 {
+    type Reading = S557.Reading
+}
+
+struct S557 {}
+
+impl Sensor for S557 {
+    type Reading = S558.Reading
+}
+
+struct S558 {}
+
+impl Sensor for S558 {
+    type Reading = S559.Reading
+}
+
+struct S559 {}
+
+impl Sensor for S559 {
+    type Reading = S560.Reading
+}
+
+struct S560 {}
+
+impl Sensor for S560 {
+    type Reading = S561.Reading
+}
+
+struct S561 {}
+
+impl Sensor for S561 {
+    type Reading = S562.Reading
+}
+
+struct S562 {}
+
+impl Sensor for S562 {
+    type Reading = S563.Reading
+}
+
+struct S563 {}
+
+impl Sensor for S563 {
+    type Reading = S564.Reading
+}
+
+struct S564 {}
+
+impl Sensor for S564 {
+    type Reading = S565.Reading
+}
+
+struct S565 {}
+
+impl Sensor for S565 {
+    type Reading = S566.Reading
+}
+
+struct S566 {}
+
+impl Sensor for S566 {
+    type Reading = S567.Reading
+}
+
+struct S567 {}
+
+impl Sensor for S567 {
+    type Reading = S568.Reading
+}
+
+struct S568 {}
+
+impl Sensor for S568 {
+    type Reading = S569.Reading
+}
+
+struct S569 {}
+
+impl Sensor for S569 {
+    type Reading = S570.Reading
+}
+
+struct S570 {}
+
+impl Sensor for S570 {
+    type Reading = S571.Reading
+}
+
+struct S571 {}
+
+impl Sensor for S571 {
+    type Reading = S572.Reading
+}
+
+struct S572 {}
+
+impl Sensor for S572 {
+    type Reading = S573.Reading
+}
+
+struct S573 {}
+
+impl Sensor for S573 {
+    type Reading = S574.Reading
+}
+
+struct S574 {}
+
+impl Sensor for S574 {
+    type Reading = S575.Reading
+}
+
+struct S575 {}
+
+impl Sensor for S575 {
+    type Reading = S576.Reading
+}
+
+struct S576 {}
+
+impl Sensor for S576 {
+    type Reading = S577.Reading
+}
+
+struct S577 {}
+
+impl Sensor for S577 {
+    type Reading = S578.Reading
+}
+
+struct S578 {}
+
+impl Sensor for S578 {
+    type Reading = S579.Reading
+}
+
+struct S579 {}
+
+impl Sensor for S579 {
+    type Reading = S580.Reading
+}
+
+struct S580 {}
+
+impl Sensor for S580 {
+    type Reading = S581.Reading
+}
+
+struct S581 {}
+
+impl Sensor for S581 {
+    type Reading = S582.Reading
+}
+
+struct S582 {}
+
+impl Sensor for S582 {
+    type Reading = S583.Reading
+}
+
+struct S583 {}
+
+impl Sensor for S583 {
+    type Reading = S584.Reading
+}
+
+struct S584 {}
+
+impl Sensor for S584 {
+    type Reading = S585.Reading
+}
+
+struct S585 {}
+
+impl Sensor for S585 {
+    type Reading = S586.Reading
+}
+
+struct S586 {}
+
+impl Sensor for S586 {
+    type Reading = S587.Reading
+}
+
+struct S587 {}
+
+impl Sensor for S587 {
+    type Reading = S588.Reading
+}
+
+struct S588 {}
+
+impl Sensor for S588 {
+    type Reading = S589.Reading
+}
+
+struct S589 {}
+
+impl Sensor for S589 {
+    type Reading = S590.Reading
+}
+
+struct S590 {}
+
+impl Sensor for S590 {
+    type Reading = S591.Reading
+}
+
+struct S591 {}
+
+impl Sensor for S591 {
+    type Reading = S592.Reading
+}
+
+struct S592 {}
+
+impl Sensor for S592 {
+    type Reading = S593.Reading
+}
+
+struct S593 {}
+
+impl Sensor for S593 {
+    type Reading = S594.Reading
+}
+
+struct S594 {}
+
+impl Sensor for S594 {
+    type Reading = S595.Reading
+}
+
+struct S595 {}
+
+impl Sensor for S595 {
+    type Reading = S596.Reading
+}
+
+struct S596 {}
+
+impl Sensor for S596 {
+    type Reading = S597.Reading
+}
+
+struct S597 {}
+
+impl Sensor for S597 {
+    type Reading = S598.Reading
+}
+
+struct S598 {}
+
+impl Sensor for S598 {
+    type Reading = S599.Reading
+}
+
+struct S599 {}
+
+impl Sensor for S599 {
+    type Reading = S600.Reading
+}
+
+struct S600 {}
+
+impl Sensor for S600 {
+    type Reading = S601.Reading
+}
+
+struct S601 {}
+
+impl Sensor for S601 {
+    type Reading = S602.Reading
+}
+
+struct S602 {}
+
+impl Sensor for S602 {
+    type Reading = S603.Reading
+}
+
+struct S603 {}
+
+impl Sensor for S603 {
+    type Reading = S604.Reading
+}
+
+struct S604 {}
+
+impl Sensor for S604 {
+    type Reading = S605.Reading
+}
+
+struct S605 {}
+
+impl Sensor for S605 {
+    type Reading = S606.Reading
+}
+
+struct S606 {}
+
+impl Sensor for S606 {
+    type Reading = S607.Reading
+}
+
+struct S607 {}
+
+impl Sensor for S607 {
+    type Reading = S608.Reading
+}
+
+struct S608 {}
+
+impl Sensor for S608 {
+    type Reading = S609.Reading
+}
+
+struct S609 {}
+
+impl Sensor for S609 {
+    type Reading = S610.Reading
+}
+
+struct S610 {}
+
+impl Sensor for S610 {
+    type Reading = S611.Reading
+}
+
+struct S611 {}
+
+impl Sensor for S611 {
+    type Reading = S612.Reading
+}
+
+struct S612 {}
+
+impl Sensor for S612 {
+    type Reading = S613.Reading
+}
+
+struct S613 {}
+
+impl Sensor for S613 {
+    type Reading = S614.Reading
+}
+
+struct S614 {}
+
+impl Sensor for S614 {
+    type Reading = S615.Reading
+}
+
+struct S615 {}
+
+impl Sensor for S615 {
+    type Reading = S616.Reading
+}
+
+struct S616 {}
+
+impl Sensor for S616 {
+    type Reading = S617.Reading
+}
+
+struct S617 {}
+
+impl Sensor for S617 {
+    type Reading = S618.Reading
+}
+
+struct S618 {}
+
+impl Sensor for S618 {
+    type Reading = S619.Reading
+}
+
+struct S619 {}
+
+impl Sensor for S619 {
+    type Reading = S620.Reading
+}
+
+struct S620 {}
+
+impl Sensor for S620 {
+    type Reading = S621.Reading
+}
+
+struct S621 {}
+
+impl Sensor for S621 {
+    type Reading = S622.Reading
+}
+
+struct S622 {}
+
+impl Sensor for S622 {
+    type Reading = S623.Reading
+}
+
+struct S623 {}
+
+impl Sensor for S623 {
+    type Reading = S624.Reading
+}
+
+struct S624 {}
+
+impl Sensor for S624 {
+    type Reading = S625.Reading
+}
+
+struct S625 {}
+
+impl Sensor for S625 {
+    type Reading = S626.Reading
+}
+
+struct S626 {}
+
+impl Sensor for S626 {
+    type Reading = S627.Reading
+}
+
+struct S627 {}
+
+impl Sensor for S627 {
+    type Reading = S628.Reading
+}
+
+struct S628 {}
+
+impl Sensor for S628 {
+    type Reading = S629.Reading
+}
+
+struct S629 {}
+
+impl Sensor for S629 {
+    type Reading = S630.Reading
+}
+
+struct S630 {}
+
+impl Sensor for S630 {
+    type Reading = S631.Reading
+}
+
+struct S631 {}
+
+impl Sensor for S631 {
+    type Reading = S632.Reading
+}
+
+struct S632 {}
+
+impl Sensor for S632 {
+    type Reading = S633.Reading
+}
+
+struct S633 {}
+
+impl Sensor for S633 {
+    type Reading = S634.Reading
+}
+
+struct S634 {}
+
+impl Sensor for S634 {
+    type Reading = S635.Reading
+}
+
+struct S635 {}
+
+impl Sensor for S635 {
+    type Reading = S636.Reading
+}
+
+struct S636 {}
+
+impl Sensor for S636 {
+    type Reading = S637.Reading
+}
+
+struct S637 {}
+
+impl Sensor for S637 {
+    type Reading = S638.Reading
+}
+
+struct S638 {}
+
+impl Sensor for S638 {
+    type Reading = S639.Reading
+}
+
+struct S639 {}
+
+impl Sensor for S639 {
+    type Reading = S640.Reading
+}
+
+struct S640 {}
+
+impl Sensor for S640 {
+    type Reading = S641.Reading
+}
+
+struct S641 {}
+
+impl Sensor for S641 {
+    type Reading = S642.Reading
+}
+
+struct S642 {}
+
+impl Sensor for S642 {
+    type Reading = S643.Reading
+}
+
+struct S643 {}
+
+impl Sensor for S643 {
+    type Reading = S644.Reading
+}
+
+struct S644 {}
+
+impl Sensor for S644 {
+    type Reading = S645.Reading
+}
+
+struct S645 {}
+
+impl Sensor for S645 {
+    type Reading = S646.Reading
+}
+
+struct S646 {}
+
+impl Sensor for S646 {
+    type Reading = S647.Reading
+}
+
+struct S647 {}
+
+impl Sensor for S647 {
+    type Reading = S648.Reading
+}
+
+struct S648 {}
+
+impl Sensor for S648 {
+    type Reading = S649.Reading
+}
+
+struct S649 {}
+
+impl Sensor for S649 {
+    type Reading = S650.Reading
+}
+
+struct S650 {}
+
+impl Sensor for S650 {
+    type Reading = S651.Reading
+}
+
+struct S651 {}
+
+impl Sensor for S651 {
+    type Reading = S652.Reading
+}
+
+struct S652 {}
+
+impl Sensor for S652 {
+    type Reading = S653.Reading
+}
+
+struct S653 {}
+
+impl Sensor for S653 {
+    type Reading = S654.Reading
+}
+
+struct S654 {}
+
+impl Sensor for S654 {
+    type Reading = S655.Reading
+}
+
+struct S655 {}
+
+impl Sensor for S655 {
+    type Reading = S656.Reading
+}
+
+struct S656 {}
+
+impl Sensor for S656 {
+    type Reading = S657.Reading
+}
+
+struct S657 {}
+
+impl Sensor for S657 {
+    type Reading = S658.Reading
+}
+
+struct S658 {}
+
+impl Sensor for S658 {
+    type Reading = S659.Reading
+}
+
+struct S659 {}
+
+impl Sensor for S659 {
+    type Reading = S660.Reading
+}
+
+struct S660 {}
+
+impl Sensor for S660 {
+    type Reading = S661.Reading
+}
+
+struct S661 {}
+
+impl Sensor for S661 {
+    type Reading = S662.Reading
+}
+
+struct S662 {}
+
+impl Sensor for S662 {
+    type Reading = S663.Reading
+}
+
+struct S663 {}
+
+impl Sensor for S663 {
+    type Reading = S664.Reading
+}
+
+struct S664 {}
+
+impl Sensor for S664 {
+    type Reading = S665.Reading
+}
+
+struct S665 {}
+
+impl Sensor for S665 {
+    type Reading = S666.Reading
+}
+
+struct S666 {}
+
+impl Sensor for S666 {
+    type Reading = S667.Reading
+}
+
+struct S667 {}
+
+impl Sensor for S667 {
+    type Reading = S668.Reading
+}
+
+struct S668 {}
+
+impl Sensor for S668 {
+    type Reading = S669.Reading
+}
+
+struct S669 {}
+
+impl Sensor for S669 {
+    type Reading = S670.Reading
+}
+
+struct S670 {}
+
+impl Sensor for S670 {
+    type Reading = S671.Reading
+}
+
+struct S671 {}
+
+impl Sensor for S671 {
+    type Reading = S672.Reading
+}
+
+struct S672 {}
+
+impl Sensor for S672 {
+    type Reading = S673.Reading
+}
+
+struct S673 {}
+
+impl Sensor for S673 {
+    type Reading = S674.Reading
+}
+
+struct S674 {}
+
+impl Sensor for S674 {
+    type Reading = S675.Reading
+}
+
+struct S675 {}
+
+impl Sensor for S675 {
+    type Reading = S676.Reading
+}
+
+struct S676 {}
+
+impl Sensor for S676 {
+    type Reading = S677.Reading
+}
+
+struct S677 {}
+
+impl Sensor for S677 {
+    type Reading = S678.Reading
+}
+
+struct S678 {}
+
+impl Sensor for S678 {
+    type Reading = S679.Reading
+}
+
+struct S679 {}
+
+impl Sensor for S679 {
+    type Reading = S680.Reading
+}
+
+struct S680 {}
+
+impl Sensor for S680 {
+    type Reading = S681.Reading
+}
+
+struct S681 {}
+
+impl Sensor for S681 {
+    type Reading = S682.Reading
+}
+
+struct S682 {}
+
+impl Sensor for S682 {
+    type Reading = S683.Reading
+}
+
+struct S683 {}
+
+impl Sensor for S683 {
+    type Reading = S684.Reading
+}
+
+struct S684 {}
+
+impl Sensor for S684 {
+    type Reading = S685.Reading
+}
+
+struct S685 {}
+
+impl Sensor for S685 {
+    type Reading = S686.Reading
+}
+
+struct S686 {}
+
+impl Sensor for S686 {
+    type Reading = S687.Reading
+}
+
+struct S687 {}
+
+impl Sensor for S687 {
+    type Reading = S688.Reading
+}
+
+struct S688 {}
+
+impl Sensor for S688 {
+    type Reading = S689.Reading
+}
+
+struct S689 {}
+
+impl Sensor for S689 {
+    type Reading = S690.Reading
+}
+
+struct S690 {}
+
+impl Sensor for S690 {
+    type Reading = S691.Reading
+}
+
+struct S691 {}
+
+impl Sensor for S691 {
+    type Reading = S692.Reading
+}
+
+struct S692 {}
+
+impl Sensor for S692 {
+    type Reading = S693.Reading
+}
+
+struct S693 {}
+
+impl Sensor for S693 {
+    type Reading = S694.Reading
+}
+
+struct S694 {}
+
+impl Sensor for S694 {
+    type Reading = S695.Reading
+}
+
+struct S695 {}
+
+impl Sensor for S695 {
+    type Reading = S696.Reading
+}
+
+struct S696 {}
+
+impl Sensor for S696 {
+    type Reading = S697.Reading
+}
+
+struct S697 {}
+
+impl Sensor for S697 {
+    type Reading = S698.Reading
+}
+
+struct S698 {}
+
+impl Sensor for S698 {
+    type Reading = S699.Reading
+}
+
+struct S699 {}
+
+impl Sensor for S699 {
+    type Reading = S700.Reading
+}
+
+struct S700 {}
+
+impl Sensor for S700 {
+    type Reading = S701.Reading
+}
+
+struct S701 {}
+
+impl Sensor for S701 {
+    type Reading = S702.Reading
+}
+
+struct S702 {}
+
+impl Sensor for S702 {
+    type Reading = S703.Reading
+}
+
+struct S703 {}
+
+impl Sensor for S703 {
+    type Reading = S704.Reading
+}
+
+struct S704 {}
+
+impl Sensor for S704 {
+    type Reading = S705.Reading
+}
+
+struct S705 {}
+
+impl Sensor for S705 {
+    type Reading = S706.Reading
+}
+
+struct S706 {}
+
+impl Sensor for S706 {
+    type Reading = S707.Reading
+}
+
+struct S707 {}
+
+impl Sensor for S707 {
+    type Reading = S708.Reading
+}
+
+struct S708 {}
+
+impl Sensor for S708 {
+    type Reading = S709.Reading
+}
+
+struct S709 {}
+
+impl Sensor for S709 {
+    type Reading = S710.Reading
+}
+
+struct S710 {}
+
+impl Sensor for S710 {
+    type Reading = S711.Reading
+}
+
+struct S711 {}
+
+impl Sensor for S711 {
+    type Reading = S712.Reading
+}
+
+struct S712 {}
+
+impl Sensor for S712 {
+    type Reading = S713.Reading
+}
+
+struct S713 {}
+
+impl Sensor for S713 {
+    type Reading = S714.Reading
+}
+
+struct S714 {}
+
+impl Sensor for S714 {
+    type Reading = S715.Reading
+}
+
+struct S715 {}
+
+impl Sensor for S715 {
+    type Reading = S716.Reading
+}
+
+struct S716 {}
+
+impl Sensor for S716 {
+    type Reading = S717.Reading
+}
+
+struct S717 {}
+
+impl Sensor for S717 {
+    type Reading = S718.Reading
+}
+
+struct S718 {}
+
+impl Sensor for S718 {
+    type Reading = S719.Reading
+}
+
+struct S719 {}
+
+impl Sensor for S719 {
+    type Reading = S720.Reading
+}
+
+struct S720 {}
+
+impl Sensor for S720 {
+    type Reading = S721.Reading
+}
+
+struct S721 {}
+
+impl Sensor for S721 {
+    type Reading = S722.Reading
+}
+
+struct S722 {}
+
+impl Sensor for S722 {
+    type Reading = S723.Reading
+}
+
+struct S723 {}
+
+impl Sensor for S723 {
+    type Reading = S724.Reading
+}
+
+struct S724 {}
+
+impl Sensor for S724 {
+    type Reading = S725.Reading
+}
+
+struct S725 {}
+
+impl Sensor for S725 {
+    type Reading = S726.Reading
+}
+
+struct S726 {}
+
+impl Sensor for S726 {
+    type Reading = S727.Reading
+}
+
+struct S727 {}
+
+impl Sensor for S727 {
+    type Reading = S728.Reading
+}
+
+struct S728 {}
+
+impl Sensor for S728 {
+    type Reading = S729.Reading
+}
+
+struct S729 {}
+
+impl Sensor for S729 {
+    type Reading = S730.Reading
+}
+
+struct S730 {}
+
+impl Sensor for S730 {
+    type Reading = S731.Reading
+}
+
+struct S731 {}
+
+impl Sensor for S731 {
+    type Reading = S732.Reading
+}
+
+struct S732 {}
+
+impl Sensor for S732 {
+    type Reading = S733.Reading
+}
+
+struct S733 {}
+
+impl Sensor for S733 {
+    type Reading = S734.Reading
+}
+
+struct S734 {}
+
+impl Sensor for S734 {
+    type Reading = S735.Reading
+}
+
+struct S735 {}
+
+impl Sensor for S735 {
+    type Reading = S736.Reading
+}
+
+struct S736 {}
+
+impl Sensor for S736 {
+    type Reading = S737.Reading
+}
+
+struct S737 {}
+
+impl Sensor for S737 {
+    type Reading = S738.Reading
+}
+
+struct S738 {}
+
+impl Sensor for S738 {
+    type Reading = S739.Reading
+}
+
+struct S739 {}
+
+impl Sensor for S739 {
+    type Reading = S740.Reading
+}
+
+struct S740 {}
+
+impl Sensor for S740 {
+    type Reading = S741.Reading
+}
+
+struct S741 {}
+
+impl Sensor for S741 {
+    type Reading = S742.Reading
+}
+
+struct S742 {}
+
+impl Sensor for S742 {
+    type Reading = S743.Reading
+}
+
+struct S743 {}
+
+impl Sensor for S743 {
+    type Reading = S744.Reading
+}
+
+struct S744 {}
+
+impl Sensor for S744 {
+    type Reading = S745.Reading
+}
+
+struct S745 {}
+
+impl Sensor for S745 {
+    type Reading = S746.Reading
+}
+
+struct S746 {}
+
+impl Sensor for S746 {
+    type Reading = S747.Reading
+}
+
+struct S747 {}
+
+impl Sensor for S747 {
+    type Reading = S748.Reading
+}
+
+struct S748 {}
+
+impl Sensor for S748 {
+    type Reading = S749.Reading
+}
+
+struct S749 {}
+
+impl Sensor for S749 {
+    type Reading = S750.Reading
+}
+
+struct S750 {}
+
+impl Sensor for S750 {
+    type Reading = S751.Reading
+}
+
+struct S751 {}
+
+impl Sensor for S751 {
+    type Reading = S752.Reading
+}
+
+struct S752 {}
+
+impl Sensor for S752 {
+    type Reading = S753.Reading
+}
+
+struct S753 {}
+
+impl Sensor for S753 {
+    type Reading = S754.Reading
+}
+
+struct S754 {}
+
+impl Sensor for S754 {
+    type Reading = S755.Reading
+}
+
+struct S755 {}
+
+impl Sensor for S755 {
+    type Reading = S756.Reading
+}
+
+struct S756 {}
+
+impl Sensor for S756 {
+    type Reading = S757.Reading
+}
+
+struct S757 {}
+
+impl Sensor for S757 {
+    type Reading = S758.Reading
+}
+
+struct S758 {}
+
+impl Sensor for S758 {
+    type Reading = S759.Reading
+}
+
+struct S759 {}
+
+impl Sensor for S759 {
+    type Reading = S760.Reading
+}
+
+struct S760 {}
+
+impl Sensor for S760 {
+    type Reading = S761.Reading
+}
+
+struct S761 {}
+
+impl Sensor for S761 {
+    type Reading = S762.Reading
+}
+
+struct S762 {}
+
+impl Sensor for S762 {
+    type Reading = S763.Reading
+}
+
+struct S763 {}
+
+impl Sensor for S763 {
+    type Reading = S764.Reading
+}
+
+struct S764 {}
+
+impl Sensor for S764 {
+    type Reading = S765.Reading
+}
+
+struct S765 {}
+
+impl Sensor for S765 {
+    type Reading = S766.Reading
+}
+
+struct S766 {}
+
+impl Sensor for S766 {
+    type Reading = S767.Reading
+}
+
+struct S767 {}
+
+impl Sensor for S767 {
+    type Reading = S768.Reading
+}
+
+struct S768 {}
+
+impl Sensor for S768 {
+    type Reading = S769.Reading
+}
+
+struct S769 {}
+
+impl Sensor for S769 {
+    type Reading = S770.Reading
+}
+
+struct S770 {}
+
+impl Sensor for S770 {
+    type Reading = S771.Reading
+}
+
+struct S771 {}
+
+impl Sensor for S771 {
+    type Reading = S772.Reading
+}
+
+struct S772 {}
+
+impl Sensor for S772 {
+    type Reading = S773.Reading
+}
+
+struct S773 {}
+
+impl Sensor for S773 {
+    type Reading = S774.Reading
+}
+
+struct S774 {}
+
+impl Sensor for S774 {
+    type Reading = S775.Reading
+}
+
+struct S775 {}
+
+impl Sensor for S775 {
+    type Reading = S776.Reading
+}
+
+struct S776 {}
+
+impl Sensor for S776 {
+    type Reading = S777.Reading
+}
+
+struct S777 {}
+
+impl Sensor for S777 {
+    type Reading = S778.Reading
+}
+
+struct S778 {}
+
+impl Sensor for S778 {
+    type Reading = S779.Reading
+}
+
+struct S779 {}
+
+impl Sensor for S779 {
+    type Reading = S780.Reading
+}
+
+struct S780 {}
+
+impl Sensor for S780 {
+    type Reading = S781.Reading
+}
+
+struct S781 {}
+
+impl Sensor for S781 {
+    type Reading = S782.Reading
+}
+
+struct S782 {}
+
+impl Sensor for S782 {
+    type Reading = S783.Reading
+}
+
+struct S783 {}
+
+impl Sensor for S783 {
+    type Reading = S784.Reading
+}
+
+struct S784 {}
+
+impl Sensor for S784 {
+    type Reading = S785.Reading
+}
+
+struct S785 {}
+
+impl Sensor for S785 {
+    type Reading = S786.Reading
+}
+
+struct S786 {}
+
+impl Sensor for S786 {
+    type Reading = S787.Reading
+}
+
+struct S787 {}
+
+impl Sensor for S787 {
+    type Reading = S788.Reading
+}
+
+struct S788 {}
+
+impl Sensor for S788 {
+    type Reading = S789.Reading
+}
+
+struct S789 {}
+
+impl Sensor for S789 {
+    type Reading = S790.Reading
+}
+
+struct S790 {}
+
+impl Sensor for S790 {
+    type Reading = S791.Reading
+}
+
+struct S791 {}
+
+impl Sensor for S791 {
+    type Reading = S792.Reading
+}
+
+struct S792 {}
+
+impl Sensor for S792 {
+    type Reading = S793.Reading
+}
+
+struct S793 {}
+
+impl Sensor for S793 {
+    type Reading = S794.Reading
+}
+
+struct S794 {}
+
+impl Sensor for S794 {
+    type Reading = S795.Reading
+}
+
+struct S795 {}
+
+impl Sensor for S795 {
+    type Reading = S796.Reading
+}
+
+struct S796 {}
+
+impl Sensor for S796 {
+    type Reading = S797.Reading
+}
+
+struct S797 {}
+
+impl Sensor for S797 {
+    type Reading = S798.Reading
+}
+
+struct S798 {}
+
+impl Sensor for S798 {
+    type Reading = S799.Reading
+}
+
+struct S799 {}
+
+impl Sensor for S799 {
+    type Reading = S800.Reading
+}
+
+struct S800 {}
+
+impl Sensor for S800 {
+    type Reading = S801.Reading
+}
+
+struct S801 {}
+
+impl Sensor for S801 {
+    type Reading = S802.Reading
+}
+
+struct S802 {}
+
+impl Sensor for S802 {
+    type Reading = S803.Reading
+}
+
+struct S803 {}
+
+impl Sensor for S803 {
+    type Reading = S804.Reading
+}
+
+struct S804 {}
+
+impl Sensor for S804 {
+    type Reading = S805.Reading
+}
+
+struct S805 {}
+
+impl Sensor for S805 {
+    type Reading = S806.Reading
+}
+
+struct S806 {}
+
+impl Sensor for S806 {
+    type Reading = S807.Reading
+}
+
+struct S807 {}
+
+impl Sensor for S807 {
+    type Reading = S808.Reading
+}
+
+struct S808 {}
+
+impl Sensor for S808 {
+    type Reading = S809.Reading
+}
+
+struct S809 {}
+
+impl Sensor for S809 {
+    type Reading = S810.Reading
+}
+
+struct S810 {}
+
+impl Sensor for S810 {
+    type Reading = S811.Reading
+}
+
+struct S811 {}
+
+impl Sensor for S811 {
+    type Reading = S812.Reading
+}
+
+struct S812 {}
+
+impl Sensor for S812 {
+    type Reading = S813.Reading
+}
+
+struct S813 {}
+
+impl Sensor for S813 {
+    type Reading = S814.Reading
+}
+
+struct S814 {}
+
+impl Sensor for S814 {
+    type Reading = S815.Reading
+}
+
+struct S815 {}
+
+impl Sensor for S815 {
+    type Reading = S816.Reading
+}
+
+struct S816 {}
+
+impl Sensor for S816 {
+    type Reading = S817.Reading
+}
+
+struct S817 {}
+
+impl Sensor for S817 {
+    type Reading = S818.Reading
+}
+
+struct S818 {}
+
+impl Sensor for S818 {
+    type Reading = S819.Reading
+}
+
+struct S819 {}
+
+impl Sensor for S819 {
+    type Reading = S820.Reading
+}
+
+struct S820 {}
+
+impl Sensor for S820 {
+    type Reading = S821.Reading
+}
+
+struct S821 {}
+
+impl Sensor for S821 {
+    type Reading = S822.Reading
+}
+
+struct S822 {}
+
+impl Sensor for S822 {
+    type Reading = S823.Reading
+}
+
+struct S823 {}
+
+impl Sensor for S823 {
+    type Reading = S824.Reading
+}
+
+struct S824 {}
+
+impl Sensor for S824 {
+    type Reading = S825.Reading
+}
+
+struct S825 {}
+
+impl Sensor for S825 {
+    type Reading = S826.Reading
+}
+
+struct S826 {}
+
+impl Sensor for S826 {
+    type Reading = S827.Reading
+}
+
+struct S827 {}
+
+impl Sensor for S827 {
+    type Reading = S828.Reading
+}
+
+struct S828 {}
+
+impl Sensor for S828 {
+    type Reading = S829.Reading
+}
+
+struct S829 {}
+
+impl Sensor for S829 {
+    type Reading = S830.Reading
+}
+
+struct S830 {}
+
+impl Sensor for S830 {
+    type Reading = S831.Reading
+}
+
+struct S831 {}
+
+impl Sensor for S831 {
+    type Reading = S832.Reading
+}
+
+struct S832 {}
+
+impl Sensor for S832 {
+    type Reading = S833.Reading
+}
+
+struct S833 {}
+
+impl Sensor for S833 {
+    type Reading = S834.Reading
+}
+
+struct S834 {}
+
+impl Sensor for S834 {
+    type Reading = S835.Reading
+}
+
+struct S835 {}
+
+impl Sensor for S835 {
+    type Reading = S836.Reading
+}
+
+struct S836 {}
+
+impl Sensor for S836 {
+    type Reading = S837.Reading
+}
+
+struct S837 {}
+
+impl Sensor for S837 {
+    type Reading = S838.Reading
+}
+
+struct S838 {}
+
+impl Sensor for S838 {
+    type Reading = S839.Reading
+}
+
+struct S839 {}
+
+impl Sensor for S839 {
+    type Reading = S840.Reading
+}
+
+struct S840 {}
+
+impl Sensor for S840 {
+    type Reading = S841.Reading
+}
+
+struct S841 {}
+
+impl Sensor for S841 {
+    type Reading = S842.Reading
+}
+
+struct S842 {}
+
+impl Sensor for S842 {
+    type Reading = S843.Reading
+}
+
+struct S843 {}
+
+impl Sensor for S843 {
+    type Reading = S844.Reading
+}
+
+struct S844 {}
+
+impl Sensor for S844 {
+    type Reading = S845.Reading
+}
+
+struct S845 {}
+
+impl Sensor for S845 {
+    type Reading = S846.Reading
+}
+
+struct S846 {}
+
+impl Sensor for S846 {
+    type Reading = S847.Reading
+}
+
+struct S847 {}
+
+impl Sensor for S847 {
+    type Reading = S848.Reading
+}
+
+struct S848 {}
+
+impl Sensor for S848 {
+    type Reading = S849.Reading
+}
+
+struct S849 {}
+
+impl Sensor for S849 {
+    type Reading = S850.Reading
+}
+
+struct S850 {}
+
+impl Sensor for S850 {
+    type Reading = S851.Reading
+}
+
+struct S851 {}
+
+impl Sensor for S851 {
+    type Reading = S852.Reading
+}
+
+struct S852 {}
+
+impl Sensor for S852 {
+    type Reading = S853.Reading
+}
+
+struct S853 {}
+
+impl Sensor for S853 {
+    type Reading = S854.Reading
+}
+
+struct S854 {}
+
+impl Sensor for S854 {
+    type Reading = S855.Reading
+}
+
+struct S855 {}
+
+impl Sensor for S855 {
+    type Reading = S856.Reading
+}
+
+struct S856 {}
+
+impl Sensor for S856 {
+    type Reading = S857.Reading
+}
+
+struct S857 {}
+
+impl Sensor for S857 {
+    type Reading = S858.Reading
+}
+
+struct S858 {}
+
+impl Sensor for S858 {
+    type Reading = S859.Reading
+}
+
+struct S859 {}
+
+impl Sensor for S859 {
+    type Reading = S860.Reading
+}
+
+struct S860 {}
+
+impl Sensor for S860 {
+    type Reading = S861.Reading
+}
+
+struct S861 {}
+
+impl Sensor for S861 {
+    type Reading = S862.Reading
+}
+
+struct S862 {}
+
+impl Sensor for S862 {
+    type Reading = S863.Reading
+}
+
+struct S863 {}
+
+impl Sensor for S863 {
+    type Reading = S864.Reading
+}
+
+struct S864 {}
+
+impl Sensor for S864 {
+    type Reading = S865.Reading
+}
+
+struct S865 {}
+
+impl Sensor for S865 {
+    type Reading = S866.Reading
+}
+
+struct S866 {}
+
+impl Sensor for S866 {
+    type Reading = S867.Reading
+}
+
+struct S867 {}
+
+impl Sensor for S867 {
+    type Reading = S868.Reading
+}
+
+struct S868 {}
+
+impl Sensor for S868 {
+    type Reading = S869.Reading
+}
+
+struct S869 {}
+
+impl Sensor for S869 {
+    type Reading = S870.Reading
+}
+
+struct S870 {}
+
+impl Sensor for S870 {
+    type Reading = S871.Reading
+}
+
+struct S871 {}
+
+impl Sensor for S871 {
+    type Reading = S872.Reading
+}
+
+struct S872 {}
+
+impl Sensor for S872 {
+    type Reading = S873.Reading
+}
+
+struct S873 {}
+
+impl Sensor for S873 {
+    type Reading = S874.Reading
+}
+
+struct S874 {}
+
+impl Sensor for S874 {
+    type Reading = S875.Reading
+}
+
+struct S875 {}
+
+impl Sensor for S875 {
+    type Reading = S876.Reading
+}
+
+struct S876 {}
+
+impl Sensor for S876 {
+    type Reading = S877.Reading
+}
+
+struct S877 {}
+
+impl Sensor for S877 {
+    type Reading = S878.Reading
+}
+
+struct S878 {}
+
+impl Sensor for S878 {
+    type Reading = S879.Reading
+}
+
+struct S879 {}
+
+impl Sensor for S879 {
+    type Reading = S880.Reading
+}
+
+struct S880 {}
+
+impl Sensor for S880 {
+    type Reading = S881.Reading
+}
+
+struct S881 {}
+
+impl Sensor for S881 {
+    type Reading = S882.Reading
+}
+
+struct S882 {}
+
+impl Sensor for S882 {
+    type Reading = S883.Reading
+}
+
+struct S883 {}
+
+impl Sensor for S883 {
+    type Reading = S884.Reading
+}
+
+struct S884 {}
+
+impl Sensor for S884 {
+    type Reading = S885.Reading
+}
+
+struct S885 {}
+
+impl Sensor for S885 {
+    type Reading = S886.Reading
+}
+
+struct S886 {}
+
+impl Sensor for S886 {
+    type Reading = S887.Reading
+}
+
+struct S887 {}
+
+impl Sensor for S887 {
+    type Reading = S888.Reading
+}
+
+struct S888 {}
+
+impl Sensor for S888 {
+    type Reading = S889.Reading
+}
+
+struct S889 {}
+
+impl Sensor for S889 {
+    type Reading = S890.Reading
+}
+
+struct S890 {}
+
+impl Sensor for S890 {
+    type Reading = S891.Reading
+}
+
+struct S891 {}
+
+impl Sensor for S891 {
+    type Reading = S892.Reading
+}
+
+struct S892 {}
+
+impl Sensor for S892 {
+    type Reading = S893.Reading
+}
+
+struct S893 {}
+
+impl Sensor for S893 {
+    type Reading = S894.Reading
+}
+
+struct S894 {}
+
+impl Sensor for S894 {
+    type Reading = S895.Reading
+}
+
+struct S895 {}
+
+impl Sensor for S895 {
+    type Reading = S896.Reading
+}
+
+struct S896 {}
+
+impl Sensor for S896 {
+    type Reading = S897.Reading
+}
+
+struct S897 {}
+
+impl Sensor for S897 {
+    type Reading = S898.Reading
+}
+
+struct S898 {}
+
+impl Sensor for S898 {
+    type Reading = S899.Reading
+}
+
+struct S899 {}
+
+impl Sensor for S899 {
+    type Reading = S900.Reading
+}
+
+struct S900 {}
+
+impl Sensor for S900 {
+    type Reading = S901.Reading
+}
+
+struct S901 {}
+
+impl Sensor for S901 {
+    type Reading = S902.Reading
+}
+
+struct S902 {}
+
+impl Sensor for S902 {
+    type Reading = S903.Reading
+}
+
+struct S903 {}
+
+impl Sensor for S903 {
+    type Reading = S904.Reading
+}
+
+struct S904 {}
+
+impl Sensor for S904 {
+    type Reading = S905.Reading
+}
+
+struct S905 {}
+
+impl Sensor for S905 {
+    type Reading = S906.Reading
+}
+
+struct S906 {}
+
+impl Sensor for S906 {
+    type Reading = S907.Reading
+}
+
+struct S907 {}
+
+impl Sensor for S907 {
+    type Reading = S908.Reading
+}
+
+struct S908 {}
+
+impl Sensor for S908 {
+    type Reading = S909.Reading
+}
+
+struct S909 {}
+
+impl Sensor for S909 {
+    type Reading = S910.Reading
+}
+
+struct S910 {}
+
+impl Sensor for S910 {
+    type Reading = S911.Reading
+}
+
+struct S911 {}
+
+impl Sensor for S911 {
+    type Reading = S912.Reading
+}
+
+struct S912 {}
+
+impl Sensor for S912 {
+    type Reading = S913.Reading
+}
+
+struct S913 {}
+
+impl Sensor for S913 {
+    type Reading = S914.Reading
+}
+
+struct S914 {}
+
+impl Sensor for S914 {
+    type Reading = S915.Reading
+}
+
+struct S915 {}
+
+impl Sensor for S915 {
+    type Reading = S916.Reading
+}
+
+struct S916 {}
+
+impl Sensor for S916 {
+    type Reading = S917.Reading
+}
+
+struct S917 {}
+
+impl Sensor for S917 {
+    type Reading = S918.Reading
+}
+
+struct S918 {}
+
+impl Sensor for S918 {
+    type Reading = S919.Reading
+}
+
+struct S919 {}
+
+impl Sensor for S919 {
+    type Reading = S920.Reading
+}
+
+struct S920 {}
+
+impl Sensor for S920 {
+    type Reading = S921.Reading
+}
+
+struct S921 {}
+
+impl Sensor for S921 {
+    type Reading = S922.Reading
+}
+
+struct S922 {}
+
+impl Sensor for S922 {
+    type Reading = S923.Reading
+}
+
+struct S923 {}
+
+impl Sensor for S923 {
+    type Reading = S924.Reading
+}
+
+struct S924 {}
+
+impl Sensor for S924 {
+    type Reading = S925.Reading
+}
+
+struct S925 {}
+
+impl Sensor for S925 {
+    type Reading = S926.Reading
+}
+
+struct S926 {}
+
+impl Sensor for S926 {
+    type Reading = S927.Reading
+}
+
+struct S927 {}
+
+impl Sensor for S927 {
+    type Reading = S928.Reading
+}
+
+struct S928 {}
+
+impl Sensor for S928 {
+    type Reading = S929.Reading
+}
+
+struct S929 {}
+
+impl Sensor for S929 {
+    type Reading = S930.Reading
+}
+
+struct S930 {}
+
+impl Sensor for S930 {
+    type Reading = S931.Reading
+}
+
+struct S931 {}
+
+impl Sensor for S931 {
+    type Reading = S932.Reading
+}
+
+struct S932 {}
+
+impl Sensor for S932 {
+    type Reading = S933.Reading
+}
+
+struct S933 {}
+
+impl Sensor for S933 {
+    type Reading = S934.Reading
+}
+
+struct S934 {}
+
+impl Sensor for S934 {
+    type Reading = S935.Reading
+}
+
+struct S935 {}
+
+impl Sensor for S935 {
+    type Reading = S936.Reading
+}
+
+struct S936 {}
+
+impl Sensor for S936 {
+    type Reading = S937.Reading
+}
+
+struct S937 {}
+
+impl Sensor for S937 {
+    type Reading = S938.Reading
+}
+
+struct S938 {}
+
+impl Sensor for S938 {
+    type Reading = S939.Reading
+}
+
+struct S939 {}
+
+impl Sensor for S939 {
+    type Reading = S940.Reading
+}
+
+struct S940 {}
+
+impl Sensor for S940 {
+    type Reading = S941.Reading
+}
+
+struct S941 {}
+
+impl Sensor for S941 {
+    type Reading = S942.Reading
+}
+
+struct S942 {}
+
+impl Sensor for S942 {
+    type Reading = S943.Reading
+}
+
+struct S943 {}
+
+impl Sensor for S943 {
+    type Reading = S944.Reading
+}
+
+struct S944 {}
+
+impl Sensor for S944 {
+    type Reading = S945.Reading
+}
+
+struct S945 {}
+
+impl Sensor for S945 {
+    type Reading = S946.Reading
+}
+
+struct S946 {}
+
+impl Sensor for S946 {
+    type Reading = S947.Reading
+}
+
+struct S947 {}
+
+impl Sensor for S947 {
+    type Reading = S948.Reading
+}
+
+struct S948 {}
+
+impl Sensor for S948 {
+    type Reading = S949.Reading
+}
+
+struct S949 {}
+
+impl Sensor for S949 {
+    type Reading = S950.Reading
+}
+
+struct S950 {}
+
+impl Sensor for S950 {
+    type Reading = S951.Reading
+}
+
+struct S951 {}
+
+impl Sensor for S951 {
+    type Reading = S952.Reading
+}
+
+struct S952 {}
+
+impl Sensor for S952 {
+    type Reading = S953.Reading
+}
+
+struct S953 {}
+
+impl Sensor for S953 {
+    type Reading = S954.Reading
+}
+
+struct S954 {}
+
+impl Sensor for S954 {
+    type Reading = S955.Reading
+}
+
+struct S955 {}
+
+impl Sensor for S955 {
+    type Reading = S956.Reading
+}
+
+struct S956 {}
+
+impl Sensor for S956 {
+    type Reading = S957.Reading
+}
+
+struct S957 {}
+
+impl Sensor for S957 {
+    type Reading = S958.Reading
+}
+
+struct S958 {}
+
+impl Sensor for S958 {
+    type Reading = S959.Reading
+}
+
+struct S959 {}
+
+impl Sensor for S959 {
+    type Reading = S960.Reading
+}
+
+struct S960 {}
+
+impl Sensor for S960 {
+    type Reading = S961.Reading
+}
+
+struct S961 {}
+
+impl Sensor for S961 {
+    type Reading = S962.Reading
+}
+
+struct S962 {}
+
+impl Sensor for S962 {
+    type Reading = S963.Reading
+}
+
+struct S963 {}
+
+impl Sensor for S963 {
+    type Reading = S964.Reading
+}
+
+struct S964 {}
+
+impl Sensor for S964 {
+    type Reading = S965.Reading
+}
+
+struct S965 {}
+
+impl Sensor for S965 {
+    type Reading = S966.Reading
+}
+
+struct S966 {}
+
+impl Sensor for S966 {
+    type Reading = S967.Reading
+}
+
+struct S967 {}
+
+impl Sensor for S967 {
+    type Reading = S968.Reading
+}
+
+struct S968 {}
+
+impl Sensor for S968 {
+    type Reading = S969.Reading
+}
+
+struct S969 {}
+
+impl Sensor for S969 {
+    type Reading = S970.Reading
+}
+
+struct S970 {}
+
+impl Sensor for S970 {
+    type Reading = S971.Reading
+}
+
+struct S971 {}
+
+impl Sensor for S971 {
+    type Reading = S972.Reading
+}
+
+struct S972 {}
+
+impl Sensor for S972 {
+    type Reading = S973.Reading
+}
+
+struct S973 {}
+
+impl Sensor for S973 {
+    type Reading = S974.Reading
+}
+
+struct S974 {}
+
+impl Sensor for S974 {
+    type Reading = S975.Reading
+}
+
+struct S975 {}
+
+impl Sensor for S975 {
+    type Reading = S976.Reading
+}
+
+struct S976 {}
+
+impl Sensor for S976 {
+    type Reading = S977.Reading
+}
+
+struct S977 {}
+
+impl Sensor for S977 {
+    type Reading = S978.Reading
+}
+
+struct S978 {}
+
+impl Sensor for S978 {
+    type Reading = S979.Reading
+}
+
+struct S979 {}
+
+impl Sensor for S979 {
+    type Reading = S980.Reading
+}
+
+struct S980 {}
+
+impl Sensor for S980 {
+    type Reading = S981.Reading
+}
+
+struct S981 {}
+
+impl Sensor for S981 {
+    type Reading = S982.Reading
+}
+
+struct S982 {}
+
+impl Sensor for S982 {
+    type Reading = S983.Reading
+}
+
+struct S983 {}
+
+impl Sensor for S983 {
+    type Reading = S984.Reading
+}
+
+struct S984 {}
+
+impl Sensor for S984 {
+    type Reading = S985.Reading
+}
+
+struct S985 {}
+
+impl Sensor for S985 {
+    type Reading = S986.Reading
+}
+
+struct S986 {}
+
+impl Sensor for S986 {
+    type Reading = S987.Reading
+}
+
+struct S987 {}
+
+impl Sensor for S987 {
+    type Reading = S988.Reading
+}
+
+struct S988 {}
+
+impl Sensor for S988 {
+    type Reading = S989.Reading
+}
+
+struct S989 {}
+
+impl Sensor for S989 {
+    type Reading = S990.Reading
+}
+
+struct S990 {}
+
+impl Sensor for S990 {
+    type Reading = S991.Reading
+}
+
+struct S991 {}
+
+impl Sensor for S991 {
+    type Reading = S992.Reading
+}
+
+struct S992 {}
+
+impl Sensor for S992 {
+    type Reading = S993.Reading
+}
+
+struct S993 {}
+
+impl Sensor for S993 {
+    type Reading = S994.Reading
+}
+
+struct S994 {}
+
+impl Sensor for S994 {
+    type Reading = S995.Reading
+}
+
+struct S995 {}
+
+impl Sensor for S995 {
+    type Reading = S996.Reading
+}
+
+struct S996 {}
+
+impl Sensor for S996 {
+    type Reading = S997.Reading
+}
+
+struct S997 {}
+
+impl Sensor for S997 {
+    type Reading = S998.Reading
+}
+
+struct S998 {}
+
+impl Sensor for S998 {
+    type Reading = UInt8
+}
+
+alias X = S0.Reading
+alias Y = X
+
+enum Stored {
+    Byte(UInt8),
+    Nothing,
+}
+
+impl From[Y] for Stored {
+    fn from(sink source: UInt8) -> Self {
+        .Byte(source)
+    }
+}
+
+fn main() -> UInt8 {
+    let stored: Stored = .Byte(3)
+    match stored {
+        Byte(value) => value,
+        Nothing => 0,
+    }
+}

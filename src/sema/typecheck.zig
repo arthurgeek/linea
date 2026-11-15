@@ -480,6 +480,9 @@ const BodyNamer = struct {
 /// differently.
 fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), program: *const ExpandedProgram, resolution: *const Resolution, typing: *const Typing, d: DeclId) !void {
     const ast = &program.ast;
+    // A head too long to spell is written as a symbol writes it, by a digest.
+    var shared: types_mod.SharedSpelling = .{};
+    defer shared.deinit(gpa);
     const module = program.moduleOf(d);
     if (module != .none) try out.appendSlice(gpa, program.modulePath(module));
     try out.append(gpa, ';');
@@ -488,7 +491,7 @@ fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), progra
         // `implementationOf` answers for the declarations an implementation
         // holds, which is what `impl_of_decl` is kept for.
         if (typing.implementationOf(d)) |implementation| {
-            try typing.appendArguments(gpa, out, &.{implementation.ty});
+            try typing.appendArgumentsWith(gpa, out, &.{implementation.ty}, &shared);
             if (implementation.trait != types_mod.Implementation.no_trait) {
                 const trait = DeclId.at(implementation.trait);
                 try out.append(gpa, ':');
@@ -496,7 +499,7 @@ fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), progra
                 if (trait_module != .none) try out.appendSlice(gpa, program.modulePath(trait_module));
                 try out.append(gpa, ';');
                 try out.appendSlice(gpa, ast.tokenText(ast.declName(trait)));
-                try typing.appendArguments(gpa, out, implementation.args);
+                try typing.appendArgumentsWith(gpa, out, implementation.args, &shared);
             }
         }
         try out.append(gpa, '.');
@@ -794,6 +797,8 @@ fn typecheckInternal(
     defer c.alias_types.deinit(gpa);
     defer c.alias_shapes.deinit(gpa);
     defer c.aliases_reading.deinit(gpa);
+    defer c.aliases_uncounted.deinit(gpa);
+    defer c.aliases_unsettled.deinit(gpa);
     defer c.defaults_reading.deinit(gpa);
     defer c.carried_omissions.deinit(gpa);
     defer c.impls_publishing.deinit(gpa);
@@ -808,6 +813,7 @@ fn typecheckInternal(
         for (c.call_impls.items) |record| if (record.args.len > 0) gpa.free(record.args);
         c.call_impls.deinit(gpa);
         c.overlapping.deinit(gpa);
+        c.unsupplied.deinit(gpa);
     }
     defer {
         for (c.calls.items) |call| call.deinit(gpa);
@@ -818,6 +824,7 @@ fn typecheckInternal(
     defer {
         for (c.function_values.items) |value| value.deinit(gpa);
         c.function_values.deinit(gpa);
+        c.settled_pairs.deinit(gpa);
         for (c.pending_values.items) |pending| pending.deinit(gpa);
         c.pending_values.deinit(gpa);
         c.binding_labels.deinit(gpa);
@@ -1423,7 +1430,13 @@ fn typecheckInternal(
         i.args = try c.traitArgumentsOf(i.decl);
         try c.settleHead(i);
         c.deferring_selections = false;
-        if (c.skipped_selection) try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
+        // Whether the key recovers every parameter is asked of the key, so
+        // of one still to be read again it is asked then.
+        if (c.skipped_selection) {
+            try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
+        } else {
+            try c.requireRecoverableParameters(i);
+        }
         try c.settleImplementationPredicates(i);
     }
 
@@ -1435,7 +1448,7 @@ fn typecheckInternal(
     // property of the declarations, so a program's compiling could not depend
     // on whether anything ever calls through either one.
     const z_overlap = tracy.beginZone(@src(), "tc.overlap");
-    try c.refuseOverlappingImplementations(implementations);
+    try c.refuseOverlappingImplementations(implementations, null);
     z_overlap.end();
 
     const observation_traits = try @import("observations.zig").compute(gpa, ast, resolution);
@@ -1460,6 +1473,19 @@ fn typecheckInternal(
     const z_parts = tracy.beginZone(@src(), "tc.parts");
     try c.settleDeclaredAnswers();
     try c.settleDeferredHeads(implementations);
+    // An implementation whose head or trait arguments named a settled type
+    // had nothing to compare while that type was unanswered, so the overlap
+    // check passed over it. It is read now, and is held to the same rule.
+    if (c.unsettled_heads.items.len != 0) {
+        var read_again = try std.DynamicBitSetUnmanaged.initEmpty(gpa, implementations.len);
+        defer read_again.deinit(gpa);
+        for (c.unsettled_heads.items) |at| read_again.set(at);
+        try c.refuseOverlappingImplementations(implementations, &read_again);
+        for (c.unsupplied.items) |missing| {
+            if (c.overlapping.contains(missing.implementation)) continue;
+            try c.reportUnsupplied(missing);
+        }
+    }
 
     // Every template is complete and every settled type known, so every
     // instantiation is filled again from its template. A part written as a
@@ -2152,7 +2178,7 @@ fn capabilityDemand(
     // Each trait's own bounds and no deeper: what those reach is in `through`
     // already, so one step over every entry is the whole closure.
     for (through) |t| {
-        const trait = node.DeclId.at(t.trait);
+        const trait = t.trait;
         for (ast.declBounds(trait)) |b| {
             if (b.kind == .callable) continue;
             const source: *Demanded = switch (resolve_mod.boundNames(ast, b.named.name, traitAt(ast, res, b.named.name))) {
@@ -2182,7 +2208,7 @@ fn integerDemandedBy(ast: *const Ast, res: *const Resolution, bounds: []const no
         if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .integer) return true;
     }
     for (through) |required| {
-        for (ast.declBounds(node.DeclId.at(required.trait))) |bound| {
+        for (ast.declBounds(required.trait)) |bound| {
             if (bound.kind == .named and resolve_mod.boundNames(ast, bound.named.name, traitAt(ast, res, bound.named.name)) == .integer) return true;
         }
     }
@@ -3232,7 +3258,7 @@ pub const Reach = struct {
         defer bounds.deinit(gpa);
         try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
         for (bounds.items) |bound| {
-            const trait = node.DeclId.at(bound.trait);
+            const trait = bound.trait;
             if (self.res.seesTrait(self.from, trait)) continue;
             if (std.mem.indexOfScalar(node.DeclId, out.items, trait) != null) continue;
             try out.append(gpa, trait);
@@ -3272,7 +3298,7 @@ pub const Reach = struct {
         try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
         const first = out.items.len;
         for (bounds.items) |bound| {
-            const trait = DeclId.at(bound.trait);
+            const trait = bound.trait;
             var members = self.res.signatures.typesOf(self.ast, trait);
             while (members.next()) |sig| {
                 if (!settlesAType(self.ast, sig)) continue;
@@ -5966,11 +5992,26 @@ const Checker = struct {
     /// mistake, and every member the refused implementation lacks would say
     /// it again.
     overlapping: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+    /// Members a trait declares that an implementation supplies nothing for,
+    /// found while an implementation's head was still to be read again. One
+    /// of those may yet be refused as overlapping another, which is then its
+    /// only report, so these are said once that is known.
+    ///
+    /// **Bound:** the unsupplied members of a program that has such a head.
+    unsupplied: std.ArrayList(Unsupplied) = .empty,
     /// The one complete semantic row for each accepted direct call.
     calls: std.ArrayList(types_mod.NormalizedCall) = .empty,
     recovered_call_args: std.ArrayList(types_mod.RecoveredCallArg) = .empty,
     recovered_calls: std.ArrayList(types_mod.RecoveredCall) = .empty,
     function_values: std.ArrayList(types_mod.FunctionValue) = .empty,
+    /// The nominal pairs the settlement in progress has matched, and how many
+    /// matches of it are open. Empty between settlements.
+    settled_pairs: std.AutoHashMapUnmanaged(SettledPair, void) = .empty,
+    settling_pairs: u32 = 0,
+    /// How many parts a settlement has left for later because an open
+    /// context had not yet said what they are. A pair matched with this
+    /// unchanged left nothing, and is one `settled_pairs` may keep.
+    settle_left_open: u32 = 0,
     /// The function values named without a written type in the bodies being
     /// checked, innermost last. Each leaves when its body closes, so the list
     /// holds what the open bodies named rather than what the program does.
@@ -6130,6 +6171,17 @@ const Checker = struct {
     /// again while its own type is read is a cycle, which the resolver
     /// reported unless a settled type joins the two readings.
     aliases_reading: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
+    /// The aliases read while no declared answer was being settled, whose
+    /// chains nothing has counted. A declared answer being settled reads
+    /// such an alias again in place of taking what is kept, so the links
+    /// under it are counted by the one walk that counts links, and every
+    /// alias is read there before the settling ends.
+    aliases_uncounted: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases whose kept type was read with a selection passed over,
+    /// so what they name is known only once declared answers are settled.
+    /// Whatever takes the kept type of one has passed over that selection
+    /// too, and is read again as if it had written the selection itself.
+    aliases_unsettled: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
@@ -6614,7 +6666,7 @@ const Checker = struct {
             for (@field(saved, field)) |row| try @field(self, field).append(gpa, try copyRetained(gpa, row));
         }
         for (prefix.seed.call_impls) |call| try self.call_impls.append(gpa, try copyRetained(gpa, call));
-        for (self.projected.items) |projection| try self.projected_at.put(gpa, ExprId.at(projection.at), projection.expansion);
+        for (self.projected.items) |projection| try self.projected_at.put(gpa, projection.at, projection.expansion);
         for (self.expansions.items, 0..) |expansion, i| {
             if (expansion.delegation) |forward| if (forward.field == null) continue;
             const implementation = if (expansion.delegation != null) expansion.member else self.res.implEnclosing(expansion.member);
@@ -8737,7 +8789,7 @@ const Checker = struct {
             admitted.deinit(self.gpa);
         }
         const arguments = try self.gpa.dupe(TypeId, self.param_types[trait.index()]);
-        admitted.append(self.gpa, .{ .trait = trait.index(), .args = arguments }) catch |err| {
+        admitted.append(self.gpa, .{ .trait = trait, .args = arguments }) catch |err| {
             self.gpa.free(arguments);
             return err;
         };
@@ -9917,7 +9969,7 @@ const Checker = struct {
     fn admittedAt(bounds: []const types_mod.BoundTrait, trait: node.DeclId) Admitted {
         var first: ?[]const TypeId = null;
         for (bounds) |b| {
-            if (b.trait != trait.index()) continue;
+            if (b.trait != trait) continue;
             if (first) |seen| {
                 if (!std.mem.eql(TypeId, seen, b.args)) return .several;
             } else first = b.args;
@@ -10943,15 +10995,21 @@ const Checker = struct {
     /// `alias_types`. An alias reached again while its own type is read is a
     /// cycle, answered with poison: the resolver reported it.
     fn aliasedType(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!TypeId {
-        if (self.settledAlias(alias)) |held| {
+        // An alias kept from a reading that counted no links is read again
+        // while a declared answer is settled: an implementation's head reads
+        // its aliases first, and a chain is as long there as anywhere.
+        const counted = self.settling == null or !self.aliases_uncounted.contains(alias);
+        if (counted) if (self.settledAlias(alias)) |held| {
             if (self.settling) |settling| settling.note(.{ .alias = alias });
+            if (self.aliases_unsettled.contains(alias)) self.skipped_selection = true;
             return held;
-        }
+        };
         const kept = if (self.callable_effects_ready) &self.alias_types else &self.alias_shapes;
-        if (kept.get(alias)) |held| {
+        if (counted) if (kept.get(alias)) |held| {
             if (self.settling) |settling| settling.note(.{ .alias = alias });
+            if (self.aliases_unsettled.contains(alias)) self.skipped_selection = true;
             return held;
-        }
+        };
         if (self.aliases_reading.get(alias)) |began_at| {
             // Reached again from inside a settled type its own reading
             // demanded: `alias Al = Mirror.Reading` with `Reading =
@@ -10994,7 +11052,14 @@ const Checker = struct {
         }
         // An alias read while declared answers are settled is one of them,
         // and counts toward how deep they depend on one another.
-        if (self.settling) |settling| if (!try settling.enter(.{ .alias = alias })) return .poison;
+        if (self.settling) |settling| {
+            if (!try settling.enter(.{ .alias = alias })) return .poison;
+        } else if (self.aliases_reading.count() >= AnswerSettling.max_depth) {
+            // Read no further down a chain already past what one may pass
+            // through. Nothing is kept for this alias, and those above it
+            // are read again, and refused, where links are counted.
+            return .poison;
+        }
         try self.aliases_reading.put(self.gpa, alias, if (self.settling) |settling| settling.depth else 0);
         defer _ = self.aliases_reading.remove(alias);
 
@@ -11008,13 +11073,34 @@ const Checker = struct {
         for (self.refused_parts.items) |seen| {
             if (seen != written.at) continue;
             try kept.put(self.gpa, alias, .poison);
-            if (self.settling) |settling| try settling.leave();
+            try self.aliasRead(alias);
             return .poison;
         }
+        // Whether this reading passed over a selection is the alias's own
+        // answer, kept with its type, and whoever is reading the alias has
+        // passed over it as well.
+        const passed_over_before = self.skipped_selection;
+        self.skipped_selection = false;
         const named = try self.typeOfRefOf(self.program.moduleOf(alias), alias, written);
+        if (self.skipped_selection) {
+            try self.aliases_unsettled.put(self.gpa, alias, {});
+        } else {
+            _ = self.aliases_unsettled.remove(alias);
+        }
+        self.skipped_selection = self.skipped_selection or passed_over_before;
         try kept.put(self.gpa, alias, named);
-        if (self.settling) |settling| try settling.leave();
+        try self.aliasRead(alias);
         return named;
+    }
+
+    /// Ends the reading of `alias`: its links are counted where a declared
+    /// answer is being settled, and still to be counted where none is.
+    fn aliasRead(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!void {
+        if (self.settling) |settling| {
+            _ = self.aliases_uncounted.remove(alias);
+            return settling.leave();
+        }
+        if (self.callable_effects_ready) try self.aliases_uncounted.put(self.gpa, alias, {});
     }
 
     /// The type an alias names, where it is already settled: every alias is
@@ -11179,7 +11265,7 @@ const Checker = struct {
             _ = try self.settle(pattern, got, heading.alias, heading.found, &clash);
         }
         for (heading.written, found) |pattern, *slot| {
-            if (slot.* != .poison or !self.writesParameter(heading, pattern) or self.hasOpenParameter(pattern, &open)) continue;
+            if (slot.* != .poison or !self.writesParameter(heading, pattern) or try self.hasOpenParameter(pattern, &open)) continue;
             slot.* = try self.builder.substitute(pattern, @intCast(heading.alias.index()), heading.found);
         }
     }
@@ -12921,7 +13007,7 @@ const Checker = struct {
                 if (!self.mentionsParameter(param.ty, trait, .stops)) continue;
                 const value = if (self.ast.exprTag(args[j]) == .marked) self.ast.unaryOperand(args[j]) else args[j];
                 if (self.determinesItsOwnType(value) != speaking) continue;
-                if (!speaking and !self.hasOpenParameter(param.ty, &settling)) continue;
+                if (!speaking and !try self.hasOpenParameter(param.ty, &settling)) continue;
                 const got = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
                 walked[j] = true;
                 if (got == .poison) {
@@ -12976,7 +13062,7 @@ const Checker = struct {
         const named: u32 = @intCast(trait.index());
         var only: ?[]const TypeId = null;
         for (self.builder.boundsOn(receiver)) |bound| {
-            if (bound.trait != named) continue;
+            if (bound.trait.index() != named) continue;
             if (only != null) return;
             only = bound.args;
         }
@@ -17071,7 +17157,7 @@ const Checker = struct {
             const resolved = try self.callableContext(want.ty, settling);
             var context = want;
             context.ty = resolved;
-            if (!self.hasOpenParameter(resolved, settling)) {
+            if (!try self.hasOpenParameter(resolved, settling)) {
                 context.inference = null;
                 return self.checkInner(id, context);
             }
@@ -18800,7 +18886,7 @@ const Checker = struct {
             const impl_args = try self.gpa.dupe(TypeId, arguments);
             errdefer self.gpa.free(impl_args);
             try self.traversals.append(self.gpa, .{
-                .at = @intCast(id.index()),
+                .at = id,
                 .decl = traversal,
                 .impl_args = impl_args,
                 .positions = positions_plan,
@@ -23021,7 +23107,7 @@ const Checker = struct {
         // body settled, or the inferred type parameter as they solved it.
         const answered = if (result_expected) |want| if (want.inference) |settling| solved: {
             const solved = try self.callableContext(want.ty, settling);
-            break :solved if (self.hasOpenParameter(solved, settling)) TypeId.never else solved;
+            break :solved if (try self.hasOpenParameter(solved, settling)) TypeId.never else solved;
         } else result else result;
         for (deferred_tries.items) |pending| {
             // Read again: what the operand left open, the body may since have settled.
@@ -23502,7 +23588,7 @@ const Checker = struct {
         args[0] = self.ast.withoutGroups(receiver);
         @memcpy(args[1..], given);
         try self.postfix.append(self.gpa, .{
-            .call = @intCast(id.index()),
+            .call = id,
             .args = args,
         });
         return .{ .settled = .{ .sig = sig, .args = args } };
@@ -27865,7 +27951,7 @@ const Checker = struct {
         // that offset rather than folding the bounds again, which is the same
         // reason a routed bracket carries its expansion.
         try self.range_places.append(self.gpa, .{
-            .at = @intCast(id.index()),
+            .at = id,
             .first = @intCast(lo),
         });
 
@@ -28192,12 +28278,12 @@ const Checker = struct {
         var arguments: std.AutoHashMapUnmanaged(ExprId, []const TypeId) = .empty;
         defer arguments.deinit(self.gpa);
         try arguments.ensureTotalCapacity(self.gpa, @intCast(self.projected.items.len));
-        for (self.projected.items) |site| arguments.putAssumeCapacity(ExprId.at(site.at), site.impl_args);
+        for (self.projected.items) |site| arguments.putAssumeCapacity(site.at, site.impl_args);
         for (self.projected.items) |site| {
-            if (self.ast.exprTag(ExprId.at(site.at)) != .index) continue;
+            if (self.ast.exprTag(site.at) != .index) continue;
             const found = self.expansions.items[site.expansion];
             if (found.delegation == null and found.index == types_mod.Expansion.no_binding) continue;
-            const wrote = self.ast.binary(ExprId.at(site.at)).rhs;
+            const wrote = self.ast.binary(site.at).rhs;
             const counts_back = self.foldedFromEnd(wrote);
             const value = counts_back orelse self.folds.get(wrote).valueOf() orelse continue;
             var visited: RangeVisits = .empty;
@@ -28207,8 +28293,8 @@ const Checker = struct {
                 visited.deinit(self.gpa);
             }
             if (try self.settleThrough(site.expansion, site.impl_args, &visited, &arguments, wrote, value, counts_back != null)) {
-                _ = self.selected_places.remove(ExprId.at(site.at));
-                _ = self.record(ExprId.at(site.at), .poison);
+                _ = self.selected_places.remove(site.at);
+                _ = self.record(site.at, .poison);
             }
         }
     }
@@ -28602,7 +28688,7 @@ const Checker = struct {
             {
                 const impl_args = try self.gpa.dupe(TypeId, self.param_types[owner.index()]);
                 errdefer self.gpa.free(impl_args);
-                try self.projected.append(self.gpa, .{ .at = @intCast(at.index()), .expansion = row, .impl_args = impl_args });
+                try self.projected.append(self.gpa, .{ .at = at, .expansion = row, .impl_args = impl_args });
             }
             try self.projected_at.put(self.gpa, at, row);
             return .{ .place = settled };
@@ -28618,7 +28704,7 @@ const Checker = struct {
         {
             const impl_args = try self.gpa.dupe(TypeId, choice.impl_args);
             errdefer self.gpa.free(impl_args);
-            try self.projected.append(self.gpa, .{ .at = @intCast(at.index()), .expansion = row, .impl_args = impl_args });
+            try self.projected.append(self.gpa, .{ .at = at, .expansion = row, .impl_args = impl_args });
         }
         try self.projected_at.put(self.gpa, at, row);
 
@@ -28893,7 +28979,7 @@ const Checker = struct {
         var rows: std.AutoHashMapUnmanaged(ExprId, usize) = .empty;
         defer rows.deinit(self.gpa);
         try rows.ensureTotalCapacity(self.gpa, @intCast(self.projected.items.len));
-        for (self.projected.items, 0..) |site, i| rows.putAssumeCapacity(ExprId.at(site.at), i);
+        for (self.projected.items, 0..) |site, i| rows.putAssumeCapacity(site.at, i);
         var found: std.ArrayList(ExprId) = .empty;
         defer found.deinit(self.gpa);
 
@@ -29509,18 +29595,15 @@ const Checker = struct {
                     // is filled by nothing, and a call through the trait would
                     // reach it. Said here, where the pairing found nothing,
                     // rather than by a second walk asking the same question of
-                    // the same two lists.
-                    try self.sink.addErrorFmt(
-                        .t_impl,
-                        self.ast.fileOf(trait_token),
-                        self.ast.tokenSpan(trait_token),
-                        if (settlesAType(self.ast, sig))
-                            "settle it, or drop it from the trait"
-                        else
-                            "supply a body for it, or drop it from the trait",
-                        "`{s}` declares `{s}`, and this implementation does not supply it",
-                        .{ self.ast.tokenText(trait_token), self.ast.tokenText(self.ast.declName(sig)) },
-                    );
+                    // the same two lists -- unless a head is still to be read
+                    // again, when which implementations overlap is not yet
+                    // all known.
+                    const missing: Unsupplied = .{ .implementation = d, .trait_token = trait_token, .sig = sig };
+                    if (self.unsettled_heads.items.len != 0) {
+                        try self.unsupplied.append(self.gpa, missing);
+                    } else {
+                        try self.reportUnsupplied(missing);
+                    }
                     continue;
                 };
 
@@ -29602,7 +29685,11 @@ const Checker = struct {
             self.gpa.free(implementation.args);
             implementation.args = args;
             implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
+            try self.requireRecoverableParameters(implementation);
         }
+        // A selection made while these rows held unanswered arguments was
+        // made against keys that have now changed.
+        if (self.unsettled_heads.items.len != 0) self.builder.invalidateImplementationLookup();
     }
 
     /// Every declared part, every type an implementation settles, every
@@ -29745,7 +29832,7 @@ const Checker = struct {
 
         /// How many settled references and aliases a chain of declared
         /// answers may pass through.
-        const max_depth: u32 = 1000;
+        const max_depth: u32 = types_mod.max_answer_links;
 
         fn isLink(reading: Read) bool {
             return reading == .reference or reading == .alias;
@@ -31523,13 +31610,13 @@ const Checker = struct {
             if (predicate.subject != subject) continue;
             var kept: usize = 0;
             for (predicate.demand.traits) |required| {
-                if (required.trait != release.index()) kept += 1;
+                if (required.trait != release) kept += 1;
             }
             if (kept == predicate.demand.traits.len) continue;
             const traits = try self.gpa.alloc(types_mod.BoundTrait, kept);
             var at: usize = 0;
             for (predicate.demand.traits) |required| {
-                if (required.trait == release.index()) continue;
+                if (required.trait == release) continue;
                 traits[at] = required;
                 at += 1;
             }
@@ -32061,16 +32148,22 @@ const Checker = struct {
     /// written type given the wrong number of arguments gets, because that is
     /// what a head is.
     ///
-    /// A head applying none is a name and not an application: it stands for the
-    /// declaration itself, which is what an inherent implementation on a generic
-    /// type is written as.
+    /// A head applying none is a name. An inherent implementation on a generic
+    /// type is written with one, and a name whose type has a parameter without
+    /// a default is refused where the written type is read. What is left for
+    /// this to refuse is a trait implementation's head naming a type whose
+    /// every parameter has a default: read as a written type it is the type
+    /// with its defaults, but a trait implementation's head fills none, so it
+    /// names no member of the family and would answer for nothing.
     fn checkHeadArity(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
         const written = self.ast.declHead(d).args.len();
-        if (written == 0) return;
+        const inherent = self.ast.declTrait(d) == TokenId.none;
+        if (written == 0 and inherent) return;
 
         const tok = self.ast.declName(d);
         const m = self.program.moduleOf(d);
         if (m == .none) return;
+        if (written == 0 and self.requiredParamCountOf(m, d, tok) != 0) return;
 
         // A head naming nothing is already reported as the undefined name it
         // is, and how many arguments a name that reaches no declaration takes
@@ -32084,7 +32177,7 @@ const Checker = struct {
         // head writes, so a head may omit the trailing arguments a default
         // fills. A trait implementation's head is the constructor applied to
         // each of its parameters, because the head key is the constructor.
-        const required = if (self.ast.declTrait(d) == TokenId.none)
+        const required = if (inherent)
             self.requiredParamCountOf(m, d, tok)
         else
             wanted;
@@ -32139,8 +32232,8 @@ const Checker = struct {
         return out;
     }
 
-    /// Settle one complete implementation key and verify that structural
-    /// matching can recover every declared parameter without inverting a projection.
+    /// Reads what an implementation's head names, and holds a default
+    /// implementation to the one head it may write.
     fn settleHead(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
         const d = implementation.decl;
         implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
@@ -32155,6 +32248,19 @@ const Checker = struct {
                 try self.sink.addErrorFmt(.t_impl, self.ast.fileOfDecl(d), self.ast.writtenSpan(self.ast.declHead(d)), "use one parameter as the whole head of a zero-argument trait", "a default implementation requires one bare parameter head and a zero-argument trait", .{});
             }
         }
+    }
+
+    /// Verifies that structural matching can recover every parameter an
+    /// implementation declares from its head and trait arguments without
+    /// inverting a projection, and refuses the implementation otherwise.
+    ///
+    /// Asked once per implementation, when its head and trait arguments are
+    /// known: where they are first read, or, for one naming a settled type,
+    /// where they are read again. An argument still unanswered holds no
+    /// parameter, so asking earlier refuses `impl[T] Tr[Two[T, Probe.Reading]]`
+    /// for a `T` its key names.
+    fn requireRecoverableParameters(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
+        const d = implementation.decl;
         var parameters = try types_mod.ImplementationParameters.init(self.gpa, &self.builder, implementation.*);
         defer parameters.deinit(self.gpa);
         for (parameters.origins, 0..) |origin, at| {
@@ -32238,10 +32344,26 @@ const Checker = struct {
     /// however many settled arguments one type implements a trait at --
     /// whatever its head's own parameters do, since an argument list written
     /// out is ground however generic the type it is written for.
+    ///
+    /// `among`, where given, limits the reports to pairs holding one of its
+    /// members: the implementations read again once declared answers were
+    /// settled, which the first asking passed over and every pair without
+    /// one of which it has already judged. A chain holding none of them is
+    /// not examined, and the pairs of one that does are found as they are
+    /// the first time, by the same hashing and the same candidates.
     fn refuseOverlappingImplementations(
         self: *Checker,
         implementations: []const types_mod.Implementation,
+        among: ?*const std.DynamicBitSetUnmanaged,
     ) std.mem.Allocator.Error!void {
+        const Pairs = struct {
+            among: ?*const std.DynamicBitSetUnmanaged,
+            fn wanted(pairs: @This(), a: usize, b: usize) bool {
+                const set = pairs.among orelse return true;
+                return set.isSet(a) or set.isSet(b);
+            }
+        };
+        const pairs: Pairs = .{ .among = among };
         var handled = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, implementations.len);
         defer handled.deinit(self.gpa);
 
@@ -32264,6 +32386,7 @@ const Checker = struct {
             if (im.head == .parameter and im.valid_key) {
                 var concrete = self.impl_index.membersOfTrait(im.trait);
                 while (concrete.next()) |other| {
+                    if (!pairs.wanted(i, other)) continue;
                     const row = implementations[other];
                     if (row.trait != im.trait or row.head == .parameter or row.head == .default_ or row.isAmbient() or !row.valid_key) continue;
                     // Integer denotes a closed receiver domain. Ordinary trait
@@ -32319,6 +32442,15 @@ const Checker = struct {
                 }
             }
 
+            if (among) |set| {
+                const holds_one = for (open_list.items) |at| {
+                    if (set.isSet(at)) break true;
+                } else for (ground_list.items) |at| {
+                    if (set.isSet(at)) break true;
+                } else false;
+                if (!holds_one) continue;
+            }
+
             if (open_list.items.len != 0) {
                 const position = try self.overlapColumn(implementations, open_list.items, ground_list.items);
                 var open_candidates: OverlapCandidates = .{};
@@ -32335,10 +32467,12 @@ const Checker = struct {
                     const root = self.overlapRoot(implementations[later].args, position);
                     var prior_rows = open_candidates.candidates(root, open_list.items[0..oi]);
                     while (prior_rows.next()) |prior| {
+                        if (!pairs.wanted(prior, later)) continue;
                         try self.refuseIfOverlapping(implementations, prior, later);
                     }
                     var ground_rows = ground_candidates.candidates(root, ground_list.items);
                     while (ground_rows.next()) |ground_at| {
+                        if (!pairs.wanted(later, ground_at)) continue;
                         try self.refuseIfOverlapping(
                             implementations,
                             @min(later, ground_at),
@@ -32360,7 +32494,7 @@ const Checker = struct {
                     // Hashed and then compared, so a collision costs a
                     // comparison rather than a report about two lists that
                     // are not the same.
-                    if (std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
+                    if (pairs.wanted(other, at) and std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
                         try self.refuseIfOverlapping(implementations, other, at);
                     }
                     walk = if (next.items[j] == j) null else next.items[j];
@@ -32388,7 +32522,7 @@ const Checker = struct {
     ) bool {
         const receiver = self.builder.headOf(other.ty);
         for (self.builder.boundsOn(head.ty)) |bound| {
-            var rows = self.impl_index.candidates(implementations, bound.trait, receiver, true);
+            var rows = self.impl_index.candidates(implementations, bound.trait.index(), receiver, true);
             if (rows.next() == null) return true;
         }
         return false;
@@ -32485,6 +32619,23 @@ const Checker = struct {
             }
         };
     };
+
+    /// A member a trait declares and an implementation supplies nothing for.
+    const Unsupplied = struct { implementation: node.DeclId, trait_token: TokenId, sig: node.DeclId };
+
+    fn reportUnsupplied(self: *Checker, missing: Unsupplied) std.mem.Allocator.Error!void {
+        try self.sink.addErrorFmt(
+            .t_impl,
+            self.ast.fileOf(missing.trait_token),
+            self.ast.tokenSpan(missing.trait_token),
+            if (settlesAType(self.ast, missing.sig))
+                "settle it, or drop it from the trait"
+            else
+                "supply a body for it, or drop it from the trait",
+            "`{s}` declares `{s}`, and this implementation does not supply it",
+            .{ self.ast.tokenText(missing.trait_token), self.ast.tokenText(self.ast.declName(missing.sig)) },
+        );
+    }
 
     /// Unifies `first` and `second`'s heads followed by their trait arguments,
     /// as one list each, and reports `[T-Impl]` where they unify -- carried by
@@ -32721,7 +32872,7 @@ const Checker = struct {
         // supplied.
         var at: usize = 0;
         while (at < out.items.len) : (at += 1) {
-            const required = node.DeclId.at(out.items[at].trait);
+            const required = out.items[at].trait;
             const supplied = out.items[at].args;
             const through: ?BoundInterning = if (interning == null) null else .{
                 .module = self.program.moduleOf(required),
@@ -32791,7 +32942,7 @@ const Checker = struct {
         }
 
         for (traits) |carried| {
-            const required = node.DeclId.at(carried.trait);
+            const required = carried.trait;
             for (self.ast.declBounds(required)) |bound| {
                 if (!self.isCallableBound(bound)) continue;
                 const raw = try self.boundSignature(self.program.moduleOf(required), required, bound);
@@ -32874,7 +33025,7 @@ const Checker = struct {
             if (args.len > 0) self.gpa.free(args);
             return err;
         };
-        out.append(self.gpa, .{ .trait = named, .args = args, .written = written }) catch |err| {
+        out.append(self.gpa, .{ .trait = trait, .args = args, .written = written }) catch |err| {
             _ = seen.removeContext(key, context);
             if (args.len > 0) self.gpa.free(args);
             return err;
@@ -32908,9 +33059,8 @@ const Checker = struct {
         trait: node.DeclId,
         written: node.TraitBound,
     ) []const TypeId {
-        const named: u32 = @intCast(trait.index());
         for (self.builder.boundsOn(t)) |seen| {
-            if (seen.trait != named) continue;
+            if (seen.trait != trait) continue;
             if (!self.sameBoundArgs(seen.written.named.args, written.named.args)) continue;
             return seen.args;
         }
@@ -35167,6 +35317,17 @@ const Checker = struct {
         return self.settleByInContext(declared, actual, d, found, clash, settlement, null);
     }
 
+    /// One pair of nominal types a settlement matched, argument by argument,
+    /// and the settlement it was matched in: whose parameters, which slots,
+    /// and which kind.
+    const SettledPair = struct {
+        declared: TypeId,
+        actual: TypeId,
+        owner: node.DeclId,
+        slots: usize,
+        settlement: Settlement,
+    };
+
     fn settleByInContext(
         self: *Checker,
         declared: TypeId,
@@ -35179,7 +35340,10 @@ const Checker = struct {
     ) std.mem.Allocator.Error!bool {
         switch (self.builder.get(declared)) {
             .parameter => |p| {
-                if (open_context) |slots| if (self.hasOpenParameter(actual, slots)) return true;
+                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) {
+                    self.settle_left_open += 1;
+                    return true;
+                };
                 if (p.owner != d.index() or p.index >= found.len or actual == .never) return true;
                 if (found[p.index] == .poison) {
                     found[p.index] = actual;
@@ -35242,13 +35406,37 @@ const Checker = struct {
         const got = self.builder.instanceOf(actual) orelse return true;
         if (want.decl != got.decl) return true;
 
+        // A type is one entry however often it is named, so a pair of types
+        // can be reached along many paths: `P[A, A]` against `P[B, B]` meets
+        // `A` against `B` twice, and aliases that each name the last twice
+        // meet their innermost pair once per path. A pair matched once holds
+        // however it is reached again, since a slot keeps the type it was
+        // given: matching it again would read the same slots and change none.
+        // Kept only where nothing can differ on a second visit: no open type
+        // on either side, which a later meeting may settle, and no part left
+        // for later under an open context, whose slots a later step may fill.
+        // A match that left nothing is complete, open context or not.
+        const repeatable = !try self.builder.mentionsOpen(declared) and !try self.builder.mentionsOpen(actual);
+        const left_open = self.settle_left_open;
+        const pair: SettledPair = .{ .declared = declared, .actual = actual, .owner = d, .slots = @intFromPtr(found.ptr), .settlement = settlement };
+        if (repeatable and self.settled_pairs.contains(pair)) return true;
+
         const wanted = try self.sink.arena.dupe(TypeId, self.builder.argsOf(want));
         const given = try self.sink.arena.dupe(TypeId, self.builder.argsOf(got));
         if (wanted.len != given.len) return true;
 
+        // The pairs are forgotten when the outermost match of a settlement
+        // returns: the slots they were matched against belong to that call.
+        const outermost = self.settling_pairs == 0;
+        self.settling_pairs += 1;
+        defer {
+            self.settling_pairs -= 1;
+            if (outermost) self.settled_pairs.clearRetainingCapacity();
+        }
         for (wanted, given) |w, g| {
             if (!try self.settlePartInContext(w, g, d, found, clash, settlement, open_context)) return false;
         }
+        if (repeatable and left_open == self.settle_left_open) try self.settled_pairs.put(self.gpa, pair, {});
         return true;
     }
 
@@ -35269,7 +35457,10 @@ const Checker = struct {
     ) std.mem.Allocator.Error!bool {
         if (actual == .never) switch (self.builder.get(declared)) {
             .parameter => |p| {
-                if (open_context) |slots| if (self.hasOpenParameter(actual, slots)) return true;
+                if (open_context) |slots| if (try self.hasOpenParameter(actual, slots)) {
+                    self.settle_left_open += 1;
+                    return true;
+                };
                 if (p.owner != d.index() or p.index >= found.len) return true;
                 if (found[p.index] == .poison or found[p.index] == .never) {
                     found[p.index] = .never;
@@ -35369,7 +35560,8 @@ const Checker = struct {
     /// parameter is shown with what the call did settle, and an open one by
     /// its name. Whether it reported one.
     ///
-    /// **Bound:** the call's arguments, each type walked once.
+    /// **Bound:** the call's arguments, each pair of types they reach compared
+    /// once.
     fn reportShapeBeforeOpen(
         self: *Checker,
         d: node.DeclId,
@@ -35378,13 +35570,17 @@ const Checker = struct {
         walked: []const bool,
         settling: []const Settling,
     ) std.mem.Allocator.Error!bool {
+        // The pairs found to hold no clash, for every argument: what the call
+        // settled does not change while they are compared.
+        var agreeing: std.AutoHashMapUnmanaged(ShapePair, void) = .empty;
+        defer agreeing.deinit(self.gpa);
         for (args, 0..) |a, j| {
             if (j >= params.len or a == ExprId.none or !walked[j]) continue;
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
             const got = self.builder.exprType(value);
             if (got == .poison) continue;
             const declared = try paramType(self, d, j);
-            if (!self.shapeClashAroundOpen(declared, got, settling)) continue;
+            if (!try self.shapeClashAroundOpen(declared, got, settling, &agreeing)) continue;
             var shown = declared;
             for (settling) |s| {
                 const own: []const TypeId = if (s.owner.index() < self.param_types.len) self.param_types[s.owner.index()] else &.{};
@@ -35406,7 +35602,11 @@ const Checker = struct {
 
     /// Whether `got` is built, somewhere `declared` writes a type parameter
     /// the call left open, by another constructor than the one around it.
-    fn shapeClashAroundOpen(self: *Checker, declared: TypeId, got: TypeId, settling: []const Settling) bool {
+    ///
+    /// `agreeing` holds the pairs already found to hold no clash. A type is one
+    /// entry however often it is named, so `P[A, A]` against `P[B, B]` reaches
+    /// `A` against `B` twice, and the answer is the same both times.
+    fn shapeClashAroundOpen(self: *Checker, declared: TypeId, got: TypeId, settling: []const Settling, agreeing: *std.AutoHashMapUnmanaged(ShapePair, void)) std.mem.Allocator.Error!bool {
         const want = self.builder.instanceOf(declared) orelse return false;
         const have = self.builder.instanceOf(got) orelse return false;
         if (want.decl != have.decl) {
@@ -35418,9 +35618,14 @@ const Checker = struct {
         const wanted = self.builder.argsOf(want);
         const had = self.builder.argsOf(have);
         if (wanted.len != had.len) return false;
-        for (wanted, had) |w, h| if (self.shapeClashAroundOpen(w, h, settling)) return true;
+        const pair: ShapePair = .{ .declared = declared, .got = got };
+        if (agreeing.contains(pair)) return false;
+        for (wanted, had) |w, h| if (try self.shapeClashAroundOpen(w, h, settling, agreeing)) return true;
+        try agreeing.put(self.gpa, pair, {});
         return false;
     }
+
+    const ShapePair = struct { declared: TypeId, got: TypeId };
 
     /// What a call settled, per list.
     ///
@@ -35520,7 +35725,7 @@ const Checker = struct {
                 // nothing to add to, and checking it here would ask it for a
                 // type with nothing flowing in -- the very thing the walk below
                 // is about to do properly.
-                if (!speaking and !self.hasOpenParameter(declared, settling)) continue;
+                if (!speaking and !try self.hasOpenParameter(declared, settling)) continue;
 
                 const observed = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
                 const got = if (over != .none and readsSelf(self.ast, params[j])) try self.inherentReceiver(d, observed) else observed;
@@ -35668,7 +35873,7 @@ const Checker = struct {
                     delayed_refused = true;
                     continue;
                 }
-            } else if (bound == .poison or !self.callableInputsKnown(bound, settling)) {
+            } else if (bound == .poison or !try self.callableInputsKnown(bound, settling)) {
                 if (!try self.reportArgumentThatSettledNothing(d, args, params, walked, settling)) self.reportCallbackInputs(value);
                 _ = try self.check(value, .{ .ty = .poison, .at = self.locOf(value), .reason = .parameter, .callable_context = true });
                 walked[j] = true;
@@ -35677,7 +35882,7 @@ const Checker = struct {
             }
 
             if (!from_callback) {
-                const infer_result = self.hasOpenParameter(bound, settling);
+                const infer_result = try self.hasOpenParameter(bound, settling);
                 var signature = try self.callableContext(bound, settling);
                 const at_parameter: Loc = .{ .file = self.ast.fileOf(params[j].name), .span = self.ast.tokenSpan(params[j].name) };
                 if (infer_result and !self.isLambda(value)) {
@@ -35720,7 +35925,7 @@ const Checker = struct {
                         // it left open standing for themselves. Settling them
                         // from it would answer each with itself, so they stay
                         // open and the call reports them as undetermined.
-                        if (self.hasOpenParameter(supplied, settling)) {
+                        if (try self.hasOpenParameter(supplied, settling)) {
                             try unsettled_lambdas.append(self.gpa, .{ .value = value, .param = j, .bound = bound });
                             walked[j] = true;
                             continue;
@@ -36015,7 +36220,7 @@ const Checker = struct {
         defer self.gpa.free(wanted_params);
         if (lambda.params.len != wanted_params.len) return;
         for (lambda.params, wanted_params) |param, wanted| {
-            if (!param.written.wasWritten() or !self.hasOpenParameter(wanted.ty, settling)) continue;
+            if (!param.written.wasWritten() or !try self.hasOpenParameter(wanted.ty, settling)) continue;
             const diagnostics_start = self.sink.items().len;
             const errors_before = self.sink.error_count;
             const warnings_before = self.sink.warning_count;
@@ -36046,7 +36251,7 @@ const Checker = struct {
             if (j >= params.len or a == ExprId.none or !walked[j]) continue;
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
             const declared = try paramType(self, d, j);
-            if (self.callbackParameter(declared) != null or !self.hasOpenParameter(declared, settling)) continue;
+            if (self.callbackParameter(declared) != null or !try self.hasOpenParameter(declared, settling)) continue;
             const got = self.builder.exprType(value);
             if (got == .poison or !self.builtFromAnotherDeclaration(declared, got)) continue;
             const at_parameter: Loc = .{ .file = self.ast.fileOf(params[j].name), .span = self.ast.tokenSpan(params[j].name) };
@@ -36083,7 +36288,7 @@ const Checker = struct {
             return;
         }
         switch (self.builder.get(ty)) {
-            .parameter => if (self.hasOpenParameter(ty, settling)) {
+            .parameter => if (try self.hasOpenParameter(ty, settling)) {
                 try out.put(self.gpa, ty, {});
             },
             .array => |array| try self.openCallbackParameters(array.element, settling, out, visited),
@@ -36103,13 +36308,13 @@ const Checker = struct {
         }
     }
 
-    fn callableInputsKnown(self: *const Checker, ty: TypeId, settling: []const Settling) bool {
+    fn callableInputsKnown(self: *const Checker, ty: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
         const signature = switch (self.builder.get(ty)) {
             .callable => |signature| signature,
             else => return false,
         };
         for (self.builder.callableParams(signature)) |parameter| {
-            if (self.hasOpenParameter(parameter.ty, settling)) return false;
+            if (try self.hasOpenParameter(parameter.ty, settling)) return false;
         }
         return true;
     }
@@ -36236,7 +36441,7 @@ const Checker = struct {
     /// type disagrees with what the call settled, which is reported here.
     fn settleUnsettledLambda(self: *Checker, lambda: UnsettledLambda, declared: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
         const signature = try self.callableContext(lambda.bound, settling);
-        if (self.hasOpenParameter(signature, settling)) return true;
+        if (try self.hasOpenParameter(signature, settling)) return true;
         const at = self.ast.withoutGroups(lambda.value);
         const closure = self.res.closures.closureOf(at);
         const descriptor = &self.closure_descriptors[closure.index()];
@@ -36618,8 +36823,50 @@ const Checker = struct {
         return self.ast.exprTag(at) == .variant_ref and self.ast.unaryOperand(at) == .none and self.res.targetOf(at) == .none;
     }
 
-    fn hasOpenParameter(self: *const Checker, ty: TypeId, settling: []const Settling) bool {
-        if (self.builder.standinOf(ty)) |standin| return self.hasOpenParameter(standin.held, settling);
+    /// Whether `ty` holds a parameter `settling` has not yet settled, or a
+    /// poison.
+    ///
+    /// **Bound:** each type `ty` reaches that names other types is walked
+    /// once. One found to hold none is kept for the rest of the question, so
+    /// a type named by many of the types above it is not walked once per
+    /// path to it; a type naming no other is answered where it is met.
+    fn hasOpenParameter(self: *const Checker, ty: TypeId, settling: []const Settling) std.mem.Allocator.Error!bool {
+        var closed: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer closed.deinit(self.gpa);
+        return self.hasOpenParameterPast(ty, settling, &closed);
+    }
+
+    fn hasOpenParameterPast(
+        self: *const Checker,
+        ty: TypeId,
+        settling: []const Settling,
+        closed: *std.AutoHashMapUnmanaged(TypeId, void),
+    ) std.mem.Allocator.Error!bool {
+        // A type naming no other answers in one step and is not kept, so a
+        // question about a scalar or a parameter allocates nothing.
+        if (!self.namesTypes(ty)) return self.holdsOpenParameter(ty, settling, closed);
+        if (closed.contains(ty)) return false;
+        if (try self.holdsOpenParameter(ty, settling, closed)) return true;
+        try closed.put(self.gpa, ty, {});
+        return false;
+    }
+
+    /// Whether `ty` is made of other types `holdsOpenParameter` walks into.
+    fn namesTypes(self: *const Checker, ty: TypeId) bool {
+        if (self.builder.standinOf(ty) != null) return true;
+        return switch (self.builder.get(ty)) {
+            .array, .borrow, .callable, .closure => true,
+            else => if (self.builder.instanceOf(ty)) |origin| self.builder.argsOf(origin).len != 0 else false,
+        };
+    }
+
+    fn holdsOpenParameter(
+        self: *const Checker,
+        ty: TypeId,
+        settling: []const Settling,
+        closed: *std.AutoHashMapUnmanaged(TypeId, void),
+    ) std.mem.Allocator.Error!bool {
+        if (self.builder.standinOf(ty)) |standin| return self.hasOpenParameterPast(standin.held, settling, closed);
         switch (self.builder.get(ty)) {
             .poison => return true,
             .parameter => |parameter| {
@@ -36629,28 +36876,28 @@ const Checker = struct {
                 }
                 return false;
             },
-            .array => |array| return self.hasOpenParameter(array.element, settling),
-            .borrow => |b| return self.hasOpenParameter(b.referent, settling),
+            .array => |array| return self.hasOpenParameterPast(array.element, settling, closed),
+            .borrow => |b| return self.hasOpenParameterPast(b.referent, settling, closed),
             .callable => |signature| {
                 for (self.builder.callableParams(signature)) |parameter| {
-                    if (self.hasOpenParameter(parameter.ty, settling)) return true;
+                    if (try self.hasOpenParameterPast(parameter.ty, settling, closed)) return true;
                 }
-                return self.hasOpenParameter(signature.result, settling);
+                return self.hasOpenParameterPast(signature.result, settling, closed);
             },
             .closure => |closure| {
                 for (self.builder.closureArgs(closure)) |arg| {
-                    if (self.hasOpenParameter(arg, settling)) return true;
+                    if (try self.hasOpenParameterPast(arg, settling, closed)) return true;
                 }
                 for (self.builder.closureImplArgs(closure)) |arg| {
-                    if (self.hasOpenParameter(arg, settling)) return true;
+                    if (try self.hasOpenParameterPast(arg, settling, closed)) return true;
                 }
-                return closure.self_ty != .poison and self.hasOpenParameter(closure.self_ty, settling);
+                return closure.self_ty != .poison and try self.hasOpenParameterPast(closure.self_ty, settling, closed);
             },
             else => {},
         }
         const origin = self.builder.instanceOf(ty) orelse return false;
         for (self.builder.argsOf(origin)) |arg| {
-            if (self.hasOpenParameter(arg, settling)) return true;
+            if (try self.hasOpenParameterPast(arg, settling, closed)) return true;
         }
         return false;
     }
@@ -41214,7 +41461,7 @@ test "postfix checking and finalization release allocations on failure" {
     defer typing.deinit(gpa);
     try testing.expectEqual(@as(u32, 0), sink.error_count);
     try testing.expectEqual(@as(usize, 1), typing.postfix.len);
-    try testing.expect(typing.call_index.callOf(&typing, ExprId.at(typing.postfix[0].call)) != null);
+    try testing.expect(typing.call_index.callOf(&typing, typing.postfix[0].call) != null);
     try testing.checkAllAllocationFailures(gpa, typecheckOnly, .{.{ .resolved = &res }});
 }
 
