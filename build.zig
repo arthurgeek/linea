@@ -375,25 +375,10 @@ fn addCompilerAssets(
 ) void {
     m.addOptions("build_options", options);
     m.addAnonymousImport("runtime_source", .{ .root_source_file = runtime_source });
-    m.addAnonymousImport("migration_audit", .{ .root_source_file = m.owner.path("runtime/migration-audit.json") });
-    m.addAnonymousImport("migration_validation", .{ .root_source_file = m.owner.path("runtime/migration-validation.json") });
     m.addAnonymousImport("semantics", .{ .root_source_file = semantics });
     m.addAnonymousImport("library_manifest", .{ .root_source_file = library });
     m.addImport("fuzz_corpus", corpus);
     m.addImport("lsp", lsp_kit.module("lsp"));
-}
-
-/// An archive's sidecar records identity without granting migration authority.
-fn migrationManifest(b: *std.Build, generator: *std.Build.Step.Compile, archive: std.Build.LazyPath, float_c: std.Build.LazyPath, config: []const u8, target: std.Build.ResolvedTarget, variant: []const u8, sanitizer: []const u8) std.Build.LazyPath {
-    const files = b.addWriteFiles();
-    const config_file = files.add("migration-build.json", config);
-    const run = b.addRunArtifact(generator);
-    run.addFileArg(archive);
-    const output = run.addOutputFileArg(b.fmt("{s}.migration.json", .{if (std.mem.eql(u8, variant, "regular")) runtime_symbols.archive_name else runtime_symbols.checked_archive_name}));
-    run.addFileArg(config_file);
-    run.addFileArg(float_c);
-    run.addArgs(&.{ target.result.zigTriple(b.allocator) catch @panic("OOM"), variant, sanitizer });
-    return output;
 }
 
 /// The generated and hand-written editor descriptions conformance tests read.
@@ -988,7 +973,7 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "migration_manifest.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig" },
         .imported_by = "build.zig",
         .layered = false,
         .test_manifests = &.{"source_test.zig"},
@@ -2222,34 +2207,11 @@ pub fn build(b: *std.Build) void {
         runtime.addArtifactArg(object);
         checked_runtime.addArtifactArg(if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object);
     }
-    const migration_generator = b.addExecutable(.{ .name = "migration-manifest", .root_module = b.createModule(.{
-        .root_source_file = b.path("build/migration_manifest.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    }) });
-    migration_generator.root_module.addAnonymousImport("migration_contract_source", .{ .root_source_file = b.path("src/support/migration_contract.zig") });
-    migration_generator.root_module.addAnonymousImport("migration_contract", .{ .root_source_file = b.path("src/support/migration_contract.zig") });
-    migration_generator.root_module.addAnonymousImport("runtime_sources", .{ .root_source_file = runtimeSources(b) });
-    migration_generator.root_module.addAnonymousImport("build_source", .{ .root_source_file = b.path("build.zig") });
-    migration_generator.root_module.addAnonymousImport("runtime_registry", .{ .root_source_file = b.path("src/support/runtime_symbols.zig") });
-    const migration_config = std.json.Stringify.valueAlloc(b.allocator, .{
-        .zig = @import("builtin").zig_version_string,
-        .cpu = runtime_target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM"),
-        .runtime_flags = runtime_flags.items,
-        .checked_flags = checked_flags.items,
-        .math_flags = math_flags.items,
-        .float_flags = float_flags.items,
-    }, .{}) catch @panic("OOM");
-    const migration_sanitizer = if (sanitize == .none) "none" else @tagName(sanitize);
-    const runtime_manifest = migrationManifest(b, migration_generator, runtime_archive, float_c, migration_config, runtime_target, "regular", migration_sanitizer);
-    const checked_runtime_manifest = migrationManifest(b, migration_generator, checked_runtime_archive, float_c, migration_config, runtime_target, "checked", migration_sanitizer);
     const runtime_installs = [_]*std.Build.Step{
         &b.addInstallLibFile(runtime_archive, runtime_symbols.archive_name).step,
         &b.addInstallLibFile(checked_runtime_archive, runtime_symbols.checked_archive_name).step,
     };
     for (runtime_installs) |install| b.getInstallStep().dependOn(install);
-    b.getInstallStep().dependOn(&b.addInstallLibFile(runtime_manifest, runtime_symbols.archive_name ++ ".migration.json").step);
-    b.getInstallStep().dependOn(&b.addInstallLibFile(checked_runtime_manifest, runtime_symbols.checked_archive_name ++ ".migration.json").step);
     b.getInstallStep().dependOn(&b.addInstallFile(b.path("runtime/zig-float-LICENSE"), "share/licenses/linea/Zig-MIT").step);
 
     // The compiler reads the runtime's source to check that the two agree on

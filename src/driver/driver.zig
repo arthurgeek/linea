@@ -47,7 +47,6 @@ const mlir_backend = @import("../backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
-const migration_contract = @import("../support/migration_contract.zig");
 const loader = @import("loader.zig");
 const prototypes = @import("prototypes.zig");
 const library = @import("library.zig");
@@ -375,42 +374,6 @@ const BuildRequest = struct {
     foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
-fn migrationRuntime(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, runtime: ?[]const u8, storage: toolchain.Storage, sanitize: ?[]const u8, runtime_available: bool) !toolchain.MigrationRuntime {
-    // No optional evidence is read or allocated until this runtime implements
-    // registration, guarded emission and entry provenance.
-    var migration: toolchain.MigrationRuntime = .{
-        .availability = .{ .disabled = if (runtime == null) .object_only else .runtime_unavailable },
-        .path = runtime,
-    };
-    if (runtime_available and runtime != null) evidence: {
-        const registry = migration_contract.sha256(@embedFile("../support/runtime_symbols.zig"));
-        const target = try builtin.target.zigTriple(gpa);
-        defer gpa.free(target);
-        const audit = std.json.parseFromSlice(migration_contract.Audit, gpa, @embedFile("migration_audit"), .{}) catch |err| {
-            migration.availability = .{ .disabled = if (err == error.OutOfMemory) .operational_failure else .missing_approval };
-            if (err == error.OutOfMemory) migration.failure = .{ .stage = .behavior_parse, .cause = err };
-            break :evidence;
-        };
-        defer audit.deinit();
-        const validation = std.json.parseFromSlice(migration_contract.Validation, gpa, @embedFile("migration_validation"), .{}) catch |err| {
-            migration.availability = .{ .disabled = if (err == error.OutOfMemory) .operational_failure else .missing_validation };
-            if (err == error.OutOfMemory) migration.failure = .{ .stage = .validation_parse, .cause = err };
-            break :evidence;
-        };
-        defer validation.deinit();
-        migration = try toolchain.prepareMigrationRuntime(gpa, io, scratch_root, runtime, .{
-            .target = target,
-            .variant = if (storage == .checked) .checked else .regular,
-            .sanitizer = if (sanitize) |name| std.meta.stringToEnum(migration_contract.Sanitizer, name).? else .none,
-            .registry_sha256 = &registry,
-            // Optional registration, entry provenance and guarded emission do not
-            // exist in this runtime yet. Identity alone cannot activate them.
-            .runtime_available = runtime_available,
-        }, if (audit.value.format == 1) audit.value.approvals else &.{}, if (validation.value.format == 1) validation.value.validations else &.{});
-    }
-    return migration;
-}
-
 /// Writes IR and assembles it, and for a program links it against the
 /// runtime. A library is left as its object, which links nothing, so no
 /// runtime is looked for.
@@ -456,9 +419,6 @@ fn compileArtifact(
         );
     };
 
-    var migration = try migrationRuntime(gpa, io, scratchDir(environ), runtime, req.storage, sanitize, false);
-    defer migration.deinit(gpa, io);
-
     const mid = try toolchain.Intermediates.of(gpa, req.out_path);
     defer mid.deinit(gpa);
 
@@ -476,7 +436,6 @@ fn compileArtifact(
         if (!try emitMlir(gpa, out.open(io, file), req.mir, req.table, req.sink, .{
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
             .foreign_symbols = req.foreign_symbols,
-            .migration = migration.availability,
         })) return exit_defect;
         try out.flush();
     }
@@ -486,8 +445,7 @@ fn compileArtifact(
     const build_opts: toolchain.Options = .{
         .mid = mid,
         .out_path = req.out_path,
-        .runtime_path = migration.path,
-        .runtime_sha256 = if (migration.snapshot) |snapshot| snapshot.sha256 else null,
+        .runtime_path = runtime,
         .artifact = req.artifact,
         .opt = req.opt,
         // Read from the same place the runtime path is, because it is the same
@@ -1330,10 +1288,4 @@ test "parseColor accepts the documented values" {
     try testing.expectEqual(ColorArg.never, parseColor("never").?);
     try testing.expectEqual(ColorArg.auto, parseColor("auto").?);
     try testing.expect(parseColor("purple") == null);
-}
-
-test "migration certification: unavailable driver skips policy allocation and I/O" {
-    var selected = try migrationRuntime(testing.failing_allocator, .failing, "unusable", "unreadable.a", .unchecked, null, false);
-    defer selected.deinit(testing.failing_allocator, .failing);
-    try testing.expectEqual(migration_contract.DisableReason.runtime_unavailable, selected.availability.disabled);
 }

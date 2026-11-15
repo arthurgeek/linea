@@ -2094,16 +2094,6 @@ the trees through their sugar and compares positions by representation, for
 every C declaration of the function. The language server does not
 run it.
 
-Optional migration identity is selected before IR emission. The native contract
-registry remains `support/runtime_symbols.zig`; `support/migration_contract.zig`
-compares archive identity with separately reviewed behavioral and target records.
-`build/migration_manifest.zig` derives identity sidecars and cannot mint approval.
-The current runtime has no migration activation/provenance protocol, so every
-normal selection remains pinned and emitted IR has no optional migration helper
-references. Object-only output requires no archive and has unproven provenance.
-See [runtime migration evidence](../runtime/MIGRATION.md) for the record boundaries
-and the remaining execution gates.
-
 A build links one of two runtime archives that differ only in the allocator.
 `liblinea_rt_checked.a` compiles `runtime/linea_rt.c` with
 `LINEA_CHECK_STORAGE`, which gives every allocation pages of its own followed
