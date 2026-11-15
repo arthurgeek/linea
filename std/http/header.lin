@@ -77,16 +77,7 @@ struct ResponseHeaders[A: Allocator] {
     fields: Vec[PendingHeader[A], A],
 }
 
-// Releasing the headers releases each one. It is written out because a derived
-// `Release` on a type holding a `Vec` could not be used for that type held in
-// a `Vec` in generic code: releasing a `Vec[ResponseHeaders[A], A]` there would
-// be refused.
-impl[A: Allocator] Release for ResponseHeaders[A] {
-    fn release(sink self: Self) {
-        let ResponseHeaders { allocator: _, fields } = self
-        fields.release()
-    }
-}
+derive[A: Allocator] Release for ResponseHeaders[A]
 
 fn release_header_lists[A: Allocator](sink lists: Vec[ResponseHeaders[A], A]) {
     lists.release()
