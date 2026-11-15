@@ -11462,8 +11462,9 @@ pub const Typing = struct {
         /// instantiation applied to one or an array of one. A parameter
         /// occupies a placeholder's width, so such a type measures the width
         /// of no value: each type that settles the parameter is a type of its
-        /// own in the pool and is asked about there. A generic declaration is
-        /// still asked about, with its own parameters as its parts.
+        /// own in the pool and is asked about there. A generic declaration's
+        /// own type is not an instantiation and is answered here; the caller
+        /// passes it over and asks about its instantiation at `()` instead.
         ///
         /// **Bound:** the types from `from` on, each asked for its layout
         /// once, and each one that crosses asked once whether it is ground.

@@ -869,7 +869,11 @@ whatever its form, so what encloses it still reads what follows it: an array
 its length, a parameter list its next parameter. An array length refused for
 its own depth is not reported again as no constant ([T-ArraySize]). A derive
 request whose head holds a refused type is not expanded, so the refused text is
-not written out and reported a second time. A type whose arguments stand past the limit
+not written out and reported a second time; it still uses the type its head
+names. An implementation whose head or trait arguments hold a refused type has
+no key: it is compared with no other implementation and is not asked whether
+its parameters can be recovered ([T-Impl]). An initialiser is not held against
+an annotation that was refused, at module level as in a function. A type whose arguments stand past the limit
 is refused with them, wherever it is written, so it is not reported for the
 arguments it lacks ([T-Bound]), and a derive naming it as a source is not
 reported for the variant that source would need ([T-Derive]). A name written
@@ -3866,15 +3870,19 @@ parentheses around the literal are allowed.
 A length that is not a constant, or not a count, is reported for its form and
 its value, and is silent only where a report already made explains why a
 constant expression has no count: a name nothing declares ([N-Undefined]); a
-part the parser refused; a constant whose initialiser was refused, which is
-reported where it is declared, once, whichever declaration reads it first
-([T-Mismatch], [T-Convert], [T-Literal]), or a constant worked out from such a
-one; and an operand of an expression of a constant form that was itself
-reported, as the `true` of `1 + true` is ([T-Operands]). That holds in a
+part the parser refused; a constant or a local binding whose own declaration
+was refused, for whatever reason, a ring of constants included, which is
+reported where it is declared, once, whichever declaration reads it first, or
+a constant worked out from such a one; and an operand of an expression of a
+constant form that was itself reported, as the `true` of `1 + true` is
+([T-Operands]). A length is read once, after the constants are checked, so what
+it reports does not depend on which declaration is written first. That holds in a
 binding, a parameter, a field, a payload, an alias and a derive's argument. An
 expression of a form no constant expression has, such as a call of a closure,
-is no count whatever else is reported inside it, so it keeps its [T-ArraySize]
-beside that report.
+or of an operation, is no count whatever else is reported inside it, so it
+keeps its [T-ArraySize] beside that report. An initialiser is not held against
+an annotation that was refused: a constant whose annotation holds a refused
+length, or a refused type, reports only that.
 
 The element type supplies context to every literal element. For example,
 `let readings: [Float64; _] = [32.0, 104.0]` has type `[Float64; 2]`, and
@@ -4401,7 +4409,11 @@ holds one too wide is too wide because that one is, so the report names the type
 at which the width crosses the limit, once; two types that cross on their own
 are each reported. A declared type and an instantiation are reported at the
 declaration; an array type, which no declaration names, is reported at the type
-that first writes it.
+that first writes it. An array no place writes, made by settling the parameter
+of a declaration that holds an array of it, is reported at that declaration,
+naming the application and the part: `struct Row[T] { items: [T; 4294967295] }`
+applied as `Row[UInt16]` reports that `Row[UInt16]` is wider, because its part
+`items` is `[UInt16; 4294967295]`.
 
 A type still written with a type parameter has no width, so the limit is asked
 of each type that settles the parameter and not of the one that holds it:

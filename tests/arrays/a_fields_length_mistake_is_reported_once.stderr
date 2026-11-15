@@ -8,6 +8,11 @@ error[T-ArraySize]: an array's length is a count, and a count is a number
   |
 8 |     text: ([UInt8; "x{count}"], UInt8),
   |                    ^^^^^^^^^^ this is not a number
+error[T-UnknownOperation]: `UInt64` has no operation `min`
+ --> tests/arrays/a_fields_length_mistake_is_reported_once.lin:9:21
+  |
+9 |     called: [UInt8; count.min(2)],
+  |                     ^^^^^^^^^ `Sequence` declares it, and `UInt64` does not implement `Sequence`
 error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
  --> tests/arrays/a_fields_length_mistake_is_reported_once.lin:9:21
   |

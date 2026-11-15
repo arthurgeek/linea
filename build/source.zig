@@ -608,11 +608,16 @@ pub fn isPassFile(path: []const u8) bool {
 pub const DiscardAllowed = struct {
     /// The file, relative to `src/`.
     path: []const u8,
-    /// The function the `catch` is written in.
+    /// The function the `catch` is written in. Where the file declares
+    /// several functions of one name, the name is followed by `#` and the
+    /// function's place among them in the file, counted from 1: `hash#2`.
     function: []const u8,
     /// The call before `catch` as it is written, receiver included, or
     /// `else` for an `else |…|` branch.
     callee: []const u8,
+    /// How many such discards the function holds. The entry excuses exactly
+    /// that many, so one added later needs its own reason.
+    sites: u32 = 1,
     /// Why no report or answer is lost.
     reason: []const u8,
 };
@@ -635,11 +640,14 @@ pub const Discard = struct {
 /// - `catch` followed by a value;
 /// - `catch unreachable`, which is undefined behaviour in a ReleaseFast
 ///   build where the call can fail;
-/// - `catch |e| …` and `else |e| …` whose body returns neither `e` nor an
-///   `error.…` value.
+/// - `catch |e| …` and `else |e| …` whose body does not end by handing the
+///   error on: its last statement, or the expression itself, is `return e`,
+///   `return error.…`, `unreachable` or `@panic(…)`, or it is a `switch` on
+///   `e` whose `error.OutOfMemory` prong, or `else` prong where it names
+///   none, returns the error.
 ///
-/// `catch return error.…`, `catch @panic(…)` and a capture whose body returns
-/// the error hand it on and are not listed. Nothing is decided by the name
+/// `catch return error.…`, `catch @panic(…)` and a capture that ends by
+/// handing the error on are not listed. Nothing is decided by the name
 /// of what is called: the tokens do not say what a call returns, so every
 /// discard is listed and the caller says which are explained.
 ///
@@ -679,6 +687,25 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
         }
         enclosing.append(gpa, .{ .first = first, .last = tree.lastToken(at), .name = name, .is_test = tag == .test_decl }) catch @panic("OOM");
     }
+    // Functions of one name are told apart by their order in the file.
+    std.mem.sort(Enclosing, enclosing.items, {}, struct {
+        fn earlier(_: void, a: Enclosing, b: Enclosing) bool {
+            return a.first < b.first;
+        }
+    }.earlier);
+    var declared: std.StringHashMapUnmanaged(u32) = .empty;
+    for (enclosing.items) |e| {
+        if (e.is_test) continue;
+        const count = declared.getOrPut(gpa, e.name) catch @panic("OOM");
+        count.value_ptr.* = if (count.found_existing) count.value_ptr.* + 1 else 1;
+    }
+    var met: std.StringHashMapUnmanaged(u32) = .empty;
+    for (enclosing.items) |*e| {
+        if (e.is_test or declared.get(e.name).? == 1) continue;
+        const place = met.getOrPut(gpa, e.name) catch @panic("OOM");
+        place.value_ptr.* = if (place.found_existing) place.value_ptr.* + 1 else 1;
+        e.name = std.fmt.allocPrint(gpa, "{s}#{d}", .{ e.name, place.value_ptr.* }) catch @panic("OOM");
+    }
 
     var found: std.ArrayList(Discard) = .empty;
     for (tags, 0..) |tag, at| {
@@ -704,7 +731,7 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
             .pipe => {
                 // `|e|`, then what is done with it.
                 const name = if (tags[i + 2] == .identifier) tree.tokenSlice(i + 2) else "";
-                if (returnsTheError(&tree, partner, i + 4, name)) continue;
+                if (handsTheErrorOn(&tree, partner, i + 4, name)) continue;
                 break :form if (is_else) "else |…| that does not return the error" else "catch |…| that does not return the error";
             },
             .keyword_unreachable => "catch unreachable",
@@ -720,7 +747,7 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
             .keyword_continue => "catch continue",
             .l_brace => {
                 if (partner[i + 1] == i + 2) break :form "catch {}";
-                if (returnsTheError(&tree, partner, i + 1, "")) continue;
+                if (handsTheErrorOn(&tree, partner, i + 1, "")) continue;
                 break :form "catch { … } that does not return an error";
             },
             else => "catch with a value",
@@ -746,48 +773,102 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
     return found.toOwnedSlice(gpa) catch @panic("OOM");
 }
 
-/// Whether what begins at `start` returns the error named `name`, or an
-/// `error.…` value: a block through its closing brace, or an expression
-/// through the `;` or `,` that ends it.
-fn returnsTheError(tree: *const std.zig.Ast, partner: []const u32, start: u32, name: []const u8) bool {
+/// Whether what begins at `start` ends by handing on the error named
+/// `name`: a block whose last statement does, or an expression that does.
+/// A `return` somewhere inside is not enough, since a path past it reaches
+/// the end with the error dropped.
+fn handsTheErrorOn(tree: *const std.zig.Ast, partner: []const u32, start: u32, name: []const u8) bool {
     const tags = tree.tokens.items(.tag);
-    var end: u32 = start;
-    if (start < tags.len and tags[start] == .l_brace and partner[start] != 0) {
-        end = partner[start];
-    } else while (end < tags.len) : (end += 1) switch (tags[end]) {
-        .l_paren, .l_brace, .l_bracket => if (partner[end] != 0) {
-            end = partner[end];
-        },
-        .r_paren, .r_brace, .r_bracket, .semicolon, .comma => break,
-        else => {},
-    };
-    var i = start;
-    while (i < end and i + 1 < tags.len) : (i += 1) {
-        if (tags[i] != .keyword_return) continue;
-        if (tags[i + 1] == .keyword_error) return true;
-        if (name.len != 0 and tags[i + 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(i + 1), name)) return true;
+    if (start >= tags.len) return false;
+    if (tags[start] != .l_brace or partner[start] == 0) return statementHandsOn(tree, partner, start, name);
+
+    // The start of the block's last statement: after the last `;` that
+    // ends one, or after a braced statement that needs none.
+    const end = partner[start];
+    var last: u32 = end;
+    var current: u32 = start + 1;
+    var i: u32 = start + 1;
+    while (i < end) {
+        switch (tags[i]) {
+            .l_paren, .l_bracket => i = partner[i] + 1,
+            .l_brace => {
+                i = partner[i] + 1;
+                if (i < end and tags[i] != .semicolon and tags[i] != .keyword_else and tags[i] != .comma and tags[i] != .period) {
+                    last = current;
+                    current = i;
+                }
+            },
+            .semicolon => {
+                last = current;
+                current = i + 1;
+                i += 1;
+            },
+            else => i += 1,
+        }
     }
-    return false;
+    if (current < end) last = current;
+    return last < end and statementHandsOn(tree, partner, last, name);
+}
+
+/// Whether the statement or expression at `at` hands the error on:
+/// `return name`, `return error.…`, `unreachable`, `@panic(…)`, or a
+/// `switch` on `name` whose prong for a refused allocation returns it.
+fn statementHandsOn(tree: *const std.zig.Ast, partner: []const u32, at: u32, name: []const u8) bool {
+    const tags = tree.tokens.items(.tag);
+    if (at + 1 >= tags.len) return false;
+    switch (tags[at]) {
+        .keyword_return => return tags[at + 1] == .keyword_error or
+            (name.len != 0 and tags[at + 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(at + 1), name)),
+        .keyword_unreachable => return true,
+        .builtin => return std.mem.eql(u8, tree.tokenSlice(at), "@panic"),
+        .keyword_switch => {},
+        else => return false,
+    }
+    // `switch (name) { … }`.
+    if (name.len == 0 or at + 4 >= tags.len or tags[at + 1] != .l_paren or tags[at + 2] != .identifier or
+        !std.mem.eql(u8, tree.tokenSlice(at + 2), name) or tags[at + 3] != .r_paren or tags[at + 4] != .l_brace) return false;
+    const end = partner[at + 4];
+    var else_returns = false;
+    var names_refusal = false;
+    var i = at + 5;
+    while (i + 2 < end) : (i += 1) {
+        if (tags[i] == .l_brace or tags[i] == .l_paren or tags[i] == .l_bracket) {
+            if (partner[i] != 0) i = partner[i];
+            continue;
+        }
+        if (tags[i] != .equal_angle_bracket_right) continue;
+        const returns = tags[i + 1] == .keyword_return and (tags[i + 2] == .keyword_error or
+            (tags[i + 2] == .identifier and std.mem.eql(u8, tree.tokenSlice(i + 2), name)));
+        const refusal = i >= 3 and tags[i - 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(i - 1), "OutOfMemory") and
+            tags[i - 2] == .period and tags[i - 3] == .keyword_error;
+        if (refusal) {
+            names_refusal = true;
+            if (!returns) return false;
+        }
+        if (tags[i - 1] == .keyword_else and returns) else_returns = true;
+    }
+    return if (names_refusal) true else else_returns;
 }
 
 /// What is wrong between the pass files and `allowed`: each discard no
-/// entry explains, and each entry that explains none, so the list holds
-/// exactly the exceptions the source makes.
+/// entry explains, and each entry whose function holds more or fewer such
+/// discards than it says, so the list holds exactly the exceptions the
+/// source makes.
 ///
 /// **Bound:** each file's tokens once, and each discard against the entries
 /// for its file.
 pub fn unexplainedDiscards(gpa: std.mem.Allocator, files: []const SourceFile, allowed: []const DiscardAllowed) []const []const u8 {
     var wrong: std.ArrayList([]const u8) = .empty;
-    const used = gpa.alloc(bool, allowed.len) catch @panic("OOM");
-    @memset(used, false);
+    const found = gpa.alloc(u32, allowed.len) catch @panic("OOM");
+    @memset(found, 0);
     for (files) |file| {
         if (!isPassFile(file.path)) continue;
         if (std.mem.indexOf(u8, file.text, "catch") == null and std.mem.indexOf(u8, file.text, "else |") == null) continue;
         for (discardedFailures(gpa, file)) |discard| {
-            const explained = for (allowed, used) |entry, *was_used| {
+            const explained = for (allowed, found) |entry, *count| {
                 if (!std.mem.eql(u8, entry.path, file.path) or !std.mem.eql(u8, entry.function, discard.function) or
                     !std.mem.eql(u8, entry.callee, discard.callee)) continue;
-                was_used.* = true;
+                count.* += 1;
                 break true;
             } else false;
             if (explained) continue;
@@ -798,12 +879,16 @@ pub fn unexplainedDiscards(gpa: std.mem.Allocator, files: []const SourceFile, al
             ) catch @panic("OOM")) catch @panic("OOM");
         }
     }
-    for (allowed, used) |entry, was_used| {
-        if (was_used) continue;
-        wrong.append(gpa, std.fmt.allocPrint(
+    for (allowed, found) |entry, count| {
+        if (count == entry.sites) continue;
+        wrong.append(gpa, if (count == 0) std.fmt.allocPrint(
             gpa,
             "{s}: `discards_allowed` names `{s}` in `{s}`, where no error is discarded",
             .{ entry.path, entry.callee, entry.function },
+        ) catch @panic("OOM") else std.fmt.allocPrint(
+            gpa,
+            "{s}: `discards_allowed` excuses {d} discard(s) after `{s}` in `{s}`, and the function holds {d}; each one needs the reason to hold for it",
+            .{ entry.path, entry.sites, entry.callee, entry.function, count },
         ) catch @panic("OOM")) catch @panic("OOM");
     }
     return wrong.toOwnedSlice(gpa) catch @panic("OOM");
@@ -813,10 +898,10 @@ pub fn unexplainedDiscards(gpa: std.mem.Allocator, files: []const SourceFile, al
 /// with why nothing is lost there.
 pub const discards_allowed = [_]DiscardAllowed{
     .{ .path = "backend/mlir.zig", .function = "", .callee = "std.fmt.parseInt", .reason = "evaluated at compile time, where a failure stops the build" },
-    .{ .path = "backend/mlir.zig", .function = "writeCanonicalNanAt", .callee = "std.fmt.bufPrint", .reason = "a tag of at most 23 bytes and one letter fit the 32-byte buffer" },
-    .{ .path = "backend/mlir.zig", .function = "emitForeignEntry", .callee = "std.fmt.bufPrint", .reason = "two letters and the digits of one index fit the 32-byte buffer" },
-    .{ .path = "backend/mlir.zig", .function = "call", .callee = "std.fmt.bufPrint", .reason = "three bytes and the digits of two 32-bit indexes fit the 32-byte buffer" },
-    .{ .path = "backend/mlir.zig", .function = "canonicalNan", .callee = "std.fmt.bufPrint", .reason = "two letters and the digits of a 32-bit index fit the 24-byte buffer" },
+    .{ .path = "backend/mlir.zig", .function = "writeCanonicalNanAt", .callee = "std.fmt.bufPrint", .sites = 4, .reason = "the longest tag a caller builds is 43 bytes, and with one letter it fits the 64-byte buffer" },
+    .{ .path = "backend/mlir.zig", .function = "emitForeignEntry", .callee = "std.fmt.bufPrint", .sites = 7, .reason = "each name is at most two bytes and one machine word in decimal, or such a tag and one letter, at most 23 bytes, which fit the 32-byte buffers" },
+    .{ .path = "backend/mlir.zig", .function = "call", .callee = "std.fmt.bufPrint", .reason = "two letters, an underscore and two machine words in decimal are at most 43 bytes, which fit the 48-byte buffer" },
+    .{ .path = "backend/mlir.zig", .function = "canonicalNan", .callee = "std.fmt.bufPrint", .sites = 4, .reason = "two letters and one machine word in decimal are at most 22 bytes, which fit the 24-byte buffer" },
     .{ .path = "mir/lower.zig", .function = "layOutOne", .callee = "std.unicode.utf8Encode", .reason = "the fill is a scalar the format specification already decoded, and four bytes hold any scalar" },
     .{ .path = "mir/lower.zig", .function = "inherentHead", .callee = "instantiate_mod.inherentHead", .reason = "the recorded arguments are read through an empty error set" },
     .{ .path = "ownership/check.zig", .function = "everyCutRefusesOrReports", .callee = "else", .reason = "a test helper that counts the refusals it induces and checks each is OutOfMemory" },
@@ -830,16 +915,16 @@ pub const discards_allowed = [_]DiscardAllowed{
     .{ .path = "sema/constfold.zig", .function = "spelledTupleComponent", .callee = "std.fmt.parseInt", .reason = "a name whose suffix is no number is not a tuple's name, and the next is tried" },
     .{ .path = "sema/reflection.zig", .function = "integerLiteral", .callee = "std.fmt.parseInt", .reason = "a literal too wide to parse is no index, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "eql", .callee = "self.lookup.sameArgs", .reason = "a hash context cannot return an error, so it is kept in `failure` and returned by the caller" },
-    .{ .path = "sema/resolve.zig", .function = "sameImplementation", .callee = "sameWrittenArgs", .reason = "the coherence reading has an empty error set" },
-    .{ .path = "sema/resolve.zig", .function = "reserve", .callee = "std.math.add", .reason = "an identifier space that overflows cannot be reserved, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "sameImplementation", .callee = "sameWrittenArgs", .sites = 3, .reason = "the coherence reading has an empty error set" },
+    .{ .path = "sema/resolve.zig", .function = "reserve", .callee = "std.math.add", .sites = 5, .reason = "an identifier space that overflows cannot be reserved, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "reserve", .callee = "std.math.mul", .reason = "an identifier space that overflows cannot be reserved, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "nextGeneratedFile", .callee = "std.math.add", .reason = "a file number that overflows leaves no next file, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "componentCount", .callee = "std.math.add", .reason = "a count that overflows is no count, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.fmt.parseInt", .reason = "an alias whose suffix is no number was not generated here, and the next is read" },
-    .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.math.add", .reason = "an origin that overflows is not representable, which the entry is then refused for" },
-    .{ .path = "sema/typecheck.zig", .function = "roundFloatLiteral", .callee = "std.fmt.parseFloat", .reason = "text that is no float rounds to nothing, which is the answer" },
+    .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.math.add", .sites = 2, .reason = "an origin that overflows is not representable, which the entry is then refused for" },
+    .{ .path = "sema/typecheck.zig", .function = "roundFloatLiteral", .callee = "std.fmt.parseFloat", .sites = 2, .reason = "text that is no float rounds to nothing, which is the answer" },
     .{ .path = "sema/typecheck.zig", .function = "hashArgs", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
-    .{ .path = "sema/typecheck.zig", .function = "hash", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
+    .{ .path = "sema/typecheck.zig", .function = "hash#2", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
     .{ .path = "sema/typecheck.zig", .function = "sameBoundArgs", .callee = "resolve_mod.sameBoundArgs", .reason = "reading settled tables has an empty error set" },
     .{ .path = "sema/typecheck.zig", .function = "mentionsParameterAt", .callee = "search.visit", .reason = "the search is given no cache, and only caching allocates" },
     .{ .path = "sema/types.zig", .function = "internInterpolation", .callee = "w.print", .reason = "a specification packed into 64 bits spells at most 21 bytes, which fit the 32-byte buffer" },

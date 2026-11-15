@@ -4754,6 +4754,13 @@ test "a pass file hands every error on, whatever is called" {
         .{ .statement = "self.visit(d) catch { self.failed = true; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch |err| { self.failure = err; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "if (self.find(d)) |found| use(found) else |err| log(err);", .form = "else |…| that does not return the error", .callee = "else" },
+        // A return on one path leaves the others reaching the end.
+        .{ .statement = "self.visit(d) catch |err| { if (self.strict) return err; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| { if (self.strict) { return err; } };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| { return err; self.undo(); };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch { if (self.strict) return error.OutOfMemory; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => {}, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.Refused => return err, else => {} };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
     };
     for (discards) |planted| {
         const text = try std.fmt.allocPrint(gpa, "fn check(self: *Checker) void {{\n    {s}\n}}\n", .{planted.statement});
@@ -4776,6 +4783,10 @@ test "a pass file hands every error on, whatever is called" {
         "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return error.OutOfMemory, error.Refused => return };",
         "self.emit(d) catch @panic(\"OOM\");",
         "if (self.find(d)) |found| use(found) else |err| return err;",
+        "self.emit(d) catch |err| { if (self.strict) self.undo(); return err; };",
+        "self.emit(d) catch |err| { self.undo(); unreachable; };",
+        "self.walk(d) catch |err| switch (err) { error.Refused => {}, else => return err };",
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return err, error.Refused => {} };",
         "const found = self.find(d) orelse return;",
     };
     for (kept) |statement| {
@@ -4840,6 +4851,35 @@ test "a discard in a pass file is explained by exactly one named exception" {
         try testing.expectEqual(@as(usize, 2), source.unexplainedDiscards(gpa, &files, &.{other}).len);
     }
 
+    // An entry excuses the number of discards it states, in either direction:
+    // a second one in the same function needs the reason to hold for it too.
+    const twice = [_]source.SourceFile{
+        .{ .path = "sema/fold.zig", .text = "fn add(a: u8, b: u8) ?u8 {\n    const once = std.math.add(u8, a, b) catch null;\n    _ = once;\n    return std.math.add(u8, b, a) catch null;\n}\n" },
+    };
+    const counted = source.unexplainedDiscards(gpa, &twice, &.{explains});
+    try testing.expectEqual(@as(usize, 1), counted.len);
+    try testing.expectEqualStrings(
+        "sema/fold.zig: `discards_allowed` excuses 1 discard(s) after `std.math.add` in `add`, and the function holds 2; each one needs the reason to hold for it",
+        counted[0],
+    );
+    var both = explains;
+    both.sites = 2;
+    try testing.expectEqual(@as(usize, 0), source.unexplainedDiscards(gpa, &twice, &.{both}).len);
+    try testing.expectEqual(@as(usize, 1), source.unexplainedDiscards(gpa, &files, &.{both}).len);
+
+    // Two functions of one name in a file are told apart by their order.
+    const named_twice = [_]source.SourceFile{
+        .{ .path = "sema/keys.zig", .text = "const A = struct {\n    fn hash(k: u8) u8 {\n        return k;\n    }\n};\nconst B = struct {\n    fn hash(k: u8) u8 {\n        return std.math.add(u8, k, 1) catch 0;\n    }\n};\n" },
+    };
+    const second: source.DiscardAllowed = .{ .path = "sema/keys.zig", .function = "hash#2", .callee = "std.math.add", .reason = "overflow is the answer" };
+    try testing.expectEqual(@as(usize, 0), source.unexplainedDiscards(gpa, &named_twice, &.{second}).len);
+    var first = second;
+    first.function = "hash#1";
+    try testing.expectEqual(@as(usize, 2), source.unexplainedDiscards(gpa, &named_twice, &.{first}).len);
+    var bare = second;
+    bare.function = "hash";
+    try testing.expectEqual(@as(usize, 2), source.unexplainedDiscards(gpa, &named_twice, &.{bare}).len);
+
     // An entry that explains nothing is refused, so the list never outlives
     // the code it excuses.
     const stale = source.unexplainedDiscards(gpa, &files, &.{ explains, .{ .path = "sema/fold.zig", .function = "gone", .callee = "std.math.add", .reason = "" } });
@@ -4866,5 +4906,11 @@ test "the passes discard no error but where an exception names it, and every exc
             if (at != skipped) try rest.append(gpa, other);
         }
         try testing.expect(source.unexplainedDiscards(gpa, files, rest.items).len != 0);
+        // And with one site more or fewer than the function holds.
+        for ([_]u32{ entry.sites + 1, entry.sites - 1 }) |sites| {
+            var changed = try gpa.dupe(source.DiscardAllowed, &source.discards_allowed);
+            changed[skipped].sites = sites;
+            try testing.expect(source.unexplainedDiscards(gpa, files, changed).len != 0);
+        }
     }
 }

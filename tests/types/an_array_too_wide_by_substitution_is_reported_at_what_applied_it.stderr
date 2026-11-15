@@ -1,0 +1,7 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Row[UInt16]` is wider
+ --> tests/types/an_array_too_wide_by_substitution_is_reported_at_what_applied_it.lin:5:8
+  |
+5 | struct Row[T] {
+  |        ^^^ hold fewer parts, or nest them less deeply
+  |
+  = help: its part `items` is `[UInt16; 4294967295]`, which is too wide by itself

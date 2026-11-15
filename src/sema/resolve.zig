@@ -8269,6 +8269,12 @@ const Resolver = struct {
         // was written. Nothing is recorded for it, so its members are the
         // members of nothing rather than of unit or of a tuple nobody wrote.
         if (headRefusedByTheParser(written_head)) return self.refused_impls.put(self.gpa, d, {});
+        // An implementation whose head or trait arguments hold a type the
+        // parser refused has no key to read: it is compared with no other,
+        // and is not asked whether its parameters can be recovered from one.
+        if (!is_derive and (holdsARefusedType(self.ast, written_head) or anyRefusedType(self.ast, self.ast.typeArgs(self.ast.declTraitArgs(d))))) {
+            return self.refused_impls.put(self.gpa, d, {});
+        }
         if (self.ast.declIsDefault(d)) {
             // A head the default names is still a written type name, and
             // what it reaches is recorded as any other one's is.
@@ -10457,10 +10463,16 @@ const Resolver = struct {
     /// type the parser began and refused.
     ///
     /// **Bound:** the written type's own nodes, once each.
-    fn holdsARefusedType(self: *const Resolver, ref: node.TypeRef) bool {
-        for (self.program.ast.typeArgs(ref.args)) |argument| {
-            if (!argument.wasWritten() and !argument.isOmitted()) return true;
-            if (self.holdsARefusedType(argument)) return true;
+    fn holdsARefusedType(ast: *const Ast, ref: node.TypeRef) bool {
+        return anyRefusedType(ast, ast.typeArgs(ref.args));
+    }
+
+    /// Whether one of `written` is, or holds at any depth, a type the parser
+    /// began and refused.
+    fn anyRefusedType(ast: *const Ast, written: []const node.TypeRef) bool {
+        for (written) |each| {
+            if (!each.wasWritten() and !each.isOmitted()) return true;
+            if (holdsARefusedType(ast, each)) return true;
         }
         return false;
     }
@@ -10477,7 +10489,13 @@ const Resolver = struct {
         // is; it targets nothing, and nothing more is said about it. A head
         // holding a type the parser refused is the same: expanding it would
         // write the refused text again and report it again.
-        if (headRefusedByTheParser(head) or self.holdsARefusedType(head)) return null;
+        if (headRefusedByTheParser(head)) return null;
+        if (holdsARefusedType(ast, head)) {
+            // The request still names its target, which a derive uses.
+            const named = self.writtenBindingAt(ast.declName(derive));
+            if (named != BindingId.none) self.bindings.items[named.index()].used = true;
+            return null;
+        }
         if (head.kind == .tuple) return self.tupleDecl(head);
         const binding = self.writtenBindingAt(ast.declName(derive));
         const not_a_declaration = "derive targets a concrete declaration, not a primitive or another kind of name";
