@@ -2422,6 +2422,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     heavy.guide_gate.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
+    heavy.guide_gate.root_module.addAnonymousImport("manifest_source", .{ .root_source_file = b.path("src/support/manifest_source.zig") });
     const run_guide = heavy.guide(b.getInstallStep());
     const guide_step = b.step("guide", "Check the guide's programs and fragments and hold their pasted output to what the compiler prints");
     guide_step.dependOn(&run_guide.step);
@@ -2435,6 +2436,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
     heavy.example_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
+    // The loader's rule for a manifest's `source`, which the check of what
+    // each example root reaches applies too.
+    heavy.example_tests.root_module.addAnonymousImport("manifest_source", .{ .root_source_file = b.path("src/support/manifest_source.zig") });
     const example_tests_step = b.step("example-tests", "Run `linea test` on every root beneath examples/");
     example_tests_step.dependOn(&heavy.exampleTests(b.getInstallStep()).step);
 
@@ -2583,10 +2587,14 @@ pub fn build(b: *std.Build) void {
         .filters = test_filters,
     });
     source_tests.root_module.addAnonymousImport("runtime_archive", .{ .root_source_file = runtime_archive });
+    // The gates' worker pool is tested here, and it runs children through
+    // the conformance runner's process module.
+    source_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
     // The runtime's signature table and every source it describes, so a test
     // holds the one to the other.
     source_tests.root_module.addAnonymousImport("runtime_symbols", .{ .root_source_file = b.path("src/support/runtime_symbols.zig") });
     source_tests.root_module.addAnonymousImport("runtime_sources", .{ .root_source_file = runtimeSources(b) });
+    source_tests.root_module.addAnonymousImport("manifest_source", .{ .root_source_file = b.path("src/support/manifest_source.zig") });
     const run_source_tests = b.addRunArtifact(source_tests);
     const runtime_tests = b.addTest(.{
         .root_module = b.createModule(.{

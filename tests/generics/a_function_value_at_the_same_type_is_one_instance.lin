@@ -1,0 +1,22 @@
+// A function that names itself at the type arguments it was given, or names
+// another function at a larger type, reaches finitely many instances.
+struct Wrap[phantom T] {}
+
+fn width[T](_value: T) -> UInt8 {
+    3
+}
+
+fn same[T](seed: T, again: Bool) -> UInt8 {
+    let next = same[T]
+    let helper = width[Wrap[T]]
+    if again {
+        next(seed, false)
+    } else {
+        helper(Wrap[T] {})
+    }
+}
+
+fn main() -> UInt8 {
+    let seed: UInt8 = 1
+    same(seed, true)
+}

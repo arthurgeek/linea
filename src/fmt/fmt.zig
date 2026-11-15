@@ -132,6 +132,7 @@ pub const Marker = enum { off, on, none };
 /// Whether two parsed trees match, ignoring where the tokens sit.
 fn sameShape(gpa: std.mem.Allocator, before: *const Ast, after: *const Ast) !bool {
     if (!sameAttributes(before, after)) return false;
+    if (!sameExpressions(before, after)) return false;
     const a = try shapeOf(gpa, before);
     defer gpa.free(a);
     const b = try shapeOf(gpa, after);
@@ -163,6 +164,33 @@ fn sameAttributes(before: *const Ast, after: *const Ast) bool {
     return true;
 }
 
+/// Whether the two trees hold the same expressions, in the order the parser
+/// made them: each of one kind with its counterpart, at a token of the same
+/// kind and text.
+///
+/// The dump prints the expressions a declaration's body reaches. An
+/// expression written inside a type, an array's length, is printed there by
+/// one token's text, so a newline that splits it into two statements leaves
+/// the dump as it was. The parser makes one node per expression wherever it
+/// is written, and two parses of the same tokens make the same nodes in the
+/// same order exactly when they read the same structure.
+fn sameExpressions(before: *const Ast, after: *const Ast) bool {
+    if (before.exprCount() != after.exprCount()) return false;
+    for (0..before.exprCount()) |index| {
+        const expression = ExprId.at(@intCast(index));
+        if (before.exprTag(expression) != after.exprTag(expression)) return false;
+        const left = before.exprMain(expression);
+        const right = after.exprMain(expression);
+        if (left == TokenId.none or right == TokenId.none) {
+            if (left != right) return false;
+            continue;
+        }
+        if (before.tokenTag(left) != after.tokenTag(right) or
+            !std.mem.eql(u8, before.tokenText(left), after.tokenText(right))) return false;
+    }
+    return true;
+}
+
 fn nextAttributeShapeToken(run: *Ast.TokenRun) ?TokenId {
     while (run.next()) |at| {
         if (run.ast.tokenTag(at) != .comma) return at;
@@ -178,18 +206,47 @@ fn shapeOf(gpa: std.mem.Allocator, ast: *const Ast) ![]const u8 {
     dumpAst(&out.writer, ast, DeclarationSelection.all(ast.declCount())) catch return error.OutOfMemory;
 
     // `tokens N..M` says where a node sits, which formatting is allowed to
-    // change. Everything else the dump prints is what the node *is*.
+    // change. Everything else the dump prints is what the node *is*, so only
+    // the note itself goes: `tokens ` followed by two numbers, and not the
+    // same word in a literal's text.
     var stripped: std.ArrayList(u8) = .empty;
     var rest = out.written();
     while (std.mem.indexOf(u8, rest, "tokens ")) |at| {
+        const after_word = rest[at + "tokens ".len ..];
+        const note = positionNoteLength(after_word);
+        if (note == 0) {
+            try stripped.appendSlice(gpa, rest[0 .. at + "tokens ".len]);
+            rest = after_word;
+            continue;
+        }
         try stripped.appendSlice(gpa, rest[0..at]);
-        rest = rest[at + "tokens ".len ..];
-        var i: usize = 0;
-        while (i < rest.len and rest[i] != ' ' and rest[i] != '\n') i += 1;
-        rest = rest[i..];
+        rest = after_word[note..];
     }
     try stripped.appendSlice(gpa, rest);
     return stripped.toOwnedSlice(gpa);
+}
+
+/// How many bytes at the start of `text` are a token range, `N..M`, or zero
+/// where it does not begin with one.
+fn positionNoteLength(text: []const u8) usize {
+    var i: usize = 0;
+    while (i < text.len and std.ascii.isDigit(text[i])) i += 1;
+    const first = i;
+    if (first == 0 or !std.mem.startsWith(u8, text[i..], "..")) return 0;
+    i += 2;
+    while (i < text.len and std.ascii.isDigit(text[i])) i += 1;
+    return if (i == first + 2) 0 else i;
+}
+
+test positionNoteLength {
+    // A node's position, as the dump writes it after `tokens `.
+    try testing.expectEqual(@as(usize, 6), positionNoteLength("12..34 rest"));
+    try testing.expectEqual(@as(usize, 4), positionNoteLength("0..7\n"));
+    // The same word in a literal's text is followed by no range, and stays.
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("alpha\""));
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("12 more"));
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("12.."));
+    try testing.expectEqual(@as(usize, 0), positionNoteLength("..34"));
 }
 
 /// One past the end of the region opened at `from`.
@@ -5660,7 +5717,7 @@ test "declaration attributes refuse malformed input without rewriting it" {
     }
 }
 
-test "declaration attributes participate in the formatter structural guard" {
+test "the formatter structural guard compares attributes, expressions inside types and literal text" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -5670,6 +5727,13 @@ test "declaration attributes participate in the formatter structural guard" {
         .{ .before = "@derive(Score) struct One {} struct Two {}", .after = "struct One {} @derive(Score) struct Two {}", .equal = false },
         .{ .before = "@(copyable, derive(Score)) struct Item {}", .after = "@copyable @derive(Score) struct Item {}", .equal = false },
         .{ .before = "@(copyable, derive(Score)) struct Item {}", .after = "@(copyable, // policy\n derive(Score,),)\nstruct Item {}", .equal = true },
+        // An array's length is an expression, and a newline inside one ends a
+        // statement: a block holding `1` and then `-2` is not one subtraction.
+        .{ .before = "alias Bytes = [UInt8; { 1\n -2 }]", .after = "alias Bytes = [UInt8; { 1 -2 }]", .equal = false },
+        .{ .before = "alias Bytes = [UInt8; { 1 -2 }]", .after = "alias Bytes = [UInt8;   { 1 - 2 }]", .equal = true },
+        .{ .before = "fn f(a: [UInt8; { 1\n -2 }]) {}", .after = "fn f(a: [UInt8; { 1 -2 }]) {}", .equal = false },
+        // Text that reads like the dump's own position note is compared.
+        .{ .before = "fn f() -> Str { \"tokens alpha\" }", .after = "fn f() -> Str { \"tokens beta\" }", .equal = false },
     };
     for (cases) |case| {
         const before_source: Source = .{ .path = "fmt.lin", .text = case.before };

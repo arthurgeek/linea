@@ -1427,10 +1427,51 @@ pub const ExpandedProgram = struct {
         return kept.items;
     }
 
+    /// Where a derive request's entry ends: past the trait's name and the
+    /// arguments written in brackets after it, or past the name alone.
+    ///
+    /// **Bound:** the entry's own tokens.
+    fn deriveEntryEnd(self: *const ExpandedProgram, trait: TokenId) u32 {
+        const ast = &self.source.ast;
+        var at = trait.index() + 1;
+        if (at >= ast.tokenCount() or ast.tokenTag(TokenId.at(at)) != .l_bracket) return ast.tokenSpan(trait).end;
+        var depth: i32 = 0;
+        while (at < ast.tokenCount()) : (at += 1) {
+            const token = TokenId.at(at);
+            depth += ast.tokenTag(token).nesting();
+            if (depth == 0) return ast.tokenSpan(token).end;
+            if (ast.tokenTag(token) == .eof) break;
+        }
+        return ast.tokenSpan(trait).end;
+    }
+
+    /// What a diagnostic says, apart from where: its severity, rule and
+    /// message.
+    fn saying(arena: std.mem.Allocator, diagnostic: Diagnostic) std.mem.Allocator.Error![]const u8 {
+        return std.fmt.allocPrint(arena, "{d}|{d}|{s}", .{ @intFromEnum(diagnostic.severity), if (diagnostic.code) |code| @as(i64, @intFromEnum(code)) else -1, diagnostic.message });
+    }
+
     pub fn collapseGeneratedDiagnostics(self: *const ExpandedProgram, sink: *Sink) std.mem.Allocator.Error!void {
         var seen: std.StringHashMapUnmanaged(void) = .empty;
         var kept: std.ArrayList(Diagnostic) = .empty;
+
+        // Where each thing was said about the program as written, by what was
+        // said. A derive's argument is copied into the implementation it
+        // generates, so a mistake in the argument is found there a second
+        // time; the copy says nothing the first report did not.
+        const Site = struct { file: FileId, at: u32 };
+        var written: std.StringHashMapUnmanaged(std.ArrayList(Site)) = .empty;
         for (sink.items()) |item| {
+            const in_source = for (item.labels) |label| {
+                if (self.originOfGeneratedFile(label.file) != null) break false;
+            } else true;
+            if (!in_source or item.labels.len == 0) continue;
+            const entry = try written.getOrPut(sink.arena, try saying(sink.arena, item));
+            if (!entry.found_existing) entry.value_ptr.* = .empty;
+            for (item.labels) |label| try entry.value_ptr.append(sink.arena, .{ .file = label.file, .at = label.span.start });
+        }
+
+        each: for (sink.items()) |item| {
             var diagnostic = item;
             var generated = false;
 
@@ -1476,6 +1517,13 @@ pub const ExpandedProgram = struct {
                 if (origin.derive_trait != .none) {
                     label.file = self.source.ast.fileOf(origin.derive_trait);
                     label.span = self.source.ast.tokenSpan(origin.derive_trait);
+                    // Said already inside the entry this was generated from.
+                    if (written.get(try saying(sink.arena, diagnostic))) |sites| {
+                        const end = self.deriveEntryEnd(origin.derive_trait);
+                        for (sites.items) |site| {
+                            if (site.file == label.file and site.at >= label.span.start and site.at < end) continue :each;
+                        }
+                    }
                 } else {
                     label.file = self.source.ast.fileOfDecl(origin.derive);
                     label.span = self.source.ast.declSpan(origin.derive);
