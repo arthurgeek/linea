@@ -1466,25 +1466,9 @@ impl[K, V, A: Allocator] Map[K, V, A] {
     }
 }
 
-// Releasing a map releases its buckets, and with them every entry. It is
-// written out because a derived `Release` on a type holding a `Vec` could not
-// be used for that type held in a `Vec` in generic code: releasing a
-// `Vec[Map[K, V, A], A]` there would be refused.
-impl[K: Release, V: Release, A: Allocator] Release for Map[K, V, A] {
-    fn release(sink self: Self) {
-        let Map { slots, allocator: _, len: _, used: _ } = self
-        slots.release()
-    }
-}
+derive[K: Release, V: Release, A: Allocator] Release for Map[K, V, A]
 
-// Releasing a drain releases the entries it has not handed out. It is written
-// out for the reason `Map`'s release is.
-impl[K: Release, V: Release, A: Allocator] Release for Drain[K, V, A] {
-    fn release(sink self: Self) {
-        let Drain { slots, remaining: _ } = self
-        slots.release()
-    }
-}
+derive[K: Release, V: Release, A: Allocator] Release for Drain[K, V, A]
 
 fn release_maps[K: Release, V: Release, A: Allocator](sink maps: Vec[Map[K, V, A], A]) {
     maps.release()

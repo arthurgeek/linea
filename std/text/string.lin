@@ -21,6 +21,7 @@ pub struct Utf8Error {
 
 // A Utf8Failure hands back bytes that are not valid UTF-8, with where their
 // encoding went wrong.
+@derive(Release)
 pub struct Utf8Failure[A: Allocator] {
     bytes: Vec[UInt8, A],
     error: Utf8Error,
@@ -493,17 +494,6 @@ impl[A: Allocator] String[A] {
 impl[A: Allocator] Release for String[A] {
     fn release(sink self: Self) {
         let String { bytes: bytes } = self
-        bytes.release()
-    }
-}
-
-// Releasing a refused conversion releases its bytes. It is written out because
-// a derived `Release` on a type holding a `Vec` could not be used for that
-// type held in a `Vec` in generic code: releasing a `Vec[Utf8Failure[A], A]`
-// there would be refused.
-impl[A: Allocator] Release for Utf8Failure[A] {
-    fn release(sink self: Self) {
-        let Utf8Failure { bytes: bytes, error: _ } = self
         bytes.release()
     }
 }
