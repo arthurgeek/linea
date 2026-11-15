@@ -12404,7 +12404,7 @@ const Resolver = struct {
                         if (self.valueNamed(ref.name)) |value| return self.refuseValueHead(ref, value, context);
                     }
                     if (try self.refuseAliasedTrait(ref.name)) return;
-                    self.reportUnknownType(ref.name);
+                    try self.reportUnknownType(ref.name);
                 },
             }
         }
@@ -13483,22 +13483,22 @@ const Resolver = struct {
     /// Reported rather than left, because an annotation naming nothing poisons
     /// what it annotates, and a poisoned value nobody diagnosed is every rule
     /// about it silently skipped.
-    fn reportUnknownType(self: *Resolver, tok: TokenId) void {
-        if (self.refuseHolderNameInTest(tok, .annotation) catch true) return;
+    fn reportUnknownType(self: *Resolver, tok: TokenId) std.mem.Allocator.Error!void {
+        if (try self.refuseHolderNameInTest(tok, .annotation)) return;
         // `Self` names the type of an implementation for a named type or a
         // tuple; an implementation for `()` has no name to stand for.
         const label = if (namesSelf(self.ast, tok))
             "`Self` is declared in an implementation for a named type or a tuple; write the type, as `()` for unit"
         else
             "no type with this name is declared here";
-        self.sink.addErrorFmt(
+        try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOf(tok),
             self.ast.tokenSpan(tok),
             label,
             "undefined name `{s}`",
             .{self.ast.tokenText(tok)},
-        ) catch {};
+        );
     }
 
     /// Resolves one constant's initialiser.
