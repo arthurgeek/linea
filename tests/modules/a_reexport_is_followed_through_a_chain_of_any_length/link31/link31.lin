@@ -1,0 +1,3 @@
+import link32
+
+pub use link32.value
