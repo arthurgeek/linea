@@ -480,6 +480,9 @@ const BodyNamer = struct {
 /// differently.
 fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), program: *const ExpandedProgram, resolution: *const Resolution, typing: *const Typing, d: DeclId) !void {
     const ast = &program.ast;
+    // A head too long to spell is written as a symbol writes it, by a digest.
+    var shared: types_mod.SharedSpelling = .{};
+    defer shared.deinit(gpa);
     const module = program.moduleOf(d);
     if (module != .none) try out.appendSlice(gpa, program.modulePath(module));
     try out.append(gpa, ';');
@@ -488,7 +491,7 @@ fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), progra
         // `implementationOf` answers for the declarations an implementation
         // holds, which is what `impl_of_decl` is kept for.
         if (typing.implementationOf(d)) |implementation| {
-            try typing.appendArguments(gpa, out, &.{implementation.ty});
+            try typing.appendArgumentsWith(gpa, out, &.{implementation.ty}, &shared);
             if (implementation.trait != types_mod.Implementation.no_trait) {
                 const trait = DeclId.at(implementation.trait);
                 try out.append(gpa, ':');
@@ -496,7 +499,7 @@ fn appendDeclarationName(gpa: std.mem.Allocator, out: *std.ArrayList(u8), progra
                 if (trait_module != .none) try out.appendSlice(gpa, program.modulePath(trait_module));
                 try out.append(gpa, ';');
                 try out.appendSlice(gpa, ast.tokenText(ast.declName(trait)));
-                try typing.appendArguments(gpa, out, implementation.args);
+                try typing.appendArgumentsWith(gpa, out, implementation.args, &shared);
             }
         }
         try out.append(gpa, '.');

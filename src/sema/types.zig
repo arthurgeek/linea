@@ -2881,6 +2881,33 @@ pub const ConstructorBody = struct {
 /// type is written in the library, where the program cannot change it.
 pub const FixedFunction = struct { signature: TypeId, in_library: bool };
 
+/// Which types a symbol writes as a digest in place of their spelling.
+///
+/// A type is one entry in the pool however often it is named, and its
+/// spelling names every one of those times: aliases that each name the one
+/// before twice spell a type of thirty entries in a billion names. A symbol
+/// is shortened to a digest anyway once it passes the length an assembler
+/// takes, so a type whose own spelling passes `longest` is digested where it
+/// stands, once, and every type holding it spells that digest.
+///
+/// A type's spelling never changes once the type is interned, so what is
+/// decided for it holds for every symbol spelled from the same pool.
+pub const SharedSpelling = struct {
+    /// The digest of each type decided so far, null for one spelled out.
+    known: std.AutoHashMapUnmanaged(TypeId, ?u64) = .empty,
+
+    /// The longest spelling written out. Far past any symbol's own bound, so
+    /// only a spelling no symbol could carry is replaced.
+    pub const longest = 1 << 16;
+    /// Begins a digest. A component that starts with a digit is no name a
+    /// program can write.
+    pub const marker = "0h";
+
+    pub fn deinit(self: *SharedSpelling, gpa: std.mem.Allocator) void {
+        self.known.deinit(gpa);
+    }
+};
+
 pub const FunctionValue = struct {
     at: ExprId,
     target: FunctionTarget,
@@ -7079,14 +7106,39 @@ pub const Typing = struct {
         out: *std.ArrayList(u8),
         args: []const TypeId,
     ) std.mem.Allocator.Error!void {
+        return self.appendArgumentsWith(gpa, out, args, null);
+    }
+
+    /// `appendArguments` for a symbol: a type too long to spell is written as
+    /// a digest, decided once per type through `shared`.
+    pub fn appendArgumentsWith(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+        args: []const TypeId,
+        shared: ?*SharedSpelling,
+    ) std.mem.Allocator.Error!void {
         if (args.len == 0) return;
 
         try out.append(gpa, '[');
         for (args, 0..) |a, i| {
             if (i > 0) try out.append(gpa, ',');
-            try self.appendMangled(gpa, out, a);
+            try self.appendMangledWith(gpa, out, a, shared);
         }
         try out.append(gpa, ']');
+    }
+
+    /// `mangledName` for a symbol, with the same shortening.
+    pub fn mangledNameWith(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        t: TypeId,
+        shared: *SharedSpelling,
+    ) std.mem.Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(gpa);
+        try self.appendMangledWith(gpa, &out, t, shared);
+        return out.toOwnedSlice(gpa);
     }
 
     /// What a type is called where a symbol carries it.
@@ -7117,6 +7169,51 @@ pub const Typing = struct {
         out: *std.ArrayList(u8),
         t: TypeId,
     ) std.mem.Allocator.Error!void {
+        return self.appendMangledWith(gpa, out, t, null);
+    }
+
+    /// `appendMangled`, writing a type whose spelling is longer than
+    /// `SharedSpelling.longest` as a digest of that spelling where `shared`
+    /// is given.
+    fn appendMangledWith(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+        t: TypeId,
+        shared: ?*SharedSpelling,
+    ) std.mem.Allocator.Error!void {
+        const held = shared orelse return self.appendMangledInner(gpa, out, t, null);
+        if (held.known.get(t)) |decided| {
+            const digest = decided orelse return self.appendMangledInner(gpa, out, t, shared);
+            return appendDigest(gpa, out, digest);
+        }
+        // Decided once per type, from the spelling written here: `t` is
+        // spelled with each type it holds already decided, so one that is
+        // itself long is its digest there, and the text digested is no
+        // longer than what `t` holds directly, each part at most `longest`.
+        // A spelling short enough to keep is the one just written.
+        const start = out.items.len;
+        try self.appendMangledInner(gpa, out, t, shared);
+        const spelled = out.items[start..];
+        if (spelled.len <= SharedSpelling.longest) return held.known.put(gpa, t, null);
+        const digest = std.hash.Wyhash.hash(0, spelled);
+        out.shrinkRetainingCapacity(start);
+        try held.known.put(gpa, t, digest);
+        return appendDigest(gpa, out, digest);
+    }
+
+    fn appendDigest(gpa: std.mem.Allocator, out: *std.ArrayList(u8), digest: u64) std.mem.Allocator.Error!void {
+        try out.appendSlice(gpa, SharedSpelling.marker);
+        try out.print(gpa, "{x:0>16}", .{digest});
+    }
+
+    fn appendMangledInner(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+        t: TypeId,
+        shared: ?*SharedSpelling,
+    ) std.mem.Allocator.Error!void {
         // An array is the one constructed type that is not an instantiation, so
         // there are no arguments to read off it: its name spells the element
         // and the length and nothing a reader can take apart. Both are written
@@ -7129,13 +7226,13 @@ pub const Typing = struct {
         switch (self.get(t)) {
             .borrow => |observation| {
                 try out.appendSlice(gpa, "borrow(");
-                try self.appendMangled(gpa, out, observation.referent);
+                try self.appendMangledWith(gpa, out, observation.referent, shared);
                 try out.append(gpa, ')');
                 return;
             },
             .array => |a| {
                 try out.append(gpa, '[');
-                try self.appendMangled(gpa, out, a.element);
+                try self.appendMangledWith(gpa, out, a.element, shared);
                 const count = try std.fmt.allocPrint(gpa, ";{d}]", .{a.count});
                 defer gpa.free(count);
                 try out.appendSlice(gpa, count);
@@ -7152,7 +7249,7 @@ pub const Typing = struct {
                     try out.appendSlice(gpa, @tagName(param.convention));
                     if (param.stable_address) try out.appendSlice(gpa, "@address");
                     try out.append(gpa, ':');
-                    try self.appendMangled(gpa, out, param.ty);
+                    try self.appendMangledWith(gpa, out, param.ty, shared);
                     switch (param.default) {
                         .absent => try out.appendSlice(gpa, ":none"),
                         .value => |value| {
@@ -7165,7 +7262,7 @@ pub const Typing = struct {
                 }
                 try out.appendSlice(gpa, ")->");
 
-                try self.appendMangled(gpa, out, signature.result);
+                try self.appendMangledWith(gpa, out, signature.result, shared);
                 try appendContractText(gpa, out, signature.contracts, null, true);
                 return;
             },
@@ -7175,17 +7272,17 @@ pub const Typing = struct {
                 try out.append(gpa, '[');
                 for (self.closureArgs(closure), 0..) |arg, i| {
                     if (i > 0) try out.append(gpa, ',');
-                    try self.appendMangled(gpa, out, arg);
+                    try self.appendMangledWith(gpa, out, arg, shared);
                 }
                 try out.append(gpa, ']');
                 if (closure.self_ty != .poison or closure.impl_arg_count != 0) {
                     try out.appendSlice(gpa, ":impl[");
                     for (self.closureImplArgs(closure), 0..) |arg, i| {
                         if (i > 0) try out.append(gpa, ',');
-                        try self.appendMangled(gpa, out, arg);
+                        try self.appendMangledWith(gpa, out, arg, shared);
                     }
                     try out.appendSlice(gpa, "]:");
-                    try self.appendMangled(gpa, out, closure.self_ty);
+                    try self.appendMangledWith(gpa, out, closure.self_ty, shared);
                 }
                 return;
             },
@@ -7214,7 +7311,7 @@ pub const Typing = struct {
         // differing here are two types.
         if (self.isInterpolation(t)) {
             try out.appendSlice(gpa, "0i");
-            return self.appendInterpolated(gpa, out, t);
+            return self.appendInterpolated(gpa, out, t, shared);
         }
 
         if (self.standinOf(t)) |standin| {
@@ -7223,9 +7320,9 @@ pub const Typing = struct {
             const identity = try std.fmt.allocPrint(gpa, "0s{d}:{d}(", .{ standin.trait, standin.member.index() });
             defer gpa.free(identity);
             try out.appendSlice(gpa, identity);
-            try self.appendMangled(gpa, out, standin.held);
+            try self.appendMangledWith(gpa, out, standin.held, shared);
             try out.append(gpa, ')');
-            return self.appendArguments(gpa, out, self.standinArgsOf(standin));
+            return self.appendArgumentsWith(gpa, out, self.standinArgsOf(standin), shared);
         }
 
         if (self.moduleOfType(t)) |mi| try self.appendModule(gpa, out, mi);
@@ -7233,7 +7330,7 @@ pub const Typing = struct {
         if (self.instanceOf(t)) |inst| {
             const template = self.typeOfDecl(inst.decl).?;
             try out.appendSlice(gpa, self.nameOf(template));
-            return self.appendArguments(gpa, out, self.argsOf(inst));
+            return self.appendArgumentsWith(gpa, out, self.argsOf(inst), shared);
         }
 
         const spelled = self.nameOf(t);
@@ -7262,6 +7359,7 @@ pub const Typing = struct {
         gpa: std.mem.Allocator,
         out: *std.ArrayList(u8),
         t: TypeId,
+        shared: ?*SharedSpelling,
     ) std.mem.Allocator.Error!void {
         const count = self.fieldCount(t);
         for (self.interpolationFormats(t), self.interpolationBorrowsAll(t)) |format, borrowed| {
@@ -7279,7 +7377,7 @@ pub const Typing = struct {
         var at: u32 = 1;
         while (at < count) : (at += 2) held.appendAssumeCapacity(self.fieldType(t, at));
 
-        return self.appendArguments(gpa, out, held.items);
+        return self.appendArgumentsWith(gpa, out, held.items, shared);
     }
 
     /// Whether lowering replaces every call of `d` with what it generates, so
@@ -8822,6 +8920,11 @@ pub const Typing = struct {
 
         gpa: std.mem.Allocator,
         constant_pool: *const constants.Pool = &.{},
+        /// Which of the pool's types a symbol writes as a digest, decided
+        /// as symbols are spelled and kept for the symbols after them.
+        ///
+        /// **Bound:** the types symbols have spelled, each once.
+        symbol_spelling: SharedSpelling = .{},
         /// Whether the pool is finished. Sealed, every growth path below is a
         /// named defect: the pass that completes the set seals it, so a later
         /// pass reaching for a type the set does not hold fails at the reach
@@ -11532,6 +11635,7 @@ pub const Typing = struct {
         }
 
         pub fn deinit(self: *Builder) void {
+            self.symbol_spelling.deinit(self.gpa);
             self.open_mentions.deinit(self.gpa);
             self.ground_memo.deinit(self.gpa);
             self.unsettled_memo.deinit(self.gpa);
@@ -16358,6 +16462,55 @@ test "shared type DAG substitution bounds allocation work per query" {
     try reopened.seal();
     try testing.expectEqual(second, try reopened.substitute(shared, owner, &.{.u16}));
     try testing.expectEqual(first, try reopened.substitute(shared, owner, &.{.u8}));
+}
+
+test "a type too long to spell is a digest in a symbol, and one leaf apart is another" {
+    const gpa = testing.allocator;
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const declaration = DeclId.at(1);
+    const template = try builder.addStruct("P", .copyable, &.{});
+    try builder.noteTemplate(declaration, 0, template);
+
+    // `P[x, x]` over itself: each level names the one below twice, so the
+    // pool holds one type per level and the spelling doubles.
+    const doubled = struct {
+        fn of(b: *Typing.Builder, t: TypeId, d: DeclId, leaf: TypeId, levels: usize) !TypeId {
+            var at = leaf;
+            for (0..levels) |_| at = try b.instantiate(t, d, &.{ at, at });
+            return at;
+        }
+    }.of;
+    const levels = 24;
+    const over_u8 = try doubled(&builder, template, declaration, .u8, levels);
+    const over_u16 = try doubled(&builder, template, declaration, .u16, levels);
+    const small = try doubled(&builder, template, declaration, .u8, 3);
+    const view = builder.view();
+
+    var shared: SharedSpelling = .{};
+    defer shared.deinit(gpa);
+    const first = try view.mangledNameWith(gpa, over_u8, &shared);
+    defer gpa.free(first);
+    const second = try view.mangledNameWith(gpa, over_u16, &shared);
+    defer gpa.free(second);
+
+    // Sixteen million names each, written in a few kilobytes, and the two
+    // differ though they differ in one leaf only.
+    try testing.expect(first.len <= 4 * SharedSpelling.longest);
+    try testing.expect(std.mem.indexOf(u8, first, SharedSpelling.marker) != null);
+    try testing.expect(!std.mem.eql(u8, first, second));
+    // Asked again, the same type is the same name.
+    const again = try view.mangledNameWith(gpa, over_u8, &shared);
+    defer gpa.free(again);
+    try testing.expectEqualStrings(first, again);
+
+    // A spelling under the bound is written as it always was.
+    const plain = try view.mangledName(gpa, small);
+    defer gpa.free(plain);
+    const bounded = try view.mangledNameWith(gpa, small, &shared);
+    defer gpa.free(bounded);
+    try testing.expectEqualStrings(plain, bounded);
+    try testing.expect(std.mem.indexOf(u8, bounded, SharedSpelling.marker) == null);
 }
 
 test "deep nominal mangling allocates in proportion to its exact spelling" {

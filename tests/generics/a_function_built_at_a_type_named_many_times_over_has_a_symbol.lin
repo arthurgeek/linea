@@ -1,0 +1,53 @@
+// Each alias names the one before it twice, so the last names `P` a billion
+// times over while the program holds one type per alias. A generic function
+// called with a value of the last is built once for that type, like any other.
+struct P[phantom A, phantom B] {}
+
+alias A0[T] = P[T, T]
+alias A1[T] = P[A0[T], A0[T]]
+alias A2[T] = P[A1[T], A1[T]]
+alias A3[T] = P[A2[T], A2[T]]
+alias A4[T] = P[A3[T], A3[T]]
+alias A5[T] = P[A4[T], A4[T]]
+alias A6[T] = P[A5[T], A5[T]]
+alias A7[T] = P[A6[T], A6[T]]
+alias A8[T] = P[A7[T], A7[T]]
+alias A9[T] = P[A8[T], A8[T]]
+alias A10[T] = P[A9[T], A9[T]]
+alias A11[T] = P[A10[T], A10[T]]
+alias A12[T] = P[A11[T], A11[T]]
+alias A13[T] = P[A12[T], A12[T]]
+alias A14[T] = P[A13[T], A13[T]]
+alias A15[T] = P[A14[T], A14[T]]
+alias A16[T] = P[A15[T], A15[T]]
+alias A17[T] = P[A16[T], A16[T]]
+alias A18[T] = P[A17[T], A17[T]]
+alias A19[T] = P[A18[T], A18[T]]
+alias A20[T] = P[A19[T], A19[T]]
+alias A21[T] = P[A20[T], A20[T]]
+alias A22[T] = P[A21[T], A21[T]]
+alias A23[T] = P[A22[T], A22[T]]
+alias A24[T] = P[A23[T], A23[T]]
+alias A25[T] = P[A24[T], A24[T]]
+alias A26[T] = P[A25[T], A25[T]]
+alias A27[T] = P[A26[T], A26[T]]
+alias A28[T] = P[A27[T], A27[T]]
+alias A29[T] = P[A28[T], A28[T]]
+alias A30[T] = P[A29[T], A29[T]]
+
+fn same[U](sink x: U) -> U {
+    x
+}
+
+fn other[U](sink x: U) -> U {
+    x
+}
+
+fn main() -> UInt8 {
+    let value: A30[UInt8] = .{}
+    let narrow: A30[Bool] = .{}
+    let _kept = same(value)
+    let _held = same(narrow)
+    let _last = other(_kept)
+    3
+}
