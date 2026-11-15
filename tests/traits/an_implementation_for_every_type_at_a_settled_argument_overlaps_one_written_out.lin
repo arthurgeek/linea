@@ -1,0 +1,34 @@
+// [T-Impl]. The implementation for every type is `Weighs[UInt8]`, since
+// `Probe.Reading` is `UInt8`, and `Scale` has its own `Weighs[UInt8]`.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+impl[T] Weighs[Probe.Reading] for T {
+    fn weigh(_self: Self, _value: UInt8) -> UInt8 {
+        1
+    }
+}
+
+impl Weighs[UInt8] for Scale {
+    fn weigh(_self: Self, _value: UInt8) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    scale.weigh(4)
+}

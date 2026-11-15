@@ -1,0 +1,15 @@
+error[N-Unused]: `T` is never used
+  --> tests/traits/a_parameter_absent_from_a_key_naming_a_settled_type_is_not_recovered.lin:20:6
+   |
+20 | impl[T] Weighs[Probe.Reading] for Scale {
+   |      ^ name it in this declaration, or remove it
+error[T-Impl]: implementation parameter `T` cannot be recovered from its key
+  --> tests/traits/a_parameter_absent_from_a_key_naming_a_settled_type_is_not_recovered.lin:20:6
+   |
+20 | impl[T] Weighs[Probe.Reading] for Scale {
+   |      ^ place the parameter in the receiver or trait arguments outside associated-type projections
+error[T-UnknownOperation]: `Scale` has no operation `weigh`
+  --> tests/traits/a_parameter_absent_from_a_key_naming_a_settled_type_is_not_recovered.lin:28:5
+   |
+28 |     scale.weigh(3)
+   |     ^^^^^^^^^^^ `Weighs` declares it, and `Scale` does not implement `Weighs`

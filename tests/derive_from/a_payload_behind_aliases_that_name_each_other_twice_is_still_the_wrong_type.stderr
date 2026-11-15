@@ -1,0 +1,7 @@
+error[T-Derive]: no variant of `Wide` wraps exactly `UInt8`
+  --> tests/derive_from/a_payload_behind_aliases_that_name_each_other_twice_is_still_the_wrong_type.lin:49:9
+   |
+49 | @derive(From[UInt8])
+   |         ^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Wide` has `Wrong(Step40)`

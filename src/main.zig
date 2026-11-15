@@ -60,6 +60,7 @@ comptime {
     _ = @import("driver/prototypes.zig");
     _ = @import("support/generated_calls.zig");
     _ = @import("support/module_route.zig");
+    _ = @import("support/manifest_source.zig");
     _ = @import("support/runtime_symbols.zig");
     _ = @import("support/symbol.zig");
     _ = @import("sema/instantiate.zig");

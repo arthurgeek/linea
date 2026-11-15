@@ -1992,7 +1992,8 @@ the level on any of them: `linea run hello.lin -O 2` runs the program
 `linea build` would make.
 
 `linea lsp` serves editors, and offers the edit a `help:` line names as a
-quick fix;
+quick fix, and checks the programs you have open again when a `linea.json`
+changes;
 `linea check --error-format=json <path>` writes each diagnostic as one line of
 JSON, with those same edits under `fixes`; `linea fmt --check <path>` reports
 the files the formatter would change without writing them; `linea build --keep` retains the intermediate

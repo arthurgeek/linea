@@ -2807,7 +2807,9 @@ links any answer rests on, so it is the same in every declaration order. A
 chain of 1000 settled references, each implementation settling `Reading` to
 the next one's, is accepted, and one of 1001 is refused where the chain
 starts; so are delegations, aliases and parts selecting through one another's
-capabilities. A plain chain of 1001 aliases is refused as well. As with
+capabilities. A plain chain of 1001 aliases is refused as well, wherever it
+is written: an implementation's head and a derive's argument count it as a
+binding's annotation does. As with
 [S-Nesting], the limit makes acceptance independent of optimisation level and
 stack size, and reports the depth instead of overflowing. Writing a type
 directly anywhere along the chain shortens it.
@@ -2880,7 +2882,15 @@ Every trait implementation parameter must be recoverable from injective
 structure in the receiver and requested trait arguments together. Nominal
 applications, array elements, observation referents and callable signature
 structure can determine parameters. An associated projection cannot be inverted
-to recover its subject, and bounds alone determine no parameter. An undetermined
+to recover its subject, and bounds alone determine no parameter. A settled
+type's name in the key is the type it is settled to, so a parameter written
+beside one is recovered as it is beside that type:
+`impl[T] Weighs[Two[T, Probe.Reading]] for Scale` recovers `T` from the first
+argument of `Two`. The same holds where the settled name is written over the
+parameter: with `type Element = T` settled for `Wrap[T]`,
+`impl[T] Gives[Wrap[T].Element] for Scale` has the key `Gives[T]` and recovers
+`T` from it, and with `type Element = UInt8` the key names `T` nowhere and
+recovers nothing. An undetermined
 implementation parameter is [T-Impl]. The canonical complete key supplies
 implementation arguments in binder declaration order to member checking,
 dispatch and instantiation.
@@ -2949,7 +2959,7 @@ implementations of one trait at one shape and one argument list are
 [N-Duplicate], whatever types the signatures write, as two tuple heads of one
 arity are, which refuses
 `fn(x: UInt64)` beside `fn(x: UInt8)`; implementations at different shapes never
-meet, and a callable head names at most 60 parameters ([T-Impl]). A function
+meet, and a head of any number of parameters has a shape of its own. A function
 value implements the trait where its signature matches the written head exactly,
 contract included, binding the head's parameters: a function taking `read` where
 the head writes `inout` does not match. A closure never does, because its type
@@ -2958,7 +2968,11 @@ required is [T-Bound].
 
 Two implementations of one trait overlap if a substitution over both
 declarations' parameters makes both their heads and trait arguments
-structurally equal. Overlap between open headers is checked at declaration time
+structurally equal. A settled type's name written among a head's arguments
+or as a trait argument is the type it is settled to: with `Probe.Reading`
+settled to `UInt8`, `impl Weighs[Probe.Reading] for Scale` overlaps
+`impl Weighs[UInt8] for Scale` and `impl[T] Weighs[UInt8] for T` alike.
+Overlap between open headers is checked at declaration time
 and rejected without ranking either declaration by specificity among ordinary
 implementations. An explicitly marked default
 occupies a separate fallback tier, described below. For example,
@@ -3217,7 +3231,9 @@ argument of the entry is independent of it, an undefined name included, so both
 it and a source no variant holds are reported. The report names the type the
 template wraps with the entry's arguments in its parameters' places, which is
 the type a variant would have to hold. Unit is a source like any other, wrapped by a variant whose
-only field is `()`. The generated implementation is the same as a
+only field is `()`. An array length in the source and in a payload is
+compared by what it counts, so `[UInt8; 2]` and `[UInt8; 1 + 1]` are one source.
+The generated implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.
 
@@ -4639,7 +4655,11 @@ The rule has four parts, each a refusal at the declaration:
 A trait implementation's head and a derive's head name every parameter of their
 type: the head key is the constructor applied to its own parameters, and an
 omitted argument is no parameter. `impl[T] Trait for Vec[T]` is [T-Bound], and a
-derive head that omits one is refused as an unsupported derive ([T-Derive]). An
+derive head that omits one is refused as an unsupported derive ([T-Derive]). A
+bare name omits every argument, so it is refused the same way where every
+parameter has a default: with `struct Crate[T = UInt8]`, `impl Weighed for Crate`
+is [T-Bound], and `impl Weighed for Crate[UInt8]` is the implementation for a
+crate of the default. An
 inherent implementation's head may omit them, so `impl[T] Vec[T]` declares
 members of the system form.
 

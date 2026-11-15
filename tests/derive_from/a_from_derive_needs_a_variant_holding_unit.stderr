@@ -11,4 +11,4 @@ error[T-Derive]: no variant of `Choice` wraps exactly `[(); 7]`
 4 | @derive(From[()], From[[(); 7]])
   |                   ^^^^^^^^^^^^^ no variant wraps this source
   |
-  = help: a variant wraps a source when its only field has the source's type (array lengths match only when spelled alike); `Choice` has `Only(UInt8)`
+  = help: a variant wraps a source when its only field has the source's type; `Choice` has `Only(UInt8)`
