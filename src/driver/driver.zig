@@ -47,6 +47,7 @@ const mlir_backend = @import("../backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
+const migration_contract = @import("../support/migration_contract.zig");
 const loader = @import("loader.zig");
 const prototypes = @import("prototypes.zig");
 const library = @import("library.zig");
@@ -419,6 +420,24 @@ fn compileArtifact(
         );
     };
 
+    const registry = migration_contract.sha256(@embedFile("../support/runtime_symbols.zig"));
+    const target = try builtin.target.zigTriple(gpa);
+    defer gpa.free(target);
+    const audit = std.json.parseFromSlice(migration_contract.Audit, gpa, @embedFile("migration_audit"), .{}) catch null;
+    defer if (audit) |parsed| parsed.deinit();
+    const validation = std.json.parseFromSlice(migration_contract.Validation, gpa, @embedFile("migration_validation"), .{}) catch null;
+    defer if (validation) |parsed| parsed.deinit();
+    var migration = try toolchain.prepareMigrationRuntime(gpa, io, scratchDir(environ), runtime, .{
+        .target = target,
+        .variant = if (req.storage == .checked) .checked else .regular,
+        .sanitizer = if (sanitize) |name| std.meta.stringToEnum(migration_contract.Sanitizer, name).? else .none,
+        .registry_sha256 = &registry,
+        // Optional registration, entry provenance and guarded emission do not
+        // exist in this runtime yet. Identity alone cannot activate them.
+        .runtime_available = false,
+    }, if (audit) |parsed| if (parsed.value.format == 1) parsed.value.approvals else &.{} else &.{}, if (validation) |parsed| if (parsed.value.format == 1) parsed.value.validations else &.{} else &.{});
+    defer migration.deinit(gpa, io);
+
     const mid = try toolchain.Intermediates.of(gpa, req.out_path);
     defer mid.deinit(gpa);
 
@@ -436,6 +455,7 @@ fn compileArtifact(
         if (!try emitMlir(gpa, out.open(io, file), req.mir, req.table, req.sink, .{
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
             .foreign_symbols = req.foreign_symbols,
+            .migration = migration.availability,
         })) return exit_defect;
         try out.flush();
     }
@@ -445,7 +465,8 @@ fn compileArtifact(
     const build_opts: toolchain.Options = .{
         .mid = mid,
         .out_path = req.out_path,
-        .runtime_path = runtime,
+        .runtime_path = migration.path,
+        .runtime_sha256 = if (migration.snapshot) |snapshot| snapshot.sha256 else null,
         .artifact = req.artifact,
         .opt = req.opt,
         // Read from the same place the runtime path is, because it is the same

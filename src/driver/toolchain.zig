@@ -331,6 +331,9 @@ pub const Options = struct {
     /// The runtime a program is linked against. An object links nothing and
     /// names none.
     runtime_path: ?[]const u8,
+    /// When selected from migration evidence, the build links the retained
+    /// snapshot rather than reopening the original archive after validation.
+    runtime_sha256: ?[64]u8 = null,
     /// What to produce, and so whether anything is linked.
     ///
     /// A library has no entry point, so there is nothing for a linker to start
@@ -459,6 +462,13 @@ pub fn build(
 
     try appendSanitizeLink(gpa, &argv, opts.sanitize);
 
+    if (opts.runtime_sha256) |expected| {
+        const path = opts.runtime_path orelse return error.RuntimeChanged;
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
+        defer gpa.free(bytes);
+        const actual = migration_contract.sha256(bytes);
+        if (!std.mem.eql(u8, &expected, &actual)) return error.RuntimeChanged;
+    }
     if (try runTool(gpa, io, .cc, argv.items)) |f| return f;
     if (!joins) return null;
 
@@ -908,4 +918,163 @@ test "a run's directory is deleted when the process that made it ends" {
     output.janitor.stdin = null;
     _ = try output.janitor.wait(io);
     try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(io, output.directory, .{}));
+}
+
+pub const RuntimeSnapshot = struct {
+    output: RunOutput,
+    sha256: [64]u8,
+
+    pub fn deinit(self: *RuntimeSnapshot, gpa: std.mem.Allocator, io: std.Io) void {
+        self.output.remove(io);
+        self.output.deinit(gpa);
+    }
+};
+
+/// Copies already validated archive bytes into a unique build-owned path.
+/// Thin archives are excluded because copying them would break member paths.
+pub fn snapshotRuntime(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, bytes: []const u8, expected: [64]u8) !RuntimeSnapshot {
+    const contract = @import("../support/migration_contract.zig");
+    if (!std.mem.startsWith(u8, bytes, "!<arch>\n")) return error.UnsupportedArchive;
+    const actual = contract.sha256(bytes);
+    if (!std.mem.eql(u8, &actual, &expected)) return error.RuntimeChanged;
+    var output = try RunOutput.create(gpa, io, scratch_root);
+    errdefer {
+        output.remove(io);
+        output.deinit(gpa);
+    }
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = output.path, .data = bytes });
+    return .{ .output = output, .sha256 = actual };
+}
+
+test "migration certification: linked snapshot retains validated bytes after source replacement" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+    const original = "!<arch>\nfixture";
+    const hash = "d05e51c47e252b596c0d3716e23dba96a2473b37b7e562703789e510b7ccb202".*;
+    try tmp.dir.writeFile(io, .{ .sub_path = "runtime.a", .data = original });
+    const bytes = try tmp.dir.readFileAlloc(io, "runtime.a", gpa, .unlimited);
+    defer gpa.free(bytes);
+    var snapshot = try snapshotRuntime(gpa, io, root, bytes, hash);
+    defer snapshot.deinit(gpa, io);
+    try tmp.dir.writeFile(io, .{ .sub_path = "runtime.a", .data = "!<arch>\nchanged" });
+    const linked = try std.Io.Dir.cwd().readFileAlloc(io, snapshot.output.path, gpa, .unlimited);
+    defer gpa.free(linked);
+    try testing.expectEqualStrings(original, linked);
+    try testing.expectError(error.RuntimeChanged, snapshotRuntime(gpa, io, root, "!<arch>\nchanged", hash));
+    try testing.expectError(error.UnsupportedArchive, snapshotRuntime(gpa, io, root, "!<thin>\nfixture", hash));
+}
+
+const migration_contract = @import("../support/migration_contract.zig");
+
+pub const MigrationRuntime = struct {
+    availability: migration_contract.Availability,
+    path: ?[]const u8,
+    snapshot: ?RuntimeSnapshot = null,
+
+    pub fn deinit(self: *MigrationRuntime, gpa: std.mem.Allocator, io: std.Io) void {
+        if (self.snapshot) |*snapshot| snapshot.deinit(gpa, io);
+    }
+};
+
+/// Re-evaluates optional metadata for each compilation. Disabled selections
+/// retain the ordinary archive path and emit no optional runtime references.
+pub fn prepareMigrationRuntime(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, runtime: ?[]const u8, request: migration_contract.Request, approvals: []const migration_contract.BehaviorApproval, validations: []const migration_contract.TargetValidation) !MigrationRuntime {
+    const path = runtime orelse return .{ .availability = .{ .disabled = .object_only }, .path = null };
+    const metadata_path = try std.fmt.allocPrint(gpa, "{s}.migration.json", .{path});
+    defer gpa.free(metadata_path);
+    const cwd = std.Io.Dir.cwd();
+    const metadata = cwd.readFileAlloc(io, metadata_path, gpa, .limited(1 << 16)) catch return .{
+        .availability = .{ .disabled = .missing_metadata },
+        .path = path,
+    };
+    defer gpa.free(metadata);
+    const archive = cwd.readFileAlloc(io, path, gpa, .unlimited) catch return .{
+        .availability = .{ .disabled = .unsupported_archive },
+        .path = path,
+    };
+    defer gpa.free(archive);
+    const availability = migration_contract.fromMetadata(gpa, archive, metadata, request, approvals, validations);
+    switch (availability) {
+        .disabled => return .{ .availability = availability, .path = path },
+        .enabled => |approved| {
+            const snapshot = snapshotRuntime(gpa, io, scratch_root, archive, approved.archive_sha256) catch return .{
+                .availability = .{ .disabled = .snapshot_unavailable },
+                .path = path,
+            };
+            return .{ .availability = availability, .path = snapshot.output.path, .snapshot = snapshot };
+        },
+    }
+}
+
+test "migration certification: object output needs no archive and metadata is reread" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+    const request: migration_contract.Request = .{ .target = "aarch64-macos", .variant = .regular, .registry_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+    var object = try prepareMigrationRuntime(gpa, io, root, null, request, &.{}, &.{});
+    defer object.deinit(gpa, io);
+    try testing.expectEqual(migration_contract.DisableReason.object_only, object.availability.disabled);
+    try testing.expect(object.path == null);
+    const archive = try std.fs.path.join(gpa, &.{ root, "runtime.a" });
+    defer gpa.free(archive);
+    const metadata = try std.fmt.allocPrint(gpa, "{s}.migration.json", .{archive});
+    defer gpa.free(metadata);
+    try tmp.dir.writeFile(io, .{ .sub_path = "runtime.a", .data = "!<arch>\nfixture" });
+    const identity: migration_contract.Identity = .{
+        .archive_sha256 = "d05e51c47e252b596c0d3716e23dba96a2473b37b7e562703789e510b7ccb202",
+        .registry_sha256 = request.registry_sha256,
+        .implementation_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        .target = request.target,
+        .variant = .regular,
+        .sanitizer = .none,
+    };
+    const approvals = [_]migration_contract.BehaviorApproval{.{
+        .id = "synthetic",
+        .registry_sha256 = identity.registry_sha256,
+        .implementation_sha256 = identity.implementation_sha256,
+        .scope = .normal,
+        .entries = &.{"entry-1"},
+        .suspensions = &.{.clean_yield},
+    }};
+    const validations = [_]migration_contract.TargetValidation{.{
+        .behavior = "synthetic",
+        .identity = identity,
+        .scope = .normal,
+        .entries = &.{"entry-1"},
+        .suspensions = &.{.clean_yield},
+    }};
+    const encoded = try std.json.Stringify.valueAlloc(gpa, identity, .{});
+    defer gpa.free(encoded);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = metadata, .data = encoded });
+    var supported = request;
+    supported.runtime_available = true;
+    var selected = try prepareMigrationRuntime(gpa, io, root, archive, supported, &approvals, &validations);
+    defer selected.deinit(gpa, io);
+    try testing.expect(selected.availability == .enabled);
+    try testing.expect(!std.mem.eql(u8, archive, selected.path.?));
+    try tmp.dir.writeFile(io, .{ .sub_path = "runtime.a", .data = "!<arch>\nchanged" });
+    const retained = try std.Io.Dir.cwd().readFileAlloc(io, selected.path.?, gpa, .unlimited);
+    defer gpa.free(retained);
+    try testing.expectEqualStrings("!<arch>\nfixture", retained);
+    var changed = try prepareMigrationRuntime(gpa, io, root, archive, supported, &approvals, &validations);
+    defer changed.deinit(gpa, io);
+    try testing.expectEqual(migration_contract.DisableReason.archive_changed, changed.availability.disabled);
+    try tmp.dir.writeFile(io, .{ .sub_path = "runtime.a", .data = "!<arch>\nfixture" });
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = metadata, .data = "{" });
+    var malformed = try prepareMigrationRuntime(gpa, io, root, archive, request, &.{}, &.{});
+    defer malformed.deinit(gpa, io);
+    try testing.expectEqual(migration_contract.DisableReason.malformed_metadata, malformed.availability.disabled);
+    try std.Io.Dir.cwd().deleteFile(io, metadata);
+    var missing = try prepareMigrationRuntime(gpa, io, root, archive, request, &.{}, &.{});
+    defer missing.deinit(gpa, io);
+    try testing.expectEqual(migration_contract.DisableReason.missing_metadata, missing.availability.disabled);
+    try testing.expectEqualStrings(archive, missing.path.?);
+    try testing.expect(missing.snapshot == null);
 }

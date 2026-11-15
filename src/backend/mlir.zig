@@ -192,6 +192,9 @@ pub fn emit(
     sink: *Sink,
     options: Options,
 ) (std.mem.Allocator.Error || std.Io.Writer.Error)!bool {
+    // Metadata approval cannot enable lowering before its runtime/provenance
+    // protocol exists. Reject an inconsistent internal request before output.
+    if (options.migration == .enabled) return false;
     const zone = tracy.beginZone(@src(), "emit.mlir");
     defer zone.end();
 
@@ -393,6 +396,7 @@ pub const Sanitizer = enum {
 
 /// What emission is asked to add to the module beyond what the MIR says.
 pub const Options = struct {
+    migration: @import("../support/migration_contract.zig").Availability = .{ .disabled = .missing_metadata },
     sanitize: ?Sanitizer = null,
     /// The symbol C gives each `extern` whose C declaration links it under
     /// another one than its name, such as `lseek64` for `lseek` where C reads
@@ -3882,4 +3886,35 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
             }
         }
     }
+}
+
+test "migration certification: pinned fallback emits no optional helpers" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const source: source_mod.Source = .{ .path = "pinned.lin", .text = "fn main() -> UInt8 { 7 }" };
+    var sink = Sink.init(gpa);
+    var interner: @import("../support/interner.zig").Interner = .empty;
+    const tokens = try @import("../lexer/lexer.zig").tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try @import("../parser/parser.zig").parse(gpa, &source, .from(0), tokens, &sink);
+    const resolved = try @import("../sema/resolve.zig").resolveTree(gpa, &ast, &sink);
+    var typing = try @import("../sema/typecheck.zig").typecheckTree(gpa, &resolved, &sink);
+    const disposals = try @import("../ownership/check.zig").check(gpa, gpa, &resolved.expanded, &resolved.resolution, &typing, &sink);
+    const module = (try @import("../mir/lower.zig").lowerProgram(gpa, &resolved.expanded, &resolved.resolution, &typing, &disposals, &sink, .program)).?;
+    try testing.expect(!sink.hasErrors());
+    var table: FileTable = .{};
+    _ = try table.add(gpa, source);
+    var baseline: std.Io.Writer.Allocating = .init(gpa);
+    try testing.expect(try emit(gpa, &baseline.writer, &module, &table, &sink, .{}));
+    for (std.enums.values(@import("../support/migration_contract.zig").DisableReason)) |reason| {
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        try testing.expect(try emit(gpa, &out.writer, &module, &table, &sink, .{ .migration = .{ .disabled = reason } }));
+        try testing.expectEqualStrings(baseline.written(), out.written());
+        for ([_][]const u8{ "linea_migration_", "linea_fiber_certify_entry", "linea_foreign_enter_unknown" }) |symbol| {
+            try testing.expect(std.mem.indexOf(u8, out.written(), symbol) == null);
+        }
+    }
+    var unsupported: std.Io.Writer.Allocating = .init(gpa);
+    try testing.expect(!try emit(gpa, &unsupported.writer, &module, &table, &sink, .{ .migration = .{ .enabled = .{ .archive_sha256 = [_]u8{'a'} ** 64, .validation = 0 } } }));
+    try testing.expectEqual(@as(usize, 0), unsupported.written().len);
 }

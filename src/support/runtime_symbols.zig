@@ -187,6 +187,16 @@ pub const DeclaredBy = union(enum) {
     }
 };
 
+/// Migration behavior of a compiler-owned native boundary. Conditional
+/// callbacks still require invocation-level coverage; a symbol alone cannot
+/// certify its callbacks or the suspension paths reached by an invocation.
+pub const MigrationContract = enum { neutral, conditional_callbacks, bound_by_context, unknown };
+
+/// Unclassified native entries conservatively establish thread affinity.
+pub fn migrationContract(name: []const u8) MigrationContract {
+    return if (signatureOf(name)) |signature| signature.migration_contract else .unknown;
+}
+
 /// One function in the `linea_` namespace and the signature it has.
 pub const Signature = struct {
     symbol: []const u8,
@@ -204,6 +214,7 @@ pub const Signature = struct {
     /// The runtime calls back into Linea code in a task it starts, so a
     /// body handed to it runs while its caller goes on ([T-ThreadStart]).
     starts_task: bool = false,
+    migration_contract: MigrationContract = .unknown,
 };
 
 fn p(scalar: Scalar) Parameter {
@@ -618,4 +629,9 @@ test "an allocation, a descriptor and an address of bytes are confined to the mo
     try testing.expectEqualStrings("fs", signatureOf("linea_set_mode").?.declared_by.home().?);
     try testing.expectEqualStrings("net", signatureOf("linea_net_accept").?.declared_by.home().?);
     try testing.expect(signatureOf("linea_clock_sleep").?.declared_by == .granted);
+}
+
+test "migration certification: unreviewed runtime symbols default to unknown" {
+    for (internal_functions) |signature| try testing.expectEqual(MigrationContract.unknown, signature.migration_contract);
+    try testing.expectEqual(MigrationContract.unknown, migrationContract("unclassified_user_ffi"));
 }

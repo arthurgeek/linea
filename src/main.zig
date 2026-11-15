@@ -62,6 +62,7 @@ comptime {
     _ = @import("support/module_route.zig");
     _ = @import("support/manifest_source.zig");
     _ = @import("support/runtime_symbols.zig");
+    _ = @import("support/migration_contract.zig");
     _ = @import("support/symbol.zig");
     _ = @import("sema/instantiate.zig");
     _ = @import("driver/loader.zig");
