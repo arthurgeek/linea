@@ -931,6 +931,10 @@ pub const Resolution = struct {
     /// The implementations resolution refused and reported. Overlapping
     /// another is the same mistake, so a later pass does not report it again.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The refused implementations whose head or trait arguments hold a type
+    /// the parser refused. Such an implementation has no key, where one
+    /// refused for the module it is written in keeps the key it wrote.
+    keyless_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// The derive entries whose source no single variant of the target
     /// wraps, in the order expansion met them. The type checker reports
     /// each, once it has typed the entry's written arguments: a source that
@@ -1175,6 +1179,7 @@ pub const Resolution = struct {
         self.module_of_file.deinit(gpa);
         self.duplicate_impls.deinit(gpa);
         self.refused_impls.deinit(gpa);
+        self.keyless_impls.deinit(gpa);
         gpa.free(self.unwrapped_sources);
         self.templates.deinit(gpa);
         self.unpaired_template_closures.deinit(gpa);
@@ -1190,6 +1195,12 @@ pub const Resolution = struct {
     /// Whether resolution refused this `impl`.
     pub fn isRefusedImpl(self: *const Resolution, impl: DeclId) bool {
         return self.refused_impls.contains(impl);
+    }
+
+    /// Whether resolution refused this `impl` for a type the parser refused
+    /// in its head or trait arguments, which leaves it no key.
+    pub fn isKeylessImpl(self: *const Resolution, impl: DeclId) bool {
+        return self.keyless_impls.contains(impl);
     }
 
     test "an implementation resolution refused is the one isRefusedImpl names" {
@@ -4150,6 +4161,7 @@ fn resolveInternal(
     errdefer r.alias_heads.deinit(gpa);
     errdefer r.refused_operations.deinit(gpa);
     errdefer r.refused_impls.deinit(gpa);
+    errdefer r.keyless_impls.deinit(gpa);
     defer r.unwrapped_sources.deinit(gpa);
     errdefer r.spelled.deinit(gpa);
     errdefer r.written.deinit(gpa);
@@ -5074,6 +5086,7 @@ fn resolveInternal(
         .module_of_file = module_of_file,
         .duplicate_impls = r.duplicate_impls,
         .refused_impls = r.refused_impls,
+        .keyless_impls = r.keyless_impls,
         .unwrapped_sources = unwrapped_sources,
         .templates = r.templates,
         .unpaired_template_closures = r.unpaired_template_closures,
@@ -6641,6 +6654,8 @@ const Resolver = struct {
     /// module may write them, or for a head that names an alias or no type.
     /// Published as `Resolution.refused_impls`.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Published as `Resolution.keyless_impls`.
+    keyless_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// Published as `Resolution.unwrapped_sources`.
     unwrapped_sources: std.ArrayList(UnwrappedSource) = .empty,
     spelled: std.ArrayList(TokenId) = .empty,
@@ -8259,6 +8274,13 @@ const Resolver = struct {
     ///
     /// Naming it is not using it. A type whose only mention is an `impl` is
     /// still a type nothing needs, and [N-Unused] is what says so.
+    /// Refuses an implementation whose head or trait arguments hold a type
+    /// the parser refused.
+    fn refuseKeyless(self: *Resolver, d: DeclId) !void {
+        try self.refused_impls.put(self.gpa, d, {});
+        try self.keyless_impls.put(self.gpa, d, {});
+    }
+
     fn implTarget(self: *Resolver, d: DeclId) !void {
         const is_derive = self.ast.declTag(d) == .derive_impl;
         const trait_decl = if (is_derive) DeclId.none else try self.implTrait(d);
@@ -8268,12 +8290,12 @@ const Resolver = struct {
         // A head the parser refused names no type, and was reported where it
         // was written. Nothing is recorded for it, so its members are the
         // members of nothing rather than of unit or of a tuple nobody wrote.
-        if (headRefusedByTheParser(written_head)) return self.refused_impls.put(self.gpa, d, {});
+        if (headRefusedByTheParser(written_head)) return self.refuseKeyless(d);
         // An implementation whose head or trait arguments hold a type the
         // parser refused has no key to read: it is compared with no other,
         // and is not asked whether its parameters can be recovered from one.
         if (!is_derive and (holdsARefusedType(self.ast, written_head) or anyRefusedType(self.ast, self.ast.typeArgs(self.ast.declTraitArgs(d))))) {
-            return self.refused_impls.put(self.gpa, d, {});
+            return self.refuseKeyless(d);
         }
         if (self.ast.declIsDefault(d)) {
             // A head the default names is still a written type name, and

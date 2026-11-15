@@ -32744,10 +32744,11 @@ const Checker = struct {
     /// for a `T` its key names.
     fn requireRecoverableParameters(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
         const d = implementation.decl;
-        // An implementation resolution refused was reported there, and one
-        // whose key holds a type the parser refused has no key to recover a
-        // parameter from.
-        if (self.res.isRefusedImpl(d)) {
+        // An implementation whose key holds a type the parser refused has no
+        // key to recover a parameter from. One refused for the module it is
+        // written in keeps its key, so a use it would have answered is not
+        // reported a second time as answered by nothing.
+        if (self.res.isKeylessImpl(d)) {
             implementation.valid_key = false;
             return;
         }
