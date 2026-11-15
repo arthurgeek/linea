@@ -4,11 +4,6 @@ error[T-ArraySize]: an array's length is a count, and a count is a number
 7 |     Pair([[UInt8; 2]; true]),
   |                       ^^^^ this is not a number
 error[T-ArraySize]: an array's length is a count, and a count is a number
- --> tests/derive_from/a_length_that_counts_nothing_leaves_the_others_counted.lin:5:9
-  |
-5 | @derive(From[[[UInt8; 1 + 1]; true]])
-  |         ^^^^ this is not a number
-error[T-ArraySize]: an array's length is a count, and a count is a number
  --> tests/derive_from/a_length_that_counts_nothing_leaves_the_others_counted.lin:5:31
   |
 5 | @derive(From[[[UInt8; 1 + 1]; true]])
