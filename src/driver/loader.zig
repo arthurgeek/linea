@@ -2,6 +2,7 @@ const std = @import("std");
 const slow_tests = @import("../support/slow_tests.zig");
 const loader_mod = @This();
 const module_route = @import("../support/module_route.zig");
+const manifest_source = @import("../support/manifest_source.zig");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
 const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
@@ -872,6 +873,9 @@ fn loadFromDiskWith(
     // A command line says which it means and is believed. Bounded by the
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
+    // `rootOf` reads the manifest that marks the root, strictly: one that
+    // will not parse, or says what a root cannot be, stops the command here,
+    // and is not checked a second time before the load.
     const found = try rootOf(gpa, io, entry, .as_named, "");
     defer found.deinit(gpa);
     const given = found.entry;
@@ -879,14 +883,6 @@ fn loadFromDiskWith(
     if (std.mem.endsWith(u8, given, ".lin")) {
         const named = try std.Io.Dir.cwd().openFile(io, given, .{});
         named.close(io);
-    }
-
-    // Read strictly here, because the person who ran the command is there to
-    // be told: a manifest that will not parse, or says what a root cannot be,
-    // stops the command rather than loading the root as something else.
-    if (found.manifest) |path| {
-        const manifest = try readManifest(gpa, io, dirOf(path));
-        if (manifest) |m| freeManifest(gpa, m);
     }
 
     const paths = try pathsOfRoot(gpa, io, found);
@@ -1758,8 +1754,9 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
     errdefer declared.deinit(gpa);
     // A `source` leaving the directory holding the manifest is refused here,
     // for a root and for a library alike: the one check either takes.
-    if (parsed.value.source) |named| if (named.len > 0 and !try sourceStaysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
-    const source: ?[]const u8 = if (parsed.value.source) |named| (if (named.len == 0) null else try gpa.dupe(u8, named)) else null;
+    const written = manifest_source.named(parsed.value.source);
+    if (written) |named| if (!try manifest_source.staysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
+    const source: ?[]const u8 = if (written) |named| try gpa.dupe(u8, named) else null;
     errdefer if (source) |named| gpa.free(named);
     const name: ?[]const u8 = if (parsed.value.name) |named| try gpa.dupe(u8, named) else null;
     return .{ .source = source, .name = name, .declared = declared };
@@ -1776,27 +1773,6 @@ fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
 fn librarySourceDir(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]const u8 {
     const named = source orelse return dir;
     return joinedDir(gpa, dir, named);
-}
-
-/// Whether a manifest's `source`, read from the directory holding the
-/// manifest, names a directory inside that one. Decided by spelling, so a
-/// root read from disk and one read from memory agree: an absolute path, and
-/// one whose `..` climbs past the directory, name another directory's files.
-pub fn sourceStaysInside(gpa: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!bool {
-    if (source.len > 0 and source[0] == '/') return false;
-    const resolved = try std.fs.path.resolvePosix(gpa, &.{source});
-    defer gpa.free(resolved);
-    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
-}
-
-test "a manifest's source stays inside the directory holding it" {
-    const gpa = testing.allocator;
-    try testing.expect(try sourceStaysInside(gpa, "src"));
-    try testing.expect(try sourceStaysInside(gpa, "./src/"));
-    try testing.expect(try sourceStaysInside(gpa, "src/../lib"));
-    try testing.expect(!try sourceStaysInside(gpa, "../elsewhere/src"));
-    try testing.expect(!try sourceStaysInside(gpa, "src/../../x"));
-    try testing.expect(!try sourceStaysInside(gpa, "/tmp"));
 }
 
 /// The keys a manifest may write. Unknown ones are ignored, so a manifest may
@@ -5672,6 +5648,52 @@ test "checked library session resumes independent application checks" {
         "@copyable\nstruct Limits { bytes: UInt8 }\nlet defaults: Limits = .{ bytes = 7 }\nfn pick(value: Limits = defaults) -> UInt8 { value.bytes }\nfn main() -> UInt8 { pick() }",
     };
     for (texts) |text| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try prefix.loadFromMemory(gpa, &table, &sink, &interner, "main.lin", &.{.{ .path = "main.lin", .text = text }}, .program, .borrow);
+        var semantics = try prefix.checkProgram(gpa, testing.allocator, &program, &interner, &sink, .program);
+        defer semantics.deinit(gpa);
+        try testing.expect(semantics.reused_library);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+    }
+}
+
+test "checked library session resumes a program whose callable heads are too long to pack" {
+    var prefix = try CheckedLibrary.init(testing.allocator);
+    defer prefix.deinit();
+
+    // Sixty-one parameters, written once for the plain head and once with
+    // the last one taken: two shapes, numbered after the library's.
+    const plain = comptime params: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else ", ") ++ std.fmt.comptimePrint("p{d}: UInt8", .{i});
+        break :params text;
+    };
+    const taking = comptime params: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else ", ") ++ (if (i == 60) "sink " else "") ++ std.fmt.comptimePrint("p{d}: UInt8", .{i});
+        break :params text;
+    };
+    const sum = comptime terms: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else " + ") ++ std.fmt.comptimePrint("p{d}", .{i});
+        break :terms text;
+    };
+    const text = "trait Describe {\n    fn describe(_self: Self) -> UInt8\n}\n" ++
+        "impl Describe for fn(" ++ plain ++ ") -> UInt8 {\n    fn describe(_self: Self) -> UInt8 {\n        1\n    }\n}\n" ++
+        "impl Describe for fn(" ++ taking ++ ") -> UInt8 {\n    fn describe(_self: Self) -> UInt8 {\n        2\n    }\n}\n" ++
+        "fn borrowed(" ++ plain ++ ") -> UInt8 {\n    " ++ sum ++ "\n}\n" ++
+        "fn describe[H: Describe](handler: H) -> UInt8 {\n    handler.describe()\n}\n" ++
+        "fn main() -> UInt8 {\n    describe(borrowed)\n}\n";
+
+    for (0..2) |_| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const gpa = arena.allocator();
