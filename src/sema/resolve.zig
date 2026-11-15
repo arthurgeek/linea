@@ -581,6 +581,8 @@ pub const UnwrappedSource = struct {
     trait: node.DeriveTraitId,
     /// The wrapped parameter's written type, as the template writes it.
     wrapped: node.TypeRef,
+    /// The template whose parameters `wrapped` is written with.
+    template: DeclId,
     /// The entry's argument that is the source: the one standing for the
     /// template parameter the wrapped type names. Null where the wrapped
     /// type is not one parameter alone, so every argument is part of the
@@ -11723,7 +11725,15 @@ const Resolver = struct {
                 // A source or a payload that failed to resolve has its own
                 // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                for (written_arguments) |argument| settled = settled and self.writtenSettled(argument, 0);
+                // Only the argument the template wraps is the source; another
+                // argument's mistake is reported where it is written and
+                // leaves the source as it stands.
+                const source = self.wrappedArgument(template, wrapped, written_arguments);
+                if (source) |argument| {
+                    settled = self.writtenSettled(argument, 0);
+                } else for (written_arguments) |argument| {
+                    settled = settled and self.writtenSettled(argument, 0);
+                }
                 for (variants) |variant| {
                     const fields = ast.variantFields(variant);
                     if (fields.len == 1) settled = settled and self.writtenSettled(fields[0].written, 0);
@@ -11734,7 +11744,8 @@ const Resolver = struct {
                     .owner = if (attached) target else derive,
                     .trait = derive_trait,
                     .wrapped = wrapped,
-                    .source = self.wrappedArgument(template, wrapped, written_arguments),
+                    .source = source,
+                    .template = template,
                     .holders = if (second) |later| .{ @enumFromInt(selected.?), @enumFromInt(later) } else null,
                 });
                 return false;
@@ -15135,18 +15146,40 @@ const Resolver = struct {
 
     /// The names written inside a type [S-Nesting] refused and stepped over.
     ///
-    /// The parser keeps no node inside such a type, so what its names reach
-    /// is marked used: a type parameter in scope, a type the enclosing trait
-    /// declares, a type of this module, a module the file imports, or any
-    /// other name in scope, such as a constant written as a length.
-    /// [N-Unused] for one of them would be a consequence of the error already
-    /// reported. No name is recorded as reaching anything, and nothing inside
-    /// is reported. Each token of the type is read once.
+    /// The parser keeps no node inside such a type, so what a name written in
+    /// a type position reaches is marked used: a type parameter in scope, a
+    /// type the enclosing trait declares, a type of this module, and a module
+    /// the file imports where a dot follows the name. Between the `;` of an
+    /// array and its `]` stands a length, an expression, so any name in scope
+    /// counts there. [N-Unused] for one of them would be a consequence of the
+    /// error already reported. A name after a dot is a member of what
+    /// precedes it and a name before a colon is a callable type's parameter,
+    /// so neither is a use of a declaration spelled the same, and nothing
+    /// that is not a type counts where a type is written. No name is recorded
+    /// as reaching anything, and nothing inside is reported. Each token of
+    /// the type is read once.
     fn useSteppedOverType(self: *Resolver, ref: node.TypeRef) void {
-        for (ref.at.index()..ref.stepped_to.index()) |i| {
+        const end = ref.stepped_to.index();
+        var in_length = false;
+        for (ref.at.index()..end) |i| {
             const tok = TokenId.at(@intCast(i));
+            switch (self.ast.tokenTag(tok)) {
+                .semicolon => in_length = true,
+                .r_bracket => in_length = false,
+                else => {},
+            }
             if (self.ast.tokenTag(tok) != .identifier) continue;
+            const after = if (i + 1 < end) self.ast.tokenTag(TokenId.at(@intCast(i + 1))) else .invalid;
+            if (i > ref.at.index() and self.ast.tokenTag(TokenId.at(@intCast(i - 1))) == .dot) continue;
             const name = self.ast.tokenName(tok);
+            if (in_length) {
+                if (self.lookupName(name)) |found| switch (found) {
+                    .binding, .unresolved_use => |b| self.bindings.items[b.index()].used = true,
+                    .type_parameter => {},
+                };
+                continue;
+            }
+            if (after == .colon) continue;
             if (self.typeParamNamedInScope(name)) |found| {
                 if (self.marks_for == found.of and found.at < self.used_type_params.items.len) {
                     self.used_type_params.items[found.at] = true;
@@ -15155,12 +15188,9 @@ const Resolver = struct {
                 self.bindings.items[declared.index()].used = true;
             } else if (self.type_in_module.get(name)) |declared| {
                 self.bindings.items[declared.index()].used = true;
-            } else if (self.moduleNamed(name, self.ast.fileOf(tok))) |module| {
-                self.bindings.items[module.index()].used = true;
-            } else if (self.lookupName(name)) |found| switch (found) {
-                .binding, .unresolved_use => |b| self.bindings.items[b.index()].used = true,
-                .type_parameter => {},
-            };
+            } else if (after == .dot) {
+                if (self.moduleNamed(name, self.ast.fileOf(tok))) |module| self.bindings.items[module.index()].used = true;
+            }
         }
     }
 

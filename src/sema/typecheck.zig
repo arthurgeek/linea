@@ -31321,8 +31321,8 @@ const Checker = struct {
     /// checked. A refused written type answers poison when it is read again,
     /// so reading it here reports nothing.
     ///
-    /// **Bound:** one search of `reported`, and the distinct types the
-    /// written type settles to.
+    /// **Bound:** one search of `reported`, and one visit of each distinct
+    /// type the written type settles to that was not asked about before.
     fn writtenTypeRefused(self: *Checker, owner: node.DeclId, written: node.TypeRef, span: Span, reported: []const Place) std.mem.Allocator.Error!bool {
         const file = self.ast.fileOf(written.at);
         const wanted: Place = .{ .file = file, .at = span.start };
@@ -31335,26 +31335,39 @@ const Checker = struct {
         }.order);
         if (first < reported.len and reported[first].file == file and reported[first].at < span.end) return true;
 
-        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
-        defer seen.deinit(self.gpa);
-        return self.holdsPoison(try self.typeOfRefOf(self.current, owner, written), &seen);
+        return self.builder.anyUnsettled(&.{try self.typeOfRefOf(self.current, owner, written)});
     }
 
-    /// Whether a type is, or is built over, one already reported.
+    /// The type a derive entry's template wraps, as the entry applies it:
+    /// the wrapped type's text with each of the template's parameters
+    /// replaced by the argument the entry wrote for it.
     ///
-    /// **Bound:** each distinct type reached is visited once.
-    fn holdsPoison(self: *Checker, ty: TypeId, seen: *std.AutoHashMapUnmanaged(TypeId, void)) std.mem.Allocator.Error!bool {
-        if (ty == .poison) return true;
-        if ((try seen.getOrPut(self.gpa, ty)).found_existing) return false;
-        switch (self.builder.get(ty)) {
-            .array => |array| return self.holdsPoison(array.element, seen),
-            .borrow => |observation| return self.holdsPoison(observation.referent, seen),
-            else => {},
+    /// **Bound:** the tokens of the wrapped type, each compared with the
+    /// template's parameters.
+    fn wrappedSourceText(self: *Checker, unwrapped: resolve_mod.UnwrappedSource, arguments: []const node.TypeRef) std.mem.Allocator.Error![]const u8 {
+        const ast = self.ast;
+        const parameters = ast.declTypeParams(unwrapped.template);
+        const span = ast.writtenWholeSpan(unwrapped.wrapped);
+        const text = ast.partOf(unwrapped.wrapped.at).source;
+        var out: std.ArrayList(u8) = .empty;
+        var written_to = span.start;
+        var index = unwrapped.wrapped.at.index();
+        while (true) : (index += 1) {
+            const tok = TokenId.at(@intCast(index));
+            const at = ast.tokenSpan(tok);
+            if (at.start >= span.end) break;
+            if (ast.tokenTag(tok) != .identifier) continue;
+            if (index > unwrapped.wrapped.at.index() and ast.tokenTag(TokenId.at(@intCast(index - 1))) == .dot) continue;
+            const argument = for (parameters, 0..) |parameter, position| {
+                if (ast.tokenName(parameter.name) == ast.tokenName(tok)) break if (position < arguments.len) arguments[position] else null;
+            } else null;
+            const replacement = argument orelse continue;
+            try out.appendSlice(self.sink.arena, text[written_to..at.start]);
+            try out.appendSlice(self.sink.arena, ast.writtenText(replacement));
+            written_to = at.end;
         }
-        const instance = self.builder.instanceOf(ty) orelse return false;
-        // The walk mints no type, so the slice `argsOf` answers stays put.
-        for (self.builder.argsOf(instance)) |argument| if (try self.holdsPoison(argument, seen)) return true;
-        return false;
+        try out.appendSlice(self.sink.arena, text[written_to..span.end]);
+        return out.items;
     }
 
     /// Reports [T-Derive] for each derive entry whose source no single
@@ -31397,7 +31410,7 @@ const Checker = struct {
             }
 
             const variants = ast.declVariants(unwrapped.target);
-            const source_text = ast.writtenText(unwrapped.source orelse unwrapped.wrapped);
+            const source_text = try self.wrappedSourceText(unwrapped, written_arguments);
             const target_name = ast.tokenText(ast.declName(unwrapped.target));
             const labels = try arena.alloc(Label, if (unwrapped.holders != null) 3 else 1);
             labels[0] = .{

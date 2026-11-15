@@ -871,7 +871,11 @@ reported for the variant that source would need ([T-Derive]). A name written
 inside a refused type, the head of the refused level included, counts as used
 as one in a refused expression does: a type, an alias, a type parameter or an
 import named only there is not [N-Unused] or [M-Unused], and is resolved for
-no other purpose. A declaration the program never writes is still unused. A
+no other purpose. Only a name in a type position counts: a callable type's
+parameter name, a member written after a dot and a function written where a
+type is are not uses of a declaration spelled the same, while any name in scope
+counts inside an array's length. A declaration the program never writes is
+still unused. A
 control header stops at the brace that opens its body, so the body is still
 read.
 
@@ -3206,8 +3210,10 @@ refusal of the source: an argument that does not meet the bound it is written
 under ([T-Bound]), a callable that writes a unit result ([S-UnitResult]), and
 an alias whose own type was refused, which is reported where the alias is
 declared. The source is the argument the template wraps; a mistake in another
-argument of the entry is independent of it, so both it and a source no variant
-holds are reported. Unit is a source like any other, wrapped by a variant whose
+argument of the entry is independent of it, an undefined name included, so both
+it and a source no variant holds are reported. The report names the type the
+template wraps with the entry's arguments in its parameters' places, which is
+the type a variant would have to hold. Unit is a source like any other, wrapped by a variant whose
 only field is `()`. The generated implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.

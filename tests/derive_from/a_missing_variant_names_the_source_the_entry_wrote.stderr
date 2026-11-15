@@ -1,0 +1,7 @@
+error[T-Derive]: no variant of `Choice` wraps exactly `Option[UInt16]`
+  --> tests/derive_from/a_missing_variant_names_the_source_the_entry_wrote.lin:14:9
+   |
+14 | @derive(Lift[UInt16])
+   |         ^^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Choice` has `Only(UInt8)`, `Unknown`
