@@ -1,0 +1,55 @@
+// [T-Impl]. `Probe.Reading` and `Gauge.Reading` are both `UInt8`, so the two
+// implementations are both `Weighs[UInt8]` for `Scale`.
+// `Weighs[Dial.Reading]`, which is `Weighs[UInt16]`, is another
+// implementation.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+struct Gauge {}
+
+impl Sensor for Gauge {
+    type Reading = UInt8
+}
+
+struct Dial {}
+
+impl Sensor for Dial {
+    type Reading = UInt16
+}
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+impl Weighs[Probe.Reading] for Scale {
+    fn weigh(_self: Self, value: Probe.Reading) -> UInt8 {
+        value
+    }
+}
+
+impl Weighs[Gauge.Reading] for Scale {
+    fn weigh(_self: Self, value: Gauge.Reading) -> UInt8 {
+        value + 1
+    }
+}
+
+impl Weighs[Dial.Reading] for Scale {
+    fn weigh(_self: Self, _value: Dial.Reading) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    let wide: UInt16 = 300
+    scale.weigh(wide)
+}
