@@ -970,10 +970,13 @@ test "migration certification: linked snapshot retains validated bytes after sou
 
 const migration_contract = @import("../support/migration_contract.zig");
 
+pub const PreparationStage = enum { metadata_path, metadata_read, metadata_parse, archive_read, snapshot, behavior_parse, validation_parse };
+pub const PreparationFailure = struct { stage: PreparationStage, cause: anyerror };
 pub const MigrationRuntime = struct {
     availability: migration_contract.Availability,
     path: ?[]const u8,
     snapshot: ?RuntimeSnapshot = null,
+    failure: ?PreparationFailure = null,
 
     pub fn deinit(self: *MigrationRuntime, gpa: std.mem.Allocator, io: std.Io) void {
         if (self.snapshot) |*snapshot| snapshot.deinit(gpa, io);
@@ -984,26 +987,43 @@ pub const MigrationRuntime = struct {
 /// retain the ordinary archive path and emit no optional runtime references.
 pub fn prepareMigrationRuntime(gpa: std.mem.Allocator, io: std.Io, scratch_root: []const u8, runtime: ?[]const u8, request: migration_contract.Request, approvals: []const migration_contract.BehaviorApproval, validations: []const migration_contract.TargetValidation) !MigrationRuntime {
     const path = runtime orelse return .{ .availability = .{ .disabled = .object_only }, .path = null };
-    const metadata_path = try std.fmt.allocPrint(gpa, "{s}.migration.json", .{path});
+    if (!request.runtime_available) return .{ .availability = .{ .disabled = .runtime_unavailable }, .path = path };
+    const metadata_path = std.fmt.allocPrint(gpa, "{s}.migration.json", .{path}) catch |err| return .{
+        .availability = .{ .disabled = .operational_failure },
+        .path = path,
+        .failure = .{ .stage = .metadata_path, .cause = err },
+    };
     defer gpa.free(metadata_path);
     const cwd = std.Io.Dir.cwd();
-    const metadata = cwd.readFileAlloc(io, metadata_path, gpa, .limited(1 << 16)) catch return .{
-        .availability = .{ .disabled = .missing_metadata },
-        .path = path,
+    const metadata = cwd.readFileAlloc(io, metadata_path, gpa, .limited(1 << 16)) catch |err| return switch (err) {
+        error.FileNotFound => .{ .availability = .{ .disabled = .missing_metadata }, .path = path },
+        error.FileTooBig => .{ .availability = .{ .disabled = .malformed_metadata }, .path = path },
+        else => .{ .availability = .{ .disabled = .operational_failure }, .path = path, .failure = .{ .stage = .metadata_read, .cause = err } },
     };
     defer gpa.free(metadata);
-    const archive = cwd.readFileAlloc(io, path, gpa, .unlimited) catch return .{
-        .availability = .{ .disabled = .unsupported_archive },
+    const parsed = std.json.parseFromSlice(migration_contract.Identity, gpa, metadata, .{}) catch |err| return switch (err) {
+        error.OutOfMemory => .{ .availability = .{ .disabled = .operational_failure }, .path = path, .failure = .{ .stage = .metadata_parse, .cause = err } },
+        else => .{ .availability = .{ .disabled = .malformed_metadata }, .path = path },
+    };
+    defer parsed.deinit();
+    const eligible = switch (migration_contract.eligibility(parsed.value, request, approvals, validations)) {
+        .disabled => |reason| return .{ .availability = .{ .disabled = reason }, .path = path },
+        .eligible => |approved| approved,
+    };
+    const archive = cwd.readFileAlloc(io, path, gpa, .unlimited) catch |err| return .{
+        .availability = .{ .disabled = .operational_failure },
         .path = path,
+        .failure = .{ .stage = .archive_read, .cause = err },
     };
     defer gpa.free(archive);
-    const availability = migration_contract.fromMetadata(gpa, archive, metadata, request, approvals, validations);
+    const availability = migration_contract.validateArchive(archive, eligible);
     switch (availability) {
         .disabled => return .{ .availability = availability, .path = path },
         .enabled => |approved| {
-            const snapshot = snapshotRuntime(gpa, io, scratch_root, archive, approved.archive_sha256) catch return .{
-                .availability = .{ .disabled = .snapshot_unavailable },
+            const snapshot = snapshotRuntime(gpa, io, scratch_root, archive, approved.archive_sha256) catch |err| return .{
+                .availability = .{ .disabled = .operational_failure },
                 .path = path,
+                .failure = .{ .stage = .snapshot, .cause = err },
             };
             return .{ .availability = availability, .path = snapshot.output.path, .snapshot = snapshot };
         },
@@ -1017,7 +1037,7 @@ test "migration certification: object output needs no archive and metadata is re
     defer tmp.cleanup();
     const root = try tmp.dir.realPathFileAlloc(io, ".", gpa);
     defer gpa.free(root);
-    const request: migration_contract.Request = .{ .target = "aarch64-macos", .variant = .regular, .registry_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+    const request: migration_contract.Request = .{ .target = "aarch64-macos", .variant = .regular, .registry_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", .runtime_available = true, .entries = &.{"entry-1"}, .suspensions = &.{.clean_yield} };
     var object = try prepareMigrationRuntime(gpa, io, root, null, request, &.{}, &.{});
     defer object.deinit(gpa, io);
     try testing.expectEqual(migration_contract.DisableReason.object_only, object.availability.disabled);
@@ -1077,4 +1097,31 @@ test "migration certification: object output needs no archive and metadata is re
     try testing.expectEqual(migration_contract.DisableReason.missing_metadata, missing.availability.disabled);
     try testing.expectEqualStrings(archive, missing.path.?);
     try testing.expect(missing.snapshot == null);
+}
+
+test "migration certification: unavailable support performs no allocation or optional I/O" {
+    const request: migration_contract.Request = .{ .target = "", .variant = .regular, .registry_sha256 = "" };
+    var selection = try prepareMigrationRuntime(testing.failing_allocator, .failing, "unusable", "unreadable-runtime.a", request, &.{}, &.{});
+    defer selection.deinit(testing.failing_allocator, .failing);
+    try testing.expectEqual(migration_contract.DisableReason.runtime_unavailable, selection.availability.disabled);
+    try testing.expectEqualStrings("unreadable-runtime.a", selection.path.?);
+    try testing.expect(selection.snapshot == null);
+}
+
+test "migration certification: operational evidence failure retains stage and cause" {
+    const Denied = struct {
+        fn open(_: ?*anyopaque, _: std.Io.Dir, _: []const u8, _: std.Io.File.OpenFlags) std.Io.File.OpenError!std.Io.File {
+            return error.AccessDenied;
+        }
+    };
+    var vtable = std.Io.failing.vtable.*;
+    vtable.dirOpenFile = Denied.open;
+    const io: std.Io = .{ .userdata = null, .vtable = &vtable };
+    const request: migration_contract.Request = .{ .target = "", .variant = .regular, .registry_sha256 = "", .runtime_available = true };
+    var selection = try prepareMigrationRuntime(testing.allocator, io, "unusable", "denied.a", request, &.{}, &.{});
+    defer selection.deinit(testing.allocator, io);
+    try testing.expectEqual(migration_contract.DisableReason.operational_failure, selection.availability.disabled);
+    try testing.expect(selection.failure != null);
+    try testing.expectEqual(PreparationStage.metadata_read, selection.failure.?.stage);
+    try testing.expectEqual(error.AccessDenied, selection.failure.?.cause);
 }

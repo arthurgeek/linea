@@ -27,6 +27,12 @@ current entry defaults to Unknown. The classification field does not yet add
 foreign guards or establish affinity. Neutrality of a native symbol will not by
 itself authorize every suspension path or callback target it can reach.
 
+Unavailable runtime support returns pinned without optional allocation or I/O.
+For supported contexts, selection checks metadata identity, authorities and the
+requested entry/path scope before reading the archive. The enabled result carries
+the checked requested scope, owned by the compilation for the entire emission;
+it is not blanket permission for other entries or suspension paths.
+
 Selection occurs afresh before compilation emits IR. Missing, malformed, stale,
 unsupported or unapproved optional evidence uses ordinary pinned emission and
 the original link path, with no optional helper references. Valid native
@@ -38,7 +44,16 @@ For an approved identity, the selection helper retains a unique archive snapshot
 and rechecks its digest before linking. It does not reopen the original archive
 for the link. The production driver cannot select that path until runtime
 availability and approved authorities exist. Synthetic tests exercise snapshot
-replacement and metadata invalidation without enabling migration.
+replacement and metadata invalidation without enabling migration. Linking assumes
+that the private build directory and retained snapshot are not concurrently
+modified during the build. The pathname plus hash check is not an OS-enforced
+immutable-file capability and does not eliminate a hostile mutation between the
+check and the linker's open.
+
+Expected missing/malformed evidence and unsupported representations remain
+ordinary disabled decisions. Operational failures retain their preparation stage
+and original error internally, including archive-read and snapshot failures.
+They currently select pinned fallback without introducing mandatory warnings.
 
 No emitted-call-site manifest, scheduler callback audit or cross-thread platform
 result is supplied here. Those remain prerequisites for any actual migration.
