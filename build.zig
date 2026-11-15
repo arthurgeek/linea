@@ -2747,6 +2747,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/derive_from/a_derive_entry_with_trailing_garbage_is_reported_once.lin",
     "tests/derive_from/a_derive_entry_without_a_source_is_reported_once.lin",
     "tests/derive_from/a_derive_request_missing_its_closing_parenthesis_is_reported_once.lin",
+    "tests/derive_from/a_from_derive_stays_silent_after_a_written_unit_result.lin",
     "tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin",
     "tests/defer_let/a_defer_let_binds_one_name.lin",
     "tests/defer_let/a_defer_let_read_binds_nothing_to_release.lin",
