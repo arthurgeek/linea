@@ -1,0 +1,3 @@
+import link66
+
+pub use link66.value

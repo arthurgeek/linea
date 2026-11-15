@@ -1,0 +1,3 @@
+import link04
+
+pub use link04.value

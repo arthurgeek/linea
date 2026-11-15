@@ -1,0 +1,10 @@
+error[S-Entry]: a program is a list of declarations
+ --> tests/recovery/an_extern_after_a_stray_token_is_still_an_extern.lin:5:1
+  |
+5 | ?
+  | ^ expected `fn` here
+error[M-Extern]: an `extern` is declared only in a module its root's manifest grants, and linea.json does not list "."
+ --> tests/recovery/an_extern_after_a_stray_token_is_still_an_extern.lin:6:11
+  |
+6 | extern fn _foreign(value: UInt8) -> UInt8
+  |           ^^^^^^^^ list this module under "extern" in linea.json to trust it with C, or call a module that is granted

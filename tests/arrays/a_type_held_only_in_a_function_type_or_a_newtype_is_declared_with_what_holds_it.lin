@@ -1,0 +1,51 @@
+// A program holds the types its values are made of. Each type here is
+// reached only through another: `Cell` as the parameter of a function a field
+// may hold, `Shelf` behind a borrow, `Seal` as the type `Sealed` is a new name
+// for, and `Tag` as what `Marker` was applied to. All are held all the same.
+@copyable
+struct Cell {
+    value: UInt8,
+}
+
+struct Handler {
+    run: Option[fn(cell: Cell) -> UInt8],
+}
+
+@copyable
+struct Shelf {
+    rows: UInt8,
+}
+
+struct Lent {
+    shelves: [borrow Shelf; 0],
+}
+
+@copyable
+struct Seal {
+    mark: UInt8,
+}
+
+type Sealed = Seal
+
+struct Envelope {
+    seals: [Sealed; 0],
+}
+
+@copyable
+struct Tag {
+    mark: UInt8,
+}
+
+struct Marker[phantom T] {}
+
+struct Holder {
+    marker: Marker[Tag],
+}
+
+fn weigh(_handler: Handler, _lent: Lent, _envelope: Envelope, _holder: Holder) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    weigh(Handler { run = .None }, Lent { shelves = [] }, Envelope { seals = [] }, Holder { marker = .{} })
+}
