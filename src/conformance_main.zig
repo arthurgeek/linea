@@ -4058,6 +4058,25 @@ fn instanceModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` generic functions, each built once for one type that a chain of
+/// aliases names sixteen million times over, so every symbol among them
+/// spells that type. The type is one entry per alias in the pool, and a
+/// symbol's cost is those entries, not the names.
+fn sharedTypeSymbolsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    const levels = 24;
+    try w.writeAll("struct P[phantom A, phantom B] {}\n\nalias A0[T] = P[T, T]\n");
+    for (1..levels) |i| try w.print("alias A{d}[T] = P[A{d}[T], A{d}[T]]\n", .{ i, i - 1, i - 1 });
+    for (0..n) |i| try w.print("\nfn same{d}[U](sink x: U) -> U {{\n    x\n}}\n", .{i});
+    try w.print("\nfn main() -> UInt8 {{\n    let v0: A{d}[UInt8] = .{{}}\n", .{levels - 1});
+    for (0..n) |i| try w.print("    let v{d} = same{d}(v{d})\n", .{ i + 1, i, i });
+    try w.print("    let _last = v{d}\n    0\n}}\n", .{n});
+    return out.toOwnedSlice();
+}
+
 /// `n` generic structures in a ring, each holding the next two through a
 /// container that stores none of them, and one built at a concrete argument.
 ///
@@ -7060,6 +7079,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "views held in one struct and ended in turn", .n = 2000, .cost = throughTheTree(storage_mod.wideViewsProgram) },
     .{ .name = "views held in one struct and ended last first", .n = 4000, .cost = throughTheTree(storage_mod.wideViewsEndedLastFirstProgram) },
     .{ .name = "instantiations", .n = 8000, .cost = throughTheTree(instanceModule) },
+    .{ .name = "symbols naming one shared type", .n = 2000, .cost = throughTheTree(sharedTypeSymbolsModule) },
     .{ .name = "generic structures holding one another", .n = 2000, .cost = throughTheTree(ringedGenericStructsModule) },
     .{ .name = "newtype chain", .n = 16000, .cost = throughTheTree(newtypeChainModule) },
     // A chain of declared answers passes through at most 1000 links
@@ -20778,7 +20798,7 @@ fn checkLibrary(
 fn filesOfProgram(gpa: std.mem.Allocator, io: std.Io, docs: *const Documents, program: []const u8) ![]const loader.InMemoryFile {
     const root = try loader.rootOf(gpa, io, program, .its_program, "");
     defer root.deinit(gpa);
-    return docs.filesFor(gpa, io, root);
+    return docs.filesFor(gpa, io, root, .every_file);
 }
 
 fn readIfExists(io: std.Io, gpa: std.mem.Allocator, path: []const u8) !?[]u8 {

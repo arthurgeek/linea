@@ -1,0 +1,8 @@
+// A file's diagnostics are shown until the server publishes others for it. A
+// file the program no longer reaches is published with none, so what it said
+// while it was part of the program does not stay on screen.
+import extra
+
+fn main() -> UInt8 {
+    extra.size()
+}
