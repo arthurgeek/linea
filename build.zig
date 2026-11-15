@@ -1761,6 +1761,22 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
         .{ .file = "runtime/sim_test.c", .flags = runtime_flags.items },
     });
+    var sim_fault_flags: std.ArrayList([]const u8) = .empty;
+    sim_fault_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    sim_fault_flags.append(b.allocator, "-Dmalloc=linea_test_malloc") catch @panic("OOM");
+    native.add(native_net_step, "native-sim-fault-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = sim_fault_flags.items },
+        .{ .file = "runtime/sim_fault_test.c", .flags = runtime_flags.items },
+    });
 
     const native_clock_step = b.step("test-native-clock", "Check native clock reads and the monotonic sleep");
     var clock_flags: std.ArrayList([]const u8) = .empty;
