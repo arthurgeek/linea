@@ -1,0 +1,24 @@
+// [L-Size]. A generic type whose fixed parts alone cross the limit is too
+// wide whatever its parameter is: with every parameter occupying nothing it
+// is already too wide. It is reported once, where it is declared, whether
+// the program applies it to several arguments or to none.
+struct Big[T] {
+    first: [UInt8; 4294967290],
+    second: [UInt8; 4294967290],
+    last: T,
+}
+
+struct _Vast[T] {
+    first: [UInt8; 4294967290],
+    second: [UInt8; 4294967290],
+    items: [T; 2147483648],
+}
+
+fn weigh(_small: borrow Big[UInt8], _large: borrow Big[UInt64]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}

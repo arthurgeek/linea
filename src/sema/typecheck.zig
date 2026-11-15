@@ -788,6 +788,8 @@ fn typecheckInternal(
     }
     defer c.bounds_reported.deinit(gpa);
     defer c.bounds_reported_order.deinit(gpa);
+    defer c.written_arrays.deinit(gpa);
+    defer c.lengths_waiting.deinit(gpa);
     defer c.refused_parts.deinit(gpa);
     defer c.bound_sites.deinit(gpa);
     defer c.alias_site_args.deinit(gpa);
@@ -1504,6 +1506,7 @@ fn typecheckInternal(
         if (annotation.wasWritten()) c.setBindingType(b, try c.bindingTypeCountingLiteral(annotation, ast.declInit(d)));
         c.generic = node.DeclId.none;
     }
+    c.constants_typed = true;
 
     // Read parameter annotations with the same symbolic Self evidence used
     // by the callable signature, before defaults or bodies inspect them.
@@ -1548,6 +1551,7 @@ fn typecheckInternal(
         if (resolution.kindOf(b) != .constant) continue;
         try c.ensureConstant(b);
     }
+    try c.reportWaitingLengths();
 
     c.callable_defaults_ready = true;
     for (c.callable_default_sites) |site| {
@@ -1766,7 +1770,7 @@ fn typecheckInternal(
     try c.reportUnwrappedSources();
     try c.checkPolyRec();
     try c.builder.fillMinted();
-    try reportOversizedTypes(sink, program, &c.builder, 0);
+    try reportOversizedTypes(sink, program, &c.builder, 0, &c.written_arrays);
 
     // The binding types pass to the caller rather than being freed: lowering
     // needs a parameter's type, and reading a declared one back out of its
@@ -5059,6 +5063,10 @@ fn operandHint(builder: *const Typing.Builder, t: TypeId) ?[]const u8 {
     return null;
 }
 
+/// Where the program first writes each array type, which no declaration
+/// names.
+pub const WrittenArrays = std.AutoHashMapUnmanaged(TypeId, Loc);
+
 /// Reports every type in `builder` at or after `from` whose width crosses what
 /// [L-Size] allows.
 ///
@@ -5072,14 +5080,43 @@ fn operandHint(builder: *const Typing.Builder, t: TypeId) ?[]const u8 {
 /// Which declaration a type came from is asked of the pool, which answers for
 /// a declared type and for an instantiation alike -- so a caller minting only
 /// instantiations needs to hand over nothing extra to be reported properly.
+///
+/// A generic declaration has no width until its parameters are settled, so
+/// its own type is not asked about. It is too wide whatever its parameters
+/// are where it is too wide with every one of them occupying nothing, which
+/// is asked of its instantiation at `()`. That is reported once, at the
+/// declaration, by the caller that starts at the first type, and none of its
+/// instantiations is reported after it.
+///
+/// **Bound:** the declarations once where `from` is zero, the types from
+/// `from` on once, and one instantiation minted for each generic declaration
+/// whose own layout is too wide.
 pub fn reportOversizedTypes(
     sink: *Sink,
     program: *const ExpandedProgram,
     builder: *Typing.Builder,
     from: u32,
+    written_arrays: ?*const WrittenArrays,
 ) !void {
     const ast = &program.ast;
     try builder.writeHeldParts();
+
+    // Whether each generic declaration asked about is too wide whatever its
+    // parameters are.
+    var wide_whatever: std.AutoHashMapUnmanaged(node.DeclId, bool) = .empty;
+    defer wide_whatever.deinit(builder.gpa);
+
+    if (from == 0) for (0..ast.declCount()) |i| {
+        const d = node.DeclId.at(@intCast(i));
+        if (ast.declTypeParams(d).len == 0) continue;
+        const own = builder.typeOfDecl(d) orelse continue;
+        if (!try wideWhateverItsParameters(builder, ast, &wide_whatever, d)) continue;
+        const settled = try atNoWidth(builder, ast, own, d);
+        // Where a part of it is already too wide, that part is the report.
+        if (!builder.crossesSizeLimit(settled)) continue;
+        try reportOversized(sink, ast.fileOfDecl(d), ast.declNameSpan(d), builder.nameOf(own));
+    };
+
     var next = from;
     while (try builder.nextOversized(next)) |t| {
         next = @intFromEnum(t) + 1;
@@ -5088,20 +5125,56 @@ pub fn reportOversizedTypes(
         // instantiation at the declaration it was made from: an instantiation
         // is written wherever it is named, and every one of those places is
         // the same type.
-        const at: Loc = if (builder.view().declOfType(t)) |i|
-            .{ .file = ast.fileOfDecl(i), .span = ast.declNameSpan(i) }
+        const declared = builder.view().declOfType(t);
+        if (declared) |d| if (ast.declTypeParams(d).len != 0) {
+            if (builder.instanceOf(t) == null) continue;
+            if (try wideWhateverItsParameters(builder, ast, &wide_whatever, d)) continue;
+        };
+        const at: Loc = if (declared) |d|
+            .{ .file = ast.fileOfDecl(d), .span = ast.declNameSpan(d) }
+        else if (written_arrays) |written|
+            written.get(t) orelse .{ .file = program.source.primaryFile(), .span = Span.empty }
         else
             .{ .file = program.source.primaryFile(), .span = Span.empty };
-
-        try sink.addErrorFmt(
-            .l_size,
-            at.file,
-            at.span,
-            "hold fewer parts, or nest them less deeply",
-            "a type is at most {d} bytes wide, and `{s}` is wider",
-            .{ types_mod.Layout.max_size, builder.nameOf(t) },
-        );
+        try reportOversized(sink, at.file, at.span, builder.nameOf(t));
     }
+}
+
+fn reportOversized(sink: *Sink, file: FileId, span: Span, name: []const u8) !void {
+    try sink.addErrorFmt(
+        .l_size,
+        file,
+        span,
+        "hold fewer parts, or nest them less deeply",
+        "a type is at most {d} bytes wide, and `{s}` is wider",
+        .{ types_mod.Layout.max_size, name },
+    );
+}
+
+/// The instantiation of the generic declaration `d` with `()` for every
+/// parameter: the declaration with its parameters occupying nothing.
+fn atNoWidth(builder: *Typing.Builder, ast: *const Ast, own: TypeId, d: node.DeclId) !TypeId {
+    const units = try builder.gpa.alloc(TypeId, ast.declTypeParams(d).len);
+    defer builder.gpa.free(units);
+    @memset(units, .unit);
+    return builder.instantiate(own, d, units);
+}
+
+/// Whether the generic declaration `d` is too wide whatever its parameters
+/// are, asked once for each declaration. A layout measured with a parameter
+/// at its placeholder width is never narrower than one measured with it at
+/// none, so only a declaration whose own layout is too wide is instantiated.
+fn wideWhateverItsParameters(
+    builder: *Typing.Builder,
+    ast: *const Ast,
+    known: *std.AutoHashMapUnmanaged(node.DeclId, bool),
+    d: node.DeclId,
+) !bool {
+    if (known.get(d)) |answer| return answer;
+    const own = builder.typeOfDecl(d) orelse return false;
+    const answer = builder.layoutOf(own).too_wide and builder.layoutOf(try atNoWidth(builder, ast, own, d)).too_wide;
+    try known.put(builder.gpa, d, answer);
+    return answer;
 }
 
 /// Whether a pattern is the catch-all.
@@ -6107,6 +6180,9 @@ const Checker = struct {
     /// a scope that checks speculatively can forget the ones it noted.
     bounds_reported: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
     bounds_reported_order: std.ArrayList(TokenId) = .empty,
+    /// Where each array type is first written, for a report about a type no
+    /// declaration names.
+    written_arrays: WrittenArrays = .empty,
     /// Every written type that named a generic declaration, and where it was
     /// written, so its bounds are asked about once every capability is settled.
     bound_sites: std.ArrayList(BoundSite) = .empty,
@@ -6257,6 +6333,11 @@ const Checker = struct {
     callable_default_sites: []?CallableDefaultSite,
     callable_defaults_checked: []bool,
     callable_defaults_ready: bool = false,
+    /// Whether every constant's written type has been read. Before that a
+    /// name reaching a constant has no type, and the constant is not checked.
+    constants_typed: bool = false,
+    /// The lengths read before then that had no count, in the order read.
+    lengths_waiting: std.ArrayList(WaitingLength) = .empty,
     callable_effects_ready: bool = false,
     /// The constants whose initialisers are being checked, outermost first. A
     /// name reaching one already on this list closes a ring, and the entries
@@ -10256,7 +10337,10 @@ const Checker = struct {
         if (ref.inferred_length != .none) return self.refuseArrayInference(ref, false);
         if (ref.length == ExprId.none) return .poison;
         const length = try self.arrayLength(ref.length) orelse return .poison;
-        return self.builder.arrayOf(element, length);
+        const array = try self.builder.arrayOf(element, length);
+        const written = try self.written_arrays.getOrPut(self.gpa, array);
+        if (!written.found_existing) written.value_ptr.* = self.locOfWritten(ref);
+        return array;
     }
 
     /// What the length written in an array type counts, or null where it was
@@ -10271,13 +10355,64 @@ const Checker = struct {
         // Null until counted, so a length whose own check reads it again
         // reads a refusal rather than counting itself.
         try self.array_lengths.put(self.gpa, length, null);
-        const counted = try self.countLength(length);
+        const counted = try self.countLength(length, false);
         try self.array_lengths.put(self.gpa, length, counted);
         return counted;
     }
 
-    fn countLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+    /// A length with no count, read before the constants were checked, and
+    /// whether reading it then reported anything.
+    const WaitingLength = struct { length: ExprId, reported: bool };
+
+    /// Says what is wrong with each length that had no count when it was read
+    /// before the constants were checked.
+    fn reportWaitingLengths(self: *Checker) std.mem.Allocator.Error!void {
+        const outer_module = self.current;
+        const outer_generic = self.generic;
+        defer {
+            self.current = outer_module;
+            self.generic = outer_generic;
+        }
+        for (self.lengths_waiting.items) |waiting| {
+            self.current = self.res.moduleOfFile(self.ast.fileOfExpr(waiting.length));
+            self.generic = self.expression_owners[waiting.length.index()];
+            _ = try self.countLength(waiting.length, waiting.reported);
+        }
+        self.lengths_waiting.clearRetainingCapacity();
+    }
+
+    fn countLength(self: *Checker, length: ExprId, reported_already: bool) std.mem.Allocator.Error!?u32 {
+        const reported_before = self.sink.error_count;
         const written_as = try self.check(length, null);
+        var named: std.ArrayList(BindingId) = .empty;
+        defer named.deinit(self.gpa);
+        var undeclared = false;
+        try self.constantDependenciesWithin(length, &named, &undeclared);
+
+        // A declared type is read before the constants are typed and
+        // checked, so a length naming one is typed as nothing here. Its count
+        // is already known, since folding needs no type. Where it has none,
+        // what to say waits until the constants are checked.
+        if (!self.constants_typed and named.items.len != 0) {
+            switch (try self.worth(length)) {
+                .integer => |count| if (count >= 0 and count <= std.math.maxInt(u32)) return @intCast(count),
+                else => {},
+            }
+            try self.lengths_waiting.append(self.gpa, .{ .length = length, .reported = self.sink.error_count != reported_before });
+            return null;
+        }
+
+        // A length that has its own report, or that names a constant refused
+        // where it is declared, has no count only because of that report.
+        // Its own report is one made while it was read, here or before it
+        // waited, or the resolver's for a name nothing declares. A length
+        // typed as nothing is not taken as reported: a name read before what
+        // it stands for is typed has no type and no report.
+        if (reported_already or undeclared or self.sink.error_count != reported_before) return null;
+        for (named.items) |constant| {
+            const initializer = self.ast.declInit(self.res.declaredBy(constant));
+            if (initializer != ExprId.none and self.builder.exprType(initializer) == .poison) return null;
+        }
 
         // The routine that folds a constant expression wherever one is read,
         // and not this pass's own table of what it has folded so far: which
@@ -10298,11 +10433,6 @@ const Checker = struct {
                 return null;
             } else v,
             .truth, .string, .aggregate => {
-                // A length typed as an integer whose constant is worth
-                // something else names a constant declared with one type and
-                // initialised with another, which is reported where it is
-                // declared.
-                if (written_as != .poison and written_as.integerInfo() != null) return null;
                 _ = try self.refuseUncountedLength(length);
                 return null;
             },
@@ -16668,6 +16798,10 @@ const Checker = struct {
     /// frame deeper per link bounds a program by what a stack holds.
     fn ensureConstant(self: *Checker, b: BindingId) std.mem.Allocator.Error!void {
         if (self.constant_taken[b.index()]) return;
+        // A constant read before its written type is has nothing to be
+        // checked against. It is checked once that type is read, and what it
+        // is worth is folded without it.
+        if (!self.constants_typed) return;
         if (self.folded.isOpen(self.siteOf(b))) return self.reportRing(b);
 
         const floor = self.constant_ring.items.len;
@@ -16690,8 +16824,8 @@ const Checker = struct {
         var dependencies: std.ArrayList(BindingId) = .empty;
         defer dependencies.deinit(self.gpa);
         const declaration = self.res.declaredBy(b);
-        try self.constantDependenciesWithinRef(self.ast.declReturnRef(declaration), &dependencies);
-        try self.constantDependenciesWithin(self.ast.declInit(declaration), &dependencies);
+        try self.constantDependenciesWithinRef(self.ast.declReturnRef(declaration), &dependencies, null);
+        try self.constantDependenciesWithin(self.ast.declInit(declaration), &dependencies, null);
         const bindings = try dependencies.toOwnedSlice(self.gpa);
         errdefer self.gpa.free(bindings);
         try self.constant_ring.ensureUnusedCapacity(self.gpa, 1);
@@ -16722,56 +16856,67 @@ const Checker = struct {
         return null;
     }
 
-    fn constantDependenciesWithinRef(self: *Checker, ref: node.TypeRef, out: *std.ArrayList(BindingId)) std.mem.Allocator.Error!void {
-        try self.constantDependenciesWithin(ref.length, out);
-        for (self.ast.typeArgs(ref.args)) |arg| try self.constantDependenciesWithinRef(arg, out);
+    fn constantDependenciesWithinRef(self: *Checker, ref: node.TypeRef, out: *std.ArrayList(BindingId), undeclared: ?*bool) std.mem.Allocator.Error!void {
+        try self.constantDependenciesWithin(ref.length, out, undeclared);
+        for (self.ast.typeArgs(ref.args)) |arg| try self.constantDependenciesWithinRef(arg, out, undeclared);
     }
 
-    fn constantDependenciesWithin(self: *Checker, id: ExprId, out: *std.ArrayList(BindingId)) std.mem.Allocator.Error!void {
+    /// Appends to `out` each constant an expression names. Where
+    /// `undeclared` is given, it is set if the expression holds a name that
+    /// reaches no declaration or a part the parser refused, each of which
+    /// was reported where it is written.
+    fn constantDependenciesWithin(self: *Checker, id: ExprId, out: *std.ArrayList(BindingId), undeclared: ?*bool) std.mem.Allocator.Error!void {
         if (id == .none) return;
         const target = self.res.targetOf(id);
         if (target != .none and self.res.kindOf(target) == .constant) try out.append(self.gpa, target);
+        if (undeclared) |found| switch (self.ast.exprTag(id)) {
+            .err => found.* = true,
+            .name_ref => if (target == .none) {
+                found.* = true;
+            },
+            else => {},
+        };
         switch (self.ast.exprTag(id).payload()) {
             .none => {},
-            .unary => try self.constantDependenciesWithin(self.ast.unaryOperand(id), out),
+            .unary => try self.constantDependenciesWithin(self.ast.unaryOperand(id), out, undeclared),
             .binary => {
                 const two = self.ast.binary(id);
-                try self.constantDependenciesWithin(two.lhs, out);
-                try self.constantDependenciesWithin(two.rhs, out);
+                try self.constantDependenciesWithin(two.lhs, out, undeclared);
+                try self.constantDependenciesWithin(two.rhs, out, undeclared);
             },
             .conditional => {
                 const conditional = self.ast.conditional(id);
-                try self.constantDependenciesWithin(conditional.cond, out);
-                try self.constantDependenciesWithin(conditional.then, out);
-                try self.constantDependenciesWithin(conditional.otherwise, out);
+                try self.constantDependenciesWithin(conditional.cond, out, undeclared);
+                try self.constantDependenciesWithin(conditional.then, out, undeclared);
+                try self.constantDependenciesWithin(conditional.otherwise, out, undeclared);
             },
             .range => {
                 const ends = self.ast.rangeEnds(id);
-                try self.constantDependenciesWithin(ends.lhs, out);
-                try self.constantDependenciesWithin(ends.rhs, out);
+                try self.constantDependenciesWithin(ends.lhs, out, undeclared);
+                try self.constantDependenciesWithin(ends.rhs, out, undeclared);
             },
             .call => {
                 const call = self.ast.call(id);
-                try self.constantDependenciesWithin(call.callee, out);
-                for (call.args) |arg| try self.constantDependenciesWithin(arg, out);
+                try self.constantDependenciesWithin(call.callee, out, undeclared);
+                for (call.args) |arg| try self.constantDependenciesWithin(arg, out, undeclared);
             },
             .interpolation => {
-                for (self.ast.interpolation(id).pieces) |piece| try self.constantDependenciesWithin(piece, out);
+                for (self.ast.interpolation(id).pieces) |piece| try self.constantDependenciesWithin(piece, out, undeclared);
             },
             .lambda => {
                 const lambda = self.ast.lambda(id);
-                for (lambda.captures) |capture| try self.constantDependenciesWithin(capture.source, out);
-                for (lambda.params) |param| try self.constantDependenciesWithin(param.default, out);
-                try self.constantDependenciesWithin(lambda.body, out);
+                for (lambda.captures) |capture| try self.constantDependenciesWithin(capture.source, out, undeclared);
+                for (lambda.params) |param| try self.constantDependenciesWithin(param.default, out, undeclared);
+                try self.constantDependenciesWithin(lambda.body, out, undeclared);
             },
             .block => {
                 const body = self.ast.blockOf(id);
                 for (self.ast.blockStmts(body)) |statement| {
                     const held = self.ast.stmtData(statement);
-                    try self.constantDependenciesWithin(held.init, out);
-                    try self.constantDependenciesWithin(held.pattern, out);
+                    try self.constantDependenciesWithin(held.init, out, undeclared);
+                    try self.constantDependenciesWithin(held.pattern, out, undeclared);
                 }
-                try self.constantDependenciesWithin(body.tail, out);
+                try self.constantDependenciesWithin(body.tail, out, undeclared);
             },
         }
     }

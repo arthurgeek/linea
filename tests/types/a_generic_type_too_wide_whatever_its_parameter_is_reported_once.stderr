@@ -1,0 +1,10 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Big` is wider
+ --> tests/types/a_generic_type_too_wide_whatever_its_parameter_is_reported_once.lin:5:8
+  |
+5 | struct Big[T] {
+  |        ^^^ hold fewer parts, or nest them less deeply
+error[L-Size]: a type is at most 4294967295 bytes wide, and `_Vast` is wider
+  --> tests/types/a_generic_type_too_wide_whatever_its_parameter_is_reported_once.lin:11:8
+   |
+11 | struct _Vast[T] {
+   |        ^^^^^ hold fewer parts, or nest them less deeply

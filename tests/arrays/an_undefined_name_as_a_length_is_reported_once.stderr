@@ -1,0 +1,10 @@
+error[N-Undefined]: undefined name `missing`
+ --> tests/arrays/an_undefined_name_as_a_length_is_reported_once.lin:5:20
+  |
+5 |     items: [UInt8; missing],
+  |                    ^^^^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `absent`
+ --> tests/arrays/an_undefined_name_as_a_length_is_reported_once.lin:8:52
+  |
+8 | fn take(_shelf: borrow Shelf, _row: borrow [UInt8; absent]) -> UInt8 {
+  |                                                    ^^^^^^ no binding with this name is in scope

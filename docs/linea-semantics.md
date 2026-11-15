@@ -3842,9 +3842,12 @@ array literal may instead write `[T; _]` to infer the count from that literal: a
 local `let` or `var`, a module constant or an `impl` constant. Grouping
 parentheses around the literal are allowed.
 
-A length naming a constant that was declared with an integer type and
-initialised with a value of another type is not reported: the constant's own
-declaration is ([T-Mismatch]), and the length has no count only because of it.
+A length that reads something already refused is not reported again. A name
+nothing declares is reported as that ([N-Undefined]), and a constant whose
+initialiser was refused is reported where it is declared, once, whichever
+declaration reads it first ([T-Mismatch], [T-Convert], [T-Literal]). A length
+naming either has no count only because of that report, in a binding, a
+parameter, a field, a payload, an alias or a derive's argument.
 
 The element type supplies context to every literal element. For example,
 `let readings: [Float64; _] = [32.0, 104.0]` has type `[Float64; 2]`, and
@@ -4368,11 +4371,19 @@ are diagnosed. The limit
 applies to every reachable type, including instantiations discovered only inside
 generic bodies, so successful checking includes monomorphisation. A type that
 holds one too wide is too wide because that one is, so the report names the type
-at which the width crosses the limit, once, at the declaration it was made from;
-two types that cross on their own are each reported. A type still written with a
-type parameter has no width, so the limit is asked of each type that settles the
-parameter and not of the one that holds it: `struct Row[T] { items: [T; 1073741824] }`
-is accepted, and so is `Row[UInt8]`, which is 2^30 bytes wide.
+at which the width crosses the limit, once; two types that cross on their own
+are each reported. A declared type and an instantiation are reported at the
+declaration; an array type, which no declaration names, is reported at the type
+that first writes it.
+
+A type still written with a type parameter has no width, so the limit is asked
+of each type that settles the parameter and not of the one that holds it:
+`struct Row[T] { items: [T; 1073741824] }` is accepted, and so is `Row[UInt8]`,
+which is 2^30 bytes wide. A generic declaration is too wide whatever its
+parameters are where it crosses the limit with every parameter occupying
+nothing, that is, instantiated at `()`. Such a declaration is reported once,
+where it is declared, whether or not the program applies it, and none of its
+instantiations is reported as well.
 
 **[T-InfiniteLayout]** The graph formed by traversing inline type parts must be
 acyclic. A value that contains itself inline has no finite size. An indirection
