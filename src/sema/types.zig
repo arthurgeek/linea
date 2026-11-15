@@ -2227,11 +2227,14 @@ fn seedsDependencies(pool: anytype, ty: TypeId) bool {
 
 pub fn sameContracts(a: []const CallableContract, b: []const CallableContract) bool {
     if (a.len != b.len) return false;
-    for (a, b) |x, y| {
-        if (x.kind != y.kind or x.borrows_source != y.borrows_source or !sameContractPath(x.source, y.source) or !sameResultSelectors(x.target, y.target)) return false;
-        if ((x.destination == null) != (y.destination == null)) return false;
-        if (x.destination) |destination| if (!sameContractPath(destination, y.destination.?)) return false;
-    }
+    for (a, b) |x, y| if (!sameContract(x, y)) return false;
+    return true;
+}
+
+fn sameContract(x: CallableContract, y: CallableContract) bool {
+    if (x.kind != y.kind or x.borrows_source != y.borrows_source or !sameContractPath(x.source, y.source) or !sameResultSelectors(x.target, y.target)) return false;
+    if ((x.destination == null) != (y.destination == null)) return false;
+    if (x.destination) |destination| if (!sameContractPath(destination, y.destination.?)) return false;
     return true;
 }
 
@@ -3621,16 +3624,31 @@ pub const ImplIndex = struct {
         return h.final();
     }
 
-    /// Whether a row is found by its head type: a nominal or primitive head
-    /// with nothing in it or in its trait arguments left to bind. A callable
-    /// head is left out, since a function value matches one by the contracts
-    /// that stand after substitution and not by identity.
-    fn foundByType(pool: anytype, row: Implementation) bool {
-        if (row.head != .applied and row.head != .whole) return false;
+    /// Whether a head of this kind is found by a receiver's type where the
+    /// head is ground: a nominal or primitive head, and a callable one, since
+    /// a callable type is interned with the contracts that stand for it and
+    /// without its labels, so a function value whose signature a ground head
+    /// writes has that head's type.
+    fn headFoundByType(head: Head) bool {
+        return head == .applied or head == .whole or head == .callable_;
+    }
+
+    /// Whether a row is found by its head type: a head of such a kind with
+    /// nothing in it or in its trait arguments left to bind.
+    fn foundByType(pool: anytype, row: Implementation) !bool {
+        if (!headFoundByType(row.head)) return false;
         if (!row.valid_key or row.ty == .poison or row.parameters != 0) return false;
-        if (!isGround(pool, row.ty)) return false;
-        for (row.args) |arg| if (!isGround(pool, arg)) return false;
+        if (!try groundKnown(pool, row.ty)) return false;
+        for (row.args) |arg| if (!try groundKnown(pool, arg)) return false;
         return true;
+    }
+
+    /// Whether a type is ground, by the answer the checker's pool remembers
+    /// (`Builder.allGround`, which the overlap check asks too) and read off
+    /// a finished pool where there is none to remember it in.
+    fn groundKnown(pool: anytype, t: TypeId) std.mem.Allocator.Error!bool {
+        if (@TypeOf(pool) == *Typing.Builder) return pool.allGround(&.{t});
+        return isGround(pool, t);
     }
 
     /// Files every row under the type that finds it, once the rows' heads and
@@ -3655,7 +3673,7 @@ pub const ImplIndex = struct {
         while (at > 0) {
             at -= 1;
             const row = impls[at];
-            if (foundByType(pool, row)) {
+            if (try foundByType(pool, row)) {
                 try self.ground_by_receiver.note(gpa, receiverKey(row.trait, row.ty), @intCast(at));
                 try self.ground_by_header.note(gpa, headerKey(row.trait, row.ty, row.args), @intCast(at));
                 try self.ground_by_type.note(gpa, @intFromEnum(row.ty), @intCast(at));
@@ -3717,12 +3735,12 @@ pub const ImplIndex = struct {
     /// list is asked for, plus the open rows of its head and of the trait's
     /// parameter heads. Not the applications of its constructor the trait is
     /// implemented for.
-    pub fn candidatesFor(self: *const ImplIndex, impls: []const Implementation, pool: anytype, trait: u32, held: TypeId, args: ?[]const TypeId, defaults: bool) CandidateIterator {
+    pub fn candidatesFor(self: *const ImplIndex, impls: []const Implementation, pool: anytype, trait: u32, held: TypeId, args: ?[]const TypeId, defaults: bool) std.mem.Allocator.Error!CandidateIterator {
         const head = pool.headOf(held);
         var all = self.candidates(impls, trait, head, defaults);
-        if (!self.ground_indexed or (head != .applied and head != .whole) or !isGround(pool, held)) return all;
+        if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(pool, held)) return all;
         const by_header = if (args) |given| for (given) |arg| {
-            if (!isGround(pool, arg)) break false;
+            if (!try groundKnown(pool, arg)) break false;
         } else true else false;
         all.found = .{
             .receiver = held,
@@ -3805,9 +3823,9 @@ pub const ImplIndex = struct {
     /// **Bound:** the rows written for the receiver's own type and the open
     /// rows of its head, not the applications of its constructor that carry
     /// implementations.
-    pub fn rowsUnder(self: *const ImplIndex, impls: []const Implementation, pool: anytype, held: TypeId) RowsUnder {
+    pub fn rowsUnder(self: *const ImplIndex, impls: []const Implementation, pool: anytype, held: TypeId) std.mem.Allocator.Error!RowsUnder {
         const head = pool.headOf(held);
-        if (!self.ground_indexed or (head != .applied and head != .whole) or !isGround(pool, held)) {
+        if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(pool, held)) {
             return .{ .impls = impls, .head = head, .open = self.by_head.walk(key(0, head)) };
         }
         return .{
@@ -3873,7 +3891,7 @@ pub const ImplIndex = struct {
     /// **Bound:** the rows under the receiver's head and the parameter-headed
     /// rows of the one trait.
     pub fn hasOpenReceiver(self: *const ImplIndex, pool: anytype, impls: []const Implementation, trait: u32, held: TypeId, scope: DeclId) !bool {
-        var rows = self.candidatesFor(impls, pool, trait, held, null, false);
+        var rows = try self.candidatesFor(impls, pool, trait, held, null, false);
         while (rows.next()) |at| {
             const row = impls[at];
             if (!receiverDomainAdmits(pool, scope, row, held)) continue;
@@ -4127,8 +4145,8 @@ pub const ImplIndex = struct {
     /// constructor the trait is implemented for -- times the pairs of a trait
     /// and a type the discharge below reaches, which the table it carries
     /// holds to the traits the program declares times the types nested inside
-    /// `held`. A receiver that still holds a parameter, and a callable one,
-    /// walk every row of their head.
+    /// `held`. A receiver that still holds a parameter walks every row of its
+    /// head.
     pub fn any(
         self: *const ImplIndex,
         gpa: std.mem.Allocator,
@@ -4157,7 +4175,7 @@ pub const ImplIndex = struct {
             if (bound.trait == trait) try appendKey(gpa, out, bound.args);
         }
         var open = false;
-        var rows = self.candidatesFor(impls, pool, trait.index(), held, null, true);
+        var rows = try self.candidatesFor(impls, pool, trait.index(), held, null, true);
         while (rows.next()) |at| {
             if (!receiverDomainAdmits(pool, scope, impls[at], held)) continue;
             const args = switch (try pool.receiverImplementation(@enumFromInt(at), held)) {
@@ -4365,41 +4383,41 @@ pub const ImplIndex = struct {
         }.rows;
 
         // Before the rows are filed, every row of the head is a candidate.
-        var unfiled = index.candidatesFor(&implementations, &b, 1, box_u16, null, false);
+        var unfiled = try index.candidatesFor(&implementations, &b, 1, box_u16, null, false);
         try collect(gpa, &seen, &unfiled);
         try testing.expectEqualSlices(u32, &.{ 0, 1 }, seen.items);
 
         try index.indexGround(gpa, &implementations, &b);
 
         // One application's receiver walks no row written for another.
-        var one = index.candidatesFor(&implementations, &b, 1, box_u16, null, false);
+        var one = try index.candidatesFor(&implementations, &b, 1, box_u16, null, false);
         try collect(gpa, &seen, &one);
         try testing.expectEqualSlices(u32, &.{1}, seen.items);
-        var none = index.candidatesFor(&implementations, &b, 1, box_bool, null, false);
+        var none = try index.candidatesFor(&implementations, &b, 1, box_bool, null, false);
         try collect(gpa, &seen, &none);
         try testing.expectEqualSlices(u32, &.{}, seen.items);
 
         // Every argument list written for the type, then the family; or the
         // one list asked for, then the family.
-        var lists = index.candidatesFor(&implementations, &b, 2, box_u8, null, false);
+        var lists = try index.candidatesFor(&implementations, &b, 2, box_u8, null, false);
         try collect(gpa, &seen, &lists);
         try testing.expectEqualSlices(u32, &.{ 2, 3, 4 }, seen.items);
-        var asked = index.candidatesFor(&implementations, &b, 2, box_u8, &.{.u16}, false);
+        var asked = try index.candidatesFor(&implementations, &b, 2, box_u8, &.{.u16}, false);
         try collect(gpa, &seen, &asked);
         try testing.expectEqualSlices(u32, &.{ 3, 4 }, seen.items);
 
         // A receiver holding a parameter is given the whole chain.
-        var open = index.candidatesFor(&implementations, &b, 2, box_t, null, false);
+        var open = try index.candidatesFor(&implementations, &b, 2, box_t, null, false);
         try collect(gpa, &seen, &open);
         try testing.expectEqualSlices(u32, &.{ 2, 3, 4 }, seen.items);
 
         // The rows of every trait under one type: its own, then the family.
         seen.clearRetainingCapacity();
-        var under = index.rowsUnder(&implementations, &b, box_u16);
+        var under = try index.rowsUnder(&implementations, &b, box_u16);
         while (under.next()) |at| try seen.append(gpa, at);
         try testing.expectEqualSlices(u32, &.{ 1, 4 }, seen.items);
         seen.clearRetainingCapacity();
-        var under_open = index.rowsUnder(&implementations, &b, box_t);
+        var under_open = try index.rowsUnder(&implementations, &b, box_t);
         while (under_open.next()) |at| try seen.append(gpa, at);
         try testing.expectEqualSlices(u32, &.{ 0, 1, 2, 3, 4 }, seen.items);
     }
@@ -4543,7 +4561,7 @@ pub const ImplIndex = struct {
         held: TypeId,
     ) std.mem.Allocator.Error!OrdinarySelection {
         var result: OrdinarySelection = .{};
-        var run = self.candidatesFor(impls, pool, trait, held, args, false);
+        var run = try self.candidatesFor(impls, pool, trait, held, args, false);
         while (run.next()) |at| {
             if (!receiverDomainAdmits(pool, decided.scope, impls[at], held)) continue;
             const arguments = if (args) |given| @as(?[]const TypeId, given) else try pool.receiverTraitArguments(@enumFromInt(at), held);
@@ -13910,7 +13928,7 @@ pub const Typing = struct {
         /// under `head` applies to `held`.
         /// Decides whether each row under `held`'s own head applies to it.
         fn prepareRowsUnder(self: *Builder, decided: *ImplIndex.Decided, held: TypeId) !void {
-            var candidates = self.impl_index.rowsUnder(self.implementations, self, held);
+            var candidates = try self.impl_index.rowsUnder(self.implementations, self, held);
             while (candidates.next()) |at| try self.prepareRow(decided, at, held);
         }
 
@@ -14839,14 +14857,16 @@ pub fn unifyWitness(
         for (argsx, argsy) |ex, ey| try worklist.append(gpa, .{ .x = ex, .y = ey });
     }
 
-    var kept_x: std.ArrayList(CallableContract) = .empty;
-    defer kept_x.deinit(gpa);
-    var kept_y: std.ArrayList(CallableContract) = .empty;
-    defer kept_y.deinit(gpa);
+    var standing_x: std.ArrayList(ContractStanding) = .empty;
+    defer standing_x.deinit(gpa);
+    var standing_y: std.ArrayList(ContractStanding) = .empty;
+    defer standing_y.deinit(gpa);
     for (contracts_to_compare.items) |pair| {
-        try contractsStanding(gpa, pool, &subst, pool.get(pair.x).callable, &kept_x);
-        try contractsStanding(gpa, pool, &subst, pool.get(pair.y).callable, &kept_y);
-        if (!sameContracts(kept_x.items, kept_y.items)) return null;
+        const sx = pool.get(pair.x).callable;
+        const sy = pool.get(pair.y).callable;
+        try contractsStanding(gpa, pool, &subst, sx, &standing_x);
+        try contractsStanding(gpa, pool, &subst, sy, &standing_y);
+        if (!try contractsMayAgree(gpa, sx.contracts, standing_x.items, sy.contracts, standing_y.items)) return null;
     }
 
     const out = try gpa.alloc(TypeId, a.len);
@@ -14855,19 +14875,32 @@ pub fn unifyWitness(
     return out;
 }
 
-/// The contracts of `signature` that still name a dependency once `subst`
-/// has settled its parameter and result types, left in `kept`: what a lookup
-/// compares a function value's contracts against after it binds a head's
-/// parameters, so the overlap of two heads is decided as a lookup of either
-/// would be.
+/// Whether a contract a signature writes is part of the callable type once
+/// its parameter and result types are settled.
+const ContractStanding = enum {
+    /// It names a dependency at every type the signature could be settled to.
+    stands,
+    /// It names none at the types the substitution settled.
+    dropped,
+    /// Whether it names one rests on a type the substitution leaves open,
+    /// which may be settled to one that carries a dependency or to a scalar
+    /// that carries none.
+    undecided,
+};
+
+/// How each contract of `signature` stands once `subst` has settled its
+/// parameter and result types, by the rule a lookup drops a contract with
+/// when it has bound a head's parameters (`contractNamesDependency`). A type
+/// the substitution leaves as a parameter or a settled reference is asked both
+/// ways: as the scalar it may become and as a type that may carry.
 fn contractsStanding(
     gpa: std.mem.Allocator,
     pool: *Typing.Builder,
     subst: *const Substitution,
     signature: CallableSignature,
-    kept: *std.ArrayList(CallableContract),
+    standing: *std.ArrayList(ContractStanding),
 ) std.mem.Allocator.Error!void {
-    kept.clearRetainingCapacity();
+    standing.clearRetainingCapacity();
     const params = pool.callableParams(signature);
     const result = resolveBound(subst, signature.result);
     for (signature.contracts) |contract| {
@@ -14875,8 +14908,79 @@ fn contractsStanding(
             .parameter => |index| resolveBound(subst, params[index].ty),
             .capture, .callee => null,
         };
-        if (contractNamesDependency(pool, contract, result, source)) try kept.append(gpa, contract);
+        // With every open type read as one that carries, and then with every
+        // open type read as a scalar.
+        const carrying = contractNamesDependency(pool, contract, result, source);
+        const scalar_result: TypeId = if (leftOpen(pool, result)) .u8 else result;
+        const scalar_source: ?TypeId = if (source) |held| if (leftOpen(pool, held)) TypeId.u8 else held else null;
+        const scalar = contractNamesDependency(pool, contract, scalar_result, scalar_source);
+        try standing.append(gpa, if (carrying and scalar) .stands else if (!carrying and !scalar) .dropped else .undecided);
     }
+}
+
+/// Whether a type is one a later settlement may still replace: a parameter
+/// no binding reached, or a settled reference nothing here can read.
+fn leftOpen(pool: *Typing.Builder, t: TypeId) bool {
+    return pool.standinOf(t) != null or pool.get(t) == .parameter;
+}
+
+/// Whether some settlement of the open types could leave two signatures with
+/// the same contracts: whether the contracts that stand on each side can be
+/// paired in order, each with one the same on the other side that stands or
+/// is undecided, the undecided ones left over being dropped.
+///
+/// A contract whose standing is undecided proves nothing apart, since the
+/// overlap question is whether any instantiation is answered by both. This
+/// reads every undecided contract as free to stand or not on its own, which
+/// admits no pair an exact reading would refuse and may refuse one an exact
+/// reading would admit, where two contracts rest on one open type.
+///
+/// **Bound:** the product of the two lists' lengths.
+fn contractsMayAgree(
+    gpa: std.mem.Allocator,
+    x: []const CallableContract,
+    x_standing: []const ContractStanding,
+    y: []const CallableContract,
+    y_standing: []const ContractStanding,
+) std.mem.Allocator.Error!bool {
+    // `reachable[j]` says whether the first `i` contracts of `x` and the
+    // first `j` of `y` can be made the same list.
+    const reachable = try gpa.alloc(bool, y.len + 1);
+    defer gpa.free(reachable);
+    const previous = try gpa.alloc(bool, y.len + 1);
+    defer gpa.free(previous);
+    for (0..x.len + 1) |i| {
+        @memcpy(previous, reachable);
+        for (0..y.len + 1) |j| {
+            reachable[j] = (i == 0 and j == 0) or
+                // Leave out a contract of `x`, or of `y`, that need not stand.
+                (i > 0 and x_standing[i - 1] != .stands and previous[j]) or
+                (j > 0 and y_standing[j - 1] != .stands and reachable[j - 1]) or
+                // Keep one of each that are the same contract.
+                (i > 0 and j > 0 and x_standing[i - 1] != .dropped and y_standing[j - 1] != .dropped and
+                    sameContract(x[i - 1], y[j - 1]) and previous[j - 1]);
+        }
+    }
+    return reachable[y.len];
+}
+
+test "contracts may agree where what differs need not stand" {
+    const gpa = testing.allocator;
+    const carries: CallableContract = .{ .kind = .carries, .source = .{ .root = .{ .parameter = 0 } } };
+    const other: CallableContract = .{ .kind = .carries, .source = .{ .root = .{ .parameter = 1 } } };
+    // A contract that stands meets nothing on the other side.
+    try testing.expect(!try contractsMayAgree(gpa, &.{carries}, &.{.stands}, &.{}, &.{}));
+    // One that may be dropped does, and so does one already dropped.
+    try testing.expect(try contractsMayAgree(gpa, &.{carries}, &.{.undecided}, &.{}, &.{}));
+    try testing.expect(try contractsMayAgree(gpa, &.{}, &.{}, &.{carries}, &.{.dropped}));
+    // The same contract on both sides agrees however each stands, unless
+    // one is dropped where the other stands.
+    try testing.expect(try contractsMayAgree(gpa, &.{carries}, &.{.stands}, &.{carries}, &.{.undecided}));
+    try testing.expect(!try contractsMayAgree(gpa, &.{carries}, &.{.stands}, &.{carries}, &.{.dropped}));
+    // Two that stand and differ never agree, with or without an undecided
+    // one between them.
+    try testing.expect(!try contractsMayAgree(gpa, &.{carries}, &.{.stands}, &.{other}, &.{.stands}));
+    try testing.expect(try contractsMayAgree(gpa, &.{ carries, other }, &.{ .undecided, .stands }, &.{other}, &.{.stands}));
 }
 
 /// `t`, with every parameter `subst` binds replaced by what it resolved to --

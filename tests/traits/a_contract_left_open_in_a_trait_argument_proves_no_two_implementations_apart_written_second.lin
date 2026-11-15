@@ -1,0 +1,28 @@
+// The same holds of a callable type written as a trait argument: at `UInt8`
+// both implementations answer `Take[fn(a: UInt8) -> Str]` for `Shelf`.
+trait Take[F] {
+    fn take(self: Self, f: F) -> UInt8
+}
+
+struct Shelf {}
+
+impl[U] Take[fn(a: U) -> Str where carries()] for Shelf {
+    fn take(_self: Self, _f: fn(a: U) -> Str where carries()) -> UInt8 {
+        2
+    }
+}
+
+impl[T] Take[fn(a: T) -> Str where carries(a)] for Shelf {
+    fn take(_self: Self, _f: fn(a: T) -> Str where carries(a)) -> UInt8 {
+        1
+    }
+}
+
+fn lit(_a: UInt8) -> Str where carries() {
+    "k"
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf {}
+    shelf.take(lit)
+}

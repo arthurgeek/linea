@@ -13828,7 +13828,7 @@ const Checker = struct {
     /// is. The blanket rows are not sized by `ty`: a program declaring many
     /// blanket implementations pays their number once per such pair.
     fn prepareTraitSettlingResults(self: *Checker, owner: DeclId, ty: TypeId) !void {
-        var own = self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, ty);
+        var own = try self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, ty);
         while (own.next()) |at| try self.prepareSettlingResultsOfRow(owner, ty, at);
         if (self.builder.headOf(ty) == .parameter) return;
         var blanket = self.builder.impl_index.membersOfHead(.parameter);

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Pick` is already implemented for `fn(b: Str, a: Str) -> Str where carries(a)`
+  --> tests/traits/callable_heads/a_repeated_callable_head_is_named_with_its_contract.lin:13:6
+   |
+7  | impl Pick for fn(b: Str, a: Str) -> Str where carries(a) {
+   |      ---- already implemented here
+13 | impl Pick for fn(b: Str, a: Str) -> Str where carries(a) {
+   |      ^^^^ a trait is implemented once for a type

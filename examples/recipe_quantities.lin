@@ -1,7 +1,6 @@
 // Print a recipe's ingredients, each amount in the unit it was measured in.
 // One record, `Quantity`, holds every amount. Its unit is part of its type, so
-// a weight prints as grams or kilograms and a volume as millilitres or litres,
-// and a weight cannot be added to a volume by mistake.
+// a weight prints as grams or kilograms and a volume as millilitres or litres.
 import std.fmt
 import std.io
 import std.testing
@@ -19,23 +18,25 @@ struct Quantity[phantom U] {
 
 // `Quantity[Grams]` and `Quantity[Millilitres]` are two types, so `Display`
 // is implemented for each with a body of its own. A weight of a kilogram or
-// more is written in kilograms. Interpolated text is `Display` too, so
-// `fmt.Display.fmt` writes it to `w`.
+// more is written in kilograms with its grams as three decimals, so 1250 g
+// prints as 1.250 kg and nothing is rounded away: `:03` pads the remainder
+// with zeros. Interpolated text is `Display` too, so `fmt.Display.fmt`
+// writes it to `w`.
 impl fmt.Display for Quantity[Grams] {
     fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
         if self.amount >= 1000 {
-            fmt.Display.fmt("{self.amount / 1000}.{self.amount % 1000 / 100} kg", &w)
+            fmt.Display.fmt("{self.amount / 1000}.{self.amount % 1000:03} kg", &w)
         } else {
             fmt.Display.fmt("{self.amount} g", &w)
         }
     }
 }
 
-// A volume of a litre or more is written in litres.
+// A volume of a litre or more is written in litres, in the same way.
 impl fmt.Display for Quantity[Millilitres] {
     fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
         if self.amount >= 1000 {
-            fmt.Display.fmt("{self.amount / 1000}.{self.amount % 1000 / 100} l", &w)
+            fmt.Display.fmt("{self.amount / 1000}.{self.amount % 1000:03} l", &w)
         } else {
             fmt.Display.fmt("{self.amount} ml", &w)
         }
@@ -57,7 +58,7 @@ test fn each_quantity_prints_in_its_own_unit() {
     write_ingredient(&written, "yeast", yeast).unwrap()
     write_ingredient(&written, "water", water).unwrap()
     let expected =
-        \\flour: 1.2 kg
+        \\flour: 1.250 kg
         \\yeast: 7 g
         \\water: 800 ml
         \\

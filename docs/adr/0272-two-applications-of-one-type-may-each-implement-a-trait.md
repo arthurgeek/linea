@@ -120,10 +120,23 @@ filed and found, and everything else
 closure matches no callable head, and a function value matches a head whose
 signature is exactly its own. A generic callable head overlaps a concrete one
 it could be settled to: `impl[T] Run for fn(x: T) -> T` beside
-`impl Run for fn(x: UInt8) -> UInt8` is `[T-Impl]`. A contract written over an
-implementation's parameter stands only where the parameter settles to a type
-that can carry a dependency, so two contract lists are compared as they stand
-after the substitution, which is how a lookup compares a function value's.
+`impl Run for fn(x: UInt8) -> UInt8` is `[T-Impl]`.
+
+A contract is part of a callable type only where it names a dependency, so one
+written over a type the implementation leaves open, a parameter or a settled
+type's name, stands at some settlements and not at others: `carries(a)` over
+`a: T` stands at `Str` and is no part of the type at `UInt8`. Overlap asks
+whether any settlement is answered by both, so such a contract proves no two
+heads apart. `impl[T] Run for fn(a: T) -> Str where carries(a)` beside
+`impl[U] Run for fn(a: U) -> Str where carries()` is `[T-Impl]`: both are
+`fn(a: UInt8) -> Str` at `UInt8`, where a lookup, which drops the contract once
+it has bound `T`, matches one function against both. Two contract lists keep
+two heads apart only where a contract that stands whatever the open types
+become has no counterpart on the other side that stands or may stand. The
+comparison reads each undecided contract as free to stand or not on its own.
+That admits no pair a lookup could match twice; it may refuse a pair whose
+undecided contracts rest on one open type and could never agree, which is
+the direction a rule that refuses what it cannot rule out errs in.
 
 **`[N-Duplicate]` reports one implementation written twice: the same trait,
 the same head and the same trait arguments as written, up to the names of the
@@ -188,8 +201,10 @@ walked the chain would cost k header matches for each receiver, k² for a
 program that uses each application once. `ImplIndex.candidatesFor` gives a
 ground receiver the rows whose head is its own type, found by hashing the
 trait and the type, and at the requested arguments where those are ground;
-only the rows that declare parameters, and the callable heads of one shape,
-are walked. `ImplIndex.rowsUnder` does the same for a reader that asks for
+only the rows that declare parameters are walked. A callable type is interned
+without its labels and with the contracts that stand for it, so a function
+value whose signature a ground callable head writes has that head's type and
+finds its row the same way. `ImplIndex.rowsUnder` does the same for a reader that asks for
 the rows of every trait under one type's head, which is how a lookup is
 prepared. A receiver that still holds a parameter walks the chain as before:
 no ground row matches it.
@@ -209,7 +224,9 @@ for each of n applications and each handed once to a bound, read n^1.04
 (149 ms, 261 ms and 548 ms at 4000, 8000 and 16000) where a linear doubling
 on the same machine reads n^1.04. "Nested applications each implementing a
 trait", n heads that agree in an outer constructor, read n^0.95 (67 ms,
-129 ms and 247 ms). Before the index and the header hash a debug compiler
+129 ms and 247 ms). "Callable heads of one shape each implementing a trait
+and used once" read n^1.06 (106 ms, 219 ms and 453 ms) where a linear
+doubling read n^1.06. Before the index and the header hash a debug compiler
 took 14.5 s and 4.5 s to check the two shapes at 2000; it takes 2.6 s and
 2.3 s, of which about 2 s is reading the library.
 

@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Run` for `fn(read U, read UInt8) -> Str where carries(#1)`
+  --> tests/traits/callable_heads/a_contract_over_one_of_two_parameters_left_open_proves_no_two_heads_apart_written_first.lin:14:12
+   |
+8  | impl[T] Run for fn(a: T, b: UInt8) -> Str where carries(a) {
+   |         --- the other implementation
+14 | impl[U, V] Run for fn(a: U, b: V) -> Str where carries() {
+   |            ^^^ no instantiation may answer to two implementations of one trait

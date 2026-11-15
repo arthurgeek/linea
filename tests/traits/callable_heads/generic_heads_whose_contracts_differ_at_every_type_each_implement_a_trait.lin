@@ -1,0 +1,35 @@
+// A contract over a parameter the head settles to `Str` stands whatever the
+// implementation's own parameter becomes, so the first head always promises
+// a result that may carry from `a` and the second never does. No function has
+// both types, and each reaches its own implementation.
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl[T] Run for fn(a: Str, b: T) -> Str where carries(a) {
+    fn go(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[U] Run for fn(a: Str, b: U) -> Str where carries() {
+    fn go(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn ask[H: Run](h: H) -> UInt8 {
+    h.go()
+}
+
+fn same(a: Str, _b: UInt8) -> Str where carries(a) {
+    copy(a)
+}
+
+fn fixed(_a: Str, _b: UInt8) -> Str where carries() {
+    "k"
+}
+
+fn main() -> UInt8 {
+    ask(same) * 10 + ask(fixed)
+}

@@ -8453,15 +8453,49 @@ const Resolver = struct {
     }
 
     /// How a report quotes an implementation's head: as it is written, with
-    /// the arguments it applies, since two applications of one constructor
-    /// are two heads. Unit is `()`.
-    fn headText(self: *const Resolver, d: DeclId) []const u8 {
+    /// the arguments it applies and, for a callable head, the contract it
+    /// promises, since both are part of which head it is. Unit is `()`.
+    ///
+    /// The head's own tokens on one line: a comment written inside it is left
+    /// out, and tokens written apart are one space apart except inside a
+    /// bracket and before a comma.
+    fn headText(self: *const Resolver, d: DeclId) ![]const u8 {
         const head = self.ast.declHead(d);
         if (head.kind == .named and head.args.len() == 0) {
             if (self.ast.tokenTag(head.at) == .l_paren) return "()";
             return self.ast.tokenText(head.at);
         }
-        return self.ast.writtenText(head);
+        const file = self.ast.fileOf(head.at);
+        const end = self.ast.writtenWholeSpan(head).end;
+        var out: std.ArrayList(u8) = .empty;
+        var previous: ?TokenId = null;
+        var at = head.at.index();
+        while (at < self.ast.tokenCount()) : (at += 1) {
+            const tok = TokenId.at(at);
+            const tag = self.ast.tokenTag(tok);
+            if (self.ast.fileOf(tok) != file) break;
+            // A callable head runs to the block it opens, past the contract
+            // written after its result; any other ends with its arguments.
+            if (head.kind == .callable) {
+                if (tag == .l_brace or tag == .eof) break;
+            } else if (self.ast.tokenSpan(tok).start >= end) break;
+            if (tag == .comment) continue;
+            if (previous) |before| {
+                const apart = self.ast.tokenSpan(tok).start > self.ast.tokenSpan(before).end;
+                const opened = switch (self.ast.tokenTag(before)) {
+                    .l_bracket, .l_paren => true,
+                    else => false,
+                };
+                const closing = switch (tag) {
+                    .r_bracket, .r_paren, .comma => true,
+                    else => false,
+                };
+                if (apart and !opened and !closing) try out.append(self.sink.arena, ' ');
+            }
+            try out.appendSlice(self.sink.arena, self.ast.tokenText(tok));
+            previous = tok;
+        }
+        return out.items;
     }
 
     /// Records what the prelude publishes, once the library is resolved: the
@@ -8810,7 +8844,7 @@ const Resolver = struct {
                         "`{s}` is already implemented for `{s}`",
                         .{
                             self.ast.tokenText(at),
-                            self.headText(it.decl),
+                            try self.headText(it.decl),
                         },
                     );
                     continue;
@@ -8854,14 +8888,14 @@ const Resolver = struct {
                         "`{s}` is already implemented for `{s}` with the same arguments",
                         .{
                             self.ast.tokenText(at),
-                            self.headText(it.decl),
+                            try self.headText(it.decl),
                         },
                     ) else try std.fmt.allocPrint(
                         self.sink.arena,
                         "`{s}` is already implemented for `{s}`",
                         .{
                             self.ast.tokenText(at),
-                            self.headText(it.decl),
+                            try self.headText(it.decl),
                         },
                     ),
                     .labels = labels,
@@ -10877,8 +10911,15 @@ const Resolver = struct {
         // lists name one implementation is coherence's question.
         var requested_traits: std.AutoHashMapUnmanaged(u64, TokenId) = .empty;
         defer requested_traits.deinit(self.gpa);
-        var requested_applications: std.StringHashMapUnmanaged(TokenId) = .empty;
-        defer requested_applications.deinit(self.gpa);
+        // The requests for one application of a target, under a hash of the
+        // target, the trait and the head as `sameWrittenType` compares it.
+        const ApplicationRequest = struct { derive: DeclId, trait: TokenId, key: u64 };
+        var requested_applications: std.AutoHashMapUnmanaged(u64, std.ArrayList(ApplicationRequest)) = .empty;
+        defer {
+            var lists = requested_applications.valueIterator();
+            while (lists.next()) |list| list.deinit(self.gpa);
+            requested_applications.deinit(self.gpa);
+        }
         var source_alias_skip_path: std.ArrayList(u64) = .empty;
         defer source_alias_skip_path.deinit(self.gpa);
         const next_generated_alias_ordinals = try self.gpa.alloc(u64, self.program.modules.len);
@@ -10984,24 +11025,31 @@ const Resolver = struct {
 
                 // A request is for the target's whole family, or for the one
                 // application a standalone head writes without declaring a
-                // parameter. Two applications are two requests, told apart by
-                // the head as spelled; two spellings of one application are
-                // one implementation and are refused where implementations
-                // are compared.
+                // parameter. Two applications are two requests, and two heads
+                // are one application where they are written as one type,
+                // whatever the spelling, by the comparison every written
+                // type is held to.
                 const request_key = (@as(u64, target.index()) << 32) | trait.index();
                 const application = !attached and self.program.ast.declTypeParams(derive).len == 0 and
                     self.program.ast.declHead(derive).args.len() != 0;
                 const earlier_request: ?TokenId = if (entry.ref.args.len() != 0)
                     null
                 else if (application) found: {
-                    var spelled: std.ArrayList(u8) = .empty;
-                    defer spelled.deinit(self.gpa);
-                    try spelled.appendSlice(self.gpa, std.mem.asBytes(&request_key));
-                    for (self.program.ast.writtenText(self.program.ast.declHead(derive))) |byte| {
-                        if (!std.ascii.isWhitespace(byte)) try spelled.append(self.gpa, byte);
+                    const head = self.program.ast.declHead(derive);
+                    // A length nothing settles leaves the head naming no
+                    // type, which is reported where it is written.
+                    if (!try self.writtenLengthsSettled(&.{&.{head}})) break :found null;
+                    const ctx: Coherence = .{ .res = self };
+                    var h: std.hash.Wyhash = .init(request_key);
+                    var left: usize = hashed_node_budget;
+                    try hashType(&self.program.ast, ctx, &h, head, .{}, &left);
+                    const requests = try requested_applications.getOrPut(self.gpa, h.final());
+                    if (!requests.found_existing) requests.value_ptr.* = .empty;
+                    for (requests.value_ptr.items) |earlier| {
+                        if (earlier.key != request_key) continue;
+                        if (try sameWrittenType(&self.program.ast, ctx, self.program.ast.declHead(earlier.derive), .{}, head, .{})) break :found earlier.trait;
                     }
-                    if (requested_applications.get(spelled.items)) |earlier| break :found earlier;
-                    try requested_applications.put(self.gpa, try self.sink.arena.dupe(u8, spelled.items), entry.ref.name);
+                    try requests.value_ptr.append(self.gpa, .{ .derive = derive, .trait = entry.ref.name, .key = request_key });
                     break :found null;
                 } else found: {
                     const requested = try requested_traits.getOrPut(self.gpa, request_key);

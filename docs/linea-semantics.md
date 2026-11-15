@@ -2949,10 +2949,21 @@ So `fn(input: UInt8) -> UInt8` beside `fn(value: UInt8) -> UInt8` is one
 implementation written twice ([N-Duplicate]), `fn(x: UInt8) -> UInt8` beside
 `fn(x: Bool) -> UInt8` or beside `fn(x: UInt8) -> UInt16` is two, and
 `impl[T] Run for fn(x: T) -> T` beside `impl Run for fn(x: UInt8) -> UInt8`
-overlaps ([T-Impl]). A contract written over one of the implementation's
-parameters stands only where that parameter is settled to a type that can
-carry a dependency, so two heads' contracts are compared as they stand at the
-type both would answer for. A function
+overlaps ([T-Impl]). A contract is part of a callable type only
+where it names a dependency: `carries` drops out where the result is a scalar
+(an integer, a float, `Bool`, `()`, `Never`, or a newtype over one that seeds
+no dependency of its own), and a contract that borrows nothing and whose
+source is a parameter drops out where that parameter is one. So a contract
+written over a type the implementation leaves as a parameter, or as a settled
+type's name, may stand or not, according to what that type is settled to, and
+it proves no two heads apart: `impl[T] Run for fn(a: T) -> Str where
+carries(a)` and `impl[U] Run for fn(a: U) -> Str where carries()` are both
+`fn(a: UInt8) -> Str` at `UInt8` and overlap. Two heads' contracts differ, and
+the heads are disjoint, only where a contract that stands whatever the open
+types become on one side has none the same on the other that stands or may
+stand: `fn(a: Str, b: T) -> Str where carries(a)` and
+`fn(a: Str, b: U) -> Str where carries()` never meet. The same holds of a
+callable type written as a trait argument. A function
 value implements the trait where its signature matches the written head exactly,
 contract included, binding the head's parameters: a function taking `read` where
 the head writes `inout` does not match. A closure never does, because its type
@@ -3115,7 +3126,7 @@ arguments of one, with its parameters read as what the other's head applies in
 the same positions, are the other's, so `impl[T] Show for Holder[T]` and
 `impl[U] Show for Holder[U]` are one implementation. An implementation written
 three times is reported twice, and an implementation reported as a repetition
-is reported as nothing else. Every other pair that could answer for one type
+takes part in no overlap report and no further repetition report. Every other pair that could answer for one type
 overlaps, as described above, and is [T-Impl]: an implementation that declares
 parameters beside one that declares none, and two headers written differently
 that are settled to the same types. Distinct heads and distinct concrete trait
@@ -3240,8 +3251,12 @@ declares no parameter and applies the target to types, `derive Score for
 Mark[UInt8]`, requests it for that application. Each implementation of a trait
 taking no arguments is requested once across attached and standalone requests
 ([T-Derive]); aliases and qualified spellings of the trait do not evade that
-rule, and `derive Score for Mark[UInt8]` beside `derive Score for Mark[UInt16]`
-is two requests. A trait with arguments may be requested once per argument
+rule, and neither does another spelling of the application: two standalone
+heads request one application where they are written as one type, so after
+`derive Score for Mark[UInt8]` each of `derive Score for Mark[ UInt8 ]`,
+`derive Score for Mark[(UInt8)]` and `derive Score for Mark[Byte]`, with `Byte`
+an alias of `UInt8`, is the request repeated. `derive Score for Mark[UInt8]`
+beside `derive Score for Mark[UInt16]` is two requests. A trait with arguments may be requested once per argument
 list. The implementations different requests generate are held to the rules of
 ordinary implementations: two that are one implementation are [N-Duplicate],
 and two that could answer for one type overlap ([T-Impl]), as a request for

@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Take[fn(read U) -> Str where carries(#1)]` for `Shelf`
+  --> tests/traits/a_contract_left_open_in_a_trait_argument_proves_no_two_implementations_apart_written_first.lin:15:9
+   |
+9  | impl[T] Take[fn(a: T) -> Str where carries(a)] for Shelf {
+   |         ---- the other implementation
+15 | impl[U] Take[fn(a: U) -> Str where carries()] for Shelf {
+   |         ^^^^ no instantiation may answer to two implementations of one trait

@@ -1,0 +1,30 @@
+// A report names a repeated head by the type it writes: on one line, without
+// the comment written inside it.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+// linea fmt: off
+impl Weigh for Crate[ // the small crate
+    UInt8
+] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item + 1
+    }
+}
+// linea fmt: on
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    small.weigh()
+}
