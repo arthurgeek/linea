@@ -9140,32 +9140,32 @@ const Resolver = struct {
     /// compares anything, or it decides for itself what two lengths with no
     /// count mean -- and neither answer to that is sound.
     fn lengthsAreSettled(self: *Resolver, it: Implementation) !bool {
+        // What the compiler provides has no header, so there is no written head
+        // to read a length out of. Its head is a primitive or the array
+        // constructor, and neither holds a written argument to carry a length:
+        // nothing to settle is settled, and the row is keyed like any other.
+        const head: []const node.TypeRef = if (it.decl == DeclId.none) &.{} else self.ast.typeArgs(self.ast.declHead(it.decl).args);
+        return self.writtenLengthsSettled(&.{ self.ast.typeArgs(it.args), head });
+    }
+
+    /// Whether every length written in `runs`, and under every alias they
+    /// reach, counts something, folding each into the memo a comparison of
+    /// written types reads. The preparation every such comparison makes first.
+    fn writtenLengthsSettled(self: *Resolver, runs: []const []const node.TypeRef) !bool {
         var walking: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
         defer walking.deinit(self.gpa);
         var finished: std.ArrayList(DeclId) = .empty;
         defer finished.deinit(self.gpa);
-        const settled = try self.implementationLengthsWithin(it, &walking, &finished);
+        var settled = true;
+        for (runs) |run| {
+            if (!try self.lengthsWithin(run, &walking, &finished)) settled = false;
+        }
         // An alias finished inside a walk that failed was read under an
         // answer the failure may have decided, so none of them is kept.
         if (!settled) {
             for (finished.items) |alias| _ = self.settled_aliases.remove(alias);
         }
         return settled;
-    }
-
-    fn implementationLengthsWithin(
-        self: *Resolver,
-        it: Implementation,
-        walking: *std.AutoHashMapUnmanaged(DeclId, void),
-        finished: *std.ArrayList(DeclId),
-    ) !bool {
-        if (!try self.lengthsWithin(self.ast.typeArgs(it.args), walking, finished)) return false;
-        // What the compiler provides has no header, so there is no written head
-        // to read a length out of. Its head is a primitive or the array
-        // constructor, and neither holds a written argument to carry a length:
-        // nothing to settle is settled, and the row is keyed like any other.
-        if (it.decl == DeclId.none) return true;
-        return self.lengthsWithin(self.ast.typeArgs(self.ast.declHead(it.decl).args), walking, finished);
     }
 
     /// The same question of a run of written types and everything under them.
@@ -9188,20 +9188,28 @@ const Resolver = struct {
         walking: *std.AutoHashMapUnmanaged(DeclId, void),
         finished: *std.ArrayList(DeclId),
     ) !bool {
+        // Every length is folded, whatever an earlier one came to: the
+        // comparison that follows reads each of them, and one that counts
+        // nothing says nothing about the rest.
+        var settled = true;
         for (refs) |r| {
             switch (r.kind) {
                 .named, .borrow, .grouped, .tuple => {},
-                .selection => if (!try self.lengthsWithin(&.{self.ast.selectionBase(r)}, walking, finished)) return false,
+                .selection => if (!try self.lengthsWithin(&.{self.ast.selectionBase(r)}, walking, finished)) {
+                    settled = false;
+                },
                 // A count, and not merely a constant expression: a truth value
                 // is one and says nothing about how many elements a type holds,
                 // so an implementation written with one is left unkeyed exactly
                 // as one whose length has no value at all is. The type is
                 // refused where it is written, which is what reports it.
-                .array => if ((try self.foldedLength(r)).number() == null) return false,
+                .array => if ((try self.foldedLength(r)).number() == null) {
+                    settled = false;
+                },
                 .callable => {
                     const callable = self.ast.callableType(r);
                     for (self.ast.params[callable.params.start..callable.params.end]) |param| {
-                        if (!try self.lengthsWithin(&.{param.written}, walking, finished)) return false;
+                        if (!try self.lengthsWithin(&.{param.written}, walking, finished)) settled = false;
                         if (param.default != ExprId.none and
                             (try constfold.foldConstant(
                                 self.gpa,
@@ -9211,26 +9219,27 @@ const Resolver = struct {
                                 param.default,
                             )).checked() == null)
                         {
-                            return false;
+                            settled = false;
                         }
                     }
-                    if (!try self.lengthsWithin(&.{callable.result}, walking, finished)) return false;
+                    if (!try self.lengthsWithin(&.{callable.result}, walking, finished)) settled = false;
                 },
             }
-            if (!try self.lengthsWithin(self.ast.typeArgs(r.args), walking, finished)) return false;
+            if (!try self.lengthsWithin(self.ast.typeArgs(r.args), walking, finished)) settled = false;
             if ((r.kind == .named or r.kind == .selection) and r.name != TokenId.none) {
                 if (self.aliasReached(r.name)) |alias| {
                     if (!self.settled_aliases.contains(alias) and !walking.contains(alias)) {
                         try walking.put(self.gpa, alias, {});
                         defer _ = walking.remove(alias);
-                        if (!try self.lengthsWithin(&.{self.ast.declReturnRef(alias)}, walking, finished)) return false;
-                        try self.settled_aliases.put(self.gpa, alias, {});
-                        try finished.append(self.gpa, alias);
+                        if (try self.lengthsWithin(&.{self.ast.declReturnRef(alias)}, walking, finished)) {
+                            try self.settled_aliases.put(self.gpa, alias, {});
+                            try finished.append(self.gpa, alias);
+                        } else settled = false;
                     }
                 }
             }
         }
-        return true;
+        return settled;
     }
 
     /// What a fold reads about the names written in a constant expression, from
@@ -11604,9 +11613,9 @@ const Resolver = struct {
     }
 
     /// How `selectWrappedVariants` reads written names: coherence's reading,
-    /// with array lengths compared as a bound's constants are. A payload's
-    /// length has not been folded the way an implementation's arguments are,
-    /// so two lengths match when they are spelled alike.
+    /// with array lengths compared as a bound's constants are. The selector
+    /// folds every length it compares first, so two lengths match when they
+    /// count the same.
     const WrapIdentity = struct {
         res: *const Resolver,
 
@@ -11716,11 +11725,21 @@ const Resolver = struct {
                     .family = target,
                     .applied = ast.typeArgs(ast.declHead(derive).args),
                 };
+                // Lengths are folded before any is compared. One that counts
+                // nothing is left as it is spelled and reported where it is
+                // written, so it matches a payload spelled the same and the
+                // derive adds no report of its own.
+                _ = try self.writtenLengthsSettled(&.{
+                    &.{wrapped},
+                    template_reading.applied,
+                    target_reading.applied,
+                });
                 var selected: ?usize = null;
                 var second: ?usize = null;
                 for (variants, 0..) |variant, index| {
                     const fields = ast.variantFields(variant);
                     if (fields.len != 1) continue;
+                    _ = try self.writtenLengthsSettled(&.{&.{fields[0].written}});
                     if (!try sameWrittenType(ast, identity, wrapped, template_reading, fields[0].written, target_reading)) continue;
                     if (selected == null) selected = index else {
                         second = index;
@@ -11796,8 +11815,7 @@ const Resolver = struct {
                     .message = try std.fmt.allocPrint(self.sink.arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
                     .labels = labels,
                     .notes = try self.sink.arena.dupe([]const u8, &.{
-                        try std.fmt.allocPrint(self.sink.arena, "a variant wraps a source when its only field has the source's type{s}; `{s}` has {s}", .{
-                            if (std.mem.indexOfScalar(u8, source_text, ';') != null) " (array lengths match only when spelled alike)" else "",
+                        try std.fmt.allocPrint(self.sink.arena, "a variant wraps a source when its only field has the source's type; `{s}` has {s}", .{
                             target_name,
                             shapes.items,
                         }),

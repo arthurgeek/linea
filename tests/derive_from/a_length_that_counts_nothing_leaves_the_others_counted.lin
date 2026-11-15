@@ -1,0 +1,14 @@
+// [T-ArraySize]. A length that is not a number is reported where it is
+// written, and says nothing about the lengths beside it: `1 + 1` and `2`
+// still count the same, so the derive finds its variant and reports nothing
+// of its own.
+@derive(From[[[UInt8; 1 + 1]; true]])
+enum Outer {
+    Pair([[UInt8; 2]; true]),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _outer = Outer.Unknown
+    0
+}
