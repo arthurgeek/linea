@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Tr` for `W[UInt8]`
+  --> tests/traits/a_family_naming_a_settled_type_written_second_overlaps_the_type_it_settles_to.lin:27:6
+   |
+21 | impl[T] Tr for W[T] {
+   |         -- the other implementation
+27 | impl Tr for W[S.Reading] {
+   |      ^^ no instantiation may answer to two implementations of one trait

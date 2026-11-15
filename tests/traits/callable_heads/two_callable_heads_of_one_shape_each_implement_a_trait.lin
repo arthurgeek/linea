@@ -1,0 +1,38 @@
+// `fn(input: UInt8) -> UInt8` and `fn(input: Bool) -> UInt8` have one shape
+// and are two types, so each may implement `Run`. A function passed where
+// `Run` is required reaches the implementation written for its own type.
+trait Run {
+    fn run(self: Self) -> UInt8
+}
+
+impl Run for fn(input: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(4)
+    }
+}
+
+impl Run for fn(input: Bool) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(true)
+    }
+}
+
+fn twice(input: UInt8) -> UInt8 {
+    input * 2
+}
+
+fn flag(input: Bool) -> UInt8 {
+    if input {
+        3
+    } else {
+        0
+    }
+}
+
+fn go[H: Run](handler: H) -> UInt8 {
+    handler.run()
+}
+
+fn main() -> UInt8 {
+    go(twice) * 10 + go(flag)
+}

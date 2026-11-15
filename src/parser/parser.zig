@@ -1646,25 +1646,7 @@ const Parser = struct {
         // A grouped head names nothing, and was refused where it was written;
         // what it applies is not a further question.
         if (head.kind == .grouped) return false;
-        const declared = self.builder.typeParams(type_params);
-        if (declared.len == 0) return true;
-
-        const applied = self.builder.typeArgs(head.args);
-        var next: usize = 0;
-        var valid = allow_subset or applied.len == declared.len;
-        for (applied) |argument| {
-            if (argument.kind != .named or argument.args.len() != 0 or argument.name == .none) {
-                valid = false;
-                break;
-            }
-            while (next < declared.len and !std.mem.eql(u8, self.cursor.textOf(argument.name), self.cursor.textOf(declared[next].name))) : (next += 1) {}
-            if (next == declared.len) {
-                valid = false;
-                break;
-            }
-            next += 1;
-        }
-        if (valid) return true;
+        if (node.headAppliesItsParameters(&self.cursor, self.builder.typeArgs(head.args), self.builder.typeParams(type_params), allow_subset)) return true;
 
         try self.reportAt(
             code,

@@ -1,0 +1,36 @@
+// `S.Reading` is settled to `UInt8`, so `W[S.Reading]` is `W[UInt8]`, and the
+// two implementations below are both for that one type.
+struct W[T] {
+    item: T,
+}
+
+trait Tr {
+    fn tr(self: Self) -> UInt8
+}
+
+trait Probe {
+    type Reading
+}
+
+struct S {}
+
+impl Probe for S {
+    type Reading = UInt8
+}
+
+impl Tr for W[UInt8] {
+    fn tr(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Tr for W[S.Reading] {
+    fn tr(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let x: W[UInt8] = .{ item = 1 }
+    x.tr()
+}

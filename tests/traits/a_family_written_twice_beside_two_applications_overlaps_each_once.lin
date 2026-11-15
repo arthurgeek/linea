@@ -1,0 +1,39 @@
+// The second `impl[T] Weigh for Crate[T]` repeats the first and is reported
+// as that. The first is also a second answer for `Crate[UInt8]` and for
+// `Crate[UInt16]`, and each of those is reported once.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl[T] Weigh for Crate[T] {
+    fn weigh(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[T] Weigh for Crate[T] {
+    fn weigh(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Weigh for Crate[UInt16] {
+    fn weigh(self: Self) -> UInt8 {
+        UInt8(self.item / 100)
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    small.weigh()
+}

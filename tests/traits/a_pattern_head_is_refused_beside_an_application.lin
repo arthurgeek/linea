@@ -1,7 +1,7 @@
 // An implementation that declares parameters applies its constructor to them
-// and to nothing else, so `Crate[Option[T]]` is not a head. Read as a family
-// all the same, it answers for `Crate[Option[UInt8]]`, which the second
-// implementation is for, and never for `Crate[UInt8]`, which the third is for.
+// and to nothing else, so `Crate[Option[T]]` is not a head. That is the one
+// mistake here: an implementation refused for the form of its head is
+// compared with no other, and the two written for one type each are valid.
 struct Crate[T] {
     item: T,
     count: UInt8,

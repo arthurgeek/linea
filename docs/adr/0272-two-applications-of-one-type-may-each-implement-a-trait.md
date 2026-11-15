@@ -5,12 +5,12 @@ Status: Accepted — 2026-11-15; supersedes the constructor coherence key of
 "Coherence keys on the head's constructor: one implementation per (trait
 declaration, trait arguments, head constructor)" and the consequence "One
 member of a family cannot be special-cased" as far as it speaks of two settled
-heads, and the comparison with "two tuple heads of one arity" in the
-Duplicates clause of
-[0213](0213-a-trait-may-be-implemented-for-a-callable-type.md). Extends
+heads, and the Duplicates clause of
+[0213](0213-a-trait-may-be-implemented-for-a-callable-type.md), "Two
+implementations of one trait at one shape and one argument list are
+[N-Duplicate], whatever types their signatures write". Extends
 [0093](0093-two-implementations-that-could-answer-once-are-refused.md), whose
-overlap rule becomes the only rule deciding whether two different
-implementations may coexist.
+overlap rule decides whether two implementations may coexist.
 
 ## Context
 
@@ -43,6 +43,12 @@ of the other. The refusal protected nothing, and it had a cost: a program that
 wanted the two bodies wrapped one application in a new type to give it a head
 of its own. Rust accepts the equivalent program.
 
+[0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) carried the
+same key to callable heads, by shape: `impl Run for fn(x: UInt8) -> UInt8`
+beside `impl Run for fn(x: Bool) -> UInt8` was `[N-Duplicate]`, though no
+function has both types. A derive carried it too, in a key of its own: a type
+could request a trait once, whichever application the request named.
+
 When 0081 was written the constructor key was the only coherence check there
 was. [0093](0093-two-implementations-that-could-answer-once-are-refused.md)
 has since added the check the key was standing in for: two implementations
@@ -53,12 +59,9 @@ the programs above.
 What the compiler relied on was traced before the key was changed:
 
 - **Lookup never took the first row of a chain.** An implementation is filed
-  under (trait, head constructor) in `ImplIndex`, and every lookup walks that
-  chain and matches each row's whole header against the receiver and the
-  trait arguments (`matchHeader`, through `bindKey`) before it answers. A
-  chain already held several rows wherever one type implements a trait at
-  several argument lists, so a row for another application is one more row
-  that does not match.
+  under (trait, head constructor) in `ImplIndex`, and every lookup matched
+  each row's whole header against the receiver and the trait arguments
+  (`matchHeader`, through `bindKey`) before it answered.
 - **Prepared answers are keyed by the receiver type**, not by its
   constructor: `(trait, arguments, receiver)` for a selection and
   `(implementation, receiver)` for the arguments a receiver settles.
@@ -73,86 +76,142 @@ What the compiler relied on was traced before the key was changed:
 - **The language server reads the checker's selections and the list of
   members supplying a signature**, and keeps no index of its own.
 
-Only two places assumed the key: the resolver's `sameImplementation`, which
-reported the duplicate, and the checker's overlap pass, which unified every
-pair of one chain whose ground argument lists are equal on the premise that
-such a pair is at most one mistake.
+Four places assumed the key. The resolver's `sameImplementation` reported the
+duplicate. The checker's overlap pass unified every pair of one chain whose
+ground argument lists are equal, on the premise that such a pair is at most
+one mistake. A lookup walked every row of the receiver's constructor, which
+the key held to one row for each argument list. And the unifier compared two
+callable types' contracts as written, which was enough only while a generic
+callable head beside a concrete one was refused before it was asked.
 
 ## Decision
 
-**Whether two different implementations of one trait may coexist is decided
-by one rule: they may unless they overlap, as
+**Two implementations of one trait may coexist unless they overlap, as
 [0093](0093-two-implementations-that-could-answer-once-are-refused.md) defines
-it.** Two implementations whose heads apply one constructor to different types
-do not unify, so `impl Weigh for Crate[UInt8]` beside
-`impl Weigh for Crate[UInt16]` is accepted, with any number of further
-applications, nested ones (`Crate[Option[UInt8]]` beside
-`Crate[Option[UInt16]]`) and tuples of one arity included. Each call, bound
-and settled reference reaches the implementation whose head is the type it
-asks about, and a type no implementation's head matches does not implement the
-trait (`[T-Bound]`).
+it: unless a substitution for both declarations' parameters makes their heads
+one type and their trait arguments the same types.** The types compared are
+the ones the headers are settled to, so a declared type's name stands for what
+it is settled to: with `S.Reading` settled to `UInt8`, `Crate[S.Reading]` is
+`Crate[UInt8]`. This is the rule for every ordinary implementation and every
+kind of head. Default implementations keep the fallback tier of
+[0139](0139-default-implementations-follow-ordinary-selection.md), and where an
+implementation may be written at all is still [M-Impl]'s question.
+
+Two heads that are settled to different types do not unify, so
+`impl Weigh for Crate[UInt8]` beside `impl Weigh for Crate[UInt16]` is
+accepted, with any number of further applications, nested ones
+(`Crate[Option[UInt8]]` beside `Crate[Option[UInt16]]`), tuples of one arity,
+and callable types of one shape. Each call, bound and settled reference
+reaches the implementation whose head is the type it asks about, and a type
+no implementation's head matches does not implement the trait (`[T-Bound]`).
+
+**A callable head follows the same rule.** `impl Run for fn(x: UInt8) -> UInt8`
+beside `impl Run for fn(x: Bool) -> UInt8` is accepted, and a function passed
+where `Run` is required reaches the implementation written for its own type.
+Two written callable types are one type where they agree in what the
+semantics makes a callable type's identity: the invocation, each parameter's
+convention, type and default, the result, and the contract. A parameter's
+label is no part of it. So two heads that differ only in a label are one head;
+two that differ in a convention, in the result or in a contract are two. The
+shape, a head's invocation and conventions, remains how a callable head is
+filed and found, and everything else
+[0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) and
+[0271](0271-a-callable-head-of-any-length-has-a-shape.md) decided stands: a
+closure matches no callable head, and a function value matches a head whose
+signature is exactly its own. A generic callable head overlaps a concrete one
+it could be settled to: `impl[T] Run for fn(x: T) -> T` beside
+`impl Run for fn(x: UInt8) -> UInt8` is `[T-Impl]`. A contract written over an
+implementation's parameter stands only where the parameter settles to a type
+that can carry a dependency, so two contract lists are compared as they stand
+after the substitution, which is how a lookup compares a function value's.
 
 **`[N-Duplicate]` reports one implementation written twice: the same trait,
-the same head and the same trait arguments, up to the names of the parameters
-each declares.** Two implementations declaring no parameters are the same
-where their heads name one type and their arguments name the same types, read
-as coherence reads every written type: through aliases, qualified names and
-folded lengths. Two families are the same where one's head and arguments, with
-its parameters read as what the other's head applies in the same positions,
-are the other's. The report names the head as written, `Crate[UInt8]`, since
-the constructor alone no longer says which implementation is repeated.
+the same head and the same trait arguments as written, up to the names of the
+parameters each declares.** Two implementations declaring no parameters are
+the same where their heads and their arguments are written as the same types,
+read through aliases, qualified names, a tuple's long form and folded lengths.
+Two families are the same where one's head and arguments, with its parameters
+read as what the other's head applies in the same positions, are the other's.
+The report stands at the one written second and names its head as written,
+`Crate[UInt8]`.
+
+**Which comparison decides what.** Whether two implementations may coexist is
+decided by the overlap rule, which unifies the settled types, with the two
+exclusions [0148](0148-parameter-heads-match-complete-trait-keys.md) and
+[0192](0192-iterator-operations-belong-to-every-sequence.md) record for a head
+that is a bare parameter. The written comparison is no part of that decision.
+It decides only which report a refused pair earns: a pair it
+calls the same is reported as a repetition, and that implementation takes part
+in no overlap report. A repetition the written comparison cannot see, because
+a name stands for a type settled later, is still refused, as the overlap it
+also is: `impl Weigh for Crate[S.Reading]` beside `impl Weigh for Crate[UInt8]`
+is `[T-Impl]`. The written comparison never admits a pair.
 
 **A family and an implementation declaring no parameters are never a
-duplicate; they overlap.** `impl[T] Weigh for Crate[T]` beside
+repetition; they overlap.** `impl[T] Weigh for Crate[T]` beside
 `impl Weigh for Crate[UInt8]` is `[T-Impl]`, "these two both answer `Weigh`
-for `Crate[UInt8]`", in either order, where it was `[N-Duplicate]`. The
-program is refused as before; the report now names the type both answer for.
+for `Crate[UInt8]`", in either order, where it was `[N-Duplicate]`.
+
+**A derive is a request for an implementation, and is one request for each
+implementation it asks for.** A derive attached to a declaration, and a
+standalone one whose head applies the target to its own parameters, request
+the family. A standalone derive that declares no parameter and applies the
+target to types requests that one application, so `derive Score for
+Mark[UInt8]` beside `derive Score for Mark[UInt16]` is two requests. The same
+request written twice is `[T-Derive]`, as before; the implementations two
+different requests generate are held to the two rules above like any others.
 
 **What stays refused.**
 
-- The same head twice, with the same trait arguments: `[N-Duplicate]`.
-- A family written twice, however its parameters are spelled:
-  `[N-Duplicate]`.
-- A family beside any application of its constructor, and two families that
+- The same header twice: `[N-Duplicate]`, or `[T-Derive]` for a derive
+  requested twice.
+- A family beside any type it could be settled to, and two families that
   unify: `[T-Impl]`. A family's bounds still do not make two headers disjoint.
 - A head that declares parameters and is not its constructor applied to them,
   each once and in order: `[T-Impl]`, 0081's head rule, which this record does
-  not touch. `impl[T] Count for Crate[Option[T]]` is still not a head.
+  not touch. `impl[T] Count for Crate[Option[T]]` is still not a head. An
+  implementation refused for the form of its head is compared with no other.
 - Specialisation. Nothing ranks two implementations; there is no pair left to
   rank, because every pair that could answer for one type is refused.
-
-**A callable head keeps its shape key.**
-[0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) decided that a
-trait takes one implementation per callable shape, whatever types the
-signature writes, and that decision stands. Its Duplicates clause compares
-this to "two tuple heads of one arity"; a tuple is an application of a
-declared type and follows this record, so that comparison no longer holds and
-0213 is marked.
 
 ## Consequences
 
 **A wrapper type is no longer needed to give a second application its own
 implementation.** `std`, the examples and the guide held no such wrapper when
-this was decided, so nothing was migrated.
+this was decided, so nothing was migrated; `examples/recipe_quantities.lin`
+shows the form.
 
-**The implementation index is unchanged.** Rows are still chained by (trait,
-head constructor); overlap is still checked within a chain, and lookup still
-walks one chain. A chain grows by one row for each application a trait is
-implemented for, and a lookup pays one header match per row of the receiver's
-chain, as it already did for a type implementing a trait at several argument
-lists.
+**A receiver finds the implementation written for its type by that type.**
+Rows are still chained by (trait, head constructor), and a trait implemented
+for k applications of one constructor puts k rows on one chain. A lookup that
+walked the chain would cost k header matches for each receiver, k² for a
+program that uses each application once. `ImplIndex.candidatesFor` gives a
+ground receiver the rows whose head is its own type, found by hashing the
+trait and the type, and at the requested arguments where those are ground;
+only the rows that declare parameters, and the callable heads of one shape,
+are walked. `ImplIndex.rowsUnder` does the same for a reader that asks for
+the rows of every trait under one type's head, which is how a lookup is
+prepared. A receiver that still holds a parameter walks the chain as before:
+no ground row matches it.
 
-**Declaration-time cost stays linear in the applications.** The resolver
-files each implementation by the root of one written position, chosen per
-chain among the trait arguments and now the head's arguments too, so two
-applications that differ at that position are never compared. Applications
-that agree at the chosen position and differ beneath it,
-`Crate[Option[UInt8]]` beside `Crate[Option[UInt16]]`, are compared pairwise;
-that bound is quadratic in the implementations of one trait for one
-constructor whose chosen argument shares a root, as it already was for trait
-arguments. The checker hashes a ground head together with a ground argument
-list, since two ground headers unify only where they are one header, so k
-applications cost k lookups and no unification.
+**Declaration-time cost is linear in the implementations that declare no
+parameters.** The resolver finds one by a hash of its whole written header, so
+it is compared only with the earlier ones written alike. The checker hashes a
+ground head with a ground argument list, since two ground headers unify only
+where they are one header. Implementations that declare parameters are still
+compared with the others of their trait and head constructor whose trait
+argument at one chosen position has the same root: quadratic in the families
+of one trait for one constructor that agree there.
+
+**Measured.** `zig build sweep -Drelease` holds both shapes as dimensions.
+"Applications each implementing a trait and used once", one implementation
+for each of n applications and each handed once to a bound, read n^1.04
+(149 ms, 261 ms and 548 ms at 4000, 8000 and 16000) where a linear doubling
+on the same machine reads n^1.04. "Nested applications each implementing a
+trait", n heads that agree in an outer constructor, read n^0.95 (67 ms,
+129 ms and 247 ms). Before the index and the header hash a debug compiler
+took 14.5 s and 4.5 s to check the two shapes at 2000; it takes 2.6 s and
+2.3 s, of which about 2 s is reading the library.
 
 **Symbols and dumps are unchanged.** No existing `.mono`, `.exit` or `.out`
 golden moved.
@@ -162,21 +221,20 @@ read what the checker selected.
 
 **Reports changed.** A repeated implementation is named by its written head
 (`Holder[T]`, `(UInt8, Bool)`) where it was named by its constructor
-(`Holder`, `Tuple2`), and the label "a trait is implemented once for all
-tuples of one arity" is gone with the rule it stated. A family beside one of
-its applications is reported as the overlap it is.
+(`Holder`, `Tuple2`), and the labels "a trait is implemented once for all
+tuples of one arity" and "once for each callable shape" are gone with the
+rules they stated. A family beside one of its applications is reported as the
+overlap it is. An overlap between two headers of one file is reported at the
+one written later, which for a derive is where its request is written and not
+where the implementation it generates is declared. An implementation written three
+times is reported twice, each time against the first, and not as an overlap as
+well.
 
-**A derive follows the same two rules.** A derive attached to a generic type
-is a family, so a handwritten implementation for one application of that type
-overlaps it (`[T-Impl]`, where it was `[N-Duplicate]`); a derive naming one
-application, `derive Score for Mark[UInt8]`, stands beside a handwritten
-implementation for `Mark[UInt16]`.
-
-**A head refused for its form is compared as it is written.** Two heads that
-break 0081's head rule, `Pair[T, UInt8]` beside `Pair[T, T]`, were reported
-as one implementation written twice because they share a constructor. They are
-now compared like any two headers, and reported as an overlap where they
-unify, beside the `[T-Impl]` each earns for its form.
+**A head refused for its form earns one report.** Two heads that break 0081's
+head rule, `Pair[T, UInt8]` beside `Pair[T, T]`, were reported as one
+implementation written twice because they share a constructor. Such a head is
+now compared with nothing: which types it would answer for is a question the
+refusal leaves unasked.
 
 **0083's remark that an array cannot head an implementation is untouched.** An
 array type is still not written after `for`.
@@ -191,12 +249,20 @@ one implementation while unification, asked about the same pair, says they
 never meet.
 
 **Admit distinct applied heads only where both are fully settled, by a rule
-of their own.** A third rule beside the duplicate and the overlap: "two heads
+of their own.** A third rule beside the repetition and the overlap: "two heads
 declaring no parameters may differ". It gives the same answers as this record
 for every program, since two settled headers unify exactly where they are
 equal, and it lost for that reason: it would be a special case of the overlap
 rule written a second time, and the next reader would have to prove the two
 agree.
+
+**Decide coexistence by the written comparison.** The resolver already
+compares two written headers, and admitting whatever it calls different needs
+no unifier. It lost because a written type is not always the type: a declared
+type's name is settled after the headers are read, so two headers written
+differently can be one type, and admitting them would give that type two
+implementations, with the one a call reaches decided by which was written
+first.
 
 **Specialisation: let `impl Weigh for Crate[UInt8]` override
 `impl[T] Weigh for Crate[T]`.** It is what a reader may expect once two
@@ -206,8 +272,16 @@ every call agrees on which implementation it reached, and a declared type read
 through `Self.Item` would have two candidates. This record admits only pairs
 that no type can reach together, so it needs neither.
 
-**Extend the rule to callable heads now.** Uniform, and the lookup already
-matches a function value against the written signature. It lost here because
-0213 decided the opposite for a stated reason, a library treating parameter
-types differently writes one implementation with a type parameter and a bound,
-and nothing this record was asked to settle depends on reversing that.
+**Leave callable heads on the shape key.** 0213's reason was that a library
+treating parameter types differently writes one implementation with a type
+parameter and a bound. That still works and is still the way to answer for
+every function of a shape. It lost as a restriction because it is the same
+refusal this record removes for named types, with the same absence of a type
+that has two answers, and because one rule for every head is what lets a
+reader predict a refusal from the two headers alone.
+
+**Walk the chain at lookup and accept the cost.** The mechanism predates this
+record: a type implementing one trait at k argument lists already paid k per
+lookup. It lost because this record makes the ordinary shape reach it, one
+implementation for each application of a container, and a question asked once
+per receiver is an index.

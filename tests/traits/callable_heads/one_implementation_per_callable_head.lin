@@ -1,0 +1,21 @@
+// A trait is implemented once for a callable type. Two implementations
+// whose heads write the same signature are one implementation written twice.
+trait Run {
+    fn run(self: Self) -> UInt8
+}
+
+impl Run for fn(input: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(4)
+    }
+}
+
+impl Run for fn(input: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(5)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

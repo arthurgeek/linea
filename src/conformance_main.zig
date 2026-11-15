@@ -2509,6 +2509,58 @@ fn implModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One trait implemented for `n` applications of one generic type, and each
+/// application handed once to a bound the trait answers.
+///
+/// Every implementation shares a constructor, so all of them sit on one chain
+/// of the implementation index. A lookup that walked the chain would match
+/// each of the `n` receivers against each of the `n` heads; a receiver finds
+/// the row written for its own type by that type instead.
+fn applicationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.print("pub struct W[T] {{\n    item: T,\n}}\n\n", .{});
+    try w.print("pub trait Tr {{\n    fn of(x: Self) -> UInt8\n}}\n\n", .{});
+    try w.print("fn ask[T: Tr](x: T) -> UInt8 {{\n    Tr.of(x)\n}}\n\n", .{});
+    for (0..n) |i| {
+        try w.print("pub struct S{d} {{}}\n\n", .{i});
+        try w.print("impl Tr for W[S{d}] {{\n    fn of(_x: Self) -> UInt8 {{\n        1\n    }}\n}}\n\n", .{i});
+    }
+    try w.print("fn main() -> UInt8 {{\n    var total: UInt8 = 0\n", .{});
+    for (0..n) |i| {
+        try w.print("    let x{d}: W[S{d}] = .{{ item = S{d} {{}} }}\n    total = ask(x{d})\n", .{ i, i, i, i });
+    }
+    try w.print("    total\n}}\n", .{});
+    return out.toOwnedSlice();
+}
+
+/// One trait implemented for `n` applications of one generic type that agree
+/// in their outer argument's constructor, `W[N[S0]]`, `W[N[S1]]`, and no
+/// call.
+///
+/// Whether an implementation is one written twice is asked of each as it is
+/// declared. Filed by the constructor of one argument, these all meet and
+/// are compared pairwise; an implementation that declares no parameters is
+/// found by a hash of its whole header instead, so none is compared with
+/// another.
+fn nestedApplicationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.print("pub struct W[T] {{\n    item: T,\n}}\n\n", .{});
+    try w.print("pub struct N[T] {{\n    item: T,\n}}\n\n", .{});
+    try w.print("pub trait Tr {{\n    fn of(x: Self) -> UInt8\n}}\n\n", .{});
+    for (0..n) |i| {
+        try w.print("pub struct S{d} {{}}\n\n", .{i});
+        try w.print("impl Tr for W[N[S{d}]] {{\n    fn of(_x: Self) -> UInt8 {{\n        1\n    }}\n}}\n\n", .{i});
+    }
+    try w.print("fn main() -> UInt8 {{\n    0\n}}\n", .{});
+    return out.toOwnedSlice();
+}
+
 /// One trait implemented for four callable shapes, and `n` functions of those
 /// shapes each handed to a bound the trait answers.
 ///
@@ -7026,6 +7078,8 @@ test "a median taken over too few dimensions speaks for too little" {
 const sweep_dimensions = [_]Dimension{
     .{ .name = "functions", .n = 8000, .cost = throughTheTree(wideModule) },
     .{ .name = "implementations", .n = 6000, .cost = throughTheTree(implModule) },
+    .{ .name = "applications each implementing a trait and used once", .n = 4000, .cost = throughTheTree(applicationsModule) },
+    .{ .name = "nested applications each implementing a trait", .n = 4000, .cost = throughTheTree(nestedApplicationsModule) },
     .{ .name = "postfix calls across types", .n = 4000, .cost = throughTheTree(distinctPostfixCallsModule) },
     .{ .name = "postfix calls sharing a name", .n = 4000, .cost = throughTheTree(sharedPostfixCallsModule) },
     .{ .name = "failed postfix calls across traits", .n = 2000, .cost = throughTreeBatch(failedPostfixCallsModule, .{ .refused = .t_unknown_operation }, 1) },

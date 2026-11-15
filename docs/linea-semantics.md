@@ -2938,12 +2938,21 @@ declaring module, so the implementation belongs in the trait's module
 ([M-Impl]); an inherent implementation for a callable type is a parse error. The
 head is written exactly as a callable type is, with its own parameter
 conventions, result and contract, and the implementation's parameters are
-recovered from it as from any other head. Coherence keys a callable head by its
-**shape**: the invocation and each parameter's convention, in order. Two
-implementations of one trait at one shape and one argument list are
-[N-Duplicate], whatever types the signatures write, which refuses
-`fn(x: UInt64)` beside `fn(x: UInt8)`; implementations at different shapes never
-meet, and a head of any number of parameters has a shape of its own. A function
+recovered from it as from any other head. A callable head is filed and found by
+its **shape**: the invocation and each parameter's convention, in order.
+Implementations at different shapes never meet, and a head of any number of
+parameters has a shape of its own. Two heads of one shape are held to the rules
+every head is held to. They are one head where they are one callable type: the
+same invocation, the same convention, type and default at each parameter, the
+same result and the same contract; a parameter's label is no part of the type.
+So `fn(input: UInt8) -> UInt8` beside `fn(value: UInt8) -> UInt8` is one
+implementation written twice ([N-Duplicate]), `fn(x: UInt8) -> UInt8` beside
+`fn(x: Bool) -> UInt8` or beside `fn(x: UInt8) -> UInt16` is two, and
+`impl[T] Run for fn(x: T) -> T` beside `impl Run for fn(x: UInt8) -> UInt8`
+overlaps ([T-Impl]). A contract written over one of the implementation's
+parameters stands only where that parameter is settled to a type that can
+carry a dependency, so two heads' contracts are compared as they stand at the
+type both would answer for. A function
 value implements the trait where its signature matches the written head exactly,
 contract included, binding the head's parameters: a function taking `read` where
 the head writes `inout` does not match. A closure never does, because its type
@@ -2958,14 +2967,21 @@ settled to `UInt8`, `impl Weighs[Probe.Reading] for Scale` overlaps
 `impl Weighs[UInt8] for Scale` and `impl[T] Weighs[UInt8] for T` alike.
 Overlap is checked at declaration time and rejected
 ([T-Impl]) without ranking either declaration by specificity among ordinary
-implementations, and it is the one rule that decides whether two different
-implementations may coexist. Two heads that apply one constructor to different
-types have no such substitution, so `impl Weigh for Crate[UInt8]` and
+implementations. Two ordinary implementations of one trait that do not overlap
+may both be written, whatever their heads have in common. Two heads that
+declare no parameters and are settled to different types have no such
+substitution, so `impl Weigh for Crate[UInt8]` and
 `impl Weigh for Crate[UInt16]` are both valid, as are
 `Crate[Option[UInt8]]` beside `Crate[Option[UInt16]]` and `(UInt8, Bool)`
-beside `(UInt8, UInt16)`; a family and one application of its constructor
-overlap, so `impl[T] Weigh for Crate[T]` beside `impl Weigh for Crate[UInt8]`
-is refused in either order, naming `Crate[UInt8]` as the type both answer for
+beside `(UInt8, UInt16)`. What is compared is the type each head is settled
+to and not its spelling: with `S.Reading` settled to `UInt8`,
+`impl Weigh for Crate[S.Reading]` beside `impl Weigh for Crate[UInt8]` is one
+type given two implementations and is refused. A family and a type it could be
+settled to overlap, so `impl[T] Weigh for Crate[T]` beside
+`impl Weigh for Crate[UInt8]` is refused in either order, naming `Crate[UInt8]`
+as the type both answer for. Where both are written in one file the report stands at the
+later of the two; a derive is written where its request is. An
+implementation whose head is refused for its form is compared with no other
 ([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
 An explicitly marked default
 occupies a separate fallback tier, described below. For example,
@@ -3086,35 +3102,37 @@ Capability bounds are compared by the strongest requirement the complete list
 demands ([T-Bound]); Copyable includes Discardable.
 
 At most one ordinary implementation may answer a given trait declaration, trait
-argument list and receiver type. Writing the same implementation twice is
-[N-Duplicate], reported at the second and naming the head as written: the same
-trait, the same head and the same trait arguments, up to the names of the
-parameters each declares. Two implementations that declare no parameters are
-the same where their heads name one type and their trait arguments name the
-same types, however each is spelled: through an alias, a qualified name, a
-tuple's long form or a length that folds to the same value. Two that declare
-parameters are the same where the head and the arguments of one, with its
-parameters read as what the other's head applies in the same positions, are
-the other's, so `impl[T] Show for Holder[T]` and `impl[U] Show for Holder[U]`
-are one implementation. An implementation that declares parameters and one
-that declares none are never the same implementation; where a type exists that
-both answer for they overlap, as described above. Distinct heads and distinct
-concrete trait arguments describe distinct relationships, so
-`Weigh for Crate[UInt8]` may coexist with `Weigh for Crate[UInt16]`, and
-`TryFrom[Int64] for UInt8` with `TryFrom[UInt8] for UInt8`. A callable head is
-the exception stated above: its shape is its head. Compiler-provided
-implementations also count when detecting duplicates.
+argument list and receiver type: a program in which two could is refused where
+the second is declared, by one of two reports. Writing the same implementation
+twice is [N-Duplicate], reported at the second and naming its head as written:
+the same trait, the same head and the same trait arguments as written, up to
+the names of the parameters each declares. Two implementations that declare no
+parameters are the same where their heads and their trait arguments are written
+as the same types, however each is spelled: through an alias, a qualified name,
+a tuple's long form, a callable type's labels or a length that folds to the
+same value. Two that declare parameters are the same where the head and the
+arguments of one, with its parameters read as what the other's head applies in
+the same positions, are the other's, so `impl[T] Show for Holder[T]` and
+`impl[U] Show for Holder[U]` are one implementation. An implementation written
+three times is reported twice, and an implementation reported as a repetition
+is reported as nothing else. Every other pair that could answer for one type
+overlaps, as described above, and is [T-Impl]: an implementation that declares
+parameters beside one that declares none, and two headers written differently
+that are settled to the same types. Distinct heads and distinct concrete trait
+arguments describe distinct relationships, so `Weigh for Crate[UInt8]` may
+coexist with `Weigh for Crate[UInt16]`, and `TryFrom[Int64] for UInt8` with
+`TryFrom[UInt8] for UInt8`. Compiler-provided implementations also count when
+detecting repetitions.
 
 A generic implementation describes a family of its instantiations; its own
 bounds determine which family members it supports, but do not distinguish
 overlapping implementations or choose between them. A type that no
 implementation's head matches does not implement the trait: with `Weigh`
 implemented for `Crate[UInt8]` and `Crate[UInt16]` only, requiring it of
-`Crate[Bool]` is [T-Bound]. For any concrete trait arguments and receiver
-there is at most one ordinary implementation; a default is considered only
-under the separate fallback rules above. Specialisation among ordinary
-implementations is forbidden: `impl Weigh for Crate[UInt8]` cannot stand
-beside `impl[T] Weigh for Crate[T]` to answer in its place
+`Crate[Bool]` is [T-Bound]. A default is considered only under the separate
+fallback rules above. Specialisation among ordinary implementations is
+forbidden: `impl Weigh for Crate[UInt8]` cannot stand beside
+`impl[T] Weigh for Crate[T]` to answer in its place
 ([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
 
 Trait identity is declaration identity. Two modules may each declare `Measure`;
@@ -3215,11 +3233,19 @@ and trailing `where` predicates, and may name one trait or a parenthesised group
 of traits. An attached request uses the following type's parameter list and
 written constraints, and adds the field requirements described below. Each
 trait entry independently names a trait, its ordinary type arguments and its
-structural template. A type requests each resolved trait taking no arguments
-once across attached and standalone requests; aliases and qualified spellings do
-not evade that rule. A trait with arguments may be requested once per argument
-list, and two requests naming one implementation are refused as coherent
-implementations are.
+structural template. A request is for one implementation. An attached request, and a
+standalone one whose head applies the target to its own parameters, request the
+implementation for every application of the type; a standalone request that
+declares no parameter and applies the target to types, `derive Score for
+Mark[UInt8]`, requests it for that application. Each implementation of a trait
+taking no arguments is requested once across attached and standalone requests
+([T-Derive]); aliases and qualified spellings of the trait do not evade that
+rule, and `derive Score for Mark[UInt8]` beside `derive Score for Mark[UInt16]`
+is two requests. A trait with arguments may be requested once per argument
+list. The implementations different requests generate are held to the rules of
+ordinary implementations: two that are one implementation are [N-Duplicate],
+and two that could answer for one type overlap ([T-Impl]), as a request for
+every application does with a request, or a written implementation, for one.
 
 `@derive(From[S])` on an enum requests the implementation `From[S]` for it that
 wraps the source in the one variant whose only field has type `S`

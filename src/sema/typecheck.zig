@@ -1473,6 +1473,12 @@ fn typecheckInternal(
     const z_parts = tracy.beginZone(@src(), "tc.parts");
     try c.settleDeclaredAnswers();
     try c.settleDeferredHeads(implementations);
+    // Every head and trait argument is read now, before any body asks which
+    // implementation answers for a type, so the rows a type finds by its own
+    // identity are filed under it.
+    try c.impl_index.indexGround(gpa, implementations, &c.builder);
+    c.builder.impl_index = c.impl_index;
+    c.builder.invalidateImplementationLookup();
     // An implementation whose head or trait arguments named a settled type
     // had nothing to compare while that type was unanswered, so the overlap
     // check passed over it. It is read now, and is held to the same rule.
@@ -13822,22 +13828,27 @@ const Checker = struct {
     /// is. The blanket rows are not sized by `ty`: a program declaring many
     /// blanket implementations pays their number once per such pair.
     fn prepareTraitSettlingResults(self: *Checker, owner: DeclId, ty: TypeId) !void {
-        const head = self.builder.headOf(ty);
-        const heads = [_]types_mod.Head{ head, .parameter };
-        const count: usize = if (head == .parameter) 1 else 2;
-        for (heads[0..count]) |under| {
-            var rows = self.builder.impl_index.membersOfHead(under);
-            while (rows.next()) |at| {
-                const row = self.builder.implementations[at];
-                if (!row.ofATrait() or !row.valid_key or !row.head.same(under)) continue;
-                var signatures = self.res.signatures.of(self.ast, DeclId.at(row.trait));
-                while (signatures.next()) |sig| {
-                    const params = self.ast.declParams(sig);
-                    if (params.len == 0 or params[0].convention != .sink) continue;
-                    if (declaresOwnBounds(self.constraints, sig)) continue;
-                    try self.builder.prepareTraitSettlingResult(owner, ty, @enumFromInt(at), sig);
-                }
-            }
+        var own = self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, ty);
+        while (own.next()) |at| try self.prepareSettlingResultsOfRow(owner, ty, at);
+        if (self.builder.headOf(ty) == .parameter) return;
+        var blanket = self.builder.impl_index.membersOfHead(.parameter);
+        while (blanket.next()) |at| {
+            if (!self.builder.implementations[at].head.same(.parameter)) continue;
+            try self.prepareSettlingResultsOfRow(owner, ty, at);
+        }
+    }
+
+    /// One row's share of `prepareTraitSettlingResults`: each signature of
+    /// its trait that takes its receiver by `sink`.
+    fn prepareSettlingResultsOfRow(self: *Checker, owner: DeclId, ty: TypeId, at: u32) !void {
+        const row = self.builder.implementations[at];
+        if (!row.ofATrait() or !row.valid_key) return;
+        var signatures = self.res.signatures.of(self.ast, DeclId.at(row.trait));
+        while (signatures.next()) |sig| {
+            const params = self.ast.declParams(sig);
+            if (params.len == 0 or params[0].convention != .sink) continue;
+            if (declaresOwnBounds(self.constraints, sig)) continue;
+            try self.builder.prepareTraitSettlingResult(owner, ty, @enumFromInt(at), sig);
         }
     }
 
@@ -32670,8 +32681,9 @@ const Checker = struct {
     /// the standard library's, the program's implementation carries it.
     ///
     /// `first` and `second` are positions in a list held in declaration order,
-    /// so the report lands where a programmer added the collision, which is
-    /// where `[N-Duplicate]` lands for the same reason.
+    /// and the report lands on whichever header is written later in the
+    /// source, which is where a programmer added the collision and where
+    /// `[N-Duplicate]` lands for the same reason.
     fn refuseIfOverlapping(
         self: *Checker,
         implementations: []const types_mod.Implementation,
@@ -32682,11 +32694,11 @@ const Checker = struct {
         const a = implementations[first];
         const b = implementations[second];
 
-        // Two implementations written identically overlap for a reason the
-        // resolver has already stated about that very pair. One mistake gets
-        // one diagnostic, and the one that names the repetition is the more
-        // useful of the two.
-        if (self.res.reportedDuplicate(a.decl, b.decl)) return;
+        // An implementation written a second time overlaps the one it
+        // repeats and whatever that one overlaps, for a reason the resolver
+        // has already stated about it. One mistake gets one diagnostic, and
+        // the one that names the repetition is the more useful of the two.
+        if (self.res.repeatsAnImplementation(a.decl) or self.res.repeatsAnImplementation(b.decl)) return;
 
         // An implementation resolution refused is reported as refused, and
         // overlapping another is the same mistake said a second time. It keeps
@@ -32726,8 +32738,17 @@ const Checker = struct {
         const a_is_library = self.declaredInLibrary(a.decl);
         const b_is_library = self.declaredInLibrary(b.decl);
         const user_first = b_is_library and !a_is_library;
-        const first_decl = if (user_first) b.decl else a.decl;
-        const second_decl = if (user_first) a.decl else b.decl;
+        // Otherwise the one written later in the source carries it. A derive
+        // is written where its request is, though the implementation it
+        // generates is declared after everything the file wrote, so the two
+        // are ordered by where each header's trait is written and not by
+        // their place in the list.
+        const a_at = self.writtenPlace(self.ast.declTrait(a.decl));
+        const b_at = self.writtenPlace(self.ast.declTrait(b.decl));
+        const written_backwards = a_at.file == b_at.file and a_at.span.start > b_at.span.start;
+        const b_first = user_first or (a_is_library == b_is_library and written_backwards);
+        const first_decl = if (b_first) b.decl else a.decl;
+        const second_decl = if (b_first) a.decl else b.decl;
 
         // The library implements `Into` for every `From`, so a direct `Into`
         // implementation collides with that bridge whatever its types are.
@@ -32768,6 +32789,16 @@ const Checker = struct {
         });
         try self.overlapping.put(gpa, a.decl, {});
         try self.overlapping.put(gpa, b.decl, {});
+    }
+
+    /// Where a token was written in the source: its own place, or for a token
+    /// of a generated file the place of the request it was generated from.
+    fn writtenPlace(self: *const Checker, at: TokenId) Loc {
+        const file = self.ast.fileOf(at);
+        const span = self.ast.tokenSpan(at);
+        const origin = self.program.generatedOriginAt(file, span) orelse return .{ .file = file, .span = span };
+        if (origin.derive_trait == .none) return .{ .file = file, .span = span };
+        return .{ .file = self.ast.fileOf(origin.derive_trait), .span = self.ast.tokenSpan(origin.derive_trait) };
     }
 
     fn declaredInLibrary(self: *const Checker, d: node.DeclId) bool {
@@ -38633,6 +38664,29 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         \\impl Route[UInt8] for Pair[Bool, UInt16] {}
         \\impl Route[UInt8] for Pair[Bool, UInt8] {}
         , .duplicates = 1 },
+        // Two callable heads of one shape are two headers where they are two
+        // types, one where only a label differs, and a generic one meets the
+        // concrete one it could be settled to.
+        .{ .declarations =
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt8 {}
+        \\impl Route[UInt8] for fn(x: Bool) -> UInt8 {}
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt16 {}
+        },
+        .{ .declarations =
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt8 {}
+        \\impl Route[UInt8] for fn(y: UInt8) -> UInt8 {}
+        , .duplicates = 1 },
+        .{ .declarations =
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt8 {}
+        \\impl[T] Route[UInt8] for fn(x: T) -> T {}
+        , .overlaps = 1 },
+        // An implementation written three times is two repetitions and no
+        // overlap.
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        , .duplicates = 2 },
         // A family with a ground argument list meets every application
         // sharing the list, and no application at another list.
         .{ .declarations =

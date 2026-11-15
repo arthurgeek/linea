@@ -841,11 +841,16 @@ decides applicability. `any` and `find` are the two answers of one ladder,
 Coherence files a constructor-headed implementation under (trait, constructor)
 and a callable head under (trait, shape), where the shape is the invocation
 convention and each parameter's convention; implementations filed apart cannot
-unify. Within one (trait, constructor) the resolver's `sameImplementation`
-reports the same header written twice, comparing the written heads and trait
-arguments, and the checker's `refuseOverlappingImplementations` refuses two
-headers that unify, so two applications of one constructor are two
-implementations. Parameter heads
+unify. Within one of those the resolver's `sameImplementation` reports the same
+header written twice, comparing the written heads and trait arguments, and
+finds an implementation that declares no parameters by a hash of its whole
+header. The checker's `refuseOverlappingImplementations` refuses two headers
+whose settled types unify, and it alone decides whether two implementations
+may coexist, so two applications of one constructor are two implementations.
+A lookup asks `ImplIndex.candidatesFor`, and a reader of every trait's rows
+under one head asks `ImplIndex.rowsUnder`; both give a ground receiver the
+rows whose head is its own type by hashing that type, and walk only the rows
+that declare parameters. Parameter heads
 are compared with the same trait's other parameter heads and with its ordinary
 implementations in every constructor chain, and never against other traits; open predicates do not establish disjointness. Unification
 uses an occurs check, so an equation that would make a type contain itself has

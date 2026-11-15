@@ -129,3 +129,5 @@ temporaries/a_place_lent_inout_keeps_what_the_call_changed.lin
 # Two applications of one type implementing one trait: declaration reversal must reach the same bodies.
 traits/two_applications_of_one_type_each_implement_a_trait.lin
 traits/each_application_settles_its_own_declared_type.lin
+# Two callable heads of one shape: declaration reversal must reach the same bodies.
+traits/callable_heads/two_callable_heads_of_one_shape_each_implement_a_trait.lin

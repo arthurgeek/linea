@@ -389,9 +389,25 @@ shipping: 2500 cents
 ```
 
 Each call runs the implementation written for the type of its receiver:
-`flour` is a `Crate[UInt64]` and `sealed` is a `Crate[Bool]`. A crate of
-anything else has no `grams`, and `shipping` refuses it. Rust accepts the same
-pair, `impl Weighed for Crate<u64>` beside `impl Weighed for Crate<bool>`.
+`flour` is a `Crate[UInt64]` and `sealed` is a `Crate[Bool]`. Rust accepts the
+same pair, `impl Weighed for Crate<u64>` beside `impl Weighed for Crate<bool>`.
+
+A crate of anything else is a third type, and nothing implements `Weighed`
+for it. Passing a `Crate[UInt8]` to `shipping` is refused, naming the type:
+
+<!-- guide: edit 40 io.println("shipping: {shipping(flour) + shipping(sealed)} cents")? -->
+```linea
+    let labelled: Crate[UInt8] = .{ item = 3 }
+    io.println("shipping: {shipping(labelled)} cents")?
+```
+
+```
+error[T-Bound]: `T` requires `Weighed`, and `Crate[UInt8]` does not implement it
+  --> crates.lin:41:28
+   |
+41 |     io.println("shipping: {shipping(labelled)} cents")?
+   |                            ^^^^^^^^ implement it for that type, or drop the bound
+```
 
 What a trait cannot have is two implementations for the same type. Writing
 the second one again is refused, and the report names the type:

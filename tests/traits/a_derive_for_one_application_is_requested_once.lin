@@ -1,0 +1,24 @@
+// A type derives a trait once. Two derives for `Mark[UInt8]` request the
+// same implementation twice.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+struct Mark[T] {
+    value: T,
+}
+
+derive Score for Mark[UInt8]
+
+derive Score for Mark[UInt8]
+
+fn main() -> UInt8 {
+    let byte: Mark[UInt8] = .{ value = 3 }
+    byte.score()
+}

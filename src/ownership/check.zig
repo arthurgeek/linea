@@ -1481,11 +1481,10 @@ const Checker = struct {
     fn settlingElsewhere(self: *const Checker, t: TypeId) std.mem.Allocator.Error!?Applicable {
         if (self.current_owner == .none) return null;
         const module = self.program.moduleOf(self.current_owner);
-        const head = self.typing.headOf(t);
-        var rows = self.typing.impl_index.membersOfHead(head);
+        var rows = self.typing.impl_index.rowsUnder(self.typing.implementations, self.typing, t);
         while (rows.next()) |at| {
             const row = self.typing.implementations[at];
-            if (!row.ofATrait() or !row.valid_key or !row.head.same(head)) continue;
+            if (!row.ofATrait() or !row.valid_key) continue;
             const trait: node.DeclId = @enumFromInt(row.trait);
             if (self.res.seesTrait(module, trait)) continue;
             var signatures = self.res.signatures.of(self.ast, trait);

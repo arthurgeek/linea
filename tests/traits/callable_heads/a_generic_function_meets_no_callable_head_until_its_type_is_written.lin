@@ -1,0 +1,30 @@
+// A generic function has no type until its parameters are settled, and a
+// bound settles none of them. `low` could be either function type `Run` is
+// implemented for, so the call says which it means or is refused.
+trait Run {
+    fn run(self: Self) -> UInt8
+}
+
+impl Run for fn(input: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(4)
+    }
+}
+
+impl Run for fn(input: UInt16) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(304)
+    }
+}
+
+fn low[T: Integer](input: T) -> UInt8 {
+    UInt8(input % 10)
+}
+
+fn go[H: Run](handler: H) -> UInt8 {
+    handler.run()
+}
+
+fn main() -> UInt8 {
+    go(low)
+}
