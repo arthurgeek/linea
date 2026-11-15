@@ -795,6 +795,7 @@ fn typecheckInternal(
     defer c.alias_shapes.deinit(gpa);
     defer c.aliases_reading.deinit(gpa);
     defer c.aliases_uncounted.deinit(gpa);
+    defer c.aliases_unsettled.deinit(gpa);
     defer c.defaults_reading.deinit(gpa);
     defer c.carried_omissions.deinit(gpa);
     defer c.impls_publishing.deinit(gpa);
@@ -6108,6 +6109,11 @@ const Checker = struct {
     /// under it are counted by the one walk that counts links, and every
     /// alias is read there before the settling ends.
     aliases_uncounted: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases whose kept type was read with a selection passed over,
+    /// so what they name is known only once declared answers are settled.
+    /// Whatever takes the kept type of one has passed over that selection
+    /// too, and is read again as if it had written the selection itself.
+    aliases_unsettled: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
@@ -10927,11 +10933,13 @@ const Checker = struct {
         const counted = self.settling == null or !self.aliases_uncounted.contains(alias);
         if (counted) if (self.settledAlias(alias)) |held| {
             if (self.settling) |settling| settling.note(.{ .alias = alias });
+            if (self.aliases_unsettled.contains(alias)) self.skipped_selection = true;
             return held;
         };
         const kept = if (self.callable_effects_ready) &self.alias_types else &self.alias_shapes;
         if (counted) if (kept.get(alias)) |held| {
             if (self.settling) |settling| settling.note(.{ .alias = alias });
+            if (self.aliases_unsettled.contains(alias)) self.skipped_selection = true;
             return held;
         };
         if (self.aliases_reading.get(alias)) |began_at| {
@@ -11000,7 +11008,18 @@ const Checker = struct {
             try self.aliasRead(alias);
             return .poison;
         }
+        // Whether this reading passed over a selection is the alias's own
+        // answer, kept with its type, and whoever is reading the alias has
+        // passed over it as well.
+        const passed_over_before = self.skipped_selection;
+        self.skipped_selection = false;
         const named = try self.typeOfRefOf(self.program.moduleOf(alias), alias, written);
+        if (self.skipped_selection) {
+            try self.aliases_unsettled.put(self.gpa, alias, {});
+        } else {
+            _ = self.aliases_unsettled.remove(alias);
+        }
+        self.skipped_selection = self.skipped_selection or passed_over_before;
         try kept.put(self.gpa, alias, named);
         try self.aliasRead(alias);
         return named;
