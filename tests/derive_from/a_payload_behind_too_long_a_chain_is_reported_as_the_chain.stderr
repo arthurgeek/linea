@@ -1,0 +1,5 @@
+error[T-AnswerDepth]: `Deep` starts a chain of declared answers longer than 1000 links
+    --> tests/derive_from/a_payload_behind_too_long_a_chain_is_reported_as_the_chain.lin:1008:6
+     |
+1008 | enum Deep {
+     |      ^^^^ write a type directly in one of the declarations along the chain

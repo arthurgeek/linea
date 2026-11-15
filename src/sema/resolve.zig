@@ -57,6 +57,7 @@ const SameCasePlan = reflection.SameCasePlan;
 const ReflectionMemberPlan = reflection.ReflectionMemberPlan;
 const ParameterPlan = reflection.ParameterPlan;
 const TypeId = @import("types.zig").TypeId;
+const max_answer_links = @import("types.zig").max_answer_links;
 const IntegerEndpoint = @import("types.zig").IntegerEndpoint;
 
 pub const IntegerSelection = struct { receiver: BindingId, endpoint: IntegerEndpoint };
@@ -3158,6 +3159,11 @@ pub const Reading = struct {
     family: DeclId = DeclId.none,
     applied: []const node.TypeRef = &.{},
     outer: ?*const Reading = null,
+    /// How many readings are around this one.
+    depth: u32 = 0,
+
+    /// How many readings `expands` looks back through one by one.
+    const frames_read = 64;
 
     /// The reading a text substituted for one of this one's parameters has.
     fn after(self: Reading) Reading {
@@ -3166,12 +3172,22 @@ pub const Reading = struct {
 
     /// Whether `alias` is being expanded by this reading or one around it,
     /// which is how an alias that names itself is told from one used twice.
-    fn expands(self: *const Reading, alias: DeclId) bool {
+    ///
+    /// **Bound:** `frames_read` readings. A ring of that many aliases or
+    /// fewer is found among them. A longer one is found by depth: aliases
+    /// that name no ring are expanded at most once each on the way down, so
+    /// a reading deeper than `declared`, the declarations the program holds,
+    /// is inside one. Reading back the whole chain at every level made a
+    /// chain of n aliases cost n squared.
+    fn expands(self: *const Reading, alias: DeclId, declared: usize) bool {
         var at: ?*const Reading = self;
+        var read: usize = 0;
         while (at) |reading| : (at = reading.outer) {
             if (reading.family == alias) return true;
+            read += 1;
+            if (read == frames_read) break;
         }
-        return false;
+        return self.depth > declared;
     }
 };
 
@@ -3213,14 +3229,14 @@ fn aliasUsed(ast: *const Ast, ctx: anytype, read: *const Reading, x: node.TypeRe
         .alias => |d| d,
         .nothing, .type_ => return null,
     };
-    if (ast.declTag(alias) != .alias or read.expands(alias)) return null;
+    if (ast.declTag(alias) != .alias or read.expands(alias, ast.declCount())) return null;
     return alias;
 }
 
 /// What an alias's use reads as: the type it names, with its parameters
 /// standing for the arguments written at the use.
 fn throughAlias(ast: *const Ast, alias: DeclId, use: node.TypeRef, outer: *const Reading) Reading {
-    return .{ .family = alias, .applied = ast.typeArgs(use.args), .outer = outer };
+    return .{ .family = alias, .applied = ast.typeArgs(use.args), .outer = outer, .depth = outer.depth + 1 };
 }
 
 /// Whether two written type-argument lists name the same types.
@@ -4079,6 +4095,7 @@ fn resolveInternal(
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
+    defer r.aliases_settle.deinit(gpa);
     defer r.length_reports.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
@@ -6450,6 +6467,9 @@ const Resolver = struct {
     /// walk reads each alias's text once however many uses and implementations
     /// reach it, and its size is the aliases the program declares.
     settled_aliases: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases `writtenSettled` has found to name a type whose every name
+    /// settled, and those it is in the middle of walking.
+    aliases_settle: std.AutoHashMapUnmanaged(DeclId, AliasWalk) = .empty,
     /// Every binding the program declares, in declaration order. Append-only:
     /// a `BindingId` indexes it, and every later pass keys side tables by one.
     bindings: std.ArrayList(Binding) = .empty,
@@ -11605,31 +11625,59 @@ const Resolver = struct {
         }
     };
 
+    /// What `writtenLinks` knows of an alias: that it is being walked, or how
+    /// many aliases the type it names passes through, itself included.
+    const AliasWalk = union(enum) { walking, settled: u32 };
+
     /// Whether every name a written type reaches settled: a name nothing
     /// declares, an alias whose own type fails, and an alias that reaches itself
-    /// have each been reported where they are written.
+    /// have each been reported where they are written. A chain of aliases of
+    /// any length settles when it ends at a type.
+    fn writtenSettled(self: *Resolver, ref: node.TypeRef) std.mem.Allocator.Error!bool {
+        return try self.writtenLinks(ref) != null;
+    }
+
+    /// How many aliases the longest chain under a written type passes
+    /// through, or null where a name it reaches did not settle.
     ///
-    /// **Bound:** the written type's own nodes, and each alias it names once
-    /// per level up to `alias_depth`.
-    fn writtenSettled(self: *const Resolver, ref: node.TypeRef, depth: u32) bool {
-        const alias_depth = 32;
-        if (depth > alias_depth) return false;
+    /// **Bound:** the written type's own nodes, and each alias's named type
+    /// once: an alias found to settle is kept in `aliases_settle`, so one
+    /// named twice by each of those above it is still walked once, and an
+    /// alias being walked is marked there too, so one that reaches itself is
+    /// found by a lookup and not by reading back the chain that led to it.
+    fn writtenLinks(self: *Resolver, ref: node.TypeRef) std.mem.Allocator.Error!?u32 {
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
+        var links: u32 = 0;
         switch (x.kind) {
             .named => if (x.name != TokenId.none) {
                 const binding = self.writtenBinding(x.name);
-                if (binding == BindingId.none) return false;
+                if (binding == BindingId.none) return null;
                 const held = self.bindings.items[binding.index()];
-                if (held.kind == .type_alias and !self.writtenSettled(ast.declReturnRef(held.decl), depth + 1)) return false;
+                if (held.kind == .type_alias) {
+                    const walk = try self.aliases_settle.getOrPut(self.gpa, held.decl);
+                    if (walk.found_existing) switch (walk.value_ptr.*) {
+                        // Still being walked: the alias reaches itself.
+                        .walking => return null,
+                        .settled => |below| links = below,
+                    } else {
+                        walk.value_ptr.* = .walking;
+                        const below = try self.writtenLinks(ast.declReturnRef(held.decl)) orelse {
+                            _ = self.aliases_settle.remove(held.decl);
+                            return null;
+                        };
+                        links = below + 1;
+                        self.aliases_settle.getPtr(held.decl).?.* = .{ .settled = links };
+                    }
+                }
             },
-            .selection => if (!self.writtenSettled(ast.selectionBase(x), depth)) return false,
+            .selection => links = try self.writtenLinks(ast.selectionBase(x)) orelse return null,
             .callable, .array, .tuple, .borrow, .grouped => {},
         }
         for (ast.typeArgs(x.args)) |argument| {
-            if (!self.writtenSettled(argument, depth)) return false;
+            links = @max(links, try self.writtenLinks(argument) orelse return null);
         }
-        return true;
+        return links;
     }
 
     /// Selects the variant each `reflect.wrap` of a template's members
@@ -11687,10 +11735,15 @@ const Resolver = struct {
                 // A source or a payload that failed to resolve has its own
                 // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                for (written_arguments) |argument| settled = settled and self.writtenSettled(argument, 0);
+                for (written_arguments) |argument| settled = settled and try self.writtenSettled(argument);
                 for (variants) |variant| {
                     const fields = ast.variantFields(variant);
-                    if (fields.len == 1) settled = settled and self.writtenSettled(fields[0].written, 0);
+                    if (fields.len != 1) continue;
+                    // A payload named through more aliases than a chain may
+                    // pass through is refused where the enum is declared
+                    // ([T-AnswerDepth]), and has no type to compare.
+                    const links = try self.writtenLinks(fields[0].written);
+                    settled = settled and links != null and links.? <= max_answer_links;
                 }
                 if (!settled) return false;
                 const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else wrapped);
