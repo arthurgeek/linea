@@ -4599,7 +4599,11 @@ The rule has four parts, each a refusal at the declaration:
 A trait implementation's head and a derive's head name every parameter of their
 type: the head key is the constructor applied to its own parameters, and an
 omitted argument is no parameter. `impl[T] Trait for Vec[T]` is [T-Bound], and a
-derive head that omits one is refused as an unsupported derive ([T-Derive]). An
+derive head that omits one is refused as an unsupported derive ([T-Derive]). A
+bare name omits every argument, so it is refused the same way where every
+parameter has a default: with `struct Crate[T = UInt8]`, `impl Weighed for Crate`
+is [T-Bound], and `impl Weighed for Crate[UInt8]` is the implementation for a
+crate of the default. An
 inherent implementation's head may omit them, so `impl[T] Vec[T]` declares
 members of the system form.
 

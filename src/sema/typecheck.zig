@@ -32067,16 +32067,22 @@ const Checker = struct {
     /// written type given the wrong number of arguments gets, because that is
     /// what a head is.
     ///
-    /// A head applying none is a name and not an application: it stands for the
-    /// declaration itself, which is what an inherent implementation on a generic
-    /// type is written as.
+    /// A head applying none is a name. An inherent implementation on a generic
+    /// type is written with one, and a name whose type has a parameter without
+    /// a default is refused where the written type is read. What is left for
+    /// this to refuse is a trait implementation's head naming a type whose
+    /// every parameter has a default: read as a written type it is the type
+    /// with its defaults, but a trait implementation's head fills none, so it
+    /// names no member of the family and would answer for nothing.
     fn checkHeadArity(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
         const written = self.ast.declHead(d).args.len();
-        if (written == 0) return;
+        const inherent = self.ast.declTrait(d) == TokenId.none;
+        if (written == 0 and inherent) return;
 
         const tok = self.ast.declName(d);
         const m = self.program.moduleOf(d);
         if (m == .none) return;
+        if (written == 0 and self.requiredParamCountOf(m, d, tok) != 0) return;
 
         // A head naming nothing is already reported as the undefined name it
         // is, and how many arguments a name that reaches no declaration takes
@@ -32090,7 +32096,7 @@ const Checker = struct {
         // head writes, so a head may omit the trailing arguments a default
         // fills. A trait implementation's head is the constructor applied to
         // each of its parameters, because the head key is the constructor.
-        const required = if (self.ast.declTrait(d) == TokenId.none)
+        const required = if (inherent)
             self.requiredParamCountOf(m, d, tok)
         else
             wanted;
