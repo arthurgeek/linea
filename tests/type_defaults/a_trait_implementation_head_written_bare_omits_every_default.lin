@@ -1,0 +1,22 @@
+// [T-Bound]. A trait implementation's head names every parameter of its type,
+// and a bare `Crate` names none: the default of `T` is not filled in a trait
+// implementation's head. `impl Weighed for Crate[UInt8]` is the
+// implementation for a crate of the default.
+struct Crate[T = UInt8] {
+    item: T,
+}
+
+trait Weighed {
+    fn weight(self: Self) -> UInt8
+}
+
+impl Weighed for Crate {
+    fn weight(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+fn main() -> UInt8 {
+    let crate: Crate = .{ item = 4 }
+    crate.item
+}

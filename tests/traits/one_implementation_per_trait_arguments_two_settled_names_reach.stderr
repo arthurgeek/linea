@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Weighs[UInt8]` for `Scale`
+  --> tests/traits/one_implementation_per_trait_arguments_two_settled_names_reach.lin:39:6
+   |
+33 | impl Weighs[Probe.Reading] for Scale {
+   |      ------ the other implementation
+39 | impl Weighs[Gauge.Reading] for Scale {
+   |      ^^^^^^ no instantiation may answer to two implementations of one trait

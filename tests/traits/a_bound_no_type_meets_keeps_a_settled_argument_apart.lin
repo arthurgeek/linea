@@ -1,0 +1,48 @@
+// The implementation for every `Marker` is `Weighs[UInt8]`, since
+// `Probe.Reading` is `UInt8`. `Scale` implements no `Marker`, so its own
+// `Weighs[UInt8]` answers for a type the other never does.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+trait Marker {
+    fn mark(self: Self) -> UInt8
+}
+
+struct Tagged {}
+
+impl Marker for Tagged {
+    fn mark(_self: Self) -> UInt8 {
+        9
+    }
+}
+
+impl[T: Marker] Weighs[Probe.Reading] for T {
+    fn weigh(self: Self, _value: UInt8) -> UInt8 {
+        self.mark()
+    }
+}
+
+impl Weighs[UInt8] for Scale {
+    fn weigh(_self: Self, _value: UInt8) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    let tagged = Tagged {}
+    scale.weigh(4) + tagged.weigh(4)
+}

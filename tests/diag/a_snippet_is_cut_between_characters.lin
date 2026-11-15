@@ -1,0 +1,7 @@
+// A long line is shown in part, around what the diagnostic points at. The
+// part shown begins and ends between characters, whatever each takes to
+// store, and the marker sits under the name it reports.
+fn main() -> UInt8 {
+    let _text = "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé" == missing
+    0
+}

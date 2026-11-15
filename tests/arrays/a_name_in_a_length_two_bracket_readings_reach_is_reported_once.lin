@@ -1,0 +1,25 @@
+// [N-Undefined]. The bracket after `shelf.empty` reads as type arguments and
+// as an index until the call settles which, and the length written inside it
+// is one expression under both: a name in it that nothing declares is
+// reported once.
+enum Slot[T] {
+    Full(T),
+    Empty,
+}
+
+struct Shelf {
+    rows: UInt8,
+}
+
+impl Shelf {
+    fn empty[T](self: Shelf) -> Slot[T] {
+        let _rows = self.rows
+        .Empty
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf { rows = 1 }
+    let _b = shelf.empty[Slot[[UInt8; missing]]]()
+    0
+}
