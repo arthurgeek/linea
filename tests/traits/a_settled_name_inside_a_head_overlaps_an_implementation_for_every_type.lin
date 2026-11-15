@@ -1,0 +1,36 @@
+// [T-Impl]. `Holder[Probe.Reading]` is `Holder[UInt8]`, a type the
+// implementation for every type answers for.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+struct Holder[T] {
+    held: T,
+}
+
+trait Peeks {
+    fn peek(self: Self) -> UInt8
+}
+
+impl Peeks for Holder[Probe.Reading] {
+    fn peek(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[T] Peeks for T {
+    fn peek(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let holder: Holder[UInt8] = .{ held = 0 }
+    holder.peek()
+}

@@ -1,0 +1,62 @@
+// [T-Derive]. A derived `From[UInt8]` wraps its argument in the one variant
+// whose payload is a `UInt8`. `Deep` holds a `UInt64` named through a chain
+// of aliases, which is as far from a `UInt8` as the `UInt64` `Near` holds
+// through one: neither enum has a variant to wrap in, however long the
+// chain.
+alias Step0 = UInt64
+alias Step1 = Step0
+alias Step2 = Step1
+alias Step3 = Step2
+alias Step4 = Step3
+alias Step5 = Step4
+alias Step6 = Step5
+alias Step7 = Step6
+alias Step8 = Step7
+alias Step9 = Step8
+alias Step10 = Step9
+alias Step11 = Step10
+alias Step12 = Step11
+alias Step13 = Step12
+alias Step14 = Step13
+alias Step15 = Step14
+alias Step16 = Step15
+alias Step17 = Step16
+alias Step18 = Step17
+alias Step19 = Step18
+alias Step20 = Step19
+alias Step21 = Step20
+alias Step22 = Step21
+alias Step23 = Step22
+alias Step24 = Step23
+alias Step25 = Step24
+alias Step26 = Step25
+alias Step27 = Step26
+alias Step28 = Step27
+alias Step29 = Step28
+alias Step30 = Step29
+alias Step31 = Step30
+alias Step32 = Step31
+alias Step33 = Step32
+alias Step34 = Step33
+alias Step35 = Step34
+alias Step36 = Step35
+alias Step37 = Step36
+alias Step38 = Step37
+alias Step39 = Step38
+alias Step40 = Step39
+
+@derive(From[UInt8])
+enum Near {
+    Wrong(Step0),
+}
+
+@derive(From[UInt8])
+enum Deep {
+    Wrong(Step40),
+}
+
+fn main() -> UInt8 {
+    let _near: Near = .Wrong(1)
+    let _deep: Deep = .Wrong(1)
+    0
+}

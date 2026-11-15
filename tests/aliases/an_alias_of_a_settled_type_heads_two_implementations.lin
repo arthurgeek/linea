@@ -1,0 +1,41 @@
+// `Stored` names the type `Probe` settles `Reading` to. Two implementations
+// write `Stored` as their trait argument, and each is the implementation of
+// `Weighs[UInt8]` for its type, as it would be with `Probe.Reading` written
+// out.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+alias Stored = Probe.Reading
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+impl Weighs[Stored] for Scale {
+    fn weigh(_self: Self, value: Stored) -> UInt8 {
+        value
+    }
+}
+
+struct Balance {}
+
+impl Weighs[Stored] for Balance {
+    fn weigh(_self: Self, value: Stored) -> UInt8 {
+        value + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    let balance = Balance {}
+    scale.weigh(3) + balance.weigh(3)
+}

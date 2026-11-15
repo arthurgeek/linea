@@ -355,6 +355,11 @@ impl[H: Allocator] Arena[H] {
         match read self.first {
             None => {},
             Some(first) => {
+                // An arena of fewer bytes than its cursor takes has no cursor
+                // to read and has handed out nothing.
+                if self.slots == 0 && self.limit < arena_header {
+                    return
+                }
                 // The used bytes of the first chunk: from its words up to the
                 // cursor, or, in an arena that grows, from its table up to
                 // where its reservations ended.
@@ -403,6 +408,16 @@ impl[H: Allocator] Arena[H] {
         testing.assert(full, "a full arena handed out more")?
         testing.assert(zeroed, "a rewound arena handed out bytes it had not zeroed")?
         testing.assert(twice, "rewinding an empty arena lost its slab")?
+        .Ok(())
+    }
+
+    test fn an_arena_smaller_than_its_cursor_rewinds_to_nothing() {
+        // Four bytes cannot hold the eight-byte cursor.
+        defer var arena = Arena.open(system(), 4)
+        &arena.rewind()
+        let refused = arena.handle().acquire(1).is_err()
+        &arena.rewind()
+        testing.assert(refused, "an arena with no room for its cursor handed out a byte")?
         .Ok(())
     }
 
