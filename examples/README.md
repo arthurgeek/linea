@@ -33,6 +33,7 @@ Values, functions, control flow, and ordinary errors.
 Strings, collections, parsing, and files.
 
 - [grocery_receipt.lin](grocery_receipt.lin): prints an aligned receipt; text formatting and padding.
+- [recipe_quantities.lin](recipe_quantities.lin): prints each ingredient in its own unit; one trait implemented for two applications of a generic type.
 - [prime_sieve.lin](prime_sieve.lin): counts primes below a limit; `Vec` as a runtime-sized table.
 - [warehouse_stock.lin](warehouse_stock.lin): totals deliveries per warehouse; `Map` and `@derive`.
 - [parcel_inspection.lin](parcel_inspection.lin): stops at the first overweight parcel; iterator chains.

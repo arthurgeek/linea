@@ -1,0 +1,78 @@
+// Print a recipe's ingredients, each amount in the unit it was measured in.
+// One record, `Quantity`, holds every amount. Its unit is part of its type, so
+// a weight prints as grams or kilograms and a volume as millilitres or litres,
+// and a weight cannot be added to a volume by mistake.
+import std.fmt
+import std.io
+import std.testing
+
+// The two units. Neither holds a value: each only names what a `Quantity`
+// counts.
+struct Grams {}
+
+struct Millilitres {}
+
+// An amount counted in the unit `U`. `phantom` says no field holds a `U`.
+struct Quantity[phantom U] {
+    amount: UInt64,
+}
+
+// `Quantity[Grams]` and `Quantity[Millilitres]` are two types, so `Display`
+// is implemented for each with a body of its own. A weight of a kilogram or
+// more is written in kilograms. Interpolated text is `Display` too, so
+// `fmt.Display.fmt` writes it to `w`.
+impl fmt.Display for Quantity[Grams] {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        if self.amount >= 1000 {
+            fmt.Display.fmt("{self.amount / 1000}.{self.amount % 1000 / 100} kg", &w)
+        } else {
+            fmt.Display.fmt("{self.amount} g", &w)
+        }
+    }
+}
+
+// A volume of a litre or more is written in litres.
+impl fmt.Display for Quantity[Millilitres] {
+    fn fmt[W: io.Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        if self.amount >= 1000 {
+            fmt.Display.fmt("{self.amount / 1000}.{self.amount % 1000 / 100} l", &w)
+        } else {
+            fmt.Display.fmt("{self.amount} ml", &w)
+        }
+    }
+}
+
+// `T: fmt.Display` accepts either quantity. Each call writes the amount with
+// the implementation for the type it was given.
+fn write_ingredient[T: fmt.Display, W: io.Writer](inout w: W, name: Str, amount: T) -> Result[(), W.Error] where carries(.Err: w) {
+    io.line("{name}: {amount}", &w)
+}
+
+test fn each_quantity_prints_in_its_own_unit() {
+    let flour: Quantity[Grams] = .{ amount = 1250 }
+    let yeast: Quantity[Grams] = .{ amount = 7 }
+    let water: Quantity[Millilitres] = .{ amount = 800 }
+    defer var written = String.new()
+    write_ingredient(&written, "flour", flour).unwrap()
+    write_ingredient(&written, "yeast", yeast).unwrap()
+    write_ingredient(&written, "water", water).unwrap()
+    let expected =
+        \\flour: 1.2 kg
+        \\yeast: 7 g
+        \\water: 800 ml
+        \\
+    testing.assert_eq(written.view(), expected, "a quantity printed in another unit")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let flour: Quantity[Grams] = .{ amount = 1250 }
+    let yeast: Quantity[Grams] = .{ amount = 7 }
+    let water: Quantity[Millilitres] = .{ amount = 800 }
+    let milk: Quantity[Millilitres] = .{ amount = 1500 }
+    var out = io.stdout()
+    write_ingredient(&out, "flour", flour)?
+    write_ingredient(&out, "yeast", yeast)?
+    write_ingredient(&out, "water", water)?
+    write_ingredient(&out, "milk", milk)?
+    .Ok(0)
+}
