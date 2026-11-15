@@ -2986,9 +2986,11 @@ pub const Implementation = struct {
     /// What the head names, which is what every type this implementation could
     /// answer for reaches it by.
     head: Head,
-    /// What the head applies, position by position, which is what tells the
-    /// members of the family this implementation answers for from the rest.
-    /// Empty for a head applying nothing, which is the whole of its own family.
+    /// False once the implementation is refused for its key: a parameter the
+    /// head and trait arguments do not name, or a default implementation
+    /// written with another head. Nothing is selected through such a row.
+    /// Decided when the key is known, so a row whose head or trait arguments
+    /// name a settled type still holds true while those are unanswered.
     valid_key: bool = true,
     /// Projected requirements checked after the receiver binds the head.
     predicates: []const Predicate = &.{},

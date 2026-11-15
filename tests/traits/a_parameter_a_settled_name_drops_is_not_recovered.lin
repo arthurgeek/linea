@@ -1,0 +1,29 @@
+// [T-Impl]. `Wrap[T].Element` is settled to `UInt8` whatever `T` is, so the
+// key is `Gives[UInt8]` and names `T` nowhere.
+trait Source {
+    type Element
+}
+
+struct Wrap[T] {
+    item: T,
+}
+
+impl[T] Source for Wrap[T] {
+    type Element = UInt8
+}
+
+trait Gives[U] {
+    fn give(self: Self, given: U) -> UInt8
+}
+
+struct Scale {}
+
+impl[T] Gives[Wrap[T].Element] for Scale {
+    fn give(_self: Self, given: UInt8) -> UInt8 {
+        given
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

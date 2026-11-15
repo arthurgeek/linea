@@ -1,0 +1,42 @@
+// [T-Impl]. `Probe.Reading` is `UInt8`, so both implementations are
+// `Weighs[Two[T, UInt8]]` for `Scale` at every `T`. Naming the parameter
+// differently and writing the second argument as the settled type's name
+// does not make it another implementation.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+struct Two[A, B] {
+    first: A,
+    second: B,
+}
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+impl[T] Weighs[Two[T, Probe.Reading]] for Scale {
+    fn weigh(_self: Self, value: Two[T, Probe.Reading]) -> UInt8 {
+        value.second
+    }
+}
+
+impl[U] Weighs[Two[U, UInt8]] for Scale {
+    fn weigh(_self: Self, value: Two[U, UInt8]) -> UInt8 {
+        value.second + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    let pair: Two[Bool, UInt8] = .{ first = true, second = 5 }
+    scale.weigh(pair)
+}

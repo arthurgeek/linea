@@ -813,6 +813,7 @@ fn typecheckInternal(
         for (c.call_impls.items) |record| if (record.args.len > 0) gpa.free(record.args);
         c.call_impls.deinit(gpa);
         c.overlapping.deinit(gpa);
+        c.unsupplied.deinit(gpa);
     }
     defer {
         for (c.calls.items) |call| call.deinit(gpa);
@@ -1429,7 +1430,13 @@ fn typecheckInternal(
         i.args = try c.traitArgumentsOf(i.decl);
         try c.settleHead(i);
         c.deferring_selections = false;
-        if (c.skipped_selection) try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
+        // Whether the key recovers every parameter is asked of the key, so
+        // of one still to be read again it is asked then.
+        if (c.skipped_selection) {
+            try c.unsettled_heads.append(gpa, @intCast(i - implementations.ptr));
+        } else {
+            try c.requireRecoverableParameters(i);
+        }
         try c.settleImplementationPredicates(i);
     }
 
@@ -1441,7 +1448,7 @@ fn typecheckInternal(
     // property of the declarations, so a program's compiling could not depend
     // on whether anything ever calls through either one.
     const z_overlap = tracy.beginZone(@src(), "tc.overlap");
-    try c.refuseOverlappingImplementations(implementations);
+    try c.refuseOverlappingImplementations(implementations, null);
     z_overlap.end();
 
     const observation_traits = try @import("observations.zig").compute(gpa, ast, resolution);
@@ -1466,6 +1473,19 @@ fn typecheckInternal(
     const z_parts = tracy.beginZone(@src(), "tc.parts");
     try c.settleDeclaredAnswers();
     try c.settleDeferredHeads(implementations);
+    // An implementation whose head or trait arguments named a settled type
+    // had nothing to compare while that type was unanswered, so the overlap
+    // check passed over it. It is read now, and is held to the same rule.
+    if (c.unsettled_heads.items.len != 0) {
+        var read_again = try std.DynamicBitSetUnmanaged.initEmpty(gpa, implementations.len);
+        defer read_again.deinit(gpa);
+        for (c.unsettled_heads.items) |at| read_again.set(at);
+        try c.refuseOverlappingImplementations(implementations, &read_again);
+        for (c.unsupplied.items) |missing| {
+            if (c.overlapping.contains(missing.implementation)) continue;
+            try c.reportUnsupplied(missing);
+        }
+    }
 
     // Every template is complete and every settled type known, so every
     // instantiation is filled again from its template. A part written as a
@@ -5972,6 +5992,13 @@ const Checker = struct {
     /// mistake, and every member the refused implementation lacks would say
     /// it again.
     overlapping: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+    /// Members a trait declares that an implementation supplies nothing for,
+    /// found while an implementation's head was still to be read again. One
+    /// of those may yet be refused as overlapping another, which is then its
+    /// only report, so these are said once that is known.
+    ///
+    /// **Bound:** the unsupplied members of a program that has such a head.
+    unsupplied: std.ArrayList(Unsupplied) = .empty,
     /// The one complete semantic row for each accepted direct call.
     calls: std.ArrayList(types_mod.NormalizedCall) = .empty,
     recovered_call_args: std.ArrayList(types_mod.RecoveredCallArg) = .empty,
@@ -29568,18 +29595,15 @@ const Checker = struct {
                     // is filled by nothing, and a call through the trait would
                     // reach it. Said here, where the pairing found nothing,
                     // rather than by a second walk asking the same question of
-                    // the same two lists.
-                    try self.sink.addErrorFmt(
-                        .t_impl,
-                        self.ast.fileOf(trait_token),
-                        self.ast.tokenSpan(trait_token),
-                        if (settlesAType(self.ast, sig))
-                            "settle it, or drop it from the trait"
-                        else
-                            "supply a body for it, or drop it from the trait",
-                        "`{s}` declares `{s}`, and this implementation does not supply it",
-                        .{ self.ast.tokenText(trait_token), self.ast.tokenText(self.ast.declName(sig)) },
-                    );
+                    // the same two lists -- unless a head is still to be read
+                    // again, when which implementations overlap is not yet
+                    // all known.
+                    const missing: Unsupplied = .{ .implementation = d, .trait_token = trait_token, .sig = sig };
+                    if (self.unsettled_heads.items.len != 0) {
+                        try self.unsupplied.append(self.gpa, missing);
+                    } else {
+                        try self.reportUnsupplied(missing);
+                    }
                     continue;
                 };
 
@@ -29661,7 +29685,11 @@ const Checker = struct {
             self.gpa.free(implementation.args);
             implementation.args = args;
             implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
+            try self.requireRecoverableParameters(implementation);
         }
+        // A selection made while these rows held unanswered arguments was
+        // made against keys that have now changed.
+        if (self.unsettled_heads.items.len != 0) self.builder.invalidateImplementationLookup();
     }
 
     /// Every declared part, every type an implementation settles, every
@@ -32120,16 +32148,22 @@ const Checker = struct {
     /// written type given the wrong number of arguments gets, because that is
     /// what a head is.
     ///
-    /// A head applying none is a name and not an application: it stands for the
-    /// declaration itself, which is what an inherent implementation on a generic
-    /// type is written as.
+    /// A head applying none is a name. An inherent implementation on a generic
+    /// type is written with one, and a name whose type has a parameter without
+    /// a default is refused where the written type is read. What is left for
+    /// this to refuse is a trait implementation's head naming a type whose
+    /// every parameter has a default: read as a written type it is the type
+    /// with its defaults, but a trait implementation's head fills none, so it
+    /// names no member of the family and would answer for nothing.
     fn checkHeadArity(self: *Checker, d: node.DeclId) std.mem.Allocator.Error!void {
         const written = self.ast.declHead(d).args.len();
-        if (written == 0) return;
+        const inherent = self.ast.declTrait(d) == TokenId.none;
+        if (written == 0 and inherent) return;
 
         const tok = self.ast.declName(d);
         const m = self.program.moduleOf(d);
         if (m == .none) return;
+        if (written == 0 and self.requiredParamCountOf(m, d, tok) != 0) return;
 
         // A head naming nothing is already reported as the undefined name it
         // is, and how many arguments a name that reaches no declaration takes
@@ -32143,7 +32177,7 @@ const Checker = struct {
         // head writes, so a head may omit the trailing arguments a default
         // fills. A trait implementation's head is the constructor applied to
         // each of its parameters, because the head key is the constructor.
-        const required = if (self.ast.declTrait(d) == TokenId.none)
+        const required = if (inherent)
             self.requiredParamCountOf(m, d, tok)
         else
             wanted;
@@ -32198,8 +32232,8 @@ const Checker = struct {
         return out;
     }
 
-    /// Settle one complete implementation key and verify that structural
-    /// matching can recover every declared parameter without inverting a projection.
+    /// Reads what an implementation's head names, and holds a default
+    /// implementation to the one head it may write.
     fn settleHead(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
         const d = implementation.decl;
         implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
@@ -32214,6 +32248,19 @@ const Checker = struct {
                 try self.sink.addErrorFmt(.t_impl, self.ast.fileOfDecl(d), self.ast.writtenSpan(self.ast.declHead(d)), "use one parameter as the whole head of a zero-argument trait", "a default implementation requires one bare parameter head and a zero-argument trait", .{});
             }
         }
+    }
+
+    /// Verifies that structural matching can recover every parameter an
+    /// implementation declares from its head and trait arguments without
+    /// inverting a projection, and refuses the implementation otherwise.
+    ///
+    /// Asked once per implementation, when its head and trait arguments are
+    /// known: where they are first read, or, for one naming a settled type,
+    /// where they are read again. An argument still unanswered holds no
+    /// parameter, so asking earlier refuses `impl[T] Tr[Two[T, Probe.Reading]]`
+    /// for a `T` its key names.
+    fn requireRecoverableParameters(self: *Checker, implementation: *types_mod.Implementation) std.mem.Allocator.Error!void {
+        const d = implementation.decl;
         var parameters = try types_mod.ImplementationParameters.init(self.gpa, &self.builder, implementation.*);
         defer parameters.deinit(self.gpa);
         for (parameters.origins, 0..) |origin, at| {
@@ -32297,10 +32344,26 @@ const Checker = struct {
     /// however many settled arguments one type implements a trait at --
     /// whatever its head's own parameters do, since an argument list written
     /// out is ground however generic the type it is written for.
+    ///
+    /// `among`, where given, limits the reports to pairs holding one of its
+    /// members: the implementations read again once declared answers were
+    /// settled, which the first asking passed over and every pair without
+    /// one of which it has already judged. A chain holding none of them is
+    /// not examined, and the pairs of one that does are found as they are
+    /// the first time, by the same hashing and the same candidates.
     fn refuseOverlappingImplementations(
         self: *Checker,
         implementations: []const types_mod.Implementation,
+        among: ?*const std.DynamicBitSetUnmanaged,
     ) std.mem.Allocator.Error!void {
+        const Pairs = struct {
+            among: ?*const std.DynamicBitSetUnmanaged,
+            fn wanted(pairs: @This(), a: usize, b: usize) bool {
+                const set = pairs.among orelse return true;
+                return set.isSet(a) or set.isSet(b);
+            }
+        };
+        const pairs: Pairs = .{ .among = among };
         var handled = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, implementations.len);
         defer handled.deinit(self.gpa);
 
@@ -32323,6 +32386,7 @@ const Checker = struct {
             if (im.head == .parameter and im.valid_key) {
                 var concrete = self.impl_index.membersOfTrait(im.trait);
                 while (concrete.next()) |other| {
+                    if (!pairs.wanted(i, other)) continue;
                     const row = implementations[other];
                     if (row.trait != im.trait or row.head == .parameter or row.head == .default_ or row.isAmbient() or !row.valid_key) continue;
                     // Integer denotes a closed receiver domain. Ordinary trait
@@ -32378,6 +32442,15 @@ const Checker = struct {
                 }
             }
 
+            if (among) |set| {
+                const holds_one = for (open_list.items) |at| {
+                    if (set.isSet(at)) break true;
+                } else for (ground_list.items) |at| {
+                    if (set.isSet(at)) break true;
+                } else false;
+                if (!holds_one) continue;
+            }
+
             if (open_list.items.len != 0) {
                 const position = try self.overlapColumn(implementations, open_list.items, ground_list.items);
                 var open_candidates: OverlapCandidates = .{};
@@ -32394,10 +32467,12 @@ const Checker = struct {
                     const root = self.overlapRoot(implementations[later].args, position);
                     var prior_rows = open_candidates.candidates(root, open_list.items[0..oi]);
                     while (prior_rows.next()) |prior| {
+                        if (!pairs.wanted(prior, later)) continue;
                         try self.refuseIfOverlapping(implementations, prior, later);
                     }
                     var ground_rows = ground_candidates.candidates(root, ground_list.items);
                     while (ground_rows.next()) |ground_at| {
+                        if (!pairs.wanted(later, ground_at)) continue;
                         try self.refuseIfOverlapping(
                             implementations,
                             @min(later, ground_at),
@@ -32419,7 +32494,7 @@ const Checker = struct {
                     // Hashed and then compared, so a collision costs a
                     // comparison rather than a report about two lists that
                     // are not the same.
-                    if (std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
+                    if (pairs.wanted(other, at) and std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
                         try self.refuseIfOverlapping(implementations, other, at);
                     }
                     walk = if (next.items[j] == j) null else next.items[j];
@@ -32544,6 +32619,23 @@ const Checker = struct {
             }
         };
     };
+
+    /// A member a trait declares and an implementation supplies nothing for.
+    const Unsupplied = struct { implementation: node.DeclId, trait_token: TokenId, sig: node.DeclId };
+
+    fn reportUnsupplied(self: *Checker, missing: Unsupplied) std.mem.Allocator.Error!void {
+        try self.sink.addErrorFmt(
+            .t_impl,
+            self.ast.fileOf(missing.trait_token),
+            self.ast.tokenSpan(missing.trait_token),
+            if (settlesAType(self.ast, missing.sig))
+                "settle it, or drop it from the trait"
+            else
+                "supply a body for it, or drop it from the trait",
+            "`{s}` declares `{s}`, and this implementation does not supply it",
+            .{ self.ast.tokenText(missing.trait_token), self.ast.tokenText(self.ast.declName(missing.sig)) },
+        );
+    }
 
     /// Unifies `first` and `second`'s heads followed by their trait arguments,
     /// as one list each, and reports `[T-Impl]` where they unify -- carried by

@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Weighs[UInt8]` for `Scale`
+  --> tests/traits/a_settled_argument_overlaps_an_implementation_for_every_type.lin:25:6
+   |
+19 | impl[T] Weighs[UInt8] for T {
+   |         ------ the other implementation
+25 | impl Weighs[Probe.Reading] for Scale {
+   |      ^^^^^^ no instantiation may answer to two implementations of one trait
