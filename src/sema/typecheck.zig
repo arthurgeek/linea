@@ -797,6 +797,8 @@ fn typecheckInternal(
     defer c.alias_types.deinit(gpa);
     defer c.alias_shapes.deinit(gpa);
     defer c.aliases_reading.deinit(gpa);
+    defer c.aliases_uncounted.deinit(gpa);
+    defer c.aliases_unsettled.deinit(gpa);
     defer c.defaults_reading.deinit(gpa);
     defer c.carried_omissions.deinit(gpa);
     defer c.impls_publishing.deinit(gpa);
@@ -6142,6 +6144,17 @@ const Checker = struct {
     /// again while its own type is read is a cycle, which the resolver
     /// reported unless a settled type joins the two readings.
     aliases_reading: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
+    /// The aliases read while no declared answer was being settled, whose
+    /// chains nothing has counted. A declared answer being settled reads
+    /// such an alias again in place of taking what is kept, so the links
+    /// under it are counted by the one walk that counts links, and every
+    /// alias is read there before the settling ends.
+    aliases_uncounted: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The aliases whose kept type was read with a selection passed over,
+    /// so what they name is known only once declared answers are settled.
+    /// Whatever takes the kept type of one has passed over that selection
+    /// too, and is read again as if it had written the selection itself.
+    aliases_unsettled: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
@@ -10955,15 +10968,21 @@ const Checker = struct {
     /// `alias_types`. An alias reached again while its own type is read is a
     /// cycle, answered with poison: the resolver reported it.
     fn aliasedType(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!TypeId {
-        if (self.settledAlias(alias)) |held| {
+        // An alias kept from a reading that counted no links is read again
+        // while a declared answer is settled: an implementation's head reads
+        // its aliases first, and a chain is as long there as anywhere.
+        const counted = self.settling == null or !self.aliases_uncounted.contains(alias);
+        if (counted) if (self.settledAlias(alias)) |held| {
             if (self.settling) |settling| settling.note(.{ .alias = alias });
+            if (self.aliases_unsettled.contains(alias)) self.skipped_selection = true;
             return held;
-        }
+        };
         const kept = if (self.callable_effects_ready) &self.alias_types else &self.alias_shapes;
-        if (kept.get(alias)) |held| {
+        if (counted) if (kept.get(alias)) |held| {
             if (self.settling) |settling| settling.note(.{ .alias = alias });
+            if (self.aliases_unsettled.contains(alias)) self.skipped_selection = true;
             return held;
-        }
+        };
         if (self.aliases_reading.get(alias)) |began_at| {
             // Reached again from inside a settled type its own reading
             // demanded: `alias Al = Mirror.Reading` with `Reading =
@@ -11006,7 +11025,14 @@ const Checker = struct {
         }
         // An alias read while declared answers are settled is one of them,
         // and counts toward how deep they depend on one another.
-        if (self.settling) |settling| if (!try settling.enter(.{ .alias = alias })) return .poison;
+        if (self.settling) |settling| {
+            if (!try settling.enter(.{ .alias = alias })) return .poison;
+        } else if (self.aliases_reading.count() >= AnswerSettling.max_depth) {
+            // Read no further down a chain already past what one may pass
+            // through. Nothing is kept for this alias, and those above it
+            // are read again, and refused, where links are counted.
+            return .poison;
+        }
         try self.aliases_reading.put(self.gpa, alias, if (self.settling) |settling| settling.depth else 0);
         defer _ = self.aliases_reading.remove(alias);
 
@@ -11020,13 +11046,34 @@ const Checker = struct {
         for (self.refused_parts.items) |seen| {
             if (seen != written.at) continue;
             try kept.put(self.gpa, alias, .poison);
-            if (self.settling) |settling| try settling.leave();
+            try self.aliasRead(alias);
             return .poison;
         }
+        // Whether this reading passed over a selection is the alias's own
+        // answer, kept with its type, and whoever is reading the alias has
+        // passed over it as well.
+        const passed_over_before = self.skipped_selection;
+        self.skipped_selection = false;
         const named = try self.typeOfRefOf(self.program.moduleOf(alias), alias, written);
+        if (self.skipped_selection) {
+            try self.aliases_unsettled.put(self.gpa, alias, {});
+        } else {
+            _ = self.aliases_unsettled.remove(alias);
+        }
+        self.skipped_selection = self.skipped_selection or passed_over_before;
         try kept.put(self.gpa, alias, named);
-        if (self.settling) |settling| try settling.leave();
+        try self.aliasRead(alias);
         return named;
+    }
+
+    /// Ends the reading of `alias`: its links are counted where a declared
+    /// answer is being settled, and still to be counted where none is.
+    fn aliasRead(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!void {
+        if (self.settling) |settling| {
+            _ = self.aliases_uncounted.remove(alias);
+            return settling.leave();
+        }
+        if (self.callable_effects_ready) try self.aliases_uncounted.put(self.gpa, alias, {});
     }
 
     /// The type an alias names, where it is already settled: every alias is

@@ -1,0 +1,5 @@
+error[T-AnswerDepth]: `Y` starts a chain of declared answers longer than 1000 links
+    --> tests/traits/declared_answers/a_chain_through_aliases_and_references_is_refused_in_an_implementation_head.lin:6005:11
+     |
+6005 | alias Y = X
+     |           ^ write a type directly in one of the declarations along the chain

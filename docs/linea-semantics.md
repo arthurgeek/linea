@@ -2792,7 +2792,9 @@ links any answer rests on, so it is the same in every declaration order. A
 chain of 1000 settled references, each implementation settling `Reading` to
 the next one's, is accepted, and one of 1001 is refused where the chain
 starts; so are delegations, aliases and parts selecting through one another's
-capabilities. A plain chain of 1001 aliases is refused as well. As with
+capabilities. A plain chain of 1001 aliases is refused as well, wherever it
+is written: an implementation's head and a derive's argument count it as a
+binding's annotation does. As with
 [S-Nesting], the limit makes acceptance independent of optimisation level and
 stack size, and reports the depth instead of overflowing. Writing a type
 directly anywhere along the chain shortens it.
