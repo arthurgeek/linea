@@ -180,7 +180,9 @@ pub fn dumpMono(
     for (0..ast.declCount()) |i| {
         const d = node.DeclId.at(@intCast(i));
         switch (ast.declTag(d)) {
-            .struct_, .enum_ => {},
+            // A newtype is a type of its own, named in a signature or a field
+            // like any other, so it is declared where one is.
+            .struct_, .enum_, .newtype => {},
             else => continue,
         }
         if (ast.declTypeParams(d).len > 0) continue;

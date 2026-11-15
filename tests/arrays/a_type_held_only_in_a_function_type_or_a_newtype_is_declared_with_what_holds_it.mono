@@ -1,0 +1,53 @@
+@copyable
+struct Cell {
+    value: UInt8,
+}
+
+struct Handler {
+    run: std.option.Option[fn(read:Cell:none)->UInt8],
+}
+
+@copyable
+struct Shelf {
+    rows: UInt8,
+}
+
+struct Lent {
+    shelves: [borrow Shelf; 0],
+}
+
+@copyable
+struct Seal {
+    mark: UInt8,
+}
+
+type Sealed = Seal
+
+struct Envelope {
+    seals: [Sealed; 0],
+}
+
+@copyable
+struct Tag {
+    mark: UInt8,
+}
+
+struct Holder {
+    marker: Marker[Tag],
+}
+
+@copyable
+pub enum Option[fn(read:Cell:none)->UInt8] {
+    None,
+    Some(fn(read:Cell:none)->UInt8),
+}
+
+struct Marker[Tag] {}
+
+fn ;main() -> UInt8 {
+    ;weigh(Handler { run = .None }, Lent { shelves = [] }, Envelope { seals = [] }, Holder { marker = .{} })
+}
+
+fn ;weigh(_handler: Handler, _lent: Lent, _envelope: Envelope, _holder: Holder) -> UInt8 {
+    2
+}
