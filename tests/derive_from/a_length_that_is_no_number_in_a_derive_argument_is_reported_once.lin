@@ -1,0 +1,13 @@
+// An array length that is not a number is reported where the derive's
+// argument writes it, and the derive says nothing about the variant such a
+// source would need.
+@derive(From[[UInt8; true]])
+enum Choice {
+    Only(UInt8),
+}
+
+fn main() -> UInt8 {
+    match Choice.Only(0) {
+        Only(code) => code,
+    }
+}

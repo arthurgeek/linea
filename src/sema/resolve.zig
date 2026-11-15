@@ -572,6 +572,22 @@ pub const Scope = struct {
 };
 
 /// Which binding each name reference names.
+/// A derive entry whose template wraps a source that no single variant of
+/// the target holds: none has it as its only field, or two do.
+pub const UnwrappedSource = struct {
+    target: DeclId,
+    /// The declaration whose type parameters the entry's arguments read:
+    /// the standalone request, or the target an attached request sits on.
+    owner: DeclId,
+    trait: node.DeriveTraitId,
+    /// The wrapped parameter's written type, which names the source where
+    /// the entry does not write exactly one argument.
+    wrapped: node.TypeRef,
+    /// The first two variants holding the source, by position in the
+    /// target, or null where none holds it.
+    holders: ?[2]u32,
+};
+
 pub const Resolution = struct {
     /// Qualified variant selections, in declaration order. Generic
     /// substitution preserves these ordinals. Storage follows selections,
@@ -908,6 +924,11 @@ pub const Resolution = struct {
     /// The implementations resolution refused and reported. Overlapping
     /// another is the same mistake, so a later pass does not report it again.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The derive entries whose source no single variant of the target
+    /// wraps, in the order expansion met them. The type checker reports
+    /// each, once it has typed the entry's written arguments: a source that
+    /// is not a type is reported as that and not as a missing variant.
+    unwrapped_sources: []const UnwrappedSource = &.{},
     /// The one structural template each resolved trait declares.
     templates: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
 
@@ -1147,6 +1168,7 @@ pub const Resolution = struct {
         self.module_of_file.deinit(gpa);
         self.duplicate_impls.deinit(gpa);
         self.refused_impls.deinit(gpa);
+        gpa.free(self.unwrapped_sources);
         self.templates.deinit(gpa);
         self.unpaired_template_closures.deinit(gpa);
         self.postfix_functions.deinit(gpa);
@@ -4103,6 +4125,7 @@ fn resolveInternal(
     errdefer r.alias_heads.deinit(gpa);
     errdefer r.refused_operations.deinit(gpa);
     errdefer r.refused_impls.deinit(gpa);
+    defer r.unwrapped_sources.deinit(gpa);
     errdefer r.spelled.deinit(gpa);
     errdefer r.written.deinit(gpa);
     errdefer r.scopes.deinit(gpa);
@@ -4957,6 +4980,8 @@ fn resolveInternal(
     errdefer finished_ambient.deinit(gpa);
     var finished_referenced = referenced.freeze();
     errdefer finished_referenced.deinit(gpa);
+    const unwrapped_sources = try r.unwrapped_sources.toOwnedSlice(gpa);
+    errdefer gpa.free(unwrapped_sources);
 
     const normalized_constraints = constraints;
     constraints = .{};
@@ -5024,6 +5049,7 @@ fn resolveInternal(
         .module_of_file = module_of_file,
         .duplicate_impls = r.duplicate_impls,
         .refused_impls = r.refused_impls,
+        .unwrapped_sources = unwrapped_sources,
         .templates = r.templates,
         .unpaired_template_closures = r.unpaired_template_closures,
         .postfix_functions = r.postfix_functions,
@@ -6576,6 +6602,8 @@ const Resolver = struct {
     /// module may write them, or for a head that names an alias or no type.
     /// Published as `Resolution.refused_impls`.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Published as `Resolution.unwrapped_sources`.
+    unwrapped_sources: std.ArrayList(UnwrappedSource) = .empty,
     spelled: std.ArrayList(TokenId) = .empty,
     written: std.ArrayList(BindingId) = .empty,
     /// Type parameter bindings keyed by their unique declaration token.
@@ -11205,7 +11233,7 @@ const Resolver = struct {
 
                 var wrapped_cases: std.ArrayList(expanded_mod.CaseOrdinal) = .empty;
                 defer wrapped_cases.deinit(self.gpa);
-                if (!try self.selectWrappedVariants(&wrapped_cases, template_plan.reflection_members, template_plan.template, derive, attached, target, entry)) continue;
+                if (!try self.selectWrappedVariants(&wrapped_cases, template_plan.reflection_members, template_plan.template, derive, attached, target, derive_trait)) continue;
 
                 var text: std.ArrayList(u8) = .empty;
                 defer text.deinit(self.gpa);
@@ -11619,8 +11647,9 @@ const Resolver = struct {
     /// constructs: the one variant of `target` with exactly one field whose
     /// written type is the wrapped parameter's, once the entry's trait
     /// arguments stand for the template's parameters. Appends one case per
-    /// wrap to `out`, in member order. Reports [T-Derive] and returns false
-    /// where no variant qualifies or two do.
+    /// wrap to `out`, in member order. Where no variant qualifies or two do
+    /// it returns false and records the entry in `unwrapped_sources`, which
+    /// the type checker reports as [T-Derive].
     ///
     /// Types are compared by `sameWrittenType`, the one answer to whether two
     /// written types name one type, so an alias and the type it names select
@@ -11633,10 +11662,11 @@ const Resolver = struct {
         derive: DeclId,
         attached: bool,
         target: DeclId,
-        entry: node.DeriveTrait,
+        derive_trait: node.DeriveTraitId,
     ) !bool {
         const ast = &self.program.ast;
         const identity: WrapIdentity = .{ .res = self };
+        const entry = ast.deriveTrait(derive_trait);
         const variants = ast.declVariants(target);
         for (members) |reflected| {
             for (reflected.wraps) |wrap| {
@@ -11676,62 +11706,12 @@ const Resolver = struct {
                     if (fields.len == 1) settled = settled and self.writtenSettled(fields[0].written, 0);
                 }
                 if (!settled) return false;
-                const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else wrapped);
-                const target_name = ast.tokenText(ast.declName(target));
-                const file = ast.fileOf(entry.ref.name);
-                const labels = try self.sink.arena.alloc(Label, if (second != null) 3 else 1);
-                labels[0] = .{
-                    .file = file,
-                    .span = ast.rangeSpan(entry.tokens),
-                    .message = if (second != null) "the conversion would wrap the source in either variant" else "no variant wraps this source",
-                    .style = .primary,
-                };
-                if (second) |later| {
-                    for ([_]usize{ selected.?, later }, 1..) |index, slot| {
-                        labels[slot] = .{
-                            .file = ast.fileOf(variants[index].name),
-                            .span = ast.tokenSpan(variants[index].name),
-                            .message = "this variant holds the source's type",
-                            .style = .secondary,
-                        };
-                    }
-                    try self.sink.add(.{
-                        .severity = .err,
-                        .code = .t_derive,
-                        .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` has two variants wrapping `{s}`", .{ target_name, source_text }),
-                        .labels = labels,
-                        .notes = try self.sink.arena.dupe([]const u8, &.{"write the conversion by hand, or give each variant its own type"}),
-                    });
-                    return false;
-                }
-                var shapes: std.ArrayList(u8) = .empty;
-                defer shapes.deinit(self.gpa);
-                if (variants.len == 0) try shapes.appendSlice(self.gpa, "no variants");
-                for (variants, 0..) |variant, index| {
-                    if (index != 0) try shapes.appendSlice(self.gpa, ", ");
-                    try shapes.appendSlice(self.gpa, "`");
-                    try shapes.appendSlice(self.gpa, ast.tokenText(variant.name));
-                    const fields = ast.variantFields(variant);
-                    if (fields.len != 0) try shapes.append(self.gpa, '(');
-                    for (fields, 0..) |field, field_index| {
-                        if (field_index != 0) try shapes.appendSlice(self.gpa, ", ");
-                        try shapes.appendSlice(self.gpa, ast.writtenText(field.written));
-                    }
-                    if (fields.len != 0) try shapes.append(self.gpa, ')');
-                    try shapes.appendSlice(self.gpa, "`");
-                }
-                try self.sink.add(.{
-                    .severity = .err,
-                    .code = .t_derive,
-                    .message = try std.fmt.allocPrint(self.sink.arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
-                    .labels = labels,
-                    .notes = try self.sink.arena.dupe([]const u8, &.{
-                        try std.fmt.allocPrint(self.sink.arena, "a variant wraps a source when its only field has the source's type{s}; `{s}` has {s}", .{
-                            if (std.mem.indexOfScalar(u8, source_text, ';') != null) " (array lengths match only when spelled alike)" else "",
-                            target_name,
-                            shapes.items,
-                        }),
-                    }),
+                try self.unwrapped_sources.append(self.gpa, .{
+                    .target = target,
+                    .owner = if (attached) target else derive,
+                    .trait = derive_trait,
+                    .wrapped = wrapped,
+                    .holders = if (second) |later| .{ @intCast(selected.?), @intCast(later) } else null,
                 });
                 return false;
             }

@@ -3190,7 +3190,11 @@ source, so no variant converts without being named, and each entry names one
 conversion: two entries of one source are refused as two implementations of one
 key are. A struct or newtype target, a source no variant holds, and a source two
 variants hold are [T-Derive] at the entry; a conversion that does more than wrap
-is written as an `impl`. The generated implementation is the same as a
+is written as an `impl`. The source is a written type and is held to what any
+written type is held to, whether or not a variant holds it: a source refused as
+a type, such as an array whose length is not a count ([T-ArraySize]), is
+reported as that, once, and not as a missing variant. Unit is a source like any
+other, wrapped by a variant whose only field is `()`. The generated implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.
 

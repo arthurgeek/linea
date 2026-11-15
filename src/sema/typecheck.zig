@@ -1604,6 +1604,7 @@ fn typecheckInternal(
 
     const z_headers = tracy.beginZone(@src(), "tc.headers");
     try c.validateTemplateRequirements();
+    try c.reportUnwrappedSources();
     try c.checkComponentRequirements();
     try c.checkImplementations();
     try c.checkStructuralSupertraits();
@@ -31252,6 +31253,101 @@ const Checker = struct {
         return out;
     }
 
+    /// Types the arguments a derive entry writes, with `owner`'s type
+    /// parameters in scope. Sets `current` and `generic`; the caller restores
+    /// them.
+    fn typeDeriveArguments(self: *Checker, target: node.DeclId, owner: node.DeclId, trait: node.DeriveTraitId) std.mem.Allocator.Error!void {
+        self.current = self.program.moduleOf(target);
+        self.generic = owner;
+        for (self.ast.typeArgs(self.ast.deriveTrait(trait).ref.args)) |argument| {
+            _ = try self.typeOfRefOf(self.current, owner, argument);
+        }
+    }
+
+    /// Reports [T-Derive] for each derive entry whose source no single
+    /// variant of its target wraps. The entry generated no implementation, so
+    /// its written arguments are typed here first: an argument refused as a
+    /// type has its own report, and a missing variant would say the same
+    /// mistake twice.
+    ///
+    /// **Bound:** each entry's written arguments, and the target's variants
+    /// and their fields once to list them.
+    fn reportUnwrappedSources(self: *Checker) std.mem.Allocator.Error!void {
+        const outer_module = self.current;
+        const outer_generic = self.generic;
+        defer {
+            self.current = outer_module;
+            self.generic = outer_generic;
+        }
+        const ast = self.ast;
+        const arena = self.sink.arena;
+        for (self.res.unwrapped_sources) |unwrapped| {
+            const errors_before = self.sink.error_count;
+            try self.typeDeriveArguments(unwrapped.target, unwrapped.owner, unwrapped.trait);
+            if (self.sink.error_count != errors_before) continue;
+
+            const entry = ast.deriveTrait(unwrapped.trait);
+            const variants = ast.declVariants(unwrapped.target);
+            const written_arguments = ast.typeArgs(entry.ref.args);
+            const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else unwrapped.wrapped);
+            const target_name = ast.tokenText(ast.declName(unwrapped.target));
+            const labels = try arena.alloc(Label, if (unwrapped.holders != null) 3 else 1);
+            labels[0] = .{
+                .file = ast.fileOf(entry.ref.name),
+                .span = ast.rangeSpan(entry.tokens),
+                .message = if (unwrapped.holders != null) "the conversion would wrap the source in either variant" else "no variant wraps this source",
+                .style = .primary,
+            };
+            if (unwrapped.holders) |holders| {
+                for (holders, 1..) |index, slot| {
+                    labels[slot] = .{
+                        .file = ast.fileOf(variants[index].name),
+                        .span = ast.tokenSpan(variants[index].name),
+                        .message = "this variant holds the source's type",
+                        .style = .secondary,
+                    };
+                }
+                try self.sink.add(.{
+                    .severity = .err,
+                    .code = .t_derive,
+                    .message = try std.fmt.allocPrint(arena, "`{s}` has two variants wrapping `{s}`", .{ target_name, source_text }),
+                    .labels = labels,
+                    .notes = try arena.dupe([]const u8, &.{"write the conversion by hand, or give each variant its own type"}),
+                });
+                continue;
+            }
+            var shapes: std.ArrayList(u8) = .empty;
+            defer shapes.deinit(self.gpa);
+            if (variants.len == 0) try shapes.appendSlice(self.gpa, "no variants");
+            for (variants, 0..) |variant, index| {
+                if (index != 0) try shapes.appendSlice(self.gpa, ", ");
+                try shapes.appendSlice(self.gpa, "`");
+                try shapes.appendSlice(self.gpa, ast.tokenText(variant.name));
+                const fields = ast.variantFields(variant);
+                if (fields.len != 0) try shapes.append(self.gpa, '(');
+                for (fields, 0..) |field, field_index| {
+                    if (field_index != 0) try shapes.appendSlice(self.gpa, ", ");
+                    try shapes.appendSlice(self.gpa, ast.writtenText(field.written));
+                }
+                if (fields.len != 0) try shapes.append(self.gpa, ')');
+                try shapes.appendSlice(self.gpa, "`");
+            }
+            try self.sink.add(.{
+                .severity = .err,
+                .code = .t_derive,
+                .message = try std.fmt.allocPrint(arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
+                .labels = labels,
+                .notes = try arena.dupe([]const u8, &.{
+                    try std.fmt.allocPrint(arena, "a variant wraps a source when its only field has the source's type{s}; `{s}` has {s}", .{
+                        if (std.mem.indexOfScalar(u8, source_text, ';') != null) " (array lengths match only when spelled alike)" else "",
+                        target_name,
+                        shapes.items,
+                    }),
+                }),
+            });
+        }
+    }
+
     /// Discharges every component row through the ordinary implementation
     /// index under the generated implementation's written constraint context.
     fn checkComponentRequirements(self: *Checker) std.mem.Allocator.Error!void {
@@ -31274,12 +31370,11 @@ const Checker = struct {
             // The entry's written arguments are types of the source request, so
             // the lengths they write are typed here, as the generated
             // implementation's copy is typed on its own.
-            const entry_arguments = self.ast.deriveTrait(descriptor.derive_trait).ref.args;
-            for (self.ast.typeArgs(entry_arguments)) |argument| {
-                self.current = self.program.moduleOf(descriptor.target);
-                self.generic = if (self.ast.declTag(descriptor.derive) == .derive_impl) descriptor.derive else descriptor.target;
-                _ = try self.typeOfRefOf(self.current, self.generic, argument);
-            }
+            try self.typeDeriveArguments(
+                descriptor.target,
+                if (self.ast.declTag(descriptor.derive) == .derive_impl) descriptor.derive else descriptor.target,
+                descriptor.derive_trait,
+            );
 
             self.current = self.program.moduleOf(descriptor.generated_impl);
             self.generic = descriptor.generated_impl;
