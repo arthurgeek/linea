@@ -8,6 +8,7 @@ const Diagnostic = diagnostic.Diagnostic;
 const Label = diagnostic.Label;
 const Edit = diagnostic.Edit;
 const Fix = diagnostic.Fix;
+const Severity = diagnostic.Severity;
 const FileId = @import("../support/source.zig").FileId;
 
 /// The most of one text a diagnostic carries.
@@ -54,14 +55,20 @@ pub const Sink = struct {
         return .{ .arena = arena };
     }
 
+    /// Stores `d` and counts it. The totals count what is stored: a
+    /// diagnostic an allocation refused is in neither, so `hasErrors` never
+    /// answers for an error the list does not hold.
     pub fn add(self: *Sink, d: Diagnostic) !void {
-        switch (d.severity) {
+        try self.list.append(self.arena, try self.bounded(d));
+        self.count(d.severity);
+    }
+
+    fn count(self: *Sink, severity: Severity) void {
+        switch (severity) {
             .err => self.error_count += 1,
             .warning => self.warning_count += 1,
             .note => {},
         }
-
-        try self.list.append(self.arena, try self.bounded(d));
     }
 
     /// `d` with every text it carries within the bound.
@@ -86,12 +93,16 @@ pub const Sink = struct {
 
     /// Replaces every diagnostic with `kept`, counted and cut as `add`
     /// counts and cuts them. `kept` may be a slice of `items()`.
+    ///
+    /// The replacement is built whole before it takes the list's place, so a
+    /// refused allocation leaves the sink holding what it held.
     pub fn replaceAll(self: *Sink, kept: []const Diagnostic) !void {
-        const copied = try self.arena.dupe(Diagnostic, kept);
-        self.list.clearRetainingCapacity();
+        var replacement: std.ArrayList(Diagnostic) = try .initCapacity(self.arena, kept.len);
+        for (kept) |d| replacement.appendAssumeCapacity(try self.bounded(d));
+        self.list = replacement;
         self.error_count = 0;
         self.warning_count = 0;
-        for (copied) |d| try self.add(d);
+        for (replacement.items) |d| self.count(d.severity);
     }
 
     /// One error with a single primary label, which is the common shape.
@@ -260,6 +271,58 @@ fn cutNotes(arena: std.mem.Allocator, notes: []const []const u8) ![]const []cons
     const out = try arena.alloc([]const u8, notes.len);
     for (out, notes) |*o, n| o.* = try cut(arena, n);
     return out;
+}
+
+test "the totals count what the sink stores when an allocation is refused" {
+    const Held = struct {
+        fn agrees(sink: *const Sink) !void {
+            var errors: u32 = 0;
+            var warnings: u32 = 0;
+            for (sink.items()) |d| switch (d.severity) {
+                .err => errors += 1,
+                .warning => warnings += 1,
+                .note => {},
+            };
+            try testing.expectEqual(errors, sink.error_count);
+            try testing.expectEqual(warnings, sink.warning_count);
+            try testing.expectEqual(errors > 0, sink.hasErrors());
+        }
+    };
+    const long: [max_text_bytes + 8]u8 = @splat('a');
+
+    // Every allocation the adds make is refused in one run, and the last run
+    // refuses none.
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        var refusing = testing.FailingAllocator.init(arena.allocator(), .{ .fail_index = fail_index });
+        var sink = Sink.init(refusing.allocator());
+
+        const at: Span = .{ .start = 0, .end = 1 };
+        sink.add(.{ .severity = .warning, .message = "suspicious" }) catch {};
+        try Held.agrees(&sink);
+        sink.add(.{ .severity = .err, .message = &long }) catch {};
+        try Held.agrees(&sink);
+        sink.addError(.s_char, .from(0), at, "bad byte", "not a token") catch {};
+        try Held.agrees(&sink);
+        sink.addErrorFmt(.s_char, .from(0), at, "not a token", "bad byte {d}", .{7}) catch {};
+        try Held.agrees(&sink);
+        sink.addNote(.s_char, .from(0), at, "a hazard", "here") catch {};
+        try Held.agrees(&sink);
+
+        const before = sink.items().len;
+        sink.replaceAll(sink.items()[0 .. before / 2]) catch {
+            try testing.expectEqual(before, sink.items().len);
+        };
+        try Held.agrees(&sink);
+
+        if (!refusing.has_induced_failure) {
+            try testing.expectEqual(@as(usize, 2), sink.items().len);
+            break;
+        }
+    }
+    try testing.expect(fail_index > 0);
 }
 
 test "sink accumulates and counts by severity" {
