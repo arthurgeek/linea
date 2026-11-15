@@ -36,6 +36,8 @@ const perturb = @import("perturb.zig");
 const fmt = @import("../fmt/fmt.zig");
 const generate = @import("generate.zig");
 const mutate = @import("mutate.zig");
+const render = @import("../diagnostics/render.zig");
+const test_library = @import("../driver/test_library.zig");
 
 /// Full-program answers used only to decide which source-local rewrite applies.
 pub const Semantics = struct {
@@ -346,6 +348,14 @@ pub const Transform = enum {
     /// them in the order they were declared and permuting them changes which
     /// programs are legal.
     renamed_head_parameters,
+    /// A `let`'s written type moved to the parameter and the result of a
+    /// function its initialiser is passed through.
+    ///
+    /// The others leave every written type where it was. A type means the
+    /// same wherever it is written, so one the checker accepts as an
+    /// annotation it accepts as a parameter's type and as a result's, and the
+    /// value that reaches the binding is the one the initialiser made.
+    moved_written_type,
 
     /// The rewritten source, or null where the transformation says nothing
     /// about this program — it does not apply, or it applies to no effect.
@@ -375,6 +385,7 @@ pub const Transform = enum {
             .defer_let_written_out => try writeOutDeferLet(gpa, ast, text),
             .permuted_named_arguments => try permuteNamedArguments(gpa, ast, typing, text),
             .renamed_head_parameters => try renameHeadParameters(gpa, ast, res, text),
+            .moved_written_type => try moveWrittenType(gpa, ast, text),
             .formatted => try perturb.perturbAndFormat(gpa, text),
         } orelse return null;
 
@@ -402,9 +413,166 @@ pub const Transform = enum {
             .defer_let_written_out => "a `defer let` written out as a binding and the `defer` of its release",
             .permuted_named_arguments => "a call's named arguments rotated",
             .renamed_head_parameters => "an implementation or derive head's own type parameters renamed",
+            .moved_written_type => "a `let`'s written type moved to a function's parameter and result",
         };
     }
 };
+
+/// The scalar types a moved annotation may be built from. A value of one, or
+/// of an array or a tuple of them, owns everything it holds and borrows
+/// nothing, so passing it to a `sink` parameter and returning it gives the
+/// binding the value the initialiser made.
+const movable_scalars = [_][]const u8{
+    "UInt8",   "UInt16",  "UInt32", "UInt64",
+    "Int8",    "Int16",   "Int32",  "Int64",
+    "Float32", "Float64", "Bool",
+};
+
+/// Whether `written` is a scalar, or arrays of literal length and tuples of
+/// them, and names nothing else.
+fn isMovableType(written: []const u8) bool {
+    var names: u32 = 0;
+    var i: usize = 0;
+    while (i < written.len) {
+        const c = written[i];
+        if (std.ascii.isAlphabetic(c) or c == '_') {
+            var end = i;
+            while (end < written.len and (std.ascii.isAlphanumeric(written[end]) or written[end] == '_')) end += 1;
+            const name = written[i..end];
+            for (movable_scalars) |scalar| {
+                if (std.mem.eql(u8, scalar, name)) break;
+            } else return false;
+            names += 1;
+            i = end;
+            continue;
+        }
+        switch (c) {
+            '[', ']', '(', ')', ',', ';', ' ', '0'...'9' => i += 1,
+            else => return false,
+        }
+    }
+    return names > 0;
+}
+
+/// `let total: UInt8 = a + b` written `let total = _moved_type(a + b)`, with
+/// `fn _moved_type(sink _value: UInt8) -> UInt8 { _value }` appended.
+///
+/// The first `let` or `var` statement whose annotation `isMovableType`
+/// admits. A binding introduced by anything but the keyword and its name, a
+/// `defer let` or a `let read` among them, is left alone: its initialiser is
+/// a place or a schedule and not a value to pass on.
+fn moveWrittenType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]const u8 {
+    const helper = "_moved_type";
+    if (std.mem.indexOf(u8, text, helper) != null) return null;
+
+    for (0..ast.stmtCount()) |i| {
+        const s = node.StmtId.at(@intCast(i));
+        if (ast.stmtTag(s) != .let_decl or ast.stmtIsDeferredBinding(s)) continue;
+        const d = ast.stmtData(s);
+        if (d.init == ExprId.none) continue;
+
+        const keyword = ast.tokenSpan(ast.stmtTokens(s).start);
+        const name = ast.tokenSpan(d.name);
+        const value = ast.exprSpan(d.init);
+        if (value.end > text.len or name.end > value.start) continue;
+        const introducer = text[keyword.start..keyword.end];
+        if (!std.mem.eql(u8, introducer, "let") and !std.mem.eql(u8, introducer, "var")) continue;
+        if (std.mem.trim(u8, text[keyword.end..name.start], " \t").len != 0) continue;
+
+        // Between the name and the initialiser: `: Type =`.
+        const between = std.mem.trim(u8, text[name.end..value.start], " \t\n");
+        if (between.len < 3 or between[0] != ':' or between[between.len - 1] != '=') continue;
+        const written = std.mem.trim(u8, between[1 .. between.len - 1], " \t\n");
+        if (!isMovableType(written)) continue;
+
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        try out.writer.writeAll(text[0..name.end]);
+        try out.writer.print(" = {s}({s})", .{ helper, text[value.start..value.end] });
+        try out.writer.writeAll(text[value.end..]);
+        if (!std.mem.endsWith(u8, text, "\n")) try out.writer.writeAll("\n");
+        try out.writer.print("\nfn {s}(sink _value: {s}) -> {s} {{\n    _value\n}}\n", .{ helper, written, written });
+        return out.written();
+    }
+    return null;
+}
+
+test moveWrittenType {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const got = (try applyTo(gpa, .moved_written_type,
+        \\struct Point {
+        \\    x: UInt8,
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p: Point = .{ x = 1 }
+        \\    let pair: [UInt8; 2] = [p.x, 2] // kept
+        \\    let last: UInt8 = pair[1]
+        \\    last
+        \\}
+        \\
+    )).?;
+    try testing.expectEqualStrings(
+        \\struct Point {
+        \\    x: UInt8,
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p: Point = .{ x = 1 }
+        \\    let pair = _moved_type([p.x, 2]) // kept
+        \\    let last: UInt8 = pair[1]
+        \\    last
+        \\}
+        \\
+        \\fn _moved_type(sink _value: [UInt8; 2]) -> [UInt8; 2] {
+        \\    _value
+        \\}
+        \\
+    , got);
+
+    // A type that names a declaration and a binding with no annotation are
+    // left alone.
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .moved_written_type,
+        \\struct Point {
+        \\    x: UInt8,
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p: Point = .{ x = 1 }
+        \\    let n = p.x
+        \\    n
+        \\}
+        \\
+    ));
+}
+
+test "slow: a let and the function its type is moved to reach one verdict" {
+    try slow_tests.skipUnlessRun();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const programs = [_][]const u8{
+        "fn main() -> UInt8 {\n    let a: UInt8 = 3\n    var b: [UInt8; 2] = [a, a]\n    b[0] = 4\n    b[0] + b[1]\n}\n",
+        "fn pick(first: Bool) -> UInt8 {\n    let chosen: UInt8 = if first {\n        1\n    } else {\n        2\n    }\n    chosen\n}\n\nfn main() -> UInt8 {\n    pick(true)\n}\n",
+        "fn main() -> UInt8 {\n    let pair: (UInt8, Bool) = (7, true)\n    let (n, _) = pair\n    n\n}\n",
+    };
+    for (programs) |text| {
+        const before = try generate.checkLoadedText(gpa, "moved.lin", text, test_library.get());
+        try testing.expect(!before.sink.hasErrors());
+        var ast = try parseText(gpa, text);
+        const rewritten = (try moveWrittenType(gpa, &ast, text)).?;
+        const after = try generate.checkLoadedText(gpa, "moved.lin", rewritten, test_library.get());
+        if (after.sink.hasErrors()) {
+            var why: std.Io.Writer.Allocating = .init(gpa);
+            try render.renderAll(&why.writer, &after.table, &after.sink, .{ .color = .never });
+            std.debug.print("\n{s}\n{s}\n", .{ rewritten, why.written() });
+            return error.MovedTypeRefused;
+        }
+    }
+}
 
 /// `impl[T: Display] Display for Option[T]` written `impl[Zz0: Display] Display
 /// for Option[Zz0]`.

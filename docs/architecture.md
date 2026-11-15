@@ -428,6 +428,11 @@ never re-read the spec. A trailing
 declaration data: formatting and tools need its subject and requirements in
 their source shape even though type checking later normalises their meaning.
 
+Every numeric limit the language states is one entry of `Limit` in
+`support/limits.zig`, with the rule that reports a program past it; the pass
+that enforces a limit reads it there, and the conformance generator writes a
+program at each limit and one past it from the same table (ADR 0270).
+
 Nesting is bounded at `node.max_tree_height` (1000) levels of expression,
 pattern or written type ([S-Nesting]). The bound is on tree height, not parser recursion:
 a left-leaning chain such as `a + b + c + ...` or a run of `.` selections parses

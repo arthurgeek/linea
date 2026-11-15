@@ -43,6 +43,7 @@ const resolve_mod = @import("resolve.zig");
 const Resolution = resolve_mod.Resolution;
 const BindingId = resolve_mod.BindingId;
 const types_mod = @import("types.zig");
+const Limit = @import("../support/limits.zig").Limit;
 const retained_typing = @import("retained_typing.zig");
 const relocation_mod = @import("../syntax/relocation.zig");
 const Cycle = types_mod.Cycle;
@@ -10299,7 +10300,7 @@ const Checker = struct {
             return null;
         }
 
-        if (folded > std.math.maxInt(u32)) {
+        if (folded > Limit.array_length.most()) {
             _ = self.report(
                 .t_array_size,
                 length,
@@ -29657,9 +29658,7 @@ const Checker = struct {
         /// no link.
         const Frame = struct { reading: Read, tallest: u32 = 0, reached: bool = false };
 
-        /// How many settled references and aliases a chain of declared
-        /// answers may pass through.
-        const max_depth: u32 = 1000;
+        const max_depth: u32 = types_mod.max_answer_links;
 
         fn isLink(reading: Read) bool {
             return reading == .reference or reading == .alias;

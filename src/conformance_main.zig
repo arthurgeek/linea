@@ -73,6 +73,8 @@ const corpus_layout = @import("support/corpus.zig");
 const runtime_symbols = @import("support/runtime_symbols.zig");
 const case_anchors = corpus_layout.case_anchors;
 const generate = @import("conformance/generate.zig");
+const hostile = @import("conformance/hostile.zig");
+const Counting = @import("conformance/counting.zig").Counting;
 const matrix = @import("conformance/matrix.zig");
 const storage_gen = @import("conformance/storage.zig");
 const regions = @import("conformance/regions.zig");
@@ -110,6 +112,9 @@ comptime {
     _ = @import("conformance/coverage.zig");
     _ = @import("conformance/layout.zig");
     _ = @import("conformance/generate.zig");
+    _ = @import("conformance/hostile.zig");
+    _ = @import("conformance/counting.zig");
+    _ = @import("conformance/reach.zig");
     _ = @import("conformance/matrix.zig");
     _ = @import("conformance/storage.zig");
     _ = @import("conformance/regions.zig");
@@ -2367,104 +2372,6 @@ const CostTimer = struct {
         };
     }
 };
-
-/// An allocator that sums successful backing allocation and growth sizes.
-/// Ordinary timing forwards the backing allocator's policy. Separate accounting
-/// can refuse growth so nested arenas choose their fallback capacities.
-///
-/// A growing resize or remap charges its full resulting size because failure
-/// followed by allocate-copy-free is the same logical growth. Outcome-equivalent
-/// growth must contribute the same cost; failed growth, shrink, and free add
-/// nothing.
-const Counting = struct {
-    under: std.mem.Allocator,
-    took: usize = 0,
-    allow_growth: bool = true,
-
-    fn allocator(self: *Counting) std.mem.Allocator {
-        return .{ .ptr = self, .vtable = &.{
-            .alloc = alloc,
-            .resize = resize,
-            .remap = remap,
-            .free = free,
-        } };
-    }
-
-    fn alloc(ctx: *anyopaque, n: usize, a: std.mem.Alignment, ra: usize) ?[*]u8 {
-        const self: *Counting = @ptrCast(@alignCast(ctx));
-        const got = self.under.rawAlloc(n, a, ra) orelse return null;
-        self.took += n;
-        return got;
-    }
-
-    fn resize(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) bool {
-        const self: *Counting = @ptrCast(@alignCast(ctx));
-        if (!self.allow_growth and n > buf.len) return false;
-        if (!self.under.rawResize(buf, a, n, ra)) return false;
-        if (n > buf.len) self.took += n;
-        return true;
-    }
-
-    fn remap(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) ?[*]u8 {
-        const self: *Counting = @ptrCast(@alignCast(ctx));
-        if (!self.allow_growth and n > buf.len) return null;
-        const got = self.under.rawRemap(buf, a, n, ra) orelse return null;
-        if (n > buf.len) self.took += n;
-        return got;
-    }
-
-    fn free(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, ra: usize) void {
-        const self: *Counting = @ptrCast(@alignCast(ctx));
-        self.under.rawFree(buf, a, ra);
-    }
-};
-
-test "allocation growth costs the same after remap success or fallback" {
-    var remap_storage: [64]u8 = undefined;
-    var remap_backing = std.heap.FixedBufferAllocator.init(&remap_storage);
-    var remap_counting: Counting = .{ .under = remap_backing.allocator() };
-    var remapped: std.Io.Writer.Allocating = .init(remap_counting.allocator());
-    defer remapped.deinit();
-    try remapped.ensureTotalCapacityPrecise(8);
-    try remapped.ensureTotalCapacityPrecise(16);
-
-    var fallback_storage: [64]u8 = undefined;
-    var fallback_backing = std.heap.FixedBufferAllocator.init(&fallback_storage);
-    var fallback_counting: Counting = .{ .under = fallback_backing.allocator() };
-    var allocated: std.Io.Writer.Allocating = .init(fallback_counting.allocator());
-    defer allocated.deinit();
-    try allocated.ensureTotalCapacityPrecise(8);
-    _ = try fallback_backing.allocator().alloc(u8, 1);
-    try allocated.ensureTotalCapacityPrecise(16);
-
-    try testing.expectEqual(remap_counting.took, fallback_counting.took);
-    try testing.expectEqual(@as(usize, 24), remap_counting.took);
-}
-
-test "nested arena allocation work is independent of backing growth" {
-    const Scenario = struct {
-        fn cost(block_growth: bool) !usize {
-            var storage: [4096]u8 align(64) = undefined;
-            var backing = std.heap.FixedBufferAllocator.init(&storage);
-            var counting: Counting = .{ .under = backing.allocator(), .allow_growth = false };
-            var arena = std.heap.ArenaAllocator.init(counting.allocator());
-            defer arena.deinit();
-
-            const first = try arena.allocator().alloc(u8, 128);
-            @memset(first, 17);
-            // A separate backing allocation prevents resizing the arena's
-            // first node without changing the requests made through it.
-            if (block_growth) _ = try backing.allocator().alloc(u8, 1);
-            const second = try arena.allocator().alloc(u8, 128);
-            @memset(second, 29);
-            for (first) |byte| try testing.expectEqual(@as(u8, 17), byte);
-            for (second) |byte| try testing.expectEqual(@as(u8, 29), byte);
-            return counting.took;
-        }
-    };
-
-    try testing.expectEqual(try Scenario.cost(false), try Scenario.cost(true));
-}
 
 /// A module of `n` functions, each calling the next, so none is unused.
 ///
@@ -8368,6 +8275,8 @@ const GeneratedResult = struct {
     failures: []const Failure = &.{},
     diagnostics: []const u8 = "",
     generated: bool = false,
+    /// Whether the seed's hostile program was checked against what it states.
+    hostile: bool = false,
     properties: std.EnumMap(Property, u32) = .{},
     rewrites: std.EnumMap(Transform, u32) = .{},
     mutations: std.EnumMap(Mutation, u32) = .{},
@@ -8510,6 +8419,9 @@ fn retainStrings(keep: std.mem.Allocator, strings: []const []const u8) ![]const 
 const GeneratedSettings = struct {
     /// The checked library a generated program resumes from.
     library: *const loader.CheckedLibrary,
+    /// The allocation work a hostile program may take, measured against
+    /// `library` once for the run.
+    budget: hostile.Budget,
     cache: *const OutcomeCache,
     env: Env,
 };
@@ -8755,9 +8667,49 @@ fn checkGeneratedProgram(
         };
     }
 
+    try checkHostileProgram(scratch, &failures, settings.library, settings.budget, at_seed);
+    result.hostile = true;
+
     result.failures = try retainFailures(keep, failures.items);
     result.diagnostics = try keep.dupe(u8, diagnostics.written());
     return result;
+}
+
+/// Checks the hostile program `at_seed` selects against what it states: that
+/// it is accepted, or refused once under one rule, within its allocation
+/// budget. A program whose defect `hostile.known_findings` records must still
+/// show it.
+fn checkHostileProgram(
+    scratch: std.mem.Allocator,
+    failures: *std.ArrayList(Failure),
+    checked_library: *const loader.CheckedLibrary,
+    budget: hostile.Budget,
+    at_seed: u64,
+) !void {
+    const program = try hostile.fromSeed(scratch, at_seed);
+    const outcome = try hostile.check(scratch, checked_library, budget, program);
+    const disagreement = (try hostile.judge(scratch, budget, program, outcome)) orelse return;
+    try failures.append(scratch, .{
+        .path = try std.fmt.allocPrint(scratch, "hostile/{d}.lin ({f})", .{ at_seed, program.shape }),
+        .what = disagreement.what,
+        .expected = disagreement.expected,
+        .actual = disagreement.actual,
+    });
+}
+
+test "a seed's hostile program holds, or shows the finding recorded for it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    const budget = try hostile.Budget.measure(scratch, test_library.get());
+
+    var failures: std.ArrayList(Failure) = .empty;
+    // The first seed is a program with nothing recorded against it, and the
+    // second is the one the first finding names.
+    for ([_]u64{ 0, hostile.known_findings[0].seed }) |seed| {
+        try checkHostileProgram(scratch, &failures, test_library.get(), budget, seed);
+    }
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
 }
 
 const GeneratedWalk = struct {
@@ -10215,7 +10167,7 @@ test "a generated result retains failures past its seed scratch" {
         scratch.allocator(),
         keep.allocator(),
         testing.io,
-        .{ .library = test_library.get(), .cache = &cache, .env = .{
+        .{ .library = test_library.get(), .budget = try hostile.Budget.measure(testing.allocator, test_library.get()), .cache = &cache, .env = .{
             .scratch = root,
             .runtime = runtime,
             .sanitize = null,
@@ -10251,7 +10203,7 @@ test "generated workers preserve serial results" {
     defer testing.allocator.free(runtime);
     const cache = try OutcomeCache.init(testing.allocator, testing.io, null, root, runtime, null);
     defer testing.allocator.free(cache.dir);
-    const settings: GeneratedSettings = .{ .library = test_library.get(), .cache = &cache, .env = .{
+    const settings: GeneratedSettings = .{ .library = test_library.get(), .budget = try hostile.Budget.measure(testing.allocator, test_library.get()), .cache = &cache, .env = .{
         .scratch = root,
         .runtime = runtime,
         .sanitize = null,
@@ -16702,6 +16654,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     var made_mutations: std.EnumMap(Mutation, u32) = .{};
     var made_damages: std.EnumMap(Damage, u32) = .{};
     var generated: u32 = 0;
+    var hostile_checked: u32 = 0;
     // The same question for the properties that are not rewrites: how many
     // files each was actually asked about. A property is counted only where it
     // compared something, so one that returns early everywhere reads as zero
@@ -17136,6 +17089,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         if (runtime_path) |rt| {
             const generated_settings: GeneratedSettings = .{
                 .library = checked_library,
+                .budget = try hostile.Budget.measure(gpa, checked_library),
                 .cache = &cache,
                 .env = .{
                     .scratch = scratch_dir,
@@ -17164,6 +17118,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                 &made_damages,
                 null,
             );
+            for (results) |result| hostile_checked += @intFromBool(result.hostile);
         }
     }
     generated_zone.end();
@@ -17189,6 +17144,20 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
             generated,
             seed,
             seed + programs - 1,
+        });
+    }
+    if (enforce_floors and programs > 0 and runtime_path != null and hostile_checked != programs) {
+        try failures.append(gpa, .{
+            .path = "the generated programs",
+            .what = "checked fewer hostile programs than seeds",
+            .expected = try std.fmt.allocPrint(gpa, "{d}", .{programs}),
+            .actual = try std.fmt.allocPrint(gpa, "{d}", .{hostile_checked}),
+        });
+    }
+    if (hostile_checked > 0) {
+        std.debug.print("conformance: {d} hostile program(s) held to what each states, {d} finding(s) recorded\n", .{
+            hostile_checked,
+            hostile.known_findings.len,
         });
     }
     // The two counts apart rather than their sum. The floor is on the corpus
