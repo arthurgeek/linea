@@ -4350,7 +4350,13 @@ fields cannot change program results.
 wide; the limit is the largest offset the representation can hold. Larger types
 are diagnosed. The limit
 applies to every reachable type, including instantiations discovered only inside
-generic bodies, so successful checking includes monomorphisation.
+generic bodies, so successful checking includes monomorphisation. A type that
+holds one too wide is too wide because that one is, so the report names the type
+at which the width crosses the limit, once, at the declaration it was made from;
+two types that cross on their own are each reported. A type still written with a
+type parameter has no width, so the limit is asked of each type that settles the
+parameter and not of the one that holds it: `struct Row[T] { items: [T; 1073741824] }`
+is accepted, and so is `Row[UInt8]`, which is 2^30 bytes wide.
 
 **[T-InfiniteLayout]** The graph formed by traversing inline type parts must be
 acyclic. A value that contains itself inline has no finite size. An indirection

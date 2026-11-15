@@ -5080,7 +5080,7 @@ pub fn reportOversizedTypes(
     const ast = &program.ast;
     try builder.writeHeldParts();
     var next = from;
-    while (builder.nextOversized(next)) |t| {
+    while (try builder.nextOversized(next)) |t| {
         next = @intFromEnum(t) + 1;
 
         // A declared type is reported where it is declared, and an

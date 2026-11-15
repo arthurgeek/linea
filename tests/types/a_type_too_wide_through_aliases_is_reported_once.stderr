@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]], Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]]], Pair[Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]], Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]]]], Pair[Pair[Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]], Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]]], Pair[Pair[Pair[UInt8, ... (truncated)
+ --> tests/types/a_type_too_wide_through_aliases_is_reported_once.lin:6:8
+  |
+6 | struct Pair[A, B] {
+  |        ^^^^ hold fewer parts, or nest them less deeply

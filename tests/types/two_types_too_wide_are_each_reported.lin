@@ -1,0 +1,78 @@
+// [L-Size]. Two types cross the limit on their own, one built of pairs and
+// one of trios, and neither holds the other, so each is reported.
+struct Pair[A, B] {
+    left: A,
+    right: B,
+}
+
+struct Trio[A, B, C] {
+    first: A,
+    second: B,
+    third: C,
+}
+
+alias Twice0[T] = Pair[T, T]
+alias Twice1[T] = Pair[Twice0[T], Twice0[T]]
+alias Twice2[T] = Pair[Twice1[T], Twice1[T]]
+alias Twice3[T] = Pair[Twice2[T], Twice2[T]]
+alias Twice4[T] = Pair[Twice3[T], Twice3[T]]
+alias Twice5[T] = Pair[Twice4[T], Twice4[T]]
+alias Twice6[T] = Pair[Twice5[T], Twice5[T]]
+alias Twice7[T] = Pair[Twice6[T], Twice6[T]]
+alias Twice8[T] = Pair[Twice7[T], Twice7[T]]
+alias Twice9[T] = Pair[Twice8[T], Twice8[T]]
+alias Twice10[T] = Pair[Twice9[T], Twice9[T]]
+alias Twice11[T] = Pair[Twice10[T], Twice10[T]]
+alias Twice12[T] = Pair[Twice11[T], Twice11[T]]
+alias Twice13[T] = Pair[Twice12[T], Twice12[T]]
+alias Twice14[T] = Pair[Twice13[T], Twice13[T]]
+alias Twice15[T] = Pair[Twice14[T], Twice14[T]]
+alias Twice16[T] = Pair[Twice15[T], Twice15[T]]
+alias Twice17[T] = Pair[Twice16[T], Twice16[T]]
+alias Twice18[T] = Pair[Twice17[T], Twice17[T]]
+alias Twice19[T] = Pair[Twice18[T], Twice18[T]]
+alias Twice20[T] = Pair[Twice19[T], Twice19[T]]
+alias Twice21[T] = Pair[Twice20[T], Twice20[T]]
+alias Twice22[T] = Pair[Twice21[T], Twice21[T]]
+alias Twice23[T] = Pair[Twice22[T], Twice22[T]]
+alias Twice24[T] = Pair[Twice23[T], Twice23[T]]
+alias Twice25[T] = Pair[Twice24[T], Twice24[T]]
+alias Twice26[T] = Pair[Twice25[T], Twice25[T]]
+alias Twice27[T] = Pair[Twice26[T], Twice26[T]]
+alias Twice28[T] = Pair[Twice27[T], Twice27[T]]
+alias Twice29[T] = Pair[Twice28[T], Twice28[T]]
+alias Twice30[T] = Pair[Twice29[T], Twice29[T]]
+alias Twice31[T] = Pair[Twice30[T], Twice30[T]]
+alias Twice32[T] = Pair[Twice31[T], Twice31[T]]
+alias Twice33[T] = Pair[Twice32[T], Twice32[T]]
+alias Thrice0[T] = Trio[T, T, T]
+alias Thrice1[T] = Trio[Thrice0[T], Thrice0[T], Thrice0[T]]
+alias Thrice2[T] = Trio[Thrice1[T], Thrice1[T], Thrice1[T]]
+alias Thrice3[T] = Trio[Thrice2[T], Thrice2[T], Thrice2[T]]
+alias Thrice4[T] = Trio[Thrice3[T], Thrice3[T], Thrice3[T]]
+alias Thrice5[T] = Trio[Thrice4[T], Thrice4[T], Thrice4[T]]
+alias Thrice6[T] = Trio[Thrice5[T], Thrice5[T], Thrice5[T]]
+alias Thrice7[T] = Trio[Thrice6[T], Thrice6[T], Thrice6[T]]
+alias Thrice8[T] = Trio[Thrice7[T], Thrice7[T], Thrice7[T]]
+alias Thrice9[T] = Trio[Thrice8[T], Thrice8[T], Thrice8[T]]
+alias Thrice10[T] = Trio[Thrice9[T], Thrice9[T], Thrice9[T]]
+alias Thrice11[T] = Trio[Thrice10[T], Thrice10[T], Thrice10[T]]
+alias Thrice12[T] = Trio[Thrice11[T], Thrice11[T], Thrice11[T]]
+alias Thrice13[T] = Trio[Thrice12[T], Thrice12[T], Thrice12[T]]
+alias Thrice14[T] = Trio[Thrice13[T], Thrice13[T], Thrice13[T]]
+alias Thrice15[T] = Trio[Thrice14[T], Thrice14[T], Thrice14[T]]
+alias Thrice16[T] = Trio[Thrice15[T], Thrice15[T], Thrice15[T]]
+alias Thrice17[T] = Trio[Thrice16[T], Thrice16[T], Thrice16[T]]
+alias Thrice18[T] = Trio[Thrice17[T], Thrice17[T], Thrice17[T]]
+alias Thrice19[T] = Trio[Thrice18[T], Thrice18[T], Thrice18[T]]
+alias Thrice20[T] = Trio[Thrice19[T], Thrice19[T], Thrice19[T]]
+alias Thrice21[T] = Trio[Thrice20[T], Thrice20[T], Thrice20[T]]
+alias Thrice22[T] = Trio[Thrice21[T], Thrice21[T], Thrice21[T]]
+
+fn _take(_pairs: Twice33[UInt8], _trios: Thrice22[UInt8]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}
