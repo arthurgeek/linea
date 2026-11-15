@@ -1,0 +1,3 @@
+import link24
+
+pub use link24.value

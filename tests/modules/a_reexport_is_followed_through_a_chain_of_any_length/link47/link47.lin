@@ -1,0 +1,3 @@
+import link48
+
+pub use link48.value
