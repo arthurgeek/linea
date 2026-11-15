@@ -1,0 +1,13 @@
+// A derive's argument is written once, so what is wrong in it is reported
+// once, where it is written. The implementation the derive generates holds
+// a copy of the argument, and says nothing a second time.
+@derive(From[[UInt8; true]])
+enum Frame {
+    Pair([UInt8; true]),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _frame = Frame.Unknown
+    0
+}
