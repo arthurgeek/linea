@@ -11,7 +11,7 @@ const none_index = std.math.maxInt(u32);
 pub const max_tree_height: usize = Limit.tree_height.most();
 
 /// The fewest components a tuple holds. One parenthesised value is a group.
-pub const min_tuple_arity: u32 = 2;
+pub const min_tuple_arity: u32 = Limit.tuple_components.fewest().?;
 
 /// The most components a tuple holds. A product with more positional parts is
 /// a struct with its names withheld. The prelude declares `Tuple2` through

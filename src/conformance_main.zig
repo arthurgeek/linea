@@ -8419,9 +8419,6 @@ fn retainStrings(keep: std.mem.Allocator, strings: []const []const u8) ![]const 
 const GeneratedSettings = struct {
     /// The checked library a generated program resumes from.
     library: *const loader.CheckedLibrary,
-    /// The allocation work a hostile program may take, measured against
-    /// `library` once for the run.
-    budget: hostile.Budget,
     cache: *const OutcomeCache,
     env: Env,
 };
@@ -8667,7 +8664,7 @@ fn checkGeneratedProgram(
         };
     }
 
-    try checkHostileProgram(scratch, &failures, settings.library, settings.budget, at_seed);
+    try checkHostileProgram(scratch, &failures, settings.library, at_seed);
     result.hostile = true;
 
     result.failures = try retainFailures(keep, failures.items);
@@ -8676,19 +8673,18 @@ fn checkGeneratedProgram(
 }
 
 /// Checks the hostile program `at_seed` selects against what it states: that
-/// it is accepted, or refused once under one rule, within its allocation
-/// budget. A program whose defect `hostile.known_findings` records must still
-/// show it.
+/// it is accepted, or refused with exactly the reports it counts, within the
+/// bound on the work its check adds. A program whose defect
+/// `hostile.known_findings` records must be answered exactly as recorded.
 fn checkHostileProgram(
     scratch: std.mem.Allocator,
     failures: *std.ArrayList(Failure),
     checked_library: *const loader.CheckedLibrary,
-    budget: hostile.Budget,
     at_seed: u64,
 ) !void {
     const program = try hostile.fromSeed(scratch, at_seed);
-    const outcome = try hostile.check(scratch, checked_library, budget, program);
-    const disagreement = (try hostile.judge(scratch, budget, program, outcome)) orelse return;
+    const observed = try hostile.observe(scratch, checked_library, program);
+    const disagreement = (try hostile.judge(scratch, program, observed)) orelse return;
     try failures.append(scratch, .{
         .path = try std.fmt.allocPrint(scratch, "hostile/{d}.lin ({f})", .{ at_seed, program.shape }),
         .what = disagreement.what,
@@ -8697,17 +8693,20 @@ fn checkHostileProgram(
     });
 }
 
-test "a seed's hostile program holds, or shows the finding recorded for it" {
+test "slow: the first seed's hostile program and every recorded finding's are answered as expected" {
+    try slow_tests.skipUnlessRun();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const scratch = arena.allocator();
-    const budget = try hostile.Budget.measure(scratch, test_library.get());
 
     var failures: std.ArrayList(Failure) = .empty;
-    // The first seed is a program with nothing recorded against it, and the
-    // second is the one the first finding names.
-    for ([_]u64{ 0, hostile.known_findings[0].seed }) |seed| {
-        try checkHostileProgram(scratch, &failures, test_library.get(), budget, seed);
+    try checkHostileProgram(scratch, &failures, test_library.get(), 0);
+    // A finding whose seed is past the seeds a walk generates is held here.
+    for (hostile.known_findings) |finding| {
+        try checkHostileProgram(scratch, &failures, test_library.get(), finding.seed);
+    }
+    for (failures.items) |failure| {
+        std.debug.print("{s}: {s}\n--- expected\n{s}\n--- actual\n{s}\n", .{ failure.path, failure.what, failure.expected, failure.actual });
     }
     try testing.expectEqual(@as(usize, 0), failures.items.len);
 }
@@ -10167,7 +10166,7 @@ test "a generated result retains failures past its seed scratch" {
         scratch.allocator(),
         keep.allocator(),
         testing.io,
-        .{ .library = test_library.get(), .budget = try hostile.Budget.measure(testing.allocator, test_library.get()), .cache = &cache, .env = .{
+        .{ .library = test_library.get(), .cache = &cache, .env = .{
             .scratch = root,
             .runtime = runtime,
             .sanitize = null,
@@ -10194,7 +10193,8 @@ fn expectFailuresEqual(expected: []const Failure, actual: []const Failure) !void
     }
 }
 
-test "generated workers preserve serial results" {
+test "slow: generated workers preserve serial results" {
+    try slow_tests.skipUnlessRun();
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const root = try std.fmt.allocPrint(testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
@@ -10203,7 +10203,7 @@ test "generated workers preserve serial results" {
     defer testing.allocator.free(runtime);
     const cache = try OutcomeCache.init(testing.allocator, testing.io, null, root, runtime, null);
     defer testing.allocator.free(cache.dir);
-    const settings: GeneratedSettings = .{ .library = test_library.get(), .budget = try hostile.Budget.measure(testing.allocator, test_library.get()), .cache = &cache, .env = .{
+    const settings: GeneratedSettings = .{ .library = test_library.get(), .cache = &cache, .env = .{
         .scratch = root,
         .runtime = runtime,
         .sanitize = null,
@@ -17089,7 +17089,6 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         if (runtime_path) |rt| {
             const generated_settings: GeneratedSettings = .{
                 .library = checked_library,
-                .budget = try hostile.Budget.measure(gpa, checked_library),
                 .cache = &cache,
                 .env = .{
                     .scratch = scratch_dir,

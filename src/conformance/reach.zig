@@ -11,20 +11,16 @@ const std = @import("std");
 const testing = std.testing;
 
 const Code = @import("../diagnostics/diagnostic.zig").Code;
-const Limit = @import("../support/limits.zig").Limit;
 const Mutation = @import("mutate.zig").Mutation;
 const hostile = @import("hostile.zig");
 
-/// Whether some generator part writes a program `rule` must refuse.
+/// Whether some generator part writes a program `rule` must refuse, and the
+/// program's check is compared against that rule.
 pub fn generated(rule: Code) bool {
     for (std.enums.values(Mutation)) |mutation| {
         if (std.mem.eql(u8, mutation.rule(), rule.ruleName())) return true;
     }
-    for (std.enums.values(Limit)) |limit| {
-        if (hostile.unwritten(limit) == null and hostile.codeOf(limit) == rule) return true;
-    }
-    // The mistake planted in a doubling alias chain.
-    return rule == .t_mismatch;
+    return hostile.reaches(rule);
 }
 
 /// Rules that share one reason no generated program reaches them yet.
@@ -43,8 +39,6 @@ pub const not_yet_generated = [_]NotYet{
             .s_encoding,
             .s_embed,
             .s_char,
-            .s_string,
-            .s_format,
             .s_float,
             .s_expr,
             .s_name,

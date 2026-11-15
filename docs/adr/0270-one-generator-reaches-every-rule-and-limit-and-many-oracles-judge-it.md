@@ -1,7 +1,7 @@
 # 270. One generator reaches every rule and limit, and many oracles judge its programs
 
 Status: Accepted — 2026-11-15; extends 0027, 0029 and 0057. The generator's
-hostile shapes, the limit table, the budget oracle, the position rewrite and
+hostile shapes, the limit table, the work bound, the position rewrite and
 the rule floor are built. The other oracles under *Order* are the direction
 this record sets, and each is built by the change that lands it.
 
@@ -65,9 +65,12 @@ states the rule that must refuse it, and is held to that rule where it runs. A
 floor (`src/conformance/reach.zig`) compares those statements with the rules
 the compiler can emit, as the test beside `Code` compares the same enum with
 the semantics document: a rule is stated by some part, or it is on
-`not_yet_generated` with the reason nothing reaches it. The list is exact. A
-rule on it that a part now states fails, as a guide marker that is no longer
-needed fails, so the list shrinks whenever reach grows and cannot be stale.
+`not_yet_generated` with the reason nothing reaches it. A statement counts
+only where a check is compared against it: a shape whose recorded finding no
+longer includes a report under the rule it states does not reach that rule.
+The list is exact. A rule on it that a part now reaches fails, as a guide
+marker that is no longer needed fails, so the list shrinks whenever reach
+grows and cannot be stale.
 
 **Hostile shapes** (`src/conformance/hostile.zig`):
 
@@ -78,59 +81,103 @@ needed fails, so the list shrinks whenever reach grows and cannot be stale.
 
 **Near-valid programs with exactly one planted mistake.** The mutations of
 0057 are this for well-typed programs. A hostile shape carries one too: a
-`UInt8` given where a doubling chain's type is wanted.
+`UInt8` given where a doubling chain's type is wanted, at depths shallow
+enough that the report is all the check is held to and at depths where the
+type's name is the cost.
 
 Every generated program states what the compiler must say of it: accepted, or
 refused with so many reports under one rule and none under another. The runner
 holds the compiler to the statement. This is the change to 0027, whose
 generator could only state "accepted".
 
-A hostile shape writes its type in a seeded position: a `let` annotation, a
-function parameter, a struct field, an enum payload, the trait argument of an
-`impl`, a derive argument, or the head of an `impl`. The language states its
-limits about a type and not about where it is written, so the expectation is
-the same in each. Where a position changes what is counted, the generator
-writes that down instead of fitting the compiler: a trait's argument stands
-one level below the written type that names the trait, so the nesting limit is
-reached one level sooner there, and an enum adds its tag to a payload, so a
-payload exactly at the byte limit is not written.
+A limit on a written type is written in a seeded position: a `let`
+annotation, a function parameter, a struct field, an enum payload, the trait
+argument of an `impl`, a derive argument, or the head of an `impl`. A type is
+the same type wherever it is written, so a chain of declared answers, a tuple
+or an array that is refused in one position is refused in each. Two limits
+count something a position adds to, and the generator writes that down
+instead of fitting the compiler. [S-Nesting] counts depth from the type's
+place in the tree, and a trait's argument stands one level below the written
+type that names the trait, so the nesting limit is reached one level sooner
+there. An enum is its payload behind a tag word, rounded up to a word, so the
+widest payload within [L-Size] is fifteen bytes short of the limit and the
+payload one byte wider is the one past it. A limit on an expression, the `#`
+of a raw literal, the depth of interpolation and a format's width, is written
+as the initialiser of a `let`.
 
 ### Limits come from one table the compiler reads
 
-`src/support/limits.zig` lists every numeric limit the language states, with
-the rule that reports a program past it: tree height, tuple components, the
-parameters of a callable type that heads an implementation, the links of a
-chain of declared answers, the cells of a coverage check, the length of an
-array and the bytes of a type. The pass that enforces a limit reads it from
-the table and holds no second copy of the number.
+`src/support/limits.zig` lists the counts the language bounds: each limit
+that a rule states as a number and that a diagnostic under the rule enforces.
+There are eleven: tree height, tuple components (with the fewest a tuple
+has), the parameters of a callable type that heads an implementation, the
+links of a chain of declared answers, the cells of a coverage check, the
+length of an array, the bytes of a type, the `#` that open a raw literal, the
+interpolations open at once, a format's width or precision, and the bytes of
+an embedded file. The pass that enforces a limit reads it from the table, and
+a diagnostic that writes the number as a numeral formats it from the table.
+
+Two bounds the compiler holds are not in it, because neither is a rule of
+the language: the largest source a position can address
+(`source.max_bytes`), which is reported with no rule name, and the ranges of
+the numeric types, which are values and not counts of what a program writes.
+
+The compiler and the generator read one table, so a wrong number in it would
+be accepted by both. The semantics document is the third statement of each
+limit, and a test writes the sentence that states each one from the table's
+number and fails when the document does not hold it. Stating the
+interpolation limit there was part of this change; the document had not.
 
 The generator switches over the table exhaustively. A limit added to it does
 not compile into the generator until it is given a shape, written at N and at
-N+1, or a reason no shape reaches it. Nobody has to remember that a new limit
-wants a case in each position; the compiler's own table is what the generator
-iterates.
+N+1, or a reason no shape reaches it. Two have a reason today: the cells of a
+coverage check, which no part writes a `match` wide enough for, and the bytes
+of an embedded file, which is a second file.
 
 ### The oracles
 
 Each is a property of every generated program, checked without a recorded
 answer.
 
-**(a) Budget.** Checking a program takes allocation work bounded by a linear
-function of its text. The work is counted by the allocator the sweep counts
-with, in-place growth refused, so it is one number on every machine and reads
-no clock. The bound is twice what the smallest program costs beside the
-library, plus a fixed allowance per byte of source. A pass whose work follows
-a shared type's names exceeds any bound of that form at the shallowest chain
-generated, and the counting allocator refuses the allocation that passes the
-bound, so the check ends instead of exhausting memory.
+**(a) Work bound.** The check of a program adds allocation work that grows no
+faster than linearly in what the program writes. Work is the sum of the
+sizes a check asks its allocator for, counted above a fresh arena with growth
+in place refused; no clock is read. Three programs are checked: the shape,
+the same shape at half its size, and the shape's position with a plain
+`UInt8` in it. The plain program's work is everything the library and the
+position cost, so the differences are what the hostile thing adds. The shape
+may add three times what its half adds, where linear work adds twice and
+quadratic work four times, and above that an allowance of one sixty-fourth of
+the plain program's work.
+
+The allowance is what the count's own error needs. A check appends to tables
+that already hold the library, a table that grows is charged its whole new
+size, and which of the three programs crosses a capacity is an accident. The
+error is a few tenths of a percent of the plain work and grows with the
+library, so the allowance is a share of the plain work and not a number of
+bytes. It sets what the bound can see: added work under it is not held to the
+ratio. Measured with a cost planted in the compiler, a pass that spells out a
+doubling chain's name is fifty-nine times its bound at depth twenty, the
+shallowest generated; a pass that allocates thirty-two bytes for each
+enclosing level at each level of a type nested a thousand deep, sixteen
+megabytes, is over its bound, and one that allocates four bytes, two
+megabytes, is not. A check that passes its bound runs on, so its reports are still
+compared, and is stopped a gibibyte later.
+
+The count is the same for two checks of one program in one build. It is not
+claimed to be the same number across builds or targets, and nothing compares
+it against a recorded number.
 
 **(b) Rewrite invariance.** The rewrites of 0026 and 0134 hold a program to
 the same answer under changes that cannot alter its meaning. Moving a written
 type between positions is one of them. For a hostile shape the generator
 writes the type in each position and states one expectation. For every other
-program a rewrite moves a `let`'s annotation to the parameter and result of a
-function the initialiser passes through; the rewritten program must be
-accepted, build, and answer alike.
+program a rewrite moves a binding's annotation to the parameter and result of
+a function the initialiser passes through; the rewritten program must be
+accepted, build, and answer alike. It applies to a binding that is not a
+constant, a `var` or a `let` whose initialiser no constant expression has the
+form of, because a call is not a constant expression and a constant may be
+read as an array length, a pattern's bound or a default.
 
 **(c) One mistake, one report, and its fixes apply.** A program with one
 planted mistake earns exactly the reports its statement counts, all under its
@@ -159,11 +206,14 @@ undisturbed check gives.
 
 An oracle that finds a defect in the compiler does not wait for the fix and is
 not weakened to pass. `hostile.known_findings` records each defect with a seed
-that shows it, the way it breaks and what the language says instead. A program
-a finding covers must break in exactly that way. When it holds, the finding
-fails as no longer reproducing and its entry is removed with the fix. The walk
-is green while a recorded defect stands, and red for a new defect, a recorded
-one that changed, and a recorded one that was fixed.
+that shows it, every report the compiler makes of the programs it covers, in
+order, whether their check is over its bound, and what the language requires
+instead. A program a finding covers must be answered exactly as recorded: one
+more report, or one under another rule, fails as it does for a program with no
+finding. When the program is answered as it states, the finding fails as no
+longer reproducing and its entry is removed with the fix. The walk is green
+while a recorded defect stands, and red for a new defect, a recorded one that
+changed, and a recorded one that was fixed.
 
 ### What this does not cover
 
@@ -177,19 +227,25 @@ inputs reaches the library only as far as a program calls it.
 sized by the program and held per function, a dead path: these are properties
 of the compiler's source, not of any program's behaviour, until some input
 makes the two places disagree. They are found by review and by the build
-gates. The budget oracle finds the second kind only once a generated shape is
+gates. The work bound finds the second kind only once a generated shape is
 large enough to show it.
 
-**Pure computation with no allocation.** The budget counts allocation. A loop
+**Pure computation with no allocation.** The bound counts allocation. A loop
 that is exponential in time and allocates nothing passes it; the sweep's
 timed dimensions and the per-case timeout remain the checks for that.
+
+**Superlinear work under the allowance.** A quadratic pass whose cost at a
+limit is under a sixty-fourth of the plain program's work passes the bound.
+The sweep's dimensions, which grow a shape until its slope shows, remain the
+check for a small constant.
 
 ### Order
 
 Each line is its own change, with the generator parts it needs.
 
-1. Built with this record: the limit table; hostile shapes for shared type
-   graphs and for every limit a written type reaches; the statement each
+1. Built with this record: the limit table and its tie to the semantics
+   document; hostile shapes for shared type graphs and for every limit one
+   file reaches by a written type or an expression; the statement each
    generated program makes; oracle (a); the position rewrite of oracle (b);
    the rule floor and its list; the findings list. The report half of oracle
    (c) is held for hostile shapes, because a statement that counts reports is
@@ -197,8 +253,8 @@ Each line is its own change, with the generator parts it needs.
 2. Oracle (c) for every refused program, with fixes applied, and generator
    parts that plant one mistake per rule family, which is what shortens
    `not_yet_generated`.
-3. Oracle (g), which needs only the counting allocator this record adds a
-   bound to.
+3. Oracle (g), which needs only the counting allocator, to which this record
+   adds a point past which it refuses.
 4. Oracle (d), over generated programs and the rarely written forms the
    coverage floors name.
 5. Oracle (f), in the soundness step, where programs are already built.
@@ -206,30 +262,31 @@ Each line is its own change, with the generator parts it needs.
 
 ## Consequences
 
-The generator found defects on the day it ran, in four of the seven classes,
-and they are recorded in `known_findings` and not fixed here: a chain of 1001
-aliases accepted in an `impl`'s trait argument, in a derive argument and
-inside an `impl`'s head; a type nested past the limit reported and then
-reported again as a consequence; a tuple and an array type past their limits
-reported twice when a derive names them; and a mismatch against a doubling
-chain whose allocation work doubles with each alias, where refusing the
-allocation drops the report and leaves the program accepted.
+The generator found defects on the day it ran, and they are recorded in
+`known_findings` and not fixed here: a chain of 1001 aliases accepted in an
+`impl`'s trait argument, in a derive argument and inside an `impl`'s head; a
+type nested past the limit reported and then reported again as a consequence;
+a nine-component tuple and an over-long array written twice, in a derive and
+its payload, and reported three times; a raw literal opened with nine `#` and
+a literal that interpolates seventeen deep each followed by reports of the
+code around them; and a mismatch against a doubling chain whose work doubles
+with each alias.
 
-`not_yet_generated` holds 129 of the 151 rules. That is the measure of how
+`not_yet_generated` holds 127 of the 151 rules. That is the measure of how
 little of the language's refusals a generated program reaches, written where a
 build fails if it is wrong. It is a list of work, grouped by what reaching
 each group takes.
 
-Every seed now checks two programs, the well-typed one and a hostile one. A
-hostile program is checked, not built or run, so the walk grows by a check per
-seed.
+Every seed now checks the well-typed program and a hostile one. A hostile
+program is checked, not built or run, and its bound takes two more checks, so
+the walk grows by three checks per seed.
 
-The budget's fixed part is measured once per run against the checked library,
-so the bound follows the library's size. Its per-byte allowance is a constant
-chosen far above what the widest generated program takes; a pass that grows
-linear work by a large constant factor passes it.
+The bound is relative on both sides, a ratio against the half size and an
+allowance against the plain program, so it holds no number that was right
+for one library. The cost is sensitivity: it sees work that is a visible
+share of a check, not a small superlinear term.
 
-The seven positions are written by hand. A position the language adds is not
+The eight positions are written by hand. A position the language adds is not
 generated until it is added to `Position`.
 
 A limit's count is a number in the table, and the words of a diagnostic that

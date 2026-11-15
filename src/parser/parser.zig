@@ -359,6 +359,8 @@ fn isComparison(tag: Tag) bool {
 /// which walks the same shape and recurses the same way.
 pub const max_nesting = node.max_tree_height;
 
+const nesting_limit_label = std.fmt.comptimePrint("the limit is {d} levels", .{max_nesting});
+
 const Parser = struct {
     gpa: std.mem.Allocator,
     cursor: Cursor,
@@ -5860,7 +5862,7 @@ const Parser = struct {
             .s_nesting,
             at,
             what,
-            "the limit is 1000 levels",
+            nesting_limit_label,
         );
     }
 
@@ -6135,7 +6137,7 @@ const Parser = struct {
     fn skipTooDeepBracket(self: *Parser, open: TokenId, close: TokenId) std.mem.Allocator.Error!ExprId {
         if (!self.reported_nesting) {
             self.reported_nesting = true;
-            try self.reportAt(.s_nesting, open, "this expression nests too deeply", "the limit is 1000 levels");
+            try self.reportAt(.s_nesting, open, "this expression nests too deeply", nesting_limit_label);
         }
         self.cursor.seek(@intCast(close.index() + 1));
         return self.builder.addLiteral(.err, open, .{ .start = open, .end = TokenId.at(close.index() + 1) });

@@ -163,15 +163,20 @@ until it is green.
   disagree about the language.
 - Each generated seed also checks one hostile program
   (`src/conformance/hostile.zig`, ADR 0270): a generic alias chain that names
-  the alias before it twice, or a written type at one of the limits in
+  the alias before it twice, or a program at one of the limits in
   `src/support/limits.zig` and one past it, in a seeded position. The program
   states whether it is accepted or which rule refuses it and with how many
-  reports, and its check is held to an allocation budget linear in its text.
-  A compiler defect one of them shows is recorded in `hostile.known_findings`
-  with its seed; the walk fails when a recorded finding stops reproducing, so
-  the fix removes the entry. `src/conformance/reach.zig` lists the rules no
-  generated or mutated program reaches, and fails when a listed rule is
-  reached or an unlisted one is not.
+  reports. Its check may add three times the allocation work the same shape
+  adds at half its size, and a sixty-fourth of what its position costs with
+  nothing hostile in it. A compiler defect one of them shows is recorded in
+  `hostile.known_findings` with its seed and every report the compiler makes;
+  the walk fails when the program is answered any other way, and when it is
+  answered as it states, so the fix removes the entry.
+  `src/conformance/reach.zig` lists the rules no generated or mutated program
+  reaches, and fails when a listed rule is reached or an unlisted one is not.
+  A limit is added to `limits.zig` with the sentence of
+  `docs/linea-semantics.md` that states it, which a test writes from the
+  table's number.
 - Every rejected case of one file is also held to its helps: a diagnostic
   carries a `Fix` for each help concrete enough to write, the edits that help
   names applied together, and the conformance runner applies each fix alone and

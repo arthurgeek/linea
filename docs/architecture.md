@@ -428,10 +428,15 @@ never re-read the spec. A trailing
 declaration data: formatting and tools need its subject and requirements in
 their source shape even though type checking later normalises their meaning.
 
-Every numeric limit the language states is one entry of `Limit` in
-`support/limits.zig`, with the rule that reports a program past it; the pass
-that enforces a limit reads it there, and the conformance generator writes a
-program at each limit and one past it from the same table (ADR 0270).
+A count that a rule of the language bounds, and that a diagnostic under the
+rule enforces, is one entry of `Limit` in `support/limits.zig`: tree height,
+tuple components, callable-head parameters, answer links, coverage cells,
+array length, type bytes, raw-literal `#`, interpolation depth, format width
+and precision, and embedded-file bytes. The pass that enforces a limit reads
+it there, and the conformance generator writes a program at each limit and
+one past it from the same table (ADR 0270). `source.max_bytes`, the largest
+source a position can address, is not a rule of the language and stays beside
+`Span`.
 
 Nesting is bounded at `node.max_tree_height` (1000) levels of expression,
 pattern or written type ([S-Nesting]). The bound is on tree height, not parser recursion:

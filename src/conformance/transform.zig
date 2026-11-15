@@ -348,13 +348,19 @@ pub const Transform = enum {
     /// them in the order they were declared and permuting them changes which
     /// programs are legal.
     renamed_head_parameters,
-    /// A `let`'s written type moved to the parameter and the result of a
+    /// A binding's written type moved to the parameter and the result of a
     /// function its initialiser is passed through.
     ///
     /// The others leave every written type where it was. A type means the
     /// same wherever it is written, so one the checker accepts as an
     /// annotation it accepts as a parameter's type and as a result's, and the
     /// value that reaches the binding is the one the initialiser made.
+    ///
+    /// A call is not a constant expression, so the rewrite applies only to a
+    /// binding that was not a constant before it: a `var`, or a `let` whose
+    /// initialiser is a form no constant expression has. Any other `let` may
+    /// be read as an array length, a pattern's bound or a default, and would
+    /// stop being one.
     moved_written_type,
 
     /// The rewritten source, or null where the transformation says nothing
@@ -454,13 +460,50 @@ fn isMovableType(written: []const u8) bool {
     return names > 0;
 }
 
-/// `let total: UInt8 = a + b` written `let total = _moved_type(a + b)`, with
+/// Whether `id` is a form no constant expression has, so a `let` it
+/// initialises is not a constant.
+///
+/// Decided by the outermost form alone. A literal, a name, a call, a
+/// selection, arithmetic and an aggregate may each be a constant expression
+/// depending on their parts, and are answered as if they were.
+fn isNeverConstant(ast: *const Ast, id: ExprId) bool {
+    return switch (ast.exprTag(id)) {
+        .grouped => isNeverConstant(ast, ast.unaryOperand(id)),
+        .block,
+        .conditional,
+        .while_,
+        .loop_,
+        .match_,
+        .match_read,
+        .index,
+        .copy_,
+        .dereference,
+        .try_,
+        .unwrap_else,
+        .float_literal,
+        .interp,
+        .not,
+        .logical_and,
+        .logical_or,
+        .eq,
+        .ne,
+        .lt,
+        .le,
+        .gt,
+        .ge,
+        => true,
+        else => false,
+    };
+}
+
+/// `var total: UInt8 = a + b` written `var total = _moved_type(a + b)`, with
 /// `fn _moved_type(sink _value: UInt8) -> UInt8 { _value }` appended.
 ///
-/// The first `let` or `var` statement whose annotation `isMovableType`
-/// admits. A binding introduced by anything but the keyword and its name, a
-/// `defer let` or a `let read` among them, is left alone: its initialiser is
-/// a place or a schedule and not a value to pass on.
+/// The first `var` statement, or `let` statement whose initialiser
+/// `isNeverConstant`, whose annotation `isMovableType` admits. A binding
+/// introduced by anything but the keyword and its name, a `defer let` or a
+/// `let read` among them, is left alone: its initialiser is a place or a
+/// schedule and not a value to pass on.
 fn moveWrittenType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]const u8 {
     const helper = "_moved_type";
     if (std.mem.indexOf(u8, text, helper) != null) return null;
@@ -470,6 +513,7 @@ fn moveWrittenType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?
         if (ast.stmtTag(s) != .let_decl or ast.stmtIsDeferredBinding(s)) continue;
         const d = ast.stmtData(s);
         if (d.init == ExprId.none) continue;
+        if (!ast.stmtIsMutable(s) and !isNeverConstant(ast, d.init)) continue;
 
         const keyword = ast.tokenSpan(ast.stmtTokens(s).start);
         const name = ast.tokenSpan(d.name);
@@ -508,7 +552,9 @@ test moveWrittenType {
         \\
         \\fn main() -> UInt8 {
         \\    let p: Point = .{ x = 1 }
-        \\    let pair: [UInt8; 2] = [p.x, 2] // kept
+        \\    let first: UInt8 = p.x
+        \\    var pair: [UInt8; 2] = [first, 2] // kept
+        \\    pair[0] = 3
         \\    let last: UInt8 = pair[1]
         \\    last
         \\}
@@ -521,7 +567,9 @@ test moveWrittenType {
         \\
         \\fn main() -> UInt8 {
         \\    let p: Point = .{ x = 1 }
-        \\    let pair = _moved_type([p.x, 2]) // kept
+        \\    let first: UInt8 = p.x
+        \\    var pair = _moved_type([first, 2]) // kept
+        \\    pair[0] = 3
         \\    let last: UInt8 = pair[1]
         \\    last
         \\}
@@ -532,6 +580,43 @@ test moveWrittenType {
         \\
     , got);
 
+    // A `let` whose initialiser is an element read is no constant.
+    const indexed = (try applyTo(gpa, .moved_written_type,
+        \\fn last(xs: [UInt8; 2]) -> UInt8 {
+        \\    let n: UInt8 = xs[1]
+        \\    n
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    last([1, 2])
+        \\}
+        \\
+    )).?;
+    try testing.expect(std.mem.indexOf(u8, indexed, "let n = _moved_type(xs[1])") != null);
+
+    // A `let` an array length reads is a constant, and so is one a range
+    // pattern's bound reads. Passing either through a call would leave the
+    // length and the bound with no value.
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .moved_written_type,
+        \\fn main() -> UInt8 {
+        \\    let n: UInt64 = 2
+        \\    let a: [UInt8; n] = [1, 2]
+        \\    a[0]
+        \\}
+        \\
+    ));
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .moved_written_type,
+        \\fn main() -> UInt8 {
+        \\    let top: UInt8 = 9
+        \\    let seen: UInt8 = top - 4
+        \\    match seen {
+        \\        0..=top => 1,
+        \\        _ => 0,
+        \\    }
+        \\}
+        \\
+    ));
+
     // A type that names a declaration and a binding with no annotation are
     // left alone.
     try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .moved_written_type,
@@ -541,15 +626,15 @@ test moveWrittenType {
         \\
         \\fn main() -> UInt8 {
         \\    let p: Point = .{ x = 1 }
-        \\    let n = p.x
+        \\    var n = p.x
+        \\    n = n + 1
         \\    n
         \\}
         \\
     ));
 }
 
-test "slow: a let and the function its type is moved to reach one verdict" {
-    try slow_tests.skipUnlessRun();
+test "a binding and the function its type is moved to reach one verdict" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -557,7 +642,7 @@ test "slow: a let and the function its type is moved to reach one verdict" {
     const programs = [_][]const u8{
         "fn main() -> UInt8 {\n    let a: UInt8 = 3\n    var b: [UInt8; 2] = [a, a]\n    b[0] = 4\n    b[0] + b[1]\n}\n",
         "fn pick(first: Bool) -> UInt8 {\n    let chosen: UInt8 = if first {\n        1\n    } else {\n        2\n    }\n    chosen\n}\n\nfn main() -> UInt8 {\n    pick(true)\n}\n",
-        "fn main() -> UInt8 {\n    let pair: (UInt8, Bool) = (7, true)\n    let (n, _) = pair\n    n\n}\n",
+        "fn main() -> UInt8 {\n    var pair: (UInt8, Bool) = (7, true)\n    pair = (8, false)\n    let (n, _) = pair\n    n\n}\n",
     };
     for (programs) |text| {
         const before = try generate.checkLoadedText(gpa, "moved.lin", text, test_library.get());
