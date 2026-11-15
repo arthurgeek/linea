@@ -1,0 +1,5 @@
+error[S-Entry]: a program is a list of declarations
+ --> tests/recovery/a_trait_after_a_stray_token_is_still_a_trait.lin:3:1
+  |
+3 | ?
+  | ^ expected `fn` here

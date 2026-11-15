@@ -164,7 +164,7 @@ pub fn dumpMono(
     defer gpa.free(receivers);
     @memset(receivers, node.ExprId.none);
     for (typing.postfix) |postfix| {
-        if (postfix.args.len > 0) receivers[postfix.call] = postfix.args[0];
+        if (postfix.args.len > 0) receivers[postfix.call.index()] = postfix.args[0];
     }
 
     // The types first, because a signature below names them. An instantiation
@@ -180,7 +180,9 @@ pub fn dumpMono(
     for (0..ast.declCount()) |i| {
         const d = node.DeclId.at(@intCast(i));
         switch (ast.declTag(d)) {
-            .struct_, .enum_ => {},
+            // A newtype is a type of its own, named in a signature or a field
+            // like any other, so it is declared where one is.
+            .struct_, .enum_, .newtype => {},
             else => continue,
         }
         if (ast.declTypeParams(d).len > 0) continue;

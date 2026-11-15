@@ -4091,10 +4091,12 @@ fn resolveInternal(
     defer r.members.deinit(gpa);
     defer r.member_at.deinit(gpa);
     defer r.impls.deinit(gpa);
+    defer r.long_shapes.deinit(gpa);
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
     defer r.aliases_settle.deinit(gpa);
+    defer r.length_reports.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
     defer r.type_parameter_bindings.deinit(gpa);
@@ -6406,6 +6408,11 @@ const Resolver = struct {
     unlent_marks: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// See `Resolution.bracket_readings`.
     bracket_readings: std.AutoHashMapUnmanaged(ExprId, Resolution.BracketReading) = .empty,
+    /// What resolving each written length reported, keyed by the length. Two
+    /// readings of one bracket hold the same length expression, so the second
+    /// to reach it is given these instead of resolving it again: a closure or
+    /// a binding declared in a length is declared once.
+    length_reports: std.AutoHashMapUnmanaged(ExprId, []const Diagnostic) = .empty,
     /// See `Resolution.name_kinds`.
     name_kinds: std.AutoHashMapUnmanaged(TokenId, name_case.Kind) = .empty,
     /// The bracket a call is about to resolve as its callee, while it is
@@ -6428,6 +6435,12 @@ const Resolver = struct {
     /// declarations it names. Collected as the headers are resolved, so that
     /// coherence is asked of the whole program at once.
     impls: std.ArrayList(Implementation) = .empty,
+    /// The callable heads too long to pack, numbered; see
+    /// `node.LongCallableShapes`. A number is compared only between two
+    /// implementations of one trait, and a callable head is written in its
+    /// trait's module ([M-Impl]), so a library's numbers and a program's
+    /// never meet and a resumed program numbers its own from nothing.
+    long_shapes: node.LongCallableShapes = .{},
     /// The namespaces a primitive's name opens: one row per primitive, module
     /// and spelling, however many inherent blocks that module writes. Built
     /// once from `impls` after every header is resolved, and handed on as
@@ -7132,7 +7145,7 @@ const Resolver = struct {
     /// already bound to a real declaration, so following it once is following
     /// it all the way.
     fn reexport(self: *Resolver, d: DeclId) std.mem.Allocator.Error!void {
-        return self.reexportFollowing(d, 0);
+        return self.reexportFollowing(d, null);
     }
 
     /// The module and the name a re-export's path spells, or null where it
@@ -7148,6 +7161,9 @@ const Resolver = struct {
         return if (count == 2) elements else null;
     }
 
+    /// A re-export being resolved, and the one whose resolution led to it.
+    const ReexportOnPath = struct { decl: DeclId, outer: ?*const ReexportOnPath };
+
     /// Resolves a re-export, resolving what it names first where that is
     /// itself one.
     ///
@@ -7157,14 +7173,19 @@ const Resolver = struct {
     /// no parameters and no type, so every call through the chain was an
     /// arity error. Following the chain here needs no ordering to be true.
     ///
-    /// The depth bound is what a cycle of re-exports runs into; each is
-    /// reported where it is written by the ordinary path below.
+    /// `following` is the re-exports being resolved on the way here, so one
+    /// that names another already among them is a ring: it reaches no
+    /// declaration, and is reported once, where the ring closes.
+    ///
+    /// **Bound:** each re-export is resolved once: a resolved one is bound to
+    /// a declaration and followed no further, and one found to reach nothing
+    /// is marked and not resolved again. A chain of n compares each against
+    /// those before it.
     fn reexportFollowing(
         self: *Resolver,
         d: DeclId,
-        depth: u32,
+        following: ?*const ReexportOnPath,
     ) std.mem.Allocator.Error!void {
-        if (depth > 64) return;
         var here: ?*Binding = null;
         for (self.scopeOf(self.current)) |b| {
             if (self.bindings.items[b.index()].decl == d) here = &self.bindings.items[b.index()];
@@ -7178,11 +7199,15 @@ const Resolver = struct {
         // mistake, and the same rule, as an import naming a module nothing
         // names through.
         if (here) |h| {
+            // One a re-export elsewhere led to and found to reach nothing was
+            // reported then.
+            if (h.unresolved) return;
             h.reexported = true;
             if (reachForVisibility(self.ast.declVisibility(d)) == .public) h.exempt = true;
         }
 
         const elements = self.pathOf(d) orelse {
+            if (here) |h| h.unresolved = true;
             return self.sink.addErrorFmt(
                 .m_import,
                 self.ast.fileOf(self.ast.declName(d)),
@@ -7233,6 +7258,7 @@ const Resolver = struct {
 
             if (!reachableFrom(self.program, held.reach, holding, self.current)) {
                 held.used = true;
+                if (here) |h| h.unresolved = true;
                 try self.reportUnreachable(elements[1], holding, held.reach);
                 return;
             }
@@ -7241,10 +7267,39 @@ const Resolver = struct {
             // resolved yet, and binding it now would bind the alias rather
             // than what it aliases.
             if (self.ast.declTag(held.decl) == .use_) {
+                // One already found to reach nothing was reported where it
+                // is written, and what names it reaches nothing either.
+                if (held.unresolved) {
+                    held.used = true;
+                    if (here) |h| h.unresolved = true;
+                    return;
+                }
+                var on_path: ?*const ReexportOnPath = following;
+                const closes_a_ring = held.decl == d or while (on_path) |earlier| : (on_path = earlier.outer) {
+                    if (earlier.decl == held.decl) break true;
+                } else false;
+                if (closes_a_ring) {
+                    held.used = true;
+                    if (here) |h| h.unresolved = true;
+                    return self.sink.addErrorFmt(
+                        .m_import,
+                        self.ast.fileOf(elements[1]),
+                        self.ast.tokenSpan(elements[1]),
+                        "one of them names the declaration itself, in the module that declares it",
+                        "`{s}` is passed on in a ring of `use` declarations, and none of them declares it",
+                        .{self.ast.tokenText(elements[1])},
+                    );
+                }
+                const next: ReexportOnPath = .{ .decl = d, .outer = following };
                 const was = self.current;
                 self.current = holding;
-                try self.reexportFollowing(held.decl, depth + 1);
+                try self.reexportFollowing(held.decl, &next);
                 self.current = was;
+                // What it names reached nothing, which was reported there.
+                if (self.bindings.items[b.index()].unresolved) {
+                    if (here) |h| h.unresolved = true;
+                    return;
+                }
             }
 
             const settled = &self.bindings.items[b.index()];
@@ -8212,9 +8267,14 @@ const Resolver = struct {
                 try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "a callable type has no declaring module", .{});
                 return;
             }
-            const shape = self.ast.callableShape(written_head) orelse {
-                try self.refused_impls.put(self.gpa, d, {});
-                return self.sink.addErrorFmt(.t_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "name a callable type with fewer parameters", "a callable head names at most {d} parameters", .{node.CallableShape.max_shape_parameters});
+            // A head of more parameters than pack is numbered by its exact
+            // spelling, so it keys a chain of its own as any other shape does.
+            const shape = self.ast.callableShape(written_head) orelse numbered: {
+                const callable = self.ast.callableType(written_head);
+                var spelled: std.ArrayList(u8) = .empty;
+                defer spelled.deinit(self.gpa);
+                try node.LongCallableShapes.spell(self.gpa, &spelled, callable.invocation, self.ast.params[callable.params.start..callable.params.end]);
+                break :numbered try self.long_shapes.intern(self.gpa, spelled.items);
             };
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .{ .callable_ = shape }, .decl = d });
         }
@@ -12439,7 +12499,16 @@ const Resolver = struct {
         // any other: it is read against the scope standing here, the binding
         // it reaches is used by being written, and reaching nothing is
         // [N-Undefined] rather than something to say about the form.
-        if (ref.length != ExprId.none) try self.useTypeExpression(ref.length);
+        if (ref.length != ExprId.none) {
+            if (self.length_reports.get(ref.length)) |reports| {
+                for (reports) |report| try self.sink.add(report);
+            } else {
+                const reported = self.sink.list.items.len;
+                try self.useTypeExpression(ref.length);
+                const reports = try self.sink.arena.dupe(Diagnostic, self.sink.list.items[reported..]);
+                try self.length_reports.put(self.gpa, ref.length, reports);
+            }
+        }
         for (self.ast.typeArgs(ref.args)) |a| try self.useRefIn(a, context.ofArguments());
     }
 

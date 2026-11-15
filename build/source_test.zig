@@ -8,6 +8,11 @@ const std = @import("std");
 const testing = std.testing;
 const source = @import("source.zig");
 const test_roots = @import("test_roots.zig");
+
+// Compiles the tests `pool.zig` holds beside the function they test.
+comptime {
+    _ = @import("pool.zig");
+}
 const runtime_symbols = @import("runtime_symbols");
 
 test "runtime archive members have stable names and separate linkage" {

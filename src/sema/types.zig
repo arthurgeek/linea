@@ -2648,6 +2648,11 @@ pub const CallableSignature = struct {
     param_count: u32,
     result: TypeId,
     name: []const u8,
+    /// For a signature of more parameters than a shape packs, the callable
+    /// type that stands for its shape: the same invocation and conventions
+    /// over `Unit`, answering `Unit`. Every signature of one shape names the
+    /// same one, which is what numbers the shape. Poison otherwise.
+    shape_of: TypeId = .poison,
 };
 
 /// A lambda source identity applied to its enclosing type arguments.
@@ -2717,7 +2722,7 @@ pub const ClosureDescriptor = struct {
 /// The target and parameter-order arguments are semantic facts and live in the
 /// call's `NormalizedCall`; this record survives only so source tools can map
 /// the receiver back to the spelling before the dot.
-pub const Postfix = struct { call: u32, args: []const ExprId };
+pub const Postfix = struct { call: ExprId, args: []const ExprId };
 
 pub const array_view_name = "as_slice";
 
@@ -2879,6 +2884,33 @@ pub const ConstructorBody = struct {
 /// The callable type a function value was received by, and whether that
 /// type is written in the library, where the program cannot change it.
 pub const FixedFunction = struct { signature: TypeId, in_library: bool };
+
+/// Which types a symbol writes as a digest in place of their spelling.
+///
+/// A type is one entry in the pool however often it is named, and its
+/// spelling names every one of those times: aliases that each name the one
+/// before twice spell a type of thirty entries in a billion names. A symbol
+/// is shortened to a digest anyway once it passes the length an assembler
+/// takes, so a type whose own spelling passes `longest` is digested where it
+/// stands, once, and every type holding it spells that digest.
+///
+/// A type's spelling never changes once the type is interned, so what is
+/// decided for it holds for every symbol spelled from the same pool.
+pub const SharedSpelling = struct {
+    /// The digest of each type decided so far, null for one spelled out.
+    known: std.AutoHashMapUnmanaged(TypeId, ?u64) = .empty,
+
+    /// The longest spelling written out. Far past any symbol's own bound, so
+    /// only a spelling no symbol could carry is replaced.
+    pub const longest = 1 << 16;
+    /// Begins a digest. A component that starts with a digit is no name a
+    /// program can write.
+    pub const marker = "0h";
+
+    pub fn deinit(self: *SharedSpelling, gpa: std.mem.Allocator) void {
+        self.known.deinit(gpa);
+    }
+};
 
 pub const FunctionValue = struct {
     at: ExprId,
@@ -3135,7 +3167,7 @@ const not_an_interpolation = std.math.maxInt(u32);
 /// `Lookup` at `UInt64`, so a body bounded on `Fancy` may hand its parameter
 /// to one bounded `Lookup[UInt64]` and to nothing else.
 pub const BoundTrait = struct {
-    trait: u32,
+    trait: DeclId,
     args: []const TypeId = &.{},
     /// The bound as it was written, kept so a reader holding one written bound
     /// finds the entry that bound made rather than the first entry naming its
@@ -3927,7 +3959,7 @@ pub const ImplIndex = struct {
         defer bounds.deinit(gpa);
         try pool.appendBoundsWithin(gpa, scope, held, &bounds);
         for (bounds.items) |bound| {
-            if (bound.trait == trait.index()) try appendKey(gpa, out, bound.args);
+            if (bound.trait == trait) try appendKey(gpa, out, bound.args);
         }
         var open = false;
         var rows = self.candidates(impls, trait.index(), pool.headOf(held), true);
@@ -4180,7 +4212,7 @@ pub const ImplIndex = struct {
         var builder = try Typing.Builder.init(gpa);
         defer builder.deinit();
         const ticket = try builder.addStruct("Ticket", .linear, &.{});
-        const lookup: u32 = 2;
+        const lookup = DeclId.at(2);
         // `Ticket` is linear and implements no `Lookup`, so the implementation
         // fails its capability requirement and its trait requirement at `UInt8`.
         const implementations = [_]Implementation{.{
@@ -4202,10 +4234,10 @@ pub const ImplIndex = struct {
         var granted: RefusedDemands = .empty;
         defer granted.deinit(gpa);
         try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .capability = .copyable } }, {});
-        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = DeclId.at(lookup), .args = &.{.u16} } } }, {});
+        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = lookup, .args = &.{.u16} } } }, {});
         // The trait is granted at `UInt16` only, and the requirement asks for `UInt8`.
         try testing.expect(!try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted));
-        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = DeclId.at(lookup), .args = &.{.u8} } } }, {});
+        try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = lookup, .args = &.{.u8} } } }, {});
         try testing.expect(try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted));
         // Selection is unchanged by what a granted lookup accepted.
         try testing.expect(try index.find(gpa, &implementations, &builder, 1, &.{}, ticket, .none) == null);
@@ -4708,6 +4740,36 @@ pub const ImplIndex = struct {
     /// bound into the parameter's match, so `fn get(self: Box[T])` inside
     /// `impl[T] Box[T]` takes the box the head admitted and nothing else.
     pub fn bindKey(pool: anytype, actual: TypeId, written: TypeId, owner: u32, bindings: []TypeId) bool {
+        var matched: MatchedKeys = .{};
+        return bindKeyPast(pool, actual, written, owner, bindings, &matched);
+    }
+
+    /// The pairs of instantiations one `bindKey` has matched, so a pair
+    /// reached again along another path is not matched again. A type is one
+    /// entry however often it is named, and a binding keeps the type it was
+    /// given, so matching a pair a second time reads the same bindings and
+    /// changes none. A fixed table and no allocation: a pair that loses its
+    /// place to another is matched again, which costs time and nothing else.
+    const MatchedKeys = struct {
+        pairs: [256]Pair = @splat(.{}),
+
+        const Pair = struct { actual: TypeId = .poison, written: TypeId = .poison };
+
+        fn place(actual: TypeId, written: TypeId) usize {
+            return (@as(usize, @intFromEnum(actual)) *% 31 +% @intFromEnum(written)) % 256;
+        }
+
+        fn holds(self: *const MatchedKeys, actual: TypeId, written: TypeId) bool {
+            const pair = self.pairs[place(actual, written)];
+            return pair.actual == actual and pair.written == written;
+        }
+
+        fn note(self: *MatchedKeys, actual: TypeId, written: TypeId) void {
+            self.pairs[place(actual, written)] = .{ .actual = actual, .written = written };
+        }
+    };
+
+    fn bindKeyPast(pool: anytype, actual: TypeId, written: TypeId, owner: u32, bindings: []TypeId, matched: *MatchedKeys) bool {
         if (actual == .poison or written == .poison) return false;
         if (pool.standinOf(written) != null) return true;
         if (pool.get(written) == .parameter) {
@@ -4725,21 +4787,23 @@ pub const ImplIndex = struct {
             const want = want_instance orelse return false;
             const got = got_instance orelse return false;
             if (want.decl != got.decl) return false;
+            if (matched.holds(actual, written)) return true;
             const wanted = pool.argsOf(want);
             const given = pool.argsOf(got);
             if (wanted.len != given.len) return false;
             for (given, wanted) |got_arg, want_arg| {
-                if (!bindKey(pool, got_arg, want_arg, owner, bindings)) return false;
+                if (!bindKeyPast(pool, got_arg, want_arg, owner, bindings, matched)) return false;
             }
+            matched.note(actual, written);
             return true;
         }
         return switch (pool.get(written)) {
             .borrow => |want| switch (pool.get(actual)) {
-                .borrow => |got| bindKey(pool, got.referent, want.referent, owner, bindings),
+                .borrow => |got| bindKeyPast(pool, got.referent, want.referent, owner, bindings, matched),
                 else => false,
             },
             .array => |want| switch (pool.get(actual)) {
-                .array => |got| got.count == want.count and bindKey(pool, got.element, want.element, owner, bindings),
+                .array => |got| got.count == want.count and bindKeyPast(pool, got.element, want.element, owner, bindings, matched),
                 else => false,
             },
             .callable => |want| switch (pool.get(actual)) {
@@ -4753,9 +4817,9 @@ pub const ImplIndex = struct {
                         // parameter taken `inout` is another signature from
                         // one read, whatever its type.
                         if (!got_parameter.samePosition(want_parameter)) break :blk false;
-                        if (!bindKey(pool, got_parameter.ty, want_parameter.ty, owner, bindings)) break :blk false;
+                        if (!bindKeyPast(pool, got_parameter.ty, want_parameter.ty, owner, bindings, matched)) break :blk false;
                     }
-                    break :blk bindKey(pool, got.result, want.result, owner, bindings);
+                    break :blk bindKeyPast(pool, got.result, want.result, owner, bindings, matched);
                 },
                 else => false,
             },
@@ -4792,6 +4856,39 @@ pub const ImplIndex = struct {
         try testing.expect(!bindKey(&b, box_bool, box_u8, impl_decl.index(), &none));
         try testing.expect(bindKey(&b, .u8, .u8, impl_decl.index(), &none));
         try testing.expect(!bindKey(&b, .bool_, .u8, impl_decl.index(), &none));
+    }
+
+    test "bindKey: a type that names its parts many times over is matched part by part once" {
+        const gpa = testing.allocator;
+        var b = try Typing.Builder.init(gpa);
+        defer b.deinit();
+
+        const pair_decl: DeclId = @enumFromInt(1);
+        const template = try b.addStruct("P", .copyable, &.{});
+        try b.noteTemplate(pair_decl, 0, template);
+        const impl_decl: DeclId = @enumFromInt(2);
+        const t = try b.addParameter("T", impl_decl.index(), 0, .unrestricted, &.{});
+
+        // `P[x, x]` over itself forty levels deep: forty types, and a
+        // trillion paths through them.
+        const levels = 40;
+        var over_u8: TypeId = .u8;
+        var over_bool: TypeId = .bool_;
+        var over_t: TypeId = t;
+        for (0..levels) |_| {
+            over_u8 = try b.instantiate(template, pair_decl, &.{ over_u8, over_u8 });
+            over_bool = try b.instantiate(template, pair_decl, &.{ over_bool, over_bool });
+            over_t = try b.instantiate(template, pair_decl, &.{ over_t, over_t });
+        }
+
+        var none: [0]TypeId = .{};
+        try testing.expect(bindKey(&b, over_u8, over_u8, impl_decl.index(), &none));
+        try testing.expect(!bindKey(&b, over_bool, over_u8, impl_decl.index(), &none));
+        // A parameter at the leaves is bound once and holds along every path.
+        var bindings = [_]TypeId{.poison};
+        try testing.expect(bindKey(&b, over_bool, over_t, impl_decl.index(), &bindings));
+        try testing.expectEqual(TypeId.bool_, bindings[0]);
+        try testing.expect(!bindKey(&b, over_u8, over_t, impl_decl.index(), &bindings));
     }
 
     fn answersFor(
@@ -4962,8 +5059,8 @@ pub const ImplIndex = struct {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);
             for (required.args, args) |written, *argument| argument.* = try pool.substitute(written, im.decl.index(), bindings);
-            if (decided.grants(.{ .ty = given, .lacks = .{ .trait = .{ .decl = DeclId.at(required.trait), .args = args } } })) continue;
-            if (try self.findOnce(impls, pool, decided, required.trait, args, given) == null) return false;
+            if (decided.grants(.{ .ty = given, .lacks = .{ .trait = .{ .decl = required.trait, .args = args } } })) continue;
+            if (try self.findOnce(impls, pool, decided, required.trait.index(), args, given) == null) return false;
         }
         for (demand.callables) |required| {
             if (try self.meetsCallableDemand(
@@ -5087,7 +5184,7 @@ pub const Traversal = struct {
     positions: TraversalPositions = .{ .expression = .none },
     impl_args: []const TypeId = &.{},
     /// The loop, by expression.
-    at: u32,
+    at: ExprId,
     /// The `trav` member, by declaration. What lowering reads the positions
     /// expression off.
     decl: DeclId,
@@ -5103,7 +5200,7 @@ pub const Projected = struct {
     requires_write: bool = false,
     impl_args: []const TypeId = &.{},
     /// The bracket, by expression.
-    at: u32,
+    at: ExprId,
     /// Which entry of `Typing.expansions` it becomes.
     expansion: u32,
 };
@@ -5119,7 +5216,7 @@ pub const Projected = struct {
 /// which is a program accepted for a place nothing can emit.
 pub const RangePlace = struct {
     /// The bracket, by expression.
-    at: u32,
+    at: ExprId,
     /// The index of the first element the place names.
     first: u32,
 };
@@ -5380,7 +5477,7 @@ pub const ContextualConstraints = struct {
             for (self.run(scope)) |constraint| {
                 if (constraint.subject != subject) continue;
                 for (constraint.demand.traits) |held| {
-                    if (held.trait != trait) continue;
+                    if (held.trait.index() != trait) continue;
                     if (args == null or std.mem.eql(TypeId, held.args, args.?)) return true;
                 }
             }
@@ -5403,7 +5500,7 @@ pub const ContextualConstraints = struct {
             for (self.run(scope)) |constraint| {
                 if (constraint.subject != subject) continue;
                 for (constraint.demand.traits) |held| {
-                    if (held.trait == trait) try out.append(gpa, held.args);
+                    if (held.trait.index() == trait) try out.append(gpa, held.args);
                 }
             }
         }
@@ -5557,19 +5654,19 @@ pub const CallIndex = struct {
             if (records.items[at].recovered_calls == absent) records.items[at].recovered_calls = @intCast(i);
         }
         for (typing.postfix, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.call) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.call.index()) orelse continue;
             if (records.items[at].postfix == absent) records.items[at].postfix = @intCast(i);
         }
         for (typing.projected, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.at) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.at.index()) orelse continue;
             if (records.items[at].projected == absent) records.items[at].projected = @intCast(i);
         }
         for (typing.traversals, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.at) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.at.index()) orelse continue;
             if (records.items[at].traversals == absent) records.items[at].traversals = @intCast(i);
         }
         for (typing.range_places, 0..) |rec, i| {
-            const at = try recordFor(gpa, locator, &records, rec.at) orelse continue;
+            const at = try recordFor(gpa, locator, &records, rec.at.index()) orelse continue;
             if (records.items[at].range_places == absent) records.items[at].range_places = @intCast(i);
         }
         for (typing.function_values, 0..) |rec, i| {
@@ -7013,14 +7110,39 @@ pub const Typing = struct {
         out: *std.ArrayList(u8),
         args: []const TypeId,
     ) std.mem.Allocator.Error!void {
+        return self.appendArgumentsWith(gpa, out, args, null);
+    }
+
+    /// `appendArguments` for a symbol: a type too long to spell is written as
+    /// a digest, decided once per type through `shared`.
+    pub fn appendArgumentsWith(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+        args: []const TypeId,
+        shared: ?*SharedSpelling,
+    ) std.mem.Allocator.Error!void {
         if (args.len == 0) return;
 
         try out.append(gpa, '[');
         for (args, 0..) |a, i| {
             if (i > 0) try out.append(gpa, ',');
-            try self.appendMangled(gpa, out, a);
+            try self.appendMangledWith(gpa, out, a, shared);
         }
         try out.append(gpa, ']');
+    }
+
+    /// `mangledName` for a symbol, with the same shortening.
+    pub fn mangledNameWith(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        t: TypeId,
+        shared: *SharedSpelling,
+    ) std.mem.Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(gpa);
+        try self.appendMangledWith(gpa, &out, t, shared);
+        return out.toOwnedSlice(gpa);
     }
 
     /// What a type is called where a symbol carries it.
@@ -7051,6 +7173,51 @@ pub const Typing = struct {
         out: *std.ArrayList(u8),
         t: TypeId,
     ) std.mem.Allocator.Error!void {
+        return self.appendMangledWith(gpa, out, t, null);
+    }
+
+    /// `appendMangled`, writing a type whose spelling is longer than
+    /// `SharedSpelling.longest` as a digest of that spelling where `shared`
+    /// is given.
+    fn appendMangledWith(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+        t: TypeId,
+        shared: ?*SharedSpelling,
+    ) std.mem.Allocator.Error!void {
+        const held = shared orelse return self.appendMangledInner(gpa, out, t, null);
+        if (held.known.get(t)) |decided| {
+            const digest = decided orelse return self.appendMangledInner(gpa, out, t, shared);
+            return appendDigest(gpa, out, digest);
+        }
+        // Decided once per type, from the spelling written here: `t` is
+        // spelled with each type it holds already decided, so one that is
+        // itself long is its digest there, and the text digested is no
+        // longer than what `t` holds directly, each part at most `longest`.
+        // A spelling short enough to keep is the one just written.
+        const start = out.items.len;
+        try self.appendMangledInner(gpa, out, t, shared);
+        const spelled = out.items[start..];
+        if (spelled.len <= SharedSpelling.longest) return held.known.put(gpa, t, null);
+        const digest = std.hash.Wyhash.hash(0, spelled);
+        out.shrinkRetainingCapacity(start);
+        try held.known.put(gpa, t, digest);
+        return appendDigest(gpa, out, digest);
+    }
+
+    fn appendDigest(gpa: std.mem.Allocator, out: *std.ArrayList(u8), digest: u64) std.mem.Allocator.Error!void {
+        try out.appendSlice(gpa, SharedSpelling.marker);
+        try out.print(gpa, "{x:0>16}", .{digest});
+    }
+
+    fn appendMangledInner(
+        self: *const Typing,
+        gpa: std.mem.Allocator,
+        out: *std.ArrayList(u8),
+        t: TypeId,
+        shared: ?*SharedSpelling,
+    ) std.mem.Allocator.Error!void {
         // An array is the one constructed type that is not an instantiation, so
         // there are no arguments to read off it: its name spells the element
         // and the length and nothing a reader can take apart. Both are written
@@ -7063,13 +7230,13 @@ pub const Typing = struct {
         switch (self.get(t)) {
             .borrow => |observation| {
                 try out.appendSlice(gpa, "borrow(");
-                try self.appendMangled(gpa, out, observation.referent);
+                try self.appendMangledWith(gpa, out, observation.referent, shared);
                 try out.append(gpa, ')');
                 return;
             },
             .array => |a| {
                 try out.append(gpa, '[');
-                try self.appendMangled(gpa, out, a.element);
+                try self.appendMangledWith(gpa, out, a.element, shared);
                 const count = try std.fmt.allocPrint(gpa, ";{d}]", .{a.count});
                 defer gpa.free(count);
                 try out.appendSlice(gpa, count);
@@ -7086,7 +7253,7 @@ pub const Typing = struct {
                     try out.appendSlice(gpa, @tagName(param.convention));
                     if (param.stable_address) try out.appendSlice(gpa, "@address");
                     try out.append(gpa, ':');
-                    try self.appendMangled(gpa, out, param.ty);
+                    try self.appendMangledWith(gpa, out, param.ty, shared);
                     switch (param.default) {
                         .absent => try out.appendSlice(gpa, ":none"),
                         .value => |value| {
@@ -7099,7 +7266,7 @@ pub const Typing = struct {
                 }
                 try out.appendSlice(gpa, ")->");
 
-                try self.appendMangled(gpa, out, signature.result);
+                try self.appendMangledWith(gpa, out, signature.result, shared);
                 try appendContractText(gpa, out, signature.contracts, null, true);
                 return;
             },
@@ -7109,17 +7276,17 @@ pub const Typing = struct {
                 try out.append(gpa, '[');
                 for (self.closureArgs(closure), 0..) |arg, i| {
                     if (i > 0) try out.append(gpa, ',');
-                    try self.appendMangled(gpa, out, arg);
+                    try self.appendMangledWith(gpa, out, arg, shared);
                 }
                 try out.append(gpa, ']');
                 if (closure.self_ty != .poison or closure.impl_arg_count != 0) {
                     try out.appendSlice(gpa, ":impl[");
                     for (self.closureImplArgs(closure), 0..) |arg, i| {
                         if (i > 0) try out.append(gpa, ',');
-                        try self.appendMangled(gpa, out, arg);
+                        try self.appendMangledWith(gpa, out, arg, shared);
                     }
                     try out.appendSlice(gpa, "]:");
-                    try self.appendMangled(gpa, out, closure.self_ty);
+                    try self.appendMangledWith(gpa, out, closure.self_ty, shared);
                 }
                 return;
             },
@@ -7148,7 +7315,7 @@ pub const Typing = struct {
         // differing here are two types.
         if (self.isInterpolation(t)) {
             try out.appendSlice(gpa, "0i");
-            return self.appendInterpolated(gpa, out, t);
+            return self.appendInterpolated(gpa, out, t, shared);
         }
 
         if (self.standinOf(t)) |standin| {
@@ -7157,9 +7324,9 @@ pub const Typing = struct {
             const identity = try std.fmt.allocPrint(gpa, "0s{d}:{d}(", .{ standin.trait, standin.member.index() });
             defer gpa.free(identity);
             try out.appendSlice(gpa, identity);
-            try self.appendMangled(gpa, out, standin.held);
+            try self.appendMangledWith(gpa, out, standin.held, shared);
             try out.append(gpa, ')');
-            return self.appendArguments(gpa, out, self.standinArgsOf(standin));
+            return self.appendArgumentsWith(gpa, out, self.standinArgsOf(standin), shared);
         }
 
         if (self.moduleOfType(t)) |mi| try self.appendModule(gpa, out, mi);
@@ -7167,7 +7334,7 @@ pub const Typing = struct {
         if (self.instanceOf(t)) |inst| {
             const template = self.typeOfDecl(inst.decl).?;
             try out.appendSlice(gpa, self.nameOf(template));
-            return self.appendArguments(gpa, out, self.argsOf(inst));
+            return self.appendArgumentsWith(gpa, out, self.argsOf(inst), shared);
         }
 
         const spelled = self.nameOf(t);
@@ -7196,6 +7363,7 @@ pub const Typing = struct {
         gpa: std.mem.Allocator,
         out: *std.ArrayList(u8),
         t: TypeId,
+        shared: ?*SharedSpelling,
     ) std.mem.Allocator.Error!void {
         const count = self.fieldCount(t);
         for (self.interpolationFormats(t), self.interpolationBorrowsAll(t)) |format, borrowed| {
@@ -7213,7 +7381,7 @@ pub const Typing = struct {
         var at: u32 = 1;
         while (at < count) : (at += 2) held.appendAssumeCapacity(self.fieldType(t, at));
 
-        return self.appendArguments(gpa, out, held.items);
+        return self.appendArgumentsWith(gpa, out, held.items, shared);
     }
 
     /// Whether lowering replaces every call of `d` with what it generates, so
@@ -7332,6 +7500,7 @@ pub const Typing = struct {
                 var shape: node.CallableShape.Builder = .begin(signature.invocation);
                 for (self.callableParams(signature)) |parameter| shape.parameter(parameter.convention);
                 if (shape.finish()) |exact| return .{ .callable_ = exact };
+                if (signature.shape_of != .poison) return .{ .callable_ = .long(@intFromEnum(signature.shape_of)) };
             },
             .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
         }
@@ -7582,7 +7751,7 @@ pub const Typing = struct {
             else => return false,
         };
         for (p.traits) |named| {
-            if (named.trait != trait) continue;
+            if (named.trait.index() != trait) continue;
             if (args == null or std.mem.eql(TypeId, named.args, args.?)) return true;
         }
         return false;
@@ -7604,7 +7773,7 @@ pub const Typing = struct {
         out: *std.ArrayList([]const TypeId),
     ) std.mem.Allocator.Error!void {
         for (self.boundsOn(t)) |named| {
-            if (named.trait == trait) try out.append(gpa, named.args);
+            if (named.trait.index() == trait) try out.append(gpa, named.args);
         }
         try self.contextual_constraints.boundArguments(gpa, owner, t, trait, out);
     }
@@ -8755,6 +8924,11 @@ pub const Typing = struct {
 
         gpa: std.mem.Allocator,
         constant_pool: *const constants.Pool = &.{},
+        /// Which of the pool's types a symbol writes as a digest, decided
+        /// as symbols are spelled and kept for the symbols after them.
+        ///
+        /// **Bound:** the types symbols have spelled, each once.
+        symbol_spelling: SharedSpelling = .{},
         /// Whether the pool is finished. Sealed, every growth path below is a
         /// named defect: the pass that completes the set seals it, so a later
         /// pass reaching for a type the set does not hold fails at the reach
@@ -10016,7 +10190,7 @@ pub const Typing = struct {
                 @intCast(promise.traits.len),
             });
             for (promise.traits) |bound| {
-                try words.appendSlice(self.gpa, &.{ bound.trait, @intCast(bound.args.len) });
+                try words.appendSlice(self.gpa, &.{ bound.trait.index(), @intCast(bound.args.len) });
                 for (bound.args) |bound_arg| try self.encodeRenamed(&words, bound_arg, args);
             }
             try words.append(self.gpa, @intCast(promise.callables.len));
@@ -10678,7 +10852,7 @@ pub const Typing = struct {
             var builder = try Builder.init(gpa);
             defer builder.deinit();
             const pair_decl = DeclId.at(1);
-            const trait: u32 = 9;
+            const trait = DeclId.at(9);
             const second = try builder.addParameter("U", @intCast(pair_decl.index()), 1, .unrestricted, &.{});
             const first = try builder.addParameter("T", @intCast(pair_decl.index()), 0, .unrestricted, &.{});
             try builder.setBoundTraits(first, try gpa.dupe(BoundTrait, &.{.{ .trait = trait, .args = try gpa.dupe(TypeId, &.{second}) }}));
@@ -11465,6 +11639,7 @@ pub const Typing = struct {
         }
 
         pub fn deinit(self: *Builder) void {
+            self.symbol_spelling.deinit(self.gpa);
             self.open_mentions.deinit(self.gpa);
             self.ground_memo.deinit(self.gpa);
             self.unsettled_memo.deinit(self.gpa);
@@ -12028,7 +12203,7 @@ pub const Typing = struct {
         /// The names stored are those of the first signature interned, kept
         /// for spelling the type in a message. A call reads the labels it
         /// names arguments by from where its callee was declared.
-        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) !TypeId {
+        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) std.mem.Allocator.Error!TypeId {
             var effective: std.ArrayList(CallableContract) = .empty;
             defer effective.deinit(self.gpa);
             const contracts = filtered: {
@@ -12048,7 +12223,14 @@ pub const Typing = struct {
                 const signature = self.pool.items[i].callable;
                 if (signature.invocation != invocation or signature.result != result or signature.param_count != params.len or !sameContracts(signature.contracts, contracts)) continue;
                 const held = self.callable_params.items[signature.first_param..][0..signature.param_count];
-                if (callableParamsMatch(held, params)) return @enumFromInt(i);
+                if (!callableParamsMatch(held, params)) continue;
+                // An interning stopped by a refused allocation may have
+                // left the type without the shape that stands for it.
+                if (signature.param_count > node.CallableShape.max_packed_parameters and signature.shape_of == .poison) {
+                    const standing = try self.longShapeOf(held, invocation);
+                    self.pool.items[i].callable.shape_of = standing;
+                }
+                return @enumFromInt(i);
             }
 
             self.grows();
@@ -12088,6 +12270,13 @@ pub const Typing = struct {
                 params;
             self.callable_params.appendSliceAssumeCapacity(stable_params);
             const id: TypeId = @enumFromInt(@as(u32, @intCast(self.pool.items.len)));
+            const long = params.len > node.CallableShape.max_packed_parameters;
+            // The type that stands for a long shape is the shape of itself,
+            // and says so from the moment it exists: interning it again to
+            // find its shape would otherwise never end.
+            const own_shape = long and result == .unit and contracts.len == 0 and for (stable_params) |param| {
+                if (param.ty != .unit or param.stable_address or param.default != .absent) break false;
+            } else true;
             try self.laid_out.append(self.gpa, .{});
             try self.pool.append(self.gpa, .{ .callable = .{
                 .invocation = invocation,
@@ -12097,9 +12286,28 @@ pub const Typing = struct {
                 .param_count = @intCast(params.len),
                 .result = result,
                 .name = name,
+                .shape_of = if (own_shape) id else .poison,
             } });
             try self.interned_callables.note(self.gpa, key, @intFromEnum(id));
+            if (long and !own_shape) {
+                const standing = try self.longShapeOf(self.callableParams(self.pool.items[@intFromEnum(id)].callable), invocation);
+                self.pool.items[@intFromEnum(id)].callable.shape_of = standing;
+            }
             return id;
+        }
+
+        /// The callable type that stands for a shape too long to pack: the
+        /// invocation and each parameter's convention, over `Unit` and
+        /// answering `Unit`. Interned like any callable type, so two
+        /// signatures of one shape reach one type and its number is exact,
+        /// kept with the pool and found again when the pool is reopened.
+        pub fn longShapeOf(self: *Builder, conventions: anytype, invocation: Convention) std.mem.Allocator.Error!TypeId {
+            const standing = try self.gpa.alloc(CallableParam, conventions.len);
+            defer self.gpa.free(standing);
+            for (standing, conventions) |*param, each| {
+                param.* = .{ .spelling = "", .convention = each.convention, .ty = .unit, .default = .absent };
+            }
+            return self.internCallable(standing, .unit, &.{}, invocation);
         }
 
         fn callableKey(params: []const CallableParam, result: TypeId, contracts: []const CallableContract, invocation: Convention) u64 {
@@ -12681,12 +12889,12 @@ pub const Typing = struct {
                         var handed_off = false;
                         defer if (!handed_off) self.gpa.free(required_args);
                         for (required.args, required_args) |written, *argument| argument.* = try self.substitute(written, im.decl.index(), bindings);
-                        if (try self.implementationChoice(DeclId.at(required.trait), required_args, subject) != null) continue;
+                        if (try self.implementationChoice(required.trait, required_args, subject) != null) continue;
                         const unmet: UnmetRequirement = .{
                             .head = im.ty,
                             .subject = predicate.subject,
                             .argument = subject,
-                            .trait = DeclId.at(required.trait),
+                            .trait = required.trait,
                             .args = required_args,
                         };
                         if (self.holdsType(subject, receiver)) {
@@ -14648,11 +14856,11 @@ test "call index accessors recover forged typing rows" {
             .{ .call = ExprId.at(1), .argument = ExprId.at(3), .parameter = null, .convention = .sink },
         },
         .recovered_calls = &.{.{ .at = ExprId.at(2), .target = .{ .declared = DeclId.at(9) } }},
-        .postfix = &.{.{ .call = 3, .args = &.{} }},
-        .projected = &.{.{ .at = 4, .expansion = 0 }},
+        .postfix = &.{.{ .call = ExprId.at(3), .args = &.{} }},
+        .projected = &.{.{ .at = ExprId.at(4), .expansion = 0 }},
         .expansions = &.{.{ .member = DeclId.at(10), .path = .none, .receiver = 0, .index = Expansion.no_binding }},
-        .traversals = &.{.{ .at = 5, .decl = DeclId.at(11) }},
-        .range_places = &.{.{ .at = 6, .first = 13 }},
+        .traversals = &.{.{ .at = ExprId.at(5), .decl = DeclId.at(11) }},
+        .range_places = &.{.{ .at = ExprId.at(6), .first = 13 }},
         .function_values = &.{.{ .at = ExprId.at(7), .target = .{ .declared = DeclId.at(15) }, .signature = .u8 }},
     };
 
@@ -14666,7 +14874,7 @@ test "call index accessors recover forged typing rows" {
     try testing.expectEqual(ExprId.at(2), recovered[0].argument);
     try testing.expectEqual(ExprId.at(3), recovered[1].argument);
     try testing.expectEqual(DeclId.at(9), index.recoveredCallOf(&typing, ExprId.at(2)).?.target.declared);
-    try testing.expectEqual(@as(u32, 3), index.postfixOf(&typing, ExprId.at(3)).?.call);
+    try testing.expectEqual(ExprId.at(3), index.postfixOf(&typing, ExprId.at(3)).?.call);
     try testing.expectEqual(DeclId.at(10), index.projectionOf(&typing, ExprId.at(4)).?.member);
     try testing.expectEqual(DeclId.at(11), index.traversalPlan(&typing, ExprId.at(5)).?.decl);
     try testing.expectEqual(@as(u32, 13), index.rangePlaceOf(&typing, ExprId.at(6)).?.first);
@@ -16260,6 +16468,55 @@ test "shared type DAG substitution bounds allocation work per query" {
     try testing.expectEqual(first, try reopened.substitute(shared, owner, &.{.u8}));
 }
 
+test "a type too long to spell is a digest in a symbol, and one leaf apart is another" {
+    const gpa = testing.allocator;
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const declaration = DeclId.at(1);
+    const template = try builder.addStruct("P", .copyable, &.{});
+    try builder.noteTemplate(declaration, 0, template);
+
+    // `P[x, x]` over itself: each level names the one below twice, so the
+    // pool holds one type per level and the spelling doubles.
+    const doubled = struct {
+        fn of(b: *Typing.Builder, t: TypeId, d: DeclId, leaf: TypeId, levels: usize) !TypeId {
+            var at = leaf;
+            for (0..levels) |_| at = try b.instantiate(t, d, &.{ at, at });
+            return at;
+        }
+    }.of;
+    const levels = 24;
+    const over_u8 = try doubled(&builder, template, declaration, .u8, levels);
+    const over_u16 = try doubled(&builder, template, declaration, .u16, levels);
+    const small = try doubled(&builder, template, declaration, .u8, 3);
+    const view = builder.view();
+
+    var shared: SharedSpelling = .{};
+    defer shared.deinit(gpa);
+    const first = try view.mangledNameWith(gpa, over_u8, &shared);
+    defer gpa.free(first);
+    const second = try view.mangledNameWith(gpa, over_u16, &shared);
+    defer gpa.free(second);
+
+    // Sixteen million names each, written in a few kilobytes, and the two
+    // differ though they differ in one leaf only.
+    try testing.expect(first.len <= 4 * SharedSpelling.longest);
+    try testing.expect(std.mem.indexOf(u8, first, SharedSpelling.marker) != null);
+    try testing.expect(!std.mem.eql(u8, first, second));
+    // Asked again, the same type is the same name.
+    const again = try view.mangledNameWith(gpa, over_u8, &shared);
+    defer gpa.free(again);
+    try testing.expectEqualStrings(first, again);
+
+    // A spelling under the bound is written as it always was.
+    const plain = try view.mangledName(gpa, small);
+    defer gpa.free(plain);
+    const bounded = try view.mangledNameWith(gpa, small, &shared);
+    defer gpa.free(bounded);
+    try testing.expectEqualStrings(plain, bounded);
+    try testing.expect(std.mem.indexOf(u8, bounded, SharedSpelling.marker) == null);
+}
+
 test "deep nominal mangling allocates in proportion to its exact spelling" {
     const gpa = testing.allocator;
     var builder = try Typing.Builder.init(gpa);
@@ -16439,4 +16696,26 @@ test "leaf type substitution does not copy a wide replacement vector" {
     }
     try testing.expectEqual(TypeId.poison, try builder.substitute(parameters[width - 1], owner, replacements[0..1]));
     try testing.expectEqual(allocated, counted.allocated_bytes);
+}
+
+test "a long callable interned after an allocation was refused still has its shape" {
+    const count = node.CallableShape.max_packed_parameters + 1;
+    var params: [count]CallableParam = undefined;
+    for (&params) |*param| param.* = .{ .spelling = "", .convention = .read, .ty = .u8, .default = .absent };
+
+    // Each allocation of the first interning is refused in turn. Whatever
+    // that left behind, interning the same signature again answers a type
+    // whose head is the shape, never the type alone.
+    var refused_at: usize = 0;
+    while (true) : (refused_at += 1) {
+        var failing = std.testing.FailingAllocator.init(testing.allocator, .{});
+        var b = try Typing.Builder.init(failing.allocator());
+        defer b.deinit();
+        failing.fail_index = failing.alloc_index + refused_at;
+        const first = b.internCallable(&params, .u8, &.{}, .read);
+        failing.fail_index = std.math.maxInt(usize);
+        const id = first catch try b.internCallable(&params, .u8, &.{}, .read);
+        try testing.expect(b.pool.items[@intFromEnum(id)].callable.shape_of != .poison);
+        if (first) |_| break else |_| {}
+    }
 }

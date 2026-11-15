@@ -82,6 +82,7 @@ fn symbolFor(
     const scope: []const u8 = if (owner == TokenId.none) "" else ast.tokenText(owner);
     var spelled: std.ArrayList(u8) = .empty;
     defer spelled.deinit(gpa);
+    const shared = &pool.symbol_spelling;
 
     const enclosing = pool.view().implementationOf(d);
     const member_of = if (enclosing) |i|
@@ -99,17 +100,17 @@ fn symbolFor(
         // A trait's provided operation is one body per type implementing the
         // trait, so it is named as that type's member is: the type first,
         // then the trait.
-        const head = try typing.mangledName(gpa, self_ty);
+        const head = try typing.mangledNameWith(gpa, self_ty, shared);
         defer gpa.free(head);
         try spelled.appendSlice(gpa, head);
         try spelled.append(gpa, route_end);
         try appendRoute(&typing, gpa, &spelled, @intCast(program.moduleOf(d).index()));
         try spelled.appendSlice(gpa, scope);
-        try typing.appendArguments(gpa, &spelled, impl_args);
+        try typing.appendArgumentsWith(gpa, &spelled, impl_args, shared);
         try spelled.append(gpa, '.');
     } else if (enclosing != null and enclosing.?.ofATrait()) {
         const i = enclosing.?;
-        const head = try typing.mangledName(gpa, member_of);
+        const head = try typing.mangledNameWith(gpa, member_of, shared);
         defer gpa.free(head);
         try spelled.appendSlice(gpa, head);
         try spelled.append(gpa, route_end);
@@ -117,18 +118,18 @@ fn symbolFor(
         const trait = DeclId.at(i.trait);
         try appendRoute(&typing, gpa, &spelled, @intCast(program.moduleOf(trait).index()));
         try spelled.appendSlice(gpa, ast.tokenText(ast.declName(trait)));
-        try typing.appendArguments(gpa, &spelled, supplied);
+        try typing.appendArgumentsWith(gpa, &spelled, supplied, shared);
         try spelled.append(gpa, '.');
     } else {
         try appendRoute(&typing, gpa, &spelled, @intCast(program.moduleOf(d).index()));
         if (scope.len > 0) {
             try spelled.appendSlice(gpa, scope);
-            try typing.appendArguments(gpa, &spelled, typing.appliedTo(member_of));
+            try typing.appendArgumentsWith(gpa, &spelled, typing.appliedTo(member_of), shared);
             try spelled.append(gpa, '.');
         }
     }
     try spelled.appendSlice(gpa, written);
-    try typing.appendArguments(gpa, &spelled, args);
+    try typing.appendArgumentsWith(gpa, &spelled, args, shared);
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
@@ -319,8 +320,9 @@ fn spellGenerated(
     try spelled.appendSlice(gpa, @tagName(kind));
     try spelled.append(gpa, '@');
     const view = pool.view();
+    const shared = &pool.symbol_spelling;
     switch (identity) {
-        .type => |ty| try view.appendArguments(gpa, spelled, &.{ty}),
+        .type => |ty| try view.appendArgumentsWith(gpa, spelled, &.{ty}, shared),
         .closure => |closure| try Typing.appendBodyName(gpa, spelled, view.closure_names, closure.index()),
         .constructor => |constructor| try Typing.appendBodyName(gpa, spelled, view.constructor_names, @intFromEnum(constructor)),
         .member => |at| {
@@ -331,11 +333,11 @@ fn spellGenerated(
             try spelled.appendSlice(gpa, ast.tokenText(ast.declName(at.member)));
         },
     }
-    try view.appendArguments(gpa, spelled, args);
-    if (self_ty != .poison) try view.appendArguments(gpa, spelled, &.{self_ty});
+    try view.appendArgumentsWith(gpa, spelled, args, shared);
+    if (self_ty != .poison) try view.appendArgumentsWith(gpa, spelled, &.{self_ty}, shared);
     if (impl_args.len > 0) {
         try spelled.appendSlice(gpa, ".impl");
-        try view.appendArguments(gpa, spelled, impl_args);
+        try view.appendArgumentsWith(gpa, spelled, impl_args, shared);
     }
 }
 
@@ -1262,10 +1264,22 @@ const Discovery = struct {
     projection_floor: usize = 0,
     active_projections: std.ArrayList(struct { member: DeclId, receiver: TypeId }) = .empty,
 
+    /// One slot of a projection's path and the expression the site fills it
+    /// with, as lowering holds it, so the two read a path alike.
     const Splice = struct {
         binding: BindingId,
         wrote: ExprId,
+        /// The instance of the function that wrote the expression. The path
+        /// is read under the projection member's instance, and a generic call
+        /// in what the site wrote is built for the site's.
+        instance: types_mod.Instantiation,
         read: bool = false,
+        /// How many slots were open at the site, before this bracket opened
+        /// its own. What the site wrote reaches only those.
+        site: usize,
+        /// How many expressions written outside this slot's bracket are being
+        /// walked; the slot is out of their reach while any is.
+        hidden: u32 = 0,
     };
 
     fn through(self: *Discovery, ty: TypeId) !TypeId {
@@ -1475,7 +1489,8 @@ const Discovery = struct {
         var i = self.splices.items.len;
         while (i > 0) {
             i -= 1;
-            if (self.splices.items[i].binding == target) return i;
+            const slot = self.splices.items[i];
+            if (slot.hidden == 0 and slot.binding == target) return i;
         }
         return null;
     }
@@ -1484,7 +1499,21 @@ const Discovery = struct {
         if (self.splices.items[at].read) return;
         self.splices.items[at].read = true;
         const wrote = self.splices.items[at].wrote;
-        if (wrote != ExprId.none) try self.projectionOperand(wrote);
+        if (wrote == ExprId.none) return;
+        const saved = self.instance;
+        self.instance = self.splices.items[at].instance;
+        defer self.instance = saved;
+        // The expression was written where only the slots open before its
+        // bracket were in reach, so those opened since are hidden while it is
+        // walked; slots its own brackets open stay visible. Indices, not a
+        // slice: the walk may open slots and move the list.
+        const from = self.splices.items[at].site;
+        const until = self.splices.items.len;
+        for (self.splices.items[from..until]) |*slot| slot.hidden += 1;
+        defer for (self.splices.items[from..until]) |*slot| {
+            slot.hidden -= 1;
+        };
+        try self.projectionOperand(wrote);
     }
 
     /// Site operands are evaluated outside the projection path they fill.
@@ -1568,11 +1597,15 @@ const Discovery = struct {
         try self.splices.append(self.gpa, .{
             .binding = BindingId.at(found.receiver),
             .wrote = receiver,
+            .instance = self.instance,
+            .site = mark,
         });
         if (found.index != types_mod.Expansion.no_binding) {
             try self.splices.append(self.gpa, .{
                 .binding = BindingId.at(found.index),
                 .wrote = index,
+                .instance = self.instance,
+                .site = mark,
             });
         }
 
