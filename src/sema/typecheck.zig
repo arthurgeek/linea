@@ -5716,6 +5716,13 @@ const Leave = struct {
     what: []const u8,
     /// Whether this is a `defer` rather than an expression that leaves.
     schedules: bool = false,
+    /// The first token of the innermost closure body that holds this, or
+    /// `outside_closures`. A closure's body is a scope of its own, so this
+    /// leaves or schedules there and not in a `defer` the closure is written
+    /// inside.
+    closure_at: u32 = outside_closures,
+
+    const outside_closures = std.math.maxInt(u32);
 };
 
 /// A traversal and the implementation that declares it.
@@ -16185,6 +16192,16 @@ const Checker = struct {
     fn checkDeferRelease(self: *Checker, s: StmtId) !void {
         const id = self.ast.stmtData(s).init;
         const receiver = self.ast.call(id).args[0];
+        // Inside a schedule refused for holding this one, the release is never
+        // placed. The value it would have ended is poison from here, so the
+        // ownership pass does not also report it as never settled.
+        if (self.schedule_refused) {
+            const bound = self.res.targetOf(self.ast.withoutGroups(receiver));
+            if (bound != BindingId.none) self.setBindingType(bound, .poison);
+            _ = self.record(receiver, .poison);
+            _ = self.record(id, .poison);
+            return;
+        }
         const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null);
         const wanted = self.ast.tokenName(self.ast.declName(release.member));
         switch (try self.postfixOperation(id, id, receiver, wanted, release.member, &.{}, null)) {
@@ -16317,8 +16334,16 @@ const Checker = struct {
         }
         if (lo == self.leaves.items.len) return false;
 
+        // A closure written inside the scheduled expression is skipped with
+        // everything in its body. Each one inside the extent is passed over
+        // once, so the search costs the leaves this `defer` encloses.
+        while (lo < self.leaves.items.len) : (lo += 1) {
+            const candidate = self.leaves.items[lo];
+            if (candidate.at >= extent.end.index()) return false;
+            if (candidate.closure_at == Leave.outside_closures or candidate.closure_at < extent.start.index()) break;
+        }
+        if (lo == self.leaves.items.len) return false;
         const found = self.leaves.items[lo];
-        if (found.at >= extent.end.index()) return false;
 
         const label = try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what});
         _ = if (found.schedules) self.report(
@@ -16388,6 +16413,40 @@ const Checker = struct {
                 return a.at < b.at;
             }
         }.before);
+
+        // Every closure body's extent, in the order they are written, so a
+        // body comes before the ones written inside it.
+        const Extent = struct { start: u32, end: u32 };
+        var closures: std.ArrayList(Extent) = .empty;
+        defer closures.deinit(self.gpa);
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            if (self.ast.exprTag(id) != .lambda) continue;
+            // The body alone. A capture's initialiser and a parameter's
+            // default are written inside the closure's brackets and are
+            // evaluated where it is written, so they leave from there.
+            const tokens = self.ast.exprTokens(self.ast.lambda(id).body);
+            try closures.append(self.gpa, .{ .start = tokens.start.index(), .end = tokens.end.index() });
+        }
+        std.mem.sort(Extent, closures.items, {}, struct {
+            fn before(_: void, a: Extent, b: Extent) bool {
+                return a.start < b.start;
+            }
+        }.before);
+
+        // One pass over both: the closures still open at a leave are a stack,
+        // because extents nest, and its top is the innermost.
+        var open: std.ArrayList(Extent) = .empty;
+        defer open.deinit(self.gpa);
+        var next: usize = 0;
+        for (self.leaves.items) |*leave| {
+            while (next < closures.items.len and closures.items[next].start <= leave.at) : (next += 1) {
+                while (open.items.len != 0 and open.items[open.items.len - 1].end <= closures.items[next].start) _ = open.pop();
+                try open.append(self.gpa, closures.items[next]);
+            }
+            while (open.items.len != 0 and open.items[open.items.len - 1].end <= leave.at) _ = open.pop();
+            if (open.items.len != 0) leave.closure_at = open.items[open.items.len - 1].start;
+        }
     }
 
     /// Records that a call lends the place `value` to an `inout` parameter.
@@ -22912,6 +22971,11 @@ const Checker = struct {
                 self.loops = enclosing_loops;
                 self.closure_hides_loops = hid_loops;
             }
+            // The body is a scope of its own: a schedule refused around the
+            // closure says nothing about what is written in it.
+            const refused_outside = self.schedule_refused;
+            defer self.schedule_refused = refused_outside;
+            self.schedule_refused = false;
             break :checked try self.check(lambda.body, result_expected);
         };
         // Reported once the body is checked, because the capture it suggests
