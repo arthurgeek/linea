@@ -701,23 +701,21 @@ pub trait Sequence {
 
     // Combine the items with `combine`, starting from the first item rather
     // than an initial value, and return the result, or None for an empty
-    // sequence. `combine` is dropped at the end.
+    // sequence. A callback lent with `&` keeps its state for the caller.
     fn reduce[
         F: inout fn(sink accumulator: Self.Iter.Item, sink item: Self.Iter.Item) -> Self.Iter.Item where carries(accumulator, item),
-    ](sink self: Self, sink combine: F) -> Option[Self.Iter.Item] where
+    ](sink self: Self, inout combine: F) -> Option[Self.Iter.Item] where
         carries(.Some: self, combine),
-        Self.Iter: Discardable,
-        F: Discardable
+        Self.Iter: Discardable
     {
         var walking = self.iterate()
-        var combining = combine
         var combined: Self.Iter.Item = match &walking.next() {
             Some(first) => first,
             None => return .None,
         }
         loop {
             match &walking.next() {
-                Some(item) => combine_into(&combined, item, &combining),
+                Some(item) => combine_into(&combined, item, &combine),
                 None => {
                     break
                 },
@@ -742,18 +740,17 @@ pub trait Sequence {
 
     // Return the position of the first item `predicate` accepts, counting
     // from zero, or None when it accepts none. The walk stops at that item.
-    // `predicate` takes each item it is shown and is dropped at the end.
-    fn position[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, sink predicate: F) -> Option[UInt64] where
-        Self.Iter: Discardable,
-        F: Discardable
+    // `predicate` takes each item it is shown. A callback lent with `&`
+    // keeps its state for the caller.
+    fn position[F: inout fn(sink item: Self.Iter.Item) -> Bool](sink self: Self, inout predicate: F) -> Option[UInt64] where
+        Self.Iter: Discardable
     {
         var walking = self.iterate()
-        var checking = predicate
         var at: UInt64 = 0
         loop {
             match &walking.next() {
                 Some(item) => {
-                    if &checking(item) {
+                    if &predicate(item) {
                         break .Some(at)
                     }
                     at += 1
@@ -767,6 +764,19 @@ pub trait Sequence {
         let found = (UInt8(10)..20).position(|sink item| item == 12)
         testing.assert_eq(found, Option.Some(UInt64(2)), "position did not count from zero")?
         testing.assert((UInt8(0)..5).position(|sink item| item > 9).is_none(), "position found an item none matched")?
+    }
+
+    test fn position_lends_a_predicate_the_caller_uses_again() {
+        var asked: UInt8 = 0
+        var counting = inout [inout asked] |sink item: UInt8| {
+            asked += 1
+            item == 12
+        }
+        let first = (UInt8(10)..20).position(&counting)
+        let second = (UInt8(12)..20).position(&counting)
+        testing.assert_eq(first, Option.Some(UInt64(2)), "a lent predicate found the wrong position")?
+        testing.assert_eq(second, Option.Some(UInt64(0)), "a predicate lent a second time found the wrong position")?
+        testing.assert_eq(asked, UInt8(4), "a lent predicate did not keep its count between walks")?
     }
 
     test fn position_hands_linear_items_to_its_predicate() {
@@ -2434,20 +2444,19 @@ impl[I: Iterator] Peekable[I] {
     }
 
     // Take the next item only when `accept` approves of it; otherwise leave
-    // it held for the next call and answer None.
-    pub fn next_if[F: inout fn(read item: I.Item) -> Bool](inout self: Self, sink accept: F) -> Option[I.Item] where
+    // it held for the next call and answer None. A callback lent with `&`
+    // keeps its state for the caller.
+    pub fn next_if[F: inout fn(read item: I.Item) -> Bool](inout self: Self, inout accept: F) -> Option[I.Item] where
         carries(.Some: self),
-        retains(self: self),
-        F: Discardable
+        retains(self: self)
     {
         let candidate = match mem.exchange(&self.held, .None) {
             Some(item) => Option.Some(item),
             None => &self.pull(),
         }
-        var accepting = accept
         match candidate {
             Some(item) => {
-                if &accepting(item) {
+                if &accept(item) {
                     .Some(item)
                 } else {
                     fill_empty(&self.held, .Some(item))
