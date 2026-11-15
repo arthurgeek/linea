@@ -157,7 +157,10 @@ Each shape has a reference program in the same position:
 - a tuple's components and an interpolation's depth are too few to regroup,
   and the reference writes the fewest.
 
-The two programs are a few tokens apart, so the tables that grow as a file is
+A reference uses what its whole uses: both chains are read from their first
+alias, the two nested halves are held by a named type, and where the whole
+heads an implementation inside an `Option` so does the reference. The two
+programs are a few declarations apart, so the tables that grow as a file is
 read reach the same capacity in both, whatever is declared before them. Over
 22 shapes after 0, 500, 1500, 4000 and 8000 unrelated declarations, the
 difference of twelve moves by less than a kilobyte and of the rest, the
@@ -172,12 +175,25 @@ a chain of half the depth is too short to reach that bound. That is 66% of
 the allowance. The largest difference of a limit's shape is 0.90 MB, a type
 nested a thousand deep in the head of an `impl`, 35%.
 
-One thing the count cannot smooth is an arena inside the check, which
-replaces its node with one half again as large as all it holds each time it
-fills, and is charged the node. Where a program fills a node and its
-reference stops short, the difference is the node. So a check over its bound
-is measured again after two thousand unrelated declarations, which move
-where the nodes fill, and fails only if it is over both times.
+One thing the count cannot smooth is an arena inside the check. The standard
+arena never grows a node in place: when one fills it asks for a new node
+half again as large as the last node and the request together, and the count
+charges that node whole. Two things follow.
+
+Work inside the room a node has left is charged nothing. A pass that
+allocates a megabyte from an arena whose node has two free costs the count
+no bytes, and one that allocates three costs it the next node, tens of
+megabytes where the arena holds a check's types.
+
+Where a program fills a node and its reference stops short, the difference
+is the node and not the program. So a check over its bound is measured once
+more after two thousand unrelated declarations, which move where the nodes
+fill. It is within its bound only if the difference then falls by eight
+megabytes or more and is within the allowance of the first measurement. A
+difference that stays, or falls by less, is the program's, and the first
+measurement stands: the second can excuse a node and cannot raise what a
+program is allowed. No measurement of a legal shape, 117 shapes and 110
+after unrelated declarations, has needed it.
 
 Every check, a reference's as well, is stopped at one gibibyte of work, and
 a stopped check fails its shape.
@@ -211,8 +227,9 @@ What it does not hold a check to:
   prelude. A cost `c·n^k` in the depth `n` costs the reference
   `2·c·(n/2)^k`, so it fails once `c·n^k·(1 − 2^(1−k))` and what the shape
   already differs by pass the allowance.
-- Work inside an arena that fits the room its node has left. It is charged
-  nothing until a node fills, and then the node.
+- Work inside an arena that fits the room its node has left, as above. It
+  is charged nothing until a node fills, and then the node; where the second
+  measurement finds room again, that node is excused with it.
 - A program one past a limit is refused before the work is done, so only the
   program exactly at the limit holds the compiler to this.
 
@@ -238,7 +255,16 @@ the file's own structs and aliases of those. A type that borrows, a linear
 struct and an enum are left alone. The generator writes four to six such
 bindings in every program, of an array, a tuple, an `Option`, a struct, an
 alias and a generic application, initialised by an `if`, a `match` or a
-block.
+block. They sit in a function `main` calls, whose answer reads a number out
+of each binding and weights it by the binding's place; `main` stops where
+that answer is not the one the bindings give, so a rewrite that changed what
+a binding holds changes what the program does.
+
+Two of the four do not preserve acceptance at a limit, and leave such a
+binding alone. An alias is one more link of a chain of declared answers, so
+the alias rewrite skips a type that names an alias. An enum is its payload
+behind a tag word, so the payload rewrite skips a type that could be half as
+wide as a type may be.
 
 **(c) One mistake, one report, and its fixes apply.** A program with one
 planted mistake earns exactly the reports its statement counts, all under its

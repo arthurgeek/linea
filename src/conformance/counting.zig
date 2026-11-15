@@ -86,8 +86,21 @@ pub const Counting = struct {
 /// written, so growing it never moves it. A smaller one comes from an arena
 /// and grows by being replaced. A buffer that grows geometrically is
 /// replaced a few times while small and grows in place after that.
+///
+/// A buffer that never moves hides a pointer kept into it across a growth,
+/// which an allocator that moved it would leave dangling. Nothing here looks
+/// for that; the corpus walk runs the same compiler over an allocator that
+/// moves what grows.
+///
+/// The address space is asked of the system with no promise it is backed.
+/// A system that refuses to overcommit refuses the reservation, which sets
+/// `failed`; this has run on macOS only.
 pub const Regions = struct {
     small: std.heap.ArenaAllocator,
+    /// Whether the system refused a reservation or the room to record one.
+    /// An allocation refused for that reason is the system's answer and not
+    /// the caller's bound.
+    failed: bool = false,
     /// The address of each large allocation, with the alignment it was asked
     /// for.
     large: std.AutoHashMapUnmanaged(usize, std.mem.Alignment) = .empty,
@@ -126,9 +139,13 @@ pub const Regions = struct {
         const self: *Regions = @ptrCast(@alignCast(ctx));
         if (n < threshold) return self.small.allocator().rawAlloc(n, a, ra);
         if (n > region) return null;
-        const memory = pages.rawAlloc(region, a, ra) orelse return null;
+        const memory = pages.rawAlloc(region, a, ra) orelse {
+            self.failed = true;
+            return null;
+        };
         self.large.put(pages, @intFromPtr(memory), a) catch {
             pages.rawFree(memory[0..region], a, ra);
+            self.failed = true;
             return null;
         };
         return memory;

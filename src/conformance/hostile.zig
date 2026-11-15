@@ -432,8 +432,9 @@ const Written = struct {
     /// Whether the rule reports once for the file or the type, however many
     /// places write it.
     once: bool,
-    /// Whether `text` is an alias. An implementation is written for a type's
-    /// own declaration, so its head holds an alias as an argument.
+    /// Whether `text` is held as the argument of an `Option` where it heads
+    /// an implementation. An implementation is written for a type's own
+    /// declaration, so an alias is; a reference is held as its whole is.
     alias: bool = false,
 };
 
@@ -486,13 +487,15 @@ fn writeLimit(
             switch (form) {
                 .whole => try writeNested(t, levels, "UInt8"),
                 // The same wrappers in two types, with leaves that keep the
-                // two halves from being one type.
+                // two halves from being one type, held by a named type as
+                // the whole is one.
                 .reference => {
-                    try t.writeAll("(");
+                    try w.writeAll("struct _Both[A, B] {\n    _one: A,\n    _other: B,\n}\n\n");
+                    try t.writeAll("_Both[");
                     try writeNested(t, levels / 2, "UInt8");
                     try t.writeAll(", ");
                     try writeNested(t, levels - levels / 2, "Bool");
-                    try t.writeAll(")");
+                    try t.writeAll("]");
                 },
             }
             return .{ .text = text.written(), .held = text.written(), .once = true };
@@ -518,6 +521,10 @@ fn writeLimit(
                 }
             }
             try w.writeAll("\n");
+            // The whole uses its one chain where the type is written. The
+            // reference uses its first chain there and its second here, so
+            // both of its chains are read from their first alias.
+            if (form == .reference) try w.print("fn _second(_given: _Link{d}) -> UInt8 {{\n    0\n}}\n\n", .{count / 2});
             try t.writeAll("_Link0");
             return .{ .text = text.written(), .held = "UInt8", .once = true, .alias = true };
         },
@@ -584,7 +591,9 @@ fn writeShared(gpa: std.mem.Allocator, w: *std.Io.Writer, depth: u32, form: Form
         },
         .reference => {
             const used = try std.fmt.allocPrint(gpa, "_Pair[_Twice{d}[UInt8], _Twice{d}[Bool]]", .{ restart - 1, depth });
-            return .{ .text = used, .held = used, .once = true };
+            // Held in an `Option` where it heads an implementation, as the
+            // whole's alias is.
+            return .{ .text = used, .held = used, .once = true, .alias = true };
         },
     }
 }
@@ -758,6 +767,18 @@ pub const Work = struct {
     pub fn over(self: Work) bool {
         return self.whole > self.reference + self.allowance();
     }
+
+    fn difference(self: Work) usize {
+        return self.whole -| self.reference;
+    }
+
+    /// The first measurement with the second's difference, where the second
+    /// shows the first was over by an arena's node: null where it does not.
+    fn excusesNode(first: Work, second: Work) ?Work {
+        if (first.difference() -| second.difference() < node_step) return null;
+        if (second.difference() > first.allowance()) return null;
+        return .{ .reference = first.reference, .whole = first.reference + second.difference() };
+    }
 };
 
 /// What a check of one program took and said.
@@ -784,9 +805,13 @@ fn measure(
     var counting: Counting = .{ .under = regions.allocator(), .charge = .added, .most = most };
 
     const loaded = generate.checkLoadedText(counting.allocator(), "hostile.lin", text, library) catch |err| {
+        // The system refusing address space is not the check passing its
+        // bound, and is not reported as one.
+        if (regions.failed) return error.RegionReservationFailed;
         if (err == error.OutOfMemory and counting.refused) return .{ .took = counting.took, .stopped = true, .reports = &.{} };
         return err;
     };
+    if (regions.failed) return error.RegionReservationFailed;
     // A refused allocation does not always end the check: a report whose
     // text could not be built is dropped, so what is left is not what the
     // compiler says of the program.
@@ -797,6 +822,30 @@ fn measure(
         if (d.severity == .err) try reports.append(gpa, d.code);
     }
     return .{ .took = counting.took, .stopped = false, .reports = reports.items };
+}
+
+test "a second measurement excuses a node and never a program" {
+    const plain: Work = .{ .reference = 100 << 20, .whole = (100 << 20) + (30 << 20) };
+    try testing.expect(plain.over());
+
+    // Thirty megabytes over, and within the allowance once declarations
+    // moved the node: the node's.
+    const moved: Work = .{ .reference = 140 << 20, .whole = (140 << 20) + (1 << 20) };
+    try testing.expect(!Work.excusesNode(plain, moved).?.over());
+
+    // A program three megabytes over stays over when its difference falls
+    // to under the larger allowance the declarations bring, since it did
+    // not fall by a node.
+    const costly: Work = .{ .reference = 100 << 20, .whole = (100 << 20) + (3 << 20) };
+    const behind: Work = .{ .reference = 140 << 20, .whole = (140 << 20) + (5 << 19) };
+    try testing.expect(costly.over());
+    try testing.expect(!behind.over());
+    try testing.expectEqual(@as(?Work, null), Work.excusesNode(costly, behind));
+
+    // A fall of a node that leaves more than the first allowance is still
+    // over.
+    const still: Work = .{ .reference = 140 << 20, .whole = (140 << 20) + (5 << 20) };
+    try testing.expectEqual(@as(?Work, null), Work.excusesNode(plain, still));
 }
 
 test "two checks of one program count the same work" {
@@ -847,16 +896,25 @@ fn workAfter(
 /// after.
 const confirming_fillers = 2000;
 
+/// The least a difference falls by, measured again, for the first
+/// measurement to have been an arena's node and not the program. No legal
+/// shape's difference moves by a megabyte with declarations before it, and
+/// the nodes of an arena that holds a check's types are tens of megabytes.
+const node_step: usize = 8 << 20;
+
 /// Checks `program` and its reference. Allocates from `gpa` and frees
 /// nothing it returns.
 ///
-/// A check over its bound is measured a second time after unrelated
-/// declarations, and is over only if it is over both times. The checker
-/// allocates from an arena, an arena replaces its node with one half again
-/// as large as everything it holds each time it fills, and a node is
-/// charged whole. Where the program fills a node and its reference stops
-/// just short, their difference is the node. Declarations before both move
-/// where the nodes fill.
+/// The checker allocates from arenas. An arena that fills its node asks for
+/// one half again as large as the last and the request together, and that
+/// node is charged whole, so where the program fills a node and its
+/// reference stops just short, their difference is the node. A check over
+/// its bound is therefore measured once more after unrelated declarations,
+/// which move where the nodes fill. It is within its bound only if the
+/// difference then falls by `node_step` or more and is within the allowance
+/// of the first measurement. A difference that stays, or falls by less, is
+/// the program's, and the first measurement stands: the second can excuse a
+/// node and cannot raise what a program is allowed.
 pub fn observe(
     gpa: std.mem.Allocator,
     library: *const loader.CheckedLibrary,
@@ -867,8 +925,9 @@ pub fn observe(
     var filler: std.Io.Writer.Allocating = .init(gpa);
     try writeFiller(&filler.writer, confirming_fillers);
     const second = try workAfter(gpa, library, program, filler.written());
-    if (second.stopped or second.work.over()) return first;
-    return .{ .reports = first.reports, .work = second.work, .stopped = false };
+    if (second.stopped) return first;
+    const excused = Work.excusesNode(first.work, second.work) orelse return first;
+    return .{ .reports = first.reports, .work = excused, .stopped = false };
 }
 
 /// A defect a generated program shows in the compiler, recorded so the walk

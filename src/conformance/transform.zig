@@ -370,9 +370,18 @@ pub const Transform = enum {
     type_moved_to_field,
     /// A binding's written type moved to the payload of an enum its
     /// initialiser is wrapped in and matched back out of.
+    ///
+    /// An enum is its payload behind a tag word, so a type within a few
+    /// bytes of [L-Size] is accepted as an annotation and refused as a
+    /// payload. The rewrite leaves alone a type that could be that wide.
     type_moved_to_payload,
     /// A binding's written type moved to an alias its annotation then names.
     /// The initialiser is untouched, so a constant stays one.
+    ///
+    /// An alias is one more link of a chain of declared answers, so a type
+    /// that already rests on the most links [T-AnswerDepth] allows is
+    /// accepted as an annotation and refused behind one more alias. The
+    /// rewrite leaves alone a type that names an alias.
     type_moved_to_alias,
 
     /// The rewritten source, or null where the transformation says nothing
@@ -608,6 +617,52 @@ fn isNeverConstant(ast: *const Ast, id: ExprId) bool {
     };
 }
 
+/// Whether `written` names an alias this file declares, so that one more
+/// alias above it could be one link too many.
+fn namesAnAlias(ast: *const Ast, written: []const u8) bool {
+    for (0..ast.declCount()) |at| {
+        const d = DeclId.at(@intCast(at));
+        if (ast.declTag(d) != .alias) continue;
+        const name_token = ast.declName(d);
+        if (name_token == .none) continue;
+        const name = ast.tokenText(name_token);
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, written, from, name)) |found| {
+            const end = found + name.len;
+            const starts = found == 0 or !(std.ascii.isAlphanumeric(written[found - 1]) or written[found - 1] == '_');
+            const ends = end == written.len or !(std.ascii.isAlphanumeric(written[end]) or written[end] == '_');
+            if (starts and ends) return true;
+            from = end;
+        }
+    }
+    return false;
+}
+
+/// Whether a value of `written` could be within a tag word of the widest a
+/// type may be. Every number written in the type is taken as an array's
+/// length and every element as eight bytes, which is at least as wide as
+/// any type `isMovableType` admits that writes those numbers.
+fn couldBeWidest(written: []const u8) bool {
+    var bytes: u64 = 8;
+    var i: usize = 0;
+    while (i < written.len) {
+        if (!std.ascii.isDigit(written[i]) or (i != 0 and (std.ascii.isAlphanumeric(written[i - 1]) or written[i - 1] == '_'))) {
+            i += 1;
+            continue;
+        }
+        var end = i;
+        while (end < written.len and std.ascii.isDigit(written[end])) end += 1;
+        const length = std.fmt.parseInt(u64, written[i..end], 10) catch return true;
+        bytes = std.math.mul(u64, bytes, @max(length, 1)) catch return true;
+        i = end;
+    }
+    return bytes >= widest_moved_payload;
+}
+
+/// A payload this wide or wider is left where it is. Half the widest a type
+/// may be, which is far more than a tag word below it.
+const widest_moved_payload: u64 = @import("../support/limits.zig").Limit.type_bytes.most() / 2;
+
 /// One binding a rewrite may move the annotation of.
 const Movable = struct {
     /// The end of the binding's name, where `: Type = ` begins.
@@ -666,6 +721,8 @@ fn moveWrittenType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8, ta
         if (between.len < 3 or between[0] != ':' or between[between.len - 1] != '=') continue;
         const written = std.mem.trim(u8, between[1 .. between.len - 1], " \t\n");
         if (!isMovableType(written, &declared, &.{})) continue;
+        if (target == .alias and namesAnAlias(ast, written)) continue;
+        if (target == .payload and couldBeWidest(written)) continue;
 
         var line = keyword.start;
         while (line > 0 and text[line - 1] != '\n') line -= 1;
@@ -788,6 +845,41 @@ test moveWrittenType {
         }
         try testing.expect((try applyTo(gpa, .type_moved_to_alias, constant)) != null);
     }
+
+    // A type that names an alias is not put behind one more, and a type that
+    // could be as wide as a type may be is not put behind a tag. The other
+    // rewrites still move both.
+    const at_limits =
+        \\alias Named = UInt8
+        \\
+        \\fn main() -> UInt8 {
+        \\    var named: Named = pick()
+        \\    named = named + 1
+        \\    var wide: [UInt8; 4294967280] = fill()
+        \\    wide[0] = named
+        \\    wide[0]
+        \\}
+        \\
+    ;
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .type_moved_to_alias,
+        \\alias Named = UInt8
+        \\
+        \\fn main() -> UInt8 {
+        \\    var named: Named = pick()
+        \\    named = named + 1
+        \\    named
+        \\}
+        \\
+    ));
+    const widest_as_alias = (try applyTo(gpa, .type_moved_to_alias, at_limits)).?;
+    try testing.expect(std.mem.indexOf(u8, widest_as_alias, "var wide: _MovedAlias = fill()") != null);
+    const named_as_payload = (try applyTo(gpa, .type_moved_to_payload, at_limits)).?;
+    try testing.expect(std.mem.indexOf(u8, named_as_payload, "var named = match _MovedPayload._Only(pick())") != null);
+    try testing.expect(std.mem.indexOf(u8, named_as_payload, "var wide: [UInt8; 4294967280] = fill()") != null);
+    try testing.expect(couldBeWidest("[UInt8; 4294967280]"));
+    try testing.expect(couldBeWidest("[[UInt16; 65536]; 32768]"));
+    try testing.expect(!couldBeWidest("[UInt64; 1000000]"));
+    try testing.expect(!couldBeWidest("Option[UInt8]"));
 
     // A type that borrows and an enum are left alone, and so is a binding
     // with no annotation.
