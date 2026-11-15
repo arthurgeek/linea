@@ -11615,9 +11615,10 @@ const Resolver = struct {
         }
     };
 
-    /// Whether every name a written type reaches settled: a name nothing
-    /// declares, an alias whose own type fails, and an alias that reaches itself
-    /// have each been reported where they are written.
+    /// Whether every name a written type reaches settled: a type the parser
+    /// refused, a name nothing declares, an alias whose own type fails, and an
+    /// alias that reaches itself have each been reported where they are
+    /// written.
     ///
     /// **Bound:** the written type's own nodes, and each alias it names once
     /// per level up to `alias_depth`.
@@ -11626,9 +11627,11 @@ const Resolver = struct {
         if (depth > alias_depth) return false;
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
+        // A type the parser refused was reported where it was written.
+        if (!x.wasWritten()) return false;
         switch (x.kind) {
             // Unit names no declaration, so there is nothing of it to settle.
-            .named => if (x.name != TokenId.none and !ast.isUnitType(x)) {
+            .named => if (!ast.isUnitType(x)) {
                 const binding = self.writtenBinding(x.name);
                 if (binding == BindingId.none) return false;
                 const held = self.bindings.items[binding.index()];

@@ -5003,8 +5003,3 @@ error[N-Undefined]: undefined name `Foo`
   |
 6 | ... Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[UInt8]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
   |                                                                 ^^^ no type with this name is declared here
-error[N-Undefined]: undefined name `Foo`
- --> tests/recovery/a_written_type_nests_too_deeply.lin:6:4014
-  |
-6 | ... Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[Foo[UInt8]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
-  |                                                                 ^^^ no type with this name is declared here

@@ -864,8 +864,11 @@ The limit is reported once per file. What stands past it is stepped over, up to
 the end of the pattern, or of the expression's enclosing group or block, and
 nothing inside it is reported again: a binder written there is bound, with no
 known type, so a use of it is not [N-Undefined], and a name used there counts
-as used, so it is not [N-Unused]. A control header stops at the brace that
-opens its body, so the body is still read.
+as used, so it is not [N-Unused]. A type whose arguments stand past the limit
+is refused with them, wherever it is written, so it is not reported for the
+arguments it lacks ([T-Bound]), and a derive naming it as a source is not
+reported for the variant that source would need ([T-Derive]). A control header
+stops at the brace that opens its body, so the body is still read.
 
 **[S-Paren]** A parenthesised expression or type, and a tuple, is closed.
 

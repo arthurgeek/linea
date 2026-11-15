@@ -3296,6 +3296,7 @@ const Parser = struct {
                 try self.reportAt(.s_type, selected, "expected a name", "a selected type names a member after the dot");
                 break :blk TokenId.none;
             };
+            if (name != .none and try self.refuseArgumentsPastTheLimit()) return .{ .at = base.at, .name = .none };
             const arguments = if (name != .none) try self.parseTypeArgs() else node.TypeRefRange.empty;
             measure.operand();
             const base_id = node.TypeRefId.at(self.builder.typeRefMark());
@@ -3322,7 +3323,18 @@ const Parser = struct {
             return .{ .at = head, .name = .none };
         }
         _ = self.cursor.advance();
+        if (try self.refuseArgumentsPastTheLimit()) return .{ .at = head, .name = .none };
         return .{ .at = head, .name = head, .args = try self.parseTypeArgs() };
+    }
+
+    /// Refuses an argument list that opens at the nesting limit, and says
+    /// whether it did. A written type refused here stands as a refused type,
+    /// not as its name without arguments: later passes report nothing for a
+    /// refused type, and would report a generic name for taking none.
+    fn refuseArgumentsPastTheLimit(self: *Parser) std.mem.Allocator.Error!bool {
+        if (!self.cursor.at(.l_bracket) or self.depth != max_nesting) return false;
+        try self.refuseToDescend(self.cursor.current(), "this type nests too deeply");
+        return true;
     }
 
     fn startsCallableType(self: *const Parser) bool {
@@ -3512,10 +3524,7 @@ const Parser = struct {
 
     fn parseTypeArgs(self: *Parser) std.mem.Allocator.Error!node.TypeRefRange {
         if (!self.cursor.at(.l_bracket)) return node.TypeRefRange.empty;
-        if (self.depth == max_nesting) {
-            try self.refuseToDescend(self.cursor.current(), "this type nests too deeply");
-            return node.TypeRefRange.empty;
-        }
+        if (try self.refuseArgumentsPastTheLimit()) return node.TypeRefRange.empty;
         // Type measurements are isolated from enclosing expression heights.
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
