@@ -4405,6 +4405,9 @@ pub fn helpTypeName(
 /// written defaults name are left out, and every module the spelling names
 /// that `from` cannot write it through yet is recorded there.
 const TypeWriter = struct {
+    /// Written where the rest of a name is left out.
+    const elided = "...";
+
     arena: std.mem.Allocator,
     ast: *const Ast,
     program: *const ExpandedProgram,
@@ -4415,7 +4418,21 @@ const TypeWriter = struct {
 
     const Error = std.Io.Writer.Error || std.mem.Allocator.Error;
 
+    /// How much of a type's name is written. A diagnostic keeps far less of
+    /// any text, and a type is one entry however often it is named: aliases
+    /// that each name the one before twice give a type of thirty entries a
+    /// name a billion names long. Past this, each part still to be written
+    /// is left out, so the writing is bounded by the name kept and the
+    /// type's depth and not by the paths through it.
+    const longest_name = 4096;
+
     fn write(self: TypeWriter, w: *std.Io.Writer, t: TypeId) Error!void {
+        if (w.end > longest_name) {
+            // One mark where the name stops, however many parts follow it.
+            const written = std.mem.trimEnd(u8, w.buffered(), "]), ");
+            if (!std.mem.endsWith(u8, written, elided)) try w.writeAll(elided);
+            return;
+        }
         const pool = self.pool;
         if (pool.instanceOf(t)) |instance| {
             const args = pool.argsOf(instance);
