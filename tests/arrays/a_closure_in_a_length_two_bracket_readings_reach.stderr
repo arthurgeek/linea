@@ -1,0 +1,10 @@
+error[T-Infer]: the type of parameter `q` cannot be inferred without an expected callable type
+  --> tests/arrays/a_closure_in_a_length_two_bracket_readings_reach.lin:24:40
+   |
+24 |     let _b = shelf.empty[Slot[[UInt8; (|q| q)(n)]]]()
+   |                                        ^^^^^ write the parameter type
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/arrays/a_closure_in_a_length_two_bracket_readings_reach.lin:24:39
+   |
+24 |     let _b = shelf.empty[Slot[[UInt8; (|q| q)(n)]]]()
+   |                                       ^^^^^^^^^^ this is not a constant

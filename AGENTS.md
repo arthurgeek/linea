@@ -162,7 +162,7 @@ until it is green.
   program the compiler rejects is a failure: the generator and the compiler
   disagree about the language.
 - Each generated seed also checks one hostile program
-  (`src/conformance/hostile.zig`, ADR 0270): a generic alias chain that names
+  (`src/conformance/hostile.zig`, ADR 0273): a generic alias chain that names
   the alias before it twice, or a program at one of the limits in
   `src/support/limits.zig` and one past it, in a seeded position. The program
   states whether it is accepted or which rule refuses it and with how many

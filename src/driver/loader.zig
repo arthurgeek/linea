@@ -2,6 +2,7 @@ const std = @import("std");
 const slow_tests = @import("../support/slow_tests.zig");
 const loader_mod = @This();
 const module_route = @import("../support/module_route.zig");
+const manifest_source = @import("../support/manifest_source.zig");
 const tracy = @import("../support/tracy.zig");
 const symbol_names = @import("../support/symbol.zig");
 const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
@@ -60,6 +61,12 @@ pub const InMemoryFile = struct {
     /// filesystem resolves it, so a load from these files tells libraries
     /// apart as a load from disk does. Empty where nothing resolved it.
     identity: []const u8 = "",
+    /// Whether the file's text was left on disk: `text` is then empty, and
+    /// the load reads the file when the program reaches it. A program that
+    /// does not reach it never reads it, as a load from disk does not. Such a
+    /// file is loaded only where the load was given a way to read
+    /// (`copy_reading_disk` or `borrow_reading_disk`).
+    deferred: bool = false,
 };
 
 fn lessByPath(_: void, a: InMemoryFile, b: InMemoryFile) bool {
@@ -121,8 +128,37 @@ pub const MemoryOwnership = union(enum) {
     /// disk rather than looked for among them: an editor holds the program's
     /// own buffers, and never a template or an image the program embeds.
     copy_reading_disk: CopyReadingDisk,
+    /// The texts supplied are borrowed, and a file supplied without one
+    /// (`InMemoryFile.deferred`) is read from disk into `allocator` when the
+    /// program reaches it. A file an `embed` names is looked for among the
+    /// files supplied, as under `borrow`. What is read is never freed one
+    /// text at a time, so `allocator` is one released whole, with the
+    /// sources.
+    borrow_reading_disk: CopyReadingDisk,
 
-    pub const CopyReadingDisk = struct { allocator: std.mem.Allocator, io: std.Io };
+    pub const CopyReadingDisk = struct {
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        /// The deferred files read so far, where two loads of one program
+        /// share their reads: the second is given what the first read and
+        /// reads nothing again. Kept in `allocator`, with the texts.
+        read: ?*ReadOnce = null,
+    };
+
+    /// The text of each deferred file a load has read, by its path.
+    pub const ReadOnce = struct {
+        texts: std.StringHashMapUnmanaged([]const u8) = .empty,
+    };
+
+    /// The text of the deferred file at `path`, read from disk the first
+    /// time it is asked for and kept in the reader's allocator.
+    fn readDeferred(reading: CopyReadingDisk, path: []const u8) ![]const u8 {
+        const shared = reading.read orelse return source_mod.readFileAlloc(reading.io, reading.allocator, path);
+        if (shared.texts.get(path)) |text| return text;
+        const text = try source_mod.readFileAlloc(reading.io, reading.allocator, path);
+        try shared.texts.put(reading.allocator, try reading.allocator.dupe(u8, path), text);
+        return text;
+    }
 };
 
 const Input = union(enum) { disk: std.Io, memory: MemoryOwnership };
@@ -315,10 +351,18 @@ pub const CheckedLibrary = struct {
         return loadFromDiskWith(gpa, io, table, sink, interner, entry, purpose, true, self);
     }
 
+    /// `reading`, with its reads shared through `shared` unless the caller
+    /// already shares them.
+    fn sharing(reading: MemoryOwnership.CopyReadingDisk, shared: *MemoryOwnership.ReadOnce) MemoryOwnership.CopyReadingDisk {
+        var with = reading;
+        if (with.read == null) with.read = shared;
+        return with;
+    }
+
     fn loadInputs(
         self: *const CheckedLibrary,
         gpa: std.mem.Allocator,
-        input: Input,
+        given: Input,
         table: *FileTable,
         sink: *Sink,
         interner: *Interner,
@@ -330,7 +374,7 @@ pub const CheckedLibrary = struct {
         std.debug.assert(table.count() == 0 and interner.count() == 0);
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
-        if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, input, table, sink, interner, entry, module, files, purpose, true, null);
+        if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, given, table, sink, interner, entry, module, files, purpose, true, null);
         const diagnostic_count = sink.list.items.len;
         const error_count = sink.error_count;
         const warning_count = sink.warning_count;
@@ -340,14 +384,30 @@ pub const CheckedLibrary = struct {
         // caller and cannot be reclaimed through Program or FileTable. A disk
         // load owns what it reads, so its candidate is the answer when it can
         // resume.
+        // A load that may read deferred files keeps its reader while it
+        // decides, since the files the program reaches are what decide it,
+        // and the load that follows is given what this one read: each file
+        // is read once and the decision and the load see one text.
+        var read_once: MemoryOwnership.ReadOnce = .{};
+        const input: Input = switch (given) {
+            .memory => |ownership| switch (ownership) {
+                .copy_reading_disk => |reading| .{ .memory = .{ .copy_reading_disk = sharing(reading, &read_once) } },
+                .borrow_reading_disk => |reading| .{ .memory = .{ .borrow_reading_disk = sharing(reading, &read_once) } },
+                .borrow, .copy => given,
+            },
+            .disk => given,
+        };
         const candidate_input: Input = switch (input) {
-            .memory => .{ .memory = .borrow },
+            .memory => |ownership| switch (ownership) {
+                .copy_reading_disk, .borrow_reading_disk => |reading| .{ .memory = .{ .borrow_reading_disk = reading } },
+                .borrow, .copy => .{ .memory = .borrow },
+            },
             .disk => input,
         };
         var candidate = try loader_mod.loadInputs(gpa, candidate_input, table, sink, interner, entry, module, files, purpose, true, &self.sources);
         const compatible = try self.resolved.canResume(gpa, &candidate, interner);
         const kept = switch (input) {
-            .memory => |ownership| ownership == .borrow,
+            .memory => |ownership| ownership == .borrow or ownership == .borrow_reading_disk,
             .disk => true,
         };
         if (compatible and kept) return candidate;
@@ -872,6 +932,9 @@ fn loadFromDiskWith(
     // A command line says which it means and is believed. Bounded by the
     // directory the compiler was run in, so a manifest further up names
     // somebody else's program and not this one.
+    // `rootOf` reads the manifest that marks the root, strictly: one that
+    // will not parse, or says what a root cannot be, stops the command here,
+    // and is not checked a second time before the load.
     const found = try rootOf(gpa, io, entry, .as_named, "");
     defer found.deinit(gpa);
     const given = found.entry;
@@ -879,14 +942,6 @@ fn loadFromDiskWith(
     if (std.mem.endsWith(u8, given, ".lin")) {
         const named = try std.Io.Dir.cwd().openFile(io, given, .{});
         named.close(io);
-    }
-
-    // Read strictly here, because the person who ran the command is there to
-    // be told: a manifest that will not parse, or says what a root cannot be,
-    // stops the command rather than loading the root as something else.
-    if (found.manifest) |path| {
-        const manifest = try readManifest(gpa, io, dirOf(path));
-        if (manifest) |m| freeManifest(gpa, m);
     }
 
     const paths = try pathsOfRoot(gpa, io, found);
@@ -934,6 +989,91 @@ test "an embed reads a file supplied beside the source, once however often it is
     try testing.expectEqual(EmbedId.none, program.embeds.sites[2].embed);
     try testing.expectEqual(@as(usize, 1), sink.items().len);
     try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
+}
+
+test "a file left on disk is read only by a program that reaches it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "kept");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "kept/kept.lin", .data = "pub fn size() -> UInt8 {\n    4\n}\n" });
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const kept: InMemoryFile = .{ .path = try std.fs.path.join(gpa, &.{ root, "kept/kept.lin" }), .text = "", .deferred = true };
+    // Listed and never written: a load that read it would fail.
+    const gone: InMemoryFile = .{ .path = try std.fs.path.join(gpa, &.{ root, "gone/gone.lin" }), .text = "", .deferred = true };
+    const manifest: InMemoryFile = .{ .path = try std.fs.path.join(gpa, &.{ root, manifest_name }), .text = "{}" };
+    const main_path = try std.fs.path.join(gpa, &.{ root, "main.lin" });
+    const reading: MemoryOwnership = .{ .borrow_reading_disk = .{ .allocator = gpa, .io = testing.io } };
+
+    // The program imports one of the two, and that one is read from disk.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, root, &.{
+            manifest,
+            .{ .path = main_path, .text = "import kept\n\nfn main() -> UInt8 {\n    kept.size()\n}\n" },
+            kept,
+            gone,
+        }, .program, false, reading);
+        try testing.expect(!sink.hasErrors());
+        try testing.expectEqual(@as(usize, 2), program.modules.len);
+    }
+
+    // The program imports the other, which is not there to read.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        try testing.expectError(error.FileNotFound, loadFromMemory(gpa, &table, &sink, &interner, root, &.{
+            manifest,
+            .{ .path = main_path, .text = "import gone\n\nfn main() -> UInt8 {\n    gone.size()\n}\n" },
+            kept,
+            gone,
+        }, .program, false, reading));
+    }
+}
+
+test "an embedded file left on disk is read where the load can read, and is otherwise not there" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "page.txt", .data = "page" });
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const files = [_]InMemoryFile{
+        .{ .path = try std.fs.path.join(gpa, &.{ root, manifest_name }), .text = "{}" },
+        .{ .path = try std.fs.path.join(gpa, &.{ root, "main.lin" }), .text = "let page = embed(\"page.txt\")\n\nfn main() -> UInt8 {\n    UInt8.try_from(page.len()).unwrap()\n}\n" },
+        .{ .path = try std.fs.path.join(gpa, &.{ root, "page.txt" }), .text = "", .deferred = true },
+    };
+
+    // The load reads from disk, so the file's bytes are the ones on disk.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const reading: MemoryOwnership = .{ .borrow_reading_disk = .{ .allocator = gpa, .io = testing.io } };
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, root, &files, .program, false, reading);
+        try testing.expect(!sink.hasErrors());
+        try testing.expectEqualStrings("page", program.embeds.bytesOf(program.embeds.sites[0].expr).?);
+    }
+
+    // The load has nothing to read with: the file is refused as missing, and
+    // is never the empty text it was listed with.
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try loadFromMemory(gpa, &table, &sink, &interner, root, &files, .program, false, .borrow);
+        try testing.expectEqual(EmbedId.none, program.embeds.sites[0].embed);
+        try testing.expectEqual(@as(usize, 1), sink.items().len);
+        try testing.expectEqual(Code.m_embed, sink.items()[0].code.?);
+    }
 }
 
 test "a file's bytes are checked as text for the first site that asks, and not again" {
@@ -1758,8 +1898,9 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
     errdefer declared.deinit(gpa);
     // A `source` leaving the directory holding the manifest is refused here,
     // for a root and for a library alike: the one check either takes.
-    if (parsed.value.source) |named| if (named.len > 0 and !try sourceStaysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
-    const source: ?[]const u8 = if (parsed.value.source) |named| (if (named.len == 0) null else try gpa.dupe(u8, named)) else null;
+    const written = manifest_source.named(parsed.value.source);
+    if (written) |named| if (!try manifest_source.staysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
+    const source: ?[]const u8 = if (written) |named| try gpa.dupe(u8, named) else null;
     errdefer if (source) |named| gpa.free(named);
     const name: ?[]const u8 = if (parsed.value.name) |named| try gpa.dupe(u8, named) else null;
     return .{ .source = source, .name = name, .declared = declared };
@@ -1776,27 +1917,6 @@ fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
 fn librarySourceDir(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]const u8 {
     const named = source orelse return dir;
     return joinedDir(gpa, dir, named);
-}
-
-/// Whether a manifest's `source`, read from the directory holding the
-/// manifest, names a directory inside that one. Decided by spelling, so a
-/// root read from disk and one read from memory agree: an absolute path, and
-/// one whose `..` climbs past the directory, name another directory's files.
-pub fn sourceStaysInside(gpa: std.mem.Allocator, source: []const u8) std.mem.Allocator.Error!bool {
-    if (source.len > 0 and source[0] == '/') return false;
-    const resolved = try std.fs.path.resolvePosix(gpa, &.{source});
-    defer gpa.free(resolved);
-    return !(std.mem.eql(u8, resolved, "..") or std.mem.startsWith(u8, resolved, "../"));
-}
-
-test "a manifest's source stays inside the directory holding it" {
-    const gpa = testing.allocator;
-    try testing.expect(try sourceStaysInside(gpa, "src"));
-    try testing.expect(try sourceStaysInside(gpa, "./src/"));
-    try testing.expect(try sourceStaysInside(gpa, "src/../lib"));
-    try testing.expect(!try sourceStaysInside(gpa, "../elsewhere/src"));
-    try testing.expect(!try sourceStaysInside(gpa, "src/../../x"));
-    try testing.expect(!try sourceStaysInside(gpa, "/tmp"));
 }
 
 /// The keys a manifest may write. Unknown ones are ignored, so a manifest may
@@ -2477,11 +2597,45 @@ const Loader = struct {
         self.prelude = try self.inLibrary(library.prelude_dir);
     }
 
+    /// What reading `full` gives where it is a file supplied with its text
+    /// left on disk, or null where it is not one. The text such a file is
+    /// listed with is empty and is never its content: a load given a reader
+    /// reads the file, and to any other load it is not there, as a source
+    /// left on disk is not.
+    fn leftOnDisk(self: *Loader, full: []const u8) std.mem.Allocator.Error!?embedded.Read {
+        const file = for (self.files) |f| {
+            if (std.mem.eql(u8, f.path, full)) break f;
+        } else return null;
+        if (!file.deferred) return null;
+        const reading = switch (self.input) {
+            .memory => |ownership| switch (ownership) {
+                .borrow_reading_disk, .copy_reading_disk => |reading| reading,
+                .borrow, .copy => return .{ .unread = .missing },
+            },
+            .disk => return null,
+        };
+        const text = MemoryOwnership.readDeferred(reading, full) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return .{ .unread = .missing },
+        };
+        if (text.len > embedded.max_bytes) return .{ .unread = .{ .too_large = text.len } };
+        return .{ .bytes = @constCast(text) };
+    }
+
     fn sourceFor(self: *Loader, file: InMemoryFile) !Source {
         if (self.in_library) return .{ .path = file.path, .text = file.text };
         const storage = switch (self.input) {
             .memory => |ownership| switch (ownership) {
-                .borrow => return .{ .path = file.path, .text = file.text },
+                .borrow => {
+                    // Nothing to read with: whoever deferred a file's text
+                    // gives the load a reader.
+                    if (file.deferred) return error.FileNotFound;
+                    return .{ .path = file.path, .text = file.text };
+                },
+                .borrow_reading_disk => |reading| {
+                    if (!file.deferred) return .{ .path = file.path, .text = file.text };
+                    return .{ .path = file.path, .text = try MemoryOwnership.readDeferred(reading, file.path) };
+                },
                 .copy => |allocator| allocator,
                 .copy_reading_disk => |reading| reading.allocator,
             },
@@ -2490,7 +2644,14 @@ const Loader = struct {
         const path = try storage.dupe(u8, file.path);
         errdefer storage.free(path);
         const text = switch (self.input) {
-            .memory => try storage.dupe(u8, file.text),
+            .memory => |ownership| if (!file.deferred)
+                try storage.dupe(u8, file.text)
+            else switch (ownership) {
+                // Read into the same allocator the copy would go to, so what
+                // an earlier load of this program read is the text itself.
+                .copy_reading_disk => |reading| try MemoryOwnership.readDeferred(reading, path),
+                .copy, .borrow, .borrow_reading_disk => return error.FileNotFound,
+            },
             .disk => |io| try source_mod.readFileAlloc(io, storage, path),
         };
         return .{ .path = path, .text = text };
@@ -2714,6 +2875,7 @@ const Loader = struct {
             .memory => |ownership| switch (ownership) {
                 .borrow => .{ null, null },
                 .copy => |allocator| .{ null, allocator },
+                .borrow_reading_disk => .{ null, null },
                 .copy_reading_disk => |reading| .{ reading.io, reading.allocator },
             },
         };
@@ -2722,6 +2884,8 @@ const Loader = struct {
         if (!library_bound) try self.embed_watched.append(self.gpa, try self.gpa.dupe(u8, full));
         const read: embedded.Read = if (disk_io) |io|
             try embedded.readFromDisk(storage orelse self.gpa, io, root, rel)
+        else if (try self.leftOnDisk(full)) |left|
+            left
         else
             embedded.readFromFiles(InMemoryFile, self.files, full);
         const bytes: []const u8 = switch (read) {
@@ -3566,7 +3730,7 @@ const Loader = struct {
         const file = self.manifest_files.get(manifest_path) orelse blk: {
             const storage = switch (self.input) {
                 .memory => |ownership| switch (ownership) {
-                    .borrow => null,
+                    .borrow, .borrow_reading_disk => null,
                     .copy => |allocator| allocator,
                     .copy_reading_disk => |reading| reading.allocator,
                 },
@@ -5672,6 +5836,52 @@ test "checked library session resumes independent application checks" {
         "@copyable\nstruct Limits { bytes: UInt8 }\nlet defaults: Limits = .{ bytes = 7 }\nfn pick(value: Limits = defaults) -> UInt8 { value.bytes }\nfn main() -> UInt8 { pick() }",
     };
     for (texts) |text| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const program = try prefix.loadFromMemory(gpa, &table, &sink, &interner, "main.lin", &.{.{ .path = "main.lin", .text = text }}, .program, .borrow);
+        var semantics = try prefix.checkProgram(gpa, testing.allocator, &program, &interner, &sink, .program);
+        defer semantics.deinit(gpa);
+        try testing.expect(semantics.reused_library);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+    }
+}
+
+test "checked library session resumes a program whose callable heads are too long to pack" {
+    var prefix = try CheckedLibrary.init(testing.allocator);
+    defer prefix.deinit();
+
+    // Sixty-one parameters, written once for the plain head and once with
+    // the last one taken: two shapes, numbered after the library's.
+    const plain = comptime params: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else ", ") ++ std.fmt.comptimePrint("p{d}: UInt8", .{i});
+        break :params text;
+    };
+    const taking = comptime params: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else ", ") ++ (if (i == 60) "sink " else "") ++ std.fmt.comptimePrint("p{d}: UInt8", .{i});
+        break :params text;
+    };
+    const sum = comptime terms: {
+        @setEvalBranchQuota(100_000);
+        var text: []const u8 = "";
+        for (0..61) |i| text = text ++ (if (i == 0) "" else " + ") ++ std.fmt.comptimePrint("p{d}", .{i});
+        break :terms text;
+    };
+    const text = "trait Describe {\n    fn describe(_self: Self) -> UInt8\n}\n" ++
+        "impl Describe for fn(" ++ plain ++ ") -> UInt8 {\n    fn describe(_self: Self) -> UInt8 {\n        1\n    }\n}\n" ++
+        "impl Describe for fn(" ++ taking ++ ") -> UInt8 {\n    fn describe(_self: Self) -> UInt8 {\n        2\n    }\n}\n" ++
+        "fn borrowed(" ++ plain ++ ") -> UInt8 {\n    " ++ sum ++ "\n}\n" ++
+        "fn describe[H: Describe](handler: H) -> UInt8 {\n    handler.describe()\n}\n" ++
+        "fn main() -> UInt8 {\n    describe(borrowed)\n}\n";
+
+    for (0..2) |_| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const gpa = arena.allocator();

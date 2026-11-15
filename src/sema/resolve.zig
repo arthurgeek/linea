@@ -4075,9 +4075,11 @@ fn resolveInternal(
     defer r.members.deinit(gpa);
     defer r.member_at.deinit(gpa);
     defer r.impls.deinit(gpa);
+    defer r.long_shapes.deinit(gpa);
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
+    defer r.length_reports.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
     defer r.type_parameter_bindings.deinit(gpa);
@@ -6389,6 +6391,11 @@ const Resolver = struct {
     unlent_marks: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// See `Resolution.bracket_readings`.
     bracket_readings: std.AutoHashMapUnmanaged(ExprId, Resolution.BracketReading) = .empty,
+    /// What resolving each written length reported, keyed by the length. Two
+    /// readings of one bracket hold the same length expression, so the second
+    /// to reach it is given these instead of resolving it again: a closure or
+    /// a binding declared in a length is declared once.
+    length_reports: std.AutoHashMapUnmanaged(ExprId, []const Diagnostic) = .empty,
     /// See `Resolution.name_kinds`.
     name_kinds: std.AutoHashMapUnmanaged(TokenId, name_case.Kind) = .empty,
     /// The bracket a call is about to resolve as its callee, while it is
@@ -6411,6 +6418,12 @@ const Resolver = struct {
     /// declarations it names. Collected as the headers are resolved, so that
     /// coherence is asked of the whole program at once.
     impls: std.ArrayList(Implementation) = .empty,
+    /// The callable heads too long to pack, numbered; see
+    /// `node.LongCallableShapes`. A number is compared only between two
+    /// implementations of one trait, and a callable head is written in its
+    /// trait's module ([M-Impl]), so a library's numbers and a program's
+    /// never meet and a resumed program numbers its own from nothing.
+    long_shapes: node.LongCallableShapes = .{},
     /// The namespaces a primitive's name opens: one row per primitive, module
     /// and spelling, however many inherent blocks that module writes. Built
     /// once from `impls` after every header is resolved, and handed on as
@@ -8234,9 +8247,14 @@ const Resolver = struct {
                 try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "a callable type has no declaring module", .{});
                 return;
             }
-            const shape = self.ast.callableShape(written_head) orelse {
-                try self.refused_impls.put(self.gpa, d, {});
-                return self.sink.addErrorFmt(.t_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "name a callable type with fewer parameters", "a callable head names at most {d} parameters", .{node.CallableShape.max_shape_parameters});
+            // A head of more parameters than pack is numbered by its exact
+            // spelling, so it keys a chain of its own as any other shape does.
+            const shape = self.ast.callableShape(written_head) orelse numbered: {
+                const callable = self.ast.callableType(written_head);
+                var spelled: std.ArrayList(u8) = .empty;
+                defer spelled.deinit(self.gpa);
+                try node.LongCallableShapes.spell(self.gpa, &spelled, callable.invocation, self.ast.params[callable.params.start..callable.params.end]);
+                break :numbered try self.long_shapes.intern(self.gpa, spelled.items);
             };
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .{ .callable_ = shape }, .decl = d });
         }
@@ -12428,7 +12446,16 @@ const Resolver = struct {
         // any other: it is read against the scope standing here, the binding
         // it reaches is used by being written, and reaching nothing is
         // [N-Undefined] rather than something to say about the form.
-        if (ref.length != ExprId.none) try self.useTypeExpression(ref.length);
+        if (ref.length != ExprId.none) {
+            if (self.length_reports.get(ref.length)) |reports| {
+                for (reports) |report| try self.sink.add(report);
+            } else {
+                const reported = self.sink.list.items.len;
+                try self.useTypeExpression(ref.length);
+                const reports = try self.sink.arena.dupe(Diagnostic, self.sink.list.items[reported..]);
+                try self.length_reports.put(self.gpa, ref.length, reports);
+            }
+        }
         for (self.ast.typeArgs(ref.args)) |a| try self.useRefIn(a, context.ofArguments());
     }
 

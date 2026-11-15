@@ -22,8 +22,6 @@ pub const Limit = enum {
     tree_height,
     /// The components of a tuple literal, type or pattern.
     tuple_components,
-    /// The parameters of a callable type that heads an implementation.
-    callable_head_parameters,
     /// The settled references and aliases a chain of declared answers passes
     /// through.
     answer_links,
@@ -47,7 +45,6 @@ pub const Limit = enum {
         return switch (self) {
             .tree_height => 1000,
             .tuple_components => 8,
-            .callable_head_parameters => 60,
             .answer_links => 1000,
             .coverage_cells => 1 << 20,
             .array_length => std.math.maxInt(u32),
@@ -73,7 +70,6 @@ pub const Limit = enum {
         return switch (self) {
             .tree_height => "S-Nesting",
             .tuple_components => "S-Tuple",
-            .callable_head_parameters => "T-Impl",
             .answer_links => "T-AnswerDepth",
             .coverage_cells => "T-CoverLimit",
             .array_length => "T-ArraySize",

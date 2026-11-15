@@ -430,11 +430,11 @@ their source shape even though type checking later normalises their meaning.
 
 A count that a rule of the language bounds, and that a diagnostic under the
 rule enforces, is one entry of `Limit` in `support/limits.zig`: tree height,
-tuple components, callable-head parameters, answer links, coverage cells,
+tuple components, answer links, coverage cells,
 array length, type bytes, raw-literal `#`, interpolation depth, format width
 and precision, and embedded-file bytes. The pass that enforces a limit reads
 it there, and the conformance generator writes a program at each limit and
-one past it from the same table (ADR 0270). `source.max_bytes`, the largest
+one past it from the same table (ADR 0273). `source.max_bytes`, the largest
 source a position can address, is not a rule of the language and stays beside
 `Span`.
 

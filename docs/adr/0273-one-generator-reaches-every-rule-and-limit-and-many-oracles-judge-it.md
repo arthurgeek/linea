@@ -1,4 +1,4 @@
-# 270. One generator reaches every rule and limit, and many oracles judge its programs
+# 273. One generator reaches every rule and limit, and many oracles judge its programs
 
 Status: Accepted — 2026-11-15; extends 0027, 0029 and 0057. The generator's
 hostile shapes, the limit table, the work bound, the position rewrite and
@@ -109,9 +109,8 @@ as the initialiser of a `let`.
 
 `src/support/limits.zig` lists the counts the language bounds: each limit
 that a rule states as a number and that a diagnostic under the rule enforces.
-There are eleven: tree height, tuple components (with the fewest a tuple
-has), the parameters of a callable type that heads an implementation, the
-links of a chain of declared answers, the cells of a coverage check, the
+There are ten: tree height, tuple components (with the fewest a tuple
+has), the links of a chain of declared answers, the cells of a coverage check, the
 length of an array, the bytes of a type, the `#` that open a raw literal, the
 interpolations open at once, a format's width or precision, and the bytes of
 an embedded file. The pass that enforces a limit reads it from the table, and

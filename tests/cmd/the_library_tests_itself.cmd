@@ -1087,6 +1087,7 @@ The library tests itself.
   ok    log.a_logger_writes_to_the_sink_it_was_given
   ok    log.a_message_is_quoted_only_when_it_could_be_read_as_a_field
   ok    log.a_value_is_quoted_when_it_could_not_be_read_back_otherwise
+  ok    log.a_value_is_rendered_once_and_written_as_rendered
   ok    log.a_value_is_written_through_display
   ok    log.added_fields_are_written_in_order
   ok    log.and_adds_a_second_field_after_the_first
@@ -1454,8 +1455,8 @@ The library tests itself.
   ok    task.join4_runs_sequentially_and_on_threads
   ok    task.join_runs_on_threads
   ok    task.join_runs_sequentially
+  ok    task.map_keeps_every_result_of_a_fallible_function
   ok    task.map_preserves_deterministic_order
-  ok    task.map_results_preserves_all_slots
   ok    task.releasing_a_client_leaves_its_owner_serving
   ok    task.releasing_an_owner_joins_its_task
   ok    testing.a_failure_displays_the_callers_message
@@ -1635,4 +1636,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1632 passed, 0 failed
+  1633 passed, 0 failed

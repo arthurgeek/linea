@@ -180,7 +180,6 @@ fn statedAs(buffer: []u8, limit: Limit) ![]const u8 {
             inWords(limit.fewest().?),
             inWords(most),
         }),
-        .callable_head_parameters => std.fmt.bufPrint(buffer, "a callable head names at most {d} parameters", .{most}),
         .answer_links => std.fmt.bufPrint(buffer, "passes through at most {d} links", .{most}),
         .coverage_cells => std.fmt.bufPrint(buffer, "more than 2^{d} cells", .{std.math.log2_int(u64, most)}),
         .array_length => std.fmt.bufPrint(buffer, "The maximum length is {d}", .{most}),
@@ -231,7 +230,6 @@ pub fn unwritten(limit: Limit) ?[]const u8 {
     return switch (limit) {
         .tree_height,
         .tuple_components,
-        .callable_head_parameters,
         .answer_links,
         .array_length,
         .type_bytes,
@@ -252,9 +250,6 @@ pub fn writes(limit: Limit, position: Position) bool {
         // An implementation's head is a named type, a tuple or a callable,
         // and both of these are written as arrays.
         .array_length, .type_bytes => position != .value and position != .implementation_head,
-        // The limit is on a callable type that heads an implementation, and
-        // a callable type of any length is accepted everywhere else.
-        .callable_head_parameters => position == .implementation_head,
         .raw_literal_hashes, .interpolation_depth, .format_count => position == .value,
         .coverage_cells, .embedded_bytes => false,
     };
@@ -412,12 +407,6 @@ fn writeLimit(
             for (0..n) |i| try t.writeAll(if (i == 0) "UInt8" else ", UInt8");
             try t.writeAll(")");
             return .{ .text = text.written(), .held = text.written(), .once = false };
-        },
-        .callable_head_parameters => {
-            try t.writeAll("fn(");
-            for (0..n) |i| try t.print("{s}_p{d}: UInt8", .{ if (i == 0) "" else ", ", i });
-            try t.writeAll(") -> UInt8");
-            return .{ .text = text.written(), .held = text.written(), .once = true };
         },
         .answer_links => {
             // Each alias is one link, the first included.
