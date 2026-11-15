@@ -808,6 +808,7 @@ fn typecheckInternal(
         for (c.call_impls.items) |record| if (record.args.len > 0) gpa.free(record.args);
         c.call_impls.deinit(gpa);
         c.overlapping.deinit(gpa);
+        c.unsupplied.deinit(gpa);
     }
     defer {
         for (c.calls.items) |call| call.deinit(gpa);
@@ -1468,6 +1469,10 @@ fn typecheckInternal(
         defer read_again.deinit(gpa);
         for (c.unsettled_heads.items) |at| read_again.set(at);
         try c.refuseOverlappingImplementations(implementations, &read_again);
+        for (c.unsupplied.items) |missing| {
+            if (c.overlapping.contains(missing.implementation)) continue;
+            try c.reportUnsupplied(missing);
+        }
     }
 
     // Every template is complete and every settled type known, so every
@@ -5953,6 +5958,13 @@ const Checker = struct {
     /// mistake, and every member the refused implementation lacks would say
     /// it again.
     overlapping: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+    /// Members a trait declares that an implementation supplies nothing for,
+    /// found while an implementation's head was still to be read again. One
+    /// of those may yet be refused as overlapping another, which is then its
+    /// only report, so these are said once that is known.
+    ///
+    /// **Bound:** the unsupplied members of a program that has such a head.
+    unsupplied: std.ArrayList(Unsupplied) = .empty,
     /// The one complete semantic row for each accepted direct call.
     calls: std.ArrayList(types_mod.NormalizedCall) = .empty,
     recovered_call_args: std.ArrayList(types_mod.RecoveredCallArg) = .empty,
@@ -29496,18 +29508,15 @@ const Checker = struct {
                     // is filled by nothing, and a call through the trait would
                     // reach it. Said here, where the pairing found nothing,
                     // rather than by a second walk asking the same question of
-                    // the same two lists.
-                    try self.sink.addErrorFmt(
-                        .t_impl,
-                        self.ast.fileOf(trait_token),
-                        self.ast.tokenSpan(trait_token),
-                        if (settlesAType(self.ast, sig))
-                            "settle it, or drop it from the trait"
-                        else
-                            "supply a body for it, or drop it from the trait",
-                        "`{s}` declares `{s}`, and this implementation does not supply it",
-                        .{ self.ast.tokenText(trait_token), self.ast.tokenText(self.ast.declName(sig)) },
-                    );
+                    // the same two lists -- unless a head is still to be read
+                    // again, when which implementations overlap is not yet
+                    // all known.
+                    const missing: Unsupplied = .{ .implementation = d, .trait_token = trait_token, .sig = sig };
+                    if (self.unsettled_heads.items.len != 0) {
+                        try self.unsupplied.append(self.gpa, missing);
+                    } else {
+                        try self.reportUnsupplied(missing);
+                    }
                     continue;
                 };
 
@@ -32267,6 +32276,7 @@ const Checker = struct {
             if (im.head == .parameter and im.valid_key) {
                 var concrete = self.impl_index.membersOfTrait(im.trait);
                 while (concrete.next()) |other| {
+                    if (!pairs.wanted(i, other)) continue;
                     const row = implementations[other];
                     if (row.trait != im.trait or row.head == .parameter or row.head == .default_ or row.isAmbient() or !row.valid_key) continue;
                     // Integer denotes a closed receiver domain. Ordinary trait
@@ -32281,7 +32291,6 @@ const Checker = struct {
                     if (try self.builder.anyUnsettled(&.{ im.ty, row.ty }) or
                         try self.builder.anyUnsettled(im.args) or
                         try self.builder.anyUnsettled(row.args)) continue;
-                    if (!pairs.wanted(i, other)) continue;
                     try self.refuseIfOverlapping(implementations, @intCast(@min(i, other)), @intCast(@max(i, other)));
                 }
             }
@@ -32500,6 +32509,23 @@ const Checker = struct {
             }
         };
     };
+
+    /// A member a trait declares and an implementation supplies nothing for.
+    const Unsupplied = struct { implementation: node.DeclId, trait_token: TokenId, sig: node.DeclId };
+
+    fn reportUnsupplied(self: *Checker, missing: Unsupplied) std.mem.Allocator.Error!void {
+        try self.sink.addErrorFmt(
+            .t_impl,
+            self.ast.fileOf(missing.trait_token),
+            self.ast.tokenSpan(missing.trait_token),
+            if (settlesAType(self.ast, missing.sig))
+                "settle it, or drop it from the trait"
+            else
+                "supply a body for it, or drop it from the trait",
+            "`{s}` declares `{s}`, and this implementation does not supply it",
+            .{ self.ast.tokenText(missing.trait_token), self.ast.tokenText(self.ast.declName(missing.sig)) },
+        );
+    }
 
     /// Unifies `first` and `second`'s heads followed by their trait arguments,
     /// as one list each, and reports `[T-Impl]` where they unify -- carried by
