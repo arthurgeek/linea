@@ -1638,4 +1638,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1634 passed, 0 failed
+  1635 passed, 0 failed
