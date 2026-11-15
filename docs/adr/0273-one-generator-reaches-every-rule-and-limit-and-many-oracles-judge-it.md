@@ -139,10 +139,12 @@ answer.
 
 **(a) Work bound.** The check of a hostile program takes no more allocation
 work than the check of the same material arranged so that nothing in it is
-deep, shared or large, plus one part in 128. Work is the sum of the sizes a
-check asks its allocator for, counted above a fresh arena with growth in
-place refused; no clock is read, and two checks of one program in one build
-count the same.
+deep, shared or large, plus one part in fifty. Work is the sum of what a
+check asks its allocator for: the size of each allocation, and for a buffer
+that grows in place the bytes it adds. The counting allocator gives every
+large buffer room to grow where it is, so a table costs its last capacity and
+not every capacity it had. No clock is read, and two checks of one program in
+one build count the same.
 
 Each shape has a reference program in the same position:
 
@@ -155,31 +157,45 @@ Each shape has a reference program in the same position:
 - a tuple's components and an interpolation's depth are too few to regroup,
   and the reference writes the fewest.
 
-The two programs are a few tokens apart. A check appends to tables that hold
-everything read so far, and a table that grows is charged its whole new size,
-so the cost of one program depends on what was declared before it; the tables
-that grow as a file is read reach the same capacity in both programs, and the
-difference does not. With nothing before them the largest difference of a
-legal shape is 56 KB against a reference of 95 MB, 0.06%. After 500, 1500,
-4000 and 8000 unrelated declarations, over 22 shapes, the largest is 208 KB,
-0.17%, which is one table that one program grew and the other did not. The
-allowance is 0.78%, a share because that residue is a share of what the
-check holds. A test keeps the 22 shapes within it at each of those sizes.
+The two programs are a few tokens apart, so the tables that grow as a file is
+read reach the same capacity in both, whatever is declared before them. Over
+22 shapes after 0, 500, 1500, 4000 and 8000 unrelated declarations, the
+difference of twelve moves by less than a kilobyte and of the rest, the
+doubling chains and the interpolation depth, by up to 0.8 MB; the largest
+difference is 59%, 45%, 37%, 33% and 28% of the allowance. A test keeps them
+there.
+
+The allowance is what the legal shapes need. A doubling chain costs up to
+1.65 MB more than its two halves, the same from depth twenty to twenty-four:
+the compiler spends a bounded amount naming each level of a shared type, and
+a chain of half the depth is too short to reach that bound. That is 66% of
+the allowance. The largest difference of a limit's shape is 0.90 MB, a type
+nested a thousand deep in the head of an `impl`, 35%.
+
+One thing the count cannot smooth is an arena inside the check, which
+replaces its node with one half again as large as all it holds each time it
+fills, and is charged the node. Where a program fills a node and its
+reference stops short, the difference is the node. So a check over its bound
+is measured again after two thousand unrelated declarations, which move
+where the nodes fill, and fails only if it is over both times.
 
 Every check, a reference's as well, is stopped at one gibibyte of work, and
-a stopped check fails its shape. The number is four times what the largest
-library measured costs a check that writes nothing.
+a stopped check fails its shape.
 
 What the bound holds a check to, measured with a cost planted in the
 compiler and removed again:
 
 - At each level of a type nested a thousand deep, an allocation for each
-  enclosing level: two bytes a pair, half a megabyte more than the reference,
-  passes; four bytes, one megabyte against 0.74 allowed, fails; thirty-two
-  bytes fails ten times over.
+  enclosing level. Four bytes a pair passes in six of seven positions; eight
+  bytes is on the line, 2.63 MB against 2.65 allowed, and fails in two;
+  sixteen bytes fails in all seven.
+- At each alias of a chain of a thousand read through the one before it, an
+  allocation for each alias being read. Four bytes each fails in five of
+  seven positions, 5.2 MB against 2.6 allowed, and passes in a `let` and a
+  parameter at 2.2 MB; eight bytes fails in all seven.
 - A walk that visits every name of a doubling chain, eight bytes a name:
-  34 MB over its reference at depth twenty, the shallowest generated, where
-  0.73 MB is allowed.
+  68 MB over its reference at depth twenty, the shallowest generated, where
+  2.5 MB is allowed, and stopped at the gibibyte at depth twenty-four.
 - One byte for each element of an array type: every array-length and
   type-bytes cell is stopped at the gibibyte and fails.
 
@@ -191,15 +207,14 @@ What it does not hold a check to:
 - Work that is superlinear in how many declarations a file holds and not in
   how deep one of them is. Both programs hold the same number; the sweep's
   dimensions are the check for width.
-- A superlinear term smaller than the allowance. A cost `c·n^k` in the depth
-  `n` costs the reference `2·c·(n/2)^k`, so it fails once
-  `c·n^k·(1 − 2^(1−k))` passes the allowance: a quadratic cost once it passes
-  twice the allowance, about 1.5 MB at these sizes, and a cost of exponent
-  1.58 once it passes three times. Every exponent above one fails at some
-  cost, and none fails below about a megabyte.
-- The same for a chain of a thousand links is computed and not measured: no
-  cost I planted in the settling of declared answers ran once per link of a
-  plain alias chain.
+- A superlinear term smaller than the allowance, about 2.5 MB beside the
+  prelude. A cost `c·n^k` in the depth `n` costs the reference
+  `2·c·(n/2)^k`, so it fails once `c·n^k·(1 − 2^(1−k))` and what the shape
+  already differs by pass the allowance.
+- Work inside an arena that fits the room its node has left. It is charged
+  nothing until a node fills, and then the node.
+- A program one past a limit is refused before the work is done, so only the
+  program exactly at the limit holds the compiler to this.
 
 The count is not claimed to be the same number across builds or targets, and
 nothing compares it against a recorded number.

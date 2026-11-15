@@ -9,10 +9,16 @@ const testing = std.testing;
 /// followed by allocate-copy-free is the same logical growth. Outcome-equivalent
 /// growth must contribute the same cost; failed growth, shrink, and free add
 /// nothing.
+///
+/// Over `Regions`, where a large allocation always grows in place, a growth
+/// may instead be charged the bytes it adds (`charge = .added`). A table that
+/// grows then costs its final capacity, not the sum of every capacity it had.
 pub const Counting = struct {
     under: std.mem.Allocator,
     took: usize = 0,
     allow_growth: bool = true,
+    /// What a growth in place is charged.
+    charge: enum { resulting, added } = .resulting,
     /// The most `took` may reach. An allocation or growth that would pass it
     /// is refused and recorded in `refused`, so a compilation whose work has
     /// no bound ends with `error.OutOfMemory` instead of exhausting memory.
@@ -39,19 +45,26 @@ pub const Counting = struct {
     fn resize(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) bool {
         const self: *Counting = @ptrCast(@alignCast(ctx));
         if (!self.allow_growth and n > buf.len) return false;
-        if (n > buf.len and self.past(n)) return false;
+        if (n > buf.len and self.past(self.grown(buf.len, n))) return false;
         if (!self.under.rawResize(buf, a, n, ra)) return false;
-        if (n > buf.len) self.took += n;
+        if (n > buf.len) self.took += self.grown(buf.len, n);
         return true;
     }
 
     fn remap(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) ?[*]u8 {
         const self: *Counting = @ptrCast(@alignCast(ctx));
         if (!self.allow_growth and n > buf.len) return null;
-        if (n > buf.len and self.past(n)) return null;
+        if (n > buf.len and self.past(self.grown(buf.len, n))) return null;
         const got = self.under.rawRemap(buf, a, n, ra) orelse return null;
-        if (n > buf.len) self.took += n;
+        if (n > buf.len) self.took += self.grown(buf.len, n);
         return got;
+    }
+
+    fn grown(self: *const Counting, from: usize, to: usize) usize {
+        return switch (self.charge) {
+            .resulting => to,
+            .added => to - from,
+        };
     }
 
     fn past(self: *Counting, n: usize) bool {
@@ -65,6 +78,102 @@ pub const Counting = struct {
         self.under.rawFree(buf, a, ra);
     }
 };
+
+/// An allocator whose large allocations always grow in place.
+///
+/// Each allocation of `threshold` bytes or more is given `region` bytes of
+/// address space of its own, which the system backs only where it is
+/// written, so growing it never moves it. A smaller one comes from an arena
+/// and grows by being replaced. A buffer that grows geometrically is
+/// replaced a few times while small and grows in place after that.
+pub const Regions = struct {
+    small: std.heap.ArenaAllocator,
+    /// The address of each large allocation, with the alignment it was asked
+    /// for.
+    large: std.AutoHashMapUnmanaged(usize, std.mem.Alignment) = .empty,
+
+    pub const threshold: usize = 64 << 10;
+    /// The most one allocation holds. No check is allowed more work than
+    /// this in all, so none asks for a larger buffer.
+    pub const region: usize = 1 << 30;
+
+    const pages = std.heap.page_allocator;
+
+    pub fn init() Regions {
+        return .{ .small = std.heap.ArenaAllocator.init(pages) };
+    }
+
+    pub fn deinit(self: *Regions) void {
+        var held = self.large.iterator();
+        while (held.next()) |entry| {
+            const memory: [*]u8 = @ptrFromInt(entry.key_ptr.*);
+            pages.rawFree(memory[0..region], entry.value_ptr.*, @returnAddress());
+        }
+        self.large.deinit(pages);
+        self.small.deinit();
+    }
+
+    pub fn allocator(self: *Regions) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &.{
+            .alloc = alloc,
+            .resize = resize,
+            .remap = remap,
+            .free = free,
+        } };
+    }
+
+    fn alloc(ctx: *anyopaque, n: usize, a: std.mem.Alignment, ra: usize) ?[*]u8 {
+        const self: *Regions = @ptrCast(@alignCast(ctx));
+        if (n < threshold) return self.small.allocator().rawAlloc(n, a, ra);
+        if (n > region) return null;
+        const memory = pages.rawAlloc(region, a, ra) orelse return null;
+        self.large.put(pages, @intFromPtr(memory), a) catch {
+            pages.rawFree(memory[0..region], a, ra);
+            return null;
+        };
+        return memory;
+    }
+
+    fn resize(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) bool {
+        _ = a;
+        _ = ra;
+        const self: *Regions = @ptrCast(@alignCast(ctx));
+        if (n <= buf.len) return true;
+        return self.large.contains(@intFromPtr(buf.ptr)) and n <= region;
+    }
+
+    fn remap(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) ?[*]u8 {
+        return if (resize(ctx, buf, a, n, ra)) buf.ptr else null;
+    }
+
+    fn free(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, ra: usize) void {
+        const self: *Regions = @ptrCast(@alignCast(ctx));
+        if (self.large.fetchRemove(@intFromPtr(buf.ptr))) |entry| {
+            pages.rawFree(buf.ptr[0..region], entry.value, ra);
+        } else {
+            self.small.allocator().rawFree(buf, a, ra);
+        }
+    }
+};
+
+test "a large allocation grows in place and is charged what it adds" {
+    var regions = Regions.init();
+    defer regions.deinit();
+    var counting: Counting = .{ .under = regions.allocator(), .charge = .added };
+    const a = counting.allocator();
+
+    // A list that doubles is replaced while small and grows in place after.
+    var list: std.ArrayList(u8) = .empty;
+    defer list.deinit(a);
+    const before = counting.took;
+    for (0..4 * Regions.threshold) |_| try list.append(a, 7);
+    // Every capacity under the threshold is charged whole, which sums to
+    // under three thresholds, and past it the list is charged its capacity
+    // once.
+    try testing.expect(counting.took - before >= list.capacity);
+    try testing.expect(counting.took - before < list.capacity + 3 * Regions.threshold);
+    for (list.items) |byte| try testing.expectEqual(@as(u8, 7), byte);
+}
 
 test "allocation growth costs the same after remap success or fallback" {
     var remap_storage: [64]u8 = undefined;

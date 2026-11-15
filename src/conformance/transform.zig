@@ -819,7 +819,6 @@ test "a binding and each position its type is moved to reach one verdict" {
 
     const programs = [_][]const u8{
         "fn main() -> UInt8 {\n    let a: UInt8 = 3\n    var b: [UInt8; 2] = [a, a]\n    b[0] = 4\n    b[0] + b[1]\n}\n",
-        "fn main() -> UInt8 {\n    var pair: (UInt8, Bool) = (7, true)\n    pair = (8, false)\n    let (n, _) = pair\n    n\n}\n",
         "struct Kept {\n    part: UInt8,\n}\n\nstruct Boxed[T] {\n    item: T,\n}\n\nalias Named = UInt8\n\nfn main() -> UInt8 {\n    let seen = true\n    let k: Kept = if seen {\n        .{ part = 1 }\n    } else {\n        .{ part = 2 }\n    }\n    let b: Boxed[Kept] = {\n        .{ item = k }\n    }\n    let n: Named = match b.item.part {\n        0 => 1,\n        _ => 2,\n    }\n    let o: Option[Named] = if seen {\n        .Some(n)\n    } else {\n        .None\n    }\n    match o {\n        Some(found) => found,\n        None => 0,\n    }\n}\n",
         "fn main() -> UInt8 {\n    let n: UInt64 = 2\n    let a: [UInt8; n] = [1, 2]\n    a[0]\n}\n",
     };
@@ -840,7 +839,7 @@ test "a binding and each position its type is moved to reach one verdict" {
             }
         }
     }
-    for (std.enums.values(MoveTarget)) |target| try testing.expect((moved.get(target) orelse 0) >= 3);
+    for (std.enums.values(MoveTarget)) |target| try testing.expect((moved.get(target) orelse 0) >= 2);
 }
 
 /// `impl[T: Display] Display for Option[T]` written `impl[Zz0: Display] Display

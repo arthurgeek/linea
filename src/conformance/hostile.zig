@@ -35,6 +35,7 @@ const test_library = @import("../driver/test_library.zig");
 const choices_mod = @import("choices.zig");
 const Choices = choices_mod.Choices;
 const Counting = @import("counting.zig").Counting;
+const Regions = @import("counting.zig").Regions;
 const generate = @import("generate.zig");
 const Layout = @import("../sema/types.zig").Layout;
 
@@ -699,8 +700,8 @@ pub fn fromSeed(gpa: std.mem.Allocator, seed: u64) !Program {
 
 /// The allocation work of a shape's program and of its reference.
 ///
-/// Work is the sum of what a check asks its allocator for, counted above a
-/// fresh arena over whole pages with growth in place refused. No clock is
+/// Work is the sum of what a check asks its allocator for: each allocation's
+/// size, and for a buffer that grows in place the bytes it adds. No clock is
 /// read, and two checks of one program in one build count the same.
 ///
 /// The reference is the same position holding the same material arranged
@@ -723,10 +724,9 @@ pub fn fromSeed(gpa: std.mem.Allocator, seed: u64) !Program {
 ///
 /// So the bound fails a check whose work grows faster than the depth of a
 /// chain or a nesting, or with the names a shared type spells out, or with
-/// an array's length. A cost `c * n^k` in the depth `n` costs the reference
-/// `2 * c * (n / 2)^k`, and fails once `c * n^k * (1 - 2^(1 - k))` passes
-/// the allowance: at a thousand nested levels, four bytes for each pair of a
-/// level and a level around it fails and two bytes passes.
+/// an array's length, once that work passes the allowance: at a thousand
+/// nested levels, sixteen bytes for each pair of a level and a level around
+/// it fails and four bytes passes.
 ///
 /// It does not fail work in proportion to the material, however much: a pass
 /// that wastes the same bytes for every alias or level costs the reference
@@ -738,14 +738,12 @@ pub const Work = struct {
 
     /// The share of `reference` that `whole` may exceed it by.
     ///
-    /// The two programs are a few tokens apart, not none, so once in a while
-    /// one of them crosses a table's capacity and the other does not, and a
-    /// table that grows is charged its whole new size. That error is a share
-    /// of everything the check holds: the largest seen is 0.17% of the
-    /// reference, over 22 shapes after 0, 500, 1500, 4000 and 8000 unrelated
-    /// declarations, and with nothing before them no legal shape differs by
-    /// more than 0.06%.
-    pub const allowance_share = 128;
+    /// A doubling chain costs up to 1.65 MB more than its two halves, about
+    /// two thirds of this beside the prelude: the compiler spends a bounded
+    /// amount naming each level of a shared type, and a chain of half the
+    /// depth is too short to reach that bound. No limit's shape differs by
+    /// more than 0.9 MB.
+    pub const allowance_share = 50;
 
     /// The most one check may take, the reference's and the whole's alike.
     /// Four times what the largest library measured costs a check that
@@ -779,13 +777,11 @@ fn measure(
     text: []const u8,
     most: usize,
 ) !Measured {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    // Growth in place is refused. An arena inside the check otherwise grows
-    // its last node by what each allocation needs, and every growth is
-    // charged its full size, so the count would follow how often a node
-    // happened to have room after it.
-    var counting: Counting = .{ .under = arena.allocator(), .allow_growth = false, .most = most };
+    // A large allocation grows in place and is charged what it adds, so a
+    // table costs its last capacity and not every capacity it had.
+    var regions = Regions.init();
+    defer regions.deinit();
+    var counting: Counting = .{ .under = regions.allocator(), .charge = .added, .most = most };
 
     const loaded = generate.checkLoadedText(counting.allocator(), "hostile.lin", text, library) catch |err| {
         if (err == error.OutOfMemory and counting.refused) return .{ .took = counting.took, .stopped = true, .reports = &.{} };
@@ -829,20 +825,50 @@ pub const Observed = struct {
     stopped: bool,
 };
 
-/// Checks `program` and its reference. Allocates from `gpa` and frees
-/// nothing it returns.
-pub fn observe(
+/// Checks the reference and the program of `shape`, each after `before`.
+fn workAfter(
     gpa: std.mem.Allocator,
     library: *const loader.CheckedLibrary,
     program: Program,
+    before: []const u8,
 ) !Observed {
-    const reference = try measure(gpa, library, (try writeForm(gpa, program.shape, .reference)).text, Work.cap);
-    const whole = try measure(gpa, library, program.text, Work.cap);
+    const reference_text = try std.mem.concat(gpa, u8, &.{ before, (try writeForm(gpa, program.shape, .reference)).text });
+    const whole_text = try std.mem.concat(gpa, u8, &.{ before, program.text });
+    const reference = try measure(gpa, library, reference_text, Work.cap);
+    const whole = try measure(gpa, library, whole_text, Work.cap);
     return .{
         .reports = whole.reports,
         .work = .{ .reference = reference.took, .whole = whole.took },
         .stopped = reference.stopped or whole.stopped,
     };
+}
+
+/// How many unrelated declarations a check over its bound is measured again
+/// after.
+const confirming_fillers = 2000;
+
+/// Checks `program` and its reference. Allocates from `gpa` and frees
+/// nothing it returns.
+///
+/// A check over its bound is measured a second time after unrelated
+/// declarations, and is over only if it is over both times. The checker
+/// allocates from an arena, an arena replaces its node with one half again
+/// as large as everything it holds each time it fills, and a node is
+/// charged whole. Where the program fills a node and its reference stops
+/// just short, their difference is the node. Declarations before both move
+/// where the nodes fill.
+pub fn observe(
+    gpa: std.mem.Allocator,
+    library: *const loader.CheckedLibrary,
+    program: Program,
+) !Observed {
+    const first = try workAfter(gpa, library, program, "");
+    if (first.stopped or !first.work.over()) return first;
+    var filler: std.Io.Writer.Allocating = .init(gpa);
+    try writeFiller(&filler.writer, confirming_fillers);
+    const second = try workAfter(gpa, library, program, filler.written());
+    if (second.stopped or second.work.over()) return first;
+    return .{ .reports = first.reports, .work = second.work, .stopped = false };
 }
 
 /// A defect a generated program shows in the compiler, recorded so the walk

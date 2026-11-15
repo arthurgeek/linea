@@ -168,7 +168,7 @@ until it is green.
   states whether it is accepted or which rule refuses it and with how many
   reports. Its check may take the allocation work of a reference program,
   the same material written as two halves or with a small count, and one part
-  in 128 more. A compiler defect one of them shows is recorded in
+  in fifty more. A compiler defect one of them shows is recorded in
   `hostile.known_findings` with its seed and every report the compiler makes;
   the walk fails when the program is answered any other way, and when it is
   answered as it states, so the fix removes the entry.
