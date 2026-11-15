@@ -2869,7 +2869,11 @@ to recover its subject, and bounds alone determine no parameter. A settled
 type's name in the key is the type it is settled to, so a parameter written
 beside one is recovered as it is beside that type:
 `impl[T] Weighs[Two[T, Probe.Reading]] for Scale` recovers `T` from the first
-argument of `Two`. An undetermined
+argument of `Two`. The same holds where the settled name is written over the
+parameter: with `type Element = T` settled for `Wrap[T]`,
+`impl[T] Gives[Wrap[T].Element] for Scale` has the key `Gives[T]` and recovers
+`T` from it, and with `type Element = UInt8` the key names `T` nowhere and
+recovers nothing. An undetermined
 implementation parameter is [T-Impl]. The canonical complete key supplies
 implementation arguments in binder declaration order to member checking,
 dispatch and instantiation.
