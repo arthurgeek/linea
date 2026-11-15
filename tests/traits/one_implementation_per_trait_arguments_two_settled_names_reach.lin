@@ -1,6 +1,6 @@
 // [T-Impl]. `Probe.Reading` and `Gauge.Reading` are both `UInt8`, so the two
-// implementations are both `Weighs[UInt8]` for `Scale`, and the pair is
-// refused once. `Weighs[Dial.Reading]`, which is `Weighs[UInt16]`, is another
+// implementations are both `Weighs[UInt8]` for `Scale`.
+// `Weighs[Dial.Reading]`, which is `Weighs[UInt16]`, is another
 // implementation.
 trait Sensor {
     type Reading

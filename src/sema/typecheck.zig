@@ -1435,7 +1435,7 @@ fn typecheckInternal(
     // property of the declarations, so a program's compiling could not depend
     // on whether anything ever calls through either one.
     const z_overlap = tracy.beginZone(@src(), "tc.overlap");
-    try c.refuseOverlappingImplementations(implementations);
+    try c.refuseOverlappingImplementations(implementations, null);
     z_overlap.end();
 
     const observation_traits = try @import("observations.zig").compute(gpa, ast, resolution);
@@ -1460,7 +1460,15 @@ fn typecheckInternal(
     const z_parts = tracy.beginZone(@src(), "tc.parts");
     try c.settleDeclaredAnswers();
     try c.settleDeferredHeads(implementations);
-    try c.refuseOverlappingDeferredHeads(implementations);
+    // An implementation whose head or trait arguments named a settled type
+    // had nothing to compare while that type was unanswered, so the overlap
+    // check passed over it. It is read now, and is held to the same rule.
+    if (c.unsettled_heads.items.len != 0) {
+        var read_again = try std.DynamicBitSetUnmanaged.initEmpty(gpa, implementations.len);
+        defer read_again.deinit(gpa);
+        for (c.unsettled_heads.items) |at| read_again.set(at);
+        try c.refuseOverlappingImplementations(implementations, &read_again);
+    }
 
     // Every template is complete and every settled type known, so every
     // instantiation is filled again from its template. A part written as a
@@ -32217,10 +32225,26 @@ const Checker = struct {
     /// however many settled arguments one type implements a trait at --
     /// whatever its head's own parameters do, since an argument list written
     /// out is ground however generic the type it is written for.
+    ///
+    /// `among`, where given, limits the reports to pairs holding one of its
+    /// members: the implementations read again once declared answers were
+    /// settled, which the first asking passed over and every pair without
+    /// one of which it has already judged. A chain holding none of them is
+    /// not examined, and the pairs of one that does are found as they are
+    /// the first time, by the same hashing and the same candidates.
     fn refuseOverlappingImplementations(
         self: *Checker,
         implementations: []const types_mod.Implementation,
+        among: ?*const std.DynamicBitSetUnmanaged,
     ) std.mem.Allocator.Error!void {
+        const Pairs = struct {
+            among: ?*const std.DynamicBitSetUnmanaged,
+            fn wanted(pairs: @This(), a: usize, b: usize) bool {
+                const set = pairs.among orelse return true;
+                return set.isSet(a) or set.isSet(b);
+            }
+        };
+        const pairs: Pairs = .{ .among = among };
         var handled = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, implementations.len);
         defer handled.deinit(self.gpa);
 
@@ -32257,6 +32281,7 @@ const Checker = struct {
                     if (try self.builder.anyUnsettled(&.{ im.ty, row.ty }) or
                         try self.builder.anyUnsettled(im.args) or
                         try self.builder.anyUnsettled(row.args)) continue;
+                    if (!pairs.wanted(i, other)) continue;
                     try self.refuseIfOverlapping(implementations, @intCast(@min(i, other)), @intCast(@max(i, other)));
                 }
             }
@@ -32298,6 +32323,15 @@ const Checker = struct {
                 }
             }
 
+            if (among) |set| {
+                const holds_one = for (open_list.items) |at| {
+                    if (set.isSet(at)) break true;
+                } else for (ground_list.items) |at| {
+                    if (set.isSet(at)) break true;
+                } else false;
+                if (!holds_one) continue;
+            }
+
             if (open_list.items.len != 0) {
                 const position = try self.overlapColumn(implementations, open_list.items, ground_list.items);
                 var open_candidates: OverlapCandidates = .{};
@@ -32314,10 +32348,12 @@ const Checker = struct {
                     const root = self.overlapRoot(implementations[later].args, position);
                     var prior_rows = open_candidates.candidates(root, open_list.items[0..oi]);
                     while (prior_rows.next()) |prior| {
+                        if (!pairs.wanted(prior, later)) continue;
                         try self.refuseIfOverlapping(implementations, prior, later);
                     }
                     var ground_rows = ground_candidates.candidates(root, ground_list.items);
                     while (ground_rows.next()) |ground_at| {
+                        if (!pairs.wanted(later, ground_at)) continue;
                         try self.refuseIfOverlapping(
                             implementations,
                             @min(later, ground_at),
@@ -32339,7 +32375,7 @@ const Checker = struct {
                     // Hashed and then compared, so a collision costs a
                     // comparison rather than a report about two lists that
                     // are not the same.
-                    if (std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
+                    if (pairs.wanted(other, at) and std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
                         try self.refuseIfOverlapping(implementations, other, at);
                     }
                     walk = if (next.items[j] == j) null else next.items[j];
@@ -32474,46 +32510,6 @@ const Checker = struct {
     /// `first` and `second` are positions in a list held in declaration order,
     /// so the report lands where a programmer added the collision, which is
     /// where `[N-Duplicate]` lands for the same reason.
-    /// Holds the implementations `settleDeferredHeads` read again to the
-    /// rule `refuseOverlappingImplementations` holds the rest to. Their head
-    /// or trait arguments named a settled type no implementation had
-    /// answered when that ran, so it passed over them: `impl
-    /// Weighs[Probe.Reading] for Scale` is `Weighs[UInt8]` only now, and
-    /// overlaps an implementation written with `UInt8`.
-    ///
-    /// **Bound:** each implementation read again is unified against the
-    /// members of its own trait and head, so the cost is those chains'
-    /// lengths summed over the implementations read again, and nothing where
-    /// none was.
-    fn refuseOverlappingDeferredHeads(
-        self: *Checker,
-        implementations: []const types_mod.Implementation,
-    ) std.mem.Allocator.Error!void {
-        if (self.unsettled_heads.items.len == 0) return;
-        var deferred = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, implementations.len);
-        defer deferred.deinit(self.gpa);
-        for (self.unsettled_heads.items) |at| deferred.set(at);
-
-        for (self.unsettled_heads.items) |at| {
-            const im = implementations[at];
-            if (im.isAmbient() or !im.ofATrait()) continue;
-            if (im.parameters > 0 and !im.valid_key) continue;
-            if (try self.builder.anyUnsettled(&.{im.ty}) or try self.builder.anyUnsettled(im.args)) continue;
-            var chain = self.impl_index.membersOf(im.trait, im.head);
-            while (chain.next()) |other| {
-                if (other == at) continue;
-                // Two read again are a pair once, at the later of them.
-                if (deferred.isSet(other) and other > at) continue;
-                const entry = implementations[other];
-                if (entry.isAmbient() or !entry.ofATrait()) continue;
-                if (entry.trait != im.trait or !entry.head.same(im.head)) continue;
-                if (entry.parameters > 0 and !entry.valid_key) continue;
-                if (try self.builder.anyUnsettled(&.{entry.ty}) or try self.builder.anyUnsettled(entry.args)) continue;
-                try self.refuseIfOverlapping(implementations, @min(at, @as(u32, @intCast(other))), @max(at, @as(u32, @intCast(other))));
-            }
-        }
-    }
-
     fn refuseIfOverlapping(
         self: *Checker,
         implementations: []const types_mod.Implementation,

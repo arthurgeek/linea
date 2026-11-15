@@ -2943,10 +2943,11 @@ required is [T-Bound].
 
 Two implementations of one trait overlap if a substitution over both
 declarations' parameters makes both their heads and trait arguments
-structurally equal. A head or trait argument written as a settled type's name
-is the type it is settled to: with `Probe.Reading` settled to `UInt8`,
-`impl Weighs[Probe.Reading] for Scale` and `impl Weighs[UInt8] for Scale`
-overlap. Overlap between open headers is checked at declaration time
+structurally equal. A settled type's name written among a head's arguments
+or as a trait argument is the type it is settled to: with `Probe.Reading`
+settled to `UInt8`, `impl Weighs[Probe.Reading] for Scale` overlaps
+`impl Weighs[UInt8] for Scale` and `impl[T] Weighs[UInt8] for T` alike.
+Overlap between open headers is checked at declaration time
 and rejected without ranking either declaration by specificity among ordinary
 implementations. An explicitly marked default
 occupies a separate fallback tier, described below. For example,

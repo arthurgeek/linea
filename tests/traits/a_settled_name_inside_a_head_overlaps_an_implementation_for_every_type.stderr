@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Peeks` for `Holder[UInt8]`
+  --> tests/traits/a_settled_name_inside_a_head_overlaps_an_implementation_for_every_type.lin:27:9
+   |
+21 | impl Peeks for Holder[Probe.Reading] {
+   |      ----- the other implementation
+27 | impl[T] Peeks for T {
+   |         ^^^^^ no instantiation may answer to two implementations of one trait
