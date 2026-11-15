@@ -4676,3 +4676,70 @@ test "only serve's own signature answers for its default" {
     try testing.expect(!servesConcurrentlyByDefault("x\npub fn serve[L](sink listener: L, policy: task.Policy = .Sequential) -> R {\n}\npub fn other(policy: task.Policy = .Threads(128)) {\n}"));
     try testing.expect(!servesConcurrentlyByDefault("x\npub fn listen_and_serve(policy: task.Policy = .Threads(128)) {\n}"));
 }
+
+test "a discarded failure of a report is refused, and a kept one is not" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const kept =
+        \\fn check(self: *Checker) !void {
+        \\    try self.sink.add(.{ .severity = .err, .message = "no" });
+        \\    self.sink.addErrorFmt(.t_bound, file, span, "label", "no", .{}) catch |err| return err;
+        \\    const name = self.typeName(t) catch return error.OutOfMemory;
+        \\    const text = render(name) catch unreachable;
+        \\    const value = parse(text) catch return null;
+        \\    self.seen.put(self.gpa, value, {}) catch @panic("OOM");
+        \\    _ = self.report(.t_bound, id, "no", .{}, "label") catch @panic("OOM");
+        \\}
+        \\
+    ;
+    try testing.expectEqual(@as(usize, 0), source.swallowedReports(gpa, .{ .path = "sema/typecheck.zig", .text = kept }).len);
+
+    const swallowed =
+        \\fn check(self: *Checker) TypeId {
+        \\    self.sink.add(.{
+        \\        .severity = .err,
+        \\        .message = "no",
+        \\    }) catch {};
+        \\    self.sink.addErrorFmt(.t_bound, file, span, "label", "no", .{}) catch {};
+        \\    self.addFix(at, .where_clause, 0, edits) catch {};
+        \\    self.noteRefused(at) catch return .poison;
+        \\    self.refused.put(self.gpa, id, {}) catch {};
+        \\    const name = self.typeName(t) catch return true;
+        \\    const labels = self.gpa.alloc(Label, 2) catch return self.record(id, .poison);
+        \\    const text = format(name) catch return self.recordMismatch(id);
+        \\    for (items) |item| self.reportAtToken(.t_bound, item, "no", "label", null) catch continue;
+        \\    while (true) self.refuseArrayInference(ref, true) catch break;
+        \\    const reported = self.report(.t_bound, id, "no", .{}, "label") catch .poison;
+        \\    sealedAt(file, span, ty, "no") catch {};
+        \\    return reported;
+        \\}
+        \\
+    ;
+    const found = source.swallowedReports(gpa, .{ .path = "sema/typecheck.zig", .text = swallowed });
+    try testing.expectEqual(@as(usize, 12), found.len);
+    try testing.expectEqualStrings("line 5: the error of `self.sink.add` is discarded, which loses the report when an allocation is refused", found[0]);
+    try testing.expectEqualStrings("line 6: the error of `self.sink.addErrorFmt` is discarded, which loses the report when an allocation is refused", found[1]);
+    try testing.expectEqualStrings("line 7: the error of `self.addFix` is discarded, which loses the report when an allocation is refused", found[2]);
+    try testing.expectEqualStrings("line 8: the error of `self.noteRefused` is discarded, which loses the report when an allocation is refused", found[3]);
+    try testing.expectEqualStrings("line 9: the error of `self.refused.put` is discarded, which loses the report when an allocation is refused", found[4]);
+    try testing.expectEqualStrings("line 10: the error of `self.typeName` is discarded, which loses the report when an allocation is refused", found[5]);
+    try testing.expectEqualStrings("line 11: a failure is answered with `record`, which records a report that was not made", found[6]);
+    try testing.expectEqualStrings("line 12: a failure is answered with `recordMismatch`, which records a report that was not made", found[7]);
+    try testing.expectEqualStrings("line 13: the error of `self.reportAtToken` is discarded, which loses the report when an allocation is refused", found[8]);
+    try testing.expectEqualStrings("line 14: the error of `self.refuseArrayInference` is discarded, which loses the report when an allocation is refused", found[9]);
+    try testing.expectEqualStrings("line 15: the error of `self.report` is discarded, which loses the report when an allocation is refused", found[10]);
+    try testing.expectEqualStrings("line 16: the error of `sealedAt` is discarded, which loses the report when an allocation is refused", found[11]);
+
+    // A table that is not a refusal table and a list that is not a sink are
+    // not reports.
+    const other =
+        \\fn note(self: *Walk) void {
+        \\    self.seen.put(self.gpa, key, {}) catch {};
+        \\    self.names.add(name) catch {};
+        \\}
+        \\
+    ;
+    try testing.expectEqual(@as(usize, 0), source.swallowedReports(gpa, .{ .path = "lsp/walk.zig", .text = other }).len);
+}

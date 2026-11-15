@@ -694,6 +694,13 @@ APIs.
   written out where the restriction is intended, and no default on a public
   function's allocator parameter ([T-DefaultedAllocator]). Bodies, private
   helpers and programs keep the short form.
+- A report's failure is propagated, never discarded. A call a pass reports
+  through (a sink's `add…`, `addFix`, `noteRefused`, a `refused` table's `put`,
+  a helper named `report…` or `refuse…`, `record`, `typeName`) fails only when an
+  allocation is refused, and a `catch {}`, `catch return`, `catch break`,
+  `catch continue` or `catch` with a value after it loses the report, so the
+  program checks clean. `build.zig` refuses those forms in every source tree;
+  `catch |err|`, `catch unreachable` and `catch return error.…` keep the failure.
 - Branch names are semantic and describe the code, never a milestone or plan.
 - PR titles and commits use one semantic form, for example `feat(sema): ...`,
   `fix(mir): ...` or `refactor(support): ...`. A merge lands one squashed commit

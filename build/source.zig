@@ -500,6 +500,96 @@ pub fn slowTestMismatches(gpa: std.mem.Allocator, file: SourceFile) []const []co
     return mismatches.toOwnedSlice(gpa) catch @panic("OOM");
 }
 
+/// The calls a pass reports through, by their last name: an error one of them
+/// returns is a report that was not stored.
+const report_calls = [_][]const u8{
+    "addError",            "addErrorFmt",       "addNote",  "addFix",
+    "noteRefused",         "noteRefusedDemand", "record",   "sealedAt",
+    "explainShadowedHead", "typeName",          "helpName", "poisonPattern",
+    "settlePatternAs",
+};
+
+/// Whether `callee`, written with `receiver` before its last name, is a call
+/// a pass reports through: a sink's `add`, a `refused` table's `put`, a
+/// name in `report_calls`, or any name beginning `report` or `refuse`.
+fn reportsThrough(receiver: []const u8, name: []const u8) bool {
+    if (std.mem.startsWith(u8, name, "report") or std.mem.startsWith(u8, name, "refuse")) return true;
+    for (report_calls) |known| if (std.mem.eql(u8, name, known)) return true;
+    if (std.mem.eql(u8, name, "add")) return std.mem.endsWith(u8, receiver, "sink");
+    if (std.mem.eql(u8, name, "put")) return std.mem.endsWith(u8, receiver, "refused");
+    return false;
+}
+
+/// Each place `file` discards the error of a call a pass reports through,
+/// by line: `catch {}`, `catch return`, `catch break`, `catch continue` or
+/// `catch` with a value in its place, written directly after the call.
+///
+/// Such a call fails only when an allocation is refused, and discarding
+/// that loses the report: the program then checks clean. `catch |err|`,
+/// `catch unreachable`, `catch @panic` and `catch return error.…` keep the
+/// failure and are not refused. A `catch return` that answers with
+/// `record` or `recordMismatch` is refused whatever call it follows: it
+/// records a value as reported when the report could not be built.
+///
+/// One pass over the tokens: each `catch` is matched back to the call it
+/// follows through that call's own parentheses.
+pub fn swallowedReports(gpa: std.mem.Allocator, file: SourceFile) []const []const u8 {
+    const z = gpa.dupeZ(u8, file.text) catch @panic("OOM");
+    var tree = std.zig.Ast.parse(gpa, z, .zig) catch @panic("OOM");
+    defer tree.deinit(gpa);
+
+    var found: std.ArrayList([]const u8) = .empty;
+    const tags = tree.tokens.items(.tag);
+    // The `(` each `)` closes, so a `catch` reaches its call in one step.
+    const opened_by = gpa.alloc(u32, tags.len) catch @panic("OOM");
+    var open: std.ArrayList(u32) = .empty;
+    for (tags, 0..) |tag, i| switch (tag) {
+        .l_paren => open.append(gpa, @intCast(i)) catch @panic("OOM"),
+        .r_paren => opened_by[i] = open.pop() orelse 0,
+        else => {},
+    };
+
+    for (tags, 0..) |tag, i| {
+        if (tag != .keyword_catch or i == 0 or i + 1 >= tags.len) continue;
+        const keeps = switch (tags[i + 1]) {
+            .pipe, .keyword_unreachable => true,
+            .builtin => std.mem.eql(u8, tree.tokenSlice(@intCast(i + 1)), "@panic"),
+            .keyword_return => i + 2 < tags.len and tags[i + 2] == .keyword_error,
+            else => false,
+        };
+        if (keeps) continue;
+        const line = tree.tokenLocation(0, @intCast(i)).line + 1;
+
+        // `catch return self.record(…)`: the names and dots after `return`,
+        // up to the `(` of the call that answers.
+        if (tags[i + 1] == .keyword_return) {
+            var last = i + 2;
+            while (last + 2 < tags.len and tags[last] == .identifier and tags[last + 1] == .period) last += 2;
+            if (last + 1 < tags.len and tags[last] == .identifier and tags[last + 1] == .l_paren) {
+                const answers = tree.tokenSlice(@intCast(last));
+                if (std.mem.eql(u8, answers, "record") or std.mem.eql(u8, answers, "recordMismatch")) {
+                    found.append(gpa, std.fmt.allocPrint(gpa, "line {d}: a failure is answered with `{s}`, which records a report that was not made", .{ line, answers }) catch @panic("OOM")) catch @panic("OOM");
+                    continue;
+                }
+            }
+        }
+
+        if (tags[i - 1] != .r_paren) continue;
+        const paren = opened_by[i - 1];
+        if (paren == 0 or tags[paren - 1] != .identifier) continue;
+        // The receiver: the names and dots written before the call's name.
+        var first = paren - 1;
+        while (first >= 2 and tags[first - 1] == .period and tags[first - 2] == .identifier) first -= 2;
+        const name = tree.tokenSlice(paren - 1);
+        const start = tree.tokenStart(first);
+        const call = file.text[start .. tree.tokenStart(paren - 1) + name.len];
+        const receiver = if (first == paren - 1) "" else file.text[start..tree.tokenStart(paren - 2)];
+        if (!reportsThrough(receiver, name)) continue;
+        found.append(gpa, std.fmt.allocPrint(gpa, "line {d}: the error of `{s}` is discarded, which loses the report when an allocation is refused", .{ line, call }) catch @panic("OOM")) catch @panic("OOM");
+    }
+    return found.toOwnedSlice(gpa) catch @panic("OOM");
+}
+
 fn nodeText(tree: *const std.zig.Ast, node: std.zig.Ast.Node.Index) []const u8 {
     const last = tree.lastToken(node);
     return tree.source[tree.tokenStart(tree.firstToken(node)) .. tree.tokenStart(last) + tree.tokenSlice(last).len];

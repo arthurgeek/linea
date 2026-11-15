@@ -287,6 +287,10 @@ test "the totals count what the sink stores when an allocation is refused" {
             try testing.expectEqual(warnings, sink.warning_count);
             try testing.expectEqual(errors > 0, sink.hasErrors());
         }
+
+        fn refusedOrStored(added: anyerror!void) !void {
+            added catch |err| try testing.expectEqual(error.OutOfMemory, err);
+        }
     };
     const long: [max_text_bytes + 8]u8 = @splat('a');
 
@@ -300,19 +304,20 @@ test "the totals count what the sink stores when an allocation is refused" {
         var sink = Sink.init(refusing.allocator());
 
         const at: Span = .{ .start = 0, .end = 1 };
-        sink.add(.{ .severity = .warning, .message = "suspicious" }) catch {};
+        try Held.refusedOrStored(sink.add(.{ .severity = .warning, .message = "suspicious" }));
         try Held.agrees(&sink);
-        sink.add(.{ .severity = .err, .message = &long }) catch {};
+        try Held.refusedOrStored(sink.add(.{ .severity = .err, .message = &long }));
         try Held.agrees(&sink);
-        sink.addError(.s_char, .from(0), at, "bad byte", "not a token") catch {};
+        try Held.refusedOrStored(sink.addError(.s_char, .from(0), at, "bad byte", "not a token"));
         try Held.agrees(&sink);
-        sink.addErrorFmt(.s_char, .from(0), at, "not a token", "bad byte {d}", .{7}) catch {};
+        try Held.refusedOrStored(sink.addErrorFmt(.s_char, .from(0), at, "not a token", "bad byte {d}", .{7}));
         try Held.agrees(&sink);
-        sink.addNote(.s_char, .from(0), at, "a hazard", "here") catch {};
+        try Held.refusedOrStored(sink.addNote(.s_char, .from(0), at, "a hazard", "here"));
         try Held.agrees(&sink);
 
         const before = sink.items().len;
-        sink.replaceAll(sink.items()[0 .. before / 2]) catch {
+        sink.replaceAll(sink.items()[0 .. before / 2]) catch |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
             try testing.expectEqual(before, sink.items().len);
         };
         try Held.agrees(&sink);

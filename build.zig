@@ -1163,6 +1163,19 @@ fn checkTreeIsTidy(b: *std.Build, tree: Tree, failed: *bool) void {
         }
     };
 
+    // A report whose failure is discarded.
+    //
+    // A call a pass reports through fails only when an allocation is
+    // refused. Discarding that failure loses the report, and a program whose
+    // one error was lost checks clean.
+    for (files) |f| {
+        if (std.mem.indexOf(u8, f.text, "catch") == null) continue;
+        for (source.swallowedReports(b.allocator, f)) |swallow| {
+            std.debug.print("swallowed report: {s}/{s}, {s}\n", .{ tree.dir, f.path, swallow });
+            failed.* = true;
+        }
+    }
+
     // A declaration nobody names.
     //
     // [N-Unused] makes this an error in the language this compiler implements,
