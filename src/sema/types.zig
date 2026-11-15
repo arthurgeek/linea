@@ -2644,6 +2644,11 @@ pub const CallableSignature = struct {
     param_count: u32,
     result: TypeId,
     name: []const u8,
+    /// For a signature of more parameters than a shape packs, the callable
+    /// type that stands for its shape: the same invocation and conventions
+    /// over `Unit`, answering `Unit`. Every signature of one shape names the
+    /// same one, which is what numbers the shape. Poison otherwise.
+    shape_of: TypeId = .poison,
 };
 
 /// A lambda source identity applied to its enclosing type arguments.
@@ -7393,6 +7398,7 @@ pub const Typing = struct {
                 var shape: node.CallableShape.Builder = .begin(signature.invocation);
                 for (self.callableParams(signature)) |parameter| shape.parameter(parameter.convention);
                 if (shape.finish()) |exact| return .{ .callable_ = exact };
+                if (signature.shape_of != .poison) return .{ .callable_ = .long(@intFromEnum(signature.shape_of)) };
             },
             .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
         }
@@ -12089,7 +12095,7 @@ pub const Typing = struct {
         /// The names stored are those of the first signature interned, kept
         /// for spelling the type in a message. A call reads the labels it
         /// names arguments by from where its callee was declared.
-        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) !TypeId {
+        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) std.mem.Allocator.Error!TypeId {
             var effective: std.ArrayList(CallableContract) = .empty;
             defer effective.deinit(self.gpa);
             const contracts = filtered: {
@@ -12109,7 +12115,14 @@ pub const Typing = struct {
                 const signature = self.pool.items[i].callable;
                 if (signature.invocation != invocation or signature.result != result or signature.param_count != params.len or !sameContracts(signature.contracts, contracts)) continue;
                 const held = self.callable_params.items[signature.first_param..][0..signature.param_count];
-                if (callableParamsMatch(held, params)) return @enumFromInt(i);
+                if (!callableParamsMatch(held, params)) continue;
+                // An interning stopped by a refused allocation may have
+                // left the type without the shape that stands for it.
+                if (signature.param_count > node.CallableShape.max_packed_parameters and signature.shape_of == .poison) {
+                    const standing = try self.longShapeOf(held, invocation);
+                    self.pool.items[i].callable.shape_of = standing;
+                }
+                return @enumFromInt(i);
             }
 
             self.grows();
@@ -12149,6 +12162,13 @@ pub const Typing = struct {
                 params;
             self.callable_params.appendSliceAssumeCapacity(stable_params);
             const id: TypeId = @enumFromInt(@as(u32, @intCast(self.pool.items.len)));
+            const long = params.len > node.CallableShape.max_packed_parameters;
+            // The type that stands for a long shape is the shape of itself,
+            // and says so from the moment it exists: interning it again to
+            // find its shape would otherwise never end.
+            const own_shape = long and result == .unit and contracts.len == 0 and for (stable_params) |param| {
+                if (param.ty != .unit or param.stable_address or param.default != .absent) break false;
+            } else true;
             try self.laid_out.append(self.gpa, .{});
             try self.pool.append(self.gpa, .{ .callable = .{
                 .invocation = invocation,
@@ -12158,9 +12178,28 @@ pub const Typing = struct {
                 .param_count = @intCast(params.len),
                 .result = result,
                 .name = name,
+                .shape_of = if (own_shape) id else .poison,
             } });
             try self.interned_callables.note(self.gpa, key, @intFromEnum(id));
+            if (long and !own_shape) {
+                const standing = try self.longShapeOf(self.callableParams(self.pool.items[@intFromEnum(id)].callable), invocation);
+                self.pool.items[@intFromEnum(id)].callable.shape_of = standing;
+            }
             return id;
+        }
+
+        /// The callable type that stands for a shape too long to pack: the
+        /// invocation and each parameter's convention, over `Unit` and
+        /// answering `Unit`. Interned like any callable type, so two
+        /// signatures of one shape reach one type and its number is exact,
+        /// kept with the pool and found again when the pool is reopened.
+        pub fn longShapeOf(self: *Builder, conventions: anytype, invocation: Convention) std.mem.Allocator.Error!TypeId {
+            const standing = try self.gpa.alloc(CallableParam, conventions.len);
+            defer self.gpa.free(standing);
+            for (standing, conventions) |*param, each| {
+                param.* = .{ .spelling = "", .convention = each.convention, .ty = .unit, .default = .absent };
+            }
+            return self.internCallable(standing, .unit, &.{}, invocation);
         }
 
         fn callableKey(params: []const CallableParam, result: TypeId, contracts: []const CallableContract, invocation: Convention) u64 {
@@ -16500,4 +16539,26 @@ test "leaf type substitution does not copy a wide replacement vector" {
     }
     try testing.expectEqual(TypeId.poison, try builder.substitute(parameters[width - 1], owner, replacements[0..1]));
     try testing.expectEqual(allocated, counted.allocated_bytes);
+}
+
+test "a long callable interned after an allocation was refused still has its shape" {
+    const count = node.CallableShape.max_packed_parameters + 1;
+    var params: [count]CallableParam = undefined;
+    for (&params) |*param| param.* = .{ .spelling = "", .convention = .read, .ty = .u8, .default = .absent };
+
+    // Each allocation of the first interning is refused in turn. Whatever
+    // that left behind, interning the same signature again answers a type
+    // whose head is the shape, never the type alone.
+    var refused_at: usize = 0;
+    while (true) : (refused_at += 1) {
+        var failing = std.testing.FailingAllocator.init(testing.allocator, .{});
+        var b = try Typing.Builder.init(failing.allocator());
+        defer b.deinit();
+        failing.fail_index = failing.alloc_index + refused_at;
+        const first = b.internCallable(&params, .u8, &.{}, .read);
+        failing.fail_index = std.math.maxInt(usize);
+        const id = first catch try b.internCallable(&params, .u8, &.{}, .read);
+        try testing.expect(b.pool.items[@intFromEnum(id)].callable.shape_of != .poison);
+        if (first) |_| break else |_| {}
+    }
 }
