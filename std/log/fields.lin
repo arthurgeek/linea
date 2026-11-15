@@ -127,28 +127,33 @@ test fn a_value_is_written_through_display() {
 
 // `fields_text` writes `fields` as a line writes them, after its message.
 fn fields_text[F: Fields](fields: F) -> String {
-    var line: Line[mem.SystemAllocator] = .{ text = String.new(), escaping = false }
+    var line: Line[mem.SystemAllocator] = .{ text = String.new(), rendered = .{ bytes = Vec.new() } }
     fields.visit(&line).unwrap()
-    let Line { text, escaping: _ } = line
+    let Line { text, rendered } = line
+    rendered.release()
     text
 }
 
-// A `Line` is a log line being built in `text`. While `escaping` is set, text
-// written to it is escaped, which is how a quoted value is written.
+// A `Line` is a log line being built in `text`. `rendered` holds the one key
+// or value being written, as its `Display` rendered it, until it is copied
+// into `text` as it stands or between quotes.
 @derive(Release)
 struct Line[A: Allocator] {
     text: String[A],
-    escaping: Bool,
+    rendered: Rendered[A],
 }
 
-impl[A: Allocator] Writer for Line[A] {
+// A `Rendered` keeps the text written to it.
+@derive(Release)
+struct Rendered[A: Allocator] {
+    bytes: Vec[UInt8, A],
+}
+
+impl[A: Allocator] Writer for Rendered[A] {
     type Error = mem.Oom
 
     fn write_str(inout self: Self, s: Str) -> Result[(), mem.Oom] where carries() {
-        if !self.escaping {
-            return &self.text.append(s)
-        }
-        append_escaped(&self.text, s)
+        &self.bytes.append_slice(s.as_bytes())
     }
 }
 
@@ -169,7 +174,7 @@ impl[A: Allocator] Visitor for Line[A] {
 // between the level and the first field is the message.
 fn write_message[A: Allocator](inout line: Line[A], message: Str) -> Result[(), mem.Oom] where carries() {
     let scanned = scan(message)
-    write_quoted_if(&line, message, scanned.special || scanned.empty)
+    append_quoted_if(&line.text, message, scanned.special || scanned.empty)
 }
 
 test fn a_message_is_quoted_only_when_it_could_be_read_as_a_field() {
@@ -184,35 +189,61 @@ test fn a_message_is_quoted_only_when_it_could_be_read_as_a_field() {
 
 // `message_text` writes `message` as a line writes it.
 fn message_text(message: Str) -> String {
-    var line: Line[mem.SystemAllocator] = .{ text = String.new(), escaping = false }
+    var line: Line[mem.SystemAllocator] = .{ text = String.new(), rendered = .{ bytes = Vec.new() } }
     write_message(&line, message).unwrap()
-    let Line { text, escaping: _ } = line
+    let Line { text, rendered } = line
+    rendered.release()
     text
 }
 
 // Write a key or a value, quoted when it is empty or holds a space, `=`, `"`
-// or a control character. The value is written once to learn which, without
-// storing it, and once more into the line.
+// or a control character. The value is rendered once, and that rendering is
+// both what decides the quotes and what is written: a `Display` may answer
+// differently each time it is asked, and a value judged plain and then
+// written with a line feed in it would be read back as two lines.
 fn write_value[T: Display, A: Allocator](inout line: Line[A], value: T) -> Result[(), mem.Oom] where carries() {
-    var scanned = Scan { empty = true, space = false, special = false }
-    match value.fmt(&scanned) {
-        Ok(_) => {},
-        Err(never) => never,
-    }
-    write_quoted_if(&line, value, scanned.empty || scanned.space || scanned.special)
+    &line.rendered.bytes.clear()
+    value.fmt(&line.rendered)?
+    // Every piece written was a `Str`, so the pieces together are UTF-8.
+    let text = Str.from_bytes(line.rendered.bytes.as_slice()).unwrap()
+    let scanned = scan(text)
+    append_quoted_if(&line.text, text, scanned.empty || scanned.space || scanned.special)
 }
 
-// Write `value` into `line`, between quotes and escaped when `quoted`.
-fn write_quoted_if[T: Display, A: Allocator](inout line: Line[A], value: T, quoted: Bool) -> Result[(), mem.Oom] where carries() {
-    if !quoted {
-        return value.fmt(&line)
+// A value that renders `plain` the first time it is asked and a line feed
+// after that, counting how often it is asked in `asked`.
+struct Changing {
+    asked: borrow testing.AllocationLog[mem.SystemAllocator],
+}
+
+impl Display for Changing {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        defer let counted = self.asked.allocator().acquire(1).unwrap()
+        let text = if self.asked.acquired() == 1 {
+            "plain"
+        } else {
+            "forged=yes\nsecond=record"
+        }
+        &w.write_str(text)
     }
-    &line.text.append("\"")?
-    line.escaping = true
-    let written = value.fmt(&line)
-    line.escaping = false
-    written?
-    &line.text.append("\"")
+}
+
+test fn a_value_is_rendered_once_and_written_as_rendered() {
+    defer let asked = testing.AllocationLog.open(mem.system(), 0).unwrap()
+    defer let text = fields_text(field("value", Changing { asked = borrow asked }))
+    testing.assert_eq(text.view(), " value=plain", "a value was written from another rendering than the one checked")?
+    testing.assert_eq(asked.acquired(), UInt64(1), "a value was rendered more than once")?
+    .Ok(())
+}
+
+// Append `value` to `text`, between quotes and escaped when `quoted`.
+fn append_quoted_if[A: Allocator](inout text: String[A], value: Str, quoted: Bool) -> Result[(), mem.Oom] where carries() {
+    if !quoted {
+        return &text.append(value)
+    }
+    &text.append("\"")?
+    append_escaped(&text, value)?
+    &text.append("\"")
 }
 
 // A `Scan` records what text written to it holds, and keeps none of it.
