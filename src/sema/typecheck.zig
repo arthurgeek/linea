@@ -10480,14 +10480,19 @@ const Checker = struct {
             return null;
         }
 
-        // A length that has its own report, or that names a constant refused
-        // where it is declared, has no count only because of that report.
-        // Its own report is one made while it was read, here or before it
-        // waited, or the resolver's for a name nothing declares. A length
+        // A length is silent where a report already made explains why a
+        // constant expression has no count: a name nothing declares or a
+        // part the parser refused, a constant refused where it is declared,
+        // or a report made while an expression of a constant form was read,
+        // here or before it waited, such as an operand of the wrong type. An
+        // expression of a form no constant expression has is no count
+        // whatever else is wrong inside it, so it is still reported. A length
         // typed as nothing is not taken as reported: a name read before what
         // it stands for is typed has no type and no report.
-        if (reported_already or undeclared or self.sink.error_count != reported_before) return null;
+        if (undeclared) return null;
         if (try self.readsARefusedConstant(&named)) return null;
+        const value = try self.worth(length);
+        if (value.isConstant() and (reported_already or self.sink.error_count != reported_before)) return null;
 
         // The routine that folds a constant expression wherever one is read,
         // and not this pass's own table of what it has folded so far: which
@@ -10500,7 +10505,7 @@ const Checker = struct {
         // text constants are different domains. A length that is not a
         // constant at all is told which of the two it failed, since a form the
         // definition does not admit may be no number either.
-        const folded = switch (try self.worth(length)) {
+        const folded = switch (value) {
             // A newtype's constant folds to the integer it holds, and is still
             // its own type rather than a number.
             .integer => |v| if (written_as != .poison and self.builder.get(written_as) == .newtype) {

@@ -3863,13 +3863,18 @@ array literal may instead write `[T; _]` to infer the count from that literal: a
 local `let` or `var`, a module constant or an `impl` constant. Grouping
 parentheses around the literal are allowed.
 
-A length that reads something already refused is not reported again. A name
-nothing declares is reported as that ([N-Undefined]), and a constant whose
-initialiser was refused is reported where it is declared, once, whichever
-declaration reads it first ([T-Mismatch], [T-Convert], [T-Literal]). A constant
-worked out from a refused one has no value because of it. A length naming any
-of these has no count only because of that report, in a binding, a
-parameter, a field, a payload, an alias or a derive's argument.
+A length that is not a constant, or not a count, is reported for its form and
+its value, and is silent only where a report already made explains why a
+constant expression has no count: a name nothing declares ([N-Undefined]); a
+part the parser refused; a constant whose initialiser was refused, which is
+reported where it is declared, once, whichever declaration reads it first
+([T-Mismatch], [T-Convert], [T-Literal]), or a constant worked out from such a
+one; and an operand of an expression of a constant form that was itself
+reported, as the `true` of `1 + true` is ([T-Operands]). That holds in a
+binding, a parameter, a field, a payload, an alias and a derive's argument. An
+expression of a form no constant expression has, such as a call of a closure,
+is no count whatever else is reported inside it, so it keeps its [T-ArraySize]
+beside that report.
 
 The element type supplies context to every literal element. For example,
 `let readings: [Float64; _] = [32.0, 104.0]` has type `[Float64; 2]`, and
