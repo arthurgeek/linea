@@ -3251,8 +3251,7 @@ const Parser = struct {
         if (self.cursor.at(.keyword_borrow)) {
             const at = self.cursor.current();
             if (self.depth == max_nesting) {
-                try self.refuseToDescend(at, "this borrow type nests too deeply");
-                return self.steppedOverType(at);
+                return self.refuseTheType(at, at, "this borrow type nests too deeply");
             }
             self.depth += 1;
             if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3289,8 +3288,7 @@ const Parser = struct {
             const dot = self.cursor.advance();
             const selected = self.cursor.current();
             if (!measure.wrap()) {
-                try self.refuseToDescend(selected, "this selected type nests too deeply");
-                return self.steppedOverType(base.at);
+                return self.refuseTheType(selected, base.at, "this selected type nests too deeply");
             }
             const name = self.cursor.eat(.identifier) orelse blk: {
                 try self.reportAt(.s_type, selected, "expected a name", "a selected type names a member after the dot");
@@ -3322,25 +3320,77 @@ const Parser = struct {
             return .{ .at = head, .name = .none };
         }
         _ = self.cursor.advance();
-        if (try self.refuseArgumentsPastTheLimit()) return self.steppedOverType(head);
+        // A name left without its arguments would be reported for having
+        // none, so the type is refused whole.
+        if (self.cursor.at(.l_bracket) and self.depth == max_nesting) {
+            return self.refuseTheType(self.cursor.current(), head, "this type nests too deeply");
+        }
         return .{ .at = head, .name = head, .args = try self.parseTypeArgs() };
     }
 
-    /// The type that stands where [S-Nesting] refused one beginning at `at`:
-    /// it names nothing, and records how far the parser stepped, so the names
-    /// written in the tokens it holds no node for can still be found.
-    fn steppedOverType(self: *const Parser, at: TokenId) node.TypeRef {
-        return .{ .at = at, .name = .none, .stepped_to = self.cursor.current() };
+    /// Refuses the written type beginning at `start` with [S-Nesting] at
+    /// `at`, and steps over that type and nothing after it.
+    ///
+    /// What encloses the type still expects what follows it: an array its
+    /// `; N]`, a parameter list its next parameter. Stepping to the enclosing
+    /// closer instead takes those away, and each encloser then reports the
+    /// part it cannot find. The type that stands here names nothing and
+    /// records how far the parser stepped, so the names written in the tokens
+    /// it holds no node for can still be found.
+    fn refuseTheType(self: *Parser, at: TokenId, start: TokenId, what: []const u8) std.mem.Allocator.Error!node.TypeRef {
+        try self.reportNesting(at, what);
+        self.cursor.seek(@intCast(start.index()));
+        self.skipWrittenType();
+        return .{ .at = start, .name = .none, .stepped_to = self.cursor.current() };
     }
 
-    /// Refuses an argument list that opens at the nesting limit, and says
-    /// whether it did. A written type refused here stands as a refused type,
-    /// not as its name without arguments: later passes report nothing for a
-    /// refused type, and would report a generic name for taking none.
-    fn refuseArgumentsPastTheLimit(self: *Parser) std.mem.Allocator.Error!bool {
-        if (!self.cursor.at(.l_bracket) or self.depth != max_nesting) return false;
-        try self.refuseToDescend(self.cursor.current(), "this type nests too deeply");
-        return true;
+    /// Steps over one written type by its tokens, building nothing: `borrow`
+    /// and a callable's convention before what they apply to, a callable's
+    /// parameters and its result, a bracketed or parenthesised group, and a
+    /// name with its arguments and the members selected from it.
+    ///
+    /// A loop, since a chain of `borrow` or of results may be as long as the
+    /// file. Each token is read once.
+    fn skipWrittenType(self: *Parser) void {
+        while (true) switch (self.cursor.peek()) {
+            .keyword_borrow => _ = self.cursor.advance(),
+            .keyword_read, .keyword_inout, .keyword_sink => {
+                if (self.cursor.peekAt(1) != .keyword_fn) return;
+                _ = self.cursor.advance();
+            },
+            .keyword_fn => {
+                _ = self.cursor.advance();
+                if (self.cursor.at(.l_paren)) self.skipGroup();
+                if (self.cursor.eat(.arrow) == null) return;
+            },
+            .l_bracket, .l_paren => return self.skipGroup(),
+            .identifier => {
+                _ = self.cursor.advance();
+                if (self.cursor.at(.l_bracket)) self.skipGroup();
+                while (self.cursor.at(.dot) and self.cursor.peekAt(1) == .identifier) {
+                    _ = self.cursor.advance();
+                    _ = self.cursor.advance();
+                    if (self.cursor.at(.l_bracket)) self.skipGroup();
+                }
+                return;
+            },
+            else => return,
+        };
+    }
+
+    /// Steps over the group the cursor opens, through its closer, or to the
+    /// end of the file where it is never closed.
+    fn skipGroup(self: *Parser) void {
+        var depth: u32 = 0;
+        while (!self.cursor.atEnd()) {
+            const nesting = self.cursor.peek().nesting();
+            _ = self.cursor.advance();
+            if (nesting == 1) depth += 1;
+            if (nesting == -1) {
+                depth -= 1;
+                if (depth == 0) return;
+            }
+        }
     }
 
     fn startsCallableType(self: *const Parser) bool {
@@ -3351,8 +3401,7 @@ const Parser = struct {
     fn parseCallableType(self: *Parser) std.mem.Allocator.Error!node.TypeRef {
         const at = self.cursor.current();
         if (self.depth == max_nesting) {
-            try self.refuseToDescend(at, "this callable type nests too deeply");
-            return self.steppedOverType(at);
+            return self.refuseTheType(at, at, "this callable type nests too deeply");
         }
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3399,11 +3448,7 @@ const Parser = struct {
         _ = self.cursor.advance();
         if (self.cursor.eat(.r_paren) != null) return .{ .at = open, .name = open };
         if (self.depth == max_nesting) {
-            // The skip stops before the `)` this `(` opened, which closes the
-            // refused type rather than whatever encloses it.
-            try self.refuseToDescend(open, "this grouped type nests too deeply");
-            _ = self.cursor.eat(.r_paren);
-            return self.steppedOverType(open);
+            return self.refuseTheType(open, open, "this grouped type nests too deeply");
         }
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3482,8 +3527,7 @@ const Parser = struct {
     fn parseArrayType(self: *Parser) std.mem.Allocator.Error!node.TypeRef {
         const open = self.cursor.current();
         if (self.depth == max_nesting) {
-            try self.refuseToDescend(open, "this type nests too deeply");
-            return self.steppedOverType(open);
+            return self.refuseTheType(open, open, "this type nests too deeply");
         }
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);
@@ -3530,7 +3574,10 @@ const Parser = struct {
 
     fn parseTypeArgs(self: *Parser) std.mem.Allocator.Error!node.TypeRefRange {
         if (!self.cursor.at(.l_bracket)) return node.TypeRefRange.empty;
-        if (try self.refuseArgumentsPastTheLimit()) return node.TypeRefRange.empty;
+        if (self.depth == max_nesting) {
+            try self.refuseToDescend(self.cursor.current(), "this type nests too deeply");
+            return node.TypeRefRange.empty;
+        }
         // Type measurements are isolated from enclosing expression heights.
         self.depth += 1;
         if (self.written_type_depth != 0) self.deepest = @max(self.deepest, self.depth);

@@ -864,7 +864,10 @@ The limit is reported once per file. What stands past it is stepped over, up to
 the end of the pattern, or of the expression's enclosing group or block, and
 nothing inside it is reported again: a binder written there is bound, with no
 known type, so a use of it is not [N-Undefined], and a name used there counts
-as used, so it is not [N-Unused]. A type whose arguments stand past the limit
+as used, so it is not [N-Unused]. A refused written type is stepped over alone,
+whatever its form, so what encloses it still reads what follows it: an array
+its length, a parameter list its next parameter. An array length refused for
+its own depth is not reported again as no constant ([T-ArraySize]). A type whose arguments stand past the limit
 is refused with them, wherever it is written, so it is not reported for the
 arguments it lacks ([T-Bound]), and a derive naming it as a source is not
 reported for the variant that source would need ([T-Derive]). A name written
