@@ -1460,6 +1460,7 @@ fn typecheckInternal(
     const z_parts = tracy.beginZone(@src(), "tc.parts");
     try c.settleDeclaredAnswers();
     try c.settleDeferredHeads(implementations);
+    try c.refuseOverlappingDeferredHeads(implementations);
 
     // Every template is complete and every settled type known, so every
     // instantiation is filled again from its template. A part written as a
@@ -32473,6 +32474,46 @@ const Checker = struct {
     /// `first` and `second` are positions in a list held in declaration order,
     /// so the report lands where a programmer added the collision, which is
     /// where `[N-Duplicate]` lands for the same reason.
+    /// Holds the implementations `settleDeferredHeads` read again to the
+    /// rule `refuseOverlappingImplementations` holds the rest to. Their head
+    /// or trait arguments named a settled type no implementation had
+    /// answered when that ran, so it passed over them: `impl
+    /// Weighs[Probe.Reading] for Scale` is `Weighs[UInt8]` only now, and
+    /// overlaps an implementation written with `UInt8`.
+    ///
+    /// **Bound:** each implementation read again is unified against the
+    /// members of its own trait and head, so the cost is those chains'
+    /// lengths summed over the implementations read again, and nothing where
+    /// none was.
+    fn refuseOverlappingDeferredHeads(
+        self: *Checker,
+        implementations: []const types_mod.Implementation,
+    ) std.mem.Allocator.Error!void {
+        if (self.unsettled_heads.items.len == 0) return;
+        var deferred = try std.DynamicBitSetUnmanaged.initEmpty(self.gpa, implementations.len);
+        defer deferred.deinit(self.gpa);
+        for (self.unsettled_heads.items) |at| deferred.set(at);
+
+        for (self.unsettled_heads.items) |at| {
+            const im = implementations[at];
+            if (im.isAmbient() or !im.ofATrait()) continue;
+            if (im.parameters > 0 and !im.valid_key) continue;
+            if (try self.builder.anyUnsettled(&.{im.ty}) or try self.builder.anyUnsettled(im.args)) continue;
+            var chain = self.impl_index.membersOf(im.trait, im.head);
+            while (chain.next()) |other| {
+                if (other == at) continue;
+                // Two read again are a pair once, at the later of them.
+                if (deferred.isSet(other) and other > at) continue;
+                const entry = implementations[other];
+                if (entry.isAmbient() or !entry.ofATrait()) continue;
+                if (entry.trait != im.trait or !entry.head.same(im.head)) continue;
+                if (entry.parameters > 0 and !entry.valid_key) continue;
+                if (try self.builder.anyUnsettled(&.{entry.ty}) or try self.builder.anyUnsettled(entry.args)) continue;
+                try self.refuseIfOverlapping(implementations, @min(at, @as(u32, @intCast(other))), @max(at, @as(u32, @intCast(other))));
+            }
+        }
+    }
+
     fn refuseIfOverlapping(
         self: *Checker,
         implementations: []const types_mod.Implementation,
