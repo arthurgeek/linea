@@ -1,0 +1,12 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/derive_from/an_error_beside_a_derive_source_keeps_the_missing_variant.lin:15:22
+   |
+15 | @derive(Conv[[UInt8; true], UInt16])
+   |                      ^^^^ this is not a number
+error[T-Derive]: no variant of `Choice` wraps exactly `UInt16`
+  --> tests/derive_from/an_error_beside_a_derive_source_keeps_the_missing_variant.lin:15:9
+   |
+15 | @derive(Conv[[UInt8; true], UInt16])
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Choice` has `Only(UInt8)`, `Unknown`

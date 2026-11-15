@@ -579,9 +579,13 @@ pub const UnwrappedSource = struct {
     /// the standalone request, or the target an attached request sits on.
     owner: DeclId,
     trait: node.DeriveTraitId,
-    /// The wrapped parameter's written type, which names the source where
-    /// the entry does not write exactly one argument.
+    /// The wrapped parameter's written type, as the template writes it.
     wrapped: node.TypeRef,
+    /// The entry's argument that is the source: the one standing for the
+    /// template parameter the wrapped type names. Null where the wrapped
+    /// type is not one parameter alone, so every argument is part of the
+    /// source.
+    source: ?node.TypeRef,
     /// The first two variants holding the source, by position in the
     /// target, or null where none holds it.
     holders: ?[2]expanded_mod.CaseOrdinal,
@@ -11646,6 +11650,22 @@ const Resolver = struct {
         return true;
     }
 
+    /// The argument of a derive entry that stands for the template parameter
+    /// `wrapped` names, or null where `wrapped` is not one parameter of the
+    /// template or the entry writes no argument for it.
+    ///
+    /// **Bound:** the template's type parameters, once.
+    fn wrappedArgument(self: *const Resolver, template: DeclId, wrapped: node.TypeRef, arguments: []const node.TypeRef) ?node.TypeRef {
+        const ast = &self.program.ast;
+        const named = ast.withoutTypeGroups(wrapped);
+        if (named.kind != .named or named.name == TokenId.none or named.args.len() != 0) return null;
+        for (ast.declTypeParams(template), 0..) |parameter, index| {
+            if (ast.tokenName(parameter.name) != ast.tokenName(named.name)) continue;
+            return if (index < arguments.len) arguments[index] else null;
+        }
+        return null;
+    }
+
     /// Selects the variant each `reflect.wrap` of a template's members
     /// constructs: the one variant of `target` with exactly one field whose
     /// written type is the wrapped parameter's, once the entry's trait
@@ -11714,6 +11734,7 @@ const Resolver = struct {
                     .owner = if (attached) target else derive,
                     .trait = derive_trait,
                     .wrapped = wrapped,
+                    .source = self.wrappedArgument(template, wrapped, written_arguments),
                     .holders = if (second) |later| .{ @enumFromInt(selected.?), @enumFromInt(later) } else null,
                 });
                 return false;

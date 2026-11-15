@@ -1,0 +1,14 @@
+// A callable source that writes a unit result is refused where the result
+// is written, and the derive says nothing about the variant it would need.
+@derive(From[fn() -> ()])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    match Choice.Unknown {
+        Only(code) => code,
+        Unknown => 0,
+    }
+}

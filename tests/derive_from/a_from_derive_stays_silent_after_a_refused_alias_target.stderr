@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/derive_from/a_from_derive_stays_silent_after_a_refused_alias_target.lin:3:21
+  |
+3 | alias Bad = [UInt8; true]
+  |                     ^^^^ this is not a number

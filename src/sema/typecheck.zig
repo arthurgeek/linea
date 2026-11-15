@@ -1604,7 +1604,7 @@ fn typecheckInternal(
 
     const z_headers = tracy.beginZone(@src(), "tc.headers");
     try c.validateTemplateRequirements();
-    try c.reportUnwrappedSources();
+    try c.typeUnwrappedSources();
     try c.checkComponentRequirements();
     try c.checkImplementations();
     try c.checkStructuralSupertraits();
@@ -1763,6 +1763,7 @@ fn typecheckInternal(
     // bound reads an argument's capability: every instantiation the program
     // reaches exists by now, and every one of them has settled.
     try c.reportBrokenBounds();
+    try c.reportUnwrappedSources();
     try c.checkPolyRec();
     try c.builder.fillMinted();
     try reportOversizedTypes(sink, program, &c.builder, 0);
@@ -10297,6 +10298,11 @@ const Checker = struct {
                 return null;
             } else v,
             .truth, .string, .aggregate => {
+                // A length typed as an integer whose constant is worth
+                // something else names a constant declared with one type and
+                // initialised with another, which is reported where it is
+                // declared.
+                if (written_as != .poison and written_as.integerInfo() != null) return null;
                 _ = try self.refuseUncountedLength(length);
                 return null;
             },
@@ -31264,15 +31270,103 @@ const Checker = struct {
         }
     }
 
-    /// Reports [T-Derive] for each derive entry whose source no single
-    /// variant of its target wraps. The entry generated no implementation, so
-    /// its written arguments are typed here first: an argument refused as a
-    /// type has its own report, and a missing variant would say the same
-    /// mistake twice.
+    /// Types the arguments of each derive entry whose source no single
+    /// variant of its target wraps. Such an entry generated no
+    /// implementation, so nothing else types what it wrote, and the bounds
+    /// its arguments are written under are checked with every other written
+    /// type's.
+    fn typeUnwrappedSources(self: *Checker) std.mem.Allocator.Error!void {
+        const outer_module = self.current;
+        const outer_generic = self.generic;
+        defer {
+            self.current = outer_module;
+            self.generic = outer_generic;
+        }
+        for (self.res.unwrapped_sources) |unwrapped| {
+            try self.typeDeriveArguments(unwrapped.target, unwrapped.owner, unwrapped.trait);
+        }
+    }
+
+    /// Where each error reported so far points, by file and then offset.
     ///
-    /// **Bound:** each entry's written arguments, and the target's variants
-    /// and their fields once to list them.
+    /// **Bound:** the diagnostics in the sink, sorted once.
+    fn reportedPlaces(self: *Checker) std.mem.Allocator.Error![]const Place {
+        var places: std.ArrayList(Place) = .empty;
+        errdefer places.deinit(self.gpa);
+        for (self.sink.items()) |diagnostic| {
+            if (diagnostic.severity != .err) continue;
+            for (diagnostic.labels) |label| {
+                if (label.style != .primary) continue;
+                try places.append(self.gpa, .{ .file = label.file, .at = label.span.start });
+            }
+        }
+        std.mem.sort(Place, places.items, {}, Place.before);
+        return places.toOwnedSlice(self.gpa);
+    }
+
+    const Place = struct {
+        file: FileId,
+        at: u32,
+
+        fn before(_: void, a: Place, b: Place) bool {
+            if (a.file != b.file) return @intFromEnum(a.file) < @intFromEnum(b.file);
+            return a.at < b.at;
+        }
+    };
+
+    /// Whether a written type was refused: an error is reported inside
+    /// `span`, the text it was written in, or it settles to a type that
+    /// holds one already reported elsewhere, such as an alias whose own type
+    /// was refused. Asked once every written type's bounds have been
+    /// checked. A refused written type answers poison when it is read again,
+    /// so reading it here reports nothing.
+    ///
+    /// **Bound:** one search of `reported`, and the distinct types the
+    /// written type settles to.
+    fn writtenTypeRefused(self: *Checker, owner: node.DeclId, written: node.TypeRef, span: Span, reported: []const Place) std.mem.Allocator.Error!bool {
+        const file = self.ast.fileOf(written.at);
+        const wanted: Place = .{ .file = file, .at = span.start };
+        const first = std.sort.lowerBound(Place, reported, wanted, struct {
+            fn order(context: Place, item: Place) std.math.Order {
+                if (Place.before({}, context, item)) return .lt;
+                if (Place.before({}, item, context)) return .gt;
+                return .eq;
+            }
+        }.order);
+        if (first < reported.len and reported[first].file == file and reported[first].at < span.end) return true;
+
+        var seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer seen.deinit(self.gpa);
+        return self.holdsPoison(try self.typeOfRefOf(self.current, owner, written), &seen);
+    }
+
+    /// Whether a type is, or is built over, one already reported.
+    ///
+    /// **Bound:** each distinct type reached is visited once.
+    fn holdsPoison(self: *Checker, ty: TypeId, seen: *std.AutoHashMapUnmanaged(TypeId, void)) std.mem.Allocator.Error!bool {
+        if (ty == .poison) return true;
+        if ((try seen.getOrPut(self.gpa, ty)).found_existing) return false;
+        switch (self.builder.get(ty)) {
+            .array => |array| return self.holdsPoison(array.element, seen),
+            .borrow => |observation| return self.holdsPoison(observation.referent, seen),
+            else => {},
+        }
+        const instance = self.builder.instanceOf(ty) orelse return false;
+        // The walk mints no type, so the slice `argsOf` answers stays put.
+        for (self.builder.argsOf(instance)) |argument| if (try self.holdsPoison(argument, seen)) return true;
+        return false;
+    }
+
+    /// Reports [T-Derive] for each derive entry whose source no single
+    /// variant of its target wraps, unless the source was refused as a type:
+    /// that refusal is the report, and a missing variant would say the same
+    /// mistake twice. The source is the argument the template wraps. A
+    /// mistake in another argument is independent of it.
+    ///
+    /// **Bound:** the diagnostics sorted once, each entry's source asked
+    /// once, and the target's variants and their fields once to list them.
     fn reportUnwrappedSources(self: *Checker) std.mem.Allocator.Error!void {
+        if (self.res.unwrapped_sources.len == 0) return;
         const outer_module = self.current;
         const outer_generic = self.generic;
         defer {
@@ -31281,15 +31375,29 @@ const Checker = struct {
         }
         const ast = self.ast;
         const arena = self.sink.arena;
-        for (self.res.unwrapped_sources) |unwrapped| {
-            const errors_before = self.sink.error_count;
-            try self.typeDeriveArguments(unwrapped.target, unwrapped.owner, unwrapped.trait);
-            if (self.sink.error_count != errors_before) continue;
-
+        const reported = try self.reportedPlaces();
+        defer self.gpa.free(reported);
+        entries: for (self.res.unwrapped_sources) |unwrapped| {
             const entry = ast.deriveTrait(unwrapped.trait);
-            const variants = ast.declVariants(unwrapped.target);
             const written_arguments = ast.typeArgs(entry.ref.args);
-            const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else unwrapped.wrapped);
+            self.current = self.program.moduleOf(unwrapped.target);
+            self.generic = unwrapped.owner;
+            // An argument's text runs to the next argument, or to the end
+            // of the entry, so a callable's refused result is inside it.
+            for (written_arguments, 0..) |argument, index| {
+                if (unwrapped.source) |source| if (source.at != argument.at) continue;
+                const span: Span = .{
+                    .start = ast.tokenSpan(argument.at).start,
+                    .end = if (index + 1 < written_arguments.len)
+                        ast.tokenSpan(written_arguments[index + 1].at).start
+                    else
+                        ast.rangeSpan(entry.tokens).end,
+                };
+                if (try self.writtenTypeRefused(unwrapped.owner, argument, span, reported)) continue :entries;
+            }
+
+            const variants = ast.declVariants(unwrapped.target);
+            const source_text = ast.writtenText(unwrapped.source orelse unwrapped.wrapped);
             const target_name = ast.tokenText(ast.declName(unwrapped.target));
             const labels = try arena.alloc(Label, if (unwrapped.holders != null) 3 else 1);
             labels[0] = .{
