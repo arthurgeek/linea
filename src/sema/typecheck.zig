@@ -794,6 +794,8 @@ fn typecheckInternal(
     defer c.alias_types.deinit(gpa);
     defer c.alias_shapes.deinit(gpa);
     defer c.aliases_reading.deinit(gpa);
+    defer c.alias_heights.deinit(gpa);
+    defer c.alias_frames.deinit(gpa);
     defer c.defaults_reading.deinit(gpa);
     defer c.carried_omissions.deinit(gpa);
     defer c.impls_publishing.deinit(gpa);
@@ -6101,6 +6103,14 @@ const Checker = struct {
     /// again while its own type is read is a cycle, which the resolver
     /// reported unless a settled type joins the two readings.
     aliases_reading: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
+    /// How many aliases the type each alias names passes through, itself
+    /// included, for every alias read so far. An alias read again is not
+    /// walked again, so the chain it ends is counted from here.
+    alias_heights: std.AutoHashMapUnmanaged(DeclId, u32) = .empty,
+    /// The aliases being read where no declared answer is being settled,
+    /// outermost first, each with the tallest alias its own type has named.
+    /// A declared answer being settled counts aliases among its own frames.
+    alias_frames: std.ArrayList(AliasFrame) = .empty,
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
@@ -10915,12 +10925,12 @@ const Checker = struct {
     /// cycle, answered with poison: the resolver reported it.
     fn aliasedType(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!TypeId {
         if (self.settledAlias(alias)) |held| {
-            if (self.settling) |settling| settling.note(.{ .alias = alias });
+            try self.noteAliasRead(alias);
             return held;
         }
         const kept = if (self.callable_effects_ready) &self.alias_types else &self.alias_shapes;
         if (kept.get(alias)) |held| {
-            if (self.settling) |settling| settling.note(.{ .alias = alias });
+            try self.noteAliasRead(alias);
             return held;
         }
         if (self.aliases_reading.get(alias)) |began_at| {
@@ -10965,7 +10975,18 @@ const Checker = struct {
         }
         // An alias read while declared answers are settled is one of them,
         // and counts toward how deep they depend on one another.
-        if (self.settling) |settling| if (!try settling.enter(.{ .alias = alias })) return .poison;
+        if (self.settling) |settling| {
+            if (!try settling.enter(.{ .alias = alias })) return .poison;
+        } else {
+            // The same bound where no answer is being settled: an alias
+            // named in an implementation's head is read here first, and a
+            // chain is as long there as anywhere it is written.
+            if (self.alias_frames.items.len == AnswerSettling.max_depth) {
+                try self.reportAliasChainTooDeep(self.alias_frames.items[0].alias);
+                return .poison;
+            }
+            try self.alias_frames.append(self.gpa, .{ .alias = alias });
+        }
         try self.aliases_reading.put(self.gpa, alias, if (self.settling) |settling| settling.depth else 0);
         defer _ = self.aliases_reading.remove(alias);
 
@@ -10979,13 +11000,70 @@ const Checker = struct {
         for (self.refused_parts.items) |seen| {
             if (seen != written.at) continue;
             try kept.put(self.gpa, alias, .poison);
-            if (self.settling) |settling| try settling.leave();
+            try self.leaveAlias(alias);
             return .poison;
         }
         const named = try self.typeOfRefOf(self.program.moduleOf(alias), alias, written);
         try kept.put(self.gpa, alias, named);
-        if (self.settling) |settling| try settling.leave();
+        try self.leaveAlias(alias);
         return named;
+    }
+
+    /// One alias being read where no declared answer is being settled.
+    const AliasFrame = struct { alias: node.DeclId, tallest: u32 = 0 };
+
+    /// Ends the reading of `alias`, recording how many aliases its type
+    /// passes through. One resting on more than a chain may pass through is
+    /// [T-AnswerDepth], reported at the alias the chain being read starts at.
+    fn leaveAlias(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!void {
+        if (self.settling) |settling| {
+            try settling.leave();
+            if (settling.heights.get(.{ .alias = alias })) |height| try self.alias_heights.put(self.gpa, alias, height);
+            return;
+        }
+        const frame = self.alias_frames.pop().?;
+        const height = frame.tallest + 1;
+        try self.alias_heights.put(self.gpa, alias, height);
+        const start = if (self.alias_frames.items.len != 0) self.alias_frames.items[0].alias else alias;
+        if (height > AnswerSettling.max_depth) try self.reportAliasChainTooDeep(start);
+        self.raiseAlias(height);
+    }
+
+    /// Counts an alias read before in whatever is reading it now.
+    fn noteAliasRead(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!void {
+        const height = self.alias_heights.get(alias) orelse return;
+        if (self.settling) |settling| return settling.raise(height);
+        self.raiseAlias(height);
+        if (self.alias_frames.items.len != 0 and self.alias_frames.items.len + height > AnswerSettling.max_depth) {
+            try self.reportAliasChainTooDeep(self.alias_frames.items[0].alias);
+        }
+    }
+
+    fn raiseAlias(self: *Checker, height: u32) void {
+        if (self.alias_frames.items.len == 0) return;
+        const top = &self.alias_frames.items[self.alias_frames.items.len - 1];
+        top.tallest = @max(top.tallest, height);
+    }
+
+    fn reportAliasChainTooDeep(self: *Checker, start: node.DeclId) std.mem.Allocator.Error!void {
+        const name = self.ast.declName(start);
+        if (self.refusedBefore(name)) return;
+        try self.noteRefused(name);
+        try self.reportAnswerDepth(start);
+    }
+
+    /// Reports [T-AnswerDepth] at `named`, the declaration a chain of
+    /// declared answers longer than it may be starts at.
+    fn reportAnswerDepth(self: *Checker, named: node.DeclId) std.mem.Allocator.Error!void {
+        const where = self.answerSpan(named);
+        try self.sink.addErrorFmt(
+            .t_answer_depth,
+            self.ast.fileOf(where.token),
+            where.span,
+            "write a type directly in one of the declarations along the chain",
+            "`{s}` starts a chain of declared answers longer than {d} links",
+            .{ try self.answerName(named), AnswerSettling.max_depth },
+        );
     }
 
     /// The type an alias names, where it is already settled: every alias is
@@ -29722,15 +29800,7 @@ const Checker = struct {
                 .part => |part| part.decl,
                 .reference => return,
             };
-            const where = c.answerSpan(named);
-            try c.sink.addErrorFmt(
-                .t_answer_depth,
-                c.ast.fileOf(where.token),
-                where.span,
-                "write a type directly in one of the declarations along the chain",
-                "`{s}` starts a chain of declared answers longer than {d} links",
-                .{ try c.answerName(named), max_depth },
-            );
+            try c.reportAnswerDepth(named);
         }
 
         fn deinit(self: *AnswerSettling, gpa: std.mem.Allocator) void {
