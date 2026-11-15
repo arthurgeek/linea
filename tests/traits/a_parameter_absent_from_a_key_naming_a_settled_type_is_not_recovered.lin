@@ -1,0 +1,29 @@
+// [T-Impl]. `Probe.Reading` is `UInt8`, so the key is `Weighs[UInt8]` for
+// `Scale`, and `T` appears nowhere in it: no receiver and no trait argument
+// says what `T` stands for.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+impl[T] Weighs[Probe.Reading] for Scale {
+    fn weigh(_self: Self, value: Probe.Reading) -> UInt8 {
+        value
+    }
+}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    scale.weigh(3)
+}

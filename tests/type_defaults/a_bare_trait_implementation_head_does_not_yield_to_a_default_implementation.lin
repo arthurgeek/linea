@@ -1,0 +1,27 @@
+// [T-Bound]. `impl Weighed for Crate` omits the argument `Crate` declares, and
+// a trait implementation's head fills no default, so it is refused where it
+// is written. The default implementation does not answer in its place.
+struct Crate[T = UInt8] {
+    item: T,
+}
+
+trait Weighed {
+    fn weight(self: Self) -> UInt8
+}
+
+default impl[T] Weighed for T {
+    fn weight(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Weighed for Crate {
+    fn weight(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+fn main() -> UInt8 {
+    let crate: Crate = .{ item = 4 }
+    crate.weight()
+}

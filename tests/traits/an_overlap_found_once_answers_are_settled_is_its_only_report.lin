@@ -1,0 +1,31 @@
+// [T-Impl]. `Probe.Reading` is `UInt8`, so the empty implementation for
+// `Scale` overlaps the one for every type. That is what is wrong with it; the
+// member it does not supply belongs to an implementation already refused.
+trait Sensor {
+    type Reading
+}
+
+struct Probe {}
+
+impl Sensor for Probe {
+    type Reading = UInt8
+}
+
+trait Weighs[U] {
+    fn weigh(self: Self, value: U) -> UInt8
+}
+
+struct Scale {}
+
+impl[T] Weighs[UInt8] for T {
+    fn weigh(_self: Self, value: UInt8) -> UInt8 {
+        value
+    }
+}
+
+impl Weighs[Probe.Reading] for Scale {}
+
+fn main() -> UInt8 {
+    let scale = Scale {}
+    scale.weigh(3)
+}

@@ -1761,6 +1761,22 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
         .{ .file = "runtime/sim_test.c", .flags = runtime_flags.items },
     });
+    var sim_fault_flags: std.ArrayList([]const u8) = .empty;
+    sim_fault_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    sim_fault_flags.append(b.allocator, "-Dmalloc=linea_test_malloc") catch @panic("OOM");
+    native.add(native_net_step, "native-sim-fault-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = sim_fault_flags.items },
+        .{ .file = "runtime/sim_fault_test.c", .flags = runtime_flags.items },
+    });
 
     const native_clock_step = b.step("test-native-clock", "Check native clock reads and the monotonic sleep");
     var clock_flags: std.ArrayList([]const u8) = .empty;
@@ -2422,6 +2438,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     heavy.guide_gate.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
+    heavy.guide_gate.root_module.addAnonymousImport("manifest_source", .{ .root_source_file = b.path("src/support/manifest_source.zig") });
     const run_guide = heavy.guide(b.getInstallStep());
     const guide_step = b.step("guide", "Check the guide's programs and fragments and hold their pasted output to what the compiler prints");
     guide_step.dependOn(&run_guide.step);
@@ -2435,6 +2452,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
     heavy.example_tests.root_module.addAnonymousImport("process", .{ .root_source_file = b.path("src/conformance/process.zig") });
+    // The loader's rule for a manifest's `source`, which the check of what
+    // each example root reaches applies too.
+    heavy.example_tests.root_module.addAnonymousImport("manifest_source", .{ .root_source_file = b.path("src/support/manifest_source.zig") });
     const example_tests_step = b.step("example-tests", "Run `linea test` on every root beneath examples/");
     example_tests_step.dependOn(&heavy.exampleTests(b.getInstallStep()).step);
 
@@ -2590,6 +2610,7 @@ pub fn build(b: *std.Build) void {
     // holds the one to the other.
     source_tests.root_module.addAnonymousImport("runtime_symbols", .{ .root_source_file = b.path("src/support/runtime_symbols.zig") });
     source_tests.root_module.addAnonymousImport("runtime_sources", .{ .root_source_file = runtimeSources(b) });
+    source_tests.root_module.addAnonymousImport("manifest_source", .{ .root_source_file = b.path("src/support/manifest_source.zig") });
     const run_source_tests = b.addRunArtifact(source_tests);
     const runtime_tests = b.addTest(.{
         .root_module = b.createModule(.{

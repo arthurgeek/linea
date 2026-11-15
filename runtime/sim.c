@@ -79,6 +79,9 @@ struct sim {
     int short_writes;
     uint64_t trace;
     unsigned next_port;
+    /* How many of its ends hold each dynamic port, so finding a free one
+     * asks each port once and not every end for every port. */
+    uint32_t held_dynamic[65536 - 49152];
     unsigned long made;
     /* Its descriptors' entry indices, in the order they were made, which is
      * the order deliveries are made in. */
@@ -188,7 +191,8 @@ WRAPS_MODULO_2_64 static void note_bytes(struct sim *s, const unsigned char *byt
  * and macOS, so one seed gives one trace on both. */
 static unsigned long traced_answer(long answer) {
     static const int errors[] = { EAGAIN, ETIMEDOUT, ECONNRESET, ECONNREFUSED, EPIPE,
-                                  ENOTCONN, EINVAL, EADDRINUSE, ENOMEM, EMFILE, EBADF };
+                                  ENOTCONN, EINVAL, EADDRINUSE, ENOMEM, EMFILE, EBADF,
+                                  EADDRNOTAVAIL };
     if (answer >= 0) return (unsigned long)answer;
     for (size_t i = 0; i < sizeof errors / sizeof *errors; i++) {
         if (answer == -(long)errors[i]) return ULONG_MAX - i;
@@ -217,6 +221,10 @@ static struct entry *at(long index) {
 }
 
 /* A new entry of `s`, or -ENOMEM. Called locked. */
+static unsigned port_of(unsigned long address) {
+    return (unsigned)(address & 0xffffUL);
+}
+
 static long make_entry(struct sim *s, int listening, unsigned long address) {
     if (reserve(&s->members, &s->member_capacity, s->member_count + 1) != 0) return -ENOMEM;
     struct entry *e = calloc(1, sizeof *e);
@@ -241,6 +249,7 @@ static long make_entry(struct sim *s, int listening, unsigned long address) {
     e->number = s->made++;
     e->listening = listening;
     e->address = address;
+    if (port_of(address) >= first_dynamic_port) s->held_dynamic[port_of(address) - first_dynamic_port] += 1;
     e->peer = -1;
     e->listener = -1;
     entries[index] = e;
@@ -270,6 +279,7 @@ static void drop_entry(long index) {
     struct entry *e = entries[index];
     if (e->sim != NULL) {
         if (e->forgotten) e->sim->forgotten_count -= 1;
+        if (port_of(e->address) >= first_dynamic_port) e->sim->held_dynamic[port_of(e->address) - first_dynamic_port] -= 1;
         remove_index(e->sim->members, &e->sim->member_count, index);
     }
     free_contents(e);
@@ -374,10 +384,6 @@ static unsigned long next_event(struct sim *s) {
     return next;
 }
 
-static unsigned port_of(unsigned long address) {
-    return (unsigned)(address & 0xffffUL);
-}
-
 static unsigned long host_of(unsigned long address) {
     return address >> 16;
 }
@@ -392,11 +398,15 @@ static int port_in_use(struct sim *s, unsigned port, int listeners_only) {
     return 0;
 }
 
+/* The next dynamic port no end holds, counting up from the last one given
+ * and back round to the first, or 0 when every dynamic port is held. */
 static unsigned long free_port(struct sim *s) {
-    while (port_in_use(s, s->next_port, 0) && s->next_port < 65535) s->next_port += 1;
-    const unsigned port = s->next_port;
-    if (s->next_port < 65535) s->next_port += 1;
-    return port;
+    for (unsigned tried = first_dynamic_port; tried <= 65535; tried++) {
+        const unsigned port = s->next_port;
+        s->next_port = port == 65535 ? first_dynamic_port : port + 1;
+        if (s->held_dynamic[port - first_dynamic_port] == 0) return port;
+    }
+    return 0;
 }
 
 /* The listener of `s` a connection to `address` reaches: one bound to its
@@ -420,13 +430,25 @@ static void close_end(struct sim *s, long index, int reset) {
     struct entry *peer = at(e->peer);
     if (peer != NULL) {
         const int unread = e->received_len > 0 || e->inflight_bytes > 0;
+        long sent = 0;
         if (reset || unread) {
-            (void)schedule(s, peer, chunk_reset, NULL, 0);
+            sent = schedule(s, peer, chunk_reset, NULL, 0);
         } else if (!e->write_shut) {
-            (void)schedule(s, peer, chunk_end, NULL, 0);
+            sent = schedule(s, peer, chunk_end, NULL, 0);
+        }
+        /* A peer still queued at its listener was never handed to anyone: it
+         * is dropped below, and nothing waits on it. */
+        const int queued = e->established > s->now && peer->listener >= 0;
+        /* A close cannot be refused, so an end or a reset that could not be
+         * allocated resets the peer at once: it would otherwise wait for
+         * something that was never sent. */
+        if (sent != 0 && !queued) {
+            peer->reset = 1;
+            peer->received_len = 0;
+            note(s, event_reset, peer->number, 0);
         }
         peer->peer = -1;
-        if (e->established > s->now && peer->listener >= 0) {
+        if (queued) {
             remove_index(at(peer->listener)->pending, &at(peer->listener)->pending_count, e->peer);
             drop_entry(e->peer);
         }
@@ -489,7 +511,9 @@ static long attempt_connect(struct sim *s, struct linea_op *op) {
         const long listener = listener_for(s, op->address);
         if (listener < 0 || at(listener)->pending_count >= at(listener)->backlog) return -(long)ECONNREFUSED;
         const unsigned long host = host_of(op->address) == 0 ? 0x7f000001UL : host_of(op->address);
-        const long client = make_entry(s, 0, (host << 16) | free_port(s));
+        const unsigned long port = free_port(s);
+        if (port == 0) return -(long)EADDRNOTAVAIL;
+        const long client = make_entry(s, 0, (host << 16) | port);
         if (client < 0) return client;
         const long server = make_entry(s, 0, (host << 16) | port_of(op->address));
         if (server < 0) { drop_entry(client); return server; }
@@ -545,9 +569,11 @@ static long attempt_write(struct sim *s, struct entry *e, struct linea_op *op) {
     if (e->write_shut) return -(long)EPIPE;
     struct entry *peer = at(e->peer);
     if (peer == NULL) {
+        /* Marked once the reset is sent: one that could not be allocated was
+         * not, and the next write sends it. */
         if (!e->reset_scheduled) {
-            e->reset_scheduled = 1;
             if (schedule(s, e, chunk_reset, NULL, 0) != 0) return -(long)ENOMEM;
+            e->reset_scheduled = 1;
         }
         return (long)op->len;
     }
@@ -772,10 +798,9 @@ long linea_sim_listen(unsigned long address, unsigned long backlog) {
     settle(s);
     unsigned long bound = address;
     long answer;
-    if (port_of(address) == 0) {
-        bound = (host_of(address) << 16) | free_port(s);
-    }
-    if (port_of(address) != 0 && port_in_use(s, port_of(address), 1)) {
+    const unsigned long given = port_of(address) == 0 ? free_port(s) : 0;
+    if (port_of(address) == 0) bound = (host_of(address) << 16) | given;
+    if (port_of(address) == 0 ? given == 0 : port_in_use(s, port_of(address), 1)) {
         answer = -(long)EADDRINUSE;
     } else {
         const long index = make_entry(s, 1, bound);
@@ -814,9 +839,12 @@ long linea_sim_shutdown_write(int fd) {
     if (e->listening || e->reset) {
         answer = -(long)ENOTCONN;
     } else if (!e->write_shut) {
-        e->write_shut = 1;
+        /* The end is sent before the side is marked shut: an end that could
+         * not be allocated leaves it open, so asking again or closing still
+         * ends the peer's input. */
         struct entry *peer = at(e->peer);
         if (peer != NULL && schedule(s, peer, chunk_end, NULL, 0) != 0) answer = -(long)ENOMEM;
+        else e->write_shut = 1;
     }
     unlock();
     return answer;
