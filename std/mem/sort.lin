@@ -59,10 +59,10 @@ impl[T, A: Allocator] Vec[T, A] {
     // is lent to the sort, and a `less` that panics ends the program without
     // unwinding, so no caller sees a partly sorted vector. The sort allocates
     // nothing and cannot fail; for n elements it makes O(n log n) calls of
-    // `less` and O(n log² n) swaps.
-    pub fn sort_by[F: inout fn(read left: T, read right: T) -> Bool](inout self: Self, sink less: F) where F: Discardable {
-        var ordering = less
-        stable_sort(&self, &ordering)
+    // `less` and O(n log² n) swaps. A callback lent with `&` keeps its state
+    // for the caller.
+    pub fn sort_by[F: inout fn(read left: T, read right: T) -> Bool](inout self: Self, inout less: F) {
+        stable_sort(&self, &less)
     }
 
     test fn sorting_an_empty_or_one_element_vector_compares_nothing() {
