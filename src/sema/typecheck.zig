@@ -4405,6 +4405,9 @@ pub fn helpTypeName(
 /// written defaults name are left out, and every module the spelling names
 /// that `from` cannot write it through yet is recorded there.
 const TypeWriter = struct {
+    /// Written where the rest of a name is left out.
+    const elided = "...";
+
     arena: std.mem.Allocator,
     ast: *const Ast,
     program: *const ExpandedProgram,
@@ -4415,7 +4418,21 @@ const TypeWriter = struct {
 
     const Error = std.Io.Writer.Error || std.mem.Allocator.Error;
 
+    /// How much of a type's name is written. A diagnostic keeps far less of
+    /// any text, and a type is one entry however often it is named: aliases
+    /// that each name the one before twice give a type of thirty entries a
+    /// name a billion names long. Past this, each part still to be written
+    /// is left out, so the writing is bounded by the name kept and the
+    /// type's depth and not by the paths through it.
+    const longest_name = 4096;
+
     fn write(self: TypeWriter, w: *std.Io.Writer, t: TypeId) Error!void {
+        if (w.end > longest_name) {
+            // One mark where the name stops, however many parts follow it.
+            const written = std.mem.trimEnd(u8, w.buffered(), "]), ");
+            if (!std.mem.endsWith(u8, written, elided)) try w.writeAll(elided);
+            return;
+        }
         const pool = self.pool;
         if (pool.instanceOf(t)) |instance| {
             const args = pool.argsOf(instance);
@@ -4660,9 +4677,14 @@ fn collectImplementations(
         const head = written_head.at;
         var names: ?node.DeclId = null;
         const parameter_head = ast.declHasParameterHead(d);
-        // A callable head of too many parameters was refused where it was
-        // written, and has no shape to key a row by.
-        if (written_head.kind == .callable and ast.callableShape(written_head) == null) continue;
+        // A callable head is keyed by its shape: packed where it fits, and
+        // otherwise by the type that stands for the shape in the pool, which
+        // is the number a callable type of that shape is looked up under.
+        const shape: ?node.CallableShape = if (written_head.kind != .callable) null else ast.callableShape(written_head) orelse numbered: {
+            const callable = ast.callableType(written_head);
+            const standing = try pool.longShapeOf(ast.params[callable.params.start..callable.params.end], callable.invocation);
+            break :numbered node.CallableShape.long(@intFromEnum(standing));
+        };
         // A tuple head applies the prelude's declaration of its arity to its
         // components, which is the declaration the resolver keyed the head
         // under. An arity the prelude does not publish was reported there,
@@ -4688,7 +4710,7 @@ fn collectImplementations(
         const applies = ast.declHead(d).args.len() > 0;
         try out.append(gpa, .{
             .trait = trait,
-            .head = if (ast.declIsDefault(d)) .default_ else if (parameter_head) .parameter else if (written_head.kind == .borrow) .borrow_ else if (written_head.kind == .callable) .{ .callable_ = ast.callableShape(written_head).? } else if (applies and names != null)
+            .head = if (ast.declIsDefault(d)) .default_ else if (parameter_head) .parameter else if (written_head.kind == .borrow) .borrow_ else if (shape) |keyed| .{ .callable_ = keyed } else if (applies and names != null)
                 .{ .applied = names.? }
             else
                 .{ .whole = ty },

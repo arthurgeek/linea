@@ -4075,6 +4075,7 @@ fn resolveInternal(
     defer r.members.deinit(gpa);
     defer r.member_at.deinit(gpa);
     defer r.impls.deinit(gpa);
+    defer r.long_shapes.deinit(gpa);
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
@@ -6411,6 +6412,12 @@ const Resolver = struct {
     /// declarations it names. Collected as the headers are resolved, so that
     /// coherence is asked of the whole program at once.
     impls: std.ArrayList(Implementation) = .empty,
+    /// The callable heads too long to pack, numbered; see
+    /// `node.LongCallableShapes`. A number is compared only between two
+    /// implementations of one trait, and a callable head is written in its
+    /// trait's module ([M-Impl]), so a library's numbers and a program's
+    /// never meet and a resumed program numbers its own from nothing.
+    long_shapes: node.LongCallableShapes = .{},
     /// The namespaces a primitive's name opens: one row per primitive, module
     /// and spelling, however many inherent blocks that module writes. Built
     /// once from `impls` after every header is resolved, and handed on as
@@ -8234,9 +8241,14 @@ const Resolver = struct {
                 try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "a callable type has no declaring module", .{});
                 return;
             }
-            const shape = self.ast.callableShape(written_head) orelse {
-                try self.refused_impls.put(self.gpa, d, {});
-                return self.sink.addErrorFmt(.t_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "name a callable type with fewer parameters", "a callable head names at most {d} parameters", .{node.CallableShape.max_shape_parameters});
+            // A head of more parameters than pack is numbered by its exact
+            // spelling, so it keys a chain of its own as any other shape does.
+            const shape = self.ast.callableShape(written_head) orelse numbered: {
+                const callable = self.ast.callableType(written_head);
+                var spelled: std.ArrayList(u8) = .empty;
+                defer spelled.deinit(self.gpa);
+                try node.LongCallableShapes.spell(self.gpa, &spelled, callable.invocation, self.ast.params[callable.params.start..callable.params.end]);
+                break :numbered try self.long_shapes.intern(self.gpa, spelled.items);
             };
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .{ .callable_ = shape }, .decl = d });
         }

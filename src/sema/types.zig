@@ -2644,6 +2644,11 @@ pub const CallableSignature = struct {
     param_count: u32,
     result: TypeId,
     name: []const u8,
+    /// For a signature of more parameters than a shape packs, the callable
+    /// type that stands for its shape: the same invocation and conventions
+    /// over `Unit`, answering `Unit`. Every signature of one shape names the
+    /// same one, which is what numbers the shape. Poison otherwise.
+    shape_of: TypeId = .poison,
 };
 
 /// A lambda source identity applied to its enclosing type arguments.
@@ -4704,6 +4709,36 @@ pub const ImplIndex = struct {
     /// bound into the parameter's match, so `fn get(self: Box[T])` inside
     /// `impl[T] Box[T]` takes the box the head admitted and nothing else.
     pub fn bindKey(pool: anytype, actual: TypeId, written: TypeId, owner: u32, bindings: []TypeId) bool {
+        var matched: MatchedKeys = .{};
+        return bindKeyPast(pool, actual, written, owner, bindings, &matched);
+    }
+
+    /// The pairs of instantiations one `bindKey` has matched, so a pair
+    /// reached again along another path is not matched again. A type is one
+    /// entry however often it is named, and a binding keeps the type it was
+    /// given, so matching a pair a second time reads the same bindings and
+    /// changes none. A fixed table and no allocation: a pair that loses its
+    /// place to another is matched again, which costs time and nothing else.
+    const MatchedKeys = struct {
+        pairs: [256]Pair = @splat(.{}),
+
+        const Pair = struct { actual: TypeId = .poison, written: TypeId = .poison };
+
+        fn place(actual: TypeId, written: TypeId) usize {
+            return (@as(usize, @intFromEnum(actual)) *% 31 +% @intFromEnum(written)) % 256;
+        }
+
+        fn holds(self: *const MatchedKeys, actual: TypeId, written: TypeId) bool {
+            const pair = self.pairs[place(actual, written)];
+            return pair.actual == actual and pair.written == written;
+        }
+
+        fn note(self: *MatchedKeys, actual: TypeId, written: TypeId) void {
+            self.pairs[place(actual, written)] = .{ .actual = actual, .written = written };
+        }
+    };
+
+    fn bindKeyPast(pool: anytype, actual: TypeId, written: TypeId, owner: u32, bindings: []TypeId, matched: *MatchedKeys) bool {
         if (actual == .poison or written == .poison) return false;
         if (pool.standinOf(written) != null) return true;
         if (pool.get(written) == .parameter) {
@@ -4721,21 +4756,23 @@ pub const ImplIndex = struct {
             const want = want_instance orelse return false;
             const got = got_instance orelse return false;
             if (want.decl != got.decl) return false;
+            if (matched.holds(actual, written)) return true;
             const wanted = pool.argsOf(want);
             const given = pool.argsOf(got);
             if (wanted.len != given.len) return false;
             for (given, wanted) |got_arg, want_arg| {
-                if (!bindKey(pool, got_arg, want_arg, owner, bindings)) return false;
+                if (!bindKeyPast(pool, got_arg, want_arg, owner, bindings, matched)) return false;
             }
+            matched.note(actual, written);
             return true;
         }
         return switch (pool.get(written)) {
             .borrow => |want| switch (pool.get(actual)) {
-                .borrow => |got| bindKey(pool, got.referent, want.referent, owner, bindings),
+                .borrow => |got| bindKeyPast(pool, got.referent, want.referent, owner, bindings, matched),
                 else => false,
             },
             .array => |want| switch (pool.get(actual)) {
-                .array => |got| got.count == want.count and bindKey(pool, got.element, want.element, owner, bindings),
+                .array => |got| got.count == want.count and bindKeyPast(pool, got.element, want.element, owner, bindings, matched),
                 else => false,
             },
             .callable => |want| switch (pool.get(actual)) {
@@ -4749,9 +4786,9 @@ pub const ImplIndex = struct {
                         // parameter taken `inout` is another signature from
                         // one read, whatever its type.
                         if (!got_parameter.samePosition(want_parameter)) break :blk false;
-                        if (!bindKey(pool, got_parameter.ty, want_parameter.ty, owner, bindings)) break :blk false;
+                        if (!bindKeyPast(pool, got_parameter.ty, want_parameter.ty, owner, bindings, matched)) break :blk false;
                     }
-                    break :blk bindKey(pool, got.result, want.result, owner, bindings);
+                    break :blk bindKeyPast(pool, got.result, want.result, owner, bindings, matched);
                 },
                 else => false,
             },
@@ -4788,6 +4825,39 @@ pub const ImplIndex = struct {
         try testing.expect(!bindKey(&b, box_bool, box_u8, impl_decl.index(), &none));
         try testing.expect(bindKey(&b, .u8, .u8, impl_decl.index(), &none));
         try testing.expect(!bindKey(&b, .bool_, .u8, impl_decl.index(), &none));
+    }
+
+    test "bindKey: a type that names its parts many times over is matched part by part once" {
+        const gpa = testing.allocator;
+        var b = try Typing.Builder.init(gpa);
+        defer b.deinit();
+
+        const pair_decl: DeclId = @enumFromInt(1);
+        const template = try b.addStruct("P", .copyable, &.{});
+        try b.noteTemplate(pair_decl, 0, template);
+        const impl_decl: DeclId = @enumFromInt(2);
+        const t = try b.addParameter("T", impl_decl.index(), 0, .unrestricted, &.{});
+
+        // `P[x, x]` over itself forty levels deep: forty types, and a
+        // trillion paths through them.
+        const levels = 40;
+        var over_u8: TypeId = .u8;
+        var over_bool: TypeId = .bool_;
+        var over_t: TypeId = t;
+        for (0..levels) |_| {
+            over_u8 = try b.instantiate(template, pair_decl, &.{ over_u8, over_u8 });
+            over_bool = try b.instantiate(template, pair_decl, &.{ over_bool, over_bool });
+            over_t = try b.instantiate(template, pair_decl, &.{ over_t, over_t });
+        }
+
+        var none: [0]TypeId = .{};
+        try testing.expect(bindKey(&b, over_u8, over_u8, impl_decl.index(), &none));
+        try testing.expect(!bindKey(&b, over_bool, over_u8, impl_decl.index(), &none));
+        // A parameter at the leaves is bound once and holds along every path.
+        var bindings = [_]TypeId{.poison};
+        try testing.expect(bindKey(&b, over_bool, over_t, impl_decl.index(), &bindings));
+        try testing.expectEqual(TypeId.bool_, bindings[0]);
+        try testing.expect(!bindKey(&b, over_u8, over_t, impl_decl.index(), &bindings));
     }
 
     fn answersFor(
@@ -7328,6 +7398,7 @@ pub const Typing = struct {
                 var shape: node.CallableShape.Builder = .begin(signature.invocation);
                 for (self.callableParams(signature)) |parameter| shape.parameter(parameter.convention);
                 if (shape.finish()) |exact| return .{ .callable_ = exact };
+                if (signature.shape_of != .poison) return .{ .callable_ = .long(@intFromEnum(signature.shape_of)) };
             },
             .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
         }
@@ -12024,7 +12095,7 @@ pub const Typing = struct {
         /// The names stored are those of the first signature interned, kept
         /// for spelling the type in a message. A call reads the labels it
         /// names arguments by from where its callee was declared.
-        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) !TypeId {
+        pub fn internCallable(self: *Builder, params: []const CallableParam, result: TypeId, declared_contracts: []const CallableContract, invocation: Convention) std.mem.Allocator.Error!TypeId {
             var effective: std.ArrayList(CallableContract) = .empty;
             defer effective.deinit(self.gpa);
             const contracts = filtered: {
@@ -12044,7 +12115,14 @@ pub const Typing = struct {
                 const signature = self.pool.items[i].callable;
                 if (signature.invocation != invocation or signature.result != result or signature.param_count != params.len or !sameContracts(signature.contracts, contracts)) continue;
                 const held = self.callable_params.items[signature.first_param..][0..signature.param_count];
-                if (callableParamsMatch(held, params)) return @enumFromInt(i);
+                if (!callableParamsMatch(held, params)) continue;
+                // An interning stopped by a refused allocation may have
+                // left the type without the shape that stands for it.
+                if (signature.param_count > node.CallableShape.max_packed_parameters and signature.shape_of == .poison) {
+                    const standing = try self.longShapeOf(held, invocation);
+                    self.pool.items[i].callable.shape_of = standing;
+                }
+                return @enumFromInt(i);
             }
 
             self.grows();
@@ -12084,6 +12162,13 @@ pub const Typing = struct {
                 params;
             self.callable_params.appendSliceAssumeCapacity(stable_params);
             const id: TypeId = @enumFromInt(@as(u32, @intCast(self.pool.items.len)));
+            const long = params.len > node.CallableShape.max_packed_parameters;
+            // The type that stands for a long shape is the shape of itself,
+            // and says so from the moment it exists: interning it again to
+            // find its shape would otherwise never end.
+            const own_shape = long and result == .unit and contracts.len == 0 and for (stable_params) |param| {
+                if (param.ty != .unit or param.stable_address or param.default != .absent) break false;
+            } else true;
             try self.laid_out.append(self.gpa, .{});
             try self.pool.append(self.gpa, .{ .callable = .{
                 .invocation = invocation,
@@ -12093,9 +12178,28 @@ pub const Typing = struct {
                 .param_count = @intCast(params.len),
                 .result = result,
                 .name = name,
+                .shape_of = if (own_shape) id else .poison,
             } });
             try self.interned_callables.note(self.gpa, key, @intFromEnum(id));
+            if (long and !own_shape) {
+                const standing = try self.longShapeOf(self.callableParams(self.pool.items[@intFromEnum(id)].callable), invocation);
+                self.pool.items[@intFromEnum(id)].callable.shape_of = standing;
+            }
             return id;
+        }
+
+        /// The callable type that stands for a shape too long to pack: the
+        /// invocation and each parameter's convention, over `Unit` and
+        /// answering `Unit`. Interned like any callable type, so two
+        /// signatures of one shape reach one type and its number is exact,
+        /// kept with the pool and found again when the pool is reopened.
+        pub fn longShapeOf(self: *Builder, conventions: anytype, invocation: Convention) std.mem.Allocator.Error!TypeId {
+            const standing = try self.gpa.alloc(CallableParam, conventions.len);
+            defer self.gpa.free(standing);
+            for (standing, conventions) |*param, each| {
+                param.* = .{ .spelling = "", .convention = each.convention, .ty = .unit, .default = .absent };
+            }
+            return self.internCallable(standing, .unit, &.{}, invocation);
         }
 
         fn callableKey(params: []const CallableParam, result: TypeId, contracts: []const CallableContract, invocation: Convention) u64 {
@@ -16435,4 +16539,26 @@ test "leaf type substitution does not copy a wide replacement vector" {
     }
     try testing.expectEqual(TypeId.poison, try builder.substitute(parameters[width - 1], owner, replacements[0..1]));
     try testing.expectEqual(allocated, counted.allocated_bytes);
+}
+
+test "a long callable interned after an allocation was refused still has its shape" {
+    const count = node.CallableShape.max_packed_parameters + 1;
+    var params: [count]CallableParam = undefined;
+    for (&params) |*param| param.* = .{ .spelling = "", .convention = .read, .ty = .u8, .default = .absent };
+
+    // Each allocation of the first interning is refused in turn. Whatever
+    // that left behind, interning the same signature again answers a type
+    // whose head is the shape, never the type alone.
+    var refused_at: usize = 0;
+    while (true) : (refused_at += 1) {
+        var failing = std.testing.FailingAllocator.init(testing.allocator, .{});
+        var b = try Typing.Builder.init(failing.allocator());
+        defer b.deinit();
+        failing.fail_index = failing.alloc_index + refused_at;
+        const first = b.internCallable(&params, .u8, &.{}, .read);
+        failing.fail_index = std.math.maxInt(usize);
+        const id = first catch try b.internCallable(&params, .u8, &.{}, .read);
+        try testing.expect(b.pool.items[@intFromEnum(id)].callable.shape_of != .poison);
+        if (first) |_| break else |_| {}
+    }
 }

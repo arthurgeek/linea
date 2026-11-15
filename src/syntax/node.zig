@@ -185,14 +185,25 @@ pub const Convention = enum(u8) {
 /// and both feed this one routine, so a written head and the type it settles
 /// to reach one chain.
 ///
-/// The key is exact: the parameter count in the low six bits, then the
-/// invocation, then two bits per convention. A callable of more than
-/// `max_shape_parameters` parameters has no shape, so no implementation is
-/// keyed for one and none is found for one.
+/// The key is exact. A callable of at most `max_packed_parameters` parameters
+/// packs into it: the parameter count in the low six bits, then the
+/// invocation, then two bits per convention. A longer one does not fit, so it
+/// is named by `long`: a number its pass gave that exact shape, written where
+/// the conventions would be under a count no packed shape has. The resolver
+/// numbers the shapes it meets in `LongCallableShapes`, and the checker by the
+/// type that stands for the shape in its pool; each compares only its own.
 pub const CallableShape = enum(u128) {
     _,
 
-    pub const max_shape_parameters = 60;
+    pub const max_packed_parameters = 60;
+
+    /// The count no packed shape writes, which marks a numbered one.
+    const numbered: u128 = 63;
+
+    /// The shape numbered `index` among those too long to pack.
+    pub fn long(index: u32) CallableShape {
+        return @enumFromInt((@as(u128, index) << 8) | numbered);
+    }
 
     pub const Builder = struct {
         count: u32 = 0,
@@ -204,16 +215,16 @@ pub const CallableShape = enum(u128) {
         }
 
         pub fn parameter(self: *Builder, convention: Convention) void {
-            if (self.count < max_shape_parameters) {
+            if (self.count < max_packed_parameters) {
                 self.conventions |= @as(u128, @intFromEnum(convention)) << @intCast(2 * self.count);
             }
             self.count += 1;
         }
 
-        /// The shape, or null where the callable has more parameters than a
-        /// shape can name.
+        /// The packed shape, or null where the callable has more parameters
+        /// than pack and its pass numbers it.
         pub fn finish(self: *const Builder) ?CallableShape {
-            if (self.count > max_shape_parameters) return null;
+            if (self.count > max_packed_parameters) return null;
             const header = (@as(u128, @intFromEnum(self.invocation)) << 6) | self.count;
             return @enumFromInt((self.conventions << 8) | header);
         }
@@ -246,6 +257,73 @@ test "a callable shape tells apart invocation, arity and each parameter's conven
     try testing.expect(shape(.read, &sixty) != null);
     const many: [61]Convention = @splat(.read);
     try testing.expectEqual(@as(?CallableShape, null), shape(.read, &many));
+    // A numbered shape is none a packed one can be, and two numbers are two.
+    try testing.expect(CallableShape.long(0) != shape(.read, &.{}).?);
+    try testing.expect(CallableShape.long(0) != shape(.read, &sixty).?);
+    try testing.expect(CallableShape.long(0) != CallableShape.long(1));
+}
+
+/// The callable shapes too long to pack, numbered in the order they were
+/// first met. A shape is spelled as one byte for its invocation and one for
+/// each parameter's convention, and two spellings are one shape exactly when
+/// they are the same bytes.
+pub const LongCallableShapes = struct {
+    /// Each shape's spelling at its number. The table owns them.
+    spellings: std.ArrayList([]const u8) = .empty,
+    numbers: std.StringHashMapUnmanaged(u32) = .empty,
+
+    pub fn deinit(self: *LongCallableShapes, gpa: std.mem.Allocator) void {
+        for (self.spellings.items) |spelling| gpa.free(spelling);
+        self.spellings.deinit(gpa);
+        self.numbers.deinit(gpa);
+    }
+
+    /// The shape `spelling` names, numbered now where it is new.
+    pub fn intern(self: *LongCallableShapes, gpa: std.mem.Allocator, spelling: []const u8) std.mem.Allocator.Error!CallableShape {
+        if (self.numbers.get(spelling)) |number| return .long(number);
+        const number: u32 = @intCast(self.spellings.items.len);
+        const kept = try gpa.dupe(u8, spelling);
+        errdefer gpa.free(kept);
+        try self.spellings.append(gpa, kept);
+        errdefer _ = self.spellings.pop();
+        try self.numbers.put(gpa, kept, number);
+        return .long(number);
+    }
+
+    /// Appends the spelling of a shape: its invocation, then each convention.
+    pub fn spell(gpa: std.mem.Allocator, out: *std.ArrayList(u8), invocation: Convention, conventions: anytype) std.mem.Allocator.Error!void {
+        try out.append(gpa, @intFromEnum(invocation));
+        for (conventions) |each| try out.append(gpa, @intFromEnum(each.convention));
+    }
+};
+
+test "a long callable shape is numbered once, by its invocation and every convention" {
+    const gpa = testing.allocator;
+    var shapes: LongCallableShapes = .{};
+    defer shapes.deinit(gpa);
+
+    const Each = struct { convention: Convention };
+    var read: [61]Each = @splat(.{ .convention = .read });
+    var spelled: std.ArrayList(u8) = .empty;
+    defer spelled.deinit(gpa);
+
+    try LongCallableShapes.spell(gpa, &spelled, .read, &read);
+    const first = try shapes.intern(gpa, spelled.items);
+    try testing.expectEqual(first, try shapes.intern(gpa, spelled.items));
+
+    // The last convention alone, and the invocation alone, each make another.
+    read[60] = .{ .convention = .sink };
+    spelled.clearRetainingCapacity();
+    try LongCallableShapes.spell(gpa, &spelled, .read, &read);
+    const last_differs = try shapes.intern(gpa, spelled.items);
+    try testing.expect(last_differs != first);
+
+    read[60] = .{ .convention = .read };
+    spelled.clearRetainingCapacity();
+    try LongCallableShapes.spell(gpa, &spelled, .inout, &read);
+    const invoked = try shapes.intern(gpa, spelled.items);
+    try testing.expect(invoked != first and invoked != last_differs);
+    try testing.expectEqual(@as(usize, 3), shapes.spellings.items.len);
 }
 
 /// One parameter. Small and fixed, so a plain struct in a flat table rather
