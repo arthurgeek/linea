@@ -1,0 +1,3 @@
+import link05
+
+pub use link05.value

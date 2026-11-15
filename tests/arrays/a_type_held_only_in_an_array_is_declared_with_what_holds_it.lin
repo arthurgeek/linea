@@ -1,0 +1,21 @@
+// A program holds the types its values are made of. `Row` reaches `Cell`
+// only as the element of an array, and holds two all the same.
+@copyable
+struct Cell {
+    value: UInt8,
+}
+
+@copyable
+struct Row {
+    cells: [Cell; 2],
+}
+
+let filled: Row = .{ cells = [Cell { value = 7 }, Cell { value = 9 }] }
+
+fn width(_row: Row) -> UInt8 {
+    2
+}
+
+fn main() -> UInt8 {
+    width(filled)
+}

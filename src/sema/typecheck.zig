@@ -4405,6 +4405,9 @@ pub fn helpTypeName(
 /// written defaults name are left out, and every module the spelling names
 /// that `from` cannot write it through yet is recorded there.
 const TypeWriter = struct {
+    /// Written where the rest of a name is left out.
+    const elided = "...";
+
     arena: std.mem.Allocator,
     ast: *const Ast,
     program: *const ExpandedProgram,
@@ -4415,7 +4418,21 @@ const TypeWriter = struct {
 
     const Error = std.Io.Writer.Error || std.mem.Allocator.Error;
 
+    /// How much of a type's name is written. A diagnostic keeps far less of
+    /// any text, and a type is one entry however often it is named: aliases
+    /// that each name the one before twice give a type of thirty entries a
+    /// name a billion names long. Past this, each part still to be written
+    /// is left out, so the writing is bounded by the name kept and the
+    /// type's depth and not by the paths through it.
+    const longest_name = 4096;
+
     fn write(self: TypeWriter, w: *std.Io.Writer, t: TypeId) Error!void {
+        if (w.end > longest_name) {
+            // One mark where the name stops, however many parts follow it.
+            const written = std.mem.trimEnd(u8, w.buffered(), "]), ");
+            if (!std.mem.endsWith(u8, written, elided)) try w.writeAll(elided);
+            return;
+        }
         const pool = self.pool;
         if (pool.instanceOf(t)) |instance| {
             const args = pool.argsOf(instance);
@@ -5716,6 +5733,13 @@ const Leave = struct {
     what: []const u8,
     /// Whether this is a `defer` rather than an expression that leaves.
     schedules: bool = false,
+    /// The first token of the innermost closure body that holds this, or
+    /// `outside_closures`. A closure's body is a scope of its own, so this
+    /// leaves or schedules there and not in a `defer` the closure is written
+    /// inside.
+    closure_at: u32 = outside_closures,
+
+    const outside_closures = std.math.maxInt(u32);
 };
 
 /// A traversal and the implementation that declares it.
@@ -16185,6 +16209,16 @@ const Checker = struct {
     fn checkDeferRelease(self: *Checker, s: StmtId) !void {
         const id = self.ast.stmtData(s).init;
         const receiver = self.ast.call(id).args[0];
+        // Inside a schedule refused for holding this one, the release is never
+        // placed. The value it would have ended is poison from here, so the
+        // ownership pass does not also report it as never settled.
+        if (self.schedule_refused) {
+            const bound = self.res.targetOf(self.ast.withoutGroups(receiver));
+            if (bound != BindingId.none) self.setBindingType(bound, .poison);
+            _ = self.record(receiver, .poison);
+            _ = self.record(id, .poison);
+            return;
+        }
         const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null);
         const wanted = self.ast.tokenName(self.ast.declName(release.member));
         switch (try self.postfixOperation(id, id, receiver, wanted, release.member, &.{}, null)) {
@@ -16317,8 +16351,16 @@ const Checker = struct {
         }
         if (lo == self.leaves.items.len) return false;
 
+        // A closure written inside the scheduled expression is skipped with
+        // everything in its body. Each one inside the extent is passed over
+        // once, so the search costs the leaves this `defer` encloses.
+        while (lo < self.leaves.items.len) : (lo += 1) {
+            const candidate = self.leaves.items[lo];
+            if (candidate.at >= extent.end.index()) return false;
+            if (candidate.closure_at == Leave.outside_closures or candidate.closure_at < extent.start.index()) break;
+        }
+        if (lo == self.leaves.items.len) return false;
         const found = self.leaves.items[lo];
-        if (found.at >= extent.end.index()) return false;
 
         const label = try std.fmt.allocPrint(self.sink.arena, "{s} inside a `defer`", .{found.what});
         _ = if (found.schedules) self.report(
@@ -16388,6 +16430,40 @@ const Checker = struct {
                 return a.at < b.at;
             }
         }.before);
+
+        // Every closure body's extent, in the order they are written, so a
+        // body comes before the ones written inside it.
+        const Extent = struct { start: u32, end: u32 };
+        var closures: std.ArrayList(Extent) = .empty;
+        defer closures.deinit(self.gpa);
+        for (0..self.ast.exprCount()) |i| {
+            const id = ExprId.at(@intCast(i));
+            if (self.ast.exprTag(id) != .lambda) continue;
+            // The body alone. A capture's initialiser and a parameter's
+            // default are written inside the closure's brackets and are
+            // evaluated where it is written, so they leave from there.
+            const tokens = self.ast.exprTokens(self.ast.lambda(id).body);
+            try closures.append(self.gpa, .{ .start = tokens.start.index(), .end = tokens.end.index() });
+        }
+        std.mem.sort(Extent, closures.items, {}, struct {
+            fn before(_: void, a: Extent, b: Extent) bool {
+                return a.start < b.start;
+            }
+        }.before);
+
+        // One pass over both: the closures still open at a leave are a stack,
+        // because extents nest, and its top is the innermost.
+        var open: std.ArrayList(Extent) = .empty;
+        defer open.deinit(self.gpa);
+        var next: usize = 0;
+        for (self.leaves.items) |*leave| {
+            while (next < closures.items.len and closures.items[next].start <= leave.at) : (next += 1) {
+                while (open.items.len != 0 and open.items[open.items.len - 1].end <= closures.items[next].start) _ = open.pop();
+                try open.append(self.gpa, closures.items[next]);
+            }
+            while (open.items.len != 0 and open.items[open.items.len - 1].end <= leave.at) _ = open.pop();
+            if (open.items.len != 0) leave.closure_at = open.items[open.items.len - 1].start;
+        }
     }
 
     /// Records that a call lends the place `value` to an `inout` parameter.
@@ -22912,6 +22988,11 @@ const Checker = struct {
                 self.loops = enclosing_loops;
                 self.closure_hides_loops = hid_loops;
             }
+            // The body is a scope of its own: a schedule refused around the
+            // closure says nothing about what is written in it.
+            const refused_outside = self.schedule_refused;
+            defer self.schedule_refused = refused_outside;
+            self.schedule_refused = false;
             break :checked try self.check(lambda.body, result_expected);
         };
         // Reported once the body is checked, because the capture it suggests
@@ -33744,10 +33825,70 @@ const Checker = struct {
         );
     }
 
+    /// What a member of a generic inherent implementation, named as a value,
+    /// gives the implementation's own parameters: the arguments a call of the
+    /// member records, read back from the receiver type the value was
+    /// selected for. Empty for any other value, and where the receiver does
+    /// not say them all.
+    fn valueHeadArguments(self: *Checker, member: node.DeclId, implementation: ?types_mod.CallImpl) std.mem.Allocator.Error![]const TypeId {
+        const selected = implementation orelse return &.{};
+        if (selected.trait != types_mod.Implementation.no_trait) return &.{};
+        const head = self.headParametersOf(member);
+        if (head == node.DeclId.none) return &.{};
+        const row = self.rowFor(head) orelse return &.{};
+        const count = self.ast.declTypeParams(head).len;
+        if (count == 0) return &.{};
+
+        const found = try self.gpa.alloc(TypeId, count);
+        errdefer self.gpa.free(found);
+        @memset(found, .poison);
+        var clash: ?Clash = null;
+        const receiver = try self.builder.resolveOpen(selected.self_ty, &self.open_types);
+        const settled = try self.settle(row.ty, receiver, head, found, &clash);
+        if (!settled or std.mem.indexOfScalar(TypeId, found, .poison) != null) {
+            self.gpa.free(found);
+            return &.{};
+        }
+        return found;
+    }
+
     /// Refuse recurring type arguments whose structural height is unbounded.
     /// Only constructor-growing calls need a bounded-reentry query.
     fn checkPolyRec(self: *Checker) std.mem.Allocator.Error!void {
-        // A program with no accepted calls has no recursive call edge.
+        // Naming a declared function as a value builds its body for the type
+        // arguments it is named at, as calling it does, whether or not the
+        // value is ever called. Each such value stands in the call records as
+        // a call of no arguments while the recurrence is read, so the walks
+        // below see one kind of edge.
+        const written_calls = self.calls.items.len;
+        defer {
+            for (self.calls.items[written_calls..]) |named| {
+                self.call_of[named.at.index()] = no_call;
+                if (named.selection.impl_args.len > 0) self.gpa.free(named.selection.impl_args);
+            }
+            self.calls.shrinkRetainingCapacity(written_calls);
+        }
+        for (self.function_values.items) |value| {
+            const target = switch (value.target) {
+                .declared => |declared| declared,
+                .closure, .constructor => continue,
+            };
+            if (self.call_of[value.at.index()] != no_call) continue;
+            const impl_args = try self.valueHeadArguments(target, value.implementation);
+            errdefer if (impl_args.len > 0) self.gpa.free(impl_args);
+            const index: u32 = @intCast(self.calls.items.len);
+            try self.calls.append(self.gpa, .{
+                .at = value.at,
+                .target = .{ .declared = target },
+                .signature = value.signature,
+                .args = &.{},
+                .selection = .{ .own_args = value.type_args, .implementation = value.implementation, .impl_args = impl_args },
+            });
+            self.call_of[value.at.index()] = index;
+        }
+
+        // A program with no accepted calls and no function named as a value
+        // has no recursive edge.
         if (self.calls.items.len == 0) return;
 
         // Which declaration each token sits in, written in declaration order
@@ -33781,7 +33922,7 @@ const Checker = struct {
         var total: u32 = 0;
         for (0..self.ast.exprCount()) |e| {
             if (owner[e] == node.DeclId.none) continue;
-            if (self.ast.exprTag(node.ExprId.at(@intCast(e))) != .call) continue;
+            if (self.call_of[e] == no_call) continue;
             starts[owner[e].index() + 1] += 1;
             total += 1;
         }
@@ -33797,7 +33938,7 @@ const Checker = struct {
         for (0..self.ast.exprCount()) |e| {
             const id = node.ExprId.at(@intCast(e));
             if (owner[e] == node.DeclId.none) continue;
-            if (self.ast.exprTag(id) != .call) continue;
+            if (self.call_of[e] == no_call) continue;
             calls[cursor[owner[e].index()]] = id;
             cursor[owner[e].index()] += 1;
         }
@@ -33807,7 +33948,7 @@ const Checker = struct {
         const component = try self.recurrenceComponents(owner);
         defer self.gpa.free(component);
 
-        for (self.calls.items) |call| {
+        for (self.calls.items, 0..) |call, row| {
             const from = owner[call.at.index()];
             if (from == .none) continue;
             if (!may_recur[from.index()]) continue;
@@ -33827,12 +33968,19 @@ const Checker = struct {
             if (!grows) continue;
             if (!try self.reaches(call, from, starts, calls, component)) continue;
 
-            _ = self.report(
+            const name = self.ast.tokenText(self.ast.declName(to));
+            _ = if (row < written_calls) self.report(
                 .t_poly_rec,
                 call.at,
                 "this call instantiates `{s}` with more than it was given",
-                .{self.ast.tokenText(self.ast.declName(to))},
+                .{name},
                 "type-argument height must remain bounded across recursive calls",
+            ) else self.report(
+                .t_poly_rec,
+                call.at,
+                "this names `{s}` with more than it was given",
+                .{name},
+                "type-argument height must remain bounded where a function names itself as a value",
             );
         }
     }

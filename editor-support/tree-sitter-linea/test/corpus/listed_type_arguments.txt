@@ -1,0 +1,121 @@
+==================
+Several type arguments take any written type
+==================
+
+fn main() -> UInt8 {
+    first[Value.Item, UInt8](1, 2)
+    first[(UInt8), UInt8](1, 2)
+    first[(UInt8, Bool), UInt8]((1, true), 3)
+    first[borrow UInt8, borrow Value.Item](borrow value, 2)
+    rows[cells[0]]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (settled_ref_type
+              (type_identifier)
+              (type_identifier))
+            (type_identifier))
+          (argument_list
+            (integer_literal)
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (grouped_type
+              (type_identifier))
+            (type_identifier))
+          (argument_list
+            (integer_literal)
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (tuple_type
+              (type_identifier)
+              (type_identifier))
+            (type_identifier))
+          (argument_list
+            (tuple_expression
+              (integer_literal)
+              (boolean_literal))
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (borrow_type
+              (type_identifier))
+            (borrow_type
+              (settled_ref_type
+                (type_identifier)
+                (type_identifier))))
+          (argument_list
+            (borrow_expression
+              (identifier))
+            (integer_literal))))
+      (expression_statement
+        (index_expression
+          (identifier)
+          (index_expression
+            (identifier)
+            (integer_literal)))))))
+
+==================
+A negative integer is a pattern
+==================
+
+fn main() -> UInt8 {
+    match value {
+        -1 => 1,
+        (-2, _) => 2,
+        Some(-3) => 3,
+        -9..=-4 => 4,
+        _ => 0,
+    }
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (block_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (integer_literal)
+            (integer_literal))
+          (match_arm
+            (tuple_pattern
+              (integer_literal)
+              (wildcard_pattern))
+            (integer_literal))
+          (match_arm
+            (variant_pattern
+              (type_identifier)
+              (integer_literal))
+            (integer_literal))
+          (match_arm
+            (range_pattern
+              (integer_literal)
+              (integer_literal))
+            (integer_literal))
+          (match_arm
+            (wildcard_pattern)
+            (integer_literal)))))))

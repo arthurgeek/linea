@@ -33,7 +33,6 @@ module.exports = grammar({
     [$.literal_type, $._expression],
     [$._result_type, $._type_only],
     [$.type_arguments, $._type_only],
-    [$.call_type_arguments, $.call_generic_arguments],
     [$.call_type_arguments, $._call_type],
     [$._expression, $.call_only_generic_type, $.call_generic_type, $.literal_type],
     [$._result_type, $._call_type],
@@ -48,6 +47,18 @@ module.exports = grammar({
     // A label's tuple pattern ends at a comma or its `)`, which the list it
     // sits in also reads; the compiler's own parser reads the pattern first.
     [$.tuple_pattern],
+    // Among a call's type arguments a parenthesised, tuple, borrowed or
+    // selected type is spelled as an expression is, and as the same type one
+    // bracket further in; the comma that follows, or its absence, says which.
+    [$.borrow_type, $._type_only],
+    [$.grouped_type, $._type_only],
+    [$.tuple_type, $._type_only],
+    // A generic type among a call's type arguments holds listed types too,
+    // so its brackets read both as its own arguments and as a call's.
+    [$.call_type_arguments, $.call_generic_arguments],
+    [$._result_type, $._call_listed_type],
+    [$._expression, $._call_type],
+    [$._expression, $._call_type, $.literal_type],
   ],
 
   rules: {
@@ -828,15 +839,38 @@ module.exports = grammar({
     // as a type's arguments, and a precedence would settle that before the
     // `1` shows which it is.
     call_type_arguments: $ => seq('[', choice(
-      seq($._call_type, repeat1(seq(',', $._call_type)), optional(',')),
-      seq($._call_type, ','),
+      seq($._call_listed_type, repeat1(seq(',', $._call_listed_type)), optional(',')),
+      seq($._call_listed_type, ','),
       $._type_only,
     ), ']'),
+    // A type among several, or before a comma: the comma shows the brackets
+    // hold types, so each may be any type a signature writes. A selected,
+    // parenthesised, tuple or borrowed type alone in the brackets reads as an
+    // index, since each is spelled as an expression is. Their parts are
+    // listed types too, and not `_type`, whose generic type carries a
+    // precedence that would settle `a[b[1]]` before the `1` is read.
+    _call_listed_type: $ => choice(
+      $._call_type,
+      alias($.call_grouped_type, $.grouped_type),
+      alias($.call_tuple_type, $.tuple_type),
+      alias($.call_borrow_type, $.borrow_type),
+      alias($.call_settled_ref_type, $.settled_ref_type),
+      $.self_type,
+    ),
+    call_grouped_type: $ => seq('(', $._call_listed_type, ')'),
+    call_tuple_type: $ => seq('(', $._call_listed_type, ',', optional(commaSep1($._call_listed_type)), ')'),
+    call_borrow_type: $ => seq('borrow', field('referent', $._call_listed_type)),
+    // Above a borrow, so `borrow A.Item` borrows the selected type.
+    call_settled_ref_type: $ => prec(1, seq(
+      field('base', $._call_listed_type),
+      '.',
+      field('member', alias($.identifier, $.type_identifier)),
+    )),
     _call_type: $ => choice(alias($.call_generic_type, $.generic_type), alias($.identifier, $.type_identifier), $._type_only),
     _type_only: $ => choice($.array_type, $.callable_type, $.unit_type, alias($.call_only_generic_type, $.generic_type)),
     call_only_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_type_arguments, $.type_arguments)),
     call_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_generic_arguments, $.type_arguments)),
-    call_generic_arguments: $ => seq('[', commaSep1($._call_type), ']'),
+    call_generic_arguments: $ => seq('[', commaSep1($._call_listed_type), ']'),
 
     // `Name?(e)`, a newtype's construction declining. One node, because the
     // parser reads it as one form and not as a `?` applied to something that
@@ -988,6 +1022,7 @@ module.exports = grammar({
       $.variant_pattern,
       $.range_pattern,
       $.integer_literal,
+      $._negative_integer,
       $.string_literal,
       $.reflection_case_pattern,
       $.tuple_pattern,
@@ -1010,9 +1045,12 @@ module.exports = grammar({
       optional($._pattern_bound), choice('..', '..='), optional($._pattern_bound),
     )),
 
+    // An integer below zero, as a pattern and as a range's bound.
+    _negative_integer: $ => seq('-', $.integer_literal),
+
     _pattern_bound: $ => choice(
       $.integer_literal,
-      seq('-', $.integer_literal),
+      $._negative_integer,
       $.string_literal,
       $.dotted_name,
     ),
@@ -1037,6 +1075,7 @@ module.exports = grammar({
       $.variant_pattern,
       $.range_pattern,
       $.integer_literal,
+      $._negative_integer,
       $.string_literal,
       $.tuple_pattern,
     ),
