@@ -1,0 +1,20 @@
+error[S-Type]: expected a type
+  --> tests/traits/an_implementation_head_holding_a_refused_type_in_a_callable_is_compared_with_no_other.lin:13:21
+   |
+13 | impl Tr for W[fn(x: ) -> UInt8] {
+   |                     ^ a `:` introduces a type
+error[S-Type]: expected a type
+  --> tests/traits/an_implementation_head_holding_a_refused_type_in_a_callable_is_compared_with_no_other.lin:19:21
+   |
+19 | impl Tr for W[fn(x: ) -> UInt8] {
+   |                     ^ a `:` introduces a type
+error[S-Type]: expected a type
+  --> tests/traits/an_implementation_head_holding_a_refused_type_in_a_callable_is_compared_with_no_other.lin:25:31
+   |
+25 | impl Tr for W[fn(x: UInt8) -> ] {
+   |                               ^ a `->` is followed by a result type
+error[S-Type]: expected a type
+  --> tests/traits/an_implementation_head_holding_a_refused_type_in_a_callable_is_compared_with_no_other.lin:31:31
+   |
+31 | impl Tr for W[fn(x: UInt8) -> ] {
+   |                               ^ a `->` is followed by a result type

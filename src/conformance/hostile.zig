@@ -956,24 +956,7 @@ pub const Finding = struct {
     }
 };
 
-pub const known_findings = [_]Finding{
-    .{
-        .seed = 65,
-        .limit = .raw_literal_hashes,
-        .positions = &.{.value},
-        .reports = &.{ .s_string, .t_mismatch },
-        .requires = "[S-String] is the only report of a raw literal opened with nine `#`: the binding it " ++
-            "initialises and the function around it are not reported as a consequence",
-    },
-    .{
-        .seed = 8,
-        .limit = .interpolation_depth,
-        .positions = &.{.value},
-        .reports = &.{ .s_string, .s_string, .s_entry, .t_mismatch },
-        .requires = "[S-String] reports a literal that opens a seventeenth interpolation once, and the rest " ++
-            "of the file is read as it is without it",
-    },
-};
+pub const known_findings = [_]Finding{};
 
 pub fn findingOf(shape: Shape) ?*const Finding {
     for (&known_findings) |*finding| {

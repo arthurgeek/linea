@@ -1,0 +1,9 @@
+// A local binding whose initialiser is refused is reported where it is
+// declared. A local worked out from it has no value only because of that, so
+// an array length naming the second says nothing more.
+fn main() -> UInt8 {
+    let count: UInt8 = true
+    let twice = count + 1
+    let _held: [UInt8; twice] = [1]
+    0
+}

@@ -29,7 +29,7 @@ pub const Reach = union(enum) {
 
     /// The row a site is memoised under. The two spaces are dense and separate,
     /// so the tag rides above the index rather than the two being mixed.
-    fn key(self: Reach) u64 {
+    pub fn key(self: Reach) u64 {
         return switch (self) {
             .nothing => 0,
             .decl => |d| (@as(u64, 1) << 32) | @intFromEnum(d),
@@ -334,6 +334,13 @@ pub const Memo = struct {
 
     fn settle(self: *Memo, gpa: std.mem.Allocator, site: Reach, v: Value) !void {
         try self.sites.put(gpa, site.key(), .{ .settled = v });
+    }
+
+    /// Gives a site a worth without folding its initialiser, for a run that
+    /// asks what the expressions naming it would be worth were its value
+    /// known. Given before any expression naming the site is folded.
+    pub fn assume(self: *Memo, gpa: std.mem.Allocator, site: Reach, v: Value) !void {
+        try self.settle(gpa, site, v);
     }
 
     /// What an expression this run already folded is worth, or `null` where
@@ -652,7 +659,7 @@ fn fieldBefore(_: void, a: constants.Field, b: constants.Field) bool {
 
 /// What the binding a site names was initialised with, or `null` where the site
 /// is not a binding a constant expression may read.
-fn initialiserOf(ast: *const Ast, site: Reach) ?ExprId {
+pub fn initialiserOf(ast: *const Ast, site: Reach) ?ExprId {
     const written = switch (site) {
         .nothing => return null,
         .decl => |d| if (ast.declTag(d) == .constant) ast.declInit(d) else return null,

@@ -1174,7 +1174,10 @@ pub const Expr = struct {
         fallible: bool = false,
         marked: bool = false,
         /// A tuple pattern whose `)` was never found, so what it holds may
-        /// be fewer parts than were written.
+        /// be fewer parts than were written; or a call one of whose
+        /// arguments ended in a token the lexer refused that took the rest
+        /// of its line, so the arguments it holds may be fewer than were
+        /// meant.
         cut_short: bool = false,
         _: u5 = 0,
     };

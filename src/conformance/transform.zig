@@ -639,9 +639,10 @@ fn namesAnAlias(ast: *const Ast, written: []const u8) bool {
 }
 
 /// Whether a value of `written` could be within a tag word of the widest a
-/// type may be. Every number written in the type is taken as an array's
-/// length and every element as eight bytes, which is at least as wide as
-/// any type `isMovableType` admits that writes those numbers.
+/// type may be, where `written` names no declaration of the file. Every
+/// number written in the type is taken as an array's length and every
+/// element as eight bytes, which is at least as wide as any type of scalars
+/// and `Option` that writes those numbers.
 fn couldBeWidest(written: []const u8) bool {
     var bytes: u64 = 8;
     var i: usize = 0;
@@ -657,6 +658,24 @@ fn couldBeWidest(written: []const u8) bool {
         i = end;
     }
     return bytes >= widest_moved_payload;
+}
+
+/// Whether `written` names one of `declared`, this file's structs and
+/// aliases. How wide such a type is stands in its declaration and not in the
+/// numbers the annotation writes, so `couldBeWidest` says nothing of it.
+fn namesADeclared(written: []const u8, declared: *const std.StringHashMapUnmanaged(void)) bool {
+    var i: usize = 0;
+    while (i < written.len) {
+        if (!(std.ascii.isAlphabetic(written[i]) or written[i] == '_')) {
+            i += 1;
+            continue;
+        }
+        var end = i;
+        while (end < written.len and (std.ascii.isAlphanumeric(written[end]) or written[end] == '_')) end += 1;
+        if (declared.contains(written[i..end])) return true;
+        i = end;
+    }
+    return false;
 }
 
 /// A payload this wide or wider is left where it is. Half the widest a type
@@ -722,7 +741,7 @@ fn moveWrittenType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8, ta
         const written = std.mem.trim(u8, between[1 .. between.len - 1], " \t\n");
         if (!isMovableType(written, &declared, &.{})) continue;
         if (target == .alias and namesAnAlias(ast, written)) continue;
-        if (target == .payload and couldBeWidest(written)) continue;
+        if (target == .payload and (couldBeWidest(written) or namesADeclared(written, &declared))) continue;
 
         var line = keyword.start;
         while (line > 0 and text[line - 1] != '\n') line -= 1;
@@ -803,14 +822,20 @@ test moveWrittenType {
     try testing.expect(std.mem.indexOf(u8, to_field, "    var pair = _MovedField { _part = [p.x, 2] }._part // kept\n") != null);
     try testing.expect(std.mem.endsWith(u8, to_field, "\nstruct _MovedField {\n    _part: [UInt8; 2],\n}\n"));
 
+    // The payload rewrite passes over `p`, whose type the file declares, and
+    // counts through the other three.
     const to_payload = (try applyTo(gpa, .type_moved_to_payload, program)).?;
     try testing.expect(std.mem.indexOf(u8, to_payload,
-        \\    let last = match _MovedPayload._Only(pair[1]) {
+        \\    let shown = match _MovedPayload._Only(if last == 3 {
+        \\        .Some(last)
+        \\    } else {
+        \\        .None
+        \\    }) {
         \\        _Only(_moved_value) => _moved_value,
         \\    }
         \\
     ) != null);
-    try testing.expect(std.mem.endsWith(u8, to_payload, "\nenum _MovedPayload {\n    _Only(UInt8),\n}\n"));
+    try testing.expect(std.mem.endsWith(u8, to_payload, "\nenum _MovedPayload {\n    _Only(Option[UInt8]),\n}\n"));
 
     const to_alias = (try applyTo(gpa, .type_moved_to_alias, program)).?;
     try testing.expect(std.mem.indexOf(u8, to_alias, "    let shown: _MovedAlias = if last == 3 {\n") != null);
@@ -873,9 +898,28 @@ test moveWrittenType {
     ));
     const widest_as_alias = (try applyTo(gpa, .type_moved_to_alias, at_limits)).?;
     try testing.expect(std.mem.indexOf(u8, widest_as_alias, "var wide: _MovedAlias = fill()") != null);
-    const named_as_payload = (try applyTo(gpa, .type_moved_to_payload, at_limits)).?;
-    try testing.expect(std.mem.indexOf(u8, named_as_payload, "var named = match _MovedPayload._Only(pick())") != null);
-    try testing.expect(std.mem.indexOf(u8, named_as_payload, "var wide: [UInt8; 4294967280] = fill()") != null);
+    // Neither binding is put behind a tag: one writes a length that wide,
+    // and the width of the other stands in the alias it names.
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .type_moved_to_payload, at_limits));
+    const wide_by_name =
+        \\alias Wide = [UInt8; 4294967290]
+        \\
+        \\struct Held {
+        \\    wide: Wide,
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    var wide: Wide = fill()
+        \\    wide[0] = 1
+        \\    var held: Held = hold()
+        \\    held.wide[0] = wide[0]
+        \\    held.wide[0]
+        \\}
+        \\
+    ;
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .type_moved_to_payload, wide_by_name));
+    const wide_as_parameter = (try applyTo(gpa, .type_moved_to_parameter, wide_by_name)).?;
+    try testing.expect(std.mem.indexOf(u8, wide_as_parameter, "var wide = _moved_type(fill())") != null);
     try testing.expect(couldBeWidest("[UInt8; 4294967280]"));
     try testing.expect(couldBeWidest("[[UInt16; 65536]; 32768]"));
     try testing.expect(!couldBeWidest("[UInt64; 1000000]"));
@@ -911,7 +955,7 @@ test "a binding and each position its type is moved to reach one verdict" {
 
     const programs = [_][]const u8{
         "fn main() -> UInt8 {\n    let a: UInt8 = 3\n    var b: [UInt8; 2] = [a, a]\n    b[0] = 4\n    b[0] + b[1]\n}\n",
-        "struct Kept {\n    part: UInt8,\n}\n\nstruct Boxed[T] {\n    item: T,\n}\n\nalias Named = UInt8\n\nfn main() -> UInt8 {\n    let seen = true\n    let k: Kept = if seen {\n        .{ part = 1 }\n    } else {\n        .{ part = 2 }\n    }\n    let b: Boxed[Kept] = {\n        .{ item = k }\n    }\n    let n: Named = match b.item.part {\n        0 => 1,\n        _ => 2,\n    }\n    let o: Option[Named] = if seen {\n        .Some(n)\n    } else {\n        .None\n    }\n    match o {\n        Some(found) => found,\n        None => 0,\n    }\n}\n",
+        "struct Kept {\n    part: UInt8,\n}\n\nstruct Boxed[T] {\n    item: T,\n}\n\nalias Named = UInt8\n\nfn main() -> UInt8 {\n    let seen = true\n    let k: Kept = if seen {\n        .{ part = 1 }\n    } else {\n        .{ part = 2 }\n    }\n    let b: Boxed[Kept] = {\n        .{ item = k }\n    }\n    let n: Named = match b.item.part {\n        0 => 1,\n        _ => 2,\n    }\n    let o: Option[Named] = if seen {\n        .Some(n)\n    } else {\n        .None\n    }\n    let w: UInt8 = match o {\n        Some(found) => found,\n        None => 0,\n    }\n    w\n}\n",
         "fn main() -> UInt8 {\n    let n: UInt64 = 2\n    let a: [UInt8; n] = [1, 2]\n    a[0]\n}\n",
     };
     var moved: std.EnumMap(MoveTarget, u32) = .{};

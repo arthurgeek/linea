@@ -1,0 +1,15 @@
+// [T-ArraySize] [T-Const]. A constant's initialiser is a constant expression
+// whatever its annotation is. A call is no form a constant expression has, so
+// it is reported beside the annotation's refused length.
+fn make() -> UInt8 {
+    3
+}
+
+let table: Option[[UInt8; true]] = make()
+
+fn main() -> UInt8 {
+    match table {
+        Some(_) => 1,
+        None => 0,
+    }
+}

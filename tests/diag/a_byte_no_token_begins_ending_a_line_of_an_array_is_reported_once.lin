@@ -1,0 +1,8 @@
+// A byte no token begins is reported where it is written. Where it is the
+// last thing on a line of an array, the elements on the next line are still
+// read as the array's.
+fn main() -> UInt8 {
+    let held = [1, $
+        2]
+    held[0]
+}

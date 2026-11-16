@@ -1,0 +1,50 @@
+// An alias applied to its arguments writes the type it names. `Read[Celsius]`
+// is `Celsius.Reading`, which `Celsius` settles to `Kelvin`, so the
+// implementation below is the one a `Shelf[Kelvin]` answers through.
+trait Measure {
+    type Reading
+
+    fn degrees_of(self: Self) -> UInt8
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Celsius {
+    degrees: UInt8,
+}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+
+    fn degrees_of(self: Self) -> UInt8 {
+        self.degrees
+    }
+}
+
+alias Read[T: Measure] = T.Reading
+
+trait Count {
+    fn count() -> UInt8
+}
+
+struct Shelf[T] {
+    held: T,
+}
+
+impl Count for Shelf[Read[Celsius]] {
+    fn count() -> UInt8 {
+        4
+    }
+}
+
+fn counted[S: Count](_shelf: S) -> UInt8 {
+    S.count()
+}
+
+fn main() -> UInt8 {
+    let warm = Celsius { degrees = 3 }
+    let shelf: Shelf[Kelvin] = .{ held = Kelvin { degrees = 1 } }
+    counted(shelf) - warm.degrees_of() - 1
+}

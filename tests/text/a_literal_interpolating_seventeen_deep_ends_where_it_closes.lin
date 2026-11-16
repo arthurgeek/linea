@@ -1,0 +1,8 @@
+// A literal that opens a seventeenth interpolation inside sixteen is refused.
+// Its quotes and braces still say where it ends, so what follows it on its
+// line is read as written.
+fn deep() -> UInt8 { let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"; 0 }
+
+fn main() -> UInt8 {
+    deep()
+}

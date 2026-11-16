@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/arrays/a_local_worked_out_from_a_refused_local_is_reported_once.lin:5:24
+  |
+5 |     let count: UInt8 = true
+  |                ----- expected because of this annotation
+  |                        ^^^^ expected `UInt8`, found `Bool`

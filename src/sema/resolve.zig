@@ -10683,10 +10683,18 @@ const Resolver = struct {
     }
 
     /// Whether a written type holds, among its arguments at any depth, a
-    /// type the parser began and refused.
+    /// type the parser began and refused. A callable type holds its
+    /// parameters' types and its result.
     ///
     /// **Bound:** the written type's own nodes, once each.
     fn holdsARefusedType(ast: *const Ast, ref: node.TypeRef) bool {
+        if (ref.kind == .callable) {
+            const callable = ast.callableType(ref);
+            for (ast.params[callable.params.start..callable.params.end]) |param| {
+                if (anyRefusedType(ast, &.{param.written})) return true;
+            }
+            if (anyRefusedType(ast, &.{callable.result})) return true;
+        }
         return anyRefusedType(ast, ast.typeArgs(ref.args));
     }
 

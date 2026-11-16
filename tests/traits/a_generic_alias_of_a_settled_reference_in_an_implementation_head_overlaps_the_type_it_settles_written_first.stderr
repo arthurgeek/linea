@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Count` for `Shelf[Kelvin]`
+  --> tests/traits/a_generic_alias_of_a_settled_reference_in_an_implementation_head_overlaps_the_type_it_settles_written_first.lin:42:6
+   |
+36 | impl Count for Shelf[Read[Celsius]] {
+   |      ----- the other implementation
+42 | impl Count for Shelf[Kelvin] {
+   |      ^^^^^ no instantiation may answer to two implementations of one trait

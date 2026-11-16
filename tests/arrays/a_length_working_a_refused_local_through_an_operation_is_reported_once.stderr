@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `UInt64`, found `Bool`
+ --> tests/arrays/a_length_working_a_refused_local_through_an_operation_is_reported_once.lin:5:25
+  |
+5 |     let count: UInt64 = true
+  |                ------ expected because of this annotation
+  |                         ^^^^ expected `UInt64`, found `Bool`

@@ -1,0 +1,29 @@
+// [T-Const]. A constant's initialiser is a constant expression whatever its
+// annotation is, and whatever form holds the part that is none: an array, a
+// variant, an operator, a tuple or a structure.
+fn get() -> UInt64 {
+    3
+}
+
+struct Wrap {
+    part: UInt64,
+}
+
+let in_an_array: [UInt64; true] = [get(), 1]
+
+let in_a_variant: Option[[UInt64; true]] = .Some([get()])
+
+let in_a_sum: [UInt64; true] = get() + 1
+
+let in_a_tuple: [UInt64; true] = (get(), 1)
+
+let in_a_structure: [UInt64; true] = .{ part = get() }
+
+let in_a_named_structure: [UInt64; true] = Wrap { part = get() }
+
+let under_an_undefined_name: Nope = .Some(get())
+
+fn main() -> UInt8 {
+    let _all = (in_an_array, in_a_variant, in_a_sum, in_a_tuple, in_a_structure, in_a_named_structure, under_an_undefined_name)
+    0
+}

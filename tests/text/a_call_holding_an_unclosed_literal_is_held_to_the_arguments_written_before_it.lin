@@ -1,0 +1,32 @@
+// A literal ends at its line, and one left open as an argument takes what
+// follows it there. The arguments up to it are written whatever it took, so a
+// call that already has too many is reported for those; one that may have
+// had its other arguments taken is not reported for missing them.
+fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+    b
+}
+
+fn too_many() -> UInt8 {
+    three("a", 1, 2, 3, 4, "y)
+}
+
+fn closed_below() -> UInt8 {
+    three("a", 1, 2, 3, 4, "y
+    )
+}
+
+fn nested() -> UInt8 {
+    three("a", three("b", 1, 2, 3, "x), 2)
+}
+
+fn alone() -> UInt8 {
+    three("x)
+}
+
+fn second() -> UInt8 {
+    three("a", "x)
+}
+
+fn main() -> UInt8 {
+    too_many() + closed_below() + nested() + alone() + second()
+}

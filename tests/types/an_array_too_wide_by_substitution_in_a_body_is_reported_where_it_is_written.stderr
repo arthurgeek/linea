@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `[[UInt8; 2000000000]; 3]` is wider
+ --> tests/types/an_array_too_wide_by_substitution_in_a_body_is_reported_where_it_is_written.lin:5:30
+  |
+5 |     let _lent: Option[borrow [T; 3]] = .None
+  |                              ^^^^^^ hold fewer parts, or nest them less deeply

@@ -1,0 +1,17 @@
+// A literal ends at its line. One left open as a call's argument took the
+// `)` after it, so the call is not held to how many arguments it takes, and
+// a line below that opens with a word only a statement begins with is a
+// statement.
+fn one(_text: Str) -> UInt8 {
+    1
+}
+
+fn late() {}
+
+fn main() -> UInt8 {
+    let first = one("x)
+    one("y")
+    let second = one("z)
+    defer late()
+    first + second
+}

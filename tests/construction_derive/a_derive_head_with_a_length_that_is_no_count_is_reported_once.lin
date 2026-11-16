@@ -1,0 +1,22 @@
+// An array's length is a count. A derive whose head applies its target to an
+// array with another kind of length is refused where the length is written.
+trait Tr {
+    fn zero() -> UInt8
+}
+
+template impl Tr where reflect.target: struct {
+    fn zero() -> UInt8 {
+        0
+    }
+}
+
+struct M[T] {
+    value: T,
+}
+
+derive Tr for M[[UInt8; true]]
+
+fn main() -> UInt8 {
+    let held: M[UInt8] = .{ value = 0 }
+    held.value
+}

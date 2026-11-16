@@ -1,0 +1,10 @@
+// A literal ends at its line. One left open as an arm's body took the comma
+// after it, so the arm on the next line is still read, and a mistake in it is
+// reported.
+fn main() -> UInt8 {
+    let _said = match 1 {
+        1 => "unterminated
+        _ => nope,
+    }
+    0
+}

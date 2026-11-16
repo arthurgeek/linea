@@ -1,0 +1,16 @@
+// A literal ends at its line. One left open as a field's value took what
+// followed it there, so the field on the next line is still read. A comma
+// missing between two later fields is a mistake of its own.
+struct Point {
+    label: Str,
+    x: UInt8,
+    y: UInt8,
+}
+
+fn main() -> UInt8 {
+    let p = Point {
+        label = "unclosed
+        x = 1
+        y = 2 }
+    p.x
+}

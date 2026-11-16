@@ -1,0 +1,40 @@
+// A callable type's parameter needs a type. An implementation whose head
+// holds a callable type missing one is refused where the type should be, and
+// is compared with no other implementation: two of them are two mistakes and
+// no duplicate.
+trait Tr {
+    fn zero() -> UInt8
+}
+
+struct W[T] {
+    value: T,
+}
+
+impl Tr for W[fn(x: ) -> UInt8] {
+    fn zero() -> UInt8 {
+        0
+    }
+}
+
+impl Tr for W[fn(x: ) -> UInt8] {
+    fn zero() -> UInt8 {
+        0
+    }
+}
+
+impl Tr for W[fn(x: UInt8) -> ] {
+    fn zero() -> UInt8 {
+        1
+    }
+}
+
+impl Tr for W[fn(x: UInt8) -> ] {
+    fn zero() -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let held: W[UInt8] = .{ value = 0 }
+    held.value
+}

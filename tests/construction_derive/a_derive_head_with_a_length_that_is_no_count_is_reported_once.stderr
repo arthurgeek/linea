@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/construction_derive/a_derive_head_with_a_length_that_is_no_count_is_reported_once.lin:17:25
+   |
+17 | derive Tr for M[[UInt8; true]]
+   |                         ^^^^ this is not a number

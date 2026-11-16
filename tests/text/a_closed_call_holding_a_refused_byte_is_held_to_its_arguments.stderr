@@ -1,0 +1,31 @@
+error[S-Char]: unexpected character '$'
+ --> tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin:9:25
+  |
+9 |     three("a", 1, 2, 3, $)
+  |                         ^ not a valid token
+error[S-Char]: unexpected character '$'
+  --> tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin:13:11
+   |
+13 |     three($)
+   |           ^ not a valid token
+error[T-Arity]: expected 3 argument(s), found 5
+ --> tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin:9:5
+  |
+4 | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+  |    ----- declared here
+9 |     three("a", 1, 2, 3, $)
+  |     ^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
+error[T-MissingArgument]: `b` receives no argument
+  --> tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin:13:5
+   |
+4  | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+   |                   - declared here
+13 |     three($)
+   |     ^^^^^^^^ every parameter receives one
+error[T-MissingArgument]: `_c` receives no argument
+  --> tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin:13:5
+   |
+4  | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+   |                             -- declared here
+13 |     three($)
+   |     ^^^^^^^^ every parameter receives one

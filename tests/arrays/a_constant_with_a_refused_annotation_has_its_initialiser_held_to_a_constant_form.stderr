@@ -1,0 +1,10 @@
+error[T-ArraySize]: an array's length is a count, and a count is a number
+ --> tests/arrays/a_constant_with_a_refused_annotation_has_its_initialiser_held_to_a_constant_form.lin:8:27
+  |
+8 | let table: Option[[UInt8; true]] = make()
+  |                           ^^^^ this is not a number
+error[T-Const]: `table` is not a constant expression
+ --> tests/arrays/a_constant_with_a_refused_annotation_has_its_initialiser_held_to_a_constant_form.lin:8:36
+  |
+8 | let table: Option[[UInt8; true]] = make()
+  |                                    ^^^^^^ give it something the language can work out without running anything

@@ -1,0 +1,70 @@
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:24:30
+   |
+24 | let under_an_undefined_name: Nope = .Some(get())
+   |                              ^^^^ no type with this name is declared here
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:12:27
+   |
+12 | let in_an_array: [UInt64; true] = [get(), 1]
+   |                           ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:14:35
+   |
+14 | let in_a_variant: Option[[UInt64; true]] = .Some([get()])
+   |                                   ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:16:24
+   |
+16 | let in_a_sum: [UInt64; true] = get() + 1
+   |                        ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:18:26
+   |
+18 | let in_a_tuple: [UInt64; true] = (get(), 1)
+   |                          ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:20:30
+   |
+20 | let in_a_structure: [UInt64; true] = .{ part = get() }
+   |                              ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:22:36
+   |
+22 | let in_a_named_structure: [UInt64; true] = Wrap { part = get() }
+   |                                    ^^^^ this is not a number
+error[T-Const]: `in_an_array` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:12:35
+   |
+12 | let in_an_array: [UInt64; true] = [get(), 1]
+   |                                   ^^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `in_a_variant` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:14:44
+   |
+14 | let in_a_variant: Option[[UInt64; true]] = .Some([get()])
+   |                                            ^^^^^^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `in_a_sum` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:16:32
+   |
+16 | let in_a_sum: [UInt64; true] = get() + 1
+   |                                ^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `in_a_tuple` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:18:34
+   |
+18 | let in_a_tuple: [UInt64; true] = (get(), 1)
+   |                                  ^^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `in_a_structure` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:20:38
+   |
+20 | let in_a_structure: [UInt64; true] = .{ part = get() }
+   |                                      ^^^^^^^^^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `in_a_named_structure` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:22:44
+   |
+22 | let in_a_named_structure: [UInt64; true] = Wrap { part = get() }
+   |                                            ^^^^^^^^^^^^^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `under_an_undefined_name` is not a constant expression
+  --> tests/arrays/a_constant_with_a_refused_annotation_has_every_initialiser_form_held_to_a_constant_form.lin:24:37
+   |
+24 | let under_an_undefined_name: Nope = .Some(get())
+   |                                     ^^^^^^^^^^^^ give it something the language can work out without running anything

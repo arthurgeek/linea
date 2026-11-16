@@ -1,0 +1,5 @@
+error[S-Char]: unexpected character '$'
+ --> tests/diag/a_byte_no_token_begins_ending_a_line_of_an_array_is_reported_once.lin:5:20
+  |
+5 |     let held = [1, $
+  |                    ^ not a valid token

@@ -1517,9 +1517,14 @@ pub const ExpandedProgram = struct {
                 if (origin.derive_trait != .none) {
                     label.file = self.source.ast.fileOf(origin.derive_trait);
                     label.span = self.source.ast.tokenSpan(origin.derive_trait);
-                    // Said already inside the entry this was generated from.
+                    // Said already inside the entry this was generated
+                    // from, or inside the head a standalone request writes
+                    // after its entries, which the implementation copies too.
                     if (written.get(try saying(sink.arena, diagnostic))) |sites| {
-                        const end = self.deriveEntryEnd(origin.derive_trait);
+                        var end = self.deriveEntryEnd(origin.derive_trait);
+                        if (self.source.ast.declTag(origin.derive) == .derive_impl) {
+                            end = @max(end, self.source.ast.writtenWholeSpan(self.source.ast.declHead(origin.derive)).end);
+                        }
                         for (sites.items) |site| {
                             if (site.file == label.file and site.at >= label.span.start and site.at < end) continue :each;
                         }

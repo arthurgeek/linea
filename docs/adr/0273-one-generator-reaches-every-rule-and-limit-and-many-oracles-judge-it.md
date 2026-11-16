@@ -264,7 +264,10 @@ Two of the four do not preserve acceptance at a limit, and leave such a
 binding alone. An alias is one more link of a chain of declared answers, so
 the alias rewrite skips a type that names an alias. An enum is its payload
 behind a tag word, so the payload rewrite skips a type that could be half as
-wide as a type may be.
+wide as a type may be. The numbers an annotation writes bound its width only
+where it names scalars and `Option`, so the rewrite also skips a type that
+names a struct or an alias of the file, whose width stands in the
+declaration.
 
 **(c) One mistake, one report, and its fixes apply.** A program with one
 planted mistake earns exactly the reports its statement counts, all under its
@@ -345,10 +348,10 @@ Each line is its own change, with the generator parts it needs.
 
 ## Consequences
 
-The generator found defects on the day it ran, and those still standing are
-recorded in `known_findings` and not fixed here: a raw literal opened with
-nine `#` and a literal that interpolates seventeen deep, each followed by
-reports of the code around them.
+The generator found defects on the day it ran: a raw literal opened with
+nine `#` and a literal that interpolates seventeen deep were each followed by
+reports of the code around them. Both are fixed, and `known_findings` is
+empty.
 
 `not_yet_generated` holds 127 of the 151 rules. That is the measure of how
 little of the language's refusals a generated program reaches, written where a

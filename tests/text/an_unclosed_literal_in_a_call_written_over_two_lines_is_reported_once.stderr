@@ -1,0 +1,5 @@
+error[S-String]: unterminated string literal
+ --> tests/text/an_unclosed_literal_in_a_call_written_over_two_lines_is_reported_once.lin:9:10
+  |
+9 |     show("unterminated,
+  |          ^^^^^^^^^^^^^^ string starts here and is never closed

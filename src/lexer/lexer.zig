@@ -175,6 +175,9 @@ const Lexer = struct {
     /// The colon that begins a format spec sets this, so the next token is
     /// the spec's text rather than ordinary tokens.
     spec_next: bool = false,
+    /// How many more times a literal refused for interpolating too deeply
+    /// may be read again to find its close, each reading nested in the last.
+    refusals_nested: u32 = 4,
 
     fn atEnd(self: *const Lexer) bool {
         return self.index >= self.text.len;
@@ -200,7 +203,7 @@ const Lexer = struct {
     /// `{{` is a literal `{`. A `}` is ordinary here and needs no doubling:
     /// this scanner only runs where no interpolation is open, so there is
     /// nothing for one to close and nothing to be ambiguous about.
-    fn literalRun(self: *Lexer, sink: *Sink, start: u32, opened: Opener) !Token {
+    fn literalRun(self: *Lexer, sink: ?*Sink, start: u32, opened: Opener) std.mem.Allocator.Error!Token {
         while (self.peek()) |c| {
             self.index += 1;
 
@@ -235,15 +238,18 @@ const Lexer = struct {
                     continue;
                 }
                 if (self.open == max_interpolation) {
-                    const t = self.make(.invalid, start);
-                    try sink.addError(
+                    if (sink) |reported| try reported.addError(
                         .s_string,
                         self.file,
-                        t.span,
+                        self.make(.invalid, start).span,
                         "this literal interpolates too deeply",
                         "an interpolation inside an interpolation, too many times over",
                     );
-                    return t;
+                    // The refused literal is one token, from its quote to
+                    // the quote that closes it, so the interpolations open
+                    // around it close where they are written to.
+                    self.index = try self.refusedLiteralEnd(start);
+                    return self.make(.invalid, start);
                 }
                 self.interpolation[self.open] = 0;
                 self.grouping[self.open] = 0;
@@ -254,11 +260,17 @@ const Lexer = struct {
             if (c == '"') {
                 return self.make(if (opened == .quote) .string_literal else .str_close, start);
             }
-            if (c == '\n') break;
+            // The line break is not part of the token, so the parser sees
+            // the line end after the unclosed literal as it does after any
+            // other token.
+            if (c == '\n') {
+                self.index = self.beforeLineBreak(start);
+                break;
+            }
         }
 
         const t = self.make(.invalid, start);
-        try sink.addError(
+        if (sink) |reported| try reported.addError(
             .s_string,
             self.file,
             t.span,
@@ -266,6 +278,44 @@ const Lexer = struct {
             "string starts here and is never closed",
         );
         return t;
+    }
+
+    /// Where a token that began at `start` and has just read a `\n` ends:
+    /// before the line break, which is `\r\n` where a `\r` stands directly
+    /// before the `\n`. Either line ending leaves the token the same text.
+    fn beforeLineBreak(self: *const Lexer, start: u32) u32 {
+        const at = self.index - 1;
+        return if (at > start and self.text[at - 1] == '\r') at - 1 else at;
+    }
+
+    /// Where the literal opening at `start`, refused for interpolating too
+    /// deeply, ends: after the quote that closes it, or, where none closes
+    /// it on its line, where an unclosed literal's token ends.
+    ///
+    /// The literal is read again as though no interpolation were open around
+    /// it, which finds its close through every literal and brace nested in
+    /// it. A literal nested deeper still is refused inside that reading and
+    /// read the same way, `refusals_nested` times over; past that the
+    /// refused literal runs to the end of its line, as an unclosed one does.
+    ///
+    /// **Bound:** the literal's bytes, once for each reading it is nested
+    /// in, which is at most `refusals_nested + 1`.
+    fn refusedLiteralEnd(self: *const Lexer, start: u32) std.mem.Allocator.Error!u32 {
+        if (self.refusals_nested != 0) {
+            var inner: Lexer = .{ .text = self.text, .file = self.file, .index = start, .refusals_nested = self.refusals_nested - 1 };
+            var end = start;
+            while (true) {
+                const t = try inner.next(null);
+                if (t.tag == .eof) return end;
+                if (std.mem.indexOfScalar(u8, self.text[end..t.span.start], '\n') != null) return end;
+                end = t.span.end;
+                if (t.tag == .str_close and inner.open == 0) return end;
+            }
+        }
+        var end = self.index;
+        while (end < self.text.len and self.text[end] != '\n') end += 1;
+        if (end > start and end < self.text.len and self.text[end - 1] == '\r') end -= 1;
+        return end;
     }
 
     /// The number of `#` between an `r` at the current index and the `"` that
@@ -293,7 +343,7 @@ const Lexer = struct {
     /// At most `max_raw_hashes` may open one. A literal opened by more is read
     /// to its close all the same, so the text after it lexes as it would, and
     /// becomes one invalid token.
-    fn rawLiteral(self: *Lexer, sink: *Sink, start: u32, hashes: u32) !Token {
+    fn rawLiteral(self: *Lexer, sink: ?*Sink, start: u32, hashes: u32) std.mem.Allocator.Error!Token {
         self.index += hashes + 2;
         const closed = while (self.peek()) |c| {
             self.index += 1;
@@ -301,12 +351,15 @@ const Lexer = struct {
                 self.index += hashes;
                 break true;
             }
-            if (c == '\n') break false;
+            if (c == '\n') {
+                self.index = self.beforeLineBreak(start);
+                break false;
+            }
         } else false;
 
         if (hashes > max_raw_hashes) {
             const t = self.make(.invalid, start);
-            try sink.addErrorFmt(
+            if (sink) |reported| try reported.addErrorFmt(
                 .s_string,
                 self.file,
                 t.span,
@@ -320,7 +373,7 @@ const Lexer = struct {
 
         const t = self.make(.invalid, start);
         if (hashes == 0) {
-            try sink.addError(
+            if (sink) |reported| try reported.addError(
                 .s_string,
                 self.file,
                 t.span,
@@ -328,7 +381,7 @@ const Lexer = struct {
                 "string starts here and is never closed",
             );
         } else {
-            try sink.addErrorFmt(
+            if (sink) |reported| try reported.addErrorFmt(
                 .s_string,
                 self.file,
                 t.span,
@@ -483,7 +536,7 @@ const Lexer = struct {
         };
     }
 
-    fn next(self: *Lexer, sink: *Sink) std.mem.Allocator.Error!Token {
+    fn next(self: *Lexer, sink: ?*Sink) std.mem.Allocator.Error!Token {
         if (self.spec_next) {
             self.spec_next = false;
             if (self.formatSpec()) |spec| return spec;
@@ -657,7 +710,7 @@ const Lexer = struct {
                             // print back a file that does not compile.
                             self.index += 1;
                             const t = self.make(.float_literal, start);
-                            try sink.addError(
+                            if (sink) |reported| try reported.addError(
                                 .s_float,
                                 self.file,
                                 t.span,
@@ -679,7 +732,7 @@ const Lexer = struct {
                     if (!continues) {
                         self.index += 1;
                         const t = self.make(.float_literal, start);
-                        try sink.addError(
+                        if (sink) |reported| try reported.addError(
                             .s_float,
                             self.file,
                             t.span,
@@ -713,7 +766,7 @@ const Lexer = struct {
                     // refused on their own and the literal still closes.
                     self.index += 2;
                     const t = self.make(.invalid, start);
-                    try sink.addError(
+                    if (sink) |reported| try reported.addError(
                         .s_string,
                         self.file,
                         t.span,
@@ -741,7 +794,7 @@ const Lexer = struct {
             self.index += 1;
         }
         const t = self.make(.invalid, start);
-        try sink.addErrorFmt(
+        if (sink) |reported| try reported.addErrorFmt(
             .s_char,
             self.file,
             t.span,
@@ -941,6 +994,45 @@ test "unterminated string reports and does not hang" {
 
     try testing.expectEqualSlices(Tag, &.{ .invalid, .eof }, ctx.tags());
     try testing.expectEqual(Code.s_string, ctx.sink.items()[0].code.?);
+}
+
+test "an unclosed literal's token ends before its line break, whichever line ending the file has" {
+    for ([_][]const u8{ "\"abc\nlet", "\"abc\r\nlet", "r#\"abc\r\nlet", "\"a{b}c\r\nlet" }) |text| {
+        var ctx = try lex(text);
+        defer ctx.deinit();
+        const tags = ctx.tags();
+        try testing.expectEqual(Tag.keyword_let, tags[tags.len - 2]);
+        const unclosed = ctx.spans()[tags.len - 3];
+        try testing.expectEqual(Tag.invalid, tags[tags.len - 3]);
+        try testing.expectEqual(@as(u8, 'c'), text[unclosed.end - 1]);
+        try testing.expectEqual(@as(usize, 1), ctx.sink.items().len);
+    }
+}
+
+test "a literal refused for interpolating too deeply is one token ending at its close" {
+    const gpa = testing.allocator;
+    // `depth` literals each opening an interpolation, around `1`, and then
+    // ` + 2` on the same line.
+    for ([_]usize{ 17, 18, 40 }) |depth| {
+        var text: std.ArrayList(u8) = .empty;
+        defer text.deinit(gpa);
+        for (0..depth) |_| try text.appendSlice(gpa, "\"{");
+        try text.append(gpa, '1');
+        for (0..depth) |_| try text.appendSlice(gpa, "}\"");
+        try text.appendSlice(gpa, " + 2");
+        var ctx = try lex(text.items);
+        defer ctx.deinit();
+        const tags = ctx.tags();
+        // Sixteen opens, the refused literal, sixteen closes, `+ 2`.
+        try testing.expectEqual(@as(usize, 16 + 1 + 16 + 3), tags.len);
+        try testing.expectEqual(Tag.invalid, tags[16]);
+        for (tags[17..33]) |tag| try testing.expectEqual(Tag.str_close, tag);
+        try testing.expectEqualSlices(Tag, &.{ .plus, .int_literal, .eof }, tags[33..]);
+        const refused = ctx.spans()[16];
+        try testing.expectEqual(@as(u32, 32), refused.start);
+        try testing.expectEqual(@as(u32, @intCast(text.items.len - 4 - 32)), refused.end);
+        try testing.expectEqual(@as(usize, 1), ctx.sink.items().len);
+    }
 }
 
 test "a raw literal is one string literal token" {

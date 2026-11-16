@@ -1,0 +1,6 @@
+// A literal ends at its line. One left open inside an interpolation is refused
+// once, and the interpolation around it is not reported as unclosed.
+fn main() -> UInt8 {
+    let _text = "total {1 + "unclosed}
+    0
+}
