@@ -1,0 +1,14 @@
+// `G[T]` requires `G[Vec[T]]`, a longer argument at every step round the
+// cycle. The cycle is reported once and its requirements are walked one step
+// round, wherever the trait is declared.
+fn _grow[S: G[UInt8]](s: S) -> UInt8 {
+    s.g(1)
+}
+
+fn main() -> UInt8 {
+    0
+}
+
+trait G[T]: G[Vec[T]] {
+    fn g(self: Self, by: T) -> UInt8
+}

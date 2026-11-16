@@ -1,0 +1,27 @@
+// `A[T]` requires `B[T]`, `B[T]` requires `C[Bool]` and `C[T]` requires
+// `A[UInt8]`, so the three traits form one cycle at changing arguments. It is
+// reported once, and every order of the three declarations grants and
+// reports the same.
+trait C[T]: A[UInt8] {
+    fn c(self: Self, by: T) -> UInt8
+}
+
+trait B[T]: C[Bool] {
+    fn b(self: Self) -> UInt8
+}
+
+trait A[T]: B[T] {
+    fn a(self: Self) -> UInt8
+}
+
+fn ua[S: A[Bool]](s: S) -> UInt8 {
+    s.c(true) + s.b()
+}
+
+fn uc[S: C[UInt8]](s: S) -> UInt8 {
+    s.a() + ua(s)
+}
+
+fn main() -> UInt8 {
+    0
+}

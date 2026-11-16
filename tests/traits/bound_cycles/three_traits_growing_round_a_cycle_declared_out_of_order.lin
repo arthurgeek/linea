@@ -1,0 +1,31 @@
+// Three traits each requiring the next at a larger argument grow round their
+// cycle through an array, a vector and an option. The cycle is reported once,
+// and `Seed`'s implementation of `G[UInt8]` still owes the `H[[UInt8; 2]]` it
+// lacks, whichever order the traits are declared in.
+trait K[T]: G[Option[T]] {
+    fn k(self: Self, by: T) -> UInt8
+}
+
+trait H[T]: K[Vec[T]] {
+    fn h(self: Self, by: T) -> UInt8
+}
+
+trait G[T]: H[[T; 2]] {
+    fn g(self: Self, by: T) -> UInt8
+}
+
+struct Seed {}
+
+impl G[UInt8] for Seed {
+    fn g(_self: Self, by: UInt8) -> UInt8 {
+        by
+    }
+}
+
+fn grow[S: G[UInt8]](s: S) -> UInt8 {
+    s.g(1)
+}
+
+fn main() -> UInt8 {
+    grow(Seed {})
+}

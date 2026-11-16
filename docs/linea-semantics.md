@@ -3847,10 +3847,15 @@ that reaches it. Trait bounds may not cycle; a cycle is diagnosed at its
 declaration, on the bound that closes it, and only there. Every bound on the
 cycle is still read as written: an implementation of a trait on it owes what
 the trait requires, and a parameter bounded by one is granted what that trait
-requires, whichever bound the report fell on. A requirement reached again round
-the cycle is not followed a second time, so `trait Grow[T]: Grow[Option[T]]`
-is refused once, although following its bound would name a longer argument
-list at every step.
+requires, whichever bound the report fell on. A requirement reached again at
+the same arguments is not followed a second time. A bound that puts a
+parameter of its trait under a constructor where that parameter's argument
+flows back to the same parameter round the cycle grows the arguments at every
+turn; such a bound is followed only from a requirement that no such bound
+reached, so `trait Grow[T]: Grow[Option[T]]` is refused once and grants
+`Grow[Option[T]]` but not `Grow[Option[Option[T]]]`. Which bounds grow is read
+from the bounds as written, so neither what a bound grants nor what is
+reported depends on the order the traits are declared in.
 
 Capability requirements are inherited through the same transitive trait bounds.
 `trait Replicable: Copyable` requires every implementation of `Replicable` to

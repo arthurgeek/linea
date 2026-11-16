@@ -1,0 +1,18 @@
+// `G[T]` requires `H[Option[T]]` and `H[T]` requires `G[(T, Bool)]`, so the
+// arguments grow at each turn of the cycle. It is reported once, and `S: G[UInt8]`
+// is granted `H[Option[UInt8]]` whichever trait is declared first.
+trait G[T]: H[Option[T]] {
+    fn g(self: Self, by: T) -> UInt8
+}
+
+trait H[T]: G[(T, Bool)] {
+    fn h(self: Self, by: T) -> UInt8
+}
+
+fn _grow[S: G[UInt8]](s: S) -> UInt8 {
+    s.g(1) + s.h(.None)
+}
+
+fn main() -> UInt8 {
+    0
+}

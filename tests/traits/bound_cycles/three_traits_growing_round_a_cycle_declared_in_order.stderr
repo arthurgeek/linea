@@ -1,0 +1,10 @@
+error[T-Bound]: `K` requires `G`, `G` requires `H`, and `H` requires `K`
+  --> tests/traits/bound_cycles/three_traits_growing_round_a_cycle_declared_in_order.lin:13:13
+   |
+13 | trait K[T]: G[Option[T]] {
+   |             ^ drop one of the bounds on the cycle
+error[T-Bound]: `G` requires `H[[UInt8; 2]]`, and `Seed` does not implement it
+  --> tests/traits/bound_cycles/three_traits_growing_round_a_cycle_declared_in_order.lin:19:6
+   |
+19 | impl G[UInt8] for Seed {
+   |      ^ implement it for that type, or drop the bound

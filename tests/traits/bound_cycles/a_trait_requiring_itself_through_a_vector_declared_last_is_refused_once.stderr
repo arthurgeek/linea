@@ -1,0 +1,5 @@
+error[T-Bound]: `G` requires itself
+  --> tests/traits/bound_cycles/a_trait_requiring_itself_through_a_vector_declared_last_is_refused_once.lin:12:13
+   |
+12 | trait G[T]: G[Vec[T]] {
+   |             ^ drop the bound
