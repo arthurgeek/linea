@@ -12,6 +12,7 @@ const literal_text = @import("../support/text.zig");
 const Interner = interner_mod.Interner;
 const StringId = interner_mod.StringId;
 const Code = @import("../diagnostics/diagnostic.zig").Code;
+const Limit = @import("../support/limits.zig").Limit;
 const token = @import("token.zig");
 const Tag = token.Tag;
 const Token = token.Token;
@@ -141,13 +142,13 @@ pub fn isIdentifier(gpa: std.mem.Allocator, text: []const u8) std.mem.Allocator.
 /// interpolation may interpolate in turn, and each level is one entry; past
 /// this the program is a mistake rather than a program, and the scanner says so
 /// rather than losing count.
-const max_interpolation = 16;
+const max_interpolation = Limit.interpolation_depth.most();
 
 /// How many `#` may open a raw literal. Text that needs `n` of them contains a
 /// `"` followed by `n - 1`, so this is far beyond real text; the bound lets an
 /// editor grammar, which can match each count only as its own regular
 /// expression, agree with the compiler about every literal.
-pub const max_raw_hashes = 8;
+pub const max_raw_hashes = Limit.raw_literal_hashes.most();
 
 const Lexer = struct {
     text: []const u8,

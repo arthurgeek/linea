@@ -8,6 +8,7 @@
 //! parts to that library, so there is no second formatter here.
 
 const std = @import("std");
+const Limit = @import("../support/limits.zig").Limit;
 const testing = std.testing;
 
 /// An alignment places a value inside its width. `none` leaves the choice to
@@ -20,7 +21,12 @@ pub const Hex = enum(u2) { none, lower, upper };
 
 /// A width or precision is at most this. A literal width needs a bound for
 /// the record to have a fixed size, and no column of text is wider.
-pub const max_count = std.math.maxInt(u16);
+pub const max_count = Limit.format_count.most();
+
+comptime {
+    std.debug.assert(max_count == std.math.maxInt(@FieldType(Format, "width")));
+    std.debug.assert(max_count == std.math.maxInt(@FieldType(Format, "precision")));
+}
 
 /// A format records how one interpolated value renders. It has a fixed size,
 /// so an interpolation's formats sit in one array and compare and hash as
@@ -191,7 +197,7 @@ pub fn parse(text: []const u8) Parsed {
     }
     if (at < text.len and text[at] >= '1' and text[at] <= '9') {
         const count = number(text, &at) orelse return refuse(
-            "a width is at most 65535",
+            std.fmt.comptimePrint("a width is at most {d}", .{max_count}),
             "no column of text is this wide",
         );
         format.width = count;
@@ -203,7 +209,7 @@ pub fn parse(text: []const u8) Parsed {
             "write digits after `.`, as in `.2`",
         );
         const count = number(text, &at) orelse return refuse(
-            "a precision is at most 65535",
+            std.fmt.comptimePrint("a precision is at most {d}", .{max_count}),
             "no float has this many digits worth writing",
         );
         format.precision = count;

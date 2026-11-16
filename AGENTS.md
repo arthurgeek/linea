@@ -161,6 +161,22 @@ until it is green.
   consecutive from zero, so a failure names a reproducing number). A generated
   program the compiler rejects is a failure: the generator and the compiler
   disagree about the language.
+- Each generated seed also checks one hostile program
+  (`src/conformance/hostile.zig`, ADR 0273): a generic alias chain that names
+  the alias before it twice, or a program at one of the limits in
+  `src/support/limits.zig` and one past it, in a seeded position. The program
+  states whether it is accepted or which rule refuses it and with how many
+  reports. Its check may take the allocation work of a reference program,
+  the same material written as two halves or with a small count, and one part
+  in fifty more. A compiler defect one of them shows is recorded in
+  `hostile.known_findings` with its seed and every report the compiler makes;
+  the walk fails when the program is answered any other way, and when it is
+  answered as it states, so the fix removes the entry.
+  `src/conformance/reach.zig` lists the rules no generated or mutated program
+  reaches, and fails when a listed rule is reached or an unlisted one is not.
+  A limit is added to `limits.zig` with the sentence of
+  `docs/linea-semantics.md` that states it, which a test writes from the
+  table's number.
 - Every rejected case of one file is also held to its helps: a diagnostic
   carries a `Fix` for each help concrete enough to write, the edits that help
   names applied together, and the conformance runner applies each fix alone and

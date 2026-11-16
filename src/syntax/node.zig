@@ -3,19 +3,20 @@ const testing = std.testing;
 const token = @import("../lexer/token.zig");
 const TokenId = token.TokenId;
 const TokenRange = token.TokenRange;
+const Limit = @import("../support/limits.zig").Limit;
 
 const none_index = std.math.maxInt(u32);
 
 /// The greatest height of a tree the parser hands to later passes.
-pub const max_tree_height: usize = 1000;
+pub const max_tree_height: usize = Limit.tree_height.most();
 
 /// The fewest components a tuple holds. One parenthesised value is a group.
-pub const min_tuple_arity: u32 = 2;
+pub const min_tuple_arity: u32 = Limit.tuple_components.fewest().?;
 
 /// The most components a tuple holds. A product with more positional parts is
 /// a struct with its names withheld. The prelude declares `Tuple2` through
 /// `Tuple8` to match.
-pub const max_tuple_arity: u32 = 8;
+pub const max_tuple_arity: u32 = Limit.tuple_components.most();
 
 /// Whether `count` components make a tuple. The one statement of the bound:
 /// the parser refuses a count outside it, and every later pass asks here

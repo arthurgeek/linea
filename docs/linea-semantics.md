@@ -480,7 +480,9 @@ contents; standard error carries the description.
 **[S-String]** A string literal must close before the end of its line. This
 holds for a raw literal too, and an unclosed raw literal is reported as
 unterminated with the closing sequence it needs. A raw literal opens with at
-most eight `#`; one opened with more is refused. The lines of a multi-line
+most eight `#`; one opened with more is refused. A literal inside an
+interpolation may interpolate in turn, with at most 16 interpolations open at
+once; a literal that opens one more is refused. The lines of a multi-line
 literal are consecutive: a blank line or a comment between two of its lines is
 refused. A multi-line literal cannot begin inside an interpolation, since its
 line would run over the `}` that closes the interpolation.

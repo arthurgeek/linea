@@ -43,6 +43,7 @@ const resolve_mod = @import("resolve.zig");
 const Resolution = resolve_mod.Resolution;
 const BindingId = resolve_mod.BindingId;
 const types_mod = @import("types.zig");
+const Limit = @import("../support/limits.zig").Limit;
 const retained_typing = @import("retained_typing.zig");
 const relocation_mod = @import("../syntax/relocation.zig");
 const Cycle = types_mod.Cycle;
@@ -10616,7 +10617,7 @@ const Checker = struct {
             return null;
         }
 
-        if (folded > std.math.maxInt(u32)) {
+        if (folded > Limit.array_length.most()) {
             _ = try self.report(
                 .t_array_size,
                 length,

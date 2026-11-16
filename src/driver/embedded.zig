@@ -8,12 +8,13 @@
 //! runner and the editor alike; only where the bytes come from differs.
 
 const std = @import("std");
+const Limit = @import("../support/limits.zig").Limit;
 const testing = std.testing;
 
 /// The most bytes one file may embed. A larger file is refused before it is
 /// read, so a mistaken path, a database or a video, is a diagnostic naming
 /// the file rather than a compilation that exhausts memory.
-pub const max_bytes: u64 = 16 * 1024 * 1024;
+pub const max_bytes: u64 = Limit.embedded_bytes.most();
 
 /// Why a written path names no file inside its root, from its spelling alone.
 pub const Spelling = enum {

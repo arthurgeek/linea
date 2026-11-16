@@ -248,11 +248,12 @@ ones most likely to be superseded as the compiler grows.
 | [0026](0026-the-corpus-checks-properties-a-golden-cannot.md) | The corpus checks metamorphic properties, not only recorded outputs | Superseded by 0134 |
 | [0134](0134-conformance-compiles-ordinary-cases-once.md) | Ordinary conformance cases compile once; recompilation properties use focused witnesses | Accepted; supersedes 0026 |
 | [0155](0155-transcript-cases-replace-one-line-command-cases.md) | A command case is a transcript of shell commands with their output inline | Accepted; extends 0008 |
-| [0027](0027-generated-programs-are-well-typed-by-construction.md) | Generated programs are well-typed by construction | Accepted |
+| [0027](0027-generated-programs-are-well-typed-by-construction.md) | Generated programs are well-typed by construction | Accepted; extended by 0273 |
 | [0028](0028-a-type-is-a-pool-handle-and-layout-is-a-table.md) | A type is a pool handle, and layout is a table the module carries | Accepted; payload clause superseded by 0030; extended by 0102 |
-| [0029](0029-a-suite-must-be-able-to-fail-for-what-it-omits.md) | A suite must be able to fail for what it omits | Accepted; extended by 0055 and 0057 |
+| [0029](0029-a-suite-must-be-able-to-fail-for-what-it-omits.md) | A suite must be able to fail for what it omits | Accepted; extended by 0055, 0057 and 0273 |
 | [0055](0055-a-rule-name-is-not-the-unit-of-enforcement.md) | A rule name is not the unit of enforcement | Accepted; extends 0029, extended by 0057 |
-| [0057](0057-a-mutation-answers-for-the-rules-it-declares.md) | A mutation answers for the rules it declares | Accepted; extends 0029 and 0055 |
+| [0057](0057-a-mutation-answers-for-the-rules-it-declares.md) | A mutation answers for the rules it declares | Accepted; extends 0029 and 0055; extended by 0273 |
+| [0273](0273-one-generator-reaches-every-rule-and-limit-and-many-oracles-judge-it.md) | One generator reaches every rule and limit, and many oracles judge its programs | Accepted; extends 0027, 0029 and 0057 |
 | [0030](0030-a-variant-carries-several-values.md) | A variant carries several values; what stops a layout is a cycle | Accepted; supersedes the payload clause of 0028 |
 | [0031](0031-fields-are-packed-at-their-natural-alignment.md) | Fields are packed at their natural alignment, in declaration order | Accepted; slot clause clarified by 0052; scalar-word consequence superseded by 0102 |
 | [0032](0032-a-module-is-a-directory.md) | A module is a directory, and the entry may be a file | Accepted; import-path clause superseded by 0111 |

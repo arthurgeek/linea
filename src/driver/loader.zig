@@ -3004,7 +3004,7 @@ const Loader = struct {
             .directory => .{ try std.fmt.allocPrint(arena, "{s} is a directory", .{written}), "an embedded path names a file" },
             .symlink => |link| .{ try std.fmt.allocPrint(arena, "{s} goes through a symbolic link", .{written}), try std.fmt.allocPrint(arena, "`{s}` is a link, and an embedded path names files and directories themselves", .{std.fs.path.basename(link)}) },
             .special => .{ try std.fmt.allocPrint(arena, "{s} is not a regular file", .{written}), "an embedded path names a file" },
-            .too_large => |size| .{ try std.fmt.allocPrint(arena, "{s} holds {d} bytes, and a file embeds at most {d}", .{ written, size, embedded.max_bytes }), "a file embeds at most 16 MiB" },
+            .too_large => |size| .{ try std.fmt.allocPrint(arena, "{s} holds {d} bytes, and a file embeds at most {d}", .{ written, size, embedded.max_bytes }), std.fmt.comptimePrint("a file embeds at most {d} MiB", .{embedded.max_bytes >> 20}) },
             .unreadable => |err| .{ try std.fmt.allocPrint(arena, "cannot read {s}: {s}", .{ written, err }), "the file named here" },
         };
         try self.reportEmbed(.m_embed, id, message, label, &.{});

@@ -36,6 +36,8 @@ const perturb = @import("perturb.zig");
 const fmt = @import("../fmt/fmt.zig");
 const generate = @import("generate.zig");
 const mutate = @import("mutate.zig");
+const render = @import("../diagnostics/render.zig");
+const test_library = @import("../driver/test_library.zig");
 
 /// Full-program answers used only to decide which source-local rewrite applies.
 pub const Semantics = struct {
@@ -346,6 +348,41 @@ pub const Transform = enum {
     /// them in the order they were declared and permuting them changes which
     /// programs are legal.
     renamed_head_parameters,
+    /// A binding's written type moved to the parameter and the result of a
+    /// function its initialiser is passed through.
+    ///
+    /// The rewrites above leave every written type where it was. A type means
+    /// the same wherever it is written, so one the checker accepts as an
+    /// annotation it accepts in each of the four positions these move it to,
+    /// and the value that reaches the binding is the one the initialiser
+    /// made. Each of the four moves another binding where a program has more
+    /// than one to move.
+    ///
+    /// A call, a field read and a `match` are not constant expressions, so
+    /// the three rewrites that pass the initialiser through one apply only to
+    /// a binding that was not a constant before: a `var`, or a `let` whose
+    /// initialiser is a form no constant expression has. Any other `let` may
+    /// be read as an array length, a pattern's bound or a default, and would
+    /// stop being one.
+    type_moved_to_parameter,
+    /// A binding's written type moved to the field of a struct its
+    /// initialiser is wrapped in and read back out of.
+    type_moved_to_field,
+    /// A binding's written type moved to the payload of an enum its
+    /// initialiser is wrapped in and matched back out of.
+    ///
+    /// An enum is its payload behind a tag word, so a type within a few
+    /// bytes of [L-Size] is accepted as an annotation and refused as a
+    /// payload. The rewrite leaves alone a type that could be that wide.
+    type_moved_to_payload,
+    /// A binding's written type moved to an alias its annotation then names.
+    /// The initialiser is untouched, so a constant stays one.
+    ///
+    /// An alias is one more link of a chain of declared answers, so a type
+    /// that already rests on the most links [T-AnswerDepth] allows is
+    /// accepted as an annotation and refused behind one more alias. The
+    /// rewrite leaves alone a type that names an alias.
+    type_moved_to_alias,
 
     /// The rewritten source, or null where the transformation says nothing
     /// about this program — it does not apply, or it applies to no effect.
@@ -375,6 +412,10 @@ pub const Transform = enum {
             .defer_let_written_out => try writeOutDeferLet(gpa, ast, text),
             .permuted_named_arguments => try permuteNamedArguments(gpa, ast, typing, text),
             .renamed_head_parameters => try renameHeadParameters(gpa, ast, res, text),
+            .type_moved_to_parameter => try moveWrittenType(gpa, ast, text, .parameter),
+            .type_moved_to_field => try moveWrittenType(gpa, ast, text, .field),
+            .type_moved_to_payload => try moveWrittenType(gpa, ast, text, .payload),
+            .type_moved_to_alias => try moveWrittenType(gpa, ast, text, .alias),
             .formatted => try perturb.perturbAndFormat(gpa, text),
         } orelse return null;
 
@@ -402,9 +443,496 @@ pub const Transform = enum {
             .defer_let_written_out => "a `defer let` written out as a binding and the `defer` of its release",
             .permuted_named_arguments => "a call's named arguments rotated",
             .renamed_head_parameters => "an implementation or derive head's own type parameters renamed",
+            .type_moved_to_parameter => "a binding's written type moved to a function's parameter and result",
+            .type_moved_to_field => "a binding's written type moved to a struct's field",
+            .type_moved_to_payload => "a binding's written type moved to an enum's payload",
+            .type_moved_to_alias => "a binding's written type moved to an alias",
         };
     }
 };
+
+/// Where a moved annotation is written.
+const MoveTarget = enum {
+    parameter,
+    field,
+    payload,
+    alias,
+
+    /// The declaration the rewrite appends, which no rewritten program may
+    /// already name.
+    fn helper(self: MoveTarget) []const u8 {
+        return switch (self) {
+            .parameter => "_moved_type",
+            .field => "_MovedField",
+            .payload => "_MovedPayload",
+            .alias => "_MovedAlias",
+        };
+    }
+};
+
+/// The scalar types a moved annotation may be built from. A value of one, or
+/// of an array, a tuple, an `Option` or a plain struct of them, owns
+/// everything it holds and borrows nothing, so passing it through a `sink`
+/// parameter, a field or a payload gives the binding the value the
+/// initialiser made.
+const movable_scalars = [_][]const u8{
+    "UInt8",   "UInt16",  "UInt32", "UInt64",
+    "Int8",    "Int16",   "Int32",  "Int64",
+    "Float32", "Float64", "Bool",   "Option",
+};
+
+/// Whether `written` names only scalars, `Option`, the names in `declared`
+/// and `parameters`, in arrays of literal length, tuples and applications.
+/// A borrow, a callable type and a name from another module are refused by
+/// the word or the character that writes them.
+fn isMovableType(
+    written: []const u8,
+    declared: *const std.StringHashMapUnmanaged(void),
+    parameters: []const []const u8,
+) bool {
+    var names: u32 = 0;
+    var i: usize = 0;
+    while (i < written.len) {
+        const c = written[i];
+        if (std.ascii.isAlphabetic(c) or c == '_') {
+            var end = i;
+            while (end < written.len and (std.ascii.isAlphanumeric(written[end]) or written[end] == '_')) end += 1;
+            const name = written[i..end];
+            const known = for (movable_scalars) |scalar| {
+                if (std.mem.eql(u8, scalar, name)) break true;
+            } else for (parameters) |parameter| {
+                if (std.mem.eql(u8, parameter, name)) break true;
+            } else declared.contains(name);
+            if (!known) return false;
+            names += 1;
+            i = end;
+            continue;
+        }
+        switch (c) {
+            '[', ']', '(', ')', ',', ';', ' ', '\n', '0'...'9' => i += 1,
+            else => return false,
+        }
+    }
+    return names > 0;
+}
+
+/// The names of this file's structs and aliases whose values own everything
+/// they hold: a struct that is not `linear` and whose every field is a
+/// movable type, and an alias of one. An enum is left out, since one may be
+/// linear through a payload, and so is a generic alias.
+fn movableDeclarations(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !std.StringHashMapUnmanaged(void) {
+    var names: std.StringHashMapUnmanaged(void) = .empty;
+    var changed = true;
+    // A declaration may name one written after it, so the pass repeats until
+    // it adds nothing.
+    while (changed) {
+        changed = false;
+        for (0..ast.declCount()) |at| {
+            const d = DeclId.at(@intCast(at));
+            const tag = ast.declTag(d);
+            if (tag != .struct_ and tag != .alias) continue;
+            const name_token = ast.declName(d);
+            if (name_token == .none) continue;
+            const name = ast.tokenText(name_token);
+            if (names.contains(name)) continue;
+
+            var parameters: std.ArrayList([]const u8) = .empty;
+            defer parameters.deinit(gpa);
+            for (ast.declTypeParams(d)) |parameter| try parameters.append(gpa, ast.tokenText(parameter.name));
+
+            const movable = switch (tag) {
+                .struct_ => holds: {
+                    if (ast.declOwnershipPolicy(d) == .linear) break :holds false;
+                    const fields = ast.declFields(d);
+                    if (fields.len == 0) break :holds false;
+                    for (fields) |field| {
+                        if (field.type_end == .none) break :holds false;
+                        const from = ast.tokenSpan(field.written.at).start;
+                        const to = ast.tokenSpan(field.type_end).end;
+                        if (to > text.len or from > to) break :holds false;
+                        if (!isMovableType(text[from..to], &names, parameters.items)) break :holds false;
+                    }
+                    break :holds true;
+                },
+                .alias => names_one: {
+                    if (parameters.items.len != 0) break :names_one false;
+                    const span = ast.declSpan(d);
+                    if (span.end > text.len) break :names_one false;
+                    const whole = text[span.start..span.end];
+                    const equals = std.mem.indexOfScalar(u8, whole, '=') orelse break :names_one false;
+                    break :names_one isMovableType(std.mem.trim(u8, whole[equals + 1 ..], " \t\n"), &names, &.{});
+                },
+                else => unreachable,
+            };
+            if (movable) {
+                try names.put(gpa, name, {});
+                changed = true;
+            }
+        }
+    }
+    return names;
+}
+
+/// Whether `id` is a form no constant expression has, so a `let` it
+/// initialises is not a constant.
+///
+/// Decided by the outermost form alone. A literal, a name, a selection,
+/// arithmetic, an aggregate and a call of a type's name may each be a
+/// constant expression depending on their parts, and are answered as if they
+/// were. A call of a function is never one, and a function's name begins
+/// with a lowercase letter where a type's does not.
+fn isNeverConstant(ast: *const Ast, id: ExprId) bool {
+    return switch (ast.exprTag(id)) {
+        .grouped => isNeverConstant(ast, ast.unaryOperand(id)),
+        .call => function: {
+            const callee = ast.call(id).callee;
+            if (ast.exprTag(callee) != .name_ref) break :function false;
+            const name = std.mem.trimStart(u8, ast.tokenText(ast.exprMain(callee)), "_");
+            break :function name.len != 0 and std.ascii.isLower(name[0]);
+        },
+        .block,
+        .conditional,
+        .while_,
+        .loop_,
+        .match_,
+        .match_read,
+        .index,
+        .copy_,
+        .dereference,
+        .try_,
+        .unwrap_else,
+        .float_literal,
+        .interp,
+        .not,
+        .logical_and,
+        .logical_or,
+        .eq,
+        .ne,
+        .lt,
+        .le,
+        .gt,
+        .ge,
+        => true,
+        else => false,
+    };
+}
+
+/// Whether `written` names an alias this file declares, so that one more
+/// alias above it could be one link too many.
+fn namesAnAlias(ast: *const Ast, written: []const u8) bool {
+    for (0..ast.declCount()) |at| {
+        const d = DeclId.at(@intCast(at));
+        if (ast.declTag(d) != .alias) continue;
+        const name_token = ast.declName(d);
+        if (name_token == .none) continue;
+        const name = ast.tokenText(name_token);
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, written, from, name)) |found| {
+            const end = found + name.len;
+            const starts = found == 0 or !(std.ascii.isAlphanumeric(written[found - 1]) or written[found - 1] == '_');
+            const ends = end == written.len or !(std.ascii.isAlphanumeric(written[end]) or written[end] == '_');
+            if (starts and ends) return true;
+            from = end;
+        }
+    }
+    return false;
+}
+
+/// Whether a value of `written` could be within a tag word of the widest a
+/// type may be. Every number written in the type is taken as an array's
+/// length and every element as eight bytes, which is at least as wide as
+/// any type `isMovableType` admits that writes those numbers.
+fn couldBeWidest(written: []const u8) bool {
+    var bytes: u64 = 8;
+    var i: usize = 0;
+    while (i < written.len) {
+        if (!std.ascii.isDigit(written[i]) or (i != 0 and (std.ascii.isAlphanumeric(written[i - 1]) or written[i - 1] == '_'))) {
+            i += 1;
+            continue;
+        }
+        var end = i;
+        while (end < written.len and std.ascii.isDigit(written[end])) end += 1;
+        const length = std.fmt.parseInt(u64, written[i..end], 10) catch return true;
+        bytes = std.math.mul(u64, bytes, @max(length, 1)) catch return true;
+        i = end;
+    }
+    return bytes >= widest_moved_payload;
+}
+
+/// A payload this wide or wider is left where it is. Half the widest a type
+/// may be, which is far more than a tag word below it.
+const widest_moved_payload: u64 = @import("../support/limits.zig").Limit.type_bytes.most() / 2;
+
+/// One binding a rewrite may move the annotation of.
+const Movable = struct {
+    /// The end of the binding's name, where `: Type = ` begins.
+    name_end: usize,
+    /// The initialiser's extent.
+    value: Span,
+    /// The annotation as written.
+    written: []const u8,
+    /// The spaces before the statement on its line.
+    indent: []const u8,
+};
+
+/// `var total: UInt8 = a + b` written with its type in another position:
+///
+///   - `var total = _moved_type(a + b)`, with
+///     `fn _moved_type(sink _value: UInt8) -> UInt8 { _value }` appended;
+///   - `var total = _MovedField { _part = a + b }._part`, with the struct;
+///   - `var total = match _MovedPayload._Only(a + b) { _Only(v) => v }`, with
+///     the enum;
+///   - `var total: _MovedAlias = a + b`, with `alias _MovedAlias = UInt8`.
+///
+/// A binding is one a rewrite moves when it is a `let` or `var` statement
+/// introduced by the keyword and its name alone, with an annotation
+/// `isMovableType` admits and an initialiser. A `defer let` and a `let read`
+/// are left alone: their initialiser is a schedule or a place and not a
+/// value to pass on. Every target but the alias also needs the binding not
+/// to be a constant. Of the bindings a target may move it takes the one its
+/// own position in `MoveTarget` counts to, so the four spread over a
+/// program's bindings.
+fn moveWrittenType(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8, target: MoveTarget) !?[]const u8 {
+    const helper = target.helper();
+    if (std.mem.indexOf(u8, text, helper) != null) return null;
+
+    var declared = try movableDeclarations(gpa, ast, text);
+    defer declared.deinit(gpa);
+    var movable: std.ArrayList(Movable) = .empty;
+    defer movable.deinit(gpa);
+
+    for (0..ast.stmtCount()) |i| {
+        const s = node.StmtId.at(@intCast(i));
+        if (ast.stmtTag(s) != .let_decl or ast.stmtIsDeferredBinding(s)) continue;
+        const d = ast.stmtData(s);
+        if (d.init == ExprId.none) continue;
+        if (target != .alias and !ast.stmtIsMutable(s) and !isNeverConstant(ast, d.init)) continue;
+
+        const keyword = ast.tokenSpan(ast.stmtTokens(s).start);
+        const name = ast.tokenSpan(d.name);
+        const value = ast.exprSpan(d.init);
+        if (value.end > text.len or name.end > value.start) continue;
+        const introducer = text[keyword.start..keyword.end];
+        if (!std.mem.eql(u8, introducer, "let") and !std.mem.eql(u8, introducer, "var")) continue;
+        if (std.mem.trim(u8, text[keyword.end..name.start], " \t").len != 0) continue;
+
+        // Between the name and the initialiser: `: Type =`.
+        const between = std.mem.trim(u8, text[name.end..value.start], " \t\n");
+        if (between.len < 3 or between[0] != ':' or between[between.len - 1] != '=') continue;
+        const written = std.mem.trim(u8, between[1 .. between.len - 1], " \t\n");
+        if (!isMovableType(written, &declared, &.{})) continue;
+        if (target == .alias and namesAnAlias(ast, written)) continue;
+        if (target == .payload and couldBeWidest(written)) continue;
+
+        var line = keyword.start;
+        while (line > 0 and text[line - 1] != '\n') line -= 1;
+        if (std.mem.indexOfNone(u8, text[line..keyword.start], " \t") != null) continue;
+        try movable.append(gpa, .{
+            .name_end = name.end,
+            .value = value,
+            .written = written,
+            .indent = text[line..keyword.start],
+        });
+    }
+    if (movable.items.len == 0) return null;
+    const chosen = movable.items[@intFromEnum(target) % movable.items.len];
+    const value = text[chosen.value.start..chosen.value.end];
+
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    const w = &out.writer;
+    try w.writeAll(text[0..chosen.name_end]);
+    switch (target) {
+        .parameter => try w.print(" = {s}({s})", .{ helper, value }),
+        .field => try w.print(" = {s} {{ _part = {s} }}._part", .{ helper, value }),
+        .payload => try w.print(" = match {s}._Only({s}) {{\n{s}    _Only(_moved_value) => _moved_value,\n{s}}}", .{
+            helper,
+            value,
+            chosen.indent,
+            chosen.indent,
+        }),
+        .alias => try w.print(": {s} = {s}", .{ helper, value }),
+    }
+    try w.writeAll(text[chosen.value.end..]);
+    if (!std.mem.endsWith(u8, text, "\n")) try w.writeAll("\n");
+    switch (target) {
+        .parameter => try w.print("\nfn {s}(sink _value: {s}) -> {s} {{\n    _value\n}}\n", .{ helper, chosen.written, chosen.written }),
+        .field => try w.print("\nstruct {s} {{\n    _part: {s},\n}}\n", .{ helper, chosen.written }),
+        .payload => try w.print("\nenum {s} {{\n    _Only({s}),\n}}\n", .{ helper, chosen.written }),
+        .alias => try w.print("\nalias {s} = {s}\n", .{ helper, chosen.written }),
+    }
+    return out.written();
+}
+
+test moveWrittenType {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const program =
+        \\struct Point {
+        \\    x: UInt8,
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p: Point = pick(1)
+        \\    var pair: [UInt8; 2] = [p.x, 2] // kept
+        \\    pair[0] = 3
+        \\    let last: UInt8 = pair[1]
+        \\    let shown: Option[UInt8] = if last == 3 {
+        \\        .Some(last)
+        \\    } else {
+        \\        .None
+        \\    }
+        \\    match shown {
+        \\        Some(n) => n,
+        \\        None => 0,
+        \\    }
+        \\}
+        \\
+        \\fn pick(x: UInt8) -> Point {
+        \\    .{ x = x }
+        \\}
+        \\
+    ;
+    // Four bindings may be moved, and each target takes the one it counts to.
+    const to_parameter = (try applyTo(gpa, .type_moved_to_parameter, program)).?;
+    try testing.expect(std.mem.indexOf(u8, to_parameter, "    let p = _moved_type(pick(1))\n") != null);
+    try testing.expect(std.mem.endsWith(u8, to_parameter, "\nfn _moved_type(sink _value: Point) -> Point {\n    _value\n}\n"));
+
+    const to_field = (try applyTo(gpa, .type_moved_to_field, program)).?;
+    try testing.expect(std.mem.indexOf(u8, to_field, "    var pair = _MovedField { _part = [p.x, 2] }._part // kept\n") != null);
+    try testing.expect(std.mem.endsWith(u8, to_field, "\nstruct _MovedField {\n    _part: [UInt8; 2],\n}\n"));
+
+    const to_payload = (try applyTo(gpa, .type_moved_to_payload, program)).?;
+    try testing.expect(std.mem.indexOf(u8, to_payload,
+        \\    let last = match _MovedPayload._Only(pair[1]) {
+        \\        _Only(_moved_value) => _moved_value,
+        \\    }
+        \\
+    ) != null);
+    try testing.expect(std.mem.endsWith(u8, to_payload, "\nenum _MovedPayload {\n    _Only(UInt8),\n}\n"));
+
+    const to_alias = (try applyTo(gpa, .type_moved_to_alias, program)).?;
+    try testing.expect(std.mem.indexOf(u8, to_alias, "    let shown: _MovedAlias = if last == 3 {\n") != null);
+    try testing.expect(std.mem.endsWith(u8, to_alias, "\nalias _MovedAlias = Option[UInt8]\n"));
+
+    // A `let` an array length reads is a constant, and so is one a range
+    // pattern's bound reads. Passing either through a call, a field or a
+    // `match` would leave the length and the bound with no value; naming its
+    // type through an alias leaves it the constant it was.
+    const constants = [_][]const u8{
+        \\fn main() -> UInt8 {
+        \\    let n: UInt64 = 2
+        \\    let a: [UInt8; n] = [1, 2]
+        \\    a[0]
+        \\}
+        \\
+        ,
+        \\fn main() -> UInt8 {
+        \\    let top: UInt8 = 9
+        \\    let seen: UInt8 = top - 4
+        \\    match seen {
+        \\        0..=top => 1,
+        \\        _ => 0,
+        \\    }
+        \\}
+        \\
+        ,
+    };
+    for (constants) |constant| {
+        for ([_]Transform{ .type_moved_to_parameter, .type_moved_to_field, .type_moved_to_payload }) |t| {
+            try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, t, constant));
+        }
+        try testing.expect((try applyTo(gpa, .type_moved_to_alias, constant)) != null);
+    }
+
+    // A type that names an alias is not put behind one more, and a type that
+    // could be as wide as a type may be is not put behind a tag. The other
+    // rewrites still move both.
+    const at_limits =
+        \\alias Named = UInt8
+        \\
+        \\fn main() -> UInt8 {
+        \\    var named: Named = pick()
+        \\    named = named + 1
+        \\    var wide: [UInt8; 4294967280] = fill()
+        \\    wide[0] = named
+        \\    wide[0]
+        \\}
+        \\
+    ;
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .type_moved_to_alias,
+        \\alias Named = UInt8
+        \\
+        \\fn main() -> UInt8 {
+        \\    var named: Named = pick()
+        \\    named = named + 1
+        \\    named
+        \\}
+        \\
+    ));
+    const widest_as_alias = (try applyTo(gpa, .type_moved_to_alias, at_limits)).?;
+    try testing.expect(std.mem.indexOf(u8, widest_as_alias, "var wide: _MovedAlias = fill()") != null);
+    const named_as_payload = (try applyTo(gpa, .type_moved_to_payload, at_limits)).?;
+    try testing.expect(std.mem.indexOf(u8, named_as_payload, "var named = match _MovedPayload._Only(pick())") != null);
+    try testing.expect(std.mem.indexOf(u8, named_as_payload, "var wide: [UInt8; 4294967280] = fill()") != null);
+    try testing.expect(couldBeWidest("[UInt8; 4294967280]"));
+    try testing.expect(couldBeWidest("[[UInt16; 65536]; 32768]"));
+    try testing.expect(!couldBeWidest("[UInt64; 1000000]"));
+    try testing.expect(!couldBeWidest("Option[UInt8]"));
+
+    // A type that borrows and an enum are left alone, and so is a binding
+    // with no annotation.
+    try testing.expectEqual(@as(?[]const u8, null), try applyTo(gpa, .type_moved_to_alias,
+        \\struct View {
+        \\    cell: borrow UInt8,
+        \\}
+        \\
+        \\enum Shade {
+        \\    Light,
+        \\    Dark,
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let v: View = view()
+        \\    let s: Shade = shade()
+        \\    var n = v.cell + 1
+        \\    n = n + 1
+        \\    n
+        \\}
+        \\
+    ));
+}
+
+test "a binding and each position its type is moved to reach one verdict" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const programs = [_][]const u8{
+        "fn main() -> UInt8 {\n    let a: UInt8 = 3\n    var b: [UInt8; 2] = [a, a]\n    b[0] = 4\n    b[0] + b[1]\n}\n",
+        "struct Kept {\n    part: UInt8,\n}\n\nstruct Boxed[T] {\n    item: T,\n}\n\nalias Named = UInt8\n\nfn main() -> UInt8 {\n    let seen = true\n    let k: Kept = if seen {\n        .{ part = 1 }\n    } else {\n        .{ part = 2 }\n    }\n    let b: Boxed[Kept] = {\n        .{ item = k }\n    }\n    let n: Named = match b.item.part {\n        0 => 1,\n        _ => 2,\n    }\n    let o: Option[Named] = if seen {\n        .Some(n)\n    } else {\n        .None\n    }\n    match o {\n        Some(found) => found,\n        None => 0,\n    }\n}\n",
+        "fn main() -> UInt8 {\n    let n: UInt64 = 2\n    let a: [UInt8; n] = [1, 2]\n    a[0]\n}\n",
+    };
+    var moved: std.EnumMap(MoveTarget, u32) = .{};
+    for (programs) |text| {
+        const before = try generate.checkLoadedText(gpa, "moved.lin", text, test_library.get());
+        try testing.expect(!before.sink.hasErrors());
+        var ast = try parseText(gpa, text);
+        for (std.enums.values(MoveTarget)) |target| {
+            const rewritten = (try moveWrittenType(gpa, &ast, text, target)) orelse continue;
+            moved.put(target, (moved.get(target) orelse 0) + 1);
+            const after = try generate.checkLoadedText(gpa, "moved.lin", rewritten, test_library.get());
+            if (after.sink.hasErrors()) {
+                var why: std.Io.Writer.Allocating = .init(gpa);
+                try render.renderAll(&why.writer, &after.table, &after.sink, .{ .color = .never });
+                std.debug.print("\n{s}\n{s}\n", .{ rewritten, why.written() });
+                return error.MovedTypeRefused;
+            }
+        }
+    }
+    for (std.enums.values(MoveTarget)) |target| try testing.expect((moved.get(target) orelse 0) >= 2);
+}
 
 /// `impl[T: Display] Display for Option[T]` written `impl[Zz0: Display] Display
 /// for Option[Zz0]`.

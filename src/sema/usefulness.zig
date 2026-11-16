@@ -33,10 +33,11 @@
 
 const std = @import("std");
 const testing = std.testing;
+const Limit = @import("../support/limits.zig").Limit;
 
 /// The cells a set of questions about one construct may build, past which the
 /// construct is refused as too intricate to check ([T-CoverLimit]).
-pub const max_cells: usize = 1 << 20;
+pub const max_cells: usize = Limit.coverage_cells.most();
 
 /// A closed interval of integers, in arithmetic wide enough for `UInt64`'s
 /// maximum and `Int64`'s minimum together.

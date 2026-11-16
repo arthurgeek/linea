@@ -40,6 +40,7 @@ pub const Signatures = Table(DeclId, TypeId);
 /// The type of each binding.
 pub const BindingTypes = Table(ids.BindingId, TypeId);
 const Chain = @import("../support/chain.zig").Chain;
+const Limit = @import("../support/limits.zig").Limit;
 
 /// A format spec lays a value out through one of three routines, chosen by
 /// the value's type.
@@ -84,7 +85,7 @@ pub const IntegerProperty = struct {
 
 /// How many settled references and aliases a chain of declared answers may
 /// pass through before it is refused ([T-AnswerDepth]).
-pub const max_answer_links: u32 = 1000;
+pub const max_answer_links: u32 = Limit.answer_links.most();
 
 /// A handle into the type pool.
 ///
@@ -518,10 +519,14 @@ pub const Layout = struct {
     /// The greatest width a type may have.
     ///
     /// A part's offset is recorded in the same width a size is, so a type
-    /// wider than this has no offset to place its parts at. Read off that
-    /// width rather than written down, so the number the semantics state and
-    /// the arithmetic that enforces it cannot drift.
-    pub const max_size: u64 = std.math.maxInt(@FieldType(Layout, "size"));
+    /// wider than this has no offset to place its parts at. The limit the
+    /// language states is held to that width, so the number the semantics
+    /// state and the arithmetic that enforces it cannot drift.
+    pub const max_size: u64 = Limit.type_bytes.most();
+
+    comptime {
+        std.debug.assert(max_size == std.math.maxInt(@FieldType(Layout, "size")));
+    }
 
     /// Whether a value of this type lives in memory rather than a register.
     ///

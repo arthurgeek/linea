@@ -144,6 +144,49 @@ pub fn generate(gpa: std.mem.Allocator, bytes: []const u8, opts: Options) ![]con
     return g.program();
 }
 
+/// The fewest and the most bindings `typedBindings` writes. Four is one for
+/// each position a written type is moved to.
+const min_typed_bindings = 4;
+const max_typed_bindings = 6;
+
+/// A written type `typedBindings` annotates a binding with, two values of it,
+/// and how a number is read out of a binding of it: `reads_before`, the
+/// binding's name, `reads_after`. The number read out of `one` is
+/// `one_reads`, and `other` reads another.
+const TypedBinding = struct {
+    written: []const u8,
+    one: []const u8,
+    other: []const u8,
+    reads_before: []const u8 = "",
+    reads_after: []const u8 = "",
+    one_reads: u32 = 1,
+    other_reads: u32 = 2,
+};
+
+comptime {
+    // A binding that held its other value has to read as another number.
+    for (typed_bindings) |binding| std.debug.assert(binding.one_reads != binding.other_reads);
+}
+
+const typed_bindings = [_]TypedBinding{
+    .{ .written = "[UInt8; 2]", .one = "[1, 2]", .other = "[3, 4]", .reads_after = "[0]", .other_reads = 3 },
+    .{ .written = "(UInt8, Bool)", .one = "(UInt8(1), true)", .other = "(UInt8(2), false)", .reads_after = "._0" },
+    .{
+        .written = "Option[UInt8]",
+        .one = ".Some(1)",
+        .other = ".None",
+        .reads_before = "match ",
+        .reads_after = " {\n        Some(_inner) => _inner,\n        None => 0,\n    }",
+        .other_reads = 0,
+    },
+    .{ .written = "_Kept", .one = ".{ _part = 1 }", .other = ".{ _part = 2 }", .reads_after = "._part" },
+    .{ .written = "_Named", .one = "1", .other = "2" },
+    .{ .written = "_Boxed[UInt8]", .one = ".{ _item = 1 }", .other = ".{ _item = 2 }", .reads_after = "._item" },
+};
+
+/// The form of a typed binding's initialiser. None is a constant expression.
+const TypedForm = enum { conditional, match, block };
+
 /// A generated interpolation chooses each value's spec from this table. Every
 /// spec is valid on a `UInt8`, and each entry records the format it parses to.
 pub const interpolation_specs = [_]struct { text: []const u8, format: node.InterpolationFormat }{
@@ -393,6 +436,9 @@ const Gen = struct {
     side: Choices,
     /// What each tuple-returning function declares, by tuple index.
     tuple_returns: std.ArrayList([2]ItemType) = .empty,
+    /// What `_typed` answers where each of its bindings takes its first
+    /// value.
+    typed_answer: u32 = 0,
     /// How many structure updates enclose the literal being written as their
     /// base.
     update_bases: u32 = 0,
@@ -890,6 +936,7 @@ const Gen = struct {
         }
 
         try self.tupleFunctions(&out.writer);
+        try self.typedBindings(&out.writer);
 
         try out.writer.writeAll("fn main() -> UInt8 ");
         self.scope.clear();
@@ -1436,6 +1483,79 @@ const Gen = struct {
         }
     }
 
+    /// A function of annotated bindings, each of a written type and an
+    /// initialiser drawn from `typed_bindings` and `TypedForm`, which answers
+    /// a number every binding contributes to.
+    ///
+    /// Every other binding the generator annotates is a `UInt8`, and most are
+    /// initialised by a literal, which makes them constants. These are what a
+    /// rewrite that moves a written type has to move: a type that is an
+    /// array, a tuple, an `Option`, a struct, an alias or a generic
+    /// application, on a `let` whose initialiser no constant expression has
+    /// the form of.
+    ///
+    /// The answer reads one number out of each binding and weights it by the
+    /// binding's place, so a binding that held another value, or two that
+    /// changed places, answer differently. `main` calls the function and
+    /// stops where the answer is not `typed_answer`, which is how a rewrite
+    /// that changed what a binding holds changes what the program does.
+    ///
+    /// The choices are read from the stream at a place of their own and
+    /// advance neither cursor, so no other axis changes phase.
+    fn typedBindings(self: *Gen, w: *std.Io.Writer) Error!void {
+        var own: Choices = .{ .bytes = self.choices.bytes, .at = self.choices.bytes.len / 3 };
+        try w.writeAll(
+            \\struct _Kept {
+            \\    _part: UInt8,
+            \\}
+            \\
+            \\struct _Boxed[T] {
+            \\    _item: T,
+            \\}
+            \\
+            \\alias _Named = UInt8
+            \\
+            \\fn _typed(_seen: Bool, _count: UInt8) -> UInt8 {
+            \\
+        );
+        const count = own.between(min_typed_bindings, max_typed_bindings);
+        var read: [max_typed_bindings]TypedBinding = undefined;
+        var answer: u32 = 0;
+        for (0..count) |i| {
+            const binding = typed_bindings[own.below(typed_bindings.len)];
+            read[i] = binding;
+            answer += binding.one_reads * @as(u32, @intCast(i + 1));
+            try w.print("    let _typed{d}: {s} = ", .{ i, binding.written });
+            switch (@as(TypedForm, @enumFromInt(own.below(std.enums.values(TypedForm).len)))) {
+                .conditional => try w.print("if _seen {{\n        {s}\n    }} else {{\n        {s}\n    }}\n", .{ binding.one, binding.other }),
+                .match => try w.print("match _count {{\n        0 => {s},\n        _ => {s},\n    }}\n", .{ binding.one, binding.other }),
+                .block => try w.print("{{\n        {s}\n    }}\n", .{binding.one}),
+            }
+        }
+        for (0..count) |i| {
+            try w.print("    let _read{d}: UInt8 = {s}_typed{d}{s}\n", .{ i, read[i].reads_before, i, read[i].reads_after });
+        }
+        try w.writeAll("    ");
+        for (0..count) |i| {
+            if (i != 0) try w.writeAll(" + ");
+            try w.print("_read{d} * {d}", .{ i, i + 1 });
+        }
+        try w.writeAll("\n}\n\n");
+        self.typed_answer = answer;
+    }
+
+    /// The call of `_typed` in `main`, held to the answer its bindings give
+    /// where `_seen` is true and `_count` is zero: each takes its first value.
+    /// Another answer makes the divisor zero, and the division stops the
+    /// program. A division needs no library declaration, where a `panic`
+    /// would need a `Str` for its message.
+    fn typedGroup(self: *Gen, w: *std.Io.Writer, at: u32) Error!void {
+        try indent(w, at);
+        try w.writeAll("let _typed_answer: UInt8 = _typed(true, 0);\n");
+        try indent(w, at);
+        try w.print("let _typed_held: UInt8 = 1 / (if _typed_answer == {d} {{ 1 }} else {{ 0 }});\n", .{self.typed_answer});
+    }
+
     fn itemType(self: *Gen) ItemType {
         return if (self.choices.odds(2)) .u8_ else .bool_;
     }
@@ -1916,6 +2036,7 @@ const Gen = struct {
         // program reads rather than a declaration it carries: a name standing
         // where a literal of its type would.
         if (is_entry) try self.constantGroup(w, 1);
+        if (is_entry) try self.typedGroup(w, 1);
 
         // Both static callable forms, in the one body every generated program
         // has. The first keeps its unique closure type and calls directly; the
@@ -3239,6 +3360,54 @@ test "generated structural derives vary every independent dimension" {
     try testing.expect(member_parameters[1] and member_parameters[2]);
     try testing.expect(bounds_per_member_parameter[1] and bounds_per_member_parameter[2]);
     try testing.expect(reverse_components[0] and reverse_components[1]);
+}
+
+test "a generated program's answer depends on each typed binding" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    for (0..32) |seed| {
+        const bytes = try choicesFromSeed(gpa, seed, 64);
+        const text = try generate(gpa, bytes, .{});
+
+        // `main` calls the function and stops where its answer is not the
+        // one the bindings give.
+        const call = "    let _typed_answer: UInt8 = _typed(true, 0);\n    let _typed_held: UInt8 = 1 / (if _typed_answer == ";
+        const called = std.mem.indexOf(u8, text, call) orelse return error.TypedBindingsNotCalled;
+        const main_at = std.mem.indexOf(u8, text, "fn main() -> UInt8 {").?;
+        try testing.expect(called > main_at);
+        const number = text[called + call.len ..];
+        const expected = try std.fmt.parseInt(u32, number[0..std.mem.indexOfScalar(u8, number, ' ').?], 10);
+        try testing.expect(std.mem.startsWith(u8, number[std.mem.indexOfScalar(u8, number, ' ').?..], " { 1 } else { 0 });\n"));
+
+        // What the bindings give, worked out again from the text: each
+        // binding's first value read as its number, weighted by its place.
+        const function = text[std.mem.indexOf(u8, text, "fn _typed(_seen: Bool, _count: UInt8) -> UInt8 {").?..main_at];
+        var answer: u32 = 0;
+        var count: u32 = 0;
+        while (true) : (count += 1) {
+            const declared = try std.fmt.allocPrint(gpa, "    let _typed{d}: ", .{count});
+            const at = std.mem.indexOf(u8, function, declared) orelse break;
+            const written = function[at + declared.len ..];
+            const binding = for (typed_bindings) |candidate| {
+                if (std.mem.startsWith(u8, written, candidate.written) and std.mem.startsWith(u8, written[candidate.written.len..], " = ")) break candidate;
+            } else return error.UnknownTypedBinding;
+            answer += binding.one_reads * (count + 1);
+
+            // Each binding is read, and its reading reaches the answer with
+            // a weight of its own, so one that held its other value answers
+            // another number and `main` stops.
+            const read = try std.fmt.allocPrint(gpa, "    let _read{d}: UInt8 = {s}_typed{d}{s}\n", .{ count, binding.reads_before, count, binding.reads_after });
+            try testing.expect(std.mem.indexOf(u8, function, read) != null);
+            const term = try std.fmt.allocPrint(gpa, "_read{d} * {d}", .{ count, count + 1 });
+            try testing.expect(std.mem.indexOf(u8, function, term) != null);
+            const other = answer - binding.one_reads * (count + 1) + binding.other_reads * (count + 1);
+            try testing.expect(other != answer);
+        }
+        try testing.expect(count >= min_typed_bindings);
+        try testing.expectEqual(expected, answer);
+    }
 }
 
 test "some generated program shadows a name" {
