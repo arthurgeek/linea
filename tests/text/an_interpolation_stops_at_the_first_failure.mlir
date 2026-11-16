@@ -2126,7 +2126,6 @@ module {
     %lw0 = llvm.load %s1 : !llvm.ptr -> i32 loc("std/io/core/error.lin":L:C)
     %v0 = arith.extsi %lw0 : i32 to i64 loc("std/io/core/error.lin":L:C)
     %va1_0 = arith.trunci %v0 : i64 to i32 loc("std/io/core/error.lin":L:C)
-    func.call @linea_fiber_restrict_current() : () -> ()
     %vr1 = func.call @linea_io_category(%va1_0) : (i32) -> i8 loc("std/io/core/error.lin":L:C)
     %v1 = arith.extui %vr1 : i8 to i64 loc("std/io/core/error.lin":L:C)
     %v2 = arith.constant 1 : i64 loc("std/io/core/error.lin":L:C)
