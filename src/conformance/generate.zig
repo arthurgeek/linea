@@ -1546,15 +1546,14 @@ const Gen = struct {
 
     /// The call of `_typed` in `main`, held to the answer its bindings give
     /// where `_seen` is true and `_count` is zero: each takes its first value.
+    /// Another answer makes the divisor zero, and the division stops the
+    /// program. A division needs no library declaration, where a `panic`
+    /// would need a `Str` for its message.
     fn typedGroup(self: *Gen, w: *std.Io.Writer, at: u32) Error!void {
         try indent(w, at);
         try w.writeAll("let _typed_answer: UInt8 = _typed(true, 0);\n");
         try indent(w, at);
-        try w.print("if _typed_answer != {d} {{\n", .{self.typed_answer});
-        try indent(w, at + 1);
-        try w.writeAll("panic(\"a typed binding holds another value\")\n");
-        try indent(w, at);
-        try w.writeAll("}\n");
+        try w.print("let _typed_held: UInt8 = 1 / (if _typed_answer == {d} {{ 1 }} else {{ 0 }});\n", .{self.typed_answer});
     }
 
     fn itemType(self: *Gen) ItemType {
@@ -3374,13 +3373,13 @@ test "a generated program's answer depends on each typed binding" {
 
         // `main` calls the function and stops where its answer is not the
         // one the bindings give.
-        const call = "    let _typed_answer: UInt8 = _typed(true, 0);\n    if _typed_answer != ";
+        const call = "    let _typed_answer: UInt8 = _typed(true, 0);\n    let _typed_held: UInt8 = 1 / (if _typed_answer == ";
         const called = std.mem.indexOf(u8, text, call) orelse return error.TypedBindingsNotCalled;
         const main_at = std.mem.indexOf(u8, text, "fn main() -> UInt8 {").?;
         try testing.expect(called > main_at);
         const number = text[called + call.len ..];
         const expected = try std.fmt.parseInt(u32, number[0..std.mem.indexOfScalar(u8, number, ' ').?], 10);
-        try testing.expect(std.mem.startsWith(u8, number[std.mem.indexOfScalar(u8, number, ' ').?..], " {\n        panic("));
+        try testing.expect(std.mem.startsWith(u8, number[std.mem.indexOfScalar(u8, number, ' ').?..], " { 1 } else { 0 });\n"));
 
         // What the bindings give, worked out again from the text: each
         // binding's first value read as its number, weighted by its place.
