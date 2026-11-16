@@ -1,0 +1,26 @@
+// A template wraps one of its trait's arguments, and that argument is the
+// derive's source. A mistake in another argument is its own report and
+// leaves the source as written, so a source no variant holds is still
+// reported.
+trait Conv[phantom A, B] {
+    fn conv(sink value: B) -> Self
+}
+
+template impl[A, B] Conv[A, B] where reflect.target: enum {
+    fn conv(sink value: B) -> Self {
+        reflect.wrap(value)
+    }
+}
+
+@derive(Conv[[UInt8; true], UInt16])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    match Choice.Unknown {
+        Only(code) => code,
+        Unknown => 0,
+    }
+}

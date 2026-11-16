@@ -1,0 +1,54 @@
+// [T-Const]. A constant whose initialiser is not a constant expression is
+// reported where it is declared. An array length naming it has no count
+// only because of that, so the length says nothing more, wherever the
+// length is written.
+fn three() -> UInt8 {
+    3
+}
+
+let count: UInt8 = three()
+
+let chosen: UInt8 = if true {
+    1
+} else {
+    2
+}
+
+struct Shelf {
+    items: [UInt8; count],
+}
+
+enum Crate {
+    Full([UInt8; chosen]),
+    Empty,
+}
+
+alias Row = [UInt8; count]
+
+struct Rack[T] {
+    items: [T; chosen],
+}
+
+@derive(From[[UInt8; count]])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn take(
+    _shelf: borrow Shelf,
+    _crate: borrow Crate,
+    _row: borrow Row,
+    _rack: borrow Rack[UInt8],
+    _choice: borrow Choice,
+    _direct: borrow [UInt8; chosen],
+    _called: fn(read given: [UInt8; count]) -> UInt8,
+) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _held: [UInt8; chosen] = [1]
+    let _taker = take
+    0
+}

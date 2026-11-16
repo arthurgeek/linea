@@ -1,0 +1,7 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Crate[UInt16]` is wider
+ --> tests/types/an_array_too_wide_through_a_default_is_reported_at_what_applied_it.lin:4:8
+  |
+4 | struct Crate[T = UInt16] {
+  |        ^^^^^ hold fewer parts, or nest them less deeply
+  |
+  = help: its part `items` is `[UInt16; 2147483648]`, which is too wide by itself

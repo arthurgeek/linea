@@ -1,0 +1,10 @@
+// [T-ArraySize]. A constant's initialiser is not held against an annotation
+// whose length was refused: the length's report is the only one.
+let table: Option[[UInt8; true]] = .None
+
+fn main() -> UInt8 {
+    match table {
+        Some(_) => 1,
+        None => 0,
+    }
+}

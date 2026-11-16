@@ -958,22 +958,6 @@ pub const Finding = struct {
 
 pub const known_findings = [_]Finding{
     .{
-        .seed = 11,
-        .limit = .tree_height,
-        .positions = &.{ .let_annotation, .parameter, .field, .payload, .implementation_argument, .implementation_head },
-        .reports = &.{ .s_nesting, .t_bound },
-        .requires = "[S-Nesting] is the only report of a type nested 1001 levels: what stands past the limit " ++
-            "is stepped over, so the `Option` at the cut is not reported as given no argument",
-    },
-    .{
-        .seed = 217,
-        .limit = .tree_height,
-        .positions = &.{.derive_argument},
-        .reports = &.{ .s_nesting, .t_derive },
-        .requires = "[S-Nesting] is the only report of a type nested 1001 levels: a derive naming the type " ++
-            "does not also say that no variant wraps it",
-    },
-    .{
         .seed = 65,
         .limit = .raw_literal_hashes,
         .positions = &.{.value},

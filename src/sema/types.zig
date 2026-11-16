@@ -11462,13 +11462,26 @@ pub const Typing = struct {
         /// pass reopened and extended already had its earlier types asked
         /// about, and a second report of the same type would name one mistake
         /// twice.
-        pub fn nextOversized(self: *const Builder, from: u32) ?TypeId {
+        ///
+        /// A type that holds a type parameter is passed over, whether an
+        /// instantiation applied to one or an array of one. A parameter
+        /// occupies a placeholder's width, so such a type measures the width
+        /// of no value: each type that settles the parameter is a type of its
+        /// own in the pool and is asked about there. A generic declaration's
+        /// own type is not an instantiation and is answered here; the caller
+        /// passes it over and asks about its instantiation at `()` instead.
+        ///
+        /// **Bound:** the types from `from` on, each asked for its layout
+        /// once, and each one that crosses asked once whether it is ground.
+        pub fn nextOversized(self: *Builder, from: u32) std.mem.Allocator.Error!?TypeId {
             for (from..self.pool.items.len) |i| {
                 const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
                 // An unwritten instantiation's width is its template's,
                 // which is asked about where it was declared.
                 if (self.isShell(t)) continue;
-                if (self.crossesSizeLimit(t)) return t;
+                if (!self.crossesSizeLimit(t)) continue;
+                if (!try self.allGround(&.{t})) continue;
+                return t;
             }
             return null;
         }

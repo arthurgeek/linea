@@ -99,9 +99,9 @@ pub const wild: Pattern = .wild;
 
 /// The usefulness check over one kind of type, `Context.Ty`.
 ///
-/// `Context` answers what a type is built by: `kind(ty) Kind`,
-/// `arity(ty, ctor) !u32` and `part(ty, ctor, i) !Ty`, the last two allowed
-/// to fail because answering may allocate.
+/// `Context` answers what a type is built by: `kind(ty) !Kind`,
+/// `arity(ty, ctor) !u32` and `part(ty, ctor, i) !Ty`, each allowed to fail
+/// because answering may allocate.
 pub fn Coverage(comptime Context: type) type {
     return struct {
         const Self = @This();
@@ -220,7 +220,7 @@ pub fn Coverage(comptime Context: type) type {
         pub fn check(self: *Self, rows: []const Row, query: ?Ty) Error!Outcome {
             // The one place a type with no values needs no rows; see
             // `Kind.uninhabited`.
-            if (rows.len == 0) if (query) |ty| if (self.context.kind(ty) == .uninhabited) {
+            if (rows.len == 0) if (query) |ty| if (try self.context.kind(ty) == .uninhabited) {
                 return .{ .reached = &.{}, .missing = &.{} };
             };
             const count = rows.len + @intFromBool(query != null);
@@ -300,7 +300,7 @@ pub fn Coverage(comptime Context: type) type {
         fn split_column(self: *Self, rows: []const Ref) Error![]const Branch {
             const ty = rows[0].cells[0].ty;
             var out: std.ArrayList(Branch) = .empty;
-            switch (self.context.kind(ty)) {
+            switch (try self.context.kind(ty)) {
                 .product => try out.append(self.arena, try self.branch(rows, ty, .product)),
                 .variants => |count| {
                     // The variants the rows name, sorted, and nothing sized by
@@ -635,7 +635,7 @@ pub fn Coverage(comptime Context: type) type {
 const TestTypes = struct {
     pub const Ty = enum { bit, byte, opt, pair, nest, text, refused, empty, hollow };
 
-    pub fn kind(_: TestTypes, ty: Ty) Kind {
+    pub fn kind(_: TestTypes, ty: Ty) std.mem.Allocator.Error!Kind {
         return switch (ty) {
             .bit => .{ .variants = 2 },
             .byte => .{ .integer = .{ .lo = 0, .hi = 3 } },
@@ -818,7 +818,7 @@ const WideTypes = struct {
 
     pub const Ty = enum { wide, part };
 
-    pub fn kind(self: WideTypes, ty: Ty) Kind {
+    pub fn kind(self: WideTypes, ty: Ty) std.mem.Allocator.Error!Kind {
         return if (ty == .wide) .{ .product = self.width } else .opaque_;
     }
 

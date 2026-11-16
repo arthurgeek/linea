@@ -1,0 +1,46 @@
+// [T-Const]. Two constants that name each other have no value, which is
+// reported where the ring closes. An array length naming either has no
+// count only because of that, so the length says nothing more, wherever
+// the length is written.
+let first: UInt8 = second
+
+let second: UInt8 = first
+
+struct Shelf {
+    items: [UInt8; first],
+}
+
+enum Crate {
+    Full([UInt8; second]),
+    Empty,
+}
+
+alias Row = [UInt8; first]
+
+struct Rack[T] {
+    items: [T; second],
+}
+
+@derive(From[[UInt8; first]])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn take(
+    _shelf: borrow Shelf,
+    _crate: borrow Crate,
+    _row: borrow Row,
+    _rack: borrow Rack[UInt8],
+    _choice: borrow Choice,
+    _direct: borrow [UInt8; second],
+    _called: fn(read given: [UInt8; first]) -> UInt8,
+) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _held: [UInt8; second] = [1]
+    let _taker = take
+    0
+}

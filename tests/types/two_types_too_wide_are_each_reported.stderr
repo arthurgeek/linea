@@ -1,0 +1,10 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]], Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]]], Pair[Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]], Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]]]], Pair[Pair[Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]], Pair[Pair[UInt8, UInt8], Pair[UInt8, UInt8]]], Pair[Pair[Pair[UInt8, ... (truncated)
+ --> tests/types/two_types_too_wide_are_each_reported.lin:3:8
+  |
+3 | struct Pair[A, B] {
+  |        ^^^^ hold fewer parts, or nest them less deeply
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8]], Trio[Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8]], Trio[Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8]]], Trio[Trio[Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8], Trio[UInt8, UInt8, UInt8]], Trio[Trio[UInt8,  ... (truncated)
+ --> tests/types/two_types_too_wide_are_each_reported.lin:8:8
+  |
+8 | struct Trio[A, B, C] {
+  |        ^^^^ hold fewer parts, or nest them less deeply

@@ -866,8 +866,29 @@ The limit is reported once per file. What stands past it is stepped over, up to
 the end of the pattern, or of the expression's enclosing group or block, and
 nothing inside it is reported again: a binder written there is bound, with no
 known type, so a use of it is not [N-Undefined], and a name used there counts
-as used, so it is not [N-Unused]. A control header stops at the brace that
-opens its body, so the body is still read.
+as used, so it is not [N-Unused]. A refused written type is stepped over alone,
+whatever its form, so what encloses it still reads what follows it: an array
+its length, a parameter list its next parameter. An array length refused for
+its own depth is not reported again as no constant ([T-ArraySize]). A derive
+request whose head holds a refused type is not expanded, so the refused text is
+not written out and reported a second time; it still uses the type its head
+names. An implementation whose head or trait arguments hold a refused type has
+no key: it is compared with no other implementation and is not asked whether
+its parameters can be recovered ([T-Impl]). An initialiser is not held against
+an annotation that was refused, at module level as in a function. A type whose arguments stand past the limit
+is refused with them, wherever it is written, so it is not reported for the
+arguments it lacks ([T-Bound]), and a derive naming it as a source is not
+reported for the variant that source would need ([T-Derive]). A name written
+inside a refused type, the head of the refused level included, counts as used
+as one in a refused expression does: a type, an alias, a type parameter or an
+import named only there is not [N-Unused] or [M-Unused], and is resolved for
+no other purpose. Only a name in a type position counts: a callable type's
+parameter name, a member written after a dot and a function written where a
+type is are not uses of a declaration spelled the same, while any name in scope
+counts inside an array's length. A declaration the program never writes is
+still unused. A
+control header stops at the brace that opens its body, so the body is still
+read.
 
 **[S-Paren]** A parenthesised expression or type, and a tuple, is closed.
 
@@ -3206,8 +3227,21 @@ source, so no variant converts without being named, and each entry names one
 conversion: two entries of one source are refused as two implementations of one
 key are. A struct or newtype target, a source no variant holds, and a source two
 variants hold are [T-Derive] at the entry; a conversion that does more than wrap
-is written as an `impl`. An array length in the source and in a payload is
-compared by what it counts, so `[UInt8; 2]` and `[UInt8; 1 + 1]` are one source. The generated implementation is the same as a
+is written as an `impl`. The source is a written type and is held to what any
+written type is held to, whether or not a variant holds it: a source refused as
+a type, such as an array whose length is not a count ([T-ArraySize]), is
+reported as that, once, and not as a missing variant. That holds for every
+refusal of the source: an argument that does not meet the bound it is written
+under ([T-Bound]), a callable that writes a unit result ([S-UnitResult]), and
+an alias whose own type was refused, which is reported where the alias is
+declared. The source is the argument the template wraps; a mistake in another
+argument of the entry is independent of it, an undefined name included, so both
+it and a source no variant holds are reported. The report names the type the
+template wraps with the entry's arguments in its parameters' places, which is
+the type a variant would have to hold. Unit is a source like any other, wrapped by a variant whose
+only field is `()`. An array length in the source and in a payload is
+compared by what it counts, so `[UInt8; 2]` and `[UInt8; 1 + 1]` are one source.
+The generated implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.
 
@@ -3835,6 +3869,23 @@ array literal may instead write `[T; _]` to infer the count from that literal: a
 local `let` or `var`, a module constant or an `impl` constant. Grouping
 parentheses around the literal are allowed.
 
+A length that is not a constant, or not a count, is reported for its form and
+its value, and is silent only where a report already made explains why a
+constant expression has no count: a name nothing declares ([N-Undefined]); a
+part the parser refused; a constant or a local binding whose own declaration
+was refused, for whatever reason, a ring of constants included, which is
+reported where it is declared, once, whichever declaration reads it first, or
+a constant worked out from such a one; and an operand of an expression of a
+constant form that was itself reported, as the `true` of `1 + true` is
+([T-Operands]). A length is read once, after the constants are checked, so what
+it reports does not depend on which declaration is written first. That holds in a
+binding, a parameter, a field, a payload, an alias and a derive's argument. An
+expression of a form no constant expression has, such as a call of a closure,
+or of an operation, is no count whatever else is reported inside it, so it
+keeps its [T-ArraySize] beside that report. An initialiser is not held against
+an annotation that was refused: a constant whose annotation holds a refused
+length, or a refused type, reports only that.
+
 The element type supplies context to every literal element. For example,
 `let readings: [Float64; _] = [32.0, 104.0]` has type `[Float64; 2]`, and
 `let empty: [UInt8; _] = []` has type `[UInt8; 0]`. At module level,
@@ -4355,7 +4406,25 @@ fields cannot change program results.
 wide; the limit is the largest offset the representation can hold. Larger types
 are diagnosed. The limit
 applies to every reachable type, including instantiations discovered only inside
-generic bodies, so successful checking includes monomorphisation.
+generic bodies, so successful checking includes monomorphisation. A type that
+holds one too wide is too wide because that one is, so the report names the type
+at which the width crosses the limit, once; two types that cross on their own
+are each reported. A declared type and an instantiation are reported at the
+declaration; an array type, which no declaration names, is reported at the type
+that first writes it. An array no place writes, made by settling the parameter
+of a declaration that holds an array of it, is reported at that declaration,
+naming the application and the part: `struct Row[T] { items: [T; 4294967295] }`
+applied as `Row[UInt16]` reports that `Row[UInt16]` is wider, because its part
+`items` is `[UInt16; 4294967295]`.
+
+A type still written with a type parameter has no width, so the limit is asked
+of each type that settles the parameter and not of the one that holds it:
+`struct Row[T] { items: [T; 1073741824] }` is accepted, and so is `Row[UInt8]`,
+which is 2^30 bytes wide. A generic declaration is too wide whatever its
+parameters are where it crosses the limit with every parameter occupying
+nothing, that is, instantiated at `()`. Such a declaration is reported once,
+where it is declared, whether or not the program applies it, and none of its
+instantiations is reported as well.
 
 **[T-InfiniteLayout]** The graph formed by traversing inline type parts must be
 acyclic. A value that contains itself inline has no finite size. An indirection

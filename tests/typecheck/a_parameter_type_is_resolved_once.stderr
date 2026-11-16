@@ -34,8 +34,3 @@ error[T-Operands]: expected `Int64`, found `Bool`
 17 | fn total(_counts: [Int64; 1 + true]) -> Int64 {
    |                           - expected because of this operand
    |                               ^^^^ expected `Int64`, found `Bool`
-error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
-  --> tests/typecheck/a_parameter_type_is_resolved_once.lin:17:27
-   |
-17 | fn total(_counts: [Int64; 1 + true]) -> Int64 {
-   |                           ^^^^^^^^ this is not a constant

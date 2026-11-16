@@ -1,0 +1,19 @@
+// A constant declared with one type and initialised with another is
+// reported where it is declared. An array length naming it has no count to
+// read, which only follows from that mistake, so the length is not reported
+// again, in a binding's annotation or in a derive's argument.
+let n: UInt8 = true
+
+@derive(From[[UInt8; n]])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _held: [UInt8; n] = [1]
+    match Choice.Unknown {
+        Only(code) => code,
+        Unknown => 0,
+    }
+}
