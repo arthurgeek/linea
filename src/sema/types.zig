@@ -3633,12 +3633,12 @@ pub const ImplIndex = struct {
     /// The ground type an open callable row writes at the slot its head's
     /// rows are told apart by, or null where the row is not one, its head
     /// has no such slot, or it leaves that slot open.
-    fn tellingRoot(self: *const ImplIndex, pool: anytype, row: Implementation) !?TypeId {
+    fn tellingRoot(self: *const ImplIndex, gpa: std.mem.Allocator, pool: anytype, row: Implementation) !?TypeId {
         if (row.head != .callable_ or !row.valid_key or row.ty == .poison) return null;
         const slot = self.telling_slots.get(key(0, row.head)) orelse return null;
         if (slot >= callableSlots(pool, row.ty)) return null;
         const written = callableSlot(pool, row.ty, slot);
-        return if (try groundKnown(pool, written)) written else null;
+        return if (try groundKnown(gpa, pool, written)) written else null;
     }
 
     fn receiverKey(trait: u32, receiver: TypeId) u64 {
@@ -3667,20 +3667,21 @@ pub const ImplIndex = struct {
 
     /// Whether a row is found by its head type: a head of such a kind with
     /// nothing in it or in its trait arguments left to bind.
-    fn foundByType(pool: anytype, row: Implementation) !bool {
+    fn foundByType(gpa: std.mem.Allocator, pool: anytype, row: Implementation) !bool {
         if (!headFoundByType(row.head)) return false;
         if (!row.valid_key or row.ty == .poison or row.parameters != 0) return false;
-        if (!try groundKnown(pool, row.ty)) return false;
-        for (row.args) |arg| if (!try groundKnown(pool, arg)) return false;
+        if (!try groundKnown(gpa, pool, row.ty)) return false;
+        for (row.args) |arg| if (!try groundKnown(gpa, pool, arg)) return false;
         return true;
     }
 
     /// Whether a type is ground, by the answer the checker's pool remembers
-    /// (`Builder.allGround`, which the overlap check asks too) and read off
-    /// a finished pool where there is none to remember it in.
-    fn groundKnown(pool: anytype, t: TypeId) std.mem.Allocator.Error!bool {
+    /// (`Builder.allGround`, which the overlap check asks too), and on a
+    /// finished pool by a walk that remembers its answers for this one
+    /// question (`isGroundIn`).
+    fn groundKnown(gpa: std.mem.Allocator, pool: anytype, t: TypeId) std.mem.Allocator.Error!bool {
         if (@TypeOf(pool) == *Typing.Builder) return pool.allGround(&.{t});
-        return isGround(pool, t);
+        return isGroundIn(gpa, pool, t);
     }
 
     /// Files every row under the type that finds it, once the rows' heads and
@@ -3714,12 +3715,12 @@ pub const ImplIndex = struct {
             var first: std.AutoHashMapUnmanaged(u64, TypeId) = .empty;
             defer first.deinit(gpa);
             for (impls) |row| {
-                if (row.head != .callable_ or !row.valid_key or row.ty == .poison or try foundByType(pool, row)) continue;
+                if (row.head != .callable_ or !row.valid_key or row.ty == .poison or try foundByType(gpa, pool, row)) continue;
                 const head_key = key(0, row.head);
                 const limit = self.telling_slots.get(head_key) orelse std.math.maxInt(u32);
                 for (0..@min(callableSlots(pool, row.ty), limit)) |slot| {
                     const written = callableSlot(pool, row.ty, slot);
-                    if (!try groundKnown(pool, written)) continue;
+                    if (!try groundKnown(gpa, pool, written)) continue;
                     const seen = try first.getOrPut(gpa, slotKey(@intCast(slot), row.head, .poison));
                     if (!seen.found_existing) {
                         seen.value_ptr.* = written;
@@ -3735,11 +3736,11 @@ pub const ImplIndex = struct {
         while (at > 0) {
             at -= 1;
             const row = impls[at];
-            if (try foundByType(pool, row)) {
+            if (try foundByType(gpa, pool, row)) {
                 try self.ground_by_receiver.note(gpa, receiverKey(row.trait, row.ty), @intCast(at));
                 try self.ground_by_header.note(gpa, headerKey(row.trait, row.ty, row.args), @intCast(at));
                 try self.ground_by_type.note(gpa, @intFromEnum(row.ty), @intCast(at));
-            } else if (try self.tellingRoot(pool, row)) |root| {
+            } else if (try self.tellingRoot(gpa, pool, row)) |root| {
                 try self.open_by_slot.note(gpa, slotKey(row.trait, row.head, root), @intCast(at));
                 try self.open_by_head_slot.note(gpa, slotKey(0, row.head, root), @intCast(at));
             } else {
@@ -3800,15 +3801,15 @@ pub const ImplIndex = struct {
     /// list is asked for, plus the open rows of its head and of the trait's
     /// parameter heads. Not the applications of its constructor the trait is
     /// implemented for.
-    pub fn candidatesFor(self: *const ImplIndex, impls: []const Implementation, pool: anytype, trait: u32, held: TypeId, args: ?[]const TypeId, defaults: bool) std.mem.Allocator.Error!CandidateIterator {
+    pub fn candidatesFor(self: *const ImplIndex, gpa: std.mem.Allocator, impls: []const Implementation, pool: anytype, trait: u32, held: TypeId, args: ?[]const TypeId, defaults: bool) std.mem.Allocator.Error!CandidateIterator {
         const head = pool.headOf(held);
         var all = self.candidates(impls, trait, head, defaults);
-        if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(pool, held)) return all;
+        if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(gpa, pool, held)) return all;
         // A closure has a callable head's shape and is no callable type, so
         // nothing is found by its type.
         if (head == .callable_ and pool.get(held) != .callable) return all;
         const by_header = if (args) |given| for (given) |arg| {
-            if (!try groundKnown(pool, arg)) break false;
+            if (!try groundKnown(gpa, pool, arg)) break false;
         } else true else false;
         all.found = .{
             .receiver = held,
@@ -3911,9 +3912,9 @@ pub const ImplIndex = struct {
     /// **Bound:** the rows written for the receiver's own type and the open
     /// rows of its head, not the applications of its constructor that carry
     /// implementations.
-    pub fn rowsUnder(self: *const ImplIndex, impls: []const Implementation, pool: anytype, held: TypeId) std.mem.Allocator.Error!RowsUnder {
+    pub fn rowsUnder(self: *const ImplIndex, gpa: std.mem.Allocator, impls: []const Implementation, pool: anytype, held: TypeId) std.mem.Allocator.Error!RowsUnder {
         const head = pool.headOf(held);
-        if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(pool, held)) {
+        if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(gpa, pool, held)) {
             return .{ .impls = impls, .head = head, .open = self.by_head.walk(key(0, head)) };
         }
         if (head == .callable_ and pool.get(held) != .callable) {
@@ -3989,8 +3990,8 @@ pub const ImplIndex = struct {
     ///
     /// **Bound:** the rows under the receiver's head and the parameter-headed
     /// rows of the one trait.
-    pub fn hasOpenReceiver(self: *const ImplIndex, pool: anytype, impls: []const Implementation, trait: u32, held: TypeId, scope: DeclId) !bool {
-        var rows = try self.candidatesFor(impls, pool, trait, held, null, false);
+    pub fn hasOpenReceiver(self: *const ImplIndex, gpa: std.mem.Allocator, pool: anytype, impls: []const Implementation, trait: u32, held: TypeId, scope: DeclId) !bool {
+        var rows = try self.candidatesFor(gpa, impls, pool, trait, held, null, false);
         while (rows.next()) |at| {
             const row = impls[at];
             if (!receiverDomainAdmits(pool, scope, row, held)) continue;
@@ -4052,6 +4053,13 @@ pub const ImplIndex = struct {
         /// refusals, and such a lookup records no answer, since its answers
         /// hold only under the grants.
         granted: ?*const RefusedDemands = null,
+        /// What a granted lookup decided for each key, where the answer
+        /// rests on no key still being decided and on no enclosing measure.
+        /// It holds under these grants for the rest of the lookup, as a
+        /// recorded answer holds for every lookup, so a key several
+        /// requirements reach is decided once rather than once per path to
+        /// it. Never recorded, since it holds only under the grants.
+        granted_answers: std.HashMapUnmanaged(PreparedImplementationKey, ImplementationCandidate, PreparedImplementationKey.Context, std.hash_map.default_max_load_percentage) = .empty,
 
         /// Whether `demand` is one this lookup takes as met.
         fn grants(self: *const Decided, demand: RefusedDemand) bool {
@@ -4219,6 +4227,7 @@ pub const ImplIndex = struct {
             self.frames.deinit(self.gpa);
             self.assumed.deinit(self.gpa);
             self.provisional.deinit(self.gpa);
+            self.granted_answers.deinit(self.gpa);
             self.scopes.deinit(self.gpa);
             self.seen.deinit(self.gpa);
             self.active.deinit(self.gpa);
@@ -4274,7 +4283,7 @@ pub const ImplIndex = struct {
             if (bound.trait == trait) try appendKey(gpa, out, bound.args);
         }
         var open = false;
-        var rows = try self.candidatesFor(impls, pool, trait.index(), held, null, true);
+        var rows = try self.candidatesFor(gpa, impls, pool, trait.index(), held, null, true);
         while (rows.next()) |at| {
             if (!receiverDomainAdmits(pool, scope, impls[at], held)) continue;
             const args = switch (try pool.receiverImplementation(@enumFromInt(at), held)) {
@@ -4482,41 +4491,41 @@ pub const ImplIndex = struct {
         }.rows;
 
         // Before the rows are filed, every row of the head is a candidate.
-        var unfiled = try index.candidatesFor(&implementations, &b, 1, box_u16, null, false);
+        var unfiled = try index.candidatesFor(gpa, &implementations, &b, 1, box_u16, null, false);
         try collect(gpa, &seen, &unfiled);
         try testing.expectEqualSlices(u32, &.{ 0, 1 }, seen.items);
 
         try index.indexGround(gpa, &implementations, &b);
 
         // One application's receiver walks no row written for another.
-        var one = try index.candidatesFor(&implementations, &b, 1, box_u16, null, false);
+        var one = try index.candidatesFor(gpa, &implementations, &b, 1, box_u16, null, false);
         try collect(gpa, &seen, &one);
         try testing.expectEqualSlices(u32, &.{1}, seen.items);
-        var none = try index.candidatesFor(&implementations, &b, 1, box_bool, null, false);
+        var none = try index.candidatesFor(gpa, &implementations, &b, 1, box_bool, null, false);
         try collect(gpa, &seen, &none);
         try testing.expectEqualSlices(u32, &.{}, seen.items);
 
         // Every argument list written for the type, then the family; or the
         // one list asked for, then the family.
-        var lists = try index.candidatesFor(&implementations, &b, 2, box_u8, null, false);
+        var lists = try index.candidatesFor(gpa, &implementations, &b, 2, box_u8, null, false);
         try collect(gpa, &seen, &lists);
         try testing.expectEqualSlices(u32, &.{ 2, 3, 4 }, seen.items);
-        var asked = try index.candidatesFor(&implementations, &b, 2, box_u8, &.{.u16}, false);
+        var asked = try index.candidatesFor(gpa, &implementations, &b, 2, box_u8, &.{.u16}, false);
         try collect(gpa, &seen, &asked);
         try testing.expectEqualSlices(u32, &.{ 3, 4 }, seen.items);
 
         // A receiver holding a parameter is given the whole chain.
-        var open = try index.candidatesFor(&implementations, &b, 2, box_t, null, false);
+        var open = try index.candidatesFor(gpa, &implementations, &b, 2, box_t, null, false);
         try collect(gpa, &seen, &open);
         try testing.expectEqualSlices(u32, &.{ 2, 3, 4 }, seen.items);
 
         // The rows of every trait under one type: its own, then the family.
         seen.clearRetainingCapacity();
-        var under = try index.rowsUnder(&implementations, &b, box_u16);
+        var under = try index.rowsUnder(gpa, &implementations, &b, box_u16);
         while (under.next()) |at| try seen.append(gpa, at);
         try testing.expectEqualSlices(u32, &.{ 1, 4 }, seen.items);
         seen.clearRetainingCapacity();
-        var under_open = try index.rowsUnder(&implementations, &b, box_t);
+        var under_open = try index.rowsUnder(gpa, &implementations, &b, box_t);
         while (under_open.next()) |at| try seen.append(gpa, at);
         try testing.expectEqualSlices(u32, &.{ 0, 1, 2, 3, 4 }, seen.items);
     }
@@ -4571,13 +4580,11 @@ pub const ImplIndex = struct {
     /// with the grants consulted wherever a requirement fails. Nothing the
     /// lookup decides is recorded, since it holds only under the grants.
     ///
-    /// **Bound:** the candidates `find` walks for the same question, walked
-    /// once for every requirement that reaches them: a granted lookup reads
-    /// no prepared answer, so a subterm of `held` that several requirements
-    /// share is decided once per requirement rather than once, and the cost
-    /// is exponential in the depth of such sharing where `find`'s is linear.
-    /// Asked only while reporting a missing implementation, and that report
-    /// spells `held` at the same cost.
+    /// **Bound:** the candidates `find` walks for the same question. A
+    /// granted lookup reads no prepared answer, and keeps its own for the
+    /// keys it settles (`Decided.granted_answers`), so a subterm of `held`
+    /// that several requirements share is decided once, as `find` decides
+    /// it.
     pub fn appliesGranted(
         self: *const ImplIndex,
         gpa: std.mem.Allocator,
@@ -4660,7 +4667,7 @@ pub const ImplIndex = struct {
         held: TypeId,
     ) std.mem.Allocator.Error!OrdinarySelection {
         var result: OrdinarySelection = .{};
-        var run = try self.candidatesFor(impls, pool, trait, held, args, false);
+        var run = try self.candidatesFor(decided.gpa, impls, pool, trait, held, args, false);
         while (run.next()) |at| {
             if (!receiverDomainAdmits(pool, decided.scope, impls[at], held)) continue;
             const arguments = if (args) |given| @as(?[]const TypeId, given) else try pool.receiverTraitArguments(@enumFromInt(at), held);
@@ -4670,7 +4677,7 @@ pub const ImplIndex = struct {
                 .{};
             result.blocks_default = result.blocks_default or candidate.header_matches;
             if (!result.blocks_default and self.defaultImplementation(impls, trait) != null)
-                result.blocks_default = !isGround(pool, held);
+                result.blocks_default = !try isGroundIn(decided.gpa, pool, held);
             if (candidate.arguments) |bindings| {
                 result.choice = .{ .supplier = .{ .declared = @enumFromInt(at) }, .receiver = held, .impl_args = bindings };
                 return result;
@@ -4700,7 +4707,7 @@ pub const ImplIndex = struct {
     ) std.mem.Allocator.Error!?ImplementationChoice {
         if (blocked or args.len != 0 or held == .poison or pool.get(held) == .parameter or pool.standinOf(held) != null) return null;
         const at = self.defaultImplementation(impls, trait) orelse return null;
-        if (pool.headOf(held) != .applied and !isGround(pool, held)) return null;
+        if (pool.headOf(held) != .applied and !try isGroundIn(decided.gpa, pool, held)) return null;
         if (try self.answersFor(impls, pool, decided, trait, at, args, held)) |bindings|
             return .{ .supplier = .{ .declared = @enumFromInt(at) }, .receiver = held, .impl_args = bindings };
         return null;
@@ -4758,7 +4765,7 @@ pub const ImplIndex = struct {
             if (implementation.parameters == 0) return written;
 
             const inner = at.impl_args;
-            if (pool.get(written) != .parameter and !isGround(pool, written)) {
+            if (pool.get(written) != .parameter and !try isGroundIn(decided.gpa, pool, written)) {
                 return try pool.substitute(written, implementation.decl.index(), inner);
             }
             return self.directlySubstituted(
@@ -4823,6 +4830,54 @@ pub const ImplIndex = struct {
         impls: []const Implementation,
         pool: anytype,
         decided: *Decided,
+        actual: TypeId,
+        written: TypeId,
+        owner: u32,
+        bindings: []const TypeId,
+    ) std.mem.Allocator.Error!bool {
+        var memo: MatchMemo = .empty;
+        defer memo.deinit(decided.gpa);
+        return self.matchesSubstitutionIn(&memo, impls, pool, decided, actual, written, owner, bindings);
+    }
+
+    /// The pairs `matchesSubstitutionIn` has answered under one owner and one
+    /// list of bindings, keyed by the actual type as given and the written one.
+    const MatchMemo = std.AutoHashMapUnmanaged(MatchPair, bool);
+    const MatchPair = struct { actual: TypeId, written: TypeId };
+
+    /// `typeMatchesSubstitution` under the owner and bindings `memo` was
+    /// made for. A pair is answered once: a type that shares a part between
+    /// several arguments meets the part once per path to it, and every
+    /// meeting asks the same question. A settled reference's member is
+    /// compared under its implementation's own bindings, which is another
+    /// question and starts its own table.
+    ///
+    /// **Bound:** the pairs of types the two sides reach together, each
+    /// answered once.
+    fn matchesSubstitutionIn(
+        self: *const ImplIndex,
+        memo: *MatchMemo,
+        impls: []const Implementation,
+        pool: anytype,
+        decided: *Decided,
+        unsettled_actual: TypeId,
+        written: TypeId,
+        owner: u32,
+        bindings: []const TypeId,
+    ) std.mem.Allocator.Error!bool {
+        const pair: MatchPair = .{ .actual = unsettled_actual, .written = written };
+        if (memo.get(pair)) |known| return known;
+        const answer = try self.matchesSubstitutionOnce(memo, impls, pool, decided, unsettled_actual, written, owner, bindings);
+        try memo.put(decided.gpa, pair, answer);
+        return answer;
+    }
+
+    fn matchesSubstitutionOnce(
+        self: *const ImplIndex,
+        memo: *MatchMemo,
+        impls: []const Implementation,
+        pool: anytype,
+        decided: *Decided,
         unsettled_actual: TypeId,
         written: TypeId,
         owner: u32,
@@ -4835,7 +4890,8 @@ pub const ImplIndex = struct {
         if (pool.standinOf(written)) |want| {
             if (pool.standinOf(actual)) |got| {
                 if (got.trait != want.trait or got.member != want.member) return false;
-                if (!try self.typeMatchesSubstitution(
+                if (!try self.matchesSubstitutionIn(
+                    memo,
                     impls,
                     pool,
                     decided,
@@ -4848,7 +4904,8 @@ pub const ImplIndex = struct {
                 const want_args = pool.standinArgsOf(want);
                 if (got_args.len != want_args.len) return false;
                 for (got_args, want_args) |got_arg, want_arg| {
-                    if (!try self.typeMatchesSubstitution(
+                    if (!try self.matchesSubstitutionIn(
+                        memo,
                         impls,
                         pool,
                         decided,
@@ -4919,7 +4976,8 @@ pub const ImplIndex = struct {
             const want_args = pool.argsOf(want);
             if (got_args.len != want_args.len) return false;
             for (got_args, want_args) |got_arg, want_arg| {
-                if (!try self.typeMatchesSubstitution(
+                if (!try self.matchesSubstitutionIn(
+                    memo,
                     impls,
                     pool,
                     decided,
@@ -4934,11 +4992,12 @@ pub const ImplIndex = struct {
 
         return switch (pool.get(written)) {
             .borrow => |want| switch (pool.get(actual)) {
-                .borrow => |got| self.typeMatchesSubstitution(impls, pool, decided, got.referent, want.referent, owner, bindings),
+                .borrow => |got| self.matchesSubstitutionIn(memo, impls, pool, decided, got.referent, want.referent, owner, bindings),
                 else => false,
             },
             .array => |want| switch (pool.get(actual)) {
-                .array => |got| got.count == want.count and try self.typeMatchesSubstitution(
+                .array => |got| got.count == want.count and try self.matchesSubstitutionIn(
+                    memo,
                     impls,
                     pool,
                     decided,
@@ -4966,7 +5025,8 @@ pub const ImplIndex = struct {
                     const want_args = pool.closureArgs(want);
                     if (got_args.len != want_args.len) break :blk false;
                     for (got_args, want_args) |got_arg, want_arg| {
-                        if (!try self.typeMatchesSubstitution(
+                        if (!try self.matchesSubstitutionIn(
+                            memo,
                             impls,
                             pool,
                             decided,
@@ -4980,9 +5040,9 @@ pub const ImplIndex = struct {
                     const want_impl = pool.closureImplArgs(want);
                     if (got_impl.len != want_impl.len) break :blk false;
                     for (got_impl, want_impl) |got_arg, want_arg| {
-                        if (!try self.typeMatchesSubstitution(impls, pool, decided, got_arg, want_arg, owner, bindings)) break :blk false;
+                        if (!try self.matchesSubstitutionIn(memo, impls, pool, decided, got_arg, want_arg, owner, bindings)) break :blk false;
                     }
-                    if (!try self.typeMatchesSubstitution(impls, pool, decided, got.self_ty, want.self_ty, owner, bindings)) break :blk false;
+                    if (!try self.matchesSubstitutionIn(memo, impls, pool, decided, got.self_ty, want.self_ty, owner, bindings)) break :blk false;
                     break :blk true;
                 },
                 else => false,
@@ -7902,26 +7962,6 @@ pub const Typing = struct {
         return .{ .whole = t };
     }
 
-    /// Whether a type still names a type nothing has settled, such as the `_`
-    /// a generic function's value carries until a use says what its parameters
-    /// are.
-    ///
-    /// **Bound:** the type's own parts, once each.
-    pub fn mentionsOpenType(self: *const Typing, t: TypeId) bool {
-        switch (self.get(t)) {
-            .open_type, .open_integer, .open_float => return true,
-            .callable => |signature| {
-                for (self.callableParams(signature)) |parameter| if (self.mentionsOpenType(parameter.ty)) return true;
-                return self.mentionsOpenType(signature.result);
-            },
-            .array => |array| return self.mentionsOpenType(array.element),
-            .borrow => |observation| return self.mentionsOpenType(observation.referent),
-            else => {},
-        }
-        for (self.appliedTo(t)) |argument| if (self.mentionsOpenType(argument)) return true;
-        return false;
-    }
-
     /// What a type applies to its head, in the order it applies them, and
     /// nothing where it applies nothing.
     ///
@@ -10591,34 +10631,66 @@ pub const Typing = struct {
                 @intFromBool(promise.isolated),
                 @intCast(promise.traits.len),
             });
+            var renaming: Renaming = .{ .args = args };
+            defer renaming.deinit(self.gpa);
             for (promise.traits) |bound| {
                 try words.appendSlice(self.gpa, &.{ bound.trait.index(), @intCast(bound.args.len) });
-                for (bound.args) |bound_arg| try self.encodeRenamed(&words, bound_arg, args);
+                for (bound.args) |bound_arg| try self.encodeRenamed(&words, &renaming, bound_arg);
             }
             try words.append(self.gpa, @intCast(promise.callables.len));
-            for (promise.callables) |callable| try self.encodeRenamed(&words, callable, args);
+            for (promise.callables) |callable| try self.encodeRenamed(&words, &renaming, callable);
             try self.encodePromisedThrough(&words, candidate, position, arg, args);
             return self.internShape(words.items);
         }
 
-        /// Appends `ty` to `words`, with each parameter among `args` written
-        /// as its position. Anything the encoding does not take apart is
-        /// written as itself, so two such types encode alike only when they
-        /// are the same type, which at worst keeps two candidates apart.
+        /// One run of words `encodeRenamed` appends to: the arguments whose
+        /// parameters are written as their positions, and the types already
+        /// written in the run, each by the order it was first written in.
+        const Renaming = struct {
+            args: []const TypeId,
+            written: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
+
+            fn deinit(self: *Renaming, gpa: std.mem.Allocator) void {
+                self.written.deinit(gpa);
+            }
+        };
+
+        /// Appends `ty` to `words`, with each parameter among `renaming`'s
+        /// arguments written as its position. Anything the encoding does not
+        /// take apart is written as itself, so two such types encode alike
+        /// only when they are the same type, which at worst keeps two
+        /// candidates apart.
         ///
-        /// **Bound:** the nesting height of `ty`.
-        fn encodeRenamed(self: *const Builder, words: *std.ArrayList(u32), ty: TypeId, args: []const TypeId) std.mem.Allocator.Error!void {
+        /// A type taken apart a second time in one run is written as the
+        /// order it was first written in. Under one renaming two types encode
+        /// alike only where they are one type, so where one part sits twice
+        /// is fixed by what the parts are, and two runs agree with these
+        /// references exactly where they agree written out in full.
+        ///
+        /// **Bound:** the distinct types `ty` holds, each taken apart once
+        /// per run however many paths reach it.
+        fn encodeRenamed(self: *const Builder, words: *std.ArrayList(u32), renaming: *Renaming, ty: TypeId) std.mem.Allocator.Error!void {
+            const composite = self.standinOf(ty) != null or self.instanceOf(ty) != null or switch (self.get(ty)) {
+                .array, .borrow => true,
+                else => false,
+            };
+            if (composite) {
+                const entry = try renaming.written.getOrPut(self.gpa, ty);
+                if (entry.found_existing) return words.appendSlice(self.gpa, &.{ 6, entry.value_ptr.* });
+                entry.value_ptr.* = @intCast(renaming.written.count() - 1);
+            }
             if (self.standinOf(ty)) |standin| {
                 try words.appendSlice(self.gpa, &.{ 2, standin.trait, standin.member.index(), standin.arg_count });
-                try self.encodeRenamed(words, standin.held, args);
-                for (self.standin_args.items[standin.first_arg..][0..standin.arg_count]) |held| try self.encodeRenamed(words, held, args);
+                try self.encodeRenamed(words, renaming, standin.held);
+                for (self.standin_args.items[standin.first_arg..][0..standin.arg_count]) |held| try self.encodeRenamed(words, renaming, held);
                 return;
             }
             if (self.instanceOf(ty)) |instance| {
                 try words.appendSlice(self.gpa, &.{ 3, instance.decl.index(), instance.arg_count });
-                for (self.argsOf(instance)) |held| try self.encodeRenamed(words, held, args);
+                for (self.argsOf(instance)) |held| try self.encodeRenamed(words, renaming, held);
                 return;
             }
+            const args = renaming.args;
             switch (self.get(ty)) {
                 .parameter => |parameter| {
                     const position: ?u32 = if (parameter.index < args.len and args[parameter.index] == ty)
@@ -10628,11 +10700,11 @@ pub const Typing = struct {
                 },
                 .array => |array| {
                     try words.appendSlice(self.gpa, &.{ 4, array.count });
-                    return self.encodeRenamed(words, array.element, args);
+                    return self.encodeRenamed(words, renaming, array.element);
                 },
                 .borrow => |borrow| {
                     try words.append(self.gpa, 5);
-                    return self.encodeRenamed(words, borrow.referent, args);
+                    return self.encodeRenamed(words, renaming, borrow.referent);
                 },
                 else => {},
             }
@@ -10694,8 +10766,13 @@ pub const Typing = struct {
 
         /// Appends a settled reference promised through a parameter, renamed,
         /// and which of `Owned`, `Shareable` and `Isolated` it was promised.
+        ///
+        /// Each promise is its own run, so its words do not depend on the
+        /// promises written before it, which are sorted afterwards.
         fn encodePromise(self: *const Builder, pieces: *std.ArrayList(u32), standin: TypeId, args: []const TypeId) std.mem.Allocator.Error!void {
-            try self.encodeRenamed(pieces, standin, args);
+            var renaming: Renaming = .{ .args = args };
+            defer renaming.deinit(self.gpa);
+            try self.encodeRenamed(pieces, &renaming, standin);
             const promise = self.get(standin).parameter;
             try pieces.append(self.gpa, @as(u32, @intFromBool(promise.owned)) | @as(u32, @intFromBool(promise.shareable)) << 1 | @as(u32, @intFromBool(promise.isolated)) << 2);
         }
@@ -12441,30 +12518,20 @@ pub const Typing = struct {
                 2 => return false,
                 else => {},
             }
-            const answer = try self.isGroundOnce(t);
+            const answer = try groundOnce(self, t, BuilderGround{ .builder = self });
             self.ground_memo.items[@intFromEnum(t)] = if (answer) 1 else 2;
             return answer;
         }
 
-        fn isGroundOnce(self: *Builder, t: TypeId) std.mem.Allocator.Error!bool {
-            if (self.standinOf(t) != null) return false;
-            switch (self.get(t)) {
-                .parameter => return false,
-                .array => |a| return self.isGroundMemo(a.element),
-                .borrow => |b| return self.isGroundMemo(b.referent),
-                .callable => |signature| {
-                    for (self.callableParams(signature)) |param| {
-                        if (!try self.isGroundMemo(param.ty)) return false;
-                    }
-                    return self.isGroundMemo(signature.result);
-                },
-                else => {},
+        /// How `groundOnce` asks a builder about a part: through the
+        /// builder's own table, which lives as long as its pool.
+        const BuilderGround = struct {
+            builder: *Builder,
+
+            pub fn ground(self: BuilderGround, t: TypeId) std.mem.Allocator.Error!bool {
+                return self.builder.isGroundMemo(t);
             }
-            const instance = self.instanceOf(t) orelse return true;
-            const held = try self.gpa.dupe(TypeId, self.argsOf(instance));
-            defer self.gpa.free(held);
-            return self.allGround(held);
-        }
+        };
 
         /// Whether a run of types holds anything nothing settled.
         ///
@@ -13329,7 +13396,7 @@ pub const Typing = struct {
                             .trait = required.trait,
                             .args = required_args,
                         };
-                        if (self.holdsType(subject, receiver)) {
+                        if (try self.holdsType(subject, receiver)) {
                             if (through_receiver == null) {
                                 handed_off = true;
                                 through_receiver = unmet;
@@ -13349,7 +13416,7 @@ pub const Typing = struct {
                             .args = &.{},
                             .capability = predicate.demand.requirement,
                         };
-                        if (!self.holdsType(subject, receiver)) {
+                        if (!try self.holdsType(subject, receiver)) {
                             if (through_receiver) |earlier| self.gpa.free(earlier.args);
                             return unmet;
                         }
@@ -13436,25 +13503,34 @@ pub const Typing = struct {
         }
 
         /// Says whether `inner` occurs within `outer`, `outer` itself included.
-        fn holdsType(self: *const Builder, outer: TypeId, inner: TypeId) bool {
-            if (outer == inner) return true;
-            switch (self.get(outer)) {
-                .array => |a| return self.holdsType(a.element, inner),
-                .borrow => |b| return self.holdsType(b.referent, inner),
-                .callable => |signature| {
-                    for (self.callableParams(signature)) |param| {
-                        if (self.holdsType(param.ty, inner)) return true;
+        ///
+        /// **Bound:** each distinct type `outer` holds, once: a part several
+        /// arguments share is read once rather than once per path to it.
+        pub fn holdsType(self: *Builder, outer: TypeId, inner: TypeId) std.mem.Allocator.Error!bool {
+            const Find = struct {
+                builder: *Builder,
+                needle: TypeId,
+                seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
+                found: bool = false,
+
+                fn visit(find: *@This(), inside: TypeId) std.mem.Allocator.Error!void {
+                    if (find.found) return;
+                    if (inside == find.needle) {
+                        find.found = true;
+                        return;
                     }
-                    return self.holdsType(signature.result, inner);
-                },
-                else => {
-                    const instance = self.instanceOf(outer) orelse return false;
-                    for (self.argsOf(instance)) |argument| {
-                        if (self.holdsType(argument, inner)) return true;
-                    }
-                    return false;
-                },
-            }
+                    if ((try find.seen.getOrPut(find.builder.gpa, inside)).found_existing) return;
+                    try find.builder.visitParts(inside, find);
+                }
+
+                pub fn part(find: *@This(), inside: TypeId) std.mem.Allocator.Error!void {
+                    try find.visit(inside);
+                }
+            };
+            var find: Find = .{ .builder = self, .needle = inner };
+            defer find.seen.deinit(self.gpa);
+            try find.visit(outer);
+            return find.found;
         }
 
         /// Discovery records the concrete supplier; a sealed emission pool reads
@@ -14072,7 +14148,7 @@ pub const Typing = struct {
         /// under `head` applies to `held`.
         /// Decides whether each row under `held`'s own head applies to it.
         fn prepareRowsUnder(self: *Builder, decided: *ImplIndex.Decided, held: TypeId) !void {
-            var candidates = try self.impl_index.rowsUnder(self.implementations, self, held);
+            var candidates = try self.impl_index.rowsUnder(self.gpa, self.implementations, self, held);
             while (candidates.next()) |at| try self.prepareRow(decided, at, held);
         }
 
@@ -14109,8 +14185,12 @@ pub const Typing = struct {
             const key_: PreparedImplementationKey = .{ .scope = self.contextual_constraints.lookupScope(decided.scope), .receiver = held, .implementation = @enumFromInt(at), .args = args };
             // An answer under grants is neither read from the record nor
             // written to it: the record holds what applies, and a granted
-            // lookup asks what would apply.
-            if (decided.granted == null) if (self.prepared_implementations.answers.get(key_)) |answer| {
+            // lookup asks what would apply. It keeps its own answers instead.
+            const recorded = if (decided.granted == null)
+                self.prepared_implementations.answers.get(key_)
+            else
+                decided.granted_answers.get(key_);
+            if (recorded) |answer| {
                 if (answer.arguments != null and decided.prerequisite_sizes.contains(@enumFromInt(at))) {
                     if (decided.outgrows(at, try decided.keySize(self, held, args))) {
                         decided.recursive_refusals += 1;
@@ -14118,7 +14198,7 @@ pub const Typing = struct {
                     }
                 }
                 return answer;
-            };
+            }
             if (self.sealed) @panic("implementation applicability was not prepared before emission");
             if (try decided.provisionalAnswer(key_)) |answer| return answer;
             if (decided.active.get(key_)) |active| {
@@ -14198,6 +14278,12 @@ pub const Typing = struct {
                     .implementation = key_.implementation,
                     .args = try self.prepared_implementations.retainArguments(self.gpa, key_.args),
                 }, .{ .answer = unrecorded, .scope = decided.frames.items[depth - 1].scope, .measured = measured });
+                if (!measured and outermost == null and decided.granted != null) try decided.granted_answers.put(self.gpa, .{
+                    .scope = key_.scope,
+                    .receiver = key_.receiver,
+                    .implementation = key_.implementation,
+                    .args = try self.prepared_implementations.retainArguments(self.gpa, key_.args),
+                }, unrecorded);
                 return unrecorded;
             }
             return self.prepared_implementations.record(self.gpa, key_, answer);
@@ -14820,30 +14906,43 @@ fn resolveBound(subst: *const Substitution, t: TypeId) TypeId {
 /// Whether `p` -- a parameter, unbound at the point this is asked -- appears
 /// anywhere inside `t` once every binding `unifyWitness` has made so far is followed.
 ///
-/// The one recursive walk in the whole function, and it is what stops a
-/// binding from ever closing a cycle: every Linea type is finite, so a
-/// substitution that would make `p` equal to a type containing `p` has no
-/// solution, and this is what answers that instead of `unifyWitness` looping while
-/// trying to compare the two sides forever.
+/// What stops a binding from ever closing a cycle: every Linea type is finite,
+/// so a substitution that would make `p` equal to a type containing `p` has no
+/// solution, and this is what answers that instead of `unifyWitness` looping
+/// while trying to compare the two sides forever.
 ///
-fn occursIn(typing: *const Typing.Builder, subst: *const Substitution, p: TypeId, t: TypeId) bool {
+/// **Bound:** each type `t` reaches once. `cleared` holds the types already
+/// found not to hold `p`, for this one question: the substitution does not
+/// change while it is asked, and a type that shares a part between several
+/// arguments reads that part once rather than once per path to it. The next
+/// question is asked with another parameter and more bindings, so the caller
+/// empties `cleared` between them.
+fn occursIn(
+    gpa: std.mem.Allocator,
+    typing: *const Typing.Builder,
+    subst: *const Substitution,
+    cleared: *std.AutoHashMapUnmanaged(TypeId, void),
+    p: TypeId,
+    t: TypeId,
+) std.mem.Allocator.Error!bool {
     const r = resolveBound(subst, t);
     if (r == p) return true;
+    if ((try cleared.getOrPut(gpa, r)).found_existing) return false;
     switch (typing.get(r)) {
         // The one constructed type an instantiation never wraps -- an array's
         // element is reached directly, the same way `substitute` reaches it.
-        .array => |a| return occursIn(typing, subst, p, a.element),
-        .borrow => |b| return occursIn(typing, subst, p, b.referent),
+        .array => |a| return occursIn(gpa, typing, subst, cleared, p, a.element),
+        .borrow => |b| return occursIn(gpa, typing, subst, cleared, p, b.referent),
         .callable => |signature| {
             for (typing.callableParams(signature)) |param| {
-                if (occursIn(typing, subst, p, param.ty)) return true;
+                if (try occursIn(gpa, typing, subst, cleared, p, param.ty)) return true;
             }
-            return occursIn(typing, subst, p, signature.result);
+            return occursIn(gpa, typing, subst, cleared, p, signature.result);
         },
         else => {
             const inst = typing.instanceOf(r) orelse return false;
             for (typing.argsOf(inst)) |arg| {
-                if (occursIn(typing, subst, p, arg)) return true;
+                if (try occursIn(gpa, typing, subst, cleared, p, arg)) return true;
             }
             return false;
         },
@@ -14858,7 +14957,8 @@ pub const Groundness = struct {
     }
 
     pub fn check(self: *Groundness, gpa: std.mem.Allocator, typing: anytype, ty: TypeId) std.mem.Allocator.Error!bool {
-        return ground(typing, ty, .{ .memo = self, .gpa = gpa });
+        var memo: GroundMemo(@TypeOf(typing)) = .{ .pool = typing, .known = self, .gpa = gpa };
+        return memo.ground(ty);
     }
 };
 
@@ -14870,38 +14970,92 @@ fn writtenPart(pool: anytype, t: TypeId, i: u32) TypeId {
     return pool.fieldType(t, i);
 }
 
-const GroundMemo = struct { memo: *Groundness, gpa: std.mem.Allocator };
-
-/// Whether a type is ground, read off any pool and remembered nowhere, which
-/// is what a retained pool allows. The checker asks `Builder.allGround`
-/// instead, which keeps its answers.
-fn isGround(typing: anytype, t: TypeId) bool {
-    return ground(typing, t, null) catch unreachable;
+/// Whether `t` holds no type parameter and no settled reference, given an
+/// answer for each type it is built from. The one place the question is
+/// decided: `Builder.isGroundMemo` and `GroundMemo` each call it with their
+/// own table of answers, and `memo.ground` is how either answers a part.
+///
+/// Poison and an open type are ground, as a type holding neither a
+/// parameter nor a settled reference is. A builder's instance arguments
+/// are copied before they are asked about, so the walk reads a run that
+/// cannot move under it.
+///
+/// **Bound:** one step per part of `t`; the memo decides how often each
+/// part is walked.
+fn groundOnce(pool: anytype, t: TypeId, memo: anytype) std.mem.Allocator.Error!bool {
+    if (pool.standinOf(t) != null) return false;
+    switch (pool.get(t)) {
+        .parameter => return false,
+        .array => |a| return memo.ground(a.element),
+        .borrow => |b| return memo.ground(b.referent),
+        .callable => |signature| {
+            for (pool.callableParams(signature)) |param| {
+                if (!try memo.ground(param.ty)) return false;
+            }
+            return memo.ground(signature.result);
+        },
+        else => {},
+    }
+    const instance = pool.instanceOf(t) orelse return true;
+    if (comptime @TypeOf(pool) == *Typing.Builder) {
+        const held = try pool.gpa.dupe(TypeId, pool.argsOf(instance));
+        defer pool.gpa.free(held);
+        for (held) |arg| if (!try memo.ground(arg)) return false;
+        return true;
+    }
+    for (pool.argsOf(instance)) |arg| if (!try memo.ground(arg)) return false;
+    return true;
 }
 
-fn ground(typing: anytype, t: TypeId, memo: ?GroundMemo) std.mem.Allocator.Error!bool {
-    if (memo) |state| if (state.memo.values.get(t)) |known| return known;
-    const result = value: {
-        if (typing.standinOf(t) != null) break :value false;
-        switch (typing.get(t)) {
-            .parameter => break :value false,
-            .array => |a| break :value try ground(typing, a.element, memo),
-            .borrow => |b| break :value try ground(typing, b.referent, memo),
-            .callable => |signature| {
-                for (typing.callableParams(signature)) |param| {
-                    if (!try ground(typing, param.ty, memo)) break :value false;
-                }
-                break :value try ground(typing, signature.result, memo);
-            },
-            else => {},
+/// Answers groundness off any pool through a table its owner keeps, so each
+/// distinct type is walked once while the table lives.
+fn GroundMemo(comptime Pool: type) type {
+    return struct {
+        pool: Pool,
+        known: *Groundness,
+        gpa: std.mem.Allocator,
+        /// How many types were walked rather than read from the table.
+        walked: usize = 0,
+
+        pub fn ground(self: *@This(), t: TypeId) std.mem.Allocator.Error!bool {
+            if (self.known.values.get(t)) |known| return known;
+            self.walked += 1;
+            const answer = try groundOnce(self.pool, t, self);
+            try self.known.values.put(self.gpa, t, answer);
+            return answer;
         }
-        if (typing.instanceOf(t)) |instance| {
-            for (typing.argsOf(instance)) |arg| if (!try ground(typing, arg, memo)) break :value false;
-        }
-        break :value true;
     };
-    if (memo) |state| try state.memo.values.put(state.gpa, t, result);
-    return result;
+}
+
+/// Whether a type is ground, read off any pool with a table kept for this
+/// one question, which is what a finished pool allows. The checker asks
+/// `Builder.allGround` instead, which keeps its answers.
+///
+/// **Bound:** one walk per distinct type `t` holds.
+fn isGroundIn(gpa: std.mem.Allocator, typing: anytype, t: TypeId) std.mem.Allocator.Error!bool {
+    var known: Groundness = .{};
+    defer known.deinit(gpa);
+    return known.check(gpa, typing, t);
+}
+
+test "a finished pool walks each distinct type once to answer groundness" {
+    const gpa = testing.allocator;
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    // `P[A, B]`, then thirty levels of `P[x, x]`: thirty-one distinct
+    // types and about two billion paths to the bottom.
+    const decl = DeclId.at(1);
+    const a = try builder.addParameter("A", decl.index(), 0, .unrestricted, &.{});
+    const b = try builder.addParameter("B", decl.index(), 1, .unrestricted, &.{});
+    const pair = try builder.addStruct("P", .copyable, &.{ .{ .name = "a", .ty = a }, .{ .name = "b", .ty = b } });
+    var top: TypeId = .u8;
+    for (0..30) |_| top = try builder.instantiate(pair, decl, &.{ top, top });
+    const view = builder.view();
+    var known: Groundness = .{};
+    defer known.deinit(gpa);
+    var memo: GroundMemo(*const Typing) = .{ .pool = &view, .known = &known, .gpa = gpa };
+    try testing.expect(try memo.ground(top));
+    try testing.expectEqual(@as(usize, 31), memo.walked);
 }
 
 /// The types a callable type writes, in order: each parameter's and then the
@@ -14931,9 +15085,13 @@ pub fn callableSlot(pool: anytype, t: TypeId, slot: usize) TypeId {
 /// trait arguments. An occurs check prevents recursive types. Associated-type
 /// standins remain opaque: overlap cannot be ruled out from an unsettled type.
 ///
-/// The worklist follows the two type expressions, and each parameter binds at
-/// most once. Occurs checks cost their combined size per parameter. Resolving
-/// the witness interns only constructed types whose arguments changed.
+/// The worklist follows the two type expressions, each pair of types once:
+/// a pair met again, which a type sharing a part between several arguments
+/// produces once per path to the part, adds nothing the first meeting did not
+/// already require. Each parameter binds at most once, and its occurs check
+/// reads each type it reaches once. Resolving the witness reads each type
+/// once, sharing what it built across the roots, and interns only constructed
+/// types whose arguments changed.
 pub fn unifyWitness(
     gpa: std.mem.Allocator,
     pool: *Typing.Builder,
@@ -14951,7 +15109,13 @@ pub fn unifyWitness(
 
     for (a, b) |x, y| try worklist.append(gpa, .{ .x = x, .y = y });
 
+    var met: std.AutoHashMapUnmanaged(UnifyPair, void) = .empty;
+    defer met.deinit(gpa);
+    var cleared: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+    defer cleared.deinit(gpa);
+
     while (worklist.pop()) |pair| {
+        if ((try met.getOrPut(gpa, pair)).found_existing) continue;
         const x = resolveBound(&subst, pair.x);
         const y = resolveBound(&subst, pair.y);
         if (x == y) continue;
@@ -14971,12 +15135,14 @@ pub fn unifyWitness(
         const ty_ = pool.get(y);
 
         if (tx == .parameter) {
-            if (occursIn(pool, &subst, x, y)) return null;
+            cleared.clearRetainingCapacity();
+            if (try occursIn(gpa, pool, &subst, &cleared, x, y)) return null;
             try subst.put(gpa, x, y);
             continue;
         }
         if (ty_ == .parameter) {
-            if (occursIn(pool, &subst, y, x)) return null;
+            cleared.clearRetainingCapacity();
+            if (try occursIn(gpa, pool, &subst, &cleared, y, x)) return null;
             try subst.put(gpa, y, x);
             continue;
         }
@@ -15050,7 +15216,9 @@ pub fn unifyWitness(
 
     const out = try gpa.alloc(TypeId, a.len);
     errdefer gpa.free(out);
-    for (a, out) |t, *slot| slot.* = try resolveDeep(gpa, pool, &subst, t);
+    var resolved: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty;
+    defer resolved.deinit(gpa);
+    for (a, out) |t, *slot| slot.* = try resolveDeep(gpa, pool, &subst, &resolved, t);
     return out;
 }
 
@@ -15217,18 +15385,38 @@ test "contracts may agree where what differs need not stand" {
 /// actually changed it, so a witness that needs no rebuilding -- the common
 /// case, a `t` with no parameter left unbound anywhere inside it -- costs one
 /// walk down to a leaf and nothing minted.
+///
+/// **Bound:** each type `t` reaches once. `resolved` holds what each type
+/// resolved to under `subst`, which no longer changes once unification has
+/// finished, so the roots of one witness share it and a part several
+/// arguments share is resolved once. A table read under another substitution
+/// would give another witness's answers, so each `unifyWitness` makes its own.
 fn resolveDeep(
     gpa: std.mem.Allocator,
     pool: *Typing.Builder,
     subst: *const Substitution,
+    resolved: *std.AutoHashMapUnmanaged(TypeId, TypeId),
+    t: TypeId,
+) std.mem.Allocator.Error!TypeId {
+    if (resolved.get(t)) |known| return known;
+    const answer = try resolveDeepOnce(gpa, pool, subst, resolved, t);
+    try resolved.put(gpa, t, answer);
+    return answer;
+}
+
+fn resolveDeepOnce(
+    gpa: std.mem.Allocator,
+    pool: *Typing.Builder,
+    subst: *const Substitution,
+    resolved: *std.AutoHashMapUnmanaged(TypeId, TypeId),
     t: TypeId,
 ) std.mem.Allocator.Error!TypeId {
     const r = resolveBound(subst, t);
 
     switch (pool.get(r)) {
-        .borrow => |b| return pool.borrowOf(try resolveDeep(gpa, pool, subst, b.referent)),
+        .borrow => |b| return pool.borrowOf(try resolveDeep(gpa, pool, subst, resolved, b.referent)),
         .array => |a| {
-            const elem = try resolveDeep(gpa, pool, subst, a.element);
+            const elem = try resolveDeep(gpa, pool, subst, resolved, a.element);
             return if (elem == a.element) r else pool.arrayOf(elem, a.count);
         },
         .callable => |signature| {
@@ -15237,11 +15425,11 @@ fn resolveDeep(
             defer gpa.free(mapped);
             var moved = false;
             for (mapped) |*param| {
-                const ty = try resolveDeep(gpa, pool, subst, param.ty);
+                const ty = try resolveDeep(gpa, pool, subst, resolved, param.ty);
                 if (ty != param.ty) moved = true;
                 param.ty = ty;
             }
-            const result = try resolveDeep(gpa, pool, subst, signature.result);
+            const result = try resolveDeep(gpa, pool, subst, resolved, signature.result);
             if (!moved and result == signature.result) return r;
             return pool.internCallable(mapped, result, signature.contracts, signature.invocation);
         },
@@ -15257,7 +15445,7 @@ fn resolveDeep(
     var moved = false;
     for (mapped) |*slot| {
         const arg = slot.*;
-        slot.* = try resolveDeep(gpa, pool, subst, arg);
+        slot.* = try resolveDeep(gpa, pool, subst, resolved, arg);
         if (slot.* != arg) moved = true;
     }
     if (!moved) return r;

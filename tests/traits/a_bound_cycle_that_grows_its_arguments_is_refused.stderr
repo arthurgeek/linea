@@ -1,0 +1,5 @@
+error[T-Bound]: `Grow` requires itself
+ --> tests/traits/a_bound_cycle_that_grows_its_arguments_is_refused.lin:4:16
+  |
+4 | trait Grow[T]: Grow[Option[T]] {
+  |                ^^^^ drop the bound

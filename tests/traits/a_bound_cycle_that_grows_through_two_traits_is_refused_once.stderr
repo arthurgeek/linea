@@ -1,0 +1,5 @@
+error[T-Bound]: `Shrink` requires `Grow`, and `Grow` requires `Shrink`
+ --> tests/traits/a_bound_cycle_that_grows_through_two_traits_is_refused_once.lin:9:18
+  |
+9 | trait Shrink[T]: Grow[Vec[T]] {
+  |                  ^^^^ drop one of the two bounds

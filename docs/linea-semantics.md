@@ -3844,7 +3844,11 @@ the arguments written on each requirement: a parameter bounded by `Fancy`
 discharges `Lookup[UInt64]` and no other `Lookup` argument list. Arguments
 referring to the requiring trait's parameters are substituted from the bound
 that reaches it. Trait bounds may not cycle; a cycle is diagnosed at its
-declaration.
+declaration, on the bound that closes it. That bound is the cycle's one report
+and is read nowhere else: an implementation of a trait on the cycle does not
+owe it, and a parameter bounded by one is not granted it. `trait Grow[T]:
+Grow[Option[T]]` is refused once, although following its bound would name a
+longer argument list at every step.
 
 Capability requirements are inherited through the same transitive trait bounds.
 `trait Replicable: Copyable` requires every implementation of `Replicable` to
@@ -3951,7 +3955,9 @@ an implementation would settle it to a smaller type.
 
 Generic type parts retain the structural non-growth rule: each argument on a
 recurring part must contain none of the declaration's parameters or be exactly
-one of them. `struct S[T] { v: S[Wrap[T]] }` is rejected. Reachability includes
+one of them. A part is a struct's field, an enum's payload or a newtype's base.
+`struct S[T] { v: S[Wrap[T]] }` and `type G[T] = Vec[G[Option[T]]]` are
+rejected. Reachability includes
 cycles through multiple declarations, not only immediate self-reference.
 
 Argument growth is separate from layout. A declaration that stores nothing from

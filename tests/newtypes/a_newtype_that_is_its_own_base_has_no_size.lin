@@ -1,0 +1,7 @@
+// A newtype is laid out as its base, and `L`'s base is `L`, so a value of it
+// would have to hold one.
+type L = L
+
+fn main() -> UInt8 {
+    0
+}

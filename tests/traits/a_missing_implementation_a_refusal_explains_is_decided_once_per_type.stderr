@@ -1,0 +1,5 @@
+error[T-Bound]: `S` requires `Show`, and `UInt8` does not implement it
+  --> tests/traits/a_missing_implementation_a_refusal_explains_is_decided_once_per_type.lin:44:18
+   |
+44 |     let _first = display(UInt8(1))
+   |                  ^^^^^^^ implement it for that type, or drop the bound

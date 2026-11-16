@@ -1,0 +1,10 @@
+// `G[T]` is laid out as `Vec[G[Option[T]]]`, which holds a `G[Option[T]]`,
+// whose base holds a `G[Option[Option[T]]]`, and every level is a type nobody
+// wrote. A newtype's base is one of its parts, held to the measure a struct's
+// field is: an argument that puts the declaration's own parameter under a
+// constructor is refused.
+type G[T] = Vec[G[Option[T]]]
+
+fn main() -> UInt8 {
+    0
+}

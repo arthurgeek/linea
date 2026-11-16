@@ -1,0 +1,5 @@
+error[T-PolyRec]: this part instantiates `G` with more than `G` was given
+ --> tests/newtypes/a_newtype_whose_base_grows_is_refused.lin:6:17
+  |
+6 | type G[T] = Vec[G[Option[T]]]
+  |                 ^ a part that reaches its own declaration again keeps or reduces the structure of its type arguments

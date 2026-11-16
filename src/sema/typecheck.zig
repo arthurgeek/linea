@@ -875,6 +875,7 @@ fn typecheckInternal(
     }
     defer c.delegations_settled.deinit(gpa);
     defer c.delegation_cycles.deinit(gpa);
+    defer c.refused_trait_bounds.deinit(gpa);
     defer c.unsettled_parts.deinit(gpa);
     defer c.unsettled_heads.deinit(gpa);
     defer {
@@ -3312,7 +3313,7 @@ pub const Reach = struct {
     fn answersDirectly(self: Reach, gpa: std.mem.Allocator, held: TypeId, trait: node.DeclId) !bool {
         return rendersDisplayItself(self.typing, self.display, held, trait) or
             try self.index.any(gpa, self.impls, self.typing, trait.index(), held, self.scope, .direct) or
-            try self.index.hasOpenReceiver(self.typing, self.impls, trait.index(), held, self.scope);
+            try self.index.hasOpenReceiver(gpa, self.typing, self.impls, trait.index(), held, self.scope);
     }
 
     /// Associated names use exact-subject promises first, then the same
@@ -6120,6 +6121,13 @@ const Checker = struct {
     /// Field delegations reported as reaching themselves through their own
     /// backing field, which `settleDelegation` does not report again.
     delegation_cycles: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+    /// The bounds `reportTraitBoundCycles` refused, by the token naming the
+    /// required trait: one per cycle, the bound that closes it. A trait's
+    /// requirements are read past these, so a bound refused for cycling is
+    /// not followed afterwards. `trait Grow[T]: Grow[Option[T]]` names a new
+    /// argument list at every step round its cycle, and following it would
+    /// not finish.
+    refused_trait_bounds: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
     /// Whether a structural selection is passed over rather than read: while
     /// parts are first read for their callable shapes and while
     /// implementation heads are settled, nothing could answer one yet.
@@ -7879,13 +7887,12 @@ const Checker = struct {
         for (self.program.modules, 0..) |_, mi| {
             for (self.program.declsOf(ModuleId.from(mi))) |d| {
                 switch (self.ast.declTag(d)) {
-                    .struct_ => for (self.ast.declFields(d)) |f| {
-                        try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = f.written });
-                    },
-                    .enum_ => for (self.ast.declVariants(d)) |v| {
-                        for (self.ast.variantFields(v)) |f| {
-                            try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = f.written });
-                        }
+                    // Through the reader that fills a declaration's parts, so
+                    // every part filling instantiates is measured here first,
+                    // a newtype's base among them.
+                    .struct_, .enum_, .newtype => for (0..self.partCount(d)) |k| {
+                        const ref = try self.partRef(.{ .decl = d, .index = @intCast(k) });
+                        try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = ref });
                     },
                     .alias => try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = self.ast.declReturnRef(d) }),
                     else => {},
@@ -11091,35 +11098,6 @@ const Checker = struct {
         of_function: bool = false,
     };
 
-    /// Whether `ty` is `needle` or holds it as a part. Each distinct type is
-    /// visited once, so the walk is linear in the distinct types `ty` holds.
-    fn holdsType(self: *Checker, ty: TypeId, needle: TypeId) std.mem.Allocator.Error!bool {
-        const Find = struct {
-            checker: *Checker,
-            needle: TypeId,
-            seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
-            found: bool = false,
-
-            fn visit(find: *@This(), inside: TypeId) std.mem.Allocator.Error!void {
-                if (find.found) return;
-                if (inside == find.needle) {
-                    find.found = true;
-                    return;
-                }
-                if ((try find.seen.getOrPut(find.checker.gpa, inside)).found_existing) return;
-                try find.checker.builder.visitParts(inside, find);
-            }
-
-            pub fn part(find: *@This(), inside: TypeId) std.mem.Allocator.Error!void {
-                try find.visit(inside);
-            }
-        };
-        var find: Find = .{ .checker = self, .needle = needle };
-        defer find.seen.deinit(self.gpa);
-        try find.visit(ty);
-        return find.found;
-    }
-
     /// Whether the declared type of a parameter of `member` mentions the
     /// parameter of `member`'s implementation that stands for the position
     /// of the type parameter `fill` defaulted.
@@ -11166,7 +11144,7 @@ const Checker = struct {
             if (found.decl != fill.decl or wanted.decl != fill.decl) break :blk false;
             break :blk self.builder.argsOf(found)[fill.position] == fill.filled and
                 self.builder.argsOf(wanted)[fill.position] != fill.filled;
-        } else try self.holdsType(want.ty, fill.filled);
+        } else try self.builder.holdsType(want.ty, fill.filled);
         if (!explained) return null;
         return try std.fmt.allocPrint(
             self.sink.arena,
@@ -12846,6 +12824,10 @@ const Checker = struct {
                 );
                 return true;
             }
+            // A bound refused for closing a cycle of traits promises nothing
+            // an implementation could keep, and was reported where it is
+            // written.
+            if (self.refused_trait_bounds.contains(bound.named.name)) continue;
             const args = try self.settledBoundArgs(own, bound);
             defer if (args.len > 0) self.gpa.free(args);
             if (try self.discharges(held, bound.named.name, args)) continue;
@@ -12862,7 +12844,7 @@ const Checker = struct {
             // A generic function named as a value has no parameters settled
             // yet, and says what is missing where it is used: the report
             // there is the cause, and this one would only precede it.
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             if (traitAt(self.ast, self.res, bound.named.name)) |refused_trait|
                 try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .trait = .{ .decl = refused_trait, .args = args } } });
@@ -12890,21 +12872,21 @@ const Checker = struct {
         }
         if (containmentBound(self.ast, self.res, bounds, .owned)) |bound| if (held != .poison and try self.builder.mayCarryDependencies(held)) {
             if (mode == .ask) return true;
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             try self.reportNotOwned(subject, held, bound, at, span);
             return true;
         };
         if (containmentBound(self.ast, self.res, bounds, .shareable)) |bound| if (held != .poison and !try self.builder.isShareable(held)) {
             if (mode == .ask) return true;
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             try self.reportNotContained(.shareable, subject, held, bound, at, span);
             return true;
         };
         if (containmentBound(self.ast, self.res, bounds, .isolated)) |bound| if (held != .poison and !try self.builder.isIsolated(held)) {
             if (mode == .ask) return true;
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             try self.reportNotContained(.isolated, subject, held, bound, at, span);
             return true;
@@ -14167,7 +14149,7 @@ const Checker = struct {
     /// is. The blanket rows are not sized by `ty`: a program declaring many
     /// blanket implementations pays their number once per such pair.
     fn prepareTraitSettlingResults(self: *Checker, owner: DeclId, ty: TypeId) !void {
-        var own = try self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, ty);
+        var own = try self.builder.impl_index.rowsUnder(self.gpa, self.builder.implementations, &self.builder, ty);
         while (own.next()) |at| try self.prepareSettlingResultsOfRow(owner, ty, at);
         if (self.builder.headOf(ty) == .parameter) return;
         var blanket = self.builder.impl_index.membersOfHead(.parameter);
@@ -34007,9 +33989,13 @@ const Checker = struct {
     /// with the arguments it was reached at. Every `written` appended comes
     /// from a bound the program wrote, and the arguments come from
     /// substituting into the entry that reached it, so the list grows only
-    /// while a new pair keeps turning up -- and an entry already in the list
-    /// is not walked again, which is what makes this finish over the cycle
-    /// `reportTraitBoundCycles` refuses.
+    /// while a new pair keeps turning up, and an entry already in the list is
+    /// not walked again. A bound `reportTraitBoundCycles` refused is not
+    /// followed, and those are the bounds that close every cycle, so the
+    /// requirements walked form an acyclic graph: an entry's arguments are
+    /// substituted at most once per trait on the longest path through it,
+    /// and the pairs are finite even where a cycle would grow its arguments
+    /// at every step.
     fn traitsBounding(
         self: *Checker,
         interning: ?BoundInterning,
@@ -34025,6 +34011,7 @@ const Checker = struct {
         }
         for (bounds) |b| {
             if (b.kind == .callable) continue;
+            if (self.refused_trait_bounds.contains(b.named.name)) continue;
             if (try self.admitIntegerComparisons(&out, &seen, context, b)) continue;
             const t = traitAt(self.ast, self.res, b.named.name) orelse continue;
             const args = try self.internedBoundArgs(interning, b);
@@ -34051,6 +34038,7 @@ const Checker = struct {
             };
             for (self.ast.declBounds(required)) |b| {
                 if (b.kind == .callable) continue;
+                if (self.refused_trait_bounds.contains(b.named.name)) continue;
                 if (try self.admitIntegerComparisons(&out, &seen, context, b)) continue;
                 const t = traitAt(self.ast, self.res, b.named.name) orelse continue;
                 const raw = try self.internedBoundArgs(through, b);
@@ -34583,7 +34571,10 @@ const Checker = struct {
                         colour[required.index()] = .on_path;
                         try path.append(self.gpa, .{ .trait = required, .at = 0 });
                     },
-                    .on_path => try self.refuseBoundCycle(path.items, from, required, bounds[step].named.name),
+                    .on_path => {
+                        try self.refused_trait_bounds.put(self.gpa, bounds[step].named.name, {});
+                        try self.refuseBoundCycle(path.items, from, required, bounds[step].named.name);
+                    },
                 }
             }
         }

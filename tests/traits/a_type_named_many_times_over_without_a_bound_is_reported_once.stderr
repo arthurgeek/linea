@@ -1,0 +1,5 @@
+error[T-Bound]: `S` requires `Show`, and `P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[P[UInt8, UInt8], P[UInt8, UInt8]], P[P[UInt8, UInt8], P[UInt8, UInt8]]], P[P[P[UInt8, UInt8], P[UInt8, UInt8]], P[P[UInt8, UInt8], P[UInt8, UInt8]]]], P[P[P[P[UInt8, UInt8], P[UInt8, UInt8]], P[P[UInt8, UInt8], P[UInt8, UInt8]]], P[P[P[UInt8, UInt8], P[UInt8, UInt8]], P[P[UInt8, UInt8], P[UInt8, UInt8]]]]], P[P[P[P[P[UInt8, UInt8], P[UInt8, UInt8]], P[P[UInt8, UInt8], P[UInt8, UInt8]]], P[P[P[UInt8, UInt8], P[UInt8, UInt8] ... (truncated)
+  --> tests/traits/a_type_named_many_times_over_without_a_bound_is_reported_once.lin:49:5
+   |
+49 |     display(x)
+   |     ^^^^^^^ implement it for that type, or drop the bound
