@@ -3108,9 +3108,13 @@ fn nestedBracketsModule(gpa: std.mem.Allocator, n: u32, comptime wrap: []const u
     return std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{\n    {s}\n}}\n", .{inner.written()});
 }
 
-/// What a program over a chain of `n` aliases, each naming the one before it
-/// twice, asks about the last of them: the program holds `n` types, and the
-/// last names `P` about `2^n` times over.
+/// What a program over a chain of aliases, each naming the one before it
+/// twice, asks about the last of them. The last names `P` about `2^d` times
+/// over for a chain `d` long, while the program holds about `d^2 / 2` types:
+/// each alias written at its own parameter is a type of its own, as deep as
+/// the alias. `n` counts those types, so the chain is `sqrt(2n)` long and a
+/// walk that reads each type once costs time linear in `n`, where one that
+/// follows every path costs `2^sqrt(2n)`.
 const SharedTypeQuestion = enum {
     /// A call finds the implementation written at the last alias.
     lookup,
@@ -3133,8 +3137,9 @@ const SharedTypeQuestion = enum {
 
 fn sharedTypeModule(comptime question: SharedTypeQuestion) fn (std.mem.Allocator, u32) anyerror![]u8 {
     return struct {
-        fn make(gpa: std.mem.Allocator, n: u32) anyerror![]u8 {
-            std.debug.assert(n > 0);
+        fn make(gpa: std.mem.Allocator, size: u32) anyerror![]u8 {
+            std.debug.assert(size > 0);
+            const n: u32 = @max(1, std.math.sqrt(2 * size));
             var out: std.Io.Writer.Allocating = .init(gpa);
             errdefer out.deinit();
             const w = &out.writer;
@@ -7189,8 +7194,10 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "trait member pairing", .n = 8000, .cost = throughTheTree(traitMemberPairingModule) },
     .{ .name = "distinct bound shapes", .n = 2000, .cost = throughTheTree(distinctBoundShapesModule) },
     .{ .name = "bounds on one parameter", .n = 4000, .cost = throughTheTree(boundsOnOneParameterModule) },
-    .{ .name = "nested alias implementations", .n = 400, .cost = throughTreeBatch(nestedAliasImplementationsModule, .{ .refused = .n_duplicate }, 16) },
-    .{ .name = "nested alias bounds", .n = 400, .cost = throughTreeBatch(nestedAliasBoundsModule, .check, 8) },
+    // An alias chain is refused past 1000 links, so these are held at four
+    // times 200 rather than grown by calibration.
+    .{ .name = "nested alias implementations", .n = 200, .grows = false, .cost = throughTreeBatch(nestedAliasImplementationsModule, .{ .refused = .n_duplicate }, 64) },
+    .{ .name = "nested alias bounds", .n = 200, .grows = false, .cost = throughTreeBatch(nestedAliasBoundsModule, .check, 64) },
     .{ .name = "generic alias path heads", .n = 4000, .cost = throughTheTree(genericAliasHeadsModule) },
     .{ .name = "callable head implementations", .n = 2000, .cost = throughTheTree(callableHeadsModule) },
     .{ .name = "coherence open arguments", .n = 1000, .cost = throughTheTree(openCoherenceModule) },
@@ -7223,15 +7230,17 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "generic positive cycle checking", .n = 500, .cost = throughTreeBatch(genericPositiveCycleModule, .{ .refused = .t_poly_rec }, 1) },
     .{ .name = "growing trait bound cycles", .n = 1000, .cost = throughTreeBatch(growingTraitCyclesModule, .{ .refused = .t_bound }, 1) },
     .{ .name = "growing newtype base ring", .n = 1000, .cost = throughTreeBatch(growingNewtypeRingModule, .{ .refused = .t_poly_rec }, 1) },
-    .{ .name = "nested brackets around a long array length", .n = 8, .grows = false, .cost = throughTreeBatch(bracketsAroundALongLengthModule, .{ .refused = .n_undefined }, 16) },
-    .{ .name = "nested brackets around a callable default", .n = 8, .grows = false, .cost = throughTreeBatch(bracketsAroundACallableDefaultModule, .{ .refused = .n_undefined }, 16) },
-    .{ .name = "shared type DAG implementation lookup", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.lookup), .check, 16) },
-    .{ .name = "shared type DAG disjoint implementations", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.disjoint), .check, 16) },
-    .{ .name = "shared type DAG unmet bound", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.unmet), .{ .refused = .t_bound }, 16) },
-    .{ .name = "shared type DAG overlap witness", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.witness), .{ .refused = .t_impl }, 16) },
-    .{ .name = "shared type DAG unmet part", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.unmet_part), .{ .refused = .t_bound }, 16) },
-    .{ .name = "shared type DAG missing operation", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.missing_operation), .{ .refused = .t_bound }, 16) },
-    .{ .name = "shared type DAG bounded parameter", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.bounded_parameter), .check, 16) },
+    // The length's six hundred terms stand one level each, so the brackets
+    // around it are held to 32 before the nesting limit.
+    .{ .name = "nested brackets around a long array length", .n = 8, .grows = false, .cost = throughTreeBatch(bracketsAroundALongLengthModule, .{ .refused = .n_undefined }, 256) },
+    .{ .name = "nested brackets around a callable default", .n = 32, .grows = false, .cost = throughTreeBatch(bracketsAroundACallableDefaultModule, .{ .refused = .n_undefined }, 256) },
+    .{ .name = "shared type DAG implementation lookup", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.lookup), .check, 16) },
+    .{ .name = "shared type DAG disjoint implementations", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.disjoint), .check, 16) },
+    .{ .name = "shared type DAG unmet bound", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.unmet), .{ .refused = .t_bound }, 16) },
+    .{ .name = "shared type DAG overlap witness", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.witness), .{ .refused = .t_impl }, 16) },
+    .{ .name = "shared type DAG unmet part", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.unmet_part), .{ .refused = .t_bound }, 16) },
+    .{ .name = "shared type DAG missing operation", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.missing_operation), .{ .refused = .t_bound }, 16) },
+    .{ .name = "shared type DAG bounded parameter", .n = 64, .cost = throughTreeBatch(sharedTypeModule(.bounded_parameter), .check, 16) },
     .{ .name = "bounded recursions beside many suppliers", .n = 1000, .cost = throughTreeBatch(boundedRecursionsBesideSuppliersModule, .check, 1) },
     .{ .name = "locals in one body", .n = 16000, .cost = throughTheTree(deepModule) },
     .{ .name = "conditional loop exits", .n = 8000, .cost = throughTheTree(conditionalLoopExitsModule) },
