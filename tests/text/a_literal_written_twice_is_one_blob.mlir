@@ -16,6 +16,7 @@ module {
   llvm.mlir.global internal constant @linea_str0("hi") : !llvm.array<2 x i8>
   llvm.mlir.global internal constant @linea_str1("other") : !llvm.array<5 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -61,6 +62,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:25)
     %tl1 = arith.constant 12 : i32 loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:25)
     %tc1 = arith.constant 25 : i32 loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:25)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:25)
     llvm.unreachable loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:25)
   ^c1:
@@ -75,6 +77,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:41)
     %tl2 = arith.constant 12 : i32 loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:41)
     %tc2 = arith.constant 41 : i32 loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:41)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:41)
     llvm.unreachable loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:41)
   ^c2:
@@ -88,6 +91,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:5)
     %tl3 = arith.constant 12 : i32 loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:5)
     %tc3 = arith.constant 5 : i32 loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:5)
     llvm.unreachable loc("tests/text/a_literal_written_twice_is_one_blob.lin":12:5)
   ^c3:

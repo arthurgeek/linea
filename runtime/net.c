@@ -127,7 +127,7 @@ static long attempt_connect(struct linea_op *op) {
     return connect_finished(op->fd);
 }
 
-static long attempt_read(const struct linea_op *op) {
+static long attempt_read(struct linea_op *op) {
     ssize_t count;
     do {
         count = read(op->fd, (void *)(uintptr_t)op->at, (size_t)op->len);
@@ -239,7 +239,10 @@ static long linea_io_perform(struct linea_op *op) {
     const int simulated = op->kind == LINEA_OP_CONNECT ? linea_sim_running() : linea_sim_takes(op->fd);
     if (simulated) return linea_sim_perform(op);
     if (!linea_fiber_active()) return perform_in_place(op);
-    const long result = linea_fiber_perform(op, attempt);
+    /* The private READ entry is certified for this exact canonical attempt.
+     * Unknown/custom callbacks must use ordinary linea_fiber_perform. */
+    const long result = op->kind == LINEA_OP_READ ? linea_fiber_perform_read(op, attempt_read) :
+        linea_fiber_perform(op, attempt);
     if (op->kind == LINEA_OP_CONNECT && result < 0 && op->fd >= 0) close(op->fd);
     return result;
 }

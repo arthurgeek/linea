@@ -973,10 +973,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig" },
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig" },
     },
     .{
         .dir = "runtime",
@@ -2200,6 +2200,7 @@ pub fn build(b: *std.Build) void {
     const runtime_archive = runtime.addOutputFileArg(runtime_symbols.archive_name);
     const checked_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
     const checked_runtime_archive = checked_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
+    var checked_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
     for ([_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
         .{ .name = "linea_rt", .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items, .checked_flags = checked_flags.items },
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
@@ -2220,7 +2221,9 @@ pub fn build(b: *std.Build) void {
     }) |input| {
         const object = runtimeObject(b, runtime_target, input.name, input.file, input.flags);
         runtime.addArtifactArg(object);
-        checked_runtime.addArtifactArg(if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object);
+        const checked_object = if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object;
+        checked_runtime.addArtifactArg(checked_object);
+        if (!std.mem.eql(u8, input.name, "fiber")) checked_nonfiber_objects.append(b.allocator, checked_object) catch @panic("OOM");
     }
     const runtime_installs = [_]*std.Build.Step{
         &b.addInstallLibFile(runtime_archive, runtime_symbols.archive_name).step,
@@ -2298,6 +2301,18 @@ pub fn build(b: *std.Build) void {
     native_task_step.dependOn(call_coverage_step);
     const call_coverage_tool = b.addExecutable(.{ .name = "fiber-call-coverage", .root_module = call_coverage_module });
 
+    const migration_metrics_module = b.createModule(.{
+        .root_source_file = b.path("build/fiber_migration_metrics.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+        .link_libc = true,
+    });
+    const migration_metrics_tool = b.addExecutable(.{ .name = "fiber-migration-metrics", .root_module = migration_metrics_module });
+    const migration_metrics_tests = b.addRunArtifact(b.addTest(.{ .root_module = migration_metrics_module }));
+    const migration_metrics_step = b.step("test-fiber-migration-metrics", "Validate bounded R/N/C/X observations of actual Linea continuation transfers");
+    migration_metrics_step.dependOn(&migration_metrics_tests.step);
+    native_task_step.dependOn(&migration_metrics_tests.step);
+
     const owner_watchdog_step = b.step("test-foreign-owner-watchdog", "Check foreign-owner watchdog deadlines and refusal paths");
     const owner_watchdog_module = b.createModule(.{
         .root_source_file = b.path("tests/cmd/foreign_owner/watchdog.zig"),
@@ -2310,33 +2325,128 @@ pub fn build(b: *std.Build) void {
     native_task_step.dependOn(owner_watchdog_step);
 
     const handoff_proof = b.step("test-fiber-handoff-proof", "Compile and force one started Linea continuation across two carriers");
+    const completed_wait_proof = b.step("test-fiber-completed-waits", "Force a started Linea continuation across a completed session wait");
+    const completed_io_proof = b.step("test-fiber-completed-io", "Force a started Linea continuation across completed socket I/O");
+    const waitset_proof = b.step("test-fiber-waitset-migration", "Migrate a Linea wait-set continuation with retained registrations");
+    const join_proof = b.step("test-fiber-completed-joins", "Migrate a Linea continuation after a structured child join");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
-        const files = b.addWriteFiles();
-        const main_source = files.addCopyFile(b.path("tests/native/fiber_migration/continuation.fixture"), "main.lin");
-        _ = files.add("linea.json", "{\"extern\":[\".\"],\"native\":[\"probe.c\"]}");
-        _ = files.addCopyFile(b.path("tests/native/fiber_migration/probe.c"), "probe.c");
-        _ = files.addCopyDirectory(b.path("runtime"), "runtime", .{ .include_extensions = &.{ ".c", ".h" } });
-        const compile = b.addSystemCommand(&.{"env"});
-        compile.addPrefixedFileArg("LINEA_RUNTIME=", checked_runtime_archive);
-        compile.addFileArg(exe.getEmittedBin());
-        compile.addArgs(&.{ "build", "--keep" });
-        compile.addFileArg(main_source);
-        compile.addArg("-o");
-        const binary = compile.addOutputFileArg("fiber-handoff");
-        const check_calls = b.addRunArtifact(call_coverage_tool);
-        check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
-        check_calls.step.dependOn(&compile.step);
-        check_calls.step.dependOn(&run_coverage_tests.step);
-        const manifest = check_calls.captureStdOut(.{});
-        const run_proof = b.addSystemCommand(&.{"env"});
-        run_proof.addFileArg(binary);
-        run_proof.addFileInput(manifest);
-        run_proof.has_side_effects = true;
-        run_proof.step.dependOn(&check_calls.step);
-        handoff_proof.dependOn(&run_proof.step);
+        native_task_step.dependOn(handoff_proof);
+        native_task_step.dependOn(completed_wait_proof);
+        native_task_step.dependOn(completed_io_proof);
+        native_task_step.dependOn(waitset_proof);
+        native_task_step.dependOn(join_proof);
+        native_task_step.dependOn(migration_metrics_step);
+        const ProofCase = struct {
+            source: []const u8,
+            completed_wait: bool = true,
+            delay_notifier: bool = false,
+            stale_cookie: bool = false,
+            trace: bool = false,
+            refusal_probes: bool = false,
+            completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
+        };
+        inline for ([_]ProofCase{
+            .{ .source = "continuation.lin", .completed_wait = false },
+            .{ .source = "continuation.lin", .completed_wait = false, .trace = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .trace = true, .refusal_probes = true },
+            .{ .source = "pinned.lin", .completed_wait = false },
+            .{ .source = "unknown_pinned.lin", .completed_wait = false, .trace = true },
+            .{ .source = "unproven.lin", .completed_wait = false, .trace = true },
+            .{ .source = "session.lin" },
+            .{ .source = "owner.lin" },
+            .{ .source = "io.lin" },
+            .{ .source = "io.lin", .trace = true },
+            .{ .source = "io.lin", .stale_cookie = true },
+            .{ .source = "io.lin", .completion = .rearm },
+            .{ .source = "io.lin", .completion = .timer_tie },
+            .{ .source = "io_timeout.lin" },
+            .{ .source = "io_failure.lin" },
+            .{ .source = "io_rearm_failure.lin", .completion = .rearm_failure },
+            .{ .source = "join.lin" },
+            .{ .source = "waitset.lin" },
+            .{ .source = "waitset.lin", .delay_notifier = true },
+            .{ .source = "waitset_io.lin" },
+            .{ .source = "timed_session.lin" },
+            .{ .source = "session.lin", .delay_notifier = true },
+            .{ .source = "session.lin", .delay_notifier = true, .trace = true },
+        }) |proof_case| {
+            const completed_wait = proof_case.completed_wait;
+            const files = b.addWriteFiles();
+            const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{proof_case.source})), "main.lin");
+            if (std.mem.eql(u8, proof_case.source, "owner.lin")) {
+                _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
+            }
+            if (std.mem.startsWith(u8, proof_case.source, "io_")) {
+                _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/io_errors/io_errors.lin"), "io_errors/io_errors.lin");
+            }
+            // The application is entirely Linea. Link canonical checked runtime
+            // objects with an internal deterministic scheduling configuration;
+            // no project-native files replace runtime definitions.
+            var handoff_flags: std.ArrayList([]const u8) = .empty;
+            handoff_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+            handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
+            if (completed_wait) handoff_flags.append(b.allocator, "-DLINEA_FIBER_WAIT_FOR_PARK_TEST=1") catch @panic("OOM");
+            if (proof_case.delay_notifier) handoff_flags.append(b.allocator, "-DLINEA_FIBER_DELAY_NOTIFIER_TEST=1") catch @panic("OOM");
+            if (proof_case.stale_cookie) handoff_flags.append(b.allocator, "-DLINEA_FIBER_STALE_COOKIE_TEST=1") catch @panic("OOM");
+            if (proof_case.trace) handoff_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1") catch @panic("OOM");
+            if (proof_case.refusal_probes) handoff_flags.append(b.allocator, "-DLINEA_FIBER_REFUSAL_PROBES_TEST=1") catch @panic("OOM");
+            if (std.mem.eql(u8, proof_case.source, "unproven.lin")) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
+            switch (proof_case.completion) {
+                .ordinary => {},
+                .rearm => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_REARM_TEST=1") catch @panic("OOM"),
+                .timer_tie => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_TIMER_TIE_TEST=1") catch @panic("OOM"),
+                .rearm_failure => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_REARM_FAILURE_TEST=1") catch @panic("OOM"),
+            }
+            const handoff_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+            const handoff_archive = handoff_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
+            for (checked_nonfiber_objects.items) |object| handoff_runtime.addArtifactArg(object);
+            handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "fiber_handoff", b.path("runtime/fiber.c"), handoff_flags.items));
+            const compile = b.addSystemCommand(&.{"env"});
+            compile.addPrefixedFileArg("LINEA_RUNTIME=", handoff_archive);
+            compile.addFileArg(exe.getEmittedBin());
+            compile.addArgs(&.{ "build", "--keep" });
+            compile.addFileArg(main_source);
+            compile.addArg("-o");
+            const binary = compile.addOutputFileArg("fiber-handoff");
+            const check_calls = b.addRunArtifact(call_coverage_tool);
+            check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
+            check_calls.step.dependOn(&compile.step);
+            check_calls.step.dependOn(&run_coverage_tests.step);
+            const manifest = check_calls.captureStdOut(.{});
+            const run_proof = b.addSystemCommand(&.{"env"});
+            run_proof.addFileArg(binary);
+            run_proof.addFileInput(manifest);
+            run_proof.has_side_effects = true;
+            if (proof_case.stale_cookie) run_proof.expectStdErrEqual("native migration: stale poll cookie rejected after reclamation\n");
+            switch (proof_case.completion) {
+                .ordinary => {},
+                .rearm => run_proof.expectStdErrEqual("native migration: spurious readiness rearmed with a new cookie\n"),
+                .timer_tie => run_proof.expectStdErrEqual("native migration: timer-first readiness tie completed\n"),
+                .rearm_failure => run_proof.expectStdErrEqual("native migration: rearm failure propagated after retirement\n"),
+            }
+            run_proof.step.dependOn(&check_calls.step);
+            if (proof_case.trace) {
+                const trace = run_proof.captureStdErr(.{});
+                const inspect_trace = b.addRunArtifact(migration_metrics_tool);
+                inspect_trace.addFileArg(trace);
+                if (proof_case.refusal_probes) inspect_trace.addArg("refusal_probes");
+                if (proof_case.delay_notifier) inspect_trace.addArg("source_busy");
+                if (std.mem.eql(u8, proof_case.source, "unknown_pinned.lin")) inspect_trace.addArg("pinned");
+                if (std.mem.eql(u8, proof_case.source, "unproven.lin")) inspect_trace.addArg("unproven");
+                inspect_trace.step.dependOn(&migration_metrics_tests.step);
+                migration_metrics_step.dependOn(&inspect_trace.step);
+            } else {
+                (if (std.mem.eql(u8, proof_case.source, "join.lin")) join_proof else if (std.mem.startsWith(u8, proof_case.source, "waitset")) waitset_proof else if (std.mem.startsWith(u8, proof_case.source, "io")) completed_io_proof else if (completed_wait) completed_wait_proof else handoff_proof).dependOn(&run_proof.step);
+            }
+        }
     } else {
         const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'forced handoff proof is unavailable on this target or sanitizer' >&2; exit 1" });
         handoff_proof.dependOn(&unavailable.step);
+        completed_io_proof.dependOn(&unavailable.step);
+        waitset_proof.dependOn(&unavailable.step);
+        join_proof.dependOn(&unavailable.step);
+        migration_metrics_step.dependOn(&unavailable.step);
+        completed_wait_proof.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");

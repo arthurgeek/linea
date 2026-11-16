@@ -129,7 +129,10 @@ static unsigned long now_on(const struct waitset *s) {
 }
 
 /* Wake the owner, whichever way it waits. Called locked. */
-static void wake(struct waitset *s) {
+/* Errno access stays in a completed native frame. In particular, a libc may
+ * declare its errno-location accessor const; do not let its address become a
+ * cached value in linea_waitset_next across a cross-thread suspension. */
+__attribute__((noinline)) static void wake(struct waitset *s) {
     if (s->kernel < 0) {
         linea_unpark(&s->park);
         return;
@@ -379,7 +382,7 @@ static int ensure_kernel(struct waitset *s) {
 
 /* Ask the kernel queue to report `fd` once, as `cookie`; or, with `remove`
  * set, to stop reporting it. Zero or an errno. */
-static int arm(struct waitset *s, int fd, int writable, unsigned long cookie, int once, int remove) {
+__attribute__((noinline)) static int arm(struct waitset *s, int fd, int writable, unsigned long cookie, int once, int remove) {
 #if defined(__linux__)
     if (remove) return epoll_ctl(s->kernel, EPOLL_CTL_DEL, fd, 0) == 0 ? 0 : errno;
     struct epoll_event watch;
@@ -508,7 +511,7 @@ enum { kernel_batch = 32 };
 /* Read one round of kernel events and signal what they report, waiting at
  * most until `deadline` (0 for none), or not at all when `poll_only` is
  * set. Answers how many events the round read, at most `kernel_batch`. */
-static int wait_in_kernel(struct waitset *s, unsigned long deadline, int poll_only) {
+__attribute__((noinline)) static int wait_in_kernel(struct waitset *s, unsigned long deadline, int poll_only) {
     enum { batch = kernel_batch };
     unsigned long cookies[batch];
     int count;

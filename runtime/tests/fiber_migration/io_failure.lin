@@ -1,0 +1,5 @@
+import io_errors
+
+fn main() -> UInt8 {
+    io_errors.run(1)
+}

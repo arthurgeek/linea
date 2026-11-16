@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/decl/marked_path.lin\00") : !llvm.array<27 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -51,6 +52,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/decl/marked_path.lin":27:15)
     %tl1 = arith.constant 27 : i32 loc("tests/decl/marked_path.lin":27:15)
     %tc1 = arith.constant 15 : i32 loc("tests/decl/marked_path.lin":27:15)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/decl/marked_path.lin":27:15)
     llvm.unreachable loc("tests/decl/marked_path.lin":27:15)
   ^c1:
@@ -77,6 +79,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/decl/marked_path.lin":9:11)
     %tl1 = arith.constant 9 : i32 loc("tests/decl/marked_path.lin":9:11)
     %tc1 = arith.constant 11 : i32 loc("tests/decl/marked_path.lin":9:11)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/decl/marked_path.lin":9:11)
     llvm.unreachable loc("tests/decl/marked_path.lin":9:11)
   ^c1:
@@ -108,6 +111,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/decl/marked_path.lin":15:15)
     %tl1 = arith.constant 15 : i32 loc("tests/decl/marked_path.lin":15:15)
     %tc1 = arith.constant 15 : i32 loc("tests/decl/marked_path.lin":15:15)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/decl/marked_path.lin":15:15)
     llvm.unreachable loc("tests/decl/marked_path.lin":15:15)
   ^c1:

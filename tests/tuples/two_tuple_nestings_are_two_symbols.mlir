@@ -13,6 +13,7 @@ module {
   llvm.mlir.global internal constant @linea_file0("tests/tuples/two_tuple_nestings_are_two_symbols.lin\00") : !llvm.array<52 x i8>
   llvm.mlir.global internal constant @linea_str0("a") : !llvm.array<1 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -113,6 +114,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:7)
     %tl1 = arith.constant 25 : i32 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:7)
     %tc1 = arith.constant 7 : i32 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:7)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:7)
     llvm.unreachable loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:7)
   ^c1:
@@ -129,6 +131,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:11)
     %tl2 = arith.constant 25 : i32 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:11)
     %tc2 = arith.constant 11 : i32 loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:11)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:11)
     llvm.unreachable loc("tests/tuples/two_tuple_nestings_are_two_symbols.lin":25:11)
   ^c2:

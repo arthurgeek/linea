@@ -1453,6 +1453,7 @@ The library tests itself.
   ok    task.a slow item fills the window and the places wrap
   ok    task.a started task answers its handle
   ok    task.a stopped map yields only what it started
+  ok    task.a system task has no carrier
   ok    task.a taken endpoint comes back with its peer still waiting
   ok    task.a task started in one call runs its body
   ok    task.a task that cannot start answers the reason

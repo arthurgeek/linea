@@ -15,6 +15,7 @@ module {
   llvm.mlir.global internal constant @linea_file2("std/mem/slice.lin\00") : !llvm.array<18 x i8>
   llvm.mlir.global internal constant @linea_str0("AB") : !llvm.array<2 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -95,6 +96,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":14:22)
     %tl1 = arith.constant 14 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":14:22)
     %tc1 = arith.constant 22 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":14:22)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":14:22)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":14:22)
   ^c1:
@@ -108,6 +110,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":13:24)
     %tl2 = arith.constant 13 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":13:24)
     %tc2 = arith.constant 24 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":13:24)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":13:24)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":13:24)
   ^b5:
@@ -150,6 +153,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":19:22)
     %tl3 = arith.constant 19 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":19:22)
     %tc3 = arith.constant 22 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":19:22)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":19:22)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":19:22)
   ^c3:
@@ -163,6 +167,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":18:25)
     %tl4 = arith.constant 18 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":18:25)
     %tc4 = arith.constant 25 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":18:25)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":18:25)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":18:25)
   ^b10:
@@ -188,6 +193,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":31:11)
     %tl5 = arith.constant 31 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":31:11)
     %tc5 = arith.constant 11 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":31:11)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":31:11)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":31:11)
   ^c5:
@@ -204,6 +210,7 @@ module {
     %tf6 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":31:20)
     %tl6 = arith.constant 31 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":31:20)
     %tc6 = arith.constant 20 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":31:20)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk6, %tf6, %tl6, %tc6) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":31:20)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":31:20)
   ^c6:
@@ -231,6 +238,7 @@ module {
     %tf7 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_byte_past_the_end_is_absent.lin":25:23)
     %tl7 = arith.constant 25 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":25:23)
     %tc7 = arith.constant 23 : i32 loc("tests/text/a_byte_past_the_end_is_absent.lin":25:23)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk7, %tf7, %tl7, %tc7) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_byte_past_the_end_is_absent.lin":25:23)
     llvm.unreachable loc("tests/text/a_byte_past_the_end_is_absent.lin":25:23)
   ^b15:
@@ -282,6 +290,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c1:
@@ -295,6 +304,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c2:
@@ -309,6 +319,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c3:
@@ -323,6 +334,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c4:
@@ -337,6 +349,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c5:

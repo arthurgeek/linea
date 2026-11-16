@@ -403,6 +403,61 @@ pub const Options = struct {
     foreign_symbols: []const ForeignSymbol = &.{},
 };
 
+/// Debug coverage from the verified MIR. Only the full-source driver may bind
+/// these rows to an emitted artifact; MIR verification alone does not establish
+/// the source language's typed-storage provenance.
+pub fn writeCallableCoverage(w: *std.Io.Writer, module: *const Module) std.Io.Writer.Error!void {
+    for (module.functions, 0..) |*mir, function_index| {
+        if (module.isExternal(FunctionId.at(@intCast(function_index)))) continue;
+        for (0..mir.insts.len) |index| {
+            const id = InstId.at(@intCast(index));
+            switch (mir.tagOf(id)) {
+                .function_addr => {
+                    const target = mir.functionOf(id);
+                    try w.writeAll("// callable-origin\t@");
+                    try writeSymbol(w, module, target);
+                    try w.writeAll("\t");
+                    try writeOrdinaryFunctionType(w, module, target);
+                    try w.writeAll("\n");
+                },
+                .call_indirect, .call_indirect_noreturn => {
+                    const signature = module.indirectSignatureOf(mir, id);
+                    const params = module.types.callableParams(signature);
+                    const by_address = module.returnsByAddress(signature.result);
+                    try w.writeAll("// callable-site\t@");
+                    try writeSymbol(w, module, FunctionId.at(@intCast(function_index)));
+                    try w.writeAll("\t(");
+                    if (by_address) try w.writeAll("!llvm.ptr");
+                    for (params, 0..) |param, i| {
+                        if (i > 0 or by_address) try w.writeAll(", ");
+                        try w.writeAll(callableParamType(module, param));
+                    }
+                    try w.writeAll(") -> ");
+                    if (by_address or mir.tagOf(id) == .call_indirect_noreturn)
+                        try w.writeAll("()")
+                    else
+                        try w.writeAll(computationType(module.representationOf(signature.result).computation));
+                    try w.writeAll("\n");
+                },
+                else => {},
+            }
+        }
+    }
+}
+
+fn writeOrdinaryFunctionType(w: *std.Io.Writer, module: *const Module, target: FunctionId) std.Io.Writer.Error!void {
+    const function = module.functionOf(target);
+    const by_address = module.returnsIndirectly(target);
+    try w.writeAll("(");
+    if (by_address) try w.writeAll("!llvm.ptr");
+    for (0..function.param_count) |i| {
+        if (i > 0 or by_address) try w.writeAll(", ");
+        try w.writeAll(paramTypeOf(module, target, function, i));
+    }
+    try w.writeAll(") -> ");
+    try w.writeAll(resultTypeOf(module, target, function.return_type) orelse "()");
+}
+
 /// An `extern`'s name and the symbol its C declaration gives it, as LLVM
 /// spells a symbol: without the underscore Darwin puts before every C name.
 pub const ForeignSymbol = struct {
@@ -1945,20 +2000,7 @@ const FunctionEmitter = struct {
     }
 
     fn writeFunctionType(self: *FunctionEmitter, target: FunctionId) std.Io.Writer.Error!void {
-        const function = self.module.functionOf(target);
-        const returns_by_address = self.module.returnsIndirectly(target);
-        try self.w.writeAll("(");
-        if (returns_by_address) try self.w.writeAll("!llvm.ptr");
-        for (0..function.param_count) |i| {
-            if (i > 0 or returns_by_address) try self.w.writeAll(", ");
-            try self.w.writeAll(paramTypeOf(self.module, target, function, i));
-        }
-        try self.w.writeAll(") -> ");
-        if (resultTypeOf(self.module, target, function.return_type)) |result| {
-            try self.w.writeAll(result);
-        } else {
-            try self.w.writeAll("()");
-        }
+        try writeOrdinaryFunctionType(self.w, self.module, target);
     }
 
     /// A call, in the callee's convention rather than a copy of it: whether an

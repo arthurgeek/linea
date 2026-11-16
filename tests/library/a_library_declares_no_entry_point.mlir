@@ -14,6 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_foreign_enter()
   func.func private @linea_foreign_leave()
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;square"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -36,6 +37,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
     %tl1 = arith.constant 2 : i32 loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
     %tc1 = arith.constant 9 : i32 loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
     llvm.unreachable loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
   ^c1:
@@ -47,6 +49,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
     %tl2 = arith.constant 2 : i32 loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
     %tc2 = arith.constant 9 : i32 loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
     llvm.unreachable loc("tests/library/a_library_declares_no_entry_point/main.lin":2:9)
   ^c2:

@@ -1,0 +1,29 @@
+import std.testing
+
+// Read placement without changing affinity or introducing a suspension point.
+// Zero means that execution is outside a real fiber carrier.
+extern fn linea_fiber_current_carrier() -> UInt64
+
+// An opaque, process-local identity for a carrier in a fiber loop. Identities
+// can be compared across observations, including observations from different
+// loops. They are not task identities, OS thread IDs, or persistent identifiers.
+@(opaque, copyable, derive(Equatable))
+struct Carrier {
+    identity: UInt64,
+}
+
+// Observe the carrier executing this fiber now. System tasks and simulated
+// tasks answer None. Placement may change at a later suspension; programs must
+// not use this observation to establish resource affinity or synchronization.
+pub fn current_carrier() -> Option[Carrier] {
+    let identity = linea_fiber_current_carrier()
+    if identity == 0 {
+        .None
+    } else {
+        .Some(Carrier { identity })
+    }
+}
+
+test "a system task has no carrier" {
+    testing.assert(current_carrier().is_none(), "a system task reported a fiber carrier")?
+}

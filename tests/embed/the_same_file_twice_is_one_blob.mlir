@@ -25,6 +25,7 @@ module {
     llvm.return %s2 : !linea_static0
   }
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -42,6 +43,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:26)
     %tl1 = arith.constant 8 : i32 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:26)
     %tc1 = arith.constant 26 : i32 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:26)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:26)
     llvm.unreachable loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:26)
   ^c1:
@@ -57,6 +59,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:44)
     %tl2 = arith.constant 8 : i32 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:44)
     %tc2 = arith.constant 44 : i32 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:44)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:44)
     llvm.unreachable loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:44)
   ^c2:
@@ -70,6 +73,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
     %tl3 = arith.constant 8 : i32 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
     %tc3 = arith.constant 5 : i32 loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
     llvm.unreachable loc("tests/embed/the_same_file_twice_is_one_blob/main.lin":8:5)
   ^c3:

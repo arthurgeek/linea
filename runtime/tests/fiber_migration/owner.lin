@@ -1,0 +1,52 @@
+import std.io
+import std.net
+import std.session
+import std.task
+import std.time
+import owner_resource
+
+use net.Acceptor
+use net.Accepted
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let owner = owner_resource.open(listener.local_address().unwrap())
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    var peer = connection
+    listener.release()
+    let client = owner.client()
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    var passed = false
+    let body = sink [client, inout entries, inout passed] |sink me: Chan[End]| {
+        entries += 1
+        let first = task.current_carrier().unwrap()
+        let (byte, system_owner) = client.read_byte()
+        if first == task.current_carrier().unwrap() {
+            panic("owner completion did not migrate the caller")
+        }
+        if byte != 120 || !system_owner {
+            panic("the owner job ran in the wrong execution context")
+        }
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first != task.current_carrier().unwrap() {
+            panic("the caller did not return to its first carrier")
+        }
+        passed = true
+        me.close()
+    }
+    // Creation, operation and settlement stay inside the system owner.
+    // This restricted client cannot extract the resource or submit arbitrary jobs.
+    let running = task.start(body, on: execution).unwrap()
+    let _sent = io.write_all(&peer, "x".as_bytes()).unwrap()
+    running.close()
+    peer.release()
+    let (calls, lifecycle_on_system) = owner.close()
+    if passed && entries == 1 && calls == 1 && lifecycle_on_system {
+        0
+    } else {
+        1
+    }
+}

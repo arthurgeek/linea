@@ -14,6 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_foreign_enter()
   func.func private @linea_foreign_leave()
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @visit(!llvm.ptr, !llvm.ptr) -> i32
@@ -68,6 +69,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/a_callback_entry_is_not_published/main.lin":10:17)
     %tl1 = arith.constant 10 : i32 loc("tests/library/a_callback_entry_is_not_published/main.lin":10:17)
     %tc1 = arith.constant 17 : i32 loc("tests/library/a_callback_entry_is_not_published/main.lin":10:17)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/a_callback_entry_is_not_published/main.lin":10:17)
     llvm.unreachable loc("tests/library/a_callback_entry_is_not_published/main.lin":10:17)
   ^c1:

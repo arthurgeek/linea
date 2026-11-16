@@ -22,6 +22,9 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+#include <stdio.h>
+#endif
 #if defined(__linux__)
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -74,6 +77,11 @@ struct pending_operation {
     struct linea_op *operation;
     long (*attempt)(struct linea_op *);
     struct linea_fiber *fiber;
+    /* Kernel registrations remain with the poller that armed them, even if
+     * the saved continuation later resumes on another carrier. */
+    struct carrier *owner;
+    /* Immutable evidence from the sole audited net.c READ producer. */
+    int audited_read;
     unsigned state;
     uint32_t slot;
     int registered;
@@ -98,9 +106,16 @@ struct linea_fiber {
     enum scheduling_claim claimed;
 #if defined(LINEA_FIBER_MIGRATION_TEST)
     int proven, transfer_ready;
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    unsigned forced_transfers;
+#endif
 #endif
     struct carrier *claimant;
     unsigned source_claims;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    unsigned long trace_identity, trace_epoch, trace_transfer_epoch, trace_resumed_epoch;
+    int trace_entered, trace_initially_eligible, trace_ever_eligible, trace_counted, trace_ever_transferred;
+#endif
     struct linea_fiber *next;
     unsigned state;
     enum waiting waiting;
@@ -149,6 +164,18 @@ struct carrier {
     void *tsan_fiber;
 };
 
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+#define TRACE_COUNTER_FIELDS(X) \
+    X(started) X(retired) X(initially_eligible) X(current_eligible) X(peak_eligible) \
+    X(initially_then_restricted) X(never_eligible) X(guard_requests) X(first_restrictions) \
+    X(transfers) X(ever_transferred) X(eligibility_checks) X(claim_attempts) X(commit_attempts) \
+    X(active_claims) X(ref_entry) X(ref_affinity) X(ref_state) X(ref_source) \
+    X(ref_reservation) X(ref_target) X(ref_empty) X(ref_quota) X(normalization_attempts) X(normalization_busy)
+#define TRACE_COUNTER_DECLARE(name) unsigned long name;
+struct trace_counts { TRACE_COUNTER_FIELDS(TRACE_COUNTER_DECLARE) };
+#undef TRACE_COUNTER_DECLARE
+#endif
+
 struct fiber_loop {
     unsigned long identity;
     unsigned long count;
@@ -159,7 +186,17 @@ struct fiber_loop {
     pthread_cond_t startup;
     unsigned long began;
     int stop;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    struct trace_counts trace_counts;
+#endif
 };
+
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+#define TRACE_COUNT(loop, field) ((loop)->trace_counts.field += 1UL)
+static void trace_update_eligibility(struct linea_fiber *f);
+#else
+#define TRACE_COUNT(loop, field) ((void)0)
+#endif
 
 /* A pthread slot, rather than C TLS, keeps fault handling allocation-free. */
 static pthread_key_t carrier_key;
@@ -177,17 +214,28 @@ static void must(int status) {
 /* Carrier-owned debug state: no context switch may carry this lock. */
 static __thread struct fiber_loop *metadata_owner;
 
-int linea_fiber_metadata_held(void) { return metadata_owner != NULL; }
+/* A compiler may cache a native TLS address across an ordinary function call.
+ * Keep address evaluation in completed leaf frames, never in a continuation
+ * that can return from linea_context_switch on another OS thread. */
+__attribute__((noinline)) static struct fiber_loop *read_metadata_owner(void) {
+    return metadata_owner;
+}
+
+__attribute__((noinline)) static void write_metadata_owner(struct fiber_loop *owner) {
+    metadata_owner = owner;
+}
+
+int linea_fiber_metadata_held(void) { return read_metadata_owner() != NULL; }
 
 static void lock_metadata(struct fiber_loop *loop) {
-    if (metadata_owner != NULL) fail("linea: scheduler metadata locks were nested\n");
+    if (read_metadata_owner() != NULL) fail("linea: scheduler metadata locks were nested\n");
     must(pthread_mutex_lock(&loop->metadata));
-    metadata_owner = loop;
+    write_metadata_owner(loop);
 }
 
 static void unlock_metadata(struct fiber_loop *loop) {
-    if (metadata_owner != loop) fail("linea: scheduler metadata was unlocked by a nonowner\n");
-    metadata_owner = NULL;
+    if (read_metadata_owner() != loop) fail("linea: scheduler metadata was unlocked by a nonowner\n");
+    write_metadata_owner(NULL);
     must(pthread_mutex_unlock(&loop->metadata));
 }
 
@@ -212,7 +260,7 @@ static void unlock_fiber(struct linea_fiber *f) {
 }
 
 static void require_metadata(struct linea_fiber *f) {
-    if (f->loop != NULL && metadata_owner != f->loop) fail("linea: scheduler metadata was used without its lock\n");
+    if (f->loop != NULL && read_metadata_owner() != f->loop) fail("linea: scheduler metadata was used without its lock\n");
 }
 
 static void make_carrier_key(void) {
@@ -239,7 +287,17 @@ void linea_fiber_restrict_current(void) {
         lock_fiber(f);
         if (f->state != running || f->home != c || (f->bound != NULL && f->bound != c))
             fail("linea: a native restriction disagreed with the executing carrier\n");
+        TRACE_COUNT(f->loop, guard_requests);
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+        if (f->bound == NULL) {
+            TRACE_COUNT(f->loop, first_restrictions);
+            if (f->trace_initially_eligible) TRACE_COUNT(f->loop, initially_then_restricted);
+        }
+#endif
         f->bound = c;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+        trace_update_eligibility(f);
+#endif
         unlock_fiber(f);
     }
     errno = error;
@@ -249,12 +307,123 @@ int linea_fiber_active(void) {
     return current_fiber() != NULL && linea_foreign_depth() == 0;
 }
 
+unsigned long linea_fiber_current_carrier(void) {
+    const int error = errno;
+    struct carrier *c = current_carrier();
+    /* Real loops and their carrier arrays live until process exit, so this
+     * opaque identity cannot be recycled into another carrier's identity. No
+     * fiber record or scheduler claim escapes through the observation. */
+    const unsigned long identity = c != NULL && c->loop != NULL && c->executing != NULL ?
+        (unsigned long)c : 0;
+    errno = error;
+    return identity;
+}
+
 static unsigned long now(void) {
     if (linea_sim_running()) return linea_sim_now();
     struct timespec instant;
     if (clock_gettime(CLOCK_MONOTONIC, &instant) != 0) fail("linea: a carrier's clock failed\n");
     return (unsigned long)instant.tv_sec * 1000000000UL + (unsigned long)instant.tv_nsec;
 }
+
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+/* Bounded proof telemetry, never a production allocation or public control.
+ * Clocks bracket M from outside. Payload snapshots happen under M; publishing
+ * a completed event never follows a possibly reclaimed fiber pointer. */
+enum { trace_capacity = 64 };
+struct trace_event {
+    char phase;
+    unsigned long identity, epoch, carrier, lower, upper;
+    int complete;
+};
+struct trace_ticket { unsigned long lower; struct trace_event *event; };
+static struct trace_event trace_events[trace_capacity];
+static unsigned long trace_count, trace_identities;
+
+/* This is contract eligibility of live fibers, independent of runnable state
+ * or source normalization. Never/initial/current/ever-transferred are distinct. */
+static void trace_update_eligibility(struct linea_fiber *f) {
+    require_metadata(f);
+    const int eligible = f->trace_entered && f->proven && f->bound == NULL && !f->retired;
+    struct trace_counts *counts = &f->loop->trace_counts;
+    if (eligible && !f->trace_counted) {
+        counts->current_eligible += 1;
+        if (counts->current_eligible > counts->peak_eligible) counts->peak_eligible = counts->current_eligible;
+        f->trace_ever_eligible = 1;
+    } else if (!eligible && f->trace_counted) {
+        if (counts->current_eligible == 0) fail("linea: an eligibility population underflowed\n");
+        counts->current_eligible -= 1;
+    }
+    f->trace_counted = eligible;
+}
+
+static struct trace_ticket trace_begin(void) {
+    if (linea_fiber_metadata_held()) fail("linea: a trace clock was sampled under metadata\n");
+    struct trace_ticket ticket = { now(), NULL };
+    return ticket;
+}
+
+static void trace_capture(struct trace_ticket *ticket, char phase, struct linea_fiber *f, struct carrier *c) {
+    require_metadata(f);
+    if (f->loop == NULL || c->loop != f->loop) fail("linea: a trace crossed execution loops\n");
+    if (phase == 'R') f->trace_epoch += 1;
+    const unsigned long index = __atomic_fetch_add(&trace_count, 1UL, __ATOMIC_RELAXED);
+    if (index >= trace_capacity) return;
+    struct trace_event *event = &trace_events[index];
+    event->phase = phase;
+    event->identity = f->trace_identity;
+    event->epoch = f->trace_epoch;
+    event->carrier = (unsigned long)(c - f->loop->carriers);
+    event->lower = ticket->lower;
+    ticket->event = event;
+}
+
+static void trace_end(struct trace_ticket *ticket) {
+    if (ticket->event == NULL) return;
+    if (linea_fiber_metadata_held()) fail("linea: a trace clock was sampled under metadata\n");
+    ticket->event->upper = now();
+    __atomic_store_n(&ticket->event->complete, 1, __ATOMIC_RELEASE);
+}
+
+static void trace_dump(struct trace_counts counts) {
+    const unsigned long count = __atomic_load_n(&trace_count, __ATOMIC_ACQUIRE);
+    const unsigned long kept = count < trace_capacity ? count : trace_capacity;
+    unsigned long dropped = count - kept;
+    for (unsigned long i = 0; i < kept; i += 1)
+        if (!__atomic_load_n(&trace_events[i].complete, __ATOMIC_ACQUIRE)) dropped += 1;
+    struct timespec resolution;
+    if (clock_getres(CLOCK_MONOTONIC, &resolution) != 0) fail("linea: a trace clock has no resolution\n");
+    const unsigned long resolution_ns = (unsigned long)resolution.tv_sec * 1000000000UL + (unsigned long)resolution.tv_nsec;
+    if (resolution_ns == 0) fail("linea: a trace clock reported zero resolution\n");
+    char line[256];
+    int length = snprintf(line, sizeof line, "migration-trace-v1 units=ns dropped=%lu resolution_ns=%lu\n", dropped, resolution_ns);
+    if (length <= 0 || (size_t)length >= sizeof line) fail("linea: a trace header overflowed\n");
+    report_bytes(line, (unsigned long)length);
+    for (unsigned long i = 0; i < kept; i += 1) {
+        const struct trace_event *event = &trace_events[i];
+        if (!__atomic_load_n(&event->complete, __ATOMIC_ACQUIRE)) continue;
+        length = snprintf(line, sizeof line, "%c %lu %lu %lu %lu %lu\n", event->phase,
+            event->identity, event->epoch, event->carrier, event->lower, event->upper);
+        if (length <= 0 || (size_t)length >= sizeof line) fail("linea: a trace row overflowed\n");
+        report_bytes(line, (unsigned long)length);
+    }
+    report_bytes("counts", 6);
+#define TRACE_COUNTER_WRITE(name) \
+    length = snprintf(line, sizeof line, " " #name "=%lu", counts.name); \
+    if (length <= 0 || (size_t)length >= sizeof line) fail("linea: a trace counter overflowed\n"); \
+    report_bytes(line, (unsigned long)length);
+    TRACE_COUNTER_FIELDS(TRACE_COUNTER_WRITE)
+#undef TRACE_COUNTER_WRITE
+    report_bytes("\n", 1);
+}
+#define TRACE_BEGIN(name) struct trace_ticket name = trace_begin()
+#define TRACE_CAPTURE(name, phase, fiber, carrier) trace_capture(&(name), (phase), (fiber), (carrier))
+#define TRACE_END(name) trace_end(&(name))
+#else
+#define TRACE_BEGIN(name) ((void)0)
+#define TRACE_CAPTURE(name, phase, fiber, carrier) ((void)0)
+#define TRACE_END(name) ((void)0)
+#endif
 
 static void wake_carrier(struct carrier *c) {
     if (c->simulation != 0) return;
@@ -325,25 +494,53 @@ static struct linea_fiber *dequeue(struct carrier *c) {
 }
 
 #if defined(LINEA_FIBER_MIGRATION_TEST)
-/* The bounded prototype has no production entry-provenance grant yet. Its
- * claims are exercised only in the native fixture until handoff is reviewed. */
+/* The bounded prototype has no production entry-provenance grant yet. These
+ * claims are exercised by the internal forced-handoff configuration and the
+ * native scheduler unit tests. Ordinary runtime archives remain pinned. */
 struct transfer_claim {
     struct linea_fiber *fiber;
     struct carrier *source;
 };
 
+static int completed_io_owned(struct linea_fiber *f, struct carrier *source) {
+    require_metadata(f);
+    struct pending_operation *op = f->operation;
+    return f->waiting == waiting_io && f->park == NULL && f->waiter == NULL &&
+        op != NULL && op->owner == source &&
+        __atomic_load_n(&op->state, __ATOMIC_ACQUIRE) == operation_complete &&
+        !op->registered &&
+        ((op->audited_read && op->operation->kind == LINEA_OP_READ) ||
+         (op->attempt == NULL && op->operation->kind == LINEA_OP_READABLE));
+}
+
 static int clean_runnable(struct linea_fiber *f, struct carrier *source) {
     require_metadata(f);
-    return f->home == source && f->loop == source->loop && f->proven &&
-        f->transfer_ready && f->bound == NULL && f->state == runnable && f->saved &&
-        f->waiting == waiting_yield && f->timer_index == no_timer &&
-        f->source_claims == 0 && f->park == NULL && f->waiter == NULL && f->operation == NULL;
+    TRACE_COUNT(source->loop, eligibility_checks);
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    if (f->forced_transfers >= 2) { TRACE_COUNT(source->loop, ref_quota); return 0; }
+#endif
+    if (f->home != source || f->loop != source->loop) { TRACE_COUNT(source->loop, ref_state); return 0; }
+    if (!f->proven) { TRACE_COUNT(source->loop, ref_entry); return 0; }
+    if (f->bound != NULL) { TRACE_COUNT(source->loop, ref_affinity); return 0; }
+    if (f->state != runnable || !f->saved) { TRACE_COUNT(source->loop, ref_state); return 0; }
+    if (!f->transfer_ready || f->timer_index != no_timer || f->source_claims != 0) {
+        TRACE_COUNT(source->loop, ref_source); return 0;
+    }
+    const int retired = (f->operation == NULL &&
+          ((f->waiting == waiting_yield && f->park == NULL && f->waiter == NULL) ||
+           (f->waiting == waiting_park && f->park != NULL && f->waiter != NULL))) ||
+         completed_io_owned(f, source);
+    if (!retired) { TRACE_COUNT(source->loop, ref_source); return 0; }
+    return 1;
 }
 
 static struct transfer_claim reserve_ready_runnable(struct carrier *source) {
     struct transfer_claim claim = { NULL, source };
     if (source->loop == NULL) return claim;
+    TRACE_BEGIN(claim_trace);
     lock_carrier(source);
+    TRACE_COUNT(source->loop, claim_attempts);
+    const int had_entries = source->first != NULL;
     struct linea_fiber *previous = NULL;
     for (struct linea_fiber *f = source->first; f != NULL; f = f->next) {
         if (!clean_runnable(f, source)) { previous = f; continue; }
@@ -356,9 +553,20 @@ static struct transfer_claim reserve_ready_runnable(struct carrier *source) {
         f->claimed = transfer_claimed;
         f->claimant = source;
         claim.fiber = f;
+        TRACE_COUNT(source->loop, active_claims);
+        TRACE_CAPTURE(claim_trace, 'C', f, source);
         break;
     }
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    if (claim.fiber == NULL && !had_entries) {
+        if (source->loop->trace_counts.active_claims != 0) TRACE_COUNT(source->loop, ref_reservation);
+        else TRACE_COUNT(source->loop, ref_empty);
+    }
+#else
+    (void)had_entries;
+#endif
     unlock_carrier(source);
+    TRACE_END(claim_trace);
     return claim;
 }
 
@@ -379,6 +587,10 @@ static void abort_transfer(struct transfer_claim *claim) {
     f->claimant = NULL;
     enqueue_locked(f);
     claim->fiber = NULL;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    if (claim->source->loop->trace_counts.active_claims == 0) fail("linea: a trace claim underflowed\n");
+    claim->source->loop->trace_counts.active_claims -= 1;
+#endif
     unlock_carrier(claim->source);
     wake_carrier(claim->source);
 }
@@ -388,11 +600,30 @@ static int commit_transfer(struct transfer_claim *claim, struct carrier *target)
     lock_carrier(source);
     require_transfer(claim);
     struct linea_fiber *f = claim->fiber;
-    if (target == source || target->loop != source->loop || !clean_runnable(f, source)) {
+    TRACE_COUNT(source->loop, commit_attempts);
+    if (target == source || target->loop != source->loop) {
+        TRACE_COUNT(source->loop, ref_target);
         unlock_carrier(source);
         return 0;
     }
+    if (!clean_runnable(f, source)) {
+        unlock_carrier(source);
+        return 0;
+    }
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    f->forced_transfers += 1;
+#endif
     f->home = target;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    f->trace_transfer_epoch = f->trace_epoch;
+    TRACE_COUNT(source->loop, transfers);
+    if (!f->trace_ever_transferred) {
+        f->trace_ever_transferred = 1;
+        TRACE_COUNT(source->loop, ever_transferred);
+    }
+    if (source->loop->trace_counts.active_claims == 0) fail("linea: a trace claim underflowed\n");
+    source->loop->trace_counts.active_claims -= 1;
+#endif
     f->claimed = no_claim;
     f->claimant = NULL;
     enqueue_locked(f);
@@ -403,19 +634,144 @@ static int commit_transfer(struct transfer_claim *claim, struct carrier *target)
 }
 #endif
 
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+/* Internal deterministic scheduling configuration, compiled only into the
+ * bounded Linea integration-test runtime. This supplies policy, not observation
+ * results: the Linea programs observe their actual carriers and local values.
+ * No replacement fiber/task implementation or application native source is
+ * linked. Emitted-call coverage gates execution of these closed-world entries. */
+static pthread_mutex_t handoff_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t handoff_changed = PTHREAD_COND_INITIALIZER;
+static int handoff_parked;
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+/* No fiber or pending-operation pointer is retained by this delayed event. */
+static struct carrier *stale_owner;
+static uint64_t stale_cookie;
+static int replay_requested, replay_finished, replay_rejected;
+#endif
+#if defined(LINEA_FIBER_DELAY_NOTIFIER_TEST)
+static int handoff_delayed, handoff_contended;
+static unsigned handoff_busy;
+#endif
+
+void fiber_test_pause(enum linea_fiber_pause_point point) {
+    struct carrier *source = current_carrier();
+    if (linea_fiber_metadata_held()) fail("linea: a test scheduler policy retained metadata\n");
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+    if (point == linea_fiber_reclaimed) {
+        if (source != NULL) fail("linea: the reclamation probe requires a system-thread joiner\n");
+        must(pthread_mutex_lock(&handoff_lock));
+        struct carrier *owner = stale_owner;
+        if (owner == NULL) fail("linea: the reclamation probe captured no I/O event\n");
+        replay_requested = 1;
+        must(pthread_mutex_unlock(&handoff_lock));
+        wake_carrier(owner);
+        must(pthread_mutex_lock(&handoff_lock));
+        while (!replay_finished) must(pthread_cond_wait(&handoff_changed, &handoff_lock));
+        const int rejected = replay_rejected;
+        must(pthread_mutex_unlock(&handoff_lock));
+        if (!rejected) fail("linea: a reclaimed fiber's stale poll event was accepted\n");
+        const char message[] = "native migration: stale poll cookie rejected after reclamation\n";
+        report_bytes(message, sizeof message - 1);
+        return;
+    }
+#endif
+#if defined(LINEA_FIBER_DELAY_NOTIFIER_TEST)
+    if (point == linea_fiber_notified && source == NULL) {
+        must(pthread_mutex_lock(&handoff_lock));
+        if (!handoff_contended) {
+            handoff_delayed = 1;
+            while (!handoff_contended) must(pthread_cond_wait(&handoff_changed, &handoff_lock));
+            handoff_delayed = 0;
+            must(pthread_cond_broadcast(&handoff_changed));
+            while (handoff_busy < 2) must(pthread_cond_wait(&handoff_changed, &handoff_lock));
+        }
+        must(pthread_mutex_unlock(&handoff_lock));
+        return;
+    }
+    if (point == linea_fiber_source_busy) {
+        must(pthread_mutex_lock(&handoff_lock));
+        handoff_busy += 1;
+        handoff_contended = 1;
+        must(pthread_cond_broadcast(&handoff_changed));
+        while (handoff_delayed) must(pthread_cond_wait(&handoff_changed, &handoff_lock));
+        must(pthread_mutex_unlock(&handoff_lock));
+        return;
+    }
+#endif
+    if (point == linea_fiber_parked) {
+        must(pthread_mutex_lock(&handoff_lock));
+        handoff_parked = 1;
+        must(pthread_cond_broadcast(&handoff_changed));
+        must(pthread_mutex_unlock(&handoff_lock));
+    } else if (point == linea_fiber_entering) {
+        struct linea_fiber *f = source->executing;
+        lock_fiber(f);
+#if defined(LINEA_FIBER_UNPROVEN_ENTRY_TEST)
+        f->proven = 0;
+#else
+        f->proven = 1;
+#endif
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+        if (!f->trace_entered) {
+            f->trace_entered = 1;
+            f->trace_initially_eligible = f->proven && f->bound == NULL;
+            TRACE_COUNT(f->loop, started);
+            if (f->trace_initially_eligible) TRACE_COUNT(f->loop, initially_eligible);
+        }
+        trace_update_eligibility(f);
+#endif
+#if defined(LINEA_FIBER_REFUSAL_PROBES_TEST)
+        if (clean_runnable(f, source)) fail("linea: an executing fiber was transferable\n");
+#endif
+        unlock_fiber(f);
+    } else if (point == linea_fiber_transfer_ready) {
+#if defined(LINEA_FIBER_REFUSAL_PROBES_TEST)
+        /* A real source claim excludes transfer without changing saved state. */
+        lock_carrier(source);
+        struct linea_fiber *candidate = source->first;
+        if (candidate != NULL) {
+            candidate->source_claims += 1;
+            if (clean_runnable(candidate, source)) fail("linea: a source-owned fiber was transferable\n");
+            candidate->source_claims -= 1;
+        }
+        unlock_carrier(source);
+#endif
+        struct transfer_claim claim = reserve_ready_runnable(source);
+        if (claim.fiber == NULL) return;
+#if defined(LINEA_FIBER_REFUSAL_PROBES_TEST)
+        struct transfer_claim duplicate = reserve_ready_runnable(source);
+        if (duplicate.fiber != NULL) fail("linea: a reserved fiber was claimed twice\n");
+        if (commit_transfer(&claim, source)) fail("linea: a same-carrier transfer committed\n");
+#endif
+        if (source->loop->count != 2) fail("linea: forced handoff requires two carriers\n");
+        struct carrier *target = source == &source->loop->carriers[0] ?
+            &source->loop->carriers[1] : &source->loop->carriers[0];
+        if (!commit_transfer(&claim, target)) abort_transfer(&claim);
+        /* No fiber access after destination publication. */
+    }
+}
+#endif
+
 /* A source lock protects this pointer. M owns the scheduling transition and
  * queue publication together; the source never independently queues it. */
 static void notify(struct linea_fiber *f) {
     struct carrier *wake = NULL;
+    TRACE_BEGIN(runnable_trace);
     lock_fiber(f);
     if (f->state == parking) f->state = notified;
     else if (f->state == parked) {
         f->state = runnable;
+        TRACE_CAPTURE(runnable_trace, 'R', f, f->home);
         enqueue_locked(f);
         if (f->home->simulation == 0) wake = f->home;
     }
     unlock_fiber(f);
+    TRACE_END(runnable_trace);
     if (wake != NULL) wake_carrier(wake);
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    if (wake != NULL) linea_fiber_pause(linea_fiber_notified);
+#endif
 }
 
 static void timer_exchange(struct carrier *c, size_t a, size_t b) {
@@ -492,6 +848,83 @@ static int timer_add(struct linea_fiber *f) {
     unlock_fiber(f);
     return error;
 }
+
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+static int requeue_saved_dispatch(struct carrier *source, struct linea_fiber *f, int ready) {
+    TRACE_BEGIN(ready_trace);
+    lock_fiber(f);
+    if (f->claimed != dispatch_claim || f->claimant != source || f->queued ||
+        f->home != source || f->state != runnable || !f->saved)
+        fail("linea: source retirement lost its dispatch claim\n");
+    if (ready && (f->source_claims != 0 || f->timer_index != no_timer)) {
+        unlock_fiber(f);
+        return 0;
+    }
+    f->transfer_ready = ready;
+    if (ready) TRACE_CAPTURE(ready_trace, 'N', f, source);
+    f->claimed = no_claim;
+    f->claimant = NULL;
+    enqueue_locked(f);
+    unlock_fiber(f);
+    TRACE_END(ready_trace);
+    wake_carrier(source);
+    return 1;
+}
+
+/* Completion retires kernel state on A before notifying. The saved C frame
+ * still owns its pending record and result, which B consumes after resuming. */
+static int normalize_completed_io(struct carrier *source, struct linea_fiber *f) {
+    lock_fiber(f);
+    const int ready = f->loop != NULL && f->proven && f->bound == NULL && !f->transfer_ready &&
+        f->state == runnable && f->saved && f->claimed == dispatch_claim &&
+        f->claimant == source && f->home == source && f->source_claims == 0 &&
+        f->timer_index == no_timer && completed_io_owned(f, source);
+    if (ready) TRACE_COUNT(f->loop, normalization_attempts);
+    unlock_fiber(f);
+    if (!ready || !requeue_saved_dispatch(source, f, 1)) return 0;
+    linea_fiber_pause(linea_fiber_transfer_ready);
+    /* Publication can immediately retire this stack on B. */
+    return 1;
+}
+
+/* Dispatch owns the saved continuation throughout source retirement. The
+ * resumed fiber still reacquires its logical source lock and clears its
+ * own stack waiter; only carrier references are retired here. */
+static int normalize_completed_park(struct carrier *source, struct linea_fiber *f) {
+    lock_fiber(f);
+    if (f->loop == NULL || !f->proven || f->bound != NULL || f->transfer_ready ||
+        f->waiting != waiting_park || f->state != runnable || !f->saved ||
+        f->claimed != dispatch_claim || f->claimant != source || f->home != source ||
+        f->source_claims != 0 || f->operation != NULL) {
+        unlock_fiber(f);
+        return 0;
+    }
+    struct linea_park *park = f->park;
+    struct linea_fiber_waiter *waiter = f->waiter;
+    TRACE_COUNT(f->loop, normalization_attempts);
+    unlock_fiber(f);
+    if (park == NULL || waiter == NULL) fail("linea: a saved park lost its logical waiter\n");
+    if (linea_fiber_metadata_held()) fail("linea: a source lock followed scheduler metadata\n");
+    const int locked = pthread_mutex_trylock(&park->lock);
+    if (locked == EBUSY) {
+        lock_fiber(f);
+        TRACE_COUNT(f->loop, normalization_busy);
+        unlock_fiber(f);
+        (void)requeue_saved_dispatch(source, f, 0);
+        linea_fiber_pause(linea_fiber_source_busy);
+        return 1;
+    }
+    must(locked);
+    const int unlinked = !waiter->linked;
+    if (unlinked) timer_remove(f);
+    linea_park_unlock(park);
+    if (!unlinked) return 0;
+    if (!requeue_saved_dispatch(source, f, 1)) return 0;
+    linea_fiber_pause(linea_fiber_transfer_ready);
+    /* Destination publication can immediately release the stack. */
+    return 1;
+}
+#endif
 
 static void unlink_waiter(struct linea_park *p, struct linea_fiber_waiter *w) {
     if (!w->linked) return;
@@ -573,6 +1006,17 @@ static void leave_fiber(struct linea_fiber *f, int ending) {
     if (kind == waiting_park) linea_fiber_pause(linea_fiber_before_switch);
     linea_context_switch(&f->context, &c->scheduler);
     finish_switch(f->asan_stack);
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    TRACE_BEGIN(resume_trace);
+    lock_fiber(f);
+    if (f->trace_transfer_epoch != 0 && f->trace_transfer_epoch == f->trace_epoch &&
+        f->trace_resumed_epoch != f->trace_epoch) {
+        TRACE_CAPTURE(resume_trace, 'X', f, current_carrier());
+        f->trace_resumed_epoch = f->trace_epoch;
+    }
+    unlock_fiber(f);
+    TRACE_END(resume_trace);
+#endif
 }
 
 void linea_fiber_yield(void) {
@@ -662,7 +1106,7 @@ static struct io_slot *io_slot_at(struct carrier *c, uint32_t index) {
 
 /* Releasing a reserved slot does not imply that the kernel accepted its watch. */
 static void release_slot(struct pending_operation *pending) {
-    struct carrier *c = pending->fiber->home;
+    struct carrier *c = pending->owner;
     struct io_slot *slot = io_slot_at(c, pending->slot);
     pending->registered = 0;
     slot->operation = NULL;
@@ -677,7 +1121,7 @@ static void release_slot(struct pending_operation *pending) {
 
 static void disarm_operation(struct pending_operation *pending) {
     if (!pending->registered) return;
-    struct carrier *c = pending->fiber->home;
+    struct carrier *c = pending->owner;
     if (c->simulation != 0) {
         struct pending_operation **at = &c->pending;
         while (*at != NULL && *at != pending) at = &(*at)->next;
@@ -701,7 +1145,7 @@ static void disarm_operation(struct pending_operation *pending) {
 }
 
 static int arm_operation(struct pending_operation *pending) {
-    struct carrier *c = pending->fiber->home;
+    struct carrier *c = pending->owner;
     if (c->simulation != 0) {
         pending->next = c->pending;
         c->pending = pending;
@@ -769,7 +1213,7 @@ static long attempt_operation(struct pending_operation *pending) {
     if (pending->attempt != NULL) return pending->attempt(pending->operation);
     const enum linea_op_kind kind = pending->operation->kind;
     if (kind == LINEA_OP_SLEEP) return -(long)EAGAIN;
-    if (pending->fiber->home->simulation != 0) return linea_sim_ready(pending->operation->fd, (uint8_t)(kind == LINEA_OP_WRITABLE)) ? 0 : -(long)EAGAIN;
+    if (pending->owner->simulation != 0) return linea_sim_ready(pending->operation->fd, (uint8_t)(kind == LINEA_OP_WRITABLE)) ? 0 : -(long)EAGAIN;
     struct pollfd fd = { pending->operation->fd, kind == LINEA_OP_WRITABLE ? POLLOUT : POLLIN, 0 };
     int answer;
     do { answer = poll(&fd, 1, 0); } while (answer < 0 && errno == EINTR);
@@ -782,21 +1226,58 @@ static void complete_operation(struct pending_operation *pending, int readable) 
     if (!__atomic_compare_exchange_n(&pending->state, &expected, operation_claimed, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
     struct linea_fiber *f = pending->fiber;
     const unsigned long deadline = pending->operation->deadline_ns;
+#if defined(LINEA_FIBER_FORCE_REARM_TEST) || defined(LINEA_FIBER_FORCE_REARM_FAILURE_TEST)
+    /* Bounded fault policy: readiness can be stale without consuming bytes.
+     * The next real attempt still reads the actual socket and its real result. */
+    static int forced_rearm;
+    const int injected = readable && pending->audited_read && !forced_rearm;
+    long result;
+    if (injected) {
+        forced_rearm = 1;
+        result = -(long)EAGAIN;
+    } else result = attempt_operation(pending);
+#else
     long result = attempt_operation(pending);
+#endif
     const int expired = deadline != 0 && now() >= deadline;
     if (result == -(long)EAGAIN && !expired && readable) {
         /* A readiness notification can be stale without completing the
          * operation. Its next arming gets a new generation. */
-        if (f->home->simulation != 0) {
+        if (pending->owner->simulation != 0) {
             __atomic_store_n(&pending->state, operation_armed, __ATOMIC_RELEASE);
             return;
         }
+#if defined(LINEA_FIBER_FORCE_REARM_TEST)
+        const uint64_t old_cookie = ((uint64_t)pending->slot << 32) |
+            io_slot_at(pending->owner, pending->slot)->generation;
+#endif
         disarm_operation(pending);
+#if defined(LINEA_FIBER_FORCE_REARM_FAILURE_TEST)
+        /* Fail the temporary operation's next actual dup, without closing the
+         * Connection's owned descriptor or replacing arm_operation itself. */
+        if (injected) pending->operation->fd = -1;
+#endif
         const int error = arm_operation(pending);
         if (error == 0) {
             __atomic_store_n(&pending->state, operation_armed, __ATOMIC_RELEASE);
+#if defined(LINEA_FIBER_FORCE_REARM_TEST)
+            if (injected) {
+                const uint64_t next_cookie = ((uint64_t)pending->slot << 32) |
+                    io_slot_at(pending->owner, pending->slot)->generation;
+                if (old_cookie == next_cookie) fail("linea: a rearmed operation reused its stale cookie\n");
+                const char message[] = "native migration: spurious readiness rearmed with a new cookie\n";
+                report_bytes(message, sizeof message - 1);
+            }
+#endif
             return;
         }
+#if defined(LINEA_FIBER_FORCE_REARM_FAILURE_TEST)
+        if (injected) {
+            if (error != EBADF || pending->registered) fail("linea: the refused rearm retained its watch\n");
+            const char message[] = "native migration: rearm failure propagated after retirement\n";
+            report_bytes(message, sizeof message - 1);
+        }
+#endif
         result = -(long)error;
     }
     if (result == -(long)EAGAIN) result = -(long)ETIMEDOUT;
@@ -808,14 +1289,19 @@ static void complete_operation(struct pending_operation *pending, int readable) 
     notify(f);
 }
 
-long linea_fiber_perform(struct linea_op *op, linea_fiber_attempt attempt) {
+static long perform_operation(struct linea_op *op, linea_fiber_attempt attempt, int audited_read) {
     struct linea_fiber *f = current_fiber();
     if (f == NULL) fail("linea: an operation has no executing fiber\n");
-    /* The callback can later run on the scheduler stack with no current
-     * fiber. Retain its unknown thread effects before the first attempt. */
-    linea_fiber_restrict_current();
+    /* Scheduler callbacks have no current fiber to restrict. The audited read
+     * and callback-free readiness poll leave no persistent thread state. Bind
+     * every other invocation, including sleep and unknown callbacks, first. */
+    audited_read = audited_read && op->kind == LINEA_OP_READ && attempt != NULL;
+    const int neutral = audited_read ||
+        (attempt == NULL && op->kind == LINEA_OP_READABLE);
+    if (!neutral)
+        linea_fiber_restrict_current();
     if (op->deadline_ns != 0 && now() >= op->deadline_ns) return op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;
-    struct pending_operation pending = { .operation = op, .attempt = attempt, .fiber = f,
+    struct pending_operation pending = { .operation = op, .attempt = attempt, .fiber = f, .owner = f->home, .audited_read = audited_read,
         .state = operation_idle, .slot = 0, .registered = 0, .result = 0 };
     const long immediate = attempt_operation(&pending);
     if (immediate != -(long)EAGAIN) return immediate;
@@ -846,6 +1332,14 @@ long linea_fiber_perform(struct linea_op *op, linea_fiber_attempt attempt) {
     return pending.result;
 }
 
+long linea_fiber_perform(struct linea_op *op, linea_fiber_attempt attempt) {
+    return perform_operation(op, attempt, 0);
+}
+
+long linea_fiber_perform_read(struct linea_op *op, linea_fiber_attempt attempt) {
+    return perform_operation(op, attempt, 1);
+}
+
 long linea_fiber_wait_descriptor(int fd, uint8_t writable, unsigned long deadline) {
     struct linea_op op = { writable ? LINEA_OP_WRITABLE : LINEA_OP_READABLE, fd, 0, 0, 0, deadline };
     return linea_fiber_perform(&op, NULL);
@@ -858,6 +1352,68 @@ long linea_fiber_sleep(unsigned long nanoseconds) {
     struct linea_op op = { LINEA_OP_SLEEP, -1, 0, 0, 0, deadline };
     return linea_fiber_perform(&op, NULL);
 }
+
+/* Validate stable carrier-owned slot storage before following any pointer into
+ * an operation's stack. This is shared by real events and delayed-event probes. */
+static int dispatch_io_cookie(struct carrier *c, uint64_t cookie) {
+    const uint32_t index = (uint32_t)(cookie >> 32);
+    if (index >= c->slots_made) return 0;
+    struct io_slot *slot = io_slot_at(c, index);
+    if (slot->generation != (uint32_t)cookie || slot->operation == NULL) return 0;
+#if defined(LINEA_FIBER_FORCE_TIMER_TIE_TEST)
+    static int forced_tie;
+    struct pending_operation *pending = slot->operation;
+    if (!forced_tie && pending->audited_read) {
+        forced_tie = 1;
+        /* Actual descriptor readiness is already present. Schedule an expired
+         * timer and let the real timer claimant attempt that same read first. */
+        struct linea_fiber *f = pending->fiber;
+        const unsigned long instant = now();
+        lock_fiber(f);
+        if (f->state != parked || !f->saved || f->home != c ||
+            f->waiting != waiting_io || f->operation != pending || f->timer_index != no_timer)
+            fail("linea: the readiness tie probe lost its parked operation\n");
+        f->deadline = instant;
+        pending->operation->deadline_ns = instant;
+        unlock_fiber(f);
+        if (timer_add(f) != 0) fail("linea: the readiness tie timer could not be prepared\n");
+        expire_timers(c);
+        /* Completion can publish the task: use no f/pending/slot pointer now. */
+        const char message[] = "native migration: timer-first readiness tie completed\n";
+        report_bytes(message, sizeof message - 1);
+        return 1;
+    }
+#endif
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+    must(pthread_mutex_lock(&handoff_lock));
+    if (stale_owner == NULL) {
+        stale_owner = c;
+        stale_cookie = cookie;
+    }
+    must(pthread_mutex_unlock(&handoff_lock));
+#endif
+    complete_operation(slot->operation, 1);
+    return 1;
+}
+
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+static void replay_stale_cookie(struct carrier *c) {
+    must(pthread_mutex_lock(&handoff_lock));
+    if (!replay_requested || stale_owner != c) {
+        must(pthread_mutex_unlock(&handoff_lock));
+        return;
+    }
+    const uint64_t cookie = stale_cookie;
+    replay_requested = 0;
+    must(pthread_mutex_unlock(&handoff_lock));
+    const int rejected = !dispatch_io_cookie(c, cookie);
+    must(pthread_mutex_lock(&handoff_lock));
+    replay_rejected = rejected;
+    replay_finished = 1;
+    must(pthread_cond_broadcast(&handoff_changed));
+    must(pthread_mutex_unlock(&handoff_lock));
+}
+#endif
 
 static void poll_carrier(struct carrier *c, int poll_only) {
     enum { batch = 32 };
@@ -902,15 +1458,18 @@ static void poll_carrier(struct carrier *c, int poll_only) {
 #endif
             continue;
         }
-        const uint32_t index = (uint32_t)(cookie >> 32);
-        if (index >= c->slots_made) continue;
-        struct io_slot *slot = io_slot_at(c, index);
-        if (slot->generation != (uint32_t)cookie || slot->operation == NULL) continue;
-        complete_operation(slot->operation, 1);
+        (void)dispatch_io_cookie(c, cookie);
     }
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+    replay_stale_cookie(c);
+#endif
 }
 
 static void run_fiber(struct carrier *c, struct linea_fiber *f) {
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    if (normalize_completed_io(c, f)) return;
+    if (normalize_completed_park(c, f)) return;
+#endif
     timer_remove(f);
     lock_fiber(f);
     if (f->state != runnable || f->claimed != dispatch_claim || f->claimant != c || f->home != c || f->queued || !f->saved) fail("linea: dispatch lost its saved runnable claim\n");
@@ -947,31 +1506,43 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     void (*ended)(void *) = NULL;
     void *argument = NULL;
     int became_parked = 0;
+    TRACE_BEGIN(runnable_trace);
+    TRACE_BEGIN(ready_trace);
     lock_fiber(f);
     if (f->state == parking) {
         f->state = parked;
         became_parked = 1;
         if (kind == waiting_yield) {
             f->state = runnable;
+            TRACE_CAPTURE(runnable_trace, 'R', f, c);
 #if defined(LINEA_FIBER_MIGRATION_TEST)
             f->transfer_ready = f->proven && f->bound == NULL && f->timer_index == no_timer &&
                 f->source_claims == 0 && f->park == NULL && f->waiter == NULL && f->operation == NULL;
+            if (f->transfer_ready) TRACE_CAPTURE(ready_trace, 'N', f, c);
 #endif
             enqueue_locked(f);
             if (c->simulation == 0) wake = c;
         }
     } else if (f->state == notified) {
         f->state = runnable;
+        TRACE_CAPTURE(runnable_trace, 'R', f, c);
         enqueue_locked(f);
         if (c->simulation == 0) wake = c;
     } else if (f->state == finished) {
         if (f->source_claims != 0) fail("linea: a finished fiber retained a source reference\n");
         f->retired = 1;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+        TRACE_COUNT(f->loop, retired);
+        if (!f->trace_ever_eligible) TRACE_COUNT(f->loop, never_eligible);
+        trace_update_eligibility(f);
+#endif
         ended = f->finished;
         argument = f->argument;
     } else fail("linea: a fiber switched in an invalid scheduling state\n");
     unlock_fiber(f);
-    if (became_parked && kind == waiting_park) linea_fiber_pause(linea_fiber_parked);
+    TRACE_END(runnable_trace);
+    TRACE_END(ready_trace);
+    if (became_parked && (kind == waiting_park || kind == waiting_io)) linea_fiber_pause(linea_fiber_parked);
     if (wake != NULL) wake_carrier(wake);
 #if defined(LINEA_FIBER_MIGRATION_TEST)
     if (kind == waiting_yield) linea_fiber_pause(linea_fiber_transfer_ready);
@@ -1123,6 +1694,9 @@ struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long sta
     f->entry = entry; f->finished = ended; f->argument = argument;
     f->timer_index = no_timer;
     f->state = parked;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    f->trace_identity = __atomic_add_fetch(&trace_identities, 1UL, __ATOMIC_RELAXED);
+#endif
     f->saved = 1;
     linea_context_init(&f->context, f->stack, usable, fiber_entry, f);
     *error = 0;
@@ -1139,6 +1713,16 @@ void linea_fiber_start(struct linea_fiber *f) {
     if (f->home->simulation == 0) wake = f->home;
     unlock_fiber(f);
     if (wake != NULL) wake_carrier(wake);
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    (void)alarm(60);
+#if defined(LINEA_FIBER_WAIT_FOR_PARK_TEST)
+    /* The producer cannot send until the receiver has actually suspended.
+     * Only immutable local data is used after publication of the fiber. */
+    must(pthread_mutex_lock(&handoff_lock));
+    while (!handoff_parked) must(pthread_cond_wait(&handoff_changed, &handoff_lock));
+    must(pthread_mutex_unlock(&handoff_lock));
+#endif
+#endif
 }
 
 void linea_fiber_destroy(struct linea_fiber *f) {
@@ -1147,6 +1731,9 @@ void linea_fiber_destroy(struct linea_fiber *f) {
         !((!f->started && f->state == parked) || (f->state == finished && f->retired))) fail("linea: a fiber was reclaimed before scheduler retirement\n");
     f->claimed = dispatch_claim;
     struct carrier *home = f->home;
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    const struct trace_counts counts = f->loop->trace_counts;
+#endif
     unlock_fiber(f);
     const int simulated = home->simulation != 0;
 #if __has_feature(thread_sanitizer)
@@ -1154,9 +1741,15 @@ void linea_fiber_destroy(struct linea_fiber *f) {
 #endif
     if (munmap(f->mapping, f->mapping_bytes) != 0) fail("linea: a fiber's stack could not be unmapped\n");
     free(f);
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    trace_dump(counts);
+#endif
     /* Prepared tasks can be canceled from a system thread. Keep their home
      * alive until stack and sanitizer cleanup no longer need it. */
     if (simulated) __atomic_fetch_sub(&home->live, 1UL, __ATOMIC_ACQ_REL);
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+    if (!simulated) linea_fiber_pause(linea_fiber_reclaimed);
+#endif
 }
 
 void *linea_fiber_sim_create(unsigned long identity) {

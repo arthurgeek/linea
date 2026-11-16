@@ -1,0 +1,89 @@
+import std.io
+import std.mem
+import std.net
+import std.task
+
+use io.Reader
+
+@linear
+struct State { connection: Option[net.Connection], calls: UInt64 }
+
+// Both dependency directions survive exchange; even a linear None is settled.
+fn exchange(inout slot: Option[net.Connection], sink next: Option[net.Connection]) -> Option[net.Connection] where carries(slot), retains(slot: next) {
+    let previous = slot
+    slot = next
+    previous
+}
+
+@(opaque, linear)
+struct Active { owner: task.Owner[State], initialized_on_system: Bool }
+
+@(opaque, copyable)
+struct Client { raw: task.Client[State] }
+
+pub fn open(address: net.Address) -> Active {
+    let owner = task.own(State { connection = .None, calls = 0 }, on: io.system()).unwrap()
+    let initialized_on_system = owner.client().call(
+        [sink address = copy(address)] |inout state: State| {
+            let resource = net.connect(address).unwrap()
+            match exchange(&state.connection, .Some(resource)) {
+                None => (),
+                Some(_) => panic("resource initialization ran twice"),
+            }
+            task.current_carrier().is_none()
+        },
+    )
+    .{ owner, initialized_on_system }
+}
+
+impl Active {
+    pub fn client(self: Self) -> Client where borrows(self) {
+        .{ raw = self.owner.client() }
+    }
+
+    // Clients must already be quiescent; consuming Active does not cancel them.
+    pub fn close(sink self: Self) -> (UInt64, Bool) {
+        let Active { owner, initialized_on_system } = self
+        let settled_on_system = owner.client().call(
+            |inout state: State| {
+                match exchange(&state.connection, .None) {
+                    Some(resource) => resource.release(),
+                    None => panic("resource settlement ran twice"),
+                }
+                task.current_carrier().is_none()
+            },
+        )
+        let State { connection, calls } = owner.close()
+        match connection {
+            None => (),
+            Some(_) => panic("a live resource escaped its owner"),
+        }
+        (calls, initialized_on_system && settled_on_system)
+    }
+}
+
+impl Client {
+    pub fn read_byte(self: Self) -> (UInt8, Bool) {
+        self.raw.call(
+            |inout state: State| {
+                let resource = match exchange(&state.connection, .None) {
+                    Some(resource) => resource,
+                    None => panic("operation after resource settlement"),
+                }
+                var held = resource
+                var buffer = mem.system().acquire(1).unwrap()
+                if &held.read_some(&buffer, offset: 0, count: 1).unwrap() != 1 {
+                    panic("the owner did not receive its release byte")
+                }
+                let byte = buffer.as_slice()[0]
+                buffer.release()
+                match exchange(&state.connection, .Some(held)) {
+                    None => (),
+                    Some(_) => panic("operation overwrote a live resource"),
+                }
+                state.calls += 1
+                (byte, task.current_carrier().is_none())
+            },
+        )
+    }
+}

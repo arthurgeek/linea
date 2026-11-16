@@ -37,6 +37,7 @@ module {
     llvm.return %s2 : !linea_static0
   }
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_write_some(i32, i64, i64) -> i64
@@ -258,6 +259,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
     %tl1 = arith.constant 18 : i32 loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
     %tc1 = arith.constant 5 : i32 loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
     llvm.unreachable loc("tests/text/an_interpolation_stops_at_the_first_failure.lin":18:5)
   ^b20:
@@ -329,6 +331,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c1:
@@ -492,6 +495,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c1:
@@ -508,6 +512,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c2:
@@ -525,6 +530,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c3:
@@ -541,6 +547,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c4:
@@ -577,6 +584,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c5:
@@ -620,6 +628,7 @@ module {
     %tf6 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl6 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc6 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk6, %tf6, %tl6, %tc6) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c6:
@@ -636,6 +645,7 @@ module {
     %tf7 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl7 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc7 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk7, %tf7, %tl7, %tc7) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c7:
@@ -706,6 +716,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c1:
@@ -725,6 +736,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c2:
@@ -744,6 +756,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c3:
@@ -786,6 +799,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c4:
@@ -886,6 +900,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/io/core/byte_writer.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/io/core/byte_writer.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/io/core/byte_writer.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/byte_writer.lin":L:C)
     llvm.unreachable loc("std/io/core/byte_writer.lin":L:C)
   ^c1:
@@ -993,6 +1008,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/io/core/byte_writer.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/io/core/byte_writer.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/io/core/byte_writer.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/byte_writer.lin":L:C)
     llvm.unreachable loc("std/io/core/byte_writer.lin":L:C)
   ^c2:
@@ -1006,6 +1022,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/io/core/byte_writer.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/io/core/byte_writer.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/io/core/byte_writer.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/byte_writer.lin":L:C)
     llvm.unreachable loc("std/io/core/byte_writer.lin":L:C)
   ^b16:
@@ -1074,6 +1091,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/io/core/byte_writer.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/io/core/byte_writer.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/io/core/byte_writer.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/byte_writer.lin":L:C)
     llvm.unreachable loc("std/io/core/byte_writer.lin":L:C)
   ^c4:
@@ -1148,6 +1166,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file6 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/io/core/error.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/io/core/error.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/error.lin":L:C)
     llvm.unreachable loc("std/io/core/error.lin":L:C)
   ^b5:
@@ -1195,6 +1214,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file6 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/io/core/error.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/io/core/error.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/error.lin":L:C)
     llvm.unreachable loc("std/io/core/error.lin":L:C)
   ^b12:
@@ -1227,6 +1247,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c1:
@@ -1243,6 +1264,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c2:
@@ -1258,6 +1280,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c3:
@@ -1274,6 +1297,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c4:
@@ -1295,6 +1319,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c5:
@@ -1339,6 +1364,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c1:
@@ -1354,6 +1380,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c2:
@@ -1392,6 +1419,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c3:
@@ -1418,6 +1446,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c4:
@@ -1457,6 +1486,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c1:
@@ -1474,6 +1504,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c2:
@@ -1497,6 +1528,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/fmt/decimal.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/fmt/decimal.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/fmt/decimal.lin":L:C)
     llvm.unreachable loc("std/fmt/decimal.lin":L:C)
   ^c3:
@@ -1566,6 +1598,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file7 : !llvm.ptr loc("std/mem/slice.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/mem/slice.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/mem/slice.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slice.lin":L:C)
     llvm.unreachable loc("std/mem/slice.lin":L:C)
   ^c1:
@@ -1604,6 +1637,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file7 : !llvm.ptr loc("std/mem/slice.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/mem/slice.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/mem/slice.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slice.lin":L:C)
     llvm.unreachable loc("std/mem/slice.lin":L:C)
   ^c2:
@@ -1618,6 +1652,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file7 : !llvm.ptr loc("std/mem/slice.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/mem/slice.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/mem/slice.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slice.lin":L:C)
     llvm.unreachable loc("std/mem/slice.lin":L:C)
   ^c3:
@@ -1631,6 +1666,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file7 : !llvm.ptr loc("std/mem/slice.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/mem/slice.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/mem/slice.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slice.lin":L:C)
     llvm.unreachable loc("std/mem/slice.lin":L:C)
   ^c4:
@@ -1644,6 +1680,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file7 : !llvm.ptr loc("std/mem/slice.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/mem/slice.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/mem/slice.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/mem/slice.lin":L:C)
     llvm.unreachable loc("std/mem/slice.lin":L:C)
   ^c5:
@@ -1701,6 +1738,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file8 : !llvm.ptr loc("std/option/option.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/option/option.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/option/option.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
   ^b5:
@@ -1721,6 +1759,7 @@ module {
     %pf2 = llvm.mlir.addressof @linea_file8 : !llvm.ptr loc("std/option/option.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/option/option.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/option/option.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_panic(%pva2, %pvl2, %pf2, %tl2, %tc2) : (i64, i64, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
   }
@@ -1791,6 +1830,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/io/core/descriptor.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/io/core/descriptor.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/io/core/descriptor.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/descriptor.lin":L:C)
     llvm.unreachable loc("std/io/core/descriptor.lin":L:C)
   ^c1:
@@ -1804,6 +1844,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/io/core/descriptor.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/io/core/descriptor.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/io/core/descriptor.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/descriptor.lin":L:C)
     llvm.unreachable loc("std/io/core/descriptor.lin":L:C)
   ^c2:
@@ -1815,6 +1856,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/io/core/descriptor.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/io/core/descriptor.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/io/core/descriptor.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/descriptor.lin":L:C)
     llvm.unreachable loc("std/io/core/descriptor.lin":L:C)
   ^c3:
@@ -1860,6 +1902,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file1 : !llvm.ptr loc("std/io/core/descriptor.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/io/core/descriptor.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/io/core/descriptor.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/descriptor.lin":L:C)
     llvm.unreachable loc("std/io/core/descriptor.lin":L:C)
   ^c4:
@@ -1973,6 +2016,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c1:
@@ -2029,6 +2073,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file8 : !llvm.ptr loc("std/option/option.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/option/option.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/option/option.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)
   ^b5:
@@ -2055,6 +2100,7 @@ module {
     %v6 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/fd.lin":L:C)
     %v7 = func.call @"lin.std.mem;Slice[UInt8].length"(%v6) : (!llvm.ptr) -> i64 loc("std/mem/fd.lin":L:C)
     %va8_0 = arith.trunci %v0 : i64 to i32 loc("std/mem/fd.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     %v8 = func.call @linea_write_some(%va8_0, %v5, %v7) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
     func.return %v8 : i64 loc("std/mem/fd.lin":L:C)
   }
@@ -2080,6 +2126,7 @@ module {
     %lw0 = llvm.load %s1 : !llvm.ptr -> i32 loc("std/io/core/error.lin":L:C)
     %v0 = arith.extsi %lw0 : i32 to i64 loc("std/io/core/error.lin":L:C)
     %va1_0 = arith.trunci %v0 : i64 to i32 loc("std/io/core/error.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     %vr1 = func.call @linea_io_category(%va1_0) : (i32) -> i8 loc("std/io/core/error.lin":L:C)
     %v1 = arith.extui %vr1 : i8 to i64 loc("std/io/core/error.lin":L:C)
     %v2 = arith.constant 1 : i64 loc("std/io/core/error.lin":L:C)
@@ -2362,6 +2409,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^b11:
@@ -2426,6 +2474,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl1 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc1 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c1:
@@ -2439,6 +2488,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl2 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc2 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c2:
@@ -2453,6 +2503,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl3 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc3 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c3:
@@ -2467,6 +2518,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl4 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc4 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c4:
@@ -2481,6 +2533,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file4 : !llvm.ptr loc("std/text/str.lin":L:C)
     %tl5 = arith.constant L : i32 loc("std/text/str.lin":L:C)
     %tc5 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("std/text/str.lin":L:C)
     llvm.unreachable loc("std/text/str.lin":L:C)
   ^c5:

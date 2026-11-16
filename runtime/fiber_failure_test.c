@@ -359,7 +359,7 @@ static void stale_events_do_not_complete_reused_slots(void) {
     operation.kind = LINEA_OP_READ; operation.fd = pair[0];
     struct pending_operation pending;
     memset(&pending, 0, sizeof pending);
-    pending.operation = &operation; pending.fiber = &fiber;
+    pending.operation = &operation; pending.fiber = &fiber; pending.owner = &carrier;
     pending.attempt = completes_once; pending.state = operation_armed;
     assert(arm_operation(&pending) == 0);
     const uint64_t stale = cookie_of(&carrier, &pending);
@@ -407,7 +407,7 @@ static void rejected_add_preserves_its_error_and_existing_watch(int error) {
     operation.kind = LINEA_OP_READ; operation.fd = pair[0];
     struct pending_operation existing, rejected;
     memset(&existing, 0, sizeof existing);
-    existing.operation = &operation; existing.fiber = &fiber;
+    existing.operation = &operation; existing.fiber = &fiber; existing.owner = &carrier;
     existing.attempt = completes_once; existing.state = operation_armed;
     rejected = existing;
     if (error == EEXIST) assert(arm_operation(&existing) == 0);
@@ -442,7 +442,7 @@ static void duplicate_failure_releases_only_its_slot(void) {
     operation.kind = LINEA_OP_READ; operation.fd = pair[0];
     struct pending_operation pending;
     memset(&pending, 0, sizeof pending);
-    pending.operation = &operation; pending.fiber = &fiber;
+    pending.operation = &operation; pending.fiber = &fiber; pending.owner = &carrier;
     pending.attempt = completes_once; pending.state = operation_armed;
     const int errors[] = { EMFILE, EBADF };
     for (size_t i = 0; i < sizeof errors / sizeof errors[0]; i += 1) {

@@ -1,0 +1,27 @@
+import std.io
+import std.task
+import std.time
+import std.session
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var stayed = false
+    let body = sink [inout stayed] |sink me: Chan[End]| {
+        let first = task.current_carrier().unwrap()
+        // Nonzero sleep conservatively binds this fiber before native effects.
+        time.sleep(time.Duration.from_nanoseconds(1))
+        let second = task.current_carrier().unwrap()
+        time.sleep(time.Duration.from_nanoseconds(0))
+        stayed = first == second && first == task.current_carrier().unwrap()
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    if stayed {
+        0
+    } else {
+        1
+    }
+}

@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/enums/payload_pair.lin\00") : !llvm.array<29 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -53,6 +54,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/payload_pair.lin":19:28)
     %tl1 = arith.constant 19 : i32 loc("tests/enums/payload_pair.lin":19:28)
     %tc1 = arith.constant 28 : i32 loc("tests/enums/payload_pair.lin":19:28)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/payload_pair.lin":19:28)
     llvm.unreachable loc("tests/enums/payload_pair.lin":19:28)
   ^c1:
@@ -70,6 +72,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/payload_pair.lin":19:52)
     %tl2 = arith.constant 19 : i32 loc("tests/enums/payload_pair.lin":19:52)
     %tc2 = arith.constant 52 : i32 loc("tests/enums/payload_pair.lin":19:52)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/payload_pair.lin":19:52)
     llvm.unreachable loc("tests/enums/payload_pair.lin":19:52)
   ^c2:
@@ -117,6 +120,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/payload_pair.lin":9:25)
     %tl1 = arith.constant 9 : i32 loc("tests/enums/payload_pair.lin":9:25)
     %tc1 = arith.constant 25 : i32 loc("tests/enums/payload_pair.lin":9:25)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/payload_pair.lin":9:25)
     llvm.unreachable loc("tests/enums/payload_pair.lin":9:25)
   ^c1:
@@ -146,6 +150,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/payload_pair.lin":10:30)
     %tl2 = arith.constant 10 : i32 loc("tests/enums/payload_pair.lin":10:30)
     %tc2 = arith.constant 30 : i32 loc("tests/enums/payload_pair.lin":10:30)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/payload_pair.lin":10:30)
     llvm.unreachable loc("tests/enums/payload_pair.lin":10:30)
   ^c2:
@@ -159,6 +164,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/enums/payload_pair.lin":8:5)
     %tl3 = arith.constant 8 : i32 loc("tests/enums/payload_pair.lin":8:5)
     %tc3 = arith.constant 5 : i32 loc("tests/enums/payload_pair.lin":8:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/enums/payload_pair.lin":8:5)
     llvm.unreachable loc("tests/enums/payload_pair.lin":8:5)
   ^b7:
