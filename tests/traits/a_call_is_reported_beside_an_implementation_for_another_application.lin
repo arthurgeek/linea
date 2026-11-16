@@ -1,0 +1,20 @@
+// `Nope` names nothing, so the implementation for `Box[Bool]` is refused. It
+// would not have answered `Box[X]` anyway, so the call in `build` reaching no
+// `from` is a mistake of its own.
+struct Box[T] {
+    held: T,
+}
+
+impl From[Nope] for Box[Bool] {
+    fn from(sink _s: Nope) -> Self {
+        Box[Bool] { held = true }
+    }
+}
+
+fn build[X](sink x: X) -> Box[X] {
+    Box.from(x)
+}
+
+fn main() -> UInt8 {
+    build(UInt8(7)).held
+}

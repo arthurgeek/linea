@@ -3317,8 +3317,9 @@ source's type, `Hot(Kelvin)` beside `Warm(Celsius.Reading)` with
 `From[Kelvin]`, are the two variants [T-Derive] refuses. A payload read
 through one of the enum's own parameters, `Held(T.Reading)` in
 `enum Box[T: Measure]`, is settled by each instantiation and holds no type
-the generic conversion could wrap. A refused entry still declares its
-conversion, so a call of it is not a second mistake. The generated
+the generic conversion could wrap. An entry refused because no variant, or
+two, holds the source still declares its conversion, so a call of it is not a
+second mistake. The generated
 implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.

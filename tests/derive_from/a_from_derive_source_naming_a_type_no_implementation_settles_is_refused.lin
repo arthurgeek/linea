@@ -1,6 +1,7 @@
 // `Wrap[T].Reading` is settled only for a `T` that implements `Tag`, and
 // `E` promises no such bound, so the derive's source names no type. The
-// conversion is still `E`'s, so the call below is not a second mistake.
+// implementation the derive writes then answers no call, and the call of
+// `E.from` below is reported as reaching nothing.
 trait Tag {
     fn tag(self: Self) -> UInt8
 }

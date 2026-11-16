@@ -109,10 +109,10 @@ writing the selection directly is.
   0209's own rule refuses two.
 - A refused `From` derive still generates its implementation, with a body the
   checker refused. A call of `Temp.from(...)` therefore reaches it and adds no
-  [N-Undefined] "declares no `from`" beside the [T-Derive]. The same holds
-  where the derive's source names a settled type no implementation supplies:
-  the implementation's refused trait argument is the report, and a call of
-  an operation its trait declares is not a second one; and an enum whose
+  [N-Undefined] "declares no `from`" beside the [T-Derive]. A derive whose
+  source names a settled type no implementation supplies is different: its
+  implementation's trait argument is refused, the implementation answers no
+  call, and a call of the conversion is still reported; and an enum whose
   only use is a refused `From` derive is not reported unused, as an enum with
   any other derive is not.
 - The [T-Derive] report for a wrap moves from expansion's selection to the

@@ -1,5 +1,0 @@
-error[T-Impl]: `Wrap[T]` has no available associated type `Reading`
-  --> tests/derive_from/a_from_derive_refused_for_its_settled_source_still_declares_its_conversion.lin:20:14
-   |
-20 | @derive(From[Wrap[T].Reading])
-   |              ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
