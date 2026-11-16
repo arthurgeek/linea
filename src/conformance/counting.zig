@@ -92,18 +92,22 @@ pub const Counting = struct {
 /// for that; the corpus walk runs the same compiler over an allocator that
 /// moves what grows.
 ///
-/// The address space is asked of the system with no promise it is backed.
-/// A system that refuses to overcommit refuses the reservation, which sets
-/// `failed`; this has run on macOS only.
+/// The address space is asked of the system with no promise it is backed,
+/// and where the system has a flag saying so, with that flag. Linux counts a
+/// writable private mapping without it against what the system may commit,
+/// and adjacent mappings are one mapping to it: a few dozen regions side by
+/// side are then one mapping larger than memory and swap together, which a
+/// process holding it cannot be forked with, so the runner could start no
+/// compiler. A system that refuses to overcommit at all refuses the
+/// reservation, which sets `failed`.
 pub const Regions = struct {
     small: std.heap.ArenaAllocator,
     /// Whether the system refused a reservation or the room to record one.
     /// An allocation refused for that reason is the system's answer and not
     /// the caller's bound.
     failed: bool = false,
-    /// The address of each large allocation, with the alignment it was asked
-    /// for.
-    large: std.AutoHashMapUnmanaged(usize, std.mem.Alignment) = .empty,
+    /// The address of each large allocation.
+    large: std.AutoHashMapUnmanaged(usize, void) = .empty,
 
     pub const threshold: usize = 64 << 10;
     /// The most one allocation holds. No check is allowed more work than
@@ -118,10 +122,7 @@ pub const Regions = struct {
 
     pub fn deinit(self: *Regions) void {
         var held = self.large.iterator();
-        while (held.next()) |entry| {
-            const memory: [*]u8 = @ptrFromInt(entry.key_ptr.*);
-            pages.rawFree(memory[0..region], entry.value_ptr.*, @returnAddress());
-        }
+        while (held.next()) |entry| release(@ptrFromInt(entry.key_ptr.*));
         self.large.deinit(pages);
         self.small.deinit();
     }
@@ -139,16 +140,32 @@ pub const Regions = struct {
         const self: *Regions = @ptrCast(@alignCast(ctx));
         if (n < threshold) return self.small.allocator().rawAlloc(n, a, ra);
         if (n > region) return null;
-        const memory = pages.rawAlloc(region, a, ra) orelse {
+        const memory = reserve(a) orelse {
             self.failed = true;
             return null;
         };
-        self.large.put(pages, @intFromPtr(memory), a) catch {
-            pages.rawFree(memory[0..region], a, ra);
+        self.large.put(pages, @intFromPtr(memory), {}) catch {
+            release(memory);
             self.failed = true;
             return null;
         };
         return memory;
+    }
+
+    /// One region of address space, or null where the system gives none. A
+    /// mapping starts on a page, so an alignment wider than a page is given
+    /// none either.
+    fn reserve(a: std.mem.Alignment) ?[*]u8 {
+        if (a.toByteUnits() > std.heap.pageSize()) return null;
+        var flags: std.posix.MAP = .{ .TYPE = .PRIVATE, .ANONYMOUS = true };
+        if (@hasField(std.posix.MAP, "NORESERVE")) flags.NORESERVE = true;
+        const memory = std.posix.mmap(null, region, .{ .READ = true, .WRITE = true }, flags, -1, 0) catch return null;
+        return memory.ptr;
+    }
+
+    fn release(memory: [*]u8) void {
+        const start: [*]align(std.heap.page_size_min) u8 = @alignCast(memory);
+        std.posix.munmap(start[0..region]);
     }
 
     fn resize(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, n: usize, ra: usize) bool {
@@ -165,8 +182,8 @@ pub const Regions = struct {
 
     fn free(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, ra: usize) void {
         const self: *Regions = @ptrCast(@alignCast(ctx));
-        if (self.large.fetchRemove(@intFromPtr(buf.ptr))) |entry| {
-            pages.rawFree(buf.ptr[0..region], entry.value, ra);
+        if (self.large.remove(@intFromPtr(buf.ptr))) {
+            release(buf.ptr);
         } else {
             self.small.allocator().rawFree(buf, a, ra);
         }
