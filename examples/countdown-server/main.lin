@@ -108,22 +108,26 @@ fn count_down(seconds: UInt64, inout body: http.BodyWriter) -> Result[(), http.E
     .Ok(())
 }
 
+// A router holding the route, or the reason the route was refused. The
+// annotation names what the route takes, `App`. A router that could not be
+// finished is released before the reason is returned.
+fn routed() -> Result[http.Router[App], http.RouteError] {
+    var router: http.Router[App] = http.Router.new()
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
 fn main() -> UInt8 {
     let options = parse_options(env.args()) else |status| {
         return status
     }
     // The logger writes lines at `Info` and above to standard error.
     let logger = log.to_stderr(minimum: .Info)
-    // The route is registered once here, so a refused pattern is reported
-    // before anything is served. The annotation names what the route takes,
-    // `App`.
-    var checked: http.Router[App] = http.Router.new()
-    let _ = routes(&checked) else |error| {
-        logger.error("cannot register a route", log.field("error", error))
-        checked.release()
-        return 2
-    }
-    checked.release()
     // `..http.Limits.default()` takes every limit not written here from the
     // standard limits, so only the connection count changes.
     let limits = http.Limits { connections = copy(options.requests), ..http.Limits.default() }
@@ -131,12 +135,17 @@ fn main() -> UInt8 {
     // lent an `App` of the task's own by `http.with_state`, inside
     // `http.logged`, which logs the address the server listens on and then one
     // line per request once its response has been sent. A logger to standard
-    // error owns nothing, so each `copy(logger)` costs nothing, and the route
-    // was checked above, so registering it again cannot fail.
+    // error owns nothing, so each `copy(logger)` costs nothing. Registering
+    // the route can be refused, so the closure returns the `Result` of
+    // `routed`, whose `map` turns a finished router into the handler and
+    // keeps a `RouteError` as it is. When one task's is `.Err`, serving ends
+    // before accepting anything and reports it.
     let serving = [sink logger = copy(logger)] || {
-        var router: http.Router[App] = http.Router.new()
-        routes(&router).unwrap()
-        http.logged(copy(logger), http.with_state(App { logger = copy(logger) }, router))
+        routed().map(
+            [sink logger = copy(logger)] |sink router: http.Router[App]| {
+                http.logged(copy(logger), http.with_state(App { logger = copy(logger) }, router))
+            },
+        )
     }
     // `listen_and_serve` opens the listener, serves many requests at once,
     // joins every serving task and closes the listener when it stops, and

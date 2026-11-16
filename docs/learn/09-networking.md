@@ -1003,29 +1003,28 @@ fn port_argument() -> Option[UInt16] {
     }
 }
 
-// A serving task's router. `serve` registered the same routes before
-// serving, so registering them here cannot fail.
-fn serving_router() -> http.Router[()] {
+// A serving task's router. Registering a route can be refused, so the
+// function answers with the router or with the reason, and releases the
+// router it could not finish.
+fn serving_router() -> Result[http.Router[()], http.RouteError] {
     var router: http.Router[()] = http.Router.new()
-    routes(&router).unwrap()
-    router
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
 }
 
 fn serve(port: UInt16) -> UInt8 {
-    // The routes are registered once here, so a refused pattern is reported
-    // before anything is served.
-    var checked: http.Router[()] = http.Router.new()
-    let _ = routes(&checked) else |error| {
-        io.eprintln("cannot register a route: {error}")
-        checked.release()
-        return 2
-    }
-    checked.release()
     io.eprintln("listening on http://127.0.0.1:{port}")
     // `listen_and_serve` opens the listener and answers many requests at once
     // until it fails. Each serving task builds its own router with
-    // `serving_router`, so no router is reached by two tasks. One `else`
-    // handles a failure to listen and a failure while serving.
+    // `serving_router`, so no router is reached by two tasks, and a task
+    // whose router is refused ends serving before a connection is accepted.
+    // One `else` handles a failure to listen, a refused route and a failure
+    // while serving.
     let _ = http.listen_and_serve(net.loopback(port), serving_router) else |error| {
         io.eprintln("{error}")
         return 1
@@ -1119,27 +1118,26 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route(r"GET /archive/{rest...}", archive)
 }
 
-// Each serving task builds its own router. `main` registered the same
-// routes before serving, so registering them here cannot fail.
-fn serving_router() -> http.Router[()] {
+// Each serving task builds its own router. Registering a route can be refused, so the
+// function answers with the router or with the reason, and releases the
+// router it could not finish.
+fn serving_router() -> Result[http.Router[()], http.RouteError] {
     var router: http.Router[()] = http.Router.new()
-    routes(&router).unwrap()
-    router
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
 }
 
 fn main() -> UInt8 {
-    var checked: http.Router[()] = http.Router.new()
-    if routes(&checked).is_err() {
-        checked.release()
-        io.eprintln("a route pattern was refused")
-        return 2
-    }
-    checked.release()
     // The program chooses the address and how each serving task builds its
     // handler. `listen_and_serve` opens the listener and serves many requests
     // at once until it fails, then joins every serving task and closes the
     // listener, whichever way it stopped. One `else` handles a failure to
-    // listen and a failure to serve.
+    // listen, a refused route and a failure to serve.
     let _ = http.listen_and_serve(net.loopback(8080), serving_router) else |error| {
         io.eprintln("{error}")
         return 1
@@ -1572,28 +1570,38 @@ fn routes(inout router: http.Router[Ctx], greeting: Str) -> Result[(), http.Rout
     &router.route_raw("GET /", [sink greeting = copy(greeting)] |inout _, request, inout _incoming| http.text(request, greeting))
 }
 
+// A router holding the routes, or the reason one was refused. The annotation
+// names what the routes take. A router that could not be finished is released
+// before the reason is returned.
+fn routed() -> Result[http.Router[Ctx], http.RouteError] {
+    var router: http.Router[Ctx] = http.Router.new()
+    match routes(&router, "Weather stations report here.\n") {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
 fn main() -> UInt8 {
     let logger = log.to_stderr(minimum: .Info)
-    // The routes are registered once here, so a refused pattern is reported
-    // before anything is served. The annotation names what the routes take.
-    var checked: http.Router[Ctx] = http.Router.new()
-    if routes(&checked, "Weather stations report here.\n").is_err() {
-        checked.release()
-        return 2
-    }
-    checked.release()
     // Each serving task builds its handler with this closure, given a client
     // of the task that owns the `App`: `http.with_state` lends the task's `Ctx`
     // to the router, `http.logged` logs the address the server listens on and
     // one line per request, and `http.with_request_ids` around it gives each
     // request an id, the one its client sent or a new time-ordered UUID, so
-    // the id is in the response and in the logged line. The routes were
-    // checked above, so registering them again cannot fail.
+    // the id is in the response and in the logged line. Registering a route
+    // can be refused, so the closure returns the `Result` of `routed`, whose
+    // `map` turns a finished router into the handler, and a task whose router
+    // is refused ends serving before a connection is accepted.
     let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
-        var router: http.Router[Ctx] = http.Router.new()
-        routes(&router, "Weather stations report here.\n").unwrap()
-        let ctx = Ctx { app = copy(app), logger = copy(logger) }
-        http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+        routed().map(
+            [sink logger = copy(logger), sink app = copy(app)] |sink router: http.Router[Ctx]| {
+                let ctx = Ctx { app = copy(app), logger = copy(logger) }
+                http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+            },
+        )
     }
     // `listen_and_serve_with` keeps `App` in an owning task while serving and
     // hands it back when serving ends.
@@ -2285,7 +2293,7 @@ limits. Pass `limits:` to change them. `http.Limits.default()` gives the
 standard ones, so struct update changes only what you write. In
 `stations.lin`, this serves one connection and returns:
 
-<!-- guide: edit stations.lin 151 let finished =… -->
+<!-- guide: edit stations.lin 161 let finished =… -->
 ```linea
     let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
     let finished = http.listen_and_serve_with(net.loopback(8080), serving, App { readings = 0 }, limits: limits) else |error| {

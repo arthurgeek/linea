@@ -800,20 +800,30 @@ fn routes(inout router: http.Router[task.Client[Greeter]]) -> Result[(), http.Ro
     &router.route(r"GET /hello/{name}", hello)
 }
 
-fn main() -> UInt8 {
-    var checked: http.Router[task.Client[Greeter]] = http.Router.new()
-    if routes(&checked).is_err() {
-        checked.release()
-        return 2
+// A router holding the route, or the reason the route was refused. A router
+// that could not be finished is released before the reason is returned.
+fn routed() -> Result[http.Router[task.Client[Greeter]], http.RouteError] {
+    var router: http.Router[task.Client[Greeter]] = http.Router.new()
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
     }
-    checked.release()
+}
+
+fn main() -> UInt8 {
     // Each serving task builds its own router, lent its client of the owning
-    // task by `http.with_state`. The route was checked above, so registering
-    // it again cannot fail.
+    // task by `http.with_state`. Registering the route can be refused, so the
+    // closure returns the `Result` of `routed`, and a task whose router is
+    // refused ends serving before a connection is accepted.
     let serving = |greeter: task.Client[Greeter]| -> where carries(greeter) {
-        var router: http.Router[task.Client[Greeter]] = http.Router.new()
-        routes(&router).unwrap()
-        http.with_state(copy(greeter), router)
+        routed().map(
+            [sink greeter = copy(greeter)] |sink router: http.Router[task.Client[Greeter]]| {
+                http.with_state(copy(greeter), router)
+            },
+        )
     }
     // `listen_and_serve_with` opens the listener, keeps the `Greeter` in an
     // owning task while it answers many requests at once, joins every serving

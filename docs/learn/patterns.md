@@ -171,15 +171,19 @@ own handler around a client of that task, and a route reaches the state
 through the client's `call`. The [JSON echo
 server](../../examples/http-json-echo/main.lin) does both, and gives every
 request an id with `http.with_request_ids`: the one its client sent, or a new
-time-ordered UUID, which each serving task makes on its own:
+time-ordered UUID, which each serving task makes on its own. `routed` builds
+the task's router and returns a `Result`, since a route can be refused, and
+`map` wraps a finished router in the handler:
 
 <!-- guide: excerpt examples/http-json-echo/main.lin -->
 ```linea
 let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
-    var router: http.Router[Ctx] = http.Router.new()
-    routes(&router).unwrap()
-    let ctx = Ctx { app = copy(app), logger = copy(logger) }
-    http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+    routed().map(
+        [sink logger = copy(logger), sink app = copy(app)] |sink router: http.Router[Ctx]| {
+            let ctx = Ctx { app = copy(app), logger = copy(logger) }
+            http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+        },
+    )
 }
 ```
 

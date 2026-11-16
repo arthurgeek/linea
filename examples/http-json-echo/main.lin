@@ -442,6 +442,20 @@ test fn stats_counts_the_messages_echoed() {
     testing.assert_eq(server.state().app.call(|inout app: App| app.echoed), 1, "the state did not keep the count")?
 }
 
+// A router holding the routes, or the reason one was refused. The annotation
+// names what the routes take, `Ctx`. A router that could not be finished is
+// released before the reason is returned.
+fn routed() -> Result[http.Router[Ctx], http.RouteError] {
+    var router: http.Router[Ctx] = http.Router.new()
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
 fn main() -> UInt8 {
     let options = parse_options(env.args()) else |status| {
         return status
@@ -449,16 +463,6 @@ fn main() -> UInt8 {
     // The logger writes lines at `Info` and above to standard error, building
     // each line in memory from `mem.system()` before writing it whole.
     let logger = log.to_stderr(minimum: .Info)
-    // The routes are registered once here, so a refused pattern is reported
-    // before anything is served. The annotation names what the routes take,
-    // `Ctx`.
-    var checked: http.Router[Ctx] = http.Router.new()
-    let _ = routes(&checked) else |error| {
-        logger.error("cannot register a route", log.field("error", error))
-        checked.release()
-        return 2
-    }
-    checked.release()
     // `..http.Limits.default()` takes every limit not written here from the
     // standard limits. `copy` takes the limit out of `options` and leaves
     // `options` whole.
@@ -471,13 +475,18 @@ fn main() -> UInt8 {
     // wraps that in turn, giving each request the id its client sent or a new
     // time-ordered UUID, which every serving task makes on its own. Port 0
     // asks the operating system for any free port. A logger to standard error
-    // owns nothing, so each `copy(logger)` costs nothing, and the routes were
-    // checked above, so registering them again cannot fail.
+    // owns nothing, so each `copy(logger)` costs nothing. Registering a
+    // route can be refused, so the closure returns the `Result` of `routed`,
+    // whose `map` turns a finished router into the handler and keeps a
+    // `RouteError` as it is. When one task's is `.Err`, serving ends before
+    // accepting anything and reports it.
     let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carries(app) {
-        var router: http.Router[Ctx] = http.Router.new()
-        routes(&router).unwrap()
-        let ctx = Ctx { app = copy(app), logger = copy(logger) }
-        http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+        routed().map(
+            [sink logger = copy(logger), sink app = copy(app)] |sink router: http.Router[Ctx]| {
+                let ctx = Ctx { app = copy(app), logger = copy(logger) }
+                http.with_request_ids(http.logged(copy(logger), http.with_state(ctx, router)))
+            },
+        )
     }
     // `listen_and_serve_with` opens the listener, keeps `App` in an owning
     // task while serving, joins every serving task and closes the listener
