@@ -6122,11 +6122,11 @@ const Checker = struct {
     /// backing field, which `settleDelegation` does not report again.
     delegation_cycles: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
     /// The bounds `reportTraitBoundCycles` refused, by the token naming the
-    /// required trait: one per cycle, the bound that closes it. A trait's
-    /// requirements are read past these, so a bound refused for cycling is
-    /// not followed afterwards. `trait Grow[T]: Grow[Option[T]]` names a new
-    /// argument list at every step round its cycle, and following it would
-    /// not finish.
+    /// required trait: one per cycle, the bound that closes it.
+    /// `traitsBounding` follows such a bound only to a trait it has not yet
+    /// admitted at any arguments, so `trait Grow[T]: Grow[Option[T]]`, which
+    /// names a new argument list at every step round its cycle, is walked
+    /// once round it rather than without end.
     refused_trait_bounds: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
     /// Whether a structural selection is passed over rather than read: while
     /// parts are first read for their callable shapes and while
@@ -12824,10 +12824,6 @@ const Checker = struct {
                 );
                 return true;
             }
-            // A bound refused for closing a cycle of traits promises nothing
-            // an implementation could keep, and was reported where it is
-            // written.
-            if (self.refused_trait_bounds.contains(bound.named.name)) continue;
             const args = try self.settledBoundArgs(own, bound);
             defer if (args.len > 0) self.gpa.free(args);
             if (try self.discharges(held, bound.named.name, args)) continue;
@@ -33990,12 +33986,12 @@ const Checker = struct {
     /// from a bound the program wrote, and the arguments come from
     /// substituting into the entry that reached it, so the list grows only
     /// while a new pair keeps turning up, and an entry already in the list is
-    /// not walked again. A bound `reportTraitBoundCycles` refused is not
-    /// followed, and those are the bounds that close every cycle, so the
-    /// requirements walked form an acyclic graph: an entry's arguments are
-    /// substituted at most once per trait on the longest path through it,
-    /// and the pairs are finite even where a cycle would grow its arguments
-    /// at every step.
+    /// not walked again. A bound `reportTraitBoundCycles` refused, one of
+    /// which closes every cycle, is followed only to a trait not yet admitted
+    /// (`closesAdmittedCycle`). Each such bound is then followed at most once
+    /// per trait it names, and between them the requirements walked form an
+    /// acyclic graph, so the pairs are finite even where a cycle would grow
+    /// its arguments at every step.
     fn traitsBounding(
         self: *Checker,
         interning: ?BoundInterning,
@@ -34009,11 +34005,17 @@ const Checker = struct {
             for (out.items) |b| if (b.args.len > 0) self.gpa.free(b.args);
             out.deinit(self.gpa);
         }
+        // The traits admitted so far at any arguments, filled from `out` as
+        // a refused bound asks, so a refused bound closing a cycle is
+        // followed to a trait the walk has not reached and to no other.
+        var admitted: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty;
+        defer admitted.deinit(self.gpa);
+        var noted: usize = 0;
         for (bounds) |b| {
             if (b.kind == .callable) continue;
-            if (self.refused_trait_bounds.contains(b.named.name)) continue;
             if (try self.admitIntegerComparisons(&out, &seen, context, b)) continue;
             const t = traitAt(self.ast, self.res, b.named.name) orelse continue;
+            if (try self.closesAdmittedCycle(&admitted, &noted, out.items, b, t)) continue;
             const args = try self.internedBoundArgs(interning, b);
             try self.admitOnce(&out, &seen, context, t, b, args);
         }
@@ -34038,9 +34040,9 @@ const Checker = struct {
             };
             for (self.ast.declBounds(required)) |b| {
                 if (b.kind == .callable) continue;
-                if (self.refused_trait_bounds.contains(b.named.name)) continue;
                 if (try self.admitIntegerComparisons(&out, &seen, context, b)) continue;
                 const t = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                if (try self.closesAdmittedCycle(&admitted, &noted, out.items, b, t)) continue;
                 const raw = try self.internedBoundArgs(through, b);
                 defer if (raw.len > 0) self.gpa.free(raw);
                 try self.admitOnce(
@@ -34054,6 +34056,27 @@ const Checker = struct {
             }
         }
         return out.toOwnedSlice(self.gpa);
+    }
+
+    /// Whether `bound`, naming `trait`, is a bound `reportTraitBoundCycles`
+    /// refused and `trait` is already among `out` at some arguments. The
+    /// cycle it closes has then been walked once, and walking it again could
+    /// only name the same traits at arguments that grow at every turn.
+    /// Followed otherwise, so what the cycle's traits require is admitted
+    /// whichever of its bounds the report fell on, and the traits a bound
+    /// admits do not depend on the order the traits are declared in.
+    fn closesAdmittedCycle(
+        self: *Checker,
+        admitted: *std.AutoHashMapUnmanaged(node.DeclId, void),
+        noted: *usize,
+        out: []const types_mod.BoundTrait,
+        bound: node.TraitBound,
+        trait: node.DeclId,
+    ) std.mem.Allocator.Error!bool {
+        if (!self.refused_trait_bounds.contains(bound.named.name)) return false;
+        for (out[noted.*..]) |entry| try admitted.put(self.gpa, entry.trait, {});
+        noted.* = out.len;
+        return admitted.contains(trait);
     }
 
     /// The closed integer family guarantees these same-type comparison traits.

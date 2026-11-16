@@ -1,7 +1,9 @@
 // `Grow[T]` requires `Shrink[Option[T]]` and `Shrink[T]` requires
-// `Grow[Vec[T]]`, so the arguments grow at each turn of the cycle. The bound
-// that closes the cycle is the one report: the implementations and the
-// function bounded on `Grow` are read as if it were not written.
+// `Grow[Vec[T]]`, so the arguments grow at each turn of the cycle. The cycle
+// is reported once. Each implementation still owes what its trait requires,
+// and `Shrink[Option[UInt8]]` owes a `Grow[Vec[Option[UInt8]]]` that `Seed`
+// does not implement: no finite set of implementations could supply every
+// turn of the cycle, and reading the requirements ends after one.
 trait Grow[T]: Shrink[Option[T]] {
     fn grow(self: Self, by: T) -> UInt8
 }

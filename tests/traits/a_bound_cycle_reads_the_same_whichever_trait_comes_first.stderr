@@ -1,0 +1,15 @@
+error[T-Bound]: `B` requires `A`, and `A` requires `B`
+  --> tests/traits/a_bound_cycle_reads_the_same_whichever_trait_comes_first.lin:10:10
+   |
+10 | trait B: A {
+   |          ^ drop one of the two bounds
+error[T-Bound]: `A` requires `B`, and `Seed` does not implement it
+  --> tests/traits/a_bound_cycle_reads_the_same_whichever_trait_comes_first.lin:18:6
+   |
+18 | impl A for Seed {
+   |      ^ implement it for that type, or drop the bound
+error[T-Bound]: `S` requires `B`, and `Seed` does not implement it
+  --> tests/traits/a_bound_cycle_reads_the_same_whichever_trait_comes_first.lin:33:31
+   |
+33 |     useb(Seed { size = 1 }) + usea(Seed { size = 2 })
+   |                               ^^^^ implement it for that type, or drop the bound

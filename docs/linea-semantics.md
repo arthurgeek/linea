@@ -3844,11 +3844,13 @@ the arguments written on each requirement: a parameter bounded by `Fancy`
 discharges `Lookup[UInt64]` and no other `Lookup` argument list. Arguments
 referring to the requiring trait's parameters are substituted from the bound
 that reaches it. Trait bounds may not cycle; a cycle is diagnosed at its
-declaration, on the bound that closes it. That bound is the cycle's one report
-and is read nowhere else: an implementation of a trait on the cycle does not
-owe it, and a parameter bounded by one is not granted it. `trait Grow[T]:
-Grow[Option[T]]` is refused once, although following its bound would name a
-longer argument list at every step.
+declaration, on the bound that closes it, and only there. Every bound on the
+cycle is still read as written: an implementation of a trait on it owes what
+the trait requires, and a parameter bounded by one is granted what that trait
+requires, whichever bound the report fell on. A requirement reached again round
+the cycle is not followed a second time, so `trait Grow[T]: Grow[Option[T]]`
+is refused once, although following its bound would name a longer argument
+list at every step.
 
 Capability requirements are inherited through the same transitive trait bounds.
 `trait Replicable: Copyable` requires every implementation of `Replicable` to

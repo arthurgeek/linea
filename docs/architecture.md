@@ -196,7 +196,7 @@ around it, so `parseTypeExpression` reads it once and later readings take it
 as it is, wherever the levels it reached stay inside the nesting limit; the
 resolver resolves it once and replays its reports. Brackets therefore cost
 `O(n·d)` for `n` tokens nested `d` deep, and the depth is at most the nesting
-limit (ADR 0274).
+limit (ADR 0275).
 
 The resolver records what each such bracket holds in
 `Resolution.bracket_readings`. A head naming a function, or a trait's

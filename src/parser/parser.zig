@@ -459,6 +459,9 @@ const Parser = struct {
     /// reading is kept with how far it reaches below where it began, and is
     /// taken only where that reach stays inside the nesting limit.
     const TypeExprContext = struct {
+        /// Whether a written type is open around the expression, which
+        /// decides whether a type inside it counts towards its height.
+        in_written_type: bool,
         in_lambda_default: bool,
         result_may_split: bool,
         reported_nesting: bool,
@@ -547,6 +550,7 @@ const Parser = struct {
 
     fn typeExprContext(self: *const Parser) TypeExprContext {
         return .{
+            .in_written_type = self.written_type_depth != 0,
             .in_lambda_default = self.in_lambda_default,
             .result_may_split = self.result_may_split,
             .reported_nesting = self.reported_nesting,

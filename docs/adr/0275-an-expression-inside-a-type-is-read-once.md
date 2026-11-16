@@ -1,4 +1,4 @@
-# 274. An expression inside a type is read once
+# 275. An expression inside a type is read once
 
 Status: Accepted — 2026-11-16; extends
 [0181](0181-a-call-may-name-its-type-arguments.md) and replaces its cost

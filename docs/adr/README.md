@@ -194,8 +194,8 @@ true of a different implementation.
 | [0187](0187-a-bound-brings-its-traits-operations-into-reach.md) | A bound brings its trait's operations into reach | Accepted; extends 0160 and 0186; extended by 0243 |
 | [0243](0243-a-bound-reaches-its-supertraits-associated-types.md) | A bound reaches the associated types its supertraits declare | Accepted; extends 0187 |
 | [0161](0161-a-postfix-call-reaches-an-operation-never-a-field.md) | A postfix call reaches an operation, never a field | Accepted; replaces the field-precedence sentence of the semantics; extended by 0181 |
-| [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176; extended by 0274, which replaces its cost consequence |
-| [0274](0274-an-expression-inside-a-type-is-read-once.md) | An expression inside a type is read once | Accepted; extends 0181 and replaces its cost consequence |
+| [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176; extended by 0275, which replaces its cost consequence |
+| [0275](0275-an-expression-inside-a-type-is-read-once.md) | An expression inside a type is read once | Accepted; extends 0181 and replaces its cost consequence |
 | [0162](0162-question-mark-converts-an-error-through-from.md) | `?` converts a different error through `From` | Accepted; extended by 0184 and 0218 |
 | [0163](0163-a-raw-string-literal-holds-its-bytes.md) | A raw string literal holds its bytes: `r"…"`, with hashes for embedded quotes | Accepted |
 | [0167](0167-a-binding-handles-its-failure-with-else.md) | A binding handles its failure with `else` | Accepted; builds on 0070 and 0106; refines 0041; extended by 0224 |
