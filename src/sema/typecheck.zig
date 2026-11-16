@@ -814,6 +814,7 @@ fn typecheckInternal(
     defer c.invalid_templates.deinit(gpa);
     defer c.suppressed_generated_implementations.deinit(gpa);
     defer c.refused_bindings.deinit(gpa);
+    defer c.refused_contexts.deinit(gpa);
     defer c.discarded_components.deinit(gpa);
     defer c.suppressed_generated_bodies.deinit(gpa);
     defer {
@@ -6480,10 +6481,12 @@ const Checker = struct {
     /// The bindings refused where they are declared, and what an expression
     /// naming one would be worth were its value known.
     refused_bindings: RefusedBindings = .{},
-    /// Whether the expression being checked stands where a written type that
-    /// was refused is expected, so a type only that context could settle is
-    /// not reported as missing.
-    expectation_refused: bool = false,
+    /// The expressions that stand where a written type that was refused is
+    /// expected: the expression a refused expectation reached, and every
+    /// result position that would have taken that expectation from it. A
+    /// type only that context could settle is not reported as missing there,
+    /// and is reported everywhere else.
+    refused_contexts: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// Whether each constant's initialiser has been checked, so it is typed
     /// once whichever reference reached it first. An ordering, not a value:
     /// what the constant is worth is the fold's answer and is asked for
@@ -13214,7 +13217,7 @@ const Checker = struct {
         // expectation is what would have settled it, so reporting the call as
         // well describes one mistake twice. A result without `Self` could not
         // have been settled by any annotation, and that is a mistake of its own.
-        if (self.contextRefused(expected) and self.mentionsParameterAt(signature.result, d, .stops, self_index))
+        if (self.contextRefused(id, expected) and self.mentionsParameterAt(signature.result, d, .stops, self_index))
             return .{ .ty = .poison };
 
         // Every trait signature needs a concrete receiver to select a body,
@@ -13299,7 +13302,7 @@ const Checker = struct {
             // An expectation that was reported settles nothing, and the reason
             // this parameter has no type is that mistake rather than the
             // absence of anything to settle it.
-            if (self.contextRefused(expected)) continue;
+            if (self.contextRefused(id, expected)) continue;
 
             // A `Self` this call could not settle already took the call with
             // it, and every parameter written in terms of the trait is
@@ -14428,7 +14431,7 @@ const Checker = struct {
         // A type that only the context could settle is not asked for where
         // the context was a written type that was refused: that refusal is
         // the report, and the type it would have read is unknown.
-        if (code == .t_infer and self.expectation_refused) return try self.record(id, .poison);
+        if (code == .t_infer and self.refused_contexts.contains(id)) return try self.record(id, .poison);
         const before = self.sink.items().len;
         try self.sink.addErrorFmt(code, self.ast.fileOfExpr(id), self.ast.exprSpan(id), label, fmt, args);
         try self.explainShadowedHead(id, before);
@@ -16553,11 +16556,6 @@ const Checker = struct {
     /// nothing in it is typed and every rule that reads a type is silent about
     /// it.
     fn checkStmt(self: *Checker, s: StmtId) !void {
-        // A statement is checked in no expectation but its own, whatever
-        // block holds it.
-        const outer_refused = self.expectation_refused;
-        self.expectation_refused = false;
-        defer self.expectation_refused = outer_refused;
         switch (self.ast.stmtTag(s)) {
             // Already diagnosed by the parser.
             .err => {},
@@ -17653,9 +17651,59 @@ const Checker = struct {
     /// was refused: an expectation of poison, or no expectation where the
     /// expression stands in the place of one, which `check` reads as none.
     /// What only that type could have settled is then not reported.
-    fn contextRefused(self: *const Checker, expected: ?Expected) bool {
+    fn contextRefused(self: *const Checker, id: ExprId, expected: ?Expected) bool {
         if (expected) |want| return want.ty == .poison;
-        return self.expectation_refused;
+        return self.refused_contexts.contains(id);
+    }
+
+    /// Records `root`, reached by an expected type that was refused, and the
+    /// result positions under it that an expected type flows into: a group's
+    /// operand, a block's tail, an `if`'s and a `match`'s arms, an
+    /// arithmetic or negated operand, an array's and a tuple's elements, a
+    /// variant's payload, a structure literal's values and a lambda's body.
+    /// A sub-expression anywhere else is checked against its own
+    /// expectation, which the refusal says nothing about.
+    ///
+    /// **Bound:** the result positions under `root`, each once, followed
+    /// with a list and not with the stack.
+    fn noteRefusedContext(self: *Checker, root: ExprId) std.mem.Allocator.Error!void {
+        if (self.refused_contexts.contains(root)) return;
+        var pending: std.ArrayList(ExprId) = .empty;
+        defer pending.deinit(self.gpa);
+        try pending.append(self.gpa, root);
+        while (pending.pop()) |id| {
+            if (id == .none or (try self.refused_contexts.getOrPut(self.gpa, id)).found_existing) continue;
+            switch (self.ast.exprTag(id)) {
+                .grouped, .negate => try pending.append(self.gpa, self.ast.unaryOperand(id)),
+                .add, .sub, .mul, .div, .rem => {
+                    const two = self.ast.binary(id);
+                    try pending.append(self.gpa, two.lhs);
+                    try pending.append(self.gpa, two.rhs);
+                },
+                .block => try pending.append(self.gpa, self.ast.blockOf(id).tail),
+                .conditional => {
+                    const arms = self.ast.conditional(id);
+                    try pending.append(self.gpa, arms.then);
+                    try pending.append(self.gpa, arms.otherwise);
+                },
+                .match_, .match_read => for (self.ast.call(id).args, 0..) |arm, at| {
+                    if (at % 2 == 1) try pending.append(self.gpa, arm);
+                },
+                .array_literal, .tuple_literal => try pending.appendSlice(self.gpa, self.ast.call(id).args),
+                .struct_literal => for (self.ast.call(id).args, 0..) |value, at| {
+                    if (at % 2 == 1) try pending.append(self.gpa, value);
+                },
+                .call => {
+                    const call = self.ast.call(id);
+                    if (self.ast.exprTag(call.callee) == .variant_ref) {
+                        try pending.append(self.gpa, call.callee);
+                        try pending.appendSlice(self.gpa, call.args);
+                    }
+                },
+                .lambda => try pending.append(self.gpa, self.ast.lambda(id).body),
+                else => {},
+            }
+        }
     }
 
     fn check(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
@@ -17665,9 +17713,7 @@ const Checker = struct {
         // with nothing written. What only a type there could have settled is
         // not reported; see `report`.
         if (expected) |want| if (want.ty == .poison and want.inference == null and !want.callable_context and !want.unit_test_success) {
-            const outer = self.expectation_refused;
-            self.expectation_refused = true;
-            defer self.expectation_refused = outer;
+            try self.noteRefusedContext(id);
             return self.checkInner(id, null);
         };
         if (expected) |want| if (self.builder.get(want.ty) == .open_type) {
@@ -36931,7 +36977,7 @@ const Checker = struct {
         // more about what the call leaves open.
         // Poison is only recorded after it was reported, which is what lets
         // this skip both the default and the unresolved-parameter report.
-        const context_refused = self.contextRefused(expected);
+        const context_refused = self.contextRefused(id, expected);
         if (!context_refused) for (settling) |s| {
             if (s.owner != over) continue;
             for (s.found, 0..) |*f, k| {

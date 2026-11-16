@@ -7594,6 +7594,11 @@ const Parser = struct {
     fn skipRefusedElement(self: *Parser, start: TokenId) !ExprId {
         var depth: usize = 0;
         while (!self.cursor.atEnd()) {
+            // A line that begins a statement or a declaration ends the
+            // element however many brackets it left open, so an opener with
+            // no closer on the refused token's line does not take the
+            // statements after it.
+            if (self.cursor.current() != start and self.cursor.precededByNewline() and self.atStatementOrDeclaration()) break;
             switch (self.cursor.peek()) {
                 .l_paren, .l_bracket, .l_brace => depth += 1,
                 .r_paren, .r_bracket, .r_brace => {

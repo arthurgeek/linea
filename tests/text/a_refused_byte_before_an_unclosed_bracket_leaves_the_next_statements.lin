@@ -1,0 +1,42 @@
+// A byte no token begins is reported where it is written. An element that
+// holds one and opens a bracket its line never closes ends where the next
+// statement begins, so the statements after it are read and their own
+// mistakes reported.
+fn main() -> UInt8 {
+    in_an_array() + in_a_call() + in_a_tuple() + in_an_array_before_a_brace() + in_an_arm()
+}
+
+fn three(_a: UInt8, b: UInt8, _c: UInt8) -> UInt8 {
+    b
+}
+
+fn in_an_array() -> UInt8 {
+    let _a = [1, é [
+    let _z = true + 1
+    0
+}
+
+fn in_a_call() -> UInt8 {
+    let _a = three(1, é (
+    let _z = true + 1
+    0
+}
+
+fn in_a_tuple() -> UInt8 {
+    let _a = (1, é {
+    let _z = true + 1
+    0
+}
+
+fn in_an_array_before_a_brace() -> UInt8 {
+    let _a = [1, é {
+    let _z = true + 1
+    0
+}
+
+fn in_an_arm() -> UInt8 {
+    let _a = match 1 {
+        1 => é {
+    let _z = true + 1
+    0
+}

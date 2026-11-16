@@ -1,0 +1,56 @@
+// An annotation that was refused would have settled the type of the value it
+// annotates, and of the values that take their type from it: a `match`'s arms,
+// a tuple's components, a lambda's result. It would have settled nothing
+// else, so a type nothing settles elsewhere in the initialiser is reported as
+// it is under an annotation that names a type.
+fn take[T](_value: Option[T]) -> Int64 {
+    0
+}
+
+fn first[T](_values: Vec[T]) -> Int64 {
+    0
+}
+
+let refused_constant: Nope = match .None {
+    _ => 1,
+}
+
+let named_constant: Int64 = match .None {
+    _ => 1,
+}
+
+fn main() -> UInt8 {
+    let numbers = [1, 2]
+    let _scrutinee: Nope = match .None {
+        _ => 1,
+    }
+    let _scrutinee_named: Int64 = match .None {
+        _ => 1,
+    }
+    let _condition: Nope = if .None == .None {
+        1
+    } else {
+        2
+    }
+    let _condition_named: Int64 = if .None == .None {
+        1
+    } else {
+        2
+    }
+    let _index: Nope = numbers[.None]
+    let _index_named: Int64 = numbers[.None]
+    let _operand: Nope = 1 + (match .None { _ => 1 })
+    let _operand_named: Int64 = 1 + (match .None { _ => 1 })
+    let _argument: Nope = take(.None)
+    let _argument_named: Int64 = take(.None)
+    let _vector: Nope = first(Vec.new())
+    let _vector_named: Int64 = first(Vec.new())
+    let _receiver: Nope = Vec.new().len()
+    let _receiver_named: UInt64 = Vec.new().len()
+    let _body: Nope = || match .None { _ => 1 }
+    let _body_named: fn() -> Int64 = || match .None { _ => 1 }
+    let _components: Nope = (.None, match .None { _ => 1 })
+    let _components_named: (Option[UInt8], Int64) = (.None, match .None { _ => 1 })
+    let _constants = (refused_constant, named_constant)
+    0
+}

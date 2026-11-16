@@ -1,0 +1,97 @@
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:14:18
+   |
+14 |     let _a = [1, é [
+   |                  ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:20:23
+   |
+20 |     let _a = three(1, é (
+   |                       ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:26:18
+   |
+26 |     let _a = (1, é {
+   |                  ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:32:18
+   |
+32 |     let _a = [1, é {
+   |                  ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:39:14
+   |
+39 |         1 => é {
+   |              ^ not a valid token
+error[S-Bracket]: expected `]`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:15:5
+   |
+15 |     let _z = true + 1
+   |     ^^^ an array literal is written `[a, b, c]`
+error[S-Paren]: expected `)`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:21:5
+   |
+21 |     let _z = true + 1
+   |     ^^^ this call is never closed
+error[S-Paren]: unclosed `(`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:26:14
+   |
+26 |     let _a = (1, é {
+   |              ^ this tuple is never closed
+error[S-Bracket]: expected `]`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:33:5
+   |
+33 |     let _z = true + 1
+   |     ^^^ an array literal is written `[a, b, c]`
+error[S-Match]: expected `,`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:40:5
+   |
+40 |     let _z = true + 1
+   |     ^^^ arms are separated by commas
+error[S-Match]: expected a pattern
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:40:5
+   |
+40 |     let _z = true + 1
+   |     ^^^ an arm begins with a variant, `_`, a number or a string
+error[S-Brace]: unclosed `{`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:37:25
+   |
+37 | fn in_an_arm() -> UInt8 {
+   |                         ^ this body is never closed
+error[T-Operands]: expected `Bool`, found `Int64`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:15:21
+   |
+15 |     let _z = true + 1
+   |              ---- expected because of this operand
+   |                     ^ expected `Bool`, found `Int64`
+error[T-MissingArgument]: `_c` receives no argument
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:20:14
+   |
+9  | fn three(_a: UInt8, b: UInt8, _c: UInt8) -> UInt8 {
+   |                               -- declared here
+20 |     let _a = three(1, é (
+   |              ^^^^^^^^^^^^ every parameter receives one
+error[T-Operands]: expected `Bool`, found `Int64`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:21:21
+   |
+21 |     let _z = true + 1
+   |              ---- expected because of this operand
+   |                     ^ expected `Bool`, found `Int64`
+error[T-Operands]: expected `Bool`, found `Int64`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:27:21
+   |
+27 |     let _z = true + 1
+   |              ---- expected because of this operand
+   |                     ^ expected `Bool`, found `Int64`
+error[T-Operands]: expected `Bool`, found `Int64`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:33:21
+   |
+33 |     let _z = true + 1
+   |              ---- expected because of this operand
+   |                     ^ expected `Bool`, found `Int64`
+error[T-Mismatch]: expected `UInt8`, found `()`
+  --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:37:25
+   |
+37 | fn in_an_arm() -> UInt8 {
+   |                   ----- expected because of this return type
+   |                         ^ this body produces nothing

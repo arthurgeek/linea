@@ -2770,6 +2770,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin",
     "tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin",
     "tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin",
+    "tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin",
     "tests/text/an_unclosed_literal_in_a_tuple_written_over_two_lines_is_reported_once.lin",
     "tests/patterns/a_refused_byte_ending_a_line_of_a_tuple_pattern_is_reported_once.lin",
     "tests/text/an_unclosed_literal_in_a_structure_literal_excuses_only_its_own_line.lin",
