@@ -45,9 +45,10 @@ text.
 Two types are one where the type pool holds them as one: an alias, a settled
 reference and the type either names are interned as that type, which is the
 identity the overlap rule of 0093 unifies over. The selected variant is the
-one variant whose only field's type, at the enum the conversion returns, is
-the type of the wrapped parameter. No such variant, or two, is [T-Derive] at
-the derive entry, with the existing messages.
+one variant whose only field's type, at the derive's target as the generated
+implementation applies it (its `Self`), is the type of the wrapped parameter.
+No such variant, or two, is [T-Derive] at the derive entry, with the existing
+messages.
 
 1. **Expansion renders a placeholder.** `reflect.wrap(source)` is rendered as
    the contextual variant reference `.wrap(source)`, which names no variant.
@@ -57,9 +58,13 @@ the derive entry, with the existing messages.
    source, as before.
 2. **The checker decides.** Checking a call whose callee is a recorded
    placeholder (`checkWrap`) reads the wrapped parameter's type and the
-   expected enum's one-field payload types, selects the variant whose payload
-   is that same type, and records it in the table every contextual variant
-   is recorded in. Ownership, instance discovery and lowering read the
+   target's one-field payload types, selects the variant whose payload is
+   that same type, and records it in the table every contextual variant is
+   recorded in. The built value has the target's type wherever the wrap
+   stands, and is held to what its position expects as any expression is:
+   a template member promising `Option[S]` that returns `reflect.wrap(value)`
+   is [T-Mismatch], and `let lifted = reflect.wrap(value)` needs no
+   expectation. Ownership, instance discovery and lowering read the
    variant from there, as they read `.Hot(source)`.
 3. **The text is written after checking.** The generated file a reader sees
    (`dump-expanded`) and the file derive materialization reloads as ordinary
@@ -104,7 +109,10 @@ writing the selection directly is.
   0209's own rule refuses two.
 - A refused `From` derive still generates its implementation, with a body the
   checker refused. A call of `Temp.from(...)` therefore reaches it and adds no
-  [N-Undefined] "declares no `from`" beside the [T-Derive]; and an enum whose
+  [N-Undefined] "declares no `from`" beside the [T-Derive]. The same holds
+  where the derive's source names a settled type no implementation supplies:
+  the implementation's refused trait argument is the report, and a call of
+  an operation its trait declares is not a second one; and an enum whose
   only use is a refused `From` derive is not reported unused, as an enum with
   any other derive is not.
 - The [T-Derive] report for a wrap moves from expansion's selection to the

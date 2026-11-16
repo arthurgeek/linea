@@ -49,7 +49,11 @@ pub fn settledGeneratedTexts(
             try out.appendSlice(gpa, text[copied..span.start]);
             try out.appendSlice(gpa, ast.tokenText(ast.declName(target)));
             try out.append(gpa, '.');
-            try out.appendSlice(gpa, ast.tokenText(ast.declVariants(target)[ordinal].name));
+            const variants = ast.declVariants(target);
+            // The checker selects a wrap's variant among its own target's,
+            // so an ordinal past them is a checker defect, not a program's.
+            if (ordinal >= variants.len) @panic("a wrap selected a variant its derive's target does not declare");
+            try out.appendSlice(gpa, ast.tokenText(variants[ordinal].name));
             copied = span.end;
         }
         try out.appendSlice(gpa, text[copied..]);

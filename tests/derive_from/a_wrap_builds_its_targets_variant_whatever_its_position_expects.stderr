@@ -1,0 +1,8 @@
+error[T-Mismatch]: expected `Option[UInt8]`, found `R`
+  --> tests/derive_from/a_wrap_builds_its_targets_variant_whatever_its_position_expects.lin:13:9
+   |
+9  |         reflect.wrap(value)
+   |         ------------------- generated from this template code
+13 | @derive(Lift[UInt8])
+   |         ^^^^ expected `Option[UInt8]`, found `R`
+   |         ---- expected because of this return type

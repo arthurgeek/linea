@@ -24944,7 +24944,7 @@ const Checker = struct {
             _ = try self.reportDropped(field, held, own);
         } else if (generic_template) |d| {
             _ = try self.reportWrongInstance(base, d, expected);
-        } else {
+        } else if (!try self.refusedRowDeclares(held, declaring.items)) {
             _ = try self.reportNothingThroughType(field, named, held, name, declaring.items);
         }
         return null;
@@ -24998,6 +24998,28 @@ const Checker = struct {
             "{s} {s} declare `{s}` for `{s}`",
             .{ traits.items, if (answering.len == 2) "both" else "all", operation, (try self.typeName(held)) },
         );
+    }
+
+    /// Whether an implementation for `held`'s head of one of the `declaring`
+    /// traits holds a trait argument that was refused, such as a derive's
+    /// source naming a settled type no implementation supplies. That
+    /// implementation still declares the operation, so a call it would have
+    /// answered is not a second mistake beside the refusal.
+    ///
+    /// **Bound:** the implementation rows under `held`'s head, and the
+    /// declaring traits for each.
+    fn refusedRowDeclares(self: *Checker, held: TypeId, declaring: []const node.DeclId) std.mem.Allocator.Error!bool {
+        if (declaring.len == 0) return false;
+        var rows = try self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, held);
+        while (rows.next()) |at| {
+            const row = self.builder.implementations[at];
+            if (!row.ofATrait()) continue;
+            const declares = for (declaring) |trait| {
+                if (trait.index() == row.trait) break true;
+            } else false;
+            if (declares and try self.builder.anyUnsettled(row.args)) return true;
+        }
+        return false;
     }
 
     /// A call written after a type's name that no trait operation answers.
@@ -31825,11 +31847,11 @@ const Checker = struct {
     fn checkWrap(self: *Checker, id: ExprId, site: expanded_mod.WrapSite, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
         const callee = self.ast.withoutGroups(c.callee);
-        const want = (expected orelse {
-            for (c.args) |a| try self.checkRecoveredArgument(a);
-            _ = try self.record(callee, .poison);
-            return try self.report(.t_infer, id, "the enum this wrap constructs cannot be determined", .{}, "use `reflect.wrap` where the enum is expected, such as a member's result");
-        }).ty;
+        // The enum is the derive's target as the generated implementation
+        // applies it, its `Self`, wherever the wrap stands; what the position
+        // expects is checked against the built value like any expression's.
+        const generated_impl = self.program.generatedImplementation(site.implementation).generated_impl;
+        const want = try self.typeOfRefOf(self.program.moduleOf(generated_impl), generated_impl, self.ast.declHead(generated_impl));
         const source: TypeId = if (c.args.len != 1) .poison else source: {
             const binding = self.res.targetOf(self.ast.withoutGroups(c.args[0]));
             break :source if (binding == BindingId.none) .poison else self.binding_types.get(binding);
@@ -31854,7 +31876,12 @@ const Checker = struct {
         };
         if (first != null and second == null) {
             try self.wrap_choices.put(self.gpa, callee, first.?);
-            return self.checkConstruct(id, expected);
+            const built = try self.checkConstruct(id, .{
+                .ty = want,
+                .at = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) },
+                .reason = .annotation,
+            });
+            return self.expect(id, built, expected);
         }
         for (c.args) |a| try self.checkRecoveredArgument(a);
         _ = try self.record(callee, .poison);

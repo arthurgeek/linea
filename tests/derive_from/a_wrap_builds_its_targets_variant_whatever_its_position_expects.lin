@@ -1,0 +1,23 @@
+// `reflect.wrap` builds a variant of the derive's target, `R`. The member
+// promises an `Option[UInt8]`, so the `R` it builds does not fit.
+trait Lift[T] {
+    fn lift(sink value: T) -> Option[T]
+}
+
+template impl[S] Lift[S] where reflect.target: enum {
+    fn lift(sink value: S) -> Option[S] {
+        reflect.wrap(value)
+    }
+}
+
+@derive(Lift[UInt8])
+enum R {
+    Count(UInt8),
+}
+
+fn main() -> UInt8 {
+    match R.lift(UInt8(7)) {
+        Some(v) => v,
+        None => 1,
+    }
+}
