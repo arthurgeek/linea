@@ -103,6 +103,58 @@ static void check_transfer_claim(void) {
     free_carrier(&other);
 }
 
+static void check_repeated_completed_transfer(void) {
+    struct carrier second = { .loop = &loop }, third = { .loop = &loop };
+    assert(pthread_mutex_init(&second.queue_lock, NULL) == 0);
+    assert(pthread_mutex_init(&third.queue_lock, NULL) == 0);
+    assert(make_poller(&second) == 0 && make_poller(&third) == 0);
+    struct linea_op operation = { .kind = LINEA_OP_READABLE };
+    struct pending_operation completed = {
+        .operation = &operation, .fiber = &fiber, .owner = &carrier,
+        .state = operation_complete, .result = 37,
+    };
+    const struct linea_context context = fiber.context;
+    fiber.claimed = no_claim;
+    fiber.claimant = NULL;
+    fiber.waiting = waiting_io;
+    fiber.operation = &completed;
+    fiber.transfer_ready = 1;
+    lock_fiber(&fiber);
+    enqueue_locked(&fiber);
+    unlock_fiber(&fiber);
+    completed.registered = 1;
+    assert(reserve_ready_runnable(&carrier).fiber == NULL);
+    completed.registered = 0;
+    completed.state = operation_armed;
+    assert(reserve_ready_runnable(&carrier).fiber == NULL);
+    completed.state = operation_complete;
+    fiber.source_claims = 1;
+    assert(reserve_ready_runnable(&carrier).fiber == NULL);
+    fiber.source_claims = 0;
+    fiber.timer_index = 0;
+    assert(reserve_ready_runnable(&carrier).fiber == NULL);
+    fiber.timer_index = no_timer;
+    struct carrier *source = &carrier;
+    struct carrier *targets[] = { &second, &third, &carrier };
+    for (size_t i = 0; i < sizeof targets / sizeof targets[0]; i += 1) {
+        struct transfer_claim claim = reserve_ready_runnable(source);
+        if (i == 0) assert(claim.fiber == &fiber);
+        else assert(claim.fiber == &fiber && completed.owner != source);
+        assert(commit_transfer(&claim, targets[i]));
+        assert(claim.fiber == NULL && fiber.home == targets[i]);
+        assert(completed.owner == &carrier && completed.result == 37);
+        assert(fiber.operation == &completed && completed.operation == &operation);
+        assert(memcmp(&context, &fiber.context, sizeof context) == 0);
+        source = targets[i];
+    }
+    assert(dequeue(&carrier) == &fiber && dequeue(&second) == NULL && dequeue(&third) == NULL);
+    fiber.operation = NULL;
+    fiber.waiting = waiting_yield;
+    fiber.transfer_ready = 0;
+    free_carrier(&second);
+    free_carrier(&third);
+}
+
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
 struct continuation_proof {
     pthread_mutex_t lock;
@@ -285,6 +337,7 @@ int main(void) {
     assert(dequeue(&carrier) == NULL);
     reject_lock_inversion();
     check_transfer_claim();
+    check_repeated_completed_transfer();
     check_affinity();
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
     prove_continuation(0, 1);

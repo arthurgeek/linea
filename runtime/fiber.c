@@ -591,11 +591,13 @@ struct transfer_claim {
     struct carrier *source;
 };
 
-static int completed_io_owned(struct linea_fiber *f, struct carrier *source) {
+/* The stack record retains its original poller after retirement. A clean
+ * continuation may change queue owners repeatedly before it is dispatched. */
+static int completed_io_retired(struct linea_fiber *f) {
     require_metadata(f);
     struct pending_operation *op = f->operation;
     return f->waiting == waiting_io && f->park == NULL && f->waiter == NULL &&
-        op != NULL && op->owner == source &&
+        op != NULL && op->owner != NULL && op->owner->loop == f->loop &&
         __atomic_load_n(&op->state, __ATOMIC_ACQUIRE) == operation_complete &&
         !op->registered &&
         ((op->audited_read && op->operation->kind == LINEA_OP_READ) ||
@@ -618,7 +620,7 @@ static int clean_runnable(struct linea_fiber *f, struct carrier *source) {
     const int retired = (f->operation == NULL &&
           ((f->waiting == waiting_yield && f->park == NULL && f->waiter == NULL) ||
            (f->waiting == waiting_park && f->park != NULL && f->waiter != NULL))) ||
-         completed_io_owned(f, source);
+         completed_io_retired(f);
     if (!retired) { TRACE_COUNT(source->loop, ref_source); return 0; }
     return 1;
 }
@@ -967,7 +969,7 @@ static int normalize_completed_io(struct carrier *source, struct linea_fiber *f)
     const int ready = f->loop != NULL && f->proven && f->bound == NULL && !f->transfer_ready &&
         f->state == runnable && f->saved && f->claimed == dispatch_claim &&
         f->claimant == source && f->home == source && f->source_claims == 0 &&
-        f->timer_index == no_timer && completed_io_owned(f, source);
+        f->timer_index == no_timer && completed_io_retired(f) && f->operation->owner == source;
     if (ready) TRACE_COUNT(f->loop, normalization_attempts);
     unlock_fiber(f);
     if (!ready || !requeue_saved_dispatch(source, f, 1)) return 0;
