@@ -1,0 +1,21 @@
+// `Nope` names nothing, so the implementation of `From[Nope]` is refused. It
+// answers only a `Box[T]` whose `T` implements `Tag`, which `UInt8` does not,
+// so the call reaching no `from` is a mistake of its own.
+trait Tag {
+    fn tag(self: Self) -> UInt8
+}
+
+struct Box[T] {
+    held: T,
+}
+
+impl[T: Tag] From[Nope] for Box[T] {
+    fn from(sink s: Nope) -> Self {
+        s
+    }
+}
+
+fn main() -> UInt8 {
+    let b: Box[UInt8] = Box.from(UInt8(7))
+    b.held
+}

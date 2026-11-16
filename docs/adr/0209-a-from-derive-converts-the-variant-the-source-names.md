@@ -1,6 +1,6 @@
 # 209. A `From` derive converts the variant its source type names
 
-Status: Accepted - 2026-10-07
+Status: Accepted - 2026-10-07; variant selection superseded by [0274](0274-a-from-derive-selects-its-variant-by-type-identity.md)
 
 Extends [0113](0113-structural-derivation-is-library-defined-source.md) and
 [0145](0145-closed-attributes-attach-ordinary-derive-requests.md).

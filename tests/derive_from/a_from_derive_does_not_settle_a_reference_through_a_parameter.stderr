@@ -1,0 +1,8 @@
+error[T-Derive]: no variant of `Box` wraps exactly `Kelvin`
+  --> tests/derive_from/a_from_derive_does_not_settle_a_reference_through_a_parameter.lin:11:9
+   |
+11 | @derive(From[Kelvin])
+   |         ^^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Box` has `Held(T.Reading)`, `Empty`
+   = help: `T.Reading` is settled by each instantiation of `Box`, so it is no one type a conversion could wrap

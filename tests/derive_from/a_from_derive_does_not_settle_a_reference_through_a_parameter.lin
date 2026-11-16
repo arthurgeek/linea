@@ -1,0 +1,29 @@
+// `T.Reading` is settled by each `Box[T]` a program uses, so inside the
+// derived conversion it is no particular type and no variant holds a `Kelvin`.
+trait Measure {
+    type Reading
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+@derive(From[Kelvin])
+enum Box[T: Measure] {
+    Held(T.Reading),
+    Empty,
+}
+
+struct Celsius {}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+}
+
+fn main() -> UInt8 {
+    let held: Box[Celsius] = .Held(Kelvin { degrees = 7 })
+    match held {
+        Held(kelvin) => kelvin.degrees - 7,
+        Empty => 1,
+    }
+}

@@ -3,12 +3,13 @@ const std = @import("std");
 const ExpandedProgram = @import("expanded_program.zig").ExpandedProgram;
 const Module = @import("program.zig").Module;
 
-/// Prints immutable generated virtual files in their stored expansion order.
-/// Both this dump and later materialization consume the same rows; neither
-/// reconstructs source from derive declarations.
+/// Prints generated virtual files in their stored expansion order, each as
+/// `texts` holds it: the text checking settled, which later materialization
+/// reloads too. Neither reconstructs source from derive declarations.
 pub fn dumpExpanded(
     expanded: *const ExpandedProgram,
     modules: []const Module,
+    texts: []const []const u8,
     writer: *std.Io.Writer,
 ) std.Io.Writer.Error!void {
     for (0..expanded.generatedSourceCount()) |index| {
@@ -27,7 +28,8 @@ pub fn dumpExpanded(
             try writer.print(", trait token {d}", .{source.origin.derive_trait.index()});
         }
         try writer.writeByte('\n');
-        try writer.writeAll(source.text);
-        if (source.text.len == 0 or source.text[source.text.len - 1] != '\n') try writer.writeByte('\n');
+        const text = texts[index];
+        try writer.writeAll(text);
+        if (text.len == 0 or text[text.len - 1] != '\n') try writer.writeByte('\n');
     }
 }

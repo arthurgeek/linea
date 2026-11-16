@@ -1,0 +1,36 @@
+// `Read[Celsius]` is `Celsius.Reading`, which is `Kelvin`, so the
+// implementation of `Takes[Read[Celsius]]` for `Temp` takes a `Kelvin`.
+trait Measure {
+    type Reading
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Celsius {}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+}
+
+alias Read[T: Measure] = T.Reading
+
+trait Takes[U] {
+    fn take(sink u: U) -> Self
+}
+
+struct Temp {
+    k: Kelvin,
+}
+
+impl Takes[Read[Celsius]] for Temp {
+    fn take(sink u: Read[Celsius]) -> Self {
+        Temp { k = u }
+    }
+}
+
+fn main() -> UInt8 {
+    let t = Temp.take(Kelvin { degrees = 7 })
+    t.k.degrees - 7
+}

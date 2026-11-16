@@ -1,0 +1,28 @@
+// `Celsius.Reading` is `Kelvin`, so `Hot` and `Warm` both hold a `Kelvin`
+// and `From[Kelvin]` could wrap one in either.
+trait Measure {
+    type Reading
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Celsius {}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+}
+
+@derive(From[Kelvin])
+enum Temp {
+    Hot(Kelvin),
+    Warm(Celsius.Reading),
+}
+
+fn main() -> UInt8 {
+    match Temp.Hot(Kelvin { degrees = 7 }) {
+        Hot(kelvin) => kelvin.degrees - 7,
+        Warm(_) => 1,
+    }
+}

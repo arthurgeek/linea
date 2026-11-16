@@ -1,0 +1,26 @@
+trait Measure {
+    type Reading
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Celsius {}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+}
+
+@derive(From[Celsius.Reading])
+enum Temp {
+    Unknown,
+    Hot(Kelvin),
+}
+
+fn main() -> UInt8 {
+    match Temp.from(Kelvin { degrees = 7 }) {
+        Hot(kelvin) => kelvin.degrees - 7,
+        Unknown => 1,
+    }
+}

@@ -114,6 +114,16 @@ pub const GeneratedImplementationId = enum(u32) {
     }
 };
 
+/// One `reflect.wrap` a derive rendered: the placeholder `.wrap` reference
+/// whose variant the checker selects, the implementation it was rendered
+/// into, and the template member parameter it wraps.
+pub const WrapSite = struct {
+    callee: ExprId,
+    implementation: GeneratedImplementationId,
+    member: DeclId,
+    parameter: u32,
+};
+
 pub const CaseOrdinal = enum(u32) { _ };
 pub const ComponentOrdinal = enum(u32) { _ };
 pub const RequirementBoundOrdinal = enum(u32) { _ };
@@ -396,6 +406,8 @@ pub const ExpandedProgram = struct {
     template_members: []const TemplateMemberPlan,
     generated_implementations: []const GeneratedImplementation,
     component_requirements: []const ComponentRequirement,
+    /// Every rendered wrap, ordered by `callee`.
+    wrap_sites: []const WrapSite,
     interner: Interner,
     generated_sources: GeneratedSources,
     borrowed_source: bool = false,
@@ -457,6 +469,7 @@ pub const ExpandedProgram = struct {
             .template_members = &.{},
             .generated_implementations = &.{},
             .component_requirements = &.{},
+            .wrap_sites = &.{},
             .interner = .empty,
             .generated_sources = .empty,
             .borrowed_source = true,
@@ -475,6 +488,7 @@ pub const ExpandedProgram = struct {
         generated: []const GeneratedDecl = &.{},
         imports: []const GeneratedImport = &.{},
         origin_segments: []const GeneratedOriginSegment = &.{},
+        wrap_sites: []const WrapSite = &.{},
     };
 
     /// Takes ownership of joined syntax and its interner, including on failure,
@@ -586,8 +600,12 @@ pub const ExpandedProgram = struct {
         defer gpa.free(requirements);
         for (requirements[0..cached.component_requirements.len], cached.component_requirements) |*out, row| out.* = relocation.value(row);
         @memcpy(requirements[cached.component_requirements.len..], appended_requirements);
+        const wrap_sites = try gpa.alloc(WrapSite, cached.wrap_sites.len + appended.wrap_sites.len);
+        defer gpa.free(wrap_sites);
+        for (wrap_sites[0..cached.wrap_sites.len], cached.wrap_sites) |*out, row| out.* = relocation.value(row);
+        @memcpy(wrap_sites[cached.wrap_sites.len..], appended.wrap_sites);
         transferred = true;
-        return init(gpa, source, &owned_ast, &owned_interner, &sources, plans, &implementations, &requirements, generated, imports.items, segments);
+        return init(gpa, source, &owned_ast, &owned_interner, &sources, plans, &implementations, &requirements, generated, imports.items, segments, wrap_sites);
     }
 
     /// Takes ownership of the expanded representations and generated tables,
@@ -604,6 +622,7 @@ pub const ExpandedProgram = struct {
         generated: []const GeneratedDecl,
         generated_imports: []const GeneratedImport,
         generated_origin_segments: []const GeneratedOriginSegment,
+        wrap_sites: []const WrapSite,
     ) InitError!ExpandedProgram {
         var owned_generated_sources = generated_sources.*;
         generated_sources.* = .empty;
@@ -631,6 +650,15 @@ pub const ExpandedProgram = struct {
             if (!validSourceOrigin(&source.ast, entry.origin, entry.derive_trait)) return error.InvalidGeneratedOrigin;
         }
         try validateTemplateMembers(source_decl_count, template_members);
+        for (wrap_sites, 0..) |site, i| {
+            if (site.callee.index() >= owned_ast.exprCount() or site.implementation.index() >= owned_generated_implementations.len or
+                (i != 0 and wrap_sites[i - 1].callee.index() >= site.callee.index()))
+            {
+                return error.InvalidGeneratedImplementation;
+            }
+        }
+        const owned_wrap_sites = try gpa.dupe(WrapSite, wrap_sites);
+        errdefer gpa.free(owned_wrap_sites);
         const owned_template_members = try gpa.dupe(TemplateMemberPlan, template_members);
         errdefer gpa.free(owned_template_members);
 
@@ -757,6 +785,7 @@ pub const ExpandedProgram = struct {
             .template_members = owned_template_members,
             .generated_implementations = owned_generated_implementations,
             .component_requirements = owned_component_requirements,
+            .wrap_sites = owned_wrap_sites,
             .interner = owned_interner,
             .generated_sources = owned_generated_sources,
         };
@@ -995,6 +1024,22 @@ pub const ExpandedProgram = struct {
         };
     }
 
+    /// The wrap a derive rendered at `callee`, or null for every other
+    /// expression.
+    ///
+    /// **Bound:** a binary search of the wraps.
+    pub fn wrapSite(self: *const ExpandedProgram, callee: ExprId) ?WrapSite {
+        var low: usize = 0;
+        var high: usize = self.wrap_sites.len;
+        while (low < high) {
+            const mid = low + (high - low) / 2;
+            const at = self.wrap_sites[mid].callee.index();
+            if (at == callee.index()) return self.wrap_sites[mid];
+            if (at < callee.index()) low = mid + 1 else high = mid;
+        }
+        return null;
+    }
+
     pub fn generatedImplementationCount(self: *const ExpandedProgram) u32 {
         return @intCast(self.generated_implementations.len);
     }
@@ -1114,7 +1159,7 @@ pub const ExpandedProgram = struct {
         var component_requirements: []ComponentRequirement = &.{};
         var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
             .{ .module = .from(0), .origin = .{ .derive = .at(2), .template_member = .at(0) } },
-        }, &.{}, &segments);
+        }, &.{}, &segments, &.{});
         defer expanded.deinit(gpa);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
 
@@ -1198,7 +1243,7 @@ pub const ExpandedProgram = struct {
         var component_requirements: []ComponentRequirement = &.{};
         var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
             .{ .module = .from(0), .origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member } },
-        }, &.{}, &segments);
+        }, &.{}, &segments, &.{});
         defer expanded.deinit(gpa);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
 
@@ -1621,7 +1666,7 @@ pub const ExpandedProgram = struct {
         var component_requirements: []ComponentRequirement = &.{};
         var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
             .{ .module = .from(0), .origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member } },
-        }, &.{}, &segments);
+        }, &.{}, &segments, &.{});
         defer expanded.deinit(gpa);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
 
@@ -1664,6 +1709,7 @@ pub const ExpandedProgram = struct {
             gpa.free(self.template_members);
             gpa.free(self.generated_implementations);
             gpa.free(self.component_requirements);
+            gpa.free(self.wrap_sites);
             self.interner.deinit(gpa);
             self.generated_sources.deinit(gpa);
         }
@@ -1851,7 +1897,7 @@ test "expanded module roots" {
         .{ .module = .from(1), .origin = .{ .derive = .at(4) } },
         .{ .module = .from(0), .origin = .{ .derive = .at(4), .template_member = .at(2) } },
         .{ .module = .from(1), .origin = .{ .derive = .at(4) } },
-    }, &.{}, &fine_segments);
+    }, &.{}, &fine_segments, &.{});
     defer expanded.deinit(gpa);
     generated_sources.deinit(gpa);
 

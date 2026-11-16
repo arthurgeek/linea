@@ -1,6 +1,6 @@
 # 113. Structural derivation is library-defined source
 
-Status: Accepted - 2026-09-05
+Status: Accepted - 2026-09-05; erasure of `reflect.wrap` before checking superseded by [0274](0274-a-from-derive-selects-its-variant-by-type-identity.md)
 
 Partially superseded by [0142](0142-construction-derives-expand-to-ordinary-source.md):
 parameterized templates admit explicit construction with ordinary source cleanup.

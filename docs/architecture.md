@@ -659,8 +659,18 @@ component loops become one ordinary block per component of the active case,
 and `component.of(subject)` becomes the binding introduced for that subject.
 Metadata becomes ordinary literals and `reflect.ordinal_of` becomes one
 ordinary match that evaluates its operand once. An uninhabited enum produces an
-ordinary empty match. No reflection descriptor crosses into an active
-declaration. Planning is linear in the member tree plus one sort of each
+ordinary empty match. `reflect.wrap(parameter)` becomes the contextual
+variant reference `.wrap(parameter)`, which names no variant, and expansion
+records it in `ExpandedProgram.wrap_sites` with its generated implementation
+and wrapped parameter (ADR 0274). The checker's `checkWrap` selects the
+variant whose one payload is the parameter's type, by type identity, and
+records it in the contextual-variant table every later pass reads through
+`variantOrdinalOf`; it reports [T-Derive] once written types' bounds are
+checked. No other reflection descriptor crosses into an active declaration.
+The generated text `dump-expanded` prints and derive materialization reloads
+is written after checking, by `generated_text.settledGeneratedTexts`, which
+spells each placeholder as the selected variant's constructor. Planning is
+linear in the member tree plus one sort of each
 member's rows; rendering is linear in the generated output, including the
 deliberate case-by-body and component-by-body products.
 

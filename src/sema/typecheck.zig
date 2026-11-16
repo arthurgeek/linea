@@ -805,6 +805,7 @@ fn typecheckInternal(
     defer c.aliases_reading.deinit(gpa);
     defer c.aliases_uncounted.deinit(gpa);
     defer c.aliases_unsettled.deinit(gpa);
+    defer c.alias_selects.deinit(gpa);
     defer c.defaults_reading.deinit(gpa);
     defer c.carried_omissions.deinit(gpa);
     defer c.impls_publishing.deinit(gpa);
@@ -928,6 +929,8 @@ fn typecheckInternal(
         while (names.next()) |index| index.deinit(gpa);
         c.variant_names.deinit(gpa);
     }
+    defer c.wrap_choices.deinit(gpa);
+    defer c.unwrapped.deinit(gpa);
     defer gpa.free(c.binding_value_locs);
     errdefer c.builder.deinit();
     // Guarded rather than deferred: the binding types leave with the caller,
@@ -6354,6 +6357,9 @@ const Checker = struct {
     /// Whatever takes the kept type of one has passed over that selection
     /// too, and is read again as if it had written the selection itself.
     aliases_unsettled: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Whether applying an alias to arguments selects an implementation, by
+    /// alias; see `aliasSelects`.
+    alias_selects: std.AutoHashMapUnmanaged(DeclId, bool) = .empty,
     /// The defaults being read, by declaration and parameter: a default that
     /// reaches itself through the types it omits arguments of is a cycle.
     defaults_reading: std.AutoHashMapUnmanaged(u64, void) = .empty,
@@ -6513,6 +6519,12 @@ const Checker = struct {
     /// variant reached with more variants than a scan is worth. Sized by those
     /// enums' variants, and freed with the checker.
     variant_names: std.AutoHashMapUnmanaged(TypeId, std.StringHashMapUnmanaged(u32)) = .empty,
+    /// The variant each rendered wrap's placeholder names, keyed by the
+    /// placeholder: chosen by `checkWrap` before the construction is checked.
+    wrap_choices: std.AutoHashMapUnmanaged(ExprId, u32) = .empty,
+    /// Each wrap that selected no single variant, reported at the end by
+    /// `reportUnwrappedSources`.
+    unwrapped: std.ArrayList(UnwrappedWrap) = .empty,
     /// What holds the pattern being checked: a `match` arm, or a binding
     /// (`let`, `let read`, `let ... else`, a walk or a lambda's parameter).
     /// A part that matches nothing is reported in the words of its holder.
@@ -7342,6 +7354,15 @@ const Checker = struct {
     /// which part of it. The place is the value the construct lends or takes,
     /// or a pattern nested in its pattern, whose own place `pattern_places`
     /// records; so a binder at any depth is a path of steps to a root.
+    const UnwrappedWrap = struct {
+        site: expanded_mod.WrapSite,
+        /// The enum the wrap constructs.
+        want: TypeId,
+        /// The first two variants holding the source's type, or null where
+        /// none does.
+        holders: ?[2]u32,
+    };
+
     const BinderPlace = struct {
         of: ExprId,
         step: Step,
@@ -11624,6 +11645,11 @@ const Checker = struct {
         try self.fillDefaults(alias, supplied, written);
         for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, alias, i);
         for (supplied) |t| if (t == .poison) return .poison;
+        // A settled reference read through the alias's parameters, `T.Reading`,
+        // selects an implementation once the arguments stand for them. While
+        // implementation heads are read, none is settled to answer it, so the
+        // reader is read again once they are, as for a selection it wrote.
+        if (self.deferring_selections and try self.aliasSelects(alias)) self.skipped_selection = true;
         if (self.callable_effects_ready) {
             const args_start: u32 = @intCast(self.alias_site_args.items.len);
             try self.alias_site_args.appendSlice(self.gpa, supplied);
@@ -11644,6 +11670,43 @@ const Checker = struct {
         // reference written out is.
         if (self.deferring_selections and try self.builder.anyUnsettled(&.{applied})) self.skipped_selection = true;
         return applied;
+    }
+
+    /// Whether `alias`'s written type reads a settled reference, directly or
+    /// through another alias it applies.
+    ///
+    /// **Bound:** each alias's written type is walked once; an alias reached
+    /// again while it is walked answers false, and the resolver reported it.
+    fn aliasSelects(self: *Checker, alias: node.DeclId) std.mem.Allocator.Error!bool {
+        const found = try self.alias_selects.getOrPut(self.gpa, alias);
+        if (found.found_existing) return found.value_ptr.*;
+        found.value_ptr.* = false;
+        const selects = try self.writtenSelects(self.ast.declReturnRef(alias));
+        try self.alias_selects.put(self.gpa, alias, selects);
+        return selects;
+    }
+
+    fn writtenSelects(self: *Checker, ref: node.TypeRef) std.mem.Allocator.Error!bool {
+        const x = self.ast.withoutTypeGroups(ref);
+        if (!x.wasWritten()) return false;
+        switch (x.kind) {
+            .selection => return true,
+            .named => if (x.name != TokenId.none) if (self.res.aliasReachedBy(x.name)) |other| {
+                if (try self.aliasSelects(other)) return true;
+            },
+            .callable => {
+                const callable = self.ast.callableType(x);
+                for (self.ast.params[callable.params.start..callable.params.end]) |param| {
+                    if (try self.writtenSelects(param.written)) return true;
+                }
+                if (callable.result.wasWritten() and try self.writtenSelects(callable.result)) return true;
+            },
+            .array, .tuple, .borrow, .grouped => {},
+        }
+        for (self.ast.typeArgs(x.args)) |argument| {
+            if (try self.writtenSelects(argument)) return true;
+        }
+        return false;
     }
 
     /// Refuses a written type given a number of type arguments its head does
@@ -16223,6 +16286,13 @@ const Checker = struct {
     /// scanned; a wider one is indexed by name the first time it is asked
     /// about, so a `match` naming each of n variants costs n lookups rather
     /// than n scans of n names.
+    /// The variant of `t` an unqualified reference names: the one a wrap
+    /// chose for its placeholder, and otherwise the one spelled `name`.
+    fn contextualVariant(self: *Checker, id: ExprId, t: TypeId, name: []const u8) std.mem.Allocator.Error!?u32 {
+        if (self.wrap_choices.get(id)) |ordinal| return ordinal;
+        return self.variantNamed(t, name);
+    }
+
     fn variantNamed(self: *Checker, t: TypeId, name: []const u8) std.mem.Allocator.Error!?u32 {
         const count = switch (self.builder.get(t)) {
             .enum_ => |e| e.variant_count,
@@ -17851,7 +17921,7 @@ const Checker = struct {
                     // The qualified form has always looked the name up; this
                     // is the same question asked of the type context supplies.
                     const spelling = self.ast.tokenText(self.ast.exprMain(id));
-                    const ordinal = (try self.variantNamed(want, spelling)) orelse {
+                    const ordinal = (try self.contextualVariant(id, want, spelling)) orelse {
                         break :blk try self.report(
                             .n_variant,
                             id,
@@ -22930,6 +23000,7 @@ const Checker = struct {
             );
         }
 
+        if (self.program.wrapSite(self.ast.withoutGroups(c.callee))) |site| return self.checkWrap(id, site, expected);
         if (namesAVariant(self.ast, self.res, self.ast.withoutGroups(c.callee))) return self.checkConstruct(id, expected);
 
         // A call whose callee names a primitive converts. There is no second
@@ -27614,7 +27685,7 @@ const Checker = struct {
         const declaration = self.declaringType(result) orelse return null;
         if (self.ast.declTag(declaration) != .enum_) return null;
         const spelling = self.ast.tokenText(self.ast.exprMain(id));
-        const ordinal = (try self.variantNamed(result, spelling)) orelse {
+        const ordinal = (try self.contextualVariant(id, result, spelling)) orelse {
             if (!report_missing) return null;
             _ = try self.report(.n_variant, id, "`{s}` is not a variant of `{s}`", .{ spelling, try self.typeName(result) }, "not a variant of the expected constructor result");
             return .{ .declaration = declaration, .result = .poison, .ordinal = 0, .qualified = false };
@@ -31886,8 +31957,8 @@ const Checker = struct {
         }
     }
 
-    /// Types the arguments of each derive entry whose source no single
-    /// variant of its target wraps. Such an entry generated no
+    /// Types the arguments of each derive entry whose wrapped source names
+    /// no type. Such an entry generated no
     /// implementation, so nothing else types what it wrote, and the bounds
     /// its arguments are written under are checked with every other written
     /// type's.
@@ -31960,20 +32031,20 @@ const Checker = struct {
     ///
     /// **Bound:** the tokens of the wrapped type, each compared with the
     /// template's parameters.
-    fn wrappedSourceText(self: *Checker, unwrapped: resolve_mod.UnwrappedSource, arguments: []const node.TypeRef) std.mem.Allocator.Error![]const u8 {
+    fn wrappedSourceText(self: *Checker, template: node.DeclId, wrapped: node.TypeRef, arguments: []const node.TypeRef) std.mem.Allocator.Error![]const u8 {
         const ast = self.ast;
-        const parameters = ast.declTypeParams(unwrapped.template);
-        const span = ast.writtenWholeSpan(unwrapped.wrapped);
-        const text = ast.partOf(unwrapped.wrapped.at).source;
+        const parameters = ast.declTypeParams(template);
+        const span = ast.writtenWholeSpan(wrapped);
+        const text = ast.partOf(wrapped.at).source;
         var out: std.ArrayList(u8) = .empty;
         var written_to = span.start;
-        var index = unwrapped.wrapped.at.index();
+        var index = wrapped.at.index();
         while (true) : (index += 1) {
             const tok = TokenId.at(@intCast(index));
             const at = ast.tokenSpan(tok);
             if (at.start >= span.end) break;
             if (ast.tokenTag(tok) != .identifier) continue;
-            if (index > unwrapped.wrapped.at.index() and ast.tokenTag(TokenId.at(@intCast(index - 1))) == .dot) continue;
+            if (index > wrapped.at.index() and ast.tokenTag(TokenId.at(@intCast(index - 1))) == .dot) continue;
             const argument = for (parameters, 0..) |parameter, position| {
                 if (ast.tokenName(parameter.name) == ast.tokenName(tok)) break if (position < arguments.len) arguments[position] else null;
             } else null;
@@ -31986,16 +32057,77 @@ const Checker = struct {
         return out.items;
     }
 
-    /// Reports [T-Derive] for each derive entry whose source no single
-    /// variant of its target wraps, unless the source was refused as a type:
-    /// that refusal is the report, and a missing variant would say the same
-    /// mistake twice. The source is the argument the template wraps. A
-    /// mistake in another argument is independent of it.
+    /// A rendered `reflect.wrap(source)`: constructs the variant of the
+    /// expected enum whose one payload is the source's type. Two types are
+    /// one where the pool holds them as one type, so an alias, a settled
+    /// reference and the type either names select the same variant; that is
+    /// the identity two implementations' headers unify over. No such variant,
+    /// or two, is [T-Derive] at the entry that asked for the conversion. A
+    /// source or a payload that settled to no type was reported where it is
+    /// written, and selects nothing silently.
     ///
-    /// **Bound:** the diagnostics sorted once, each entry's source asked
-    /// once, and the target's variants and their fields once to list them.
+    /// **Bound:** the target's variants, once.
+    fn checkWrap(self: *Checker, id: ExprId, site: expanded_mod.WrapSite, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+        const c = self.ast.call(id);
+        const callee = self.ast.withoutGroups(c.callee);
+        // The enum is the derive's target as the generated implementation
+        // applies it, its `Self`, wherever the wrap stands; what the position
+        // expects is checked against the built value like any expression's.
+        const generated_impl = self.program.generatedImplementation(site.implementation).generated_impl;
+        const want = try self.typeOfRefOf(self.program.moduleOf(generated_impl), generated_impl, self.ast.declHead(generated_impl));
+        const source: TypeId = if (c.args.len != 1) .poison else source: {
+            const binding = self.res.targetOf(self.ast.withoutGroups(c.args[0]));
+            break :source if (binding == BindingId.none) .poison else self.binding_types.get(binding);
+        };
+        var first: ?u32 = null;
+        var second: ?u32 = null;
+        var unsettled = want == .poison or try self.builder.anyUnsettled(&.{source});
+        if (!unsettled) for (0..self.builder.variantCount(want)) |raw| {
+            const k: u32 = @intCast(raw);
+            if (try self.builder.variantFieldCount(want, k) != 1) continue;
+            const payload = try self.builder.variantFieldType(want, k, 0);
+            if (try self.builder.anyUnsettled(&.{payload})) {
+                unsettled = true;
+                continue;
+            }
+            if (payload != source) continue;
+            if (first == null) {
+                first = k;
+            } else if (second == null) {
+                second = k;
+            }
+        };
+        if (first != null and second == null) {
+            try self.wrap_choices.put(self.gpa, callee, first.?);
+            const built = try self.checkConstruct(id, .{
+                .ty = want,
+                .at = .{ .file = self.ast.fileOfExpr(id), .span = self.ast.exprSpan(id) },
+                .reason = .annotation,
+            });
+            return self.expect(id, built, expected);
+        }
+        for (c.args) |a| try self.checkRecoveredArgument(a);
+        _ = try self.record(callee, .poison);
+        if (first == null and unsettled) return try self.record(id, .poison);
+        try self.unwrapped.append(self.gpa, .{
+            .site = site,
+            .want = want,
+            .holders = if (second) |later| .{ first.?, later } else null,
+        });
+        return try self.record(id, .poison);
+    }
+
+    /// Reports [T-Derive] for each wrap `checkWrap` found no single variant
+    /// for, unless the derive's source was refused as a type: that refusal
+    /// is the report, and a missing variant would say the same mistake
+    /// twice. Asked once every written type's bounds have been checked. The
+    /// source is the argument the template wraps; a mistake in another
+    /// argument is independent of it.
+    ///
+    /// **Bound:** the diagnostics sorted once, and each refused wrap's
+    /// source asked once.
     fn reportUnwrappedSources(self: *Checker) std.mem.Allocator.Error!void {
-        if (self.res.unwrapped_sources.len == 0) return;
+        if (self.unwrapped.items.len == 0) return;
         const outer_module = self.current;
         const outer_generic = self.generic;
         defer {
@@ -32003,18 +32135,20 @@ const Checker = struct {
             self.generic = outer_generic;
         }
         const ast = self.ast;
-        const arena = self.sink.arena;
         const reported = try self.reportedPlaces();
         defer self.gpa.free(reported);
-        entries: for (self.res.unwrapped_sources) |unwrapped| {
-            const entry = ast.deriveTrait(unwrapped.trait);
+        entries: for (self.unwrapped.items) |unwrapped| {
+            const descriptor = self.program.generatedImplementation(unwrapped.site.implementation);
+            const entry = ast.deriveTrait(descriptor.derive_trait);
             const written_arguments = ast.typeArgs(entry.ref.args);
-            self.current = self.program.moduleOf(unwrapped.target);
-            self.generic = unwrapped.owner;
+            const wrapped = ast.declParams(unwrapped.site.member)[unwrapped.site.parameter].written;
+            const source = resolve_mod.wrappedArgument(ast, descriptor.template, wrapped, written_arguments);
+            self.current = self.program.moduleOf(descriptor.target);
+            self.generic = descriptor.derive;
             // An argument's text runs to the next argument, or to the end
             // of the entry, so a callable's refused result is inside it.
             for (written_arguments, 0..) |argument, index| {
-                if (unwrapped.source) |source| if (source.at != argument.at) continue;
+                if (source) |held| if (held.at != argument.at) continue;
                 const span: Span = .{
                     .start = ast.tokenSpan(argument.at).start,
                     .end = if (index + 1 < written_arguments.len)
@@ -32022,67 +32156,93 @@ const Checker = struct {
                     else
                         ast.rangeSpan(entry.tokens).end,
                 };
-                if (try self.writtenTypeRefused(unwrapped.owner, argument, span, reported)) continue :entries;
+                if (try self.writtenTypeRefused(descriptor.derive, argument, span, reported)) continue :entries;
             }
+            try self.reportUnwrapped(unwrapped.site, unwrapped.want, unwrapped.holders);
+        }
+    }
 
-            const variants = ast.declVariants(unwrapped.target);
-            const source_text = try self.wrappedSourceText(unwrapped, written_arguments);
-            const target_name = ast.tokenText(ast.declName(unwrapped.target));
-            const labels = try arena.alloc(Label, if (unwrapped.holders != null) 3 else 1);
-            labels[0] = .{
-                .file = ast.fileOf(entry.ref.name),
-                .span = ast.rangeSpan(entry.tokens),
-                .message = if (unwrapped.holders != null) "the conversion would wrap the source in either variant" else "no variant wraps this source",
-                .style = .primary,
-            };
-            if (unwrapped.holders) |holders| {
-                for (holders, 1..) |holder, slot| {
-                    const variant = variants[@intFromEnum(holder)];
-                    labels[slot] = .{
-                        .file = ast.fileOf(variant.name),
-                        .span = ast.tokenSpan(variant.name),
-                        .message = "this variant holds the source's type",
-                        .style = .secondary,
-                    };
-                }
-                try self.sink.add(.{
-                    .severity = .err,
-                    .code = .t_derive,
-                    .message = try std.fmt.allocPrint(arena, "`{s}` has two variants wrapping `{s}`", .{ target_name, source_text }),
-                    .labels = labels,
-                    .notes = try arena.dupe([]const u8, &.{"write the conversion by hand, or give each variant its own type"}),
-                });
-                continue;
-            }
-            var shapes: std.ArrayList(u8) = .empty;
-            defer shapes.deinit(self.gpa);
-            if (variants.len == 0) try shapes.appendSlice(self.gpa, "no variants");
-            for (variants, 0..) |variant, index| {
-                if (index != 0) try shapes.appendSlice(self.gpa, ", ");
-                try shapes.appendSlice(self.gpa, "`");
-                try shapes.appendSlice(self.gpa, ast.tokenText(variant.name));
-                const fields = ast.variantFields(variant);
-                if (fields.len != 0) try shapes.append(self.gpa, '(');
-                for (fields, 0..) |field, field_index| {
-                    if (field_index != 0) try shapes.appendSlice(self.gpa, ", ");
-                    try shapes.appendSlice(self.gpa, ast.writtenText(field.written));
-                }
-                if (fields.len != 0) try shapes.append(self.gpa, ')');
-                try shapes.appendSlice(self.gpa, "`");
+    /// Reports [T-Derive] at the derive entry whose wrap selected no variant
+    /// of `want`, or two: `holders` names the first two variants holding the
+    /// source's type, and is null where none does.
+    ///
+    /// **Bound:** the target's variants and their fields, once, to list them.
+    fn reportUnwrapped(self: *Checker, site: expanded_mod.WrapSite, want: TypeId, holders: ?[2]u32) std.mem.Allocator.Error!void {
+        const ast = self.ast;
+        const arena = self.sink.arena;
+        const descriptor = self.program.generatedImplementation(site.implementation);
+        const entry = ast.deriveTrait(descriptor.derive_trait);
+        const wrapped = ast.declParams(site.member)[site.parameter].written;
+        const variants = ast.declVariants(descriptor.target);
+        const source_text = try self.wrappedSourceText(descriptor.template, wrapped, ast.typeArgs(entry.ref.args));
+        const target_name = ast.tokenText(ast.declName(descriptor.target));
+        const labels = try arena.alloc(Label, if (holders != null) 3 else 1);
+        labels[0] = .{
+            .file = ast.fileOf(entry.ref.name),
+            .span = ast.rangeSpan(entry.tokens),
+            .message = if (holders != null) "the conversion would wrap the source in either variant" else "no variant wraps this source",
+            .style = .primary,
+        };
+        if (holders) |held| {
+            for (held, 1..) |holder, slot| {
+                const variant = variants[holder];
+                labels[slot] = .{
+                    .file = ast.fileOf(variant.name),
+                    .span = ast.tokenSpan(variant.name),
+                    .message = "this variant holds the source's type",
+                    .style = .secondary,
+                };
             }
             try self.sink.add(.{
                 .severity = .err,
                 .code = .t_derive,
-                .message = try std.fmt.allocPrint(arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
+                .message = try std.fmt.allocPrint(arena, "`{s}` has two variants wrapping `{s}`", .{ target_name, source_text }),
                 .labels = labels,
-                .notes = try arena.dupe([]const u8, &.{
-                    try std.fmt.allocPrint(arena, "a variant wraps a source when its only field has the source's type; `{s}` has {s}", .{
-                        target_name,
-                        shapes.items,
-                    }),
-                }),
+                .notes = try arena.dupe([]const u8, &.{"write the conversion by hand, or give each variant its own type"}),
             });
+            return;
         }
+        var shapes: std.ArrayList(u8) = .empty;
+        defer shapes.deinit(self.gpa);
+        if (variants.len == 0) try shapes.appendSlice(self.gpa, "no variants");
+        for (variants, 0..) |variant, index| {
+            if (index != 0) try shapes.appendSlice(self.gpa, ", ");
+            try shapes.appendSlice(self.gpa, "`");
+            try shapes.appendSlice(self.gpa, ast.tokenText(variant.name));
+            const fields = ast.variantFields(variant);
+            if (fields.len != 0) try shapes.append(self.gpa, '(');
+            for (fields, 0..) |field, field_index| {
+                if (field_index != 0) try shapes.appendSlice(self.gpa, ", ");
+                try shapes.appendSlice(self.gpa, ast.writtenText(field.written));
+            }
+            if (fields.len != 0) try shapes.append(self.gpa, ')');
+            try shapes.appendSlice(self.gpa, "`");
+        }
+        var notes: std.ArrayList([]const u8) = .empty;
+        try notes.append(arena, try std.fmt.allocPrint(arena, "a variant wraps a source when its only field has the source's type; `{s}` has {s}", .{
+            target_name,
+            shapes.items,
+        }));
+        // A payload read through one of the enum's parameters is settled by
+        // each instantiation, so inside the generic conversion it is no type
+        // the source could be.
+        for (0..self.builder.variantCount(want)) |raw| {
+            const k: u32 = @intCast(raw);
+            if (try self.builder.variantFieldCount(want, k) != 1) continue;
+            const payload = try self.builder.variantFieldType(want, k, 0);
+            if (self.view().standinOf(payload) == null) continue;
+            try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is settled by each instantiation of `{s}`, so it is no one type a conversion could wrap", .{
+                ast.writtenText(ast.variantFields(variants[k])[0].written),
+                target_name,
+            }));
+        }
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_derive,
+            .message = try std.fmt.allocPrint(arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
+            .labels = labels,
+            .notes = notes.items,
+        });
     }
 
     /// Discharges every component row through the ordinary implementation

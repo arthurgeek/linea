@@ -1,0 +1,33 @@
+// `Wrap[T].Reading` is settled only for a `T` that implements `Tag`, and
+// `E` promises no such bound, so the derive's source names no type. The
+// implementation the derive writes then answers no call, and the call of
+// `E.from` below is reported as reaching nothing.
+trait Tag {
+    fn tag(self: Self) -> UInt8
+}
+
+trait Measure {
+    type Reading
+}
+
+struct Wrap[T] {
+    held: T,
+}
+
+impl[T: Tag] Measure for Wrap[T] {
+    type Reading = T
+}
+
+@derive(From[Wrap[T].Reading])
+enum E[T] {
+    Held(T),
+    Empty,
+}
+
+fn main() -> UInt8 {
+    let e: E[UInt8] = E.from(UInt8(7))
+    match e {
+        Held(v) => v,
+        Empty => 1,
+    }
+}

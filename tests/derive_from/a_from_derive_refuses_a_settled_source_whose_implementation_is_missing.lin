@@ -1,0 +1,29 @@
+// `Thermo` does not implement `Measure`, so `Thermo.Reading` names no type and
+// the derive has no source to wrap.
+trait Measure {
+    type Reading
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Thermo {}
+
+impl Measure for Kelvin {
+    type Reading = UInt8
+}
+
+@derive(From[Thermo.Reading])
+enum Temp {
+    Hot(Kelvin),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    let _thermo = Thermo {}
+    match Temp.Hot(Kelvin { degrees = 7 }) {
+        Hot(kelvin) => kelvin.degrees - 7,
+        Unknown => 1,
+    }
+}

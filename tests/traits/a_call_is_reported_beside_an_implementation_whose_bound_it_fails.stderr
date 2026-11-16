@@ -1,0 +1,15 @@
+error[N-Undefined]: undefined name `Nope`
+  --> tests/traits/a_call_is_reported_beside_an_implementation_whose_bound_it_fails.lin:13:21
+   |
+13 |     fn from(sink s: Nope) -> Self {
+   |                     ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/traits/a_call_is_reported_beside_an_implementation_whose_bound_it_fails.lin:12:19
+   |
+12 | impl[T: Tag] From[Nope] for Box[T] {
+   |                   ^^^^ no type with this name is declared here
+error[N-Undefined]: `Box[UInt8]` declares no `from`, and implements no trait in scope that does
+  --> tests/traits/a_call_is_reported_beside_an_implementation_whose_bound_it_fails.lin:19:25
+   |
+19 |     let b: Box[UInt8] = Box.from(UInt8(7))
+   |                         ^^^^^^^^ `From` declares `from`; implement `From` for `Box[UInt8]` to reach it here

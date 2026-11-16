@@ -1,0 +1,11 @@
+error[T-Derive]: `Temp` has two variants wrapping `Kelvin`
+  --> tests/derive_from/a_from_derive_refuses_two_variants_holding_its_source_once_settled.lin:17:9
+   |
+17 | @derive(From[Kelvin])
+   |         ^^^^^^^^^^^^ the conversion would wrap the source in either variant
+19 |     Hot(Kelvin),
+   |     --- this variant holds the source's type
+20 |     Warm(Celsius.Reading),
+   |     ---- this variant holds the source's type
+   |
+   = help: write the conversion by hand, or give each variant its own type

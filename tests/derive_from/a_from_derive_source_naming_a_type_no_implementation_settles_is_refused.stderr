@@ -1,0 +1,10 @@
+error[T-Impl]: `Wrap[T]` has no available associated type `Reading`
+  --> tests/derive_from/a_from_derive_source_naming_a_type_no_implementation_settles_is_refused.lin:21:14
+   |
+21 | @derive(From[Wrap[T].Reading])
+   |              ^^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type
+error[N-Undefined]: `E[UInt8]` declares no `from`, and implements no trait in scope that does
+  --> tests/derive_from/a_from_derive_source_naming_a_type_no_implementation_settles_is_refused.lin:28:23
+   |
+28 |     let e: E[UInt8] = E.from(UInt8(7))
+   |                       ^^^^^^ `From` declares `from`; implement `From` for `E[UInt8]` to reach it here

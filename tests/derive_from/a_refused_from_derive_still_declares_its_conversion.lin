@@ -1,0 +1,17 @@
+// No variant of `Failure` holds a `Missing`, so the derive is refused. The
+// conversion it asked for is still `Failure`'s, and the call below is not a
+// second mistake.
+struct Missing {
+    key: UInt8,
+}
+
+@derive(From[Missing])
+enum Failure {
+    Absent(UInt8),
+}
+
+fn main() -> UInt8 {
+    match Failure.from(Missing { key = 1 }) {
+        Absent(key) => key,
+    }
+}

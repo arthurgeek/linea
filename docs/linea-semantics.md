@@ -3325,9 +3325,23 @@ argument of the entry is independent of it, an undefined name included, so both
 it and a source no variant holds are reported. The report names the type the
 template wraps with the entry's arguments in its parameters' places, which is
 the type a variant would have to hold. Unit is a source like any other, wrapped by a variant whose
-only field is `()`. An array length in the source and in a payload is
-compared by what it counts, so `[UInt8; 2]` and `[UInt8; 1 + 1]` are one source.
-The generated implementation is the same as a
+only field is `()`. Source and payload are one type when they settle to one
+type, which is the identity two implementations' arguments overlap at: an
+array length is compared by what it counts, so `[UInt8; 2]` and
+`[UInt8; 1 + 1]` are one source; an alias is the type it names; and a settled
+reference is the type its implementation settles it to, so with
+`impl Measure for Celsius { type Reading = Kelvin }` the source
+`Celsius.Reading`, an alias of it, and `Read[Celsius]` with
+`alias Read[T: Measure] = T.Reading` all select `Hot(Kelvin)`, and a payload
+written `Celsius.Reading` holds a `Kelvin`. Two variants that settle to the
+source's type, `Hot(Kelvin)` beside `Warm(Celsius.Reading)` with
+`From[Kelvin]`, are the two variants [T-Derive] refuses. A payload read
+through one of the enum's own parameters, `Held(T.Reading)` in
+`enum Box[T: Measure]`, is settled by each instantiation and holds no type
+the generic conversion could wrap. An entry refused because no variant, or
+two, holds the source still declares its conversion, so a call of it is not a
+second mistake. The generated
+implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.
 
@@ -3507,13 +3521,15 @@ only field has the written type of the member's parameter `parameter`, applied
 to the value `parameter` holds, as that variant's ordinary constructor does. It
 is available outside reflected cases and component loops, in a template
 declaring `reflect.target: enum`, and its argument is a parameter of the member.
-The derive entry selects the variant: the parameter's written type is read with
-the template's parameters standing for the entry's trait arguments, and each
-variant of one field is compared with it as coherence compares the written
-arguments of two implementations, so the names a type reaches decide and an
-alias is the type it names. A variant with no field, several fields, or a
-different type is not selected. No variant selected, or two, is [T-Derive] at
-the entry; any other use is [T-Reflection].
+The variant is selected when the generated implementation is checked: the
+parameter's type, with the template's parameters standing for the entry's
+trait arguments, is compared with the type of each variant of one field, and
+two are one where they settle to one type, as two implementations' arguments
+are where coherence decides whether they overlap. A variant with no field,
+several fields, or a different type is not selected. No variant selected, or
+two, is [T-Derive] at the entry; any other use is [T-Reflection]. The
+generated text a tool shows, and the text a derive is compared with when it is
+replaced by its expansion, names the selected variant's constructor.
 
 Bare reflection roots, bare descriptors, unsupported selections, and descriptor
 uses in any other position are refused. A `break` or `continue` may not target

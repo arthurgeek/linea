@@ -22,6 +22,7 @@ const token = @import("../lexer/token.zig");
 const tokenize = @import("../lexer/lexer.zig").tokenize;
 const dumpAst = @import("../syntax/dump.zig").dumpAst;
 const dumpExpanded = @import("../syntax/expanded_dump.zig").dumpExpanded;
+const generated_text = @import("../sema/generated_text.zig");
 const lexer_dump = @import("../lexer/dump.zig");
 const lower = @import("../mir/lower.zig").lowerProgram;
 const Purpose = @import("../mir/lower.zig").Purpose;
@@ -823,7 +824,9 @@ pub fn run(process: std.process.Init) !u8 {
                     const stdout_w = stdout.open(io, stdout_file);
                     defer stdout.flush() catch {};
 
-                    try dumpExpanded(&settled.expanded, settled.expanded.modules, stdout_w);
+                    const texts = try generated_text.settledGeneratedTexts(gpa, &settled.expanded, &settled.res, &settled.typing);
+                    defer generated_text.freeTexts(gpa, texts);
+                    try dumpExpanded(&settled.expanded, settled.expanded.modules, texts, stdout_w);
                 }
 
                 // Only where the passes were happy. Both of these render the

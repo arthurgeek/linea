@@ -1,0 +1,11 @@
+error[T-Derive]: `R` has two variants wrapping `UInt8`
+  --> tests/derive_from/a_wrap_refuses_two_variants_of_its_target_holding_its_source.lin:13:9
+   |
+13 | @derive(Lift[UInt8])
+   |         ^^^^^^^^^^^ the conversion would wrap the source in either variant
+15 |     Count(UInt8),
+   |     ----- this variant holds the source's type
+16 |     Other(UInt8),
+   |     ----- this variant holds the source's type
+   |
+   = help: write the conversion by hand, or give each variant its own type
