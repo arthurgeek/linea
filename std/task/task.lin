@@ -284,10 +284,13 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
     }
 }
 
-// Policy selects the execution strategy for independent value-producing computations.
-// `.Sequential` executes inline on the caller's stack with no task start and
-// complete determinism; `.Threads(max)` allows at most `max` worker tasks
-// on the current Io.
+// Policy says how much independent work runs at once. `.Sequential` runs
+// every job on the caller, one after another, and starts no task.
+// `.Threads(max)` runs at most `max` jobs at once, each on a task started on
+// the caller's Io (a join runs one of them on the caller itself): an operating-system thread of its own under `io.system()`,
+// a fiber pinned to one of the loop's carriers under a loop, so no more jobs
+// run simultaneously than the loop has carriers, and a fiber scheduled from
+// the seed inside a simulation. `.Threads(1)` runs the jobs on the caller.
 @(copyable, derive(Equatable, Equivalent, Display, Debug))
 pub enum Policy {
     Sequential,
@@ -298,25 +301,7 @@ pub enum Policy {
 // in parameter order once both have finished. Under `.Threads(max)` with `max`
 // above 1, `f1` runs on a new task while the caller runs `f2`.
 pub fn join[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2](sink policy: Policy, sink f1: F1, sink f2: F2) -> (T1, T2) {
-    match policy {
-        Sequential => (f1(), f2()),
-        Threads(max) => {
-            if max == 0 {
-                panic("task.join: policy task limit cannot be 0")
-            }
-            if max == 1 {
-                return (f1(), f2())
-            }
-            let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
-                me.send(f1()).close()
-            }
-            let h1 = start(body1).unwrap()
-            let r2 = f2()
-            let (r1, done1) = h1.recv()
-            done1.close()
-            (r1, r2)
-        },
-    }
+    join_in(mem.system(), policy, f1, f2)
 }
 
 test "join runs sequentially" {
@@ -331,43 +316,56 @@ test "join runs on threads" {
     testing.assert_eq(b, 200, "second threaded join result was wrong")?
 }
 
+// Join as `join` does, taking the bytes each started job is kept in from
+// `allocator`. Under `.Sequential`, or `.Threads(1)`, nothing is allocated.
+pub fn join_in[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, A: Allocator](allocator: A, sink policy: Policy, sink f1: F1, sink f2: F2) -> (T1, T2) {
+    match policy {
+        Sequential => (f1(), f2()),
+        Threads(max) => {
+            if max == 0 {
+                panic("task.join: policy task limit cannot be 0")
+            }
+            if max == 1 {
+                return (f1(), f2())
+            }
+            let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
+                me.send(f1()).close()
+            }
+            let h1 = start_in(allocator, body1, default_stack_bytes).unwrap()
+            let r2 = f2()
+            let (r1, done1) = h1.recv()
+            done1.close()
+            (r1, r2)
+        },
+    }
+}
+
+test fn join_in_takes_each_task_from_its_allocator() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let results = join_in(log.allocator(), Policy.Threads(2), sink [] || UInt64(3), sink [] || UInt64(4))
+    let attempts = log.attempts()
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert_eq(results, (UInt64(3), UInt64(4)), "the results came back out of order")?
+    testing.assert_eq(attempts, 1, "a started job's bytes did not come from the allocator")?
+    testing.assert(settled, "joining kept a job's bytes")?
+}
+
+test fn join_in_allocates_nothing_in_sequence() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let results = join_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4))
+    let attempts = log.attempts()
+    log.release()
+    testing.assert_eq(results, (UInt64(3), UInt64(4)), "the results came back out of order")?
+    testing.assert_eq(attempts, 0, "a sequential join allocated")?
+}
+
 // Join three independent calculations according to policy and return all three results
 // in parameter order once all three have finished. Under `.Threads(max)` no
 // more than `max` of them run at once: the first `max - 1` run on new tasks
 // and the caller runs the rest, one after another.
 pub fn join3[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, F3: Owned + Discardable + sink fn() -> T3](sink policy: Policy, sink f1: F1, sink f2: F2, sink f3: F3) -> (T1, T2, T3) {
-    match policy {
-        Sequential => (f1(), f2(), f3()),
-        Threads(max) => {
-            if max == 0 {
-                panic("task.join3: policy task limit cannot be 0")
-            }
-            if max == 1 {
-                return (f1(), f2(), f3())
-            }
-            let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
-                me.send(f1()).close()
-            }
-            let h1 = start(body1).unwrap()
-            if max == 2 {
-                let r2 = f2()
-                let r3 = f3()
-                let (r1, done1) = h1.recv()
-                done1.close()
-                return (r1, r2, r3)
-            }
-            let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
-                me.send(f2()).close()
-            }
-            let h2 = start(body2).unwrap()
-            let r3 = f3()
-            let (r1, done1) = h1.recv()
-            done1.close()
-            let (r2, done2) = h2.recv()
-            done2.close()
-            (r1, r2, r3)
-        },
-    }
+    join3_in(mem.system(), policy, f1, f2, f3)
 }
 
 test "join3 runs sequentially and on threads" {
@@ -398,59 +396,69 @@ test "join3 runs no more closures at once than its bound" {
     testing.assert(took >= 200000000, "three closures ran at once under a bound of two")?
 }
 
+// Join as `join3` does, taking the bytes each started job is kept in from
+// `allocator`. Under `.Sequential`, or `.Threads(1)`, nothing is allocated.
+pub fn join3_in[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, F3: Owned + Discardable + sink fn() -> T3, A: Allocator](allocator: A, sink policy: Policy, sink f1: F1, sink f2: F2, sink f3: F3) -> (T1, T2, T3) {
+    match policy {
+        Sequential => (f1(), f2(), f3()),
+        Threads(max) => {
+            if max == 0 {
+                panic("task.join3: policy task limit cannot be 0")
+            }
+            if max == 1 {
+                return (f1(), f2(), f3())
+            }
+            let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
+                me.send(f1()).close()
+            }
+            let h1 = start_in(allocator, body1, default_stack_bytes).unwrap()
+            if max == 2 {
+                let r2 = f2()
+                let r3 = f3()
+                let (r1, done1) = h1.recv()
+                done1.close()
+                return (r1, r2, r3)
+            }
+            let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
+                me.send(f2()).close()
+            }
+            let h2 = start_in(allocator, body2, default_stack_bytes).unwrap()
+            let r3 = f3()
+            let (r1, done1) = h1.recv()
+            done1.close()
+            let (r2, done2) = h2.recv()
+            done2.close()
+            (r1, r2, r3)
+        },
+    }
+}
+
+test fn join3_in_takes_each_task_from_its_allocator() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let results = join3_in(log.allocator(), Policy.Threads(3), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
+    let attempts = log.attempts()
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert_eq(results, (UInt64(3), UInt64(4), UInt64(5)), "the results came back out of order")?
+    testing.assert_eq(attempts, 2, "a started job's bytes did not come from the allocator")?
+    testing.assert(settled, "joining kept a job's bytes")?
+}
+
+test fn join3_in_allocates_nothing_in_sequence() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let results = join3_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
+    let attempts = log.attempts()
+    log.release()
+    testing.assert_eq(results, (UInt64(3), UInt64(4), UInt64(5)), "the results came back out of order")?
+    testing.assert_eq(attempts, 0, "a sequential join allocated")?
+}
+
 // Join four independent calculations according to policy and return all four results
 // in parameter order once all four have finished. Under `.Threads(max)` no
 // more than `max` of them run at once: the first `max - 1` run on new tasks
 // and the caller runs the rest, one after another.
 pub fn join4[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, F3: Owned + Discardable + sink fn() -> T3, F4: Owned + Discardable + sink fn() -> T4](sink policy: Policy, sink f1: F1, sink f2: F2, sink f3: F3, sink f4: F4) -> (T1, T2, T3, T4) {
-    match policy {
-        Sequential => (f1(), f2(), f3(), f4()),
-        Threads(max) => {
-            if max == 0 {
-                panic("task.join4: policy task limit cannot be 0")
-            }
-            if max == 1 {
-                return (f1(), f2(), f3(), f4())
-            }
-            let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
-                me.send(f1()).close()
-            }
-            let h1 = start(body1).unwrap()
-            if max == 2 {
-                let r2 = f2()
-                let r3 = f3()
-                let r4 = f4()
-                let (r1, done1) = h1.recv()
-                done1.close()
-                return (r1, r2, r3, r4)
-            }
-            let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
-                me.send(f2()).close()
-            }
-            let h2 = start(body2).unwrap()
-            if max == 3 {
-                let r3 = f3()
-                let r4 = f4()
-                let (r1, done1) = h1.recv()
-                done1.close()
-                let (r2, done2) = h2.recv()
-                done2.close()
-                return (r1, r2, r3, r4)
-            }
-            let body3 = sink [sink f3] |sink me: Chan[Send[T3, End]]| {
-                me.send(f3()).close()
-            }
-            let h3 = start(body3).unwrap()
-            let r4 = f4()
-            let (r1, done1) = h1.recv()
-            done1.close()
-            let (r2, done2) = h2.recv()
-            done2.close()
-            let (r3, done3) = h3.recv()
-            done3.close()
-            (r1, r2, r3, r4)
-        },
-    }
+    join4_in(mem.system(), policy, f1, f2, f3, f4)
 }
 
 test "join4 runs sequentially and on threads" {
@@ -471,69 +479,865 @@ test "join4 runs no more closures at once than its bound" {
     testing.assert(took >= 200000000, "four closures ran at once under a bound of three")?
 }
 
-// all executes a collection of homogeneous independent jobs according to policy,
-// awaiting their completion and returning results in job order (like Promise.all).
-pub fn all[T: Owned, F: Owned + Discardable + fn() -> T](sink policy: Policy, sink jobs: mem.Vec[F, mem.SystemAllocator]) -> mem.Vec[T, mem.SystemAllocator] {
+// Join as `join4` does, taking the bytes each started job is kept in from
+// `allocator`. Under `.Sequential`, or `.Threads(1)`, nothing is allocated.
+pub fn join4_in[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discardable + sink fn() -> T1, F2: Owned + Discardable + sink fn() -> T2, F3: Owned + Discardable + sink fn() -> T3, F4: Owned + Discardable + sink fn() -> T4, A: Allocator](allocator: A, sink policy: Policy, sink f1: F1, sink f2: F2, sink f3: F3, sink f4: F4) -> (T1, T2, T3, T4) {
     match policy {
-        Sequential => {
-            var results: mem.Vec[T, mem.SystemAllocator] = mem.Vec.new()
-            var pending = jobs.drain()
-            for job in &pending {
-                &results.push(job()).unwrap()
-            }
-            pending.finish().unwrap()
-            results
-        },
+        Sequential => (f1(), f2(), f3(), f4()),
         Threads(max) => {
             if max == 0 {
-                panic("task.all: policy task limit cannot be 0")
+                panic("task.join4: policy task limit cannot be 0")
             }
             if max == 1 {
-                var results: mem.Vec[T, mem.SystemAllocator] = mem.Vec.new()
-                var pending = jobs.drain()
-                for job in &pending {
-                    &results.push(job()).unwrap()
-                }
-                pending.finish().unwrap()
-                return results
+                return (f1(), f2(), f3(), f4())
             }
-            let total = jobs.length()
-            if total == 0 {
-                jobs.finish().unwrap()
-                return mem.Vec.new()
+            let body1 = sink [sink f1] |sink me: Chan[Send[T1, End]]| {
+                me.send(f1()).close()
             }
-            var results: mem.Vec[T, mem.SystemAllocator] = mem.Vec.new()
-            var pending_jobs = jobs.drain()
-            var running = true
-            while running {
-                var handles: mem.Vec[Chan[Recv[T, End]], mem.SystemAllocator] = mem.Vec.new()
-                for _ in 0..max {
-                    match &pending_jobs.next() {
-                        Some(job) => {
-                            let body = sink [sink job] |sink me: Chan[Send[T, End]]| {
-                                me.send(job()).close()
-                            }
-                            let handle = prepare(body).unwrap().start()
-                            &handles.push(handle.detach()).unwrap()
-                        },
-                        None => {
-                            running = false
-                            break
-                        },
-                    }
-                }
-                var pending_handles = handles.drain()
-                for handle in &pending_handles {
-                    let (val, done) = handle.recv()
-                    done.close()
-                    &results.push(val).unwrap()
-                }
-                pending_handles.finish().unwrap()
+            let h1 = start_in(allocator, body1, default_stack_bytes).unwrap()
+            if max == 2 {
+                let r2 = f2()
+                let r3 = f3()
+                let r4 = f4()
+                let (r1, done1) = h1.recv()
+                done1.close()
+                return (r1, r2, r3, r4)
             }
-            pending_jobs.finish().unwrap()
-            results
+            let body2 = sink [sink f2] |sink me: Chan[Send[T2, End]]| {
+                me.send(f2()).close()
+            }
+            let h2 = start_in(allocator, body2, default_stack_bytes).unwrap()
+            if max == 3 {
+                let r3 = f3()
+                let r4 = f4()
+                let (r1, done1) = h1.recv()
+                done1.close()
+                let (r2, done2) = h2.recv()
+                done2.close()
+                return (r1, r2, r3, r4)
+            }
+            let body3 = sink [sink f3] |sink me: Chan[Send[T3, End]]| {
+                me.send(f3()).close()
+            }
+            let h3 = start_in(allocator, body3, default_stack_bytes).unwrap()
+            let r4 = f4()
+            let (r1, done1) = h1.recv()
+            done1.close()
+            let (r2, done2) = h2.recv()
+            done2.close()
+            let (r3, done3) = h3.recv()
+            done3.close()
+            (r1, r2, r3, r4)
         },
     }
+}
+
+test fn join4_in_takes_each_task_from_its_allocator() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let results = join4_in(log.allocator(), Policy.Threads(4), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
+    let attempts = log.attempts()
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert_eq(results, (UInt64(3), UInt64(4), UInt64(5), UInt64(6)), "the results came back out of order")?
+    testing.assert_eq(attempts, 3, "a started job's bytes did not come from the allocator")?
+    testing.assert(settled, "joining kept a job's bytes")?
+}
+
+test fn join4_in_allocates_nothing_in_sequence() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let results = join4_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
+    let attempts = log.attempts()
+    log.release()
+    testing.assert_eq(results, (UInt64(3), UInt64(4), UInt64(5), UInt64(6)), "the results came back out of order")?
+    testing.assert_eq(attempts, 0, "a sequential join allocated")?
+}
+
+// One pulled item's place in a lazy map: its job still running on a task of
+// its own, or the result it answered.
+enum Ahead[R, A: Allocator] {
+    Running(Chan[Recv[R, End], A]),
+    Done(R),
+}
+
+// A LazyMap applies `transform` to the items of `source` on tasks of their
+// own and yields the results in the items' order. At most `running_at_most`
+// jobs run at once, and an item is pulled only when a job may start for it:
+// when fewer than `running_at_most` jobs run and fewer than `ahead_at_most`
+// pulled items wait to be yielded. A job that finishes before the items
+// ahead of it hands its result over at once, so its task ends and the next
+// item starts while the earlier jobs still run.
+//
+// `slots` keeps the place of every pulled item not yet yielded, the item
+// pulled `n`th at `n % ahead_at_most`. `set` is the runtime wait set that
+// watches the running jobs' handles, and `waiting` names the place of the
+// job each of its slots watches; the set numbers at most `running_at_most`
+// slots, since a slot is free again once its job has answered. The runtime
+// retires a slot after four billion reuses and numbers a new one, which
+// `waiting` has no place for, so a map that started that many jobs on one
+// slot stops the program with an index out of range. Both are
+// reserved before the first job starts. With `running_at_most` 0 every job
+// runs on the caller, when it is asked for, and nothing is allocated.
+//
+// It holds tasks and results, and a drop neither joins a task nor settles a
+// result, so it is linear: `release()` joins every job it started and
+// releases what they answered, and `stop()` and `finish()` hand results that
+// have no `Release` to their owner.
+@(opaque, linear)
+struct LazyMap[I, R, F, A: Allocator = mem.SystemAllocator] {
+    source: I,
+    transform: F,
+    allocator: A,
+    running_at_most: UInt64,
+    ahead_at_most: UInt64,
+    slots: mem.Vec[Option[Ahead[R, A]], A],
+    waiting: mem.Vec[UInt64, A],
+    set: UInt64,
+    pulled: UInt64,
+    yielded: UInt64,
+    running: UInt64,
+    pulling: Bool,
+}
+
+// Take the value `holder` holds and leave it empty. A loop that consumes a
+// value and answers its successor keeps it here, since a binding declared
+// outside a loop cannot be moved inside it.
+fn taken_out[T](inout holder: Option[T]) -> T where carries(holder) {
+    let empty: Option[T] = .None
+    match mem.exchange(&holder, empty) {
+        Some(value) => value,
+        None => panic("a holder was emptied twice"),
+    }
+}
+
+// Put `value` into the empty `holder`.
+fn put_back[T](inout holder: Option[T], sink value: T) where retains(holder: value) {
+    match mem.exchange(&holder, .Some(value)) {
+        None => {},
+        Some(_) => panic("a holder was filled twice"),
+    }
+}
+
+// Build a lazy map that runs at most `running_at_most` jobs at once and
+// keeps at most `ahead_at_most` pulled items waiting to be yielded. A bound
+// below 2 runs every job on the caller, as `.Threads(1)` does everywhere.
+fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator](allocator: A, sink source: I, sink transform: F, running_at_most: UInt64, ahead_at_most: UInt64) -> LazyMap[I, R, F, A] where
+    carries(allocator, source, transform),
+    I.Item: Owned
+{
+    let running = if running_at_most < 2 {
+        UInt64(0)
+    } else {
+        running_at_most
+    }
+    .{
+        source,
+        transform,
+        allocator = copy(allocator),
+        running_at_most = running,
+        ahead_at_most,
+        slots = mem.Vec.new_in(allocator),
+        waiting = mem.Vec.new_in(allocator),
+        set = 0,
+        pulled = 0,
+        yielded = 0,
+        running = 0,
+        pulling = true,
+    }
+}
+
+impl[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator] LazyMap[I, R, F, A]
+where I.Item: Owned {
+    // Reserve the places and the wait set's names and open the wait set,
+    // before the first job starts. Where one of them cannot be had, every job
+    // runs on the caller instead, so the map yields the same results.
+    fn open(inout self: Self) {
+        match &self.slots.reserve(self.ahead_at_most) {
+            Ok(_) => {},
+            Err(_) => {
+                self.running_at_most = 0
+                return
+            },
+        }
+        match &self.waiting.reserve(self.running_at_most) {
+            Ok(_) => {},
+            Err(_) => {
+                self.running_at_most = 0
+                return
+            },
+        }
+        let set = linea_waitset_open()
+        if set == 0 {
+            self.running_at_most = 0
+            return
+        }
+        // The reservations above hold every place, so these pushes allocate
+        // nothing and cannot fail.
+        for _ in 0..self.ahead_at_most {
+            let empty: Option[Ahead[R, A]] = .None
+            &self.slots.push(empty).unwrap()
+        }
+        for _ in 0..self.running_at_most {
+            &self.waiting.push(0).unwrap()
+        }
+        self.set = set
+    }
+
+    // Pull items and start their jobs while a job may start. Each helper
+    // below consumes the map and answers it: a started job's handle carries
+    // the map's allocator, so it is stored into a map that is rebuilt rather
+    // than written through a borrowed one.
+    fn filled(sink self: Self) -> Self where carries(self) {
+        var holder: Option[Self] = .Some(self)
+        loop {
+            var me = taken_out(&holder)
+            if !(me.pulling && me.running < me.running_at_most && me.pulled - me.yielded < me.ahead_at_most) {
+                put_back(&holder, me)
+                break
+            }
+            let running_before = me.running
+            let advanced = match &me.source.next() {
+                Some(item) => me.launched(item),
+                None => {
+                    me.pulling = false
+                    me
+                },
+            }
+            // An item whose task could not be prepared was mapped on the
+            // caller; the caller pulls no further item until the next result
+            // is asked for, so refused tasks never make the map eager.
+            let ran_here = advanced.pulling && advanced.running == running_before
+            put_back(&holder, advanced)
+            if ran_here {
+                break
+            }
+        }
+        match holder {
+            Some(rest) => rest,
+            None => panic("a lazy map was lost while it pulled"),
+        }
+    }
+
+    // Start the job for `item` at the next place: prepare a task that waits
+    // for an item, start it, and hand it `item`. A task that cannot be
+    // prepared, because its bytes or its stack are refused, leaves the job to
+    // the caller, which runs it at once and keeps its result in its place.
+    fn launched(sink self: Self, sink item: I.Item) -> Self where carries(self, item) {
+        var me = self
+        let place = me.pulled % me.ahead_at_most
+        me.pulled += 1
+        let body = sink [sink transform = copy(me.transform)] |sink end: Chan[Recv[I.Item, Send[R, End]]]| {
+            let (given, answering) = end.recv()
+            answering.send(transform(given)).close()
+        }
+        let entry: Ahead[R, A] = match prepare_in(me.allocator, body, default_stack_bytes) {
+            Ok(slot) => {
+                let handle = slot.start().detach_body().send(item)
+                let watched = linea_waitset_reserve(me.set) / slot_shift
+                linea_waitset_received(me.set, watched, handle.number())
+                let _free = mem.exchange(&me.waiting[watched], place)
+                me.running += 1
+                .Running(handle)
+            },
+            Err(failure) => {
+                let Unstarted { body: _, reason: _ } = failure
+                .Done((me.transform)(item))
+            },
+        }
+        match mem.exchange(&me.slots[place], .Some(entry)) {
+            None => {},
+            Some(_) => panic("a lazy map reused the place of an item it had not yielded"),
+        }
+        me
+    }
+
+    // Wait for whichever running job answers first, keep its result in its
+    // place, and join its task.
+    fn collected_one(sink self: Self) -> Self where carries(self) {
+        var me = self
+        let watched = linea_waitset_next(me.set)
+        if watched < 0 {
+            panic("a lazy map waited with no job running")
+        }
+        let place = mem.exchange(&me.waiting[UInt64(watched)], 0)
+        let empty: Option[Ahead[R, A]] = .None
+        let answered: Ahead[R, A] = match mem.exchange(&me.slots[place], empty) {
+            Some(Running(handle)) => {
+                let (result, done) = handle.recv()
+                done.close()
+                .Done(result)
+            },
+            Some(_) => panic("a lazy map's wait set answered a job that had already answered"),
+            None => panic("a lazy map's wait set answered an empty place"),
+        }
+        me.running -= 1
+        match mem.exchange(&me.slots[place], .Some(answered)) {
+            None => {},
+            Some(_) => panic("a lazy map lost a job's place while it waited"),
+        }
+        me
+    }
+
+    // Answer the next item's result and the map, waiting for the item's job
+    // when it is still running and starting the jobs the freed capacity
+    // allows.
+    fn advanced(sink self: Self) -> (Option[R], Self) where carries(self) {
+        var me = self
+        if me.running_at_most > 0 && me.set == 0 && me.pulling {
+            &me.open()
+        }
+        if me.running_at_most == 0 {
+            if !me.pulling {
+                return (.None, me)
+            }
+            let result: Option[R] = match &me.source.next() {
+                Some(item) => .Some((me.transform)(item)),
+                None => {
+                    me.pulling = false
+                    .None
+                },
+            }
+            return (result, me)
+        }
+        var holder: Option[Self] = .Some(me.filled())
+        var answer: Option[R] = .None
+        loop {
+            var current = taken_out(&holder)
+            if current.pulled == current.yielded {
+                put_back(&holder, current)
+                break
+            }
+            let place = current.yielded % current.ahead_at_most
+            let empty: Option[Ahead[R, A]] = .None
+            match mem.exchange(&current.slots[place], empty) {
+                Some(Done(result)) => {
+                    current.yielded += 1
+                    put_back(&answer, result)
+                    put_back(&holder, current.filled())
+                    break
+                },
+                Some(Running(handle)) => {
+                    match mem.exchange(&current.slots[place], .Some(.Running(handle))) {
+                        None => {},
+                        Some(_) => panic("a lazy map lost a job's place while it looked"),
+                    }
+                },
+                None => panic("a lazy map lost the place of an item it pulled"),
+            }
+            // The job that answered freed its place among the running ones, so
+            // the next item starts before the head is waited for again.
+            put_back(&holder, current.collected_one().filled())
+        }
+        match holder {
+            Some(rest) => (answer, rest),
+            None => panic("a lazy map was lost while it waited"),
+        }
+    }
+
+    // Pull no more items. The jobs already started still answer, and walking
+    // the map yields their results in order and then ends, so a result that
+    // has no `Release` can be taken before `finish`.
+    pub fn stop(inout self: Self) {
+        self.pulling = false
+    }
+
+    test fn a_stopped_map_yields_only_what_it_started() {
+        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=100, |sink n| n * 10)
+        let first = &mapped.next()
+        &mapped.stop()
+        var rest = UInt64(0)
+        var in_order = true
+        for result in &mapped {
+            rest += 1
+            in_order = in_order && result == 10 * (rest + 1)
+        }
+        let source = match mapped.finish() {
+            Ok(source) => source,
+            Err(still) => {
+                still.release()
+                log.release()
+                return testing.assert(false, "a walked stopped map still held results")
+            },
+        }
+        let settled = log.all_disposed()
+        let attempts = log.attempts()
+        log.release()
+        var resumed = source
+        let next_item = match &resumed.next() {
+            Some(n) => n,
+            None => 0,
+        }
+        testing.assert_eq(first, Option.Some(UInt64(10)), "the first result was wrong")?
+        testing.assert(in_order, "a stopped map yielded out of order")?
+        testing.assert(rest <= 4, "a stopped map started more than its window holds")?
+        testing.assert_eq(next_item, rest + 2, "the source did not resume after the items the map pulled")?
+        testing.assert(attempts <= 2 + 1 + 4, "a stopped map started jobs past its window")?
+        testing.assert(settled, "a finished map kept an allocation")?
+    }
+
+    // Consume the map and answer its source, as far as it advanced, once
+    // every item the map pulled has been yielded. A map with results still to
+    // yield comes back as `Err`: `stop()` it, walk it, and finish it again.
+    pub fn finish(sink self: Self) -> Result[I, Self] where carries(.Ok: self), carries(.Err: self) {
+        if self.pulled != self.yielded {
+            return .Err(self)
+        }
+        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, slots, waiting, set, pulled: _, yielded: _, running: _, pulling: _ } = self
+        if set != 0 {
+            linea_waitset_close(set)
+        }
+        var places = slots
+        loop {
+            let place = &places.pop() else {
+                break
+            }
+            match place {
+                None => {},
+                Some(_) => panic("a lazy map finished holding a result"),
+            }
+        }
+        match places.finish() {
+            Ok(_) => {},
+            Err(_) => panic("a lazy map's places were not empty"),
+        }
+        var names = waiting
+        &names.clear()
+        match names.finish() {
+            Ok(_) => {},
+            Err(_) => panic("a lazy map's wait set names were not empty"),
+        }
+        .Ok(source)
+    }
+
+    test fn a_map_with_results_to_yield_does_not_finish() {
+        var mapped = lazy_map(Policy.Threads(2), UInt64(1)..=6, |sink n| n + 1)
+        let first = &mapped.next()
+        let refused = match mapped.finish() {
+            Ok(_) => false,
+            Err(still) => {
+                still.release()
+                true
+            },
+        }
+        testing.assert_eq(first, Option.Some(UInt64(2)), "the first result was wrong")?
+        testing.assert(refused, "a map finished with started jobs it had not yielded")?
+    }
+}
+
+impl[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator] Iterator for LazyMap[I, R, F, A]
+where I.Item: Owned {
+    type Item = R
+
+    // Answer the result of the next item, waiting for its job when it is
+    // still running, and start the jobs the freed capacity allows.
+    fn next(inout self: Self) -> Option[R] where carries(.Some: self) {
+        let current = self
+        let (result, rest) = current.advanced()
+        self = rest
+        result
+    }
+}
+
+impl[I: Iterator + Release, R: Owned + Release, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator] Release for LazyMap[I, R, F, A]
+where I.Item: Owned {
+    // Pull no more items, join every job already started and release what it
+    // answered, release the results still waiting to be yielded, and release
+    // the source with the items it has not handed over. At most the map's
+    // window of jobs runs to completion after the call; no item is pulled.
+    fn release(sink self: Self) {
+        var holder: Option[Self] = .Some(self)
+        loop {
+            var current = taken_out(&holder)
+            current.pulling = false
+            if current.pulled == current.yielded {
+                put_back(&holder, current)
+                break
+            }
+            let place = current.yielded % current.ahead_at_most
+            let empty: Option[Ahead[R, A]] = .None
+            match mem.exchange(&current.slots[place], empty) {
+                Some(Done(result)) => {
+                    result.release()
+                    current.yielded += 1
+                    put_back(&holder, current)
+                },
+                Some(Running(handle)) => {
+                    match mem.exchange(&current.slots[place], .Some(.Running(handle))) {
+                        None => {},
+                        Some(_) => panic("a lazy map lost a job's place while it was released"),
+                    }
+                    put_back(&holder, current.collected_one())
+                },
+                None => panic("a lazy map lost the place of an item it pulled"),
+            }
+        }
+        let ending = match holder {
+            Some(rest) => rest,
+            None => panic("a lazy map was lost while it was released"),
+        }
+        match ending.finish() {
+            Ok(source) => source.release(),
+            Err(_) => panic("a released lazy map still held results"),
+        }
+    }
+}
+
+// The window a lazy map keeps ahead of its caller for a bound of `max` jobs:
+// `max` running and `max` more answered and waiting for an earlier item.
+fn ahead_of(max: UInt64) -> UInt64 {
+    if max > 9223372036854775807 {
+        max
+    } else {
+        max * 2
+    }
+}
+
+// Apply `f` to the items of `items` on demand, under `policy`, and answer a
+// linear iterator over the results in the items' order. Building it pulls
+// nothing and starts nothing. Under `.Threads(max)` it runs at most `max`
+// jobs at once, each on a task of its own on the current Io, and pulls an
+// item only when a job may start for it: each time a job finishes its result
+// is kept and the next item starts, while at most `2 * max` pulled items,
+// running or answered, wait to be yielded. `.Sequential` and `.Threads(1)`
+// call `f` on the caller, one item for each `next`, and start no task. A
+// `max` of 0 stops the program. The bytes of each started job come from the
+// system allocator; `lazy_map_in` says what a refused allocation does.
+pub fn lazy_map[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: S.Iter.Item) -> R](sink policy: Policy, sink items: S, sink f: F) -> LazyMap[S.Iter, R, F, mem.SystemAllocator] where
+    carries(items, f),
+    S.Iter.Item: Owned
+{
+    lazy_map_in(mem.system(), policy, items, f)
+}
+
+test fn a_lazy_map_yields_every_result_in_input_order() {
+    defer var squares = lazy_map(Policy.Threads(3), UInt64(1)..=20, |sink n| n * n)
+    var expected = UInt64(1)
+    for square in &squares {
+        testing.assert_eq(square, expected * expected, "a result came back out of order")?
+        expected += 1
+    }
+    testing.assert_eq(expected, 21, "a lazy map lost a result")?
+}
+
+// Sum what a lazy map yields after `take` results, release it, and answer the
+// sum with how many allocations the map attempted and whether it disposed of
+// every one.
+fn lazy_test_take(take: UInt64) -> (UInt64, UInt64, Bool) {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var mapped = lazy_map_in(log.allocator(), Policy.Threads(3), UInt64(1)..=1000, |sink n| n)
+    var sum = UInt64(0)
+    for _ in 0..take {
+        match &mapped.next() {
+            Some(n) => {
+                sum += n
+            },
+            None => {},
+        }
+    }
+    mapped.release()
+    let attempts = log.attempts()
+    let settled = log.all_disposed()
+    log.release()
+    (sum, attempts, settled)
+}
+
+// Walk a lazy map of `count` napping jobs, two at once, and answer the most
+// bytes its allocations held at one time, how many allocations it had made
+// once the first result came back, the sum of its results, and whether it
+// disposed of every allocation.
+fn lazy_test_peak(count: UInt64) -> (UInt64, UInt64, UInt64, Bool) {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=count, |sink n| napping(n))
+    var total = UInt64(0)
+    var after_first = UInt64(0)
+    for n in &mapped {
+        if total == 0 {
+            after_first = log.attempts()
+        }
+        total += n
+    }
+    mapped.release()
+    let peak = log.peak_bytes()
+    let settled = log.all_disposed()
+    log.release()
+    (peak, after_first, total, settled)
+}
+
+// A receipt is linear and has no `Release`, so its owner settles each one by
+// taking it apart.
+@linear
+struct LazyReceipt {
+    number: UInt64,
+}
+
+// Walk a lazy map whose allocation numbered `refused` is refused, and answer
+// the sum of its results with whether every allocation was disposed of.
+fn lazy_test_refusing(refused: UInt64) -> (UInt64, Bool) {
+    let log = mem.AllocationLog.open(mem.system(), refused).unwrap()
+    var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=5, |sink n| n * n)
+    var sum = UInt64(0)
+    for n in &mapped {
+        sum += n
+    }
+    mapped.release()
+    let settled = log.all_disposed()
+    log.release()
+    (sum, settled)
+}
+
+// Map the items 1 to 10 two at once, the first taking six tenths of a second
+// and the others a twentieth each, and answer how many allocations the map
+// had made when the first result came back, with every result in order.
+fn lazy_test_slow_head() -> (UInt64, Bool, Bool) {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var mapped = lazy_map_in(
+        log.allocator(),
+        Policy.Threads(2),
+        UInt64(1)..=10,
+        |sink n| -> UInt64 {
+            let pause = if n == 1 {
+                UInt64(600)
+            } else {
+                UInt64(50)
+            }
+            time.sleep(time.Duration.from_milliseconds(pause))
+            n
+        },
+    )
+    var after_first = UInt64(0)
+    var expected = UInt64(1)
+    var in_order = true
+    for n in &mapped {
+        if expected == 1 {
+            after_first = log.attempts()
+        }
+        in_order = in_order && n == expected
+        expected += 1
+    }
+    mapped.release()
+    let settled = log.all_disposed()
+    log.release()
+    (after_first, in_order && expected == 11, settled)
+}
+
+// Map lazily as `lazy_map` does, taking the bytes each started job is kept
+// in, the places of the pulled items and the names of the running jobs from
+// `allocator`. Nothing is allocated until the first `next`. Where the places
+// are refused every job runs on the caller, and where one job's bytes are
+// refused that job runs on the caller, so a refusal changes where the work
+// runs and never which results are yielded.
+pub fn lazy_map_in[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: S.Iter.Item) -> R, A: Allocator](allocator: A, sink policy: Policy, sink items: S, sink f: F) -> LazyMap[S.Iter, R, F, A] where
+    carries(allocator, items, f),
+    S.Iter.Item: Owned
+{
+    let running_at_most = match policy {
+        Sequential => UInt64(0),
+        Threads(max) => {
+            if max == 0 {
+                panic("task.lazy_map: policy task limit cannot be 0")
+            }
+            max
+        },
+    }
+    lazy_window(allocator, items.iterate(), f, running_at_most, ahead_of(running_at_most))
+}
+
+test fn a_slow_item_fills_the_window_and_the_places_wrap() {
+    let (after_first, in_order, settled) = lazy_test_slow_head()
+    // While the first item runs, the other job works through the fast items
+    // until four pulled items wait: the places and the names, those four,
+    // and the fifth started once the first answered. Items five to ten reuse
+    // the places the first four had.
+    testing.assert_eq(after_first, UInt64(2 + 4 + 1), "the window did not fill to twice its bound behind a slow item")?
+    testing.assert(in_order, "results came back out of order once the places wrapped")?
+    testing.assert(settled, "a finished map kept an allocation")?
+}
+
+test fn a_lazy_map_released_early_settles_every_job_it_started() {
+    let (none, none_attempts, none_settled) = lazy_test_take(0)
+    testing.assert_eq((none, none_attempts), (UInt64(0), UInt64(0)), "a map released before its first result started work")?
+    testing.assert(none_settled, "a map released at once kept an allocation")?
+    // Two allocations hold the places and the wait set's names; every other
+    // one is a started job. After `k` results at most `k + 6` items were
+    // pulled, so at most `k + 6` jobs started.
+    let (one, one_attempts, one_settled) = lazy_test_take(1)
+    testing.assert_eq(one, UInt64(1), "the first result was wrong")?
+    testing.assert(one_attempts <= 2 + 1 + 6, "a map released after one result started unbounded work")?
+    testing.assert(one_settled, "a map released after one result kept an allocation")?
+    let (some, some_attempts, some_settled) = lazy_test_take(10)
+    testing.assert_eq(some, UInt64(55), "the first ten results were wrong")?
+    testing.assert(some_attempts <= 2 + 10 + 6, "a map released after ten results started unbounded work")?
+    testing.assert(some_settled, "a map released after ten results kept an allocation")?
+}
+
+test fn a_lazy_map_runs_no_more_jobs_at_once_than_its_bound() {
+    // Two items start two jobs before either is waited for, so this peak is
+    // the places with two jobs' bytes.
+    let (two_jobs, _, _, _) = lazy_test_peak(2)
+    let (peak, after_first, total, settled) = lazy_test_peak(12)
+    testing.assert_eq(total, UInt64(78), "a result was lost")?
+    // Every job holds the same bytes until it has answered, so a peak above
+    // what two jobs and the places hold means a third ran at once.
+    testing.assert(peak <= two_jobs, "more jobs ran at once than the bound allows")?
+    // The places and the names, then at most one item for each result
+    // yielded and four more ahead of it.
+    testing.assert(after_first <= 2 + 1 + 4, "the map pulled more items than its window holds")?
+    testing.assert(settled, "a finished map kept an allocation")?
+}
+
+test fn a_sequential_lazy_map_starts_no_task_and_yields_the_same_results() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var sequential = lazy_map_in(log.allocator(), Policy.Sequential, UInt64(1)..=8, |sink n| n * 3)
+    var threaded = lazy_map_in(log.allocator(), Policy.Threads(1), UInt64(1)..=8, |sink n| n * 3)
+    var same = true
+    var count = UInt64(0)
+    for result in &sequential {
+        count += 1
+        match &threaded.next() {
+            Some(other) => {
+                same = same && other == result && result == count * 3
+            },
+            None => {
+                same = false
+            },
+        }
+    }
+    sequential.release()
+    threaded.release()
+    let attempts = log.attempts()
+    log.release()
+    defer var parallel = lazy_map(Policy.Threads(4), UInt64(1)..=8, |sink n| n * 3)
+    var position = UInt64(0)
+    for result in &parallel {
+        position += 1
+        same = same && result == position * 3
+    }
+    testing.assert(same, "the policies yielded different results")?
+    testing.assert_eq(count, 8, "a sequential map lost a result")?
+    testing.assert_eq(attempts, 0, "a map that runs on the caller allocated")?
+}
+
+test fn a_lazy_map_hands_linear_results_to_their_owner() {
+    var receipts = lazy_map(Policy.Threads(2), UInt64(1)..=9, |sink n| LazyReceipt { number = n })
+    var seen = UInt64(0)
+    for receipt in &receipts {
+        let LazyReceipt { number } = receipt
+        seen = seen * 10 + number
+        if number == 3 {
+            break
+        }
+    }
+    &receipts.stop()
+    var after = UInt64(0)
+    for receipt in &receipts {
+        let LazyReceipt { number: _ } = receipt
+        after += 1
+    }
+    match receipts.finish() {
+        Ok(_) => {},
+        Err(still) => {
+            var left = still
+            for receipt in &left {
+                let LazyReceipt { number: _ } = receipt
+            }
+            match left.finish() {
+                Ok(_) => {},
+                Err(_) => panic("a walked stopped map still held receipts"),
+            }
+            return testing.assert(false, "a walked stopped map did not finish")
+        },
+    }
+    testing.assert_eq(seen, UInt64(123), "the receipts came back out of order")?
+    testing.assert(after <= 4, "a stopped map yielded receipts past its window")?
+}
+
+test fn a_lazy_map_releases_results_that_own_storage() {
+    var lists = lazy_map(
+        Policy.Threads(2),
+        UInt64(1)..=8,
+        |sink n| -> mem.Vec[UInt64, mem.SystemAllocator] {
+            mem.Vec.filled(n, n).unwrap()
+        },
+    )
+    let first = &lists.next().unwrap()
+    let length = first.length()
+    first.release()
+    lists.release()
+    testing.assert_eq(length, 1, "the first list was wrong")?
+}
+
+test fn a_lazy_map_keeps_every_result_of_a_fallible_function() {
+    defer var checked = lazy_map(
+        Policy.Threads(3),
+        UInt64(1)..=6,
+        |sink n| -> Result[UInt64, UInt64] {
+            if n % 2 == 0 {
+                .Ok(n * 10)
+            } else {
+                .Err(n)
+            }
+        },
+    )
+    var position = UInt64(0)
+    for result in &checked {
+        position += 1
+        let expected: Result[UInt64, UInt64] = if position % 2 == 0 {
+            .Ok(position * 10)
+        } else {
+            .Err(position)
+        }
+        testing.assert_eq(result, expected, "a failure dropped or moved another result")?
+    }
+    testing.assert_eq(position, 6, "a failure ended the map early")?
+}
+
+test fn a_refused_allocation_moves_work_to_the_caller_and_keeps_every_result() {
+    // The first two allocations are the places and the names; the rest are
+    // the jobs, one each.
+    for refused in UInt64(1)..=7 {
+        let (sum, settled) = lazy_test_refusing(refused)
+        testing.assert_eq(sum, UInt64(55), "a refused allocation changed the results")?
+        testing.assert(settled, "a refused allocation left another one undisposed")?
+    }
+}
+
+// Map every item of `items` through a lazy map that runs at most
+// `running_at_most` jobs at once and may keep every result ahead, and
+// collect the results in the items' order into a vector from `allocator`.
+// A result the vector cannot take stops the program.
+fn collected[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T) -> R, A: Allocator, B: Allocator](allocator: A, sink items: mem.Vec[T, B], sink f: F, running_at_most: UInt64) -> mem.Vec[R, A] where carries(allocator) {
+    let total = items.length()
+    let ahead = if total == 0 {
+        UInt64(1)
+    } else {
+        total
+    }
+    var results: mem.Vec[R, A] = mem.Vec.new_in(allocator)
+    let running = if running_at_most > total {
+        total
+    } else {
+        running_at_most
+    }
+    var mapped = lazy_window(allocator, items.drain(), f, running, ahead)
+    for result in &mapped {
+        &results.push(result).unwrap()
+    }
+    match mapped.finish() {
+        Ok(drained) => drained.finish().unwrap(),
+        Err(_) => panic("a walked map still held results"),
+    }
+    results
+}
+
+// Run every job in `jobs` under `policy` and answer their results in job
+// order once all have finished, as `Promise.all` does. Under `.Threads(max)`
+// at most `max` jobs run at once, each on a task of its own on the current
+// Io, and each time one finishes the next job starts. `.Sequential` and
+// `.Threads(1)` run the jobs in turn on the caller. A `max` of 0 stops the
+// program. The results and each started job's bytes come from the system
+// allocator; `all_in` names another.
+pub fn all[T: Owned, F: Owned + Discardable + fn() -> T](sink policy: Policy, sink jobs: mem.Vec[F, mem.SystemAllocator]) -> mem.Vec[T, mem.SystemAllocator] {
+    all_in(mem.system(), policy, jobs)
 }
 
 fn job1() -> UInt64 {
@@ -580,90 +1384,91 @@ test "all runs sequentially and on threads" {
     testing.assert_eq(par_len, 3, "threaded all length wrong")?
 }
 
-// map transforms items according to policy across worker threads bounded by max.
-pub fn map[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T) -> R](sink policy: Policy, sink items: mem.Vec[T, mem.SystemAllocator], sink f: F) -> mem.Vec[R, mem.SystemAllocator] {
-    match policy {
-        Sequential => {
-            var results: mem.Vec[R, mem.SystemAllocator] = mem.Vec.new()
-            var pending = items.drain()
-            for item in &pending {
-                &results.push(f(item)).unwrap()
-            }
-            pending.finish().unwrap()
-            results
-        },
+// Sleep a little under half a second and answer when the sleep ended.
+fn slow_job() -> time.Instant {
+    time.sleep(time.Duration.from_milliseconds(400))
+    time.Instant.now()
+}
+
+// Sleep a twentieth of a second and answer when the sleep ended.
+fn fast_job() -> time.Instant {
+    time.sleep(time.Duration.from_milliseconds(50))
+    time.Instant.now()
+}
+
+test fn all_starts_the_next_job_as_soon_as_one_finishes() {
+    var jobs: mem.Vec[fn() -> time.Instant, mem.SystemAllocator] = mem.Vec.new()
+    &jobs.push(slow_job).unwrap()
+    for _ in 0..4 {
+        &jobs.push(fast_job).unwrap()
+    }
+    let finished: mem.Vec[time.Instant, mem.SystemAllocator] = all(Policy.Threads(2), jobs)
+    var pending = finished.drain()
+    let slow = &pending.next().unwrap()
+    // Two jobs run at once. While the slow one runs, the other task's place
+    // goes to each fast job in turn, so all four finish before it.
+    var before = UInt64(0)
+    for at in &pending {
+        if at < slow {
+            before += 1
+        }
+    }
+    pending.finish().unwrap()
+    testing.assert_eq(before, 4, "a fast job waited for the slow one")?
+}
+
+// Run every job as `all` does, taking the results and each started job's
+// bytes from `allocator`. A job whose bytes are refused runs on the caller;
+// a result the vector cannot take stops the program.
+pub fn all_in[T: Owned, F: Owned + Discardable + fn() -> T, A: Allocator, B: Allocator](allocator: A, sink policy: Policy, sink jobs: mem.Vec[F, B]) -> mem.Vec[T, A] where carries(allocator) {
+    let running_at_most = match policy {
+        Sequential => UInt64(0),
         Threads(max) => {
             if max == 0 {
-                panic("task.map: policy task limit cannot be 0")
+                panic("task.all: policy task limit cannot be 0")
             }
-            if max == 1 {
-                var results: mem.Vec[R, mem.SystemAllocator] = mem.Vec.new()
-                var pending = items.drain()
-                for item in &pending {
-                    &results.push(f(item)).unwrap()
-                }
-                pending.finish().unwrap()
-                return results
-            }
-            let total = items.length()
-            if total == 0 {
-                items.finish().unwrap()
-                return mem.Vec.new()
-            }
-            let workers = if max > total {
-                total
-            } else {
-                max
-            }
-            let base_chunk = total / workers
-            let remainder = total % workers
-
-            var handles: mem.Vec[Chan[Recv[mem.Vec[R, mem.SystemAllocator], End]], mem.SystemAllocator] = mem.Vec.new()
-            var drained = items.drain()
-            for worker_idx in 0..workers {
-                let chunk_len = base_chunk + (if worker_idx < remainder {
-                    UInt64(1)
-                } else {
-                    UInt64(0)
-                })
-                var chunk: mem.Vec[T, mem.SystemAllocator] = mem.Vec.new()
-                for _ in 0..chunk_len {
-                    match &drained.next() {
-                        Some(item) => {
-                            &chunk.push(item).unwrap()
-                        },
-                        None => break,
-                    }
-                }
-                let body = sink [sink chunk, sink f = copy(f)] |sink me: Chan[Send[mem.Vec[R, mem.SystemAllocator], End]]| {
-                    var chunk_res: mem.Vec[R, mem.SystemAllocator] = mem.Vec.new()
-                    var pending_chunk = chunk.drain()
-                    for item in &pending_chunk {
-                        &chunk_res.push(f(item)).unwrap()
-                    }
-                    pending_chunk.finish().unwrap()
-                    me.send(chunk_res).close()
-                }
-                let handle = prepare(body).unwrap().start()
-                &handles.push(handle.detach()).unwrap()
-            }
-            drained.finish().unwrap()
-
-            var results: mem.Vec[R, mem.SystemAllocator] = mem.Vec.new()
-            var pending_handles = handles.drain()
-            for handle in &pending_handles {
-                let (chunk_res, done) = handle.recv()
-                done.close()
-                var pending_chunk_res = chunk_res.drain()
-                for res in &pending_chunk_res {
-                    &results.push(res).unwrap()
-                }
-                pending_chunk_res.finish().unwrap()
-            }
-            pending_handles.finish().unwrap()
-            results
+            max
         },
     }
+    collected(
+        allocator,
+        jobs,
+        |sink job: F| -> T {
+            job()
+        },
+        running_at_most,
+    )
+}
+
+test fn all_in_takes_its_results_and_tasks_from_its_allocator() {
+    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    var jobs: mem.Vec[fn() -> UInt64, mem.SystemAllocator] = mem.Vec.new()
+    &jobs.push(job10).unwrap()
+    &jobs.push(job20).unwrap()
+    &jobs.push(job30).unwrap()
+    let results: mem.Vec[UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = all_in(log.allocator(), Policy.Threads(2), jobs)
+    let same = results.as_slice() == [UInt64(10), 20, 30].as_slice()
+    let attempts = log.attempts()
+    results.release()
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert(same, "the results came back out of order")?
+    // The places and the wait set's names, three jobs, and the results.
+    testing.assert(attempts >= 6, "a job's bytes did not come from the allocator")?
+    testing.assert(settled, "all kept an allocation")?
+}
+
+// Apply `f` to every item under `policy` and answer the results in the items'
+// order once all have finished. Under `.Threads(max)` at most `max` items are
+// mapped at once, each on a task of its own on the current Io, and each time
+// one finishes the next item starts, so one slow item holds up no other.
+// `.Sequential` and `.Threads(1)` map the items in turn on the caller. A
+// `max` of 0 stops the program. `f` answering a `Result` gives every item's
+// result, failures included. The results and each started job's bytes come
+// from the system allocator; `map_in` names another, and `lazy_map` yields
+// the results one at a time instead of collecting them.
+pub fn map[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T) -> R](sink policy: Policy, sink items: mem.Vec[T, mem.SystemAllocator], sink f: F) -> mem.Vec[R, mem.SystemAllocator] {
+    map_in(mem.system(), policy, items, f)
 }
 
 test "map preserves deterministic order" {
@@ -726,4 +1531,67 @@ test "map keeps every result of a fallible function" {
     pending.finish().unwrap()
     testing.assert(len_matches, "a failing item dropped another item's result")?
     testing.assert(results_match, "results mismatch")?
+}
+
+test fn map_starts_the_next_item_as_soon_as_one_finishes() {
+    var pauses: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+    &pauses.push(400).unwrap()
+    for _ in 0..4 {
+        &pauses.push(50).unwrap()
+    }
+    let finished = map(
+        Policy.Threads(2),
+        pauses,
+        |sink milliseconds| -> time.Instant {
+            time.sleep(time.Duration.from_milliseconds(milliseconds))
+            time.Instant.now()
+        },
+    )
+    var pending = finished.drain()
+    let slow = &pending.next().unwrap()
+    var before = UInt64(0)
+    for at in &pending {
+        if at < slow {
+            before += 1
+        }
+    }
+    pending.finish().unwrap()
+    testing.assert_eq(before, 4, "a fast item waited for the slow one")?
+}
+
+// Map every item as `map` does, taking the results and each started job's
+// bytes from `allocator`; `items` keep their own allocator. A job whose
+// bytes are refused runs on the caller; a result the vector cannot take
+// stops the program.
+pub fn map_in[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T) -> R, A: Allocator, B: Allocator](allocator: A, sink policy: Policy, sink items: mem.Vec[T, B], sink f: F) -> mem.Vec[R, A] where carries(allocator) {
+    let running_at_most = match policy {
+        Sequential => UInt64(0),
+        Threads(max) => {
+            if max == 0 {
+                panic("task.map: policy task limit cannot be 0")
+            }
+            max
+        },
+    }
+    collected(allocator, items, f, running_at_most)
+}
+
+test fn map_in_takes_its_results_and_tasks_from_its_allocator() {
+    for refused in UInt64(0)..=4 {
+        let log = mem.AllocationLog.open(mem.system(), refused).unwrap()
+        var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+        for n in 1..=3 {
+            &items.push(n).unwrap()
+        }
+        // A refusal at one of the first two allocations, the places and the
+        // wait set's names, maps every item on the caller, and one at the
+        // third or fourth maps that item there.
+        let results = map_in(log.allocator(), Policy.Threads(2), items, |sink n| n + 100)
+        let same = results.as_slice() == [UInt64(101), 102, 103].as_slice()
+        results.release()
+        let settled = log.all_disposed()
+        log.release()
+        testing.assert(same, "a refused allocation changed the results")?
+        testing.assert(settled, "map_in kept an allocation")?
+    }
 }

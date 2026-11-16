@@ -1,0 +1,27 @@
+import std.task
+
+// A lazy map holds the jobs it started and the results they answered, so a
+// walk that takes it is refused: nothing would join those jobs.
+fn total(limit: UInt64) -> UInt64 {
+    var sum = UInt64(0)
+    for doubled in task.lazy_map(.Threads(4), UInt64(1)..=limit, |sink n| n * 2) {
+        sum += doubled
+    }
+    sum
+}
+
+// Leaving the function abandons the map, its running jobs and the results
+// they hold.
+fn first_above(threshold: UInt64) -> UInt64 {
+    var doubled = task.lazy_map(.Threads(4), UInt64(1)..=100, |sink n| n * 2)
+    for value in &doubled {
+        if value > threshold {
+            return value
+        }
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    UInt8(total(3) + first_above(5))
+}

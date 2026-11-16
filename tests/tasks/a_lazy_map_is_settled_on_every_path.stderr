@@ -1,0 +1,18 @@
+error[O-LinearWalk]: walking a `task.LazyMap[Range[UInt64], UInt64, <closure>, mem.SystemAllocator]` abandons it where the walk ends, and it is linear
+ --> tests/tasks/a_lazy_map_is_settled_on_every_path.lin:7:20
+  |
+7 |     for doubled in task.lazy_map(.Threads(4), UInt64(1)..=limit, |sink n| n * 2) {
+  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ it holds storage from `mem.SystemAllocator`, which must be released
+  |
+  = help: bind it, `var pending = task.lazy_map(.Threads(4), UInt64(1)..=limit, |sink n| n * 2)`, walk it lent with `for doubled in &pending`, then settle `pending` with `release()`
+error[O-Leak]: `doubled` (a linear `task.LazyMap[Range[UInt64], UInt64, <closure>, mem.SystemAllocator]`) is still owned when this path leaves
+  --> tests/tasks/a_lazy_map_is_settled_on_every_path.lin:19:13
+   |
+16 |     var doubled = task.lazy_map(.Threads(4), UInt64(1)..=100, |sink n| n * 2)
+   |         ------- acquired here
+19 |             return value
+   |             ^^^^^^ still owned here
+23 | }
+   | - also still owned where the block ends
+   |
+   = help: settle it first with `doubled.release()`, or declare it `defer var doubled = …` so every path releases it
