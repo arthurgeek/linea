@@ -2330,6 +2330,7 @@ pub fn build(b: *std.Build) void {
     const waitset_proof = b.step("test-fiber-waitset-migration", "Migrate a Linea wait-set continuation with retained registrations");
     const join_proof = b.step("test-fiber-completed-joins", "Migrate a Linea continuation after a structured child join");
     const handoff_measurement = b.step("measure-fiber-handoff", "Collect matched plain/traced forced-handoff observations on an idle host");
+    const platform_proof = b.step("test-fiber-platform-state", "Check FP, signal and protected-frame state across actual Linea handoffs");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
         native_task_step.dependOn(handoff_proof);
         native_task_step.dependOn(completed_wait_proof);
@@ -2337,6 +2338,7 @@ pub fn build(b: *std.Build) void {
         native_task_step.dependOn(waitset_proof);
         native_task_step.dependOn(join_proof);
         native_task_step.dependOn(migration_metrics_step);
+        native_task_step.dependOn(platform_proof);
         var measurement_binaries: [2]?std.Build.LazyPath = .{ null, null };
         var measurement_manifests: [2]?std.Build.LazyPath = .{ null, null };
         const ProofCase = struct {
@@ -2346,10 +2348,14 @@ pub fn build(b: *std.Build) void {
             stale_cookie: bool = false,
             trace: bool = false,
             refusal_probes: bool = false,
+            platform: bool = false,
+            guard_fault: bool = false,
             completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
         };
         inline for ([_]ProofCase{
             .{ .source = "continuation.lin", .completed_wait = false },
+            .{ .source = "continuation.lin", .completed_wait = false, .platform = true },
+            .{ .source = "overflow_after_handoff.lin", .completed_wait = false, .platform = true, .guard_fault = true },
             .{ .source = "continuation.lin", .completed_wait = false, .trace = true },
             .{ .source = "continuation.lin", .completed_wait = false, .trace = true, .refusal_probes = true },
             .{ .source = "pinned.lin", .completed_wait = false },
@@ -2393,6 +2399,7 @@ pub fn build(b: *std.Build) void {
             if (proof_case.stale_cookie) handoff_flags.append(b.allocator, "-DLINEA_FIBER_STALE_COOKIE_TEST=1") catch @panic("OOM");
             if (proof_case.trace) handoff_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1") catch @panic("OOM");
             if (proof_case.refusal_probes) handoff_flags.append(b.allocator, "-DLINEA_FIBER_REFUSAL_PROBES_TEST=1") catch @panic("OOM");
+            if (proof_case.platform) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_PLATFORM_STATE_TEST=1", "-fstack-protector-all" }) catch @panic("OOM");
             if (std.mem.eql(u8, proof_case.source, "unproven.lin")) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
             switch (proof_case.completion) {
                 .ordinary => {},
@@ -2416,7 +2423,7 @@ pub fn build(b: *std.Build) void {
             check_calls.step.dependOn(&compile.step);
             check_calls.step.dependOn(&run_coverage_tests.step);
             const manifest = check_calls.captureStdOut(.{});
-            if (std.mem.eql(u8, proof_case.source, "continuation.lin") and !proof_case.refusal_probes) {
+            if (std.mem.eql(u8, proof_case.source, "continuation.lin") and !proof_case.refusal_probes and !proof_case.platform) {
                 const index: usize = @intFromBool(proof_case.trace);
                 measurement_binaries[index] = binary;
                 measurement_manifests[index] = manifest;
@@ -2425,6 +2432,13 @@ pub fn build(b: *std.Build) void {
             run_proof.addFileArg(binary);
             run_proof.addFileInput(manifest);
             run_proof.has_side_effects = true;
+            if (proof_case.guard_fault) {
+                run_proof.addCheck(.{ .expect_term = .{ .signal = .ABRT } });
+                run_proof.expectStdErrEqual("linea: a stack overflowed\n");
+            } else {
+                run_proof.expectExitCode(0);
+                if (proof_case.platform) run_proof.expectStdErrEqual("native migration: FP control, carrier signals and protected frames passed\n");
+            }
             if (proof_case.stale_cookie) run_proof.expectStdErrEqual("native migration: stale poll cookie rejected after reclamation\n");
             switch (proof_case.completion) {
                 .ordinary => {},
@@ -2443,6 +2457,8 @@ pub fn build(b: *std.Build) void {
                 if (std.mem.eql(u8, proof_case.source, "unproven.lin")) inspect_trace.addArg("unproven");
                 inspect_trace.step.dependOn(&migration_metrics_tests.step);
                 migration_metrics_step.dependOn(&inspect_trace.step);
+            } else if (proof_case.platform) {
+                platform_proof.dependOn(&run_proof.step);
             } else {
                 (if (std.mem.eql(u8, proof_case.source, "join.lin")) join_proof else if (std.mem.startsWith(u8, proof_case.source, "waitset")) waitset_proof else if (std.mem.startsWith(u8, proof_case.source, "io")) completed_io_proof else if (completed_wait) completed_wait_proof else handoff_proof).dependOn(&run_proof.step);
             }
@@ -2466,6 +2482,7 @@ pub fn build(b: *std.Build) void {
         migration_metrics_step.dependOn(&unavailable.step);
         completed_wait_proof.dependOn(&unavailable.step);
         handoff_measurement.dependOn(&unavailable.step);
+        platform_proof.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");

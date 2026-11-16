@@ -22,6 +22,9 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+#include <signal.h>
+#endif
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
 #include <stdio.h>
 #endif
@@ -276,6 +279,92 @@ static struct linea_fiber *current_fiber(void) {
     struct carrier *c = current_carrier();
     return c == NULL ? NULL : c->executing;
 }
+
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+/* A bounded probe of the real switch path. Control state follows the saved
+ * continuation; masks and a thread-directed pending signal stay on carriers. */
+static unsigned platform_signal_sent, platform_migrations, platform_scheduler_checks;
+
+static unsigned long platform_control(void) {
+#if defined(__aarch64__)
+    unsigned long value;
+    __asm__ volatile("mrs %0, fpcr" : "=r"(value));
+    return (value >> 22) & 3UL;
+#elif defined(__x86_64__)
+    unsigned short x87;
+    unsigned int sse;
+    __asm__ volatile("fnstcw %0" : "=m"(x87));
+    __asm__ volatile("stmxcsr %0" : "=m"(sse));
+    return ((unsigned long)x87 >> 10 & 3UL) | (((unsigned long)sse >> 13 & 3UL) << 2);
+#else
+#error Unsupported platform-state probe architecture
+#endif
+}
+
+static unsigned long platform_rounding(unsigned role) {
+#if defined(__aarch64__)
+    const unsigned long modes[] = { 2, 3, 1 }; /* down, zero, up */
+    return modes[role];
+#else
+    const unsigned long modes[] = { 1, 3, 2 };
+    return modes[role] | (modes[role] << 2);
+#endif
+}
+
+static void platform_set_rounding(unsigned role) {
+#if defined(__aarch64__)
+    unsigned long value;
+    __asm__ volatile("mrs %0, fpcr" : "=r"(value));
+    value = (value & ~(3UL << 22)) | (platform_rounding(role) << 22);
+    __asm__ volatile("msr fpcr, %0\n\tisb" : : "r"(value) : "memory");
+#else
+    unsigned short x87;
+    unsigned int sse;
+    const unsigned long mode = platform_rounding(role) & 3UL;
+    __asm__ volatile("fnstcw %0" : "=m"(x87));
+    __asm__ volatile("stmxcsr %0" : "=m"(sse));
+    x87 = (unsigned short)((x87 & ~(3U << 10)) | ((unsigned int)mode << 10));
+    sse = (sse & ~(3U << 13)) | ((unsigned int)mode << 13);
+    __asm__ volatile("fldcw %0" : : "m"(x87) : "memory");
+    __asm__ volatile("ldmxcsr %0" : : "m"(sse) : "memory");
+#endif
+}
+
+static int platform_first(struct carrier *c) {
+    if (c == NULL || c->loop == NULL || c->loop->count != 2) fail("linea: platform probe requires two real carriers\n");
+    return c == &c->loop->carriers[0];
+}
+
+static void platform_carrier_begin(struct carrier *c) {
+    sigset_t signal;
+    if (sigemptyset(&signal) != 0 || sigaddset(&signal, SIGUSR1) != 0) fail("linea: platform signal setup failed\n");
+    must(pthread_sigmask(platform_first(c) ? SIG_BLOCK : SIG_UNBLOCK, &signal, NULL));
+    platform_set_rounding(platform_first(c) ? 0U : 1U);
+}
+
+static void platform_check(struct carrier *c, int fibre) {
+    const int first = platform_first(c);
+    const unsigned role = fibre ? 2U : first ? 0U : 1U;
+    if (platform_control() != platform_rounding(role)) fail("linea: FP control followed the wrong execution context\n");
+    sigset_t mask, pending;
+    must(pthread_sigmask(SIG_SETMASK, NULL, &mask));
+    if (sigpending(&pending) != 0) fail("linea: platform pending-signal query failed\n");
+    const int sent = __atomic_load_n(&platform_signal_sent, __ATOMIC_ACQUIRE) != 0;
+    if (sigismember(&mask, SIGUSR1) != first || sigismember(&pending, SIGUSR1) != (first && sent))
+        fail("linea: signal state followed a fiber instead of its carrier\n");
+    if (!fibre) __atomic_fetch_add(&platform_scheduler_checks, 1U, __ATOMIC_RELEASE);
+}
+
+static void platform_fibre_begin(void) {
+    struct carrier *c = current_carrier();
+    if (!platform_first(c)) fail("linea: platform probe started on the wrong carrier\n");
+    if (__atomic_load_n(&platform_signal_sent, __ATOMIC_ACQUIRE)) fail("linea: platform probe entered twice\n");
+    platform_set_rounding(2);
+    must(pthread_kill(pthread_self(), SIGUSR1));
+    __atomic_store_n(&platform_signal_sent, 1U, __ATOMIC_RELEASE);
+    platform_check(c, 1);
+}
+#endif
 
 /* Foreign code can leave a thread dependency after returning. This is a
  * logical fiber restriction, independent of the live native-frame depth. */
@@ -987,7 +1076,14 @@ static void finish_switch(void *asan_stack) {
     linea_thread_guard_commit();
 }
 
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+__attribute__((noinline))
+#endif
 static void leave_fiber(struct linea_fiber *f, int ending) {
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+    volatile unsigned char protected_frame[32];
+    for (unsigned i = 0; i < sizeof protected_frame; i += 1) protected_frame[i] = (unsigned char)(i * 7U + 29U);
+#endif
     lock_fiber(f);
     struct carrier *c = f->home;
     const enum waiting kind = f->waiting;
@@ -1006,6 +1102,13 @@ static void leave_fiber(struct linea_fiber *f, int ending) {
     if (kind == waiting_park) linea_fiber_pause(linea_fiber_before_switch);
     linea_context_switch(&f->context, &c->scheduler);
     finish_switch(f->asan_stack);
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+    struct carrier *resumed = current_carrier();
+    platform_check(resumed, 1);
+    for (unsigned i = 0; i < sizeof protected_frame; i += 1)
+        if (protected_frame[i] != (unsigned char)(i * 7U + 29U)) fail("linea: a protected frame changed across transfer\n");
+    if (resumed != c) __atomic_fetch_add(&platform_migrations, 1U, __ATOMIC_RELEASE);
+#endif
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
     TRACE_BEGIN(resume_trace);
     lock_fiber(f);
@@ -1069,6 +1172,9 @@ int linea_fiber_park(struct linea_park *p, unsigned long deadline) {
 static void fiber_entry(void *argument) {
     struct linea_fiber *f = argument;
     finish_switch(f->asan_stack);
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+    platform_fibre_begin();
+#endif
     f->entry(f->argument);
     lock_fiber(f);
     f->state = finished;
@@ -1496,6 +1602,9 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     if (linea_fiber_metadata_held()) fail("linea: dispatch retained scheduler metadata\n");
     linea_context_switch(&c->scheduler, &f->context);
     finish_switch(c->asan_stack);
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+    platform_check(c, 0);
+#endif
     lock_fiber(f);
     c->executing = NULL;
     f->saved = 1;
@@ -1573,6 +1682,9 @@ static void *run_carrier(void *argument) {
     must(pthread_cond_signal(&c->loop->startup));
     must(pthread_mutex_unlock(&c->loop->startup_lock));
     if (c->begin_error != 0) return NULL;
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+    platform_carrier_begin(c);
+#endif
     (void)linea_io_switch(c->loop->identity);
     while (!__atomic_load_n(&c->loop->stop, __ATOMIC_ACQUIRE)) {
         expire_timers(c);
@@ -1741,6 +1853,13 @@ void linea_fiber_destroy(struct linea_fiber *f) {
 #endif
     if (munmap(f->mapping, f->mapping_bytes) != 0) fail("linea: a fiber's stack could not be unmapped\n");
     free(f);
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+    if (__atomic_load_n(&platform_migrations, __ATOMIC_ACQUIRE) != 2 ||
+        __atomic_load_n(&platform_scheduler_checks, __ATOMIC_ACQUIRE) < 3)
+        fail("linea: platform state was not checked across both transfers\n");
+    report_bytes("native migration: FP control, carrier signals and protected frames passed\n",
+        sizeof "native migration: FP control, carrier signals and protected frames passed\n" - 1);
+#endif
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
     trace_dump(counts);
 #endif
