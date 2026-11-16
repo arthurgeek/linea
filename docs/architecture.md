@@ -190,6 +190,13 @@ is kept only if it reads the brackets whole without a diagnostic; a failed
 one is rolled back through `Ast.Builder.checkpoint` and `rollback`, including
 its diagnostics. The type reading lives in `Ast.bracket_types`, keyed by the
 index node; where only types were read, the index is an unreported `.err`.
+An expression written inside a type, an array's length or a callable type
+parameter's default, is reached by both readings and by those of every bracket
+around it, so `parseTypeExpression` reads it once and later readings take it
+as it is, wherever the levels it reached stay inside the nesting limit; the
+resolver resolves it once and replays its reports. Brackets therefore cost
+`O(n·d)` for `n` tokens nested `d` deep, and the depth is at most the nesting
+limit (ADR 0274).
 
 The resolver records what each such bracket holds in
 `Resolution.bracket_readings`. A head naming a function, or a trait's
@@ -874,7 +881,12 @@ that declare parameters. Parameter heads
 are compared with the same trait's other parameter heads and with its ordinary
 implementations in every constructor chain, and never against other traits; open predicates do not establish disjointness. Unification
 uses an occurs check, so an equation that would make a type contain itself has
-no solution. Closed Integer evidence
+no solution. A type is a shared graph, and a part several arguments name is one
+node: unification meets each pair of nodes once, an occurs check and the
+witness's rebuilding read each node once, and comparing a type with a selected
+implementation's head answers each pair once under that implementation's
+bindings, so their cost is the distinct nodes, never the paths to them.
+Closed Integer evidence
 retains its finite receiver domain.
 
 Receiver-only method discovery can expose a potential parameter-headed member

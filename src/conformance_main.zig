@@ -3040,6 +3040,146 @@ fn genericPositiveCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// `n` traits, each requiring itself at a longer argument list, each
+/// declaring an operation of its own name, implemented once and named as a
+/// bound by one function a call reaches. Every
+/// bound closing a cycle is refused once, and nothing after that reads it.
+fn growingTraitCyclesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("struct Seed {}\nstruct Mark[phantom T] {}\n");
+    for (0..n) |i| {
+        try w.print("trait G{d}[T]: G{d}[Mark[T]] {{ fn g{d}(self: Self, by: T) -> UInt8 }}\n", .{ i, i, i });
+        try w.print("impl G{d}[UInt8] for Seed {{ fn g{d}(_self: Self, by: UInt8) -> UInt8 {{ by }} }}\n", .{ i, i });
+        try w.print("fn use{d}[S: G{d}[UInt8]](s: S) -> UInt8 {{ s.g{d}(1) }}\n", .{ i, i, i });
+    }
+    try w.writeAll("fn main() -> UInt8 {\n");
+    for (0..n) |i| try w.print("    let _u{d} = use{d}(Seed {{}})\n", .{ i, i });
+    try w.writeAll("    0\n}\n");
+    return out.toOwnedSlice();
+}
+
+/// `n` newtypes in a ring, each based on a marker of the next, the last on a
+/// marker of the first at a larger argument. The one growing base is
+/// refused before any base is filled.
+fn growingNewtypeRingModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll("struct Mark[phantom T] {}\n");
+    for (0..n - 1) |i| try w.print("type G{d}[T] = Mark[G{d}[T]]\n", .{ i, i + 1 });
+    try w.print("type G{d}[T] = Mark[G0[Mark[T]]]\n", .{n - 1});
+    try w.writeAll("fn main() -> UInt8 { 0 }\n");
+    return out.toOwnedSlice();
+}
+
+/// `n` brackets after a name, each holding an array type whose length holds
+/// the next, the innermost length six hundred terms long. Every bracket is
+/// read as types and as an index, and the length inside is read once.
+fn bracketsAroundALongLengthModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    return nestedBracketsModule(gpa, n, "a[B[[UInt8; {s}]]]", .long_length);
+}
+
+/// `n` brackets after a name, each holding a callable type whose parameter's
+/// default holds the next. The default is read once, as a length is.
+fn bracketsAroundACallableDefaultModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    return nestedBracketsModule(gpa, n, "a[B[fn(x: UInt8 = {s}) -> UInt8]]", .zero);
+}
+
+fn nestedBracketsModule(gpa: std.mem.Allocator, n: u32, comptime wrap: []const u8, innermost: enum { long_length, zero }) ![]u8 {
+    var inner: std.Io.Writer.Allocating = .init(gpa);
+    defer inner.deinit();
+    switch (innermost) {
+        .long_length => {
+            try inner.writer.writeAll("1");
+            for (0..599) |_| try inner.writer.writeAll(" + 1");
+        },
+        .zero => try inner.writer.writeAll("0"),
+    }
+    for (0..n) |_| {
+        const wrapped = try std.fmt.allocPrint(gpa, wrap, .{inner.written()});
+        defer gpa.free(wrapped);
+        inner.clearRetainingCapacity();
+        try inner.writer.writeAll(wrapped);
+    }
+    return std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{\n    {s}\n}}\n", .{inner.written()});
+}
+
+/// What a program over a chain of `n` aliases, each naming the one before it
+/// twice, asks about the last of them: the program holds `n` types, and the
+/// last names `P` about `2^n` times over.
+const SharedTypeQuestion = enum {
+    /// A call finds the implementation written at the last alias.
+    lookup,
+    /// Two implementations differ only past the last alias, and are told
+    /// apart.
+    disjoint,
+    /// A value of the last alias implements no trait its bound names.
+    unmet,
+    /// Two implementations meet at the last alias, and the witness is built.
+    witness,
+    /// A value of the last alias lacks an implementation because its parts
+    /// lack one, and the report finds which part.
+    unmet_part,
+    /// A structure is built for a parameter bounded at the last alias.
+    bounded_parameter,
+    /// A value of the last alias is called with an operation no
+    /// implementation answers for it, because its parts lack the trait.
+    missing_operation,
+};
+
+fn sharedTypeModule(comptime question: SharedTypeQuestion) fn (std.mem.Allocator, u32) anyerror![]u8 {
+    return struct {
+        fn make(gpa: std.mem.Allocator, n: u32) anyerror![]u8 {
+            std.debug.assert(n > 0);
+            var out: std.Io.Writer.Allocating = .init(gpa);
+            errdefer out.deinit();
+            const w = &out.writer;
+            try w.writeAll("@copyable\nstruct P[phantom A, phantom B] {}\nalias A0[T] = P[T, T]\n");
+            for (1..n + 1) |i| try w.print("alias A{d}[T] = P[A{d}[T], A{d}[T]]\n", .{ i, i - 1, i - 1 });
+            // Written into format strings, so their braces are doubled.
+            const give = "trait Give[T] {{ fn give(self: Self, x: T) -> UInt8 }}\nstruct Holder {{}}\n";
+            const show = "trait Show {{ fn show(self: Self) -> UInt8 }}\nfn display[S: Show](s: S) -> UInt8 {{ s.show() }}\n";
+            switch (question) {
+                .lookup => try w.print(give ++
+                    "impl[T] Give[A{d}[T]] for Holder {{ fn give(_self: Self, _x: A{d}[T]) -> UInt8 {{ 0 }} }}\n" ++
+                    "fn main() -> UInt8 {{ let x: A{d}[UInt8] = .{{}}; Holder {{}}.give(x) }}\n", .{ n, n, n }),
+                .disjoint => try w.print(give ++
+                    "impl[T] Give[P[UInt8, A{d}[T]]] for Holder {{ fn give(_self: Self, _x: P[UInt8, A{d}[T]]) -> UInt8 {{ 1 }} }}\n" ++
+                    "impl[T] Give[P[Bool, A{d}[T]]] for Holder {{ fn give(_self: Self, _x: P[Bool, A{d}[T]]) -> UInt8 {{ 0 }} }}\n" ++
+                    "fn main() -> UInt8 {{ let x: P[Bool, A{d}[UInt8]] = .{{}}; Holder {{}}.give(x) }}\n", .{ n, n, n, n, n }),
+                .unmet => try w.print(show ++
+                    "fn main() -> UInt8 {{ let x: A{d}[UInt8] = .{{}}; display(x) }}\n", .{n}),
+                .witness => try w.print(give ++
+                    "impl[T] Give[P[A{d}[T], T]] for Holder {{ fn give(_self: Self, _x: P[A{d}[T], T]) -> UInt8 {{ 0 }} }}\n" ++
+                    "impl[U] Give[P[A{d}[UInt8], U]] for Holder {{ fn give(_self: Self, _x: P[A{d}[UInt8], U]) -> UInt8 {{ 1 }} }}\n" ++
+                    "fn main() -> UInt8 {{ 0 }}\n", .{ n, n, n, n }),
+                .unmet_part => try w.print(show ++
+                    "impl[A: Show, B: Show] Show for P[A, B] {{ fn show(_self: Self) -> UInt8 {{ 0 }} }}\n" ++
+                    "fn main() -> UInt8 {{ let x: A{d}[UInt8] = .{{}}; display(x) }}\n", .{n}),
+                .missing_operation => try w.print(
+                    "trait Show {{ fn show(self: Self) -> UInt8 }}\n" ++
+                        "impl[A: Show, B: Show] Show for P[A, B] {{ fn show(_self: Self) -> UInt8 {{ 0 }} }}\n" ++
+                        "fn main() -> UInt8 {{ let x: A{d}[UInt8] = .{{}}; x.show() }}\n",
+                    .{n},
+                ),
+                .bounded_parameter => try w.print(
+                    "trait Give[T] {{ fn give(self: Self, x: T) -> UInt8 }}\n" ++
+                        "struct Holder[S: Give[A{d}[UInt8]]] {{ value: S }}\nstruct Seed {{}}\n" ++
+                        "impl Give[A{d}[UInt8]] for Seed {{ fn give(_self: Self, _x: A{d}[UInt8]) -> UInt8 {{ 0 }} }}\n" ++
+                        "fn hold[S: Give[A{d}[UInt8]]](sink value: S) -> Holder[S] {{ .{{ value = value }} }}\n" ++
+                        "fn main() -> UInt8 {{ let held = hold(Seed {{}}); let x: A{d}[UInt8] = .{{}}; held.value.give(x) }}\n",
+                    .{ n, n, n, n, n },
+                ),
+            }
+            return out.toOwnedSlice();
+        }
+    }.make;
+}
+
 /// `n` pairs of functions that call each other, the first with a larger type
 /// argument and the second with a fixed one, so each pair recurs with a
 /// bounded height. The second calls a trait operation on a value whose type
@@ -7081,6 +7221,17 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "generic shared DAG checking", .n = 8, .cost = throughTreeBatch(genericSharedDagModule, .check, 128) },
     .{ .name = "generic trait-selected shared DAG checking", .n = 8, .cost = throughTreeBatch(genericTraitSelectedSharedDagModule, .check, 128) },
     .{ .name = "generic positive cycle checking", .n = 500, .cost = throughTreeBatch(genericPositiveCycleModule, .{ .refused = .t_poly_rec }, 1) },
+    .{ .name = "growing trait bound cycles", .n = 1000, .cost = throughTreeBatch(growingTraitCyclesModule, .{ .refused = .t_bound }, 1) },
+    .{ .name = "growing newtype base ring", .n = 1000, .cost = throughTreeBatch(growingNewtypeRingModule, .{ .refused = .t_poly_rec }, 1) },
+    .{ .name = "nested brackets around a long array length", .n = 8, .grows = false, .cost = throughTreeBatch(bracketsAroundALongLengthModule, .{ .refused = .n_undefined }, 16) },
+    .{ .name = "nested brackets around a callable default", .n = 8, .grows = false, .cost = throughTreeBatch(bracketsAroundACallableDefaultModule, .{ .refused = .n_undefined }, 16) },
+    .{ .name = "shared type DAG implementation lookup", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.lookup), .check, 16) },
+    .{ .name = "shared type DAG disjoint implementations", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.disjoint), .check, 16) },
+    .{ .name = "shared type DAG unmet bound", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.unmet), .{ .refused = .t_bound }, 16) },
+    .{ .name = "shared type DAG overlap witness", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.witness), .{ .refused = .t_impl }, 16) },
+    .{ .name = "shared type DAG unmet part", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.unmet_part), .{ .refused = .t_bound }, 16) },
+    .{ .name = "shared type DAG missing operation", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.missing_operation), .{ .refused = .t_bound }, 16) },
+    .{ .name = "shared type DAG bounded parameter", .n = 8, .grows = false, .cost = throughTreeBatch(sharedTypeModule(.bounded_parameter), .check, 16) },
     .{ .name = "bounded recursions beside many suppliers", .n = 1000, .cost = throughTreeBatch(boundedRecursionsBesideSuppliersModule, .check, 1) },
     .{ .name = "locals in one body", .n = 16000, .cost = throughTheTree(deepModule) },
     .{ .name = "conditional loop exits", .n = 8000, .cost = throughTheTree(conditionalLoopExitsModule) },

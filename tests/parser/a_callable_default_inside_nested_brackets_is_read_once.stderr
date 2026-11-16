@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `a`
+ --> tests/parser/a_callable_default_inside_nested_brackets_is_read_once.lin:5:5
+  |
+5 |     a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x ...
+  |     ^ no binding with this name is in scope
