@@ -1,0 +1,165 @@
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:15:23
+   |
+15 | let refused_constant: Nope = match .None {
+   |                       ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:25:21
+   |
+25 |     let _scrutinee: Nope = match .None {
+   |                     ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:31:21
+   |
+31 |     let _condition: Nope = if .None == .None {
+   |                     ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:41:17
+   |
+41 |     let _index: Nope = numbers[.None]
+   |                 ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:43:19
+   |
+43 |     let _operand: Nope = 1 + (match .None { _ => 1 })
+   |                   ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:45:20
+   |
+45 |     let _argument: Nope = take(.None)
+   |                    ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:47:18
+   |
+47 |     let _vector: Nope = first(Vec.new())
+   |                  ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:49:20
+   |
+49 |     let _receiver: Nope = Vec.new().len()
+   |                    ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:51:16
+   |
+51 |     let _body: Nope = || match .None { _ => 1 }
+   |                ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:53:22
+   |
+53 |     let _components: Nope = (.None, match .None { _ => 1 })
+   |                      ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:55:18
+   |
+55 |     let _copied: Nope = copy(.None)
+   |                  ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:57:18
+   |
+57 |     let _looped: Nope = loop {
+   |                  ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:69:17
+   |
+69 |     let _found: Nope = for n in [1, 2] {
+   |                 ^^^^ no type with this name is declared here
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:15:36
+   |
+15 | let refused_constant: Nope = match .None {
+   |                                    ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:19:35
+   |
+19 | let named_constant: Int64 = match .None {
+   |                                   ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:25:34
+   |
+25 |     let _scrutinee: Nope = match .None {
+   |                                  ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:28:41
+   |
+28 |     let _scrutinee_named: Int64 = match .None {
+   |                                         ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:31:31
+   |
+31 |     let _condition: Nope = if .None == .None {
+   |                               ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:36:38
+   |
+36 |     let _condition_named: Int64 = if .None == .None {
+   |                                      ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:41:32
+   |
+41 |     let _index: Nope = numbers[.None]
+   |                                ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:42:39
+   |
+42 |     let _index_named: Int64 = numbers[.None]
+   |                                       ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:43:37
+   |
+43 |     let _operand: Nope = 1 + (match .None { _ => 1 })
+   |                                     ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:44:44
+   |
+44 |     let _operand_named: Int64 = 1 + (match .None { _ => 1 })
+   |                                            ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:45:32
+   |
+45 |     let _argument: Nope = take(.None)
+   |                                ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:46:39
+   |
+46 |     let _argument_named: Int64 = take(.None)
+   |                                       ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: nothing here says what `T` is
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:47:31
+   |
+47 |     let _vector: Nope = first(Vec.new())
+   |                               ^^^^^^^^^ no argument determines it, and nothing expects a type of it
+error[T-Infer]: nothing here says what `T` is
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:48:38
+   |
+48 |     let _vector_named: Int64 = first(Vec.new())
+   |                                      ^^^^^^^^^ no argument determines it, and nothing expects a type of it
+error[T-Infer]: nothing here says what `T` is
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:49:27
+   |
+49 |     let _receiver: Nope = Vec.new().len()
+   |                           ^^^^^^^^^ no argument determines it, and nothing expects a type of it
+error[T-Infer]: nothing here says what `T` is
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:50:35
+   |
+50 |     let _receiver_named: UInt64 = Vec.new().len()
+   |                                   ^^^^^^^^^ no argument determines it, and nothing expects a type of it
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:51:32
+   |
+51 |     let _body: Nope = || match .None { _ => 1 }
+   |                                ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:52:47
+   |
+52 |     let _body_named: fn() -> Int64 = || match .None { _ => 1 }
+   |                                               ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:53:43
+   |
+53 |     let _components: Nope = (.None, match .None { _ => 1 })
+   |                                           ^^^^^ name its enum, or give the binding a type
+error[T-Infer]: the type of this variant cannot be determined
+  --> tests/arrays/a_refused_annotation_excuses_only_what_it_would_have_settled.lin:54:67
+   |
+54 |     let _components_named: (Option[UInt8], Int64) = (.None, match .None { _ => 1 })
+   |                                                                   ^^^^^ name its enum, or give the binding a type

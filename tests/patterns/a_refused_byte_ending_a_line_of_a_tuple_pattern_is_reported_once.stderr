@@ -1,0 +1,10 @@
+error[S-Char]: unexpected character '$'
+ --> tests/patterns/a_refused_byte_ending_a_line_of_a_tuple_pattern_is_reported_once.lin:5:17
+  |
+5 |     let (first, $
+  |                 ^ not a valid token
+error[S-Char]: unexpected character '$'
+ --> tests/patterns/a_refused_byte_ending_a_line_of_a_tuple_pattern_is_reported_once.lin:8:13
+  |
+8 |         (a, $
+  |             ^ not a valid token

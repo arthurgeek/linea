@@ -1765,8 +1765,9 @@ pub const Ast = struct {
         }
     }
 
-    /// Whether a tuple pattern's `)` was never found, so its parts may stop
-    /// short of what was written and its arity says nothing.
+    /// Whether a tuple pattern's `)` was never found, or one of its parts
+    /// took its line, so its parts need not be what was written and its
+    /// arity says nothing.
     pub fn tuplePatternCutShort(self: *const Ast, id: ExprId) bool {
         std.debug.assert(self.exprTag(id) == .tuple_pattern);
         return self.exprs.items(.call_flags)[id.index()].cut_short;

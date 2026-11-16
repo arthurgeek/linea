@@ -1,0 +1,8 @@
+// A literal ends at its line. One left open as a tuple's component took the
+// comma after it, so the components on the next line are still read as the
+// tuple's, and a mistake among them is reported.
+fn main() -> UInt8 {
+    let _pair = (1, "unterminated
+        2, nope)
+    0
+}
