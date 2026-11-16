@@ -278,6 +278,21 @@ test "pinned controls reject an observed destination carrier change" {
 
 const Expectation = enum { round_trip, refusal_probes, source_busy, pinned, unproven };
 
+fn validateRun(result: std.process.RunResult, traced: bool) !?Report {
+    switch (result.term) {
+        .exited => |code| if (code != 0) return error.ChildFailed,
+        else => return error.ChildFailed,
+    }
+    if (result.stdout.len != 0 or (!traced and result.stderr.len != 0)) return error.UnexpectedOutput;
+    return if (traced) try inspectTrace(result.stderr) else null;
+}
+
+test "measurement refuses a failed or unexpected child rather than timing it as success" {
+    try testing.expectError(error.ChildFailed, validateRun(.{ .term = .{ .exited = 1 }, .stdout = &.{}, .stderr = &.{} }, false));
+    try testing.expectError(error.UnexpectedOutput, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast("unexpected") }, false));
+    try testing.expectError(error.BadTrace, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = &.{} }, true));
+}
+
 fn inspectTraceFor(text: []const u8, expectation: Expectation) !Report {
     const report = try inspectPopulation(text, expectation);
     switch (expectation) {
@@ -289,25 +304,62 @@ fn inspectTraceFor(text: []const u8, expectation: Expectation) !Report {
     return report;
 }
 
+fn writeReport(output: *std.Io.Writer, report: Report) !void {
+    try output.print("clock_resolution_ns\t{d}\n", .{report.resolution_ns});
+    try output.writeAll("population_snapshot\tafter_retirement\n");
+    inline for (std.meta.fields(Counts)) |member| {
+        try output.print("{s}\t{d}\n", .{ member.name, @field(report.counts, member.name) });
+    }
+    try output.writeAll("interval\tsample\tlower_ns\tupper_ns\tcensored\n");
+    inline for (.{ "runnable_to_ready", "ready_to_claim", "claim_to_resume" }) |name| {
+        for (@field(report, name)[0..report.sample_count], 0..) |interval, sample| {
+            try output.print("{s}\t{d}\t{d}\t{d}\t{}\n", .{ name, sample, interval.lower, interval.upper, interval.censored });
+        }
+    }
+}
+
+const Sample = struct { process_wall_ns: i96, report: ?Report };
+
+fn sampleRun(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, traced: bool) !Sample {
+    const start = std.Io.Clock.awake.now(io);
+    const result = try std.process.run(gpa, io, .{
+        .argv = &.{binary},
+        .stdout_limit = .limited(64 << 10),
+        .stderr_limit = .limited(64 << 10),
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(30), .clock = .awake } },
+    });
+    const finish = std.Io.Clock.awake.now(io);
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    const duration = start.durationTo(finish).toNanoseconds();
+    if (duration < 0) return error.ClockOrder;
+    return .{ .process_wall_ns = duration, .report = try validateRun(result, traced) };
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.arena.allocator();
     const args = try init.minimal.args.toSlice(gpa);
-    if (args.len < 2 or args.len > 3) return error.ExpectedTracePath;
-    const text = try std.Io.Dir.cwd().readFileAlloc(init.io, args[1], gpa, .limited(64 << 10));
-    const expectation = if (args.len == 3) std.meta.stringToEnum(Expectation, args[2]) orelse return error.BadExpectation else .round_trip;
-    const report = try inspectTraceFor(text, expectation);
     var buffer: [4096]u8 = undefined;
     var output = std.Io.File.stdout().writer(init.io, &buffer);
-    try output.interface.print("clock_resolution_ns\t{d}\n", .{report.resolution_ns});
-    try output.interface.writeAll("population_snapshot\tafter_retirement\n");
-    inline for (std.meta.fields(Counts)) |member| {
-        try output.interface.print("{s}\t{d}\n", .{ member.name, @field(report.counts, member.name) });
-    }
-    try output.interface.writeAll("interval\tsample\tlower_ns\tupper_ns\tcensored\n");
-    inline for (.{ "runnable_to_ready", "ready_to_claim", "claim_to_resume" }) |name| {
-        for (@field(report, name)[0..report.sample_count], 0..) |interval, sample| {
-            try output.interface.print("{s}\t{d}\t{d}\t{d}\t{}\n", .{ name, sample, interval.lower, interval.upper, interval.censored });
+    if (args.len == 4 and std.mem.eql(u8, args[1], "--measure")) {
+        // Both binaries execute the same Linea assertions for two real handoffs.
+        // Wall time includes process/carrier startup and collection: it is not
+        // an isolated context-switch cost. ABBA order limits simple time drift.
+        _ = try sampleRun(gpa, init.io, args[2], false);
+        _ = try sampleRun(gpa, init.io, args[3], true);
+        try output.interface.writeAll("measurement\tprocess_wall_including_startup_and_collection\norder\tABBA\nwarmups_per_variant\t1\nhandoffs_per_invocation\t2\n");
+        for (0..8) |block| {
+            for ([_]bool{ false, true, true, false }, 0..) |traced, position| {
+                const sample = try sampleRun(gpa, init.io, args[if (traced) 3 else 2], traced);
+                try output.interface.print("trial\t{d}\t{s}\t{d}\n", .{ block * 4 + position, if (traced) "traced" else "plain", sample.process_wall_ns });
+                if (sample.report) |report| try writeReport(&output.interface, report);
+            }
         }
+    } else {
+        if (args.len < 2 or args.len > 3) return error.ExpectedTracePath;
+        const text = try std.Io.Dir.cwd().readFileAlloc(init.io, args[1], gpa, .limited(64 << 10));
+        const expectation = if (args.len == 3) std.meta.stringToEnum(Expectation, args[2]) orelse return error.BadExpectation else .round_trip;
+        try writeReport(&output.interface, try inspectTraceFor(text, expectation));
     }
     try output.interface.flush();
 }

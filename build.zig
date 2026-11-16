@@ -2329,6 +2329,7 @@ pub fn build(b: *std.Build) void {
     const completed_io_proof = b.step("test-fiber-completed-io", "Force a started Linea continuation across completed socket I/O");
     const waitset_proof = b.step("test-fiber-waitset-migration", "Migrate a Linea wait-set continuation with retained registrations");
     const join_proof = b.step("test-fiber-completed-joins", "Migrate a Linea continuation after a structured child join");
+    const handoff_measurement = b.step("measure-fiber-handoff", "Collect matched plain/traced forced-handoff observations on an idle host");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
         native_task_step.dependOn(handoff_proof);
         native_task_step.dependOn(completed_wait_proof);
@@ -2336,6 +2337,8 @@ pub fn build(b: *std.Build) void {
         native_task_step.dependOn(waitset_proof);
         native_task_step.dependOn(join_proof);
         native_task_step.dependOn(migration_metrics_step);
+        var measurement_binaries: [2]?std.Build.LazyPath = .{ null, null };
+        var measurement_manifests: [2]?std.Build.LazyPath = .{ null, null };
         const ProofCase = struct {
             source: []const u8,
             completed_wait: bool = true,
@@ -2413,6 +2416,11 @@ pub fn build(b: *std.Build) void {
             check_calls.step.dependOn(&compile.step);
             check_calls.step.dependOn(&run_coverage_tests.step);
             const manifest = check_calls.captureStdOut(.{});
+            if (std.mem.eql(u8, proof_case.source, "continuation.lin") and !proof_case.refusal_probes) {
+                const index: usize = @intFromBool(proof_case.trace);
+                measurement_binaries[index] = binary;
+                measurement_manifests[index] = manifest;
+            }
             const run_proof = b.addSystemCommand(&.{"env"});
             run_proof.addFileArg(binary);
             run_proof.addFileInput(manifest);
@@ -2439,6 +2447,16 @@ pub fn build(b: *std.Build) void {
                 (if (std.mem.eql(u8, proof_case.source, "join.lin")) join_proof else if (std.mem.startsWith(u8, proof_case.source, "waitset")) waitset_proof else if (std.mem.startsWith(u8, proof_case.source, "io")) completed_io_proof else if (completed_wait) completed_wait_proof else handoff_proof).dependOn(&run_proof.step);
             }
         }
+        const measure = b.addRunArtifact(migration_metrics_tool);
+        measure.addArg("--measure");
+        for (measurement_binaries, measurement_manifests) |binary, manifest| {
+            measure.addFileArg(binary.?);
+            measure.addFileInput(manifest.?);
+        }
+        measure.step.dependOn(&migration_metrics_tests.step);
+        measure.has_side_effects = true;
+        const measurements = measure.captureStdOut(.{});
+        handoff_measurement.dependOn(&b.addInstallFile(measurements, "fiber-handoff-measurements.tsv").step);
     } else {
         const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'forced handoff proof is unavailable on this target or sanitizer' >&2; exit 1" });
         handoff_proof.dependOn(&unavailable.step);
@@ -2447,6 +2465,7 @@ pub fn build(b: *std.Build) void {
         join_proof.dependOn(&unavailable.step);
         migration_metrics_step.dependOn(&unavailable.step);
         completed_wait_proof.dependOn(&unavailable.step);
+        handoff_measurement.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");
