@@ -62,6 +62,7 @@ static const size_t no_timer = (size_t)-1;
 enum scheduling { running, parking, parked, notified, runnable, finished };
 enum waiting { waiting_none, waiting_park, waiting_yield, waiting_io };
 enum scheduling_claim { no_claim, dispatch_claim, transfer_claimed };
+enum runnable_lane { local_lane = 1, stealable_lane = 2 };
 
 struct carrier;
 struct fiber_loop;
@@ -151,6 +152,8 @@ struct carrier {
     struct linea_fiber *executing;
     pthread_mutex_t queue_lock;
     struct linea_fiber *first, *last;
+    struct linea_fiber *stealable_first, *stealable_last;
+    int prefer_stealable;
     struct linea_fiber **timers;
     size_t timer_count, timer_capacity;
     int kernel;
@@ -530,13 +533,17 @@ static void wake_carrier(struct carrier *c) {
 #endif
 }
 
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+static int clean_runnable(struct linea_fiber *f, struct carrier *source);
+#endif
+
 /* Called with the loop metadata lock, or the simulation's existing queue
  * lock. Waking the carrier happens only after that lock is released. */
 static void enqueue_locked(struct linea_fiber *f) {
     require_metadata(f);
     struct carrier *c = f->home;
     if (f->state != runnable || f->queued || f->claimed || !f->saved) fail("linea: a runnable queue entry has no exclusive saved context\n");
-    f->queued = 1;
+    f->queued = local_lane;
     if (c->simulation != 0) {
         if (c->ready_count == c->ready_capacity) {
             size_t capacity = c->ready_capacity == 0 ? 16 : c->ready_capacity * 2;
@@ -549,14 +556,23 @@ static void enqueue_locked(struct linea_fiber *f) {
         return;
     }
     f->next = NULL;
-    if (c->last == NULL) c->first = f;
-    else c->last->next = f;
-    c->last = f;
+    struct linea_fiber **first = &c->first, **last = &c->last;
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    if (clean_runnable(f, c)) {
+        f->queued = stealable_lane;
+        first = &c->stealable_first;
+        last = &c->stealable_last;
+    }
+#endif
+    if (*last == NULL) *first = f;
+    else (*last)->next = f;
+    *last = f;
 }
 
 static struct linea_fiber *dequeue(struct carrier *c) {
     lock_carrier(c);
     struct linea_fiber *f = NULL;
+    enum runnable_lane lane = local_lane;
     if (c->simulation != 0) {
         if (c->ready_count != 0) {
             size_t index = (size_t)linea_sim_choice((unsigned long)c->ready_count);
@@ -564,16 +580,21 @@ static struct linea_fiber *dequeue(struct carrier *c) {
             c->ready[index] = c->ready[--c->ready_count];
         }
     } else {
-        f = c->first;
+        const int take_stealable = c->stealable_first != NULL && (c->first == NULL || c->prefer_stealable);
+        struct linea_fiber **first = take_stealable ? &c->stealable_first : &c->first;
+        struct linea_fiber **last = take_stealable ? &c->stealable_last : &c->last;
+        lane = take_stealable ? stealable_lane : local_lane;
+        f = *first;
         if (f != NULL) {
-            c->first = f->next;
-            if (c->first == NULL) c->last = NULL;
+            *first = f->next;
+            if (*first == NULL) *last = NULL;
             f->next = NULL;
+            c->prefer_stealable = !take_stealable;
         }
     }
     if (f != NULL) {
         require_metadata(f);
-        if (!f->queued || f->claimed || f->state != runnable || !f->saved) fail("linea: dispatch did not claim one saved runnable entry\n");
+        if (f->queued != (int)lane || f->claimed || f->state != runnable || !f->saved) fail("linea: dispatch did not claim one saved runnable entry\n");
         f->queued = 0;
         f->claimed = dispatch_claim;
         f->claimant = c;
@@ -631,14 +652,14 @@ static struct transfer_claim reserve_ready_runnable(struct carrier *source) {
     TRACE_BEGIN(claim_trace);
     lock_carrier(source);
     TRACE_COUNT(source->loop, claim_attempts);
-    const int had_entries = source->first != NULL;
+    const int had_entries = source->first != NULL || source->stealable_first != NULL;
     struct linea_fiber *previous = NULL;
-    for (struct linea_fiber *f = source->first; f != NULL; f = f->next) {
+    for (struct linea_fiber *f = source->stealable_first; f != NULL; f = f->next) {
         if (!clean_runnable(f, source)) { previous = f; continue; }
-        if (!f->queued || f->claimed) fail("linea: transfer found a nonexclusive runnable entry\n");
-        if (previous == NULL) source->first = f->next;
+        if (f->queued != stealable_lane || f->claimed) fail("linea: transfer found a nonexclusive runnable entry\n");
+        if (previous == NULL) source->stealable_first = f->next;
         else previous->next = f->next;
-        if (source->last == f) source->last = previous;
+        if (source->stealable_last == f) source->stealable_last = previous;
         f->next = NULL;
         f->queued = 0;
         f->claimed = transfer_claimed;
@@ -649,6 +670,9 @@ static struct transfer_claim reserve_ready_runnable(struct carrier *source) {
         break;
     }
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    if (claim.fiber == NULL) {
+        for (struct linea_fiber *f = source->first; f != NULL; f = f->next) (void)clean_runnable(f, source);
+    }
     if (claim.fiber == NULL && !had_entries) {
         if (source->loop->trace_counts.active_claims != 0) TRACE_COUNT(source->loop, ref_reservation);
         else TRACE_COUNT(source->loop, ref_empty);
@@ -820,7 +844,7 @@ void fiber_test_pause(enum linea_fiber_pause_point point) {
 #if defined(LINEA_FIBER_REFUSAL_PROBES_TEST)
         /* A real source claim excludes transfer without changing saved state. */
         lock_carrier(source);
-        struct linea_fiber *candidate = source->first;
+        struct linea_fiber *candidate = source->stealable_first;
         if (candidate != NULL) {
             candidate->source_claims += 1;
             if (clean_runnable(candidate, source)) fail("linea: a source-owned fiber was transferable\n");

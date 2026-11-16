@@ -67,7 +67,7 @@ static void check_transfer_claim(void) {
     publish_together();
     assert(dequeue(&carrier) == NULL);
     abort_transfer(&claim);
-    assert(claim.fiber == NULL && carrier.first == &fiber && carrier.last == &fiber);
+    assert(claim.fiber == NULL && carrier.stealable_first == &fiber && carrier.stealable_last == &fiber);
     claim = reserve_ready_runnable(&carrier);
     assert(claim.fiber == &fiber);
     struct carrier outside = {0};
@@ -75,7 +75,7 @@ static void check_transfer_claim(void) {
     assert(claim.fiber == &fiber && fiber.home == &carrier);
     assert(commit_transfer(&claim, &other));
     assert(claim.fiber == NULL && fiber.home == &other);
-    assert(carrier.first == NULL && other.first == &fiber);
+    assert(carrier.stealable_first == NULL && other.stealable_first == &fiber);
     assert(dequeue(&other) == &fiber && dequeue(&other) == NULL);
 
     fiber.claimed = 0;
@@ -289,6 +289,30 @@ static void check_prepared_entry_grant(void) {
     free_carrier(&simulation);
 }
 
+static void check_queue_lane_progress(void) {
+    struct linea_fiber work[3];
+    memset(work, 0, sizeof work);
+    for (size_t i = 0; i < 3; i += 1) {
+        work[i].home = &carrier;
+        work[i].loop = &loop;
+        work[i].state = runnable;
+        work[i].saved = 1;
+        work[i].waiting = waiting_yield;
+        work[i].timer_index = no_timer;
+        work[i].proven = i == 2;
+        work[i].transfer_ready = i == 2;
+        lock_fiber(&work[i]);
+        enqueue_locked(&work[i]);
+        unlock_fiber(&work[i]);
+    }
+    struct linea_fiber *first = dequeue(&carrier);
+    struct linea_fiber *second = dequeue(&carrier);
+    assert(first == &work[2] || second == &work[2]);
+    assert(first == &work[0] || second == &work[0]);
+    assert(first != second && dequeue(&carrier) == &work[1]);
+    assert(dequeue(&carrier) == NULL);
+}
+
 static void check_affinity(void) {
     /* A system task has no logical fiber to bind. */
     errno = EDOM;
@@ -368,6 +392,7 @@ int main(void) {
     check_transfer_claim();
     check_repeated_completed_transfer();
     check_prepared_entry_grant();
+    check_queue_lane_progress();
     check_affinity();
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
     prove_continuation(0, 1);
