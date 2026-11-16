@@ -1,0 +1,12 @@
+// A byte no token begins is reported where it is written. Where it is the
+// last thing on a line of a tuple pattern, the binders on the next line are
+// still read as the pattern's, in a `let` and in a `match` arm.
+fn main() -> UInt8 {
+    let (first, $
+        second) = (1, 2)
+    let total = match (first, second) {
+        (a, $
+            b) => a + b,
+    }
+    total
+}

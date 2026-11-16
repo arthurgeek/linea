@@ -1,0 +1,32 @@
+error[S-Char]: unexpected character 'é'
+ --> tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin:9:17
+  |
+9 |     let held = [é, 1, nope]
+  |                 ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin:10:18
+   |
+10 |     let _pair = (é, 2, also_nope)
+   |                  ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin:11:11
+   |
+11 |     three(é, 1, 2, 3) + held[1]
+   |           ^ not a valid token
+error[N-Undefined]: undefined name `nope`
+ --> tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin:9:23
+  |
+9 |     let held = [é, 1, nope]
+  |                       ^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `also_nope`
+  --> tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin:10:24
+   |
+10 |     let _pair = (é, 2, also_nope)
+   |                        ^^^^^^^^^ no binding with this name is in scope
+error[T-Arity]: expected 3 argument(s), found 4
+  --> tests/text/a_refused_byte_in_an_argument_list_ends_at_the_next_comma.lin:11:5
+   |
+4  | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+   |    ----- declared here
+11 |     three(é, 1, 2, 3) + held[1]
+   |     ^^^^^^^^^^^^^^^^^ the wrong number of arguments

@@ -1,0 +1,12 @@
+// A byte no token begins is reported where it is written. As an argument it
+// ends at the comma after it, so the arguments after it are read, counted
+// and checked: this call has four for three parameters.
+fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+    b
+}
+
+fn main() -> UInt8 {
+    let held = [é, 1, nope]
+    let _pair = (é, 2, also_nope)
+    three(é, 1, 2, 3) + held[1]
+}

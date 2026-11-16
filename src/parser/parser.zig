@@ -416,6 +416,13 @@ const Parser = struct {
     /// gets the answer every token that begins none gets. Counted rather than
     /// flagged, because a bracket may be written inside another one.
     indexes: u32 = 0,
+    /// How many comma-separated lists of expressions the cursor is inside
+    /// with no block between: a call's arguments, an array's elements, a
+    /// tuple's components or a group, a structure literal's values, and a
+    /// `match`'s arms. Inside one, a region that begins at a token the lexer
+    /// refused ends at the next comma or closer at its own depth, so the
+    /// elements after it are read.
+    lists: u32 = 0,
     /// Whether this is the outer, undelimited expression in a control header.
     /// Its following brace opens the control body. `parseFull` clears this
     /// while it reads, and every delimited position reads through it, so a
@@ -4461,6 +4468,10 @@ const Parser = struct {
     /// A block whose extent excluded its own braces read as its contents,
     /// which is not a block: a rewrite that moved one dropped them.
     fn parseBody(self: *Parser, start: TokenId, terminator: Tag) !ExprId {
+        // A block's statements are in no list, whatever holds the block.
+        const outer_lists = self.lists;
+        self.lists = 0;
+        defer self.lists = outer_lists;
         const seq = try self.parseSequence(start, terminator);
         defer self.gpa.free(seq.stmts);
 
@@ -4761,6 +4772,12 @@ const Parser = struct {
         }
         if (self.cursor.at(.keyword_reflect) or !self.atArmPattern()) {
             try self.reportNoPattern(at);
+            // A token the lexer refused is the part, and is stepped over, so
+            // what follows it is read as the next part.
+            if (self.cursor.at(.invalid)) {
+                _ = self.cursor.advance();
+                return self.builder.addLiteral(.err, at, self.rangeFrom(at));
+            }
             if (self.cursor.at(.l_paren) and self.cursor.peekAt(1) == .r_paren) {
                 _ = self.cursor.advance();
                 _ = self.cursor.advance();
@@ -5007,10 +5024,22 @@ const Parser = struct {
         // the arity of `()`, a single part or more than eight is not judged.
         var refused = false;
 
+        // Whether the binders read on past a line a refused token took, and
+        // whether one of them ended in such a token.
+        var went_on = false;
+        var took_a_line = false;
+
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
             const keyword = self.atKeywordName();
             const component = try self.parseSubPattern();
             try binders.append(self.gpa, component);
+            if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and self.afterARefusedTokenEndingItsLine()) {
+                refused = true;
+                took_a_line = true;
+                if (!self.listGoesOnPastARefusedLineEnd()) break;
+                went_on = true;
+                continue;
+            }
             if (!keyword and self.builder.exprTag(component) == .err) {
                 refused = true;
                 // A part refused for nesting too deeply was stepped over
@@ -5024,9 +5053,10 @@ const Parser = struct {
             if (self.cursor.eat(.comma) == null) break;
         }
 
+        const taken = self.closerMayHaveBeenTaken(went_on);
         const cut_short = self.cursor.eat(.r_paren) == null;
         if (cut_short) {
-            try self.reportAt(.s_paren, open, "unclosed `(`", "this tuple pattern is never closed");
+            if (!taken) try self.reportAt(.s_paren, open, "unclosed `(`", "this tuple pattern is never closed");
         } else if (!refused) {
             try self.checkTupleArity(open, binders.items.len, switch (binders.items.len) {
                 0 => "`()` has nothing to take apart",
@@ -5037,7 +5067,8 @@ const Parser = struct {
 
         const id = try self.builder.addCall(open, self.rangeFrom(open), .none, binders.items, &.{});
         self.builder.retag(id, .tuple_pattern);
-        if (cut_short) self.builder.markCutShort(id);
+        // Either way the parts it holds need not be the parts written.
+        if (cut_short or took_a_line) self.builder.markCutShort(id);
         return id;
     }
 
@@ -5138,6 +5169,8 @@ const Parser = struct {
         if (self.cursor.at(.l_paren) and self.cursor.peekAt(1) == .r_paren) {
             return self.reportAt(.s_match, at, "`()` is not a pattern", "the unit type has one value; write `_` to match it");
         }
+        // A token the lexer refused was reported where it is written.
+        if (self.cursor.at(.invalid)) return;
         return self.reportAt(.s_match, at, "expected a pattern", "an arm begins with a variant, `_`, a number or a string");
     }
 
@@ -6762,6 +6795,8 @@ const Parser = struct {
     /// argument after a named one is `[S-Args]`, reported and kept, per the
     /// infallible frontend.
     fn parseCall(self: *Parser, start: TokenId, callee: ExprId) std.mem.Allocator.Error!ExprId {
+        self.lists += 1;
+        defer self.lists -= 1;
         _ = self.cursor.advance(); // (
 
         var args: std.ArrayList(ExprId) = .empty;
@@ -6930,6 +6965,8 @@ const Parser = struct {
     /// bare name, and it is what lets an arm's pattern stay a `name_ref` when
     /// payloads make it carry binders.
     fn parseMatch(self: *Parser) std.mem.Allocator.Error!ExprId {
+        self.lists += 1;
+        defer self.lists -= 1;
         const start = self.cursor.current();
         _ = self.cursor.advance();
 
@@ -7144,6 +7181,8 @@ const Parser = struct {
     /// still parsed, so a misplaced base costs one error rather than the rest
     /// of the literal.
     fn parseStructLiteral(self: *Parser, start: TokenId) std.mem.Allocator.Error!ExprId {
+        self.lists += 1;
+        defer self.lists -= 1;
         _ = self.cursor.advance(); // {
 
         var items: std.ArrayList(ExprId) = .empty;
@@ -7250,6 +7289,8 @@ const Parser = struct {
     /// too: same payload, same side array, and one arrangement rather than a
     /// second that could disagree about where a run of operands lives.
     fn parseArrayLiteral(self: *Parser) std.mem.Allocator.Error!ExprId {
+        self.lists += 1;
+        defer self.lists -= 1;
         const start = self.cursor.current();
         _ = self.cursor.advance();
 
@@ -7350,6 +7391,8 @@ const Parser = struct {
 
             .l_paren => {
                 _ = self.cursor.advance();
+                self.lists += 1;
+                defer self.lists -= 1;
                 // `()` is the unit value, spelled as its type is.
                 if (self.cursor.eat(.r_paren) != null) {
                     return self.builder.addLiteral(.unit_literal, start, self.rangeFrom(start));
@@ -7377,15 +7420,25 @@ const Parser = struct {
         defer components.deinit(self.gpa);
         try components.append(self.gpa, first);
 
-        while (self.cursor.eat(.comma) != null) {
+        // Whether the components read on past a line a refused token took.
+        var went_on = false;
+        while (true) {
+            if (self.cursor.eat(.comma) == null) {
+                if (!self.listGoesOnPastARefusedLineEnd()) break;
+                went_on = true;
+            }
             if (self.cursor.at(.r_paren) or self.cursor.atEnd()) break;
             try components.append(self.gpa, try self.parseFull());
         }
 
-        // A tuple missing a comma or its `)` may hold more than was read, so
-        // its arity is not judged.
+        // A tuple missing a comma or its `)` may hold more than was read, and
+        // so may one with a component that took its line, so the arity of
+        // neither is judged.
+        const taken = self.closerMayHaveBeenTaken(went_on);
         if (self.cursor.eat(.r_paren) != null) {
-            try self.checkTupleArity(open, components.items.len, one_component_help);
+            if (!went_on and !taken) try self.checkTupleArity(open, components.items.len, one_component_help);
+        } else if (taken) {
+            // The line a refused token took may have held the `)`.
         } else if (!try self.skipPastMissingComma(open, "a tuple separates its components with commas")) {
             try self.reportAt(.s_paren, open, "unclosed `(`", "this tuple is never closed");
         }
@@ -7517,6 +7570,7 @@ const Parser = struct {
     /// expression could end or a statement begin, and returns the error node
     /// covering it. Reports nothing: the caller has said what is wrong.
     fn skipMalformed(self: *Parser, start: TokenId) !ExprId {
+        if (self.lists != 0 and self.cursor.at(.invalid)) return self.skipRefusedElement(start);
         while (!inExprFollow(self.cursor.peek()) and !self.atStatementTokenBoundary()) {
             // A preceding statement's newline does not end this malformed
             // production before it has consumed any of its own tokens.
@@ -7525,6 +7579,31 @@ const Parser = struct {
             // text, and the lexer ends every such token at its line or
             // before. The line after it is the next statement.
             if (self.cursor.current() != start and self.cursor.previousTag() == .invalid and self.cursor.precededByNewline()) break;
+            _ = self.cursor.advance();
+        }
+        return self.builder.addLiteral(.err, start, self.rangeFrom(start));
+    }
+
+    /// Skips an element of a list that begins at a token the lexer refused,
+    /// up to the comma or the closer that ends it at its own depth, and
+    /// returns the error node covering it. The lexer reported the token, and
+    /// the elements after it are read as written. It also ends where a
+    /// statement would, as any malformed region does.
+    ///
+    /// **Bound:** the element's own tokens.
+    fn skipRefusedElement(self: *Parser, start: TokenId) !ExprId {
+        var depth: usize = 0;
+        while (!self.cursor.atEnd()) {
+            switch (self.cursor.peek()) {
+                .l_paren, .l_bracket, .l_brace => depth += 1,
+                .r_paren, .r_bracket, .r_brace => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                },
+                .comma => if (depth == 0) break,
+                else => if (depth == 0 and self.cursor.current() != start and
+                    (self.atStatementTokenBoundary() or self.finishedAtALineBreak() or self.afterARefusedTokenEndingItsLine())) break,
+            }
             _ = self.cursor.advance();
         }
         return self.builder.addLiteral(.err, start, self.rangeFrom(start));

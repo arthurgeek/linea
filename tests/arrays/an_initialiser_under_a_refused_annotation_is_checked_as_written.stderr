@@ -1,0 +1,70 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:5:16
+  |
+5 | fn scaled(_by: Nope = 1 + true) -> UInt8 {
+  |                ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+ --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:9:12
+  |
+9 | let table: Nope = 1 + true
+  |            ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:15:15
+   |
+15 |     let _sum: Nope = 1 + true
+   |               ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:18:26
+   |
+18 |     let _needs_its_type: Nope = .None
+   |                          ^^^^ no type with this name is declared here
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:11:19
+   |
+11 | let grid: [UInt8; true] = [1, true]
+   |                   ^^^^ this is not a number
+error[T-Operands]: expected `Int64`, found `Bool`
+ --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:9:23
+  |
+9 | let table: Nope = 1 + true
+  |                   - expected because of this operand
+  |                       ^^^^ expected `Int64`, found `Bool`
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:11:28
+   |
+11 | let grid: [UInt8; true] = [1, true]
+   |                            ^ expected `Bool`, found `Int64`
+   |                               ---- this element settles what the array holds
+error[T-Operands]: expected `Int64`, found `Bool`
+ --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:5:27
+  |
+5 | fn scaled(_by: Nope = 1 + true) -> UInt8 {
+  |                       - expected because of this operand
+  |                           ^^^^ expected `Int64`, found `Bool`
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:14:25
+   |
+14 |     let _local: [UInt8; true] = [1, true]
+   |                         ^^^^ this is not a number
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:14:34
+   |
+14 |     let _local: [UInt8; true] = [1, true]
+   |                                  ^ expected `Bool`, found `Int64`
+   |                                     ---- this element settles what the array holds
+error[T-Operands]: expected `Int64`, found `Bool`
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:15:26
+   |
+15 |     let _sum: Nope = 1 + true
+   |                      - expected because of this operand
+   |                          ^^^^ expected `Int64`, found `Bool`
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:16:24
+   |
+16 |     let _fine: [UInt8; true] = [1, 2]
+   |                        ^^^^ this is not a number
+error[T-ArraySize]: an array's length is a count, and a count is a number
+  --> tests/arrays/an_initialiser_under_a_refused_annotation_is_checked_as_written.lin:17:30
+   |
+17 |     let _other_type: [UInt8; true] = "text"
+   |                              ^^^^ this is not a number

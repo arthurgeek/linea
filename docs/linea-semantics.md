@@ -483,11 +483,11 @@ unterminated with the closing sequence it needs. A raw literal opens with at
 most eight `#`; one opened with more is refused. A literal inside an
 interpolation may interpolate in turn, with at most 16 interpolations open at
 once; a literal that opens one more is refused whole, from its quote to the
-quote that closes it, and what follows it is read as written. That close is
-found through as many as 80 interpolations open at once; a literal nested
-more deeply is refused to the end of its line. An unclosed
+quote that closes it, however many interpolations it opens inside, and what
+follows it is read as written. An unclosed
 literal holds the rest of its line, and a byte no token begins may stand for
-anything, so a call, an array, a structure literal or a `match` with either
+anything, so a call, an array, a tuple, a structure literal, a tuple pattern
+or a `match` with either
 as the last token of an element's line is not reported for the comma or the
 closing bracket that line may have held. The list reads on to the next line
 unless that line begins a statement or a declaration; a separator missing
@@ -890,10 +890,13 @@ names. An implementation whose head or trait arguments hold a refused type has
 no key: it is compared with no other implementation and is not asked whether
 its parameters can be recovered ([T-Impl]). A callable type holds the types of
 its parameters and its result, so a head applied to `fn(x: ) -> UInt8` holds
-a refused type. An initialiser is not held against
-an annotation that was refused, at module level as in a function; a
-constant's initialiser is still a constant expression ([T-Const]), which is
-asked of its form and not of its type. A type whose arguments stand past the limit
+a refused type. An initialiser under an annotation that was refused, at module level, in a
+function or as a parameter's default, is checked as one with no annotation:
+`let x: [UInt8; true] = [1, true]` is reported for its elements disagreeing,
+and nothing is held against the type the annotation would have named. A type
+only the annotation could have settled, as `.None`'s or `[]`'s, is not
+reported as missing. A constant's initialiser is still a constant expression
+([T-Const]), which is asked of its form and not of its type. A type whose arguments stand past the limit
 is refused with them, wherever it is written, so it is not reported for the
 arguments it lacks ([T-Bound]), and a derive naming it as a source is not
 reported for the variant that source would need ([T-Derive]). A name written
@@ -3970,7 +3973,8 @@ expression of a form no constant expression has, such as a call of a closure,
 or of an operation, is no count whatever else is reported inside it, so it
 keeps its [T-ArraySize] beside that report. An initialiser is not held against
 an annotation that was refused: a constant whose annotation holds a refused
-length, or a refused type, reports only that.
+length, or a refused type, reports that, and of its initialiser only what is
+wrong with it as written.
 
 The element type supplies context to every literal element. For example,
 `let readings: [Float64; _] = [32.0, 104.0]` has type `[Float64; 2]`, and

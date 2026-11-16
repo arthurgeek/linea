@@ -1173,8 +1173,10 @@ pub const Expr = struct {
     pub const CallFlags = packed struct(u8) {
         fallible: bool = false,
         marked: bool = false,
-        /// A tuple pattern whose `)` was never found, so what it holds may
-        /// be fewer parts than were written; or a call one of whose
+        /// A tuple pattern whose `)` was never found, or one of whose parts
+        /// ended in a token the lexer refused that took the rest of its
+        /// line, so the parts it holds need not be those written; or a call
+        /// one of whose
         /// arguments ended in a token the lexer refused that took the rest
         /// of its line, so the arguments it holds may be fewer than were
         /// meant.

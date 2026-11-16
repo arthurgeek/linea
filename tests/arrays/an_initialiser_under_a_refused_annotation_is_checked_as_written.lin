@@ -1,0 +1,21 @@
+// An initialiser under an annotation that was refused is checked as one with
+// no annotation: a mistake inside it is its own and is reported, and nothing
+// is held against the type the annotation would have named. A parameter's
+// default is such an initialiser too.
+fn scaled(_by: Nope = 1 + true) -> UInt8 {
+    0
+}
+
+let table: Nope = 1 + true
+
+let grid: [UInt8; true] = [1, true]
+
+fn main() -> UInt8 {
+    let _local: [UInt8; true] = [1, true]
+    let _sum: Nope = 1 + true
+    let _fine: [UInt8; true] = [1, 2]
+    let _other_type: [UInt8; true] = "text"
+    let _needs_its_type: Nope = .None
+    let _both = (table, grid)
+    scaled()
+}

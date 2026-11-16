@@ -6480,6 +6480,10 @@ const Checker = struct {
     /// The bindings refused where they are declared, and what an expression
     /// naming one would be worth were its value known.
     refused_bindings: RefusedBindings = .{},
+    /// Whether the expression being checked stands where a written type that
+    /// was refused is expected, so a type only that context could settle is
+    /// not reported as missing.
+    expectation_refused: bool = false,
     /// Whether each constant's initialiser has been checked, so it is typed
     /// once whichever reference reached it first. An ordering, not a value:
     /// what the constant is worth is the fold's answer and is asked for
@@ -13210,7 +13214,7 @@ const Checker = struct {
         // expectation is what would have settled it, so reporting the call as
         // well describes one mistake twice. A result without `Self` could not
         // have been settled by any annotation, and that is a mistake of its own.
-        if (expected) |want| if (want.ty == .poison and self.mentionsParameterAt(signature.result, d, .stops, self_index))
+        if (self.contextRefused(expected) and self.mentionsParameterAt(signature.result, d, .stops, self_index))
             return .{ .ty = .poison };
 
         // Every trait signature needs a concrete receiver to select a body,
@@ -13295,7 +13299,7 @@ const Checker = struct {
             // An expectation that was reported settles nothing, and the reason
             // this parameter has no type is that mistake rather than the
             // absence of anything to settle it.
-            if (expected) |want| if (want.ty == .poison) continue;
+            if (self.contextRefused(expected)) continue;
 
             // A `Self` this call could not settle already took the call with
             // it, and every parameter written in terms of the trait is
@@ -14421,6 +14425,10 @@ const Checker = struct {
         args: anytype,
         label: []const u8,
     ) std.mem.Allocator.Error!TypeId {
+        // A type that only the context could settle is not asked for where
+        // the context was a written type that was refused: that refusal is
+        // the report, and the type it would have read is unknown.
+        if (code == .t_infer and self.expectation_refused) return try self.record(id, .poison);
         const before = self.sink.items().len;
         try self.sink.addErrorFmt(code, self.ast.fileOfExpr(id), self.ast.exprSpan(id), label, fmt, args);
         try self.explainShadowedHead(id, before);
@@ -16545,6 +16553,11 @@ const Checker = struct {
     /// nothing in it is typed and every rule that reads a type is silent about
     /// it.
     fn checkStmt(self: *Checker, s: StmtId) !void {
+        // A statement is checked in no expectation but its own, whatever
+        // block holds it.
+        const outer_refused = self.expectation_refused;
+        self.expectation_refused = false;
+        defer self.expectation_refused = outer_refused;
         switch (self.ast.stmtTag(s)) {
             // Already diagnosed by the parser.
             .err => {},
@@ -17636,7 +17649,27 @@ const Checker = struct {
         return self.check(child, expected);
     }
 
+    /// Whether what an expression is expected to be is a written type that
+    /// was refused: an expectation of poison, or no expectation where the
+    /// expression stands in the place of one, which `check` reads as none.
+    /// What only that type could have settled is then not reported.
+    fn contextRefused(self: *const Checker, expected: ?Expected) bool {
+        if (expected) |want| return want.ty == .poison;
+        return self.expectation_refused;
+    }
+
     fn check(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+        // An expected type that was refused, a written type nobody can read,
+        // says nothing about the expression: it is checked as one with no
+        // expectation, so what is wrong inside it is reported as it would be
+        // with nothing written. What only a type there could have settled is
+        // not reported; see `report`.
+        if (expected) |want| if (want.ty == .poison and want.inference == null and !want.callable_context and !want.unit_test_success) {
+            const outer = self.expectation_refused;
+            self.expectation_refused = true;
+            defer self.expectation_refused = outer;
+            return self.checkInner(id, null);
+        };
         if (expected) |want| if (self.builder.get(want.ty) == .open_type) {
             // A type a function value's uses are settling flows in as what it
             // settled to. Until it settles it says nothing about the
@@ -36898,7 +36931,7 @@ const Checker = struct {
         // more about what the call leaves open.
         // Poison is only recorded after it was reported, which is what lets
         // this skip both the default and the unresolved-parameter report.
-        const context_refused = if (expected) |want| want.ty == .poison else false;
+        const context_refused = self.contextRefused(expected);
         if (!context_refused) for (settling) |s| {
             if (s.owner != over) continue;
             for (s.found, 0..) |*f, k| {
