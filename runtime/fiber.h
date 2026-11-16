@@ -17,6 +17,8 @@ typedef long (*linea_fiber_attempt)(struct linea_op *operation);
 struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long stack_bytes,
                                       linea_fiber_entry entry, linea_fiber_entry finished, void *argument, int *error);
 void linea_fiber_start(struct linea_fiber *fiber);
+/* Compiler-proven body; only the prepared destination may gain eligibility. */
+void linea_fiber_start_compiled(struct linea_fiber *fiber);
 void linea_fiber_destroy(struct linea_fiber *fiber);
 int linea_fiber_active(void);
 /* Opaque process-local carrier identity; zero outside a real running fiber.

@@ -105,10 +105,10 @@ struct linea_fiber {
     struct carrier *home;
     struct fiber_loop *loop;
     struct carrier *bound;
-    int queued, started, saved, retired;
+    int queued, started, saved, retired, proven;
     enum scheduling_claim claimed;
 #if defined(LINEA_FIBER_MIGRATION_TEST)
-    int proven, transfer_ready;
+    int transfer_ready;
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
     unsigned forced_transfers;
 #endif
@@ -800,7 +800,7 @@ void fiber_test_pause(enum linea_fiber_pause_point point) {
         lock_fiber(f);
 #if defined(LINEA_FIBER_UNPROVEN_ENTRY_TEST)
         f->proven = 0;
-#else
+#elif !defined(LINEA_FIBER_ENTRY_PROVENANCE_TEST)
         f->proven = 1;
 #endif
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
@@ -1817,10 +1817,11 @@ struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long sta
     return f;
 }
 
-void linea_fiber_start(struct linea_fiber *f) {
+static void start_fiber(struct linea_fiber *f, int compiled) {
     struct carrier *wake = NULL;
     lock_fiber(f);
     if (f->state != parked || f->started || !f->saved) fail("linea: a fiber was started twice\n");
+    if (compiled && f->loop != NULL) f->proven = 1;
     f->started = 1;
     f->state = runnable;
     enqueue_locked(f);
@@ -1837,6 +1838,14 @@ void linea_fiber_start(struct linea_fiber *f) {
     must(pthread_mutex_unlock(&handoff_lock));
 #endif
 #endif
+}
+
+void linea_fiber_start(struct linea_fiber *f) {
+    start_fiber(f, 0);
+}
+
+void linea_fiber_start_compiled(struct linea_fiber *f) {
+    start_fiber(f, 1);
 }
 
 void linea_fiber_destroy(struct linea_fiber *f) {

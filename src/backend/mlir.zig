@@ -347,7 +347,7 @@ pub fn emit(
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
         if (module.isExternal(id)) continue;
-        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options.sanitize, link_symbols);
+        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options, link_symbols);
     }
 
     // Only where something is to be entered. A library holds no entry point, so
@@ -362,6 +362,7 @@ pub fn emit(
         try emitForeignEntry(w, module, &module.functions[one.id.index()], one.id, one.entry, options.sanitize, one.body);
     }
 
+    if (try moduleStartsMigratableTask(gpa, module, options)) try emitTaskStartFallback(w);
     try w.writeAll("}\n");
     return true;
 }
@@ -397,6 +398,9 @@ pub const Sanitizer = enum {
 /// What emission is asked to add to the module beyond what the MIR says.
 pub const Options = struct {
     sanitize: ?Sanitizer = null,
+    /// Only complete source executables can prove the native boundaries of
+    /// their task bodies. Object and MIR-only emission leave this false.
+    migratable_task_entries: bool = false,
     /// The symbol C gives each `extern` whose C declaration links it under
     /// another one than its name, such as `lseek64` for `lseek` where C reads
     /// files with 64-bit offsets ([T-ExternPrototype]).
@@ -703,6 +707,63 @@ fn runtimeCallbacks(gpa: std.mem.Allocator, module: *const Module, mir: *const M
 /// Whether the callback address `address` is one the runtime alone receives.
 fn isRuntimeCallback(callbacks: []const bool, address: InstId) bool {
     return callbacks.len != 0 and callbacks[address.index()];
+}
+
+fn migratableTaskStart(module: *const Module, mir: *const Mir, call: InstId, callbacks: []const bool, options: Options) bool {
+    if (!options.migratable_task_entries) return false;
+    const target = mir.callOf(call);
+    if (!module.isExternal(target.func) or
+        !std.mem.eql(u8, module.nameOf(target.func), "linea_task_start") or
+        target.args.len != runtime_symbols.task_start_signature.parameters.len) return false;
+    for (options.foreign_symbols) |held| {
+        if (!std.mem.eql(u8, held.name, "linea_task_start")) continue;
+        if (!std.mem.eql(u8, held.symbol, held.name)) return false;
+        break;
+    }
+    const body = target.args[1];
+    return mir.tagOf(body) == .foreign_function_addr and
+        !module.isExternal(mir.functionOf(body)) and isRuntimeCallback(callbacks, body);
+}
+
+fn moduleStartsMigratableTask(gpa: std.mem.Allocator, module: *const Module, options: Options) std.mem.Allocator.Error!bool {
+    if (!options.migratable_task_entries) return false;
+    for (module.functions, 0..) |*mir, i| {
+        if (module.isExternal(FunctionId.at(@intCast(i)))) continue;
+        const has_start = for (0..mir.insts.len) |at| {
+            const inst = InstId.at(@intCast(at));
+            if (mir.tagOf(inst) != .call and mir.tagOf(inst) != .call_noreturn) continue;
+            const target = mir.callOf(inst).func;
+            if (module.isExternal(target) and std.mem.eql(u8, module.nameOf(target), "linea_task_start")) break true;
+        } else false;
+        if (!has_start) continue;
+        const callbacks = try runtimeCallbacks(gpa, module, mir);
+        defer gpa.free(callbacks);
+        for (0..mir.insts.len) |at| {
+            const inst = InstId.at(@intCast(at));
+            if (mir.tagOf(inst) != .call and mir.tagOf(inst) != .call_noreturn) continue;
+            if (migratableTaskStart(module, mir, inst, callbacks, options)) return true;
+        }
+    }
+    return false;
+}
+
+fn emitTaskStartFallback(w: *std.Io.Writer) std.Io.Writer.Error!void {
+    const signature = runtime_symbols.task_start_migratable_signature;
+    try w.print("  func.func @{s}(", .{signature.symbol});
+    for (signature.parameters, 0..) |parameter, i| {
+        if (i != 0) try w.writeAll(", ");
+        try w.print("%a{d}: {s}", .{ i, mlirType(parameter.scalar) });
+    }
+    try w.print(") -> {s} attributes {{llvm.linkage = #llvm.linkage<weak>, passthrough = [\"noinline\"]}} {{\n", .{mlirType(signature.result)});
+    try writeMigrationGuard(w, runtime_symbols.task_start_signature);
+    try w.print("    %result = func.call @{s}(", .{runtime_symbols.task_start_signature.symbol});
+    for (signature.parameters, 0..) |_, i| {
+        if (i != 0) try w.writeAll(", ");
+        try w.print("%a{d}", .{i});
+    }
+    try w.writeAll(")");
+    try writeOwnedCallType(w, signature);
+    try w.print("\n    func.return %result : {s}\n  }}\n", .{mlirType(signature.result)});
 }
 
 fn writeForeignGuard(w: *std.Io.Writer, enter: bool) std.Io.Writer.Error!void {
@@ -1241,13 +1302,14 @@ fn emitFunction(
     path: []const u8,
     id: FunctionId,
     file_symbol: u32,
-    sanitize: ?Sanitizer,
+    options: Options,
     /// The symbol each function is linked under, from `linkSymbols`.
     link_symbols: []const []const u8,
 ) (std.mem.Allocator.Error || std.Io.Writer.Error)!void {
     // An answer too wide for a register is written into storage the caller
     // owns, handed in as a leading pointer. Asked of the module because the
     // call sites ask the same routine, so the two sides cannot disagree.
+    const sanitize = options.sanitize;
     const indirect = module.returnsIndirectly(id);
     const runtime_callbacks = try runtimeCallbacks(gpa, module, mir);
     defer gpa.free(runtime_callbacks);
@@ -1261,6 +1323,7 @@ fn emitFunction(
         .indirect = indirect,
         .link_symbols = link_symbols,
         .runtime_callbacks = runtime_callbacks,
+        .options = options,
     };
 
     try w.writeAll("  func.func private @");
@@ -1598,6 +1661,7 @@ const FunctionEmitter = struct {
     /// Which of this function's callback addresses the runtime alone
     /// receives, from `runtimeCallbacks`.
     runtime_callbacks: []const bool = &.{},
+    options: Options = .{},
     /// The terminal call writes directly to this function's caller-owned result.
     return_call: InstId = .none,
     /// Names the temporaries a check expands into, and the trap blocks it
@@ -2049,7 +2113,9 @@ const FunctionEmitter = struct {
         } else {
             try w.print("    %v{d} = func.call @", .{n});
         }
-        try writeCallee(w, module, self.link_symbols, c.func);
+        if (migratableTaskStart(module, mir, id, self.runtime_callbacks, self.options)) {
+            try w.writeAll(runtime_symbols.task_start_migratable_signature.symbol);
+        } else try writeCallee(w, module, self.link_symbols, c.func);
         try w.writeAll("(");
         if (indirect) {
             if (id == self.return_call) try w.writeAll("%sret") else try w.print("%rs{d}", .{n});
@@ -3716,6 +3782,83 @@ test "allocator zero facts require the exact library producer" {
             try testing.expect(!try verify(gpa, &bad, &rejected));
             try testing.expect(rejected.hasErrors());
         }
+    }
+}
+
+test "compiled migration task starts retain a guarded weak pinned fallback" {
+    var output: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer output.deinit();
+    try emitTaskStartFallback(&output.writer);
+    try testing.expect(std.mem.indexOf(u8, output.written(), "func.func @linea_task_start_migratable(") != null);
+    try testing.expect(std.mem.indexOf(u8, output.written(), "llvm.linkage = #llvm.linkage<weak>") != null);
+    try testing.expect(std.mem.indexOf(u8, output.written(), "\"noinline\"") != null);
+    const guard = std.mem.indexOf(u8, output.written(), "func.call @linea_fiber_restrict_current()") orelse return error.TestExpectedGuard;
+    const fallback = std.mem.indexOf(u8, output.written(), "func.call @linea_task_start(") orelse return error.TestExpectedFallback;
+    try testing.expect(guard < fallback);
+    try testing.expect(std.mem.indexOf(u8, output.written(), ": (i64, !llvm.ptr, !llvm.ptr, i64, i64, i64) -> i64") != null);
+}
+
+test "task-body migration eligibility excludes releases, native targets and object emission" {
+    const gpa = testing.allocator;
+    var types = try types_mod.Typing.Builder.init(gpa);
+    defer types.deinit();
+    const layouts = try gpa.alloc(types_mod.Layout, types.pool.items.len);
+    defer gpa.free(layouts);
+    @memset(layouts, .{ .size = 8, .alignment = 8 });
+    var representations = try mir_mod.deriveRepresentations(gpa, &types.view(), layouts);
+    defer representations.deinit(gpa);
+    const Case = struct {
+        symbol: []const u8 = "linea_task_start",
+        enabled: bool = true,
+        external_start: bool = true,
+        external_body: bool = false,
+        runtime_only: bool = true,
+        linked_symbol: ?[]const u8 = null,
+        body_slot: usize = 1,
+        expected: bool = false,
+    };
+    for ([_]Case{
+        .{ .expected = true },
+        .{ .enabled = false },
+        .{ .external_body = true },
+        .{ .body_slot = 2 },
+        .{ .body_slot = 0 },
+        .{ .symbol = "linea_owner_call" },
+        .{ .symbol = "user_native_start" },
+        .{ .external_start = false },
+        .{ .runtime_only = false },
+        .{ .linked_symbol = "other_start" },
+        .{ .linked_symbol = "linea_task_start", .expected = true },
+    }) |case| {
+        var builder = Mir.Builder.init(gpa);
+        defer builder.deinit();
+        const block = try builder.addBlock();
+        const zero = try builder.addInst(block, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 0 } });
+        const body = try builder.addForeignFunctionAddr(block, .unit, Span.empty, .at(1));
+        var arguments = [_]InstId{ zero, zero, zero, zero, zero, zero };
+        arguments[case.body_slot] = body;
+        const call = try builder.addCall(block, .value, .unit, Span.empty, .at(0), &arguments);
+        if (!case.runtime_only) _ = try builder.addCall(block, .value, .unit, Span.empty, .at(2), &.{body});
+        _ = try builder.setTerminator(block, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = call } });
+        var mir = try builder.finish(block, .from(0));
+        defer mir.deinit(gpa);
+        var functions = [_]Mir{ mir, mir, mir };
+        var names = [_][]const u8{ case.symbol, "compiled_task_body", "user_observe" };
+        const module: Module = .{
+            .functions = &functions,
+            .external = &.{ case.external_start, case.external_body, true },
+            .bytes = &.{},
+            .names = &names,
+            .origins = &.{},
+            .types = types.view(),
+            .representations = representations,
+            .layouts = layouts,
+            .entry = .none,
+        };
+        const callbacks = try runtimeCallbacks(gpa, &module, &mir);
+        defer gpa.free(callbacks);
+        const aliases: []const ForeignSymbol = if (case.linked_symbol) |linked| &.{.{ .name = "linea_task_start", .symbol = linked }} else &.{};
+        try testing.expectEqual(case.expected, migratableTaskStart(&module, &mir, call, callbacks, .{ .migratable_task_entries = case.enabled, .foreign_symbols = aliases }));
     }
 }
 

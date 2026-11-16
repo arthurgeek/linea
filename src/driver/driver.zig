@@ -439,6 +439,7 @@ fn compileArtifact(
         // sink for the renderer at the end of the run.
         if (!try emitMlir(gpa, if (callable_proof) &hashed.writer else writer, req.mir, req.table, req.sink, .{
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
+            .migratable_task_entries = req.artifact == .executable,
             .foreign_symbols = req.foreign_symbols,
         })) return exit_defect;
         if (callable_proof) try hashed.writer.flush();

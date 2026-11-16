@@ -34,6 +34,14 @@ fn functionName(line: []const u8) ?[]const u8 {
     return symbol(tail);
 }
 
+fn replaceableBody(line: []const u8) bool {
+    const attribute = std.mem.indexOf(u8, line, "llvm.linkage") orelse return false;
+    const start = std.mem.indexOfScalarPos(u8, line, attribute, '<') orelse return true;
+    const end = std.mem.indexOfScalarPos(u8, line, start + 1, '>') orelse return true;
+    const linkage = std.mem.trim(u8, line[start + 1 .. end], " \t");
+    return !std.mem.eql(u8, linkage, "internal") and !std.mem.eql(u8, linkage, "private");
+}
+
 fn isEntryGuard(name: []const u8) bool {
     return std.mem.eql(u8, name, "linea_fiber_restrict_current") or std.mem.eql(u8, name, "linea_foreign_enter");
 }
@@ -94,17 +102,17 @@ fn readProof(gpa: std.mem.Allocator, text: []const u8) !Proof {
 fn inspectCalls(gpa: std.mem.Allocator, text: []const u8, lookup: Lookup) ![]Row {
     var proof = try readProof(gpa, text);
     defer proof.deinit(gpa);
-    var definitions: std.StringHashMapUnmanaged(void) = .empty;
+    var definitions: std.StringHashMapUnmanaged(bool) = .empty;
     defer definitions.deinit(gpa);
     var lines = std.mem.splitScalar(u8, proof.body, '\n');
     while (lines.next()) |raw| {
         const line = std.mem.trim(u8, raw, " \t\r");
         if (functionName(line)) |name| {
-            if (std.mem.endsWith(u8, line, "{")) try definitions.put(gpa, name, {});
+            if (std.mem.endsWith(u8, line, "{")) try definitions.put(gpa, name, replaceableBody(line));
         }
     }
     if (definitions.count() == 0) return error.NoFunctionBodies;
-    for (proof.origins.items) |origin| if (!definitions.contains(origin.target)) return error.ExternalCallableAddress;
+    for (proof.origins.items) |origin| if (definitions.get(origin.target) orelse true) return error.ExternalCallableAddress;
     var rows: std.ArrayList(Row) = .empty;
     errdefer rows.deinit(gpa);
     var current: ?[]const u8 = null;
@@ -145,7 +153,7 @@ fn inspectCalls(gpa: std.mem.Allocator, text: []const u8, lookup: Lookup) ![]Row
             std.mem.startsWith(u8, operation, "\"llvm.call\"") or
             std.mem.startsWith(u8, operation, "\"func.constant\"")) return error.UnclassifiedCall;
         if (after(operation, "func.constant ")) |target| {
-            if (current == null or !definitions.contains(target)) return error.ExternalCallableAddress;
+            if (current == null or (definitions.get(target) orelse true)) return error.ExternalCallableAddress;
             const abi_start = std.mem.indexOf(u8, operation, " : ") orelse return error.UnclassifiedCall;
             try callables.put(gpa, result_name orelse return error.UnclassifiedCall, .{
                 .target = target,
@@ -183,7 +191,7 @@ fn inspectCalls(gpa: std.mem.Allocator, text: []const u8, lookup: Lookup) ![]Row
         if (after(operation, "func.call ")) |target| {
             const function = current orelse return error.CallOutsideBody;
             const kind: Kind = classify: {
-                if (definitions.contains(target)) break :classify .linea_direct;
+                if (definitions.get(target)) |replaceable| if (!replaceable) break :classify .linea_direct;
                 if (isEntryGuard(target) or std.mem.eql(u8, target, "linea_foreign_leave")) break :classify .affinity_guard;
                 if (std.mem.eql(u8, target, "linea_set_args") and std.mem.eql(u8, function, "main")) break :classify .system_entry;
                 if (std.mem.eql(u8, target, "llvm.assume") or std.mem.eql(u8, target, "llvm.is.constant.i1")) break :classify .llvm_intrinsic;
@@ -443,6 +451,47 @@ test "a callable from another function's SSA scope is refused" {
         \\}
     ;
     try testing.expectError(error.IndirectCall, inspectCalls(testing.allocator, text, unknownContract));
+}
+
+test "a replaceable fallback body does not prove an unguarded native target" {
+    const text =
+        \\module {
+        \\ func.func @linea_task_start_migratable() attributes {llvm.linkage = #llvm.linkage<weak>} {
+        \\ }
+        \\ func.func private @lin.caller() {
+        \\  func.call @linea_task_start_migratable()
+        \\ }
+        \\}
+    ;
+    const inspected = inspectCalls(testing.allocator, text, unknownContract);
+    defer if (inspected) |rows| testing.allocator.free(rows) else |_| {};
+    try testing.expectError(error.NativeCallWithoutGuard, inspected);
+}
+
+test "a replaceable fallback requires a guard and cannot prove a callable origin" {
+    const guarded =
+        \\module {
+        \\ func.func @linea_task_start_migratable() attributes {llvm.linkage = #llvm.linkage< weak >} {
+        \\ }
+        \\ func.func private @lin.caller() {
+        \\  func.call @linea_fiber_restrict_current()
+        \\  func.call @linea_task_start_migratable()
+        \\ }
+        \\}
+    ;
+    const rows = try inspectCalls(testing.allocator, guarded, unknownContract);
+    defer testing.allocator.free(rows);
+    try testing.expectEqual(Kind.guarded_native, rows[1].kind);
+    const address =
+        \\module {
+        \\ func.func @lin.replaceable() attributes {llvm.linkage = #llvm.linkage<linkonce>} {
+        \\ }
+        \\ func.func private @lin.caller() {
+        \\  %f = func.constant @lin.replaceable : () -> ()
+        \\ }
+        \\}
+    ;
+    try testing.expectError(error.ExternalCallableAddress, inspectCalls(testing.allocator, address, unknownContract));
 }
 
 test "unexpected direct LLVM calls are refused" {

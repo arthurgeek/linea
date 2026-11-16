@@ -973,10 +973,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_object_entry.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig" },
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_object_entry.zig" },
     },
     .{
         .dir = "runtime",
@@ -2331,6 +2331,7 @@ pub fn build(b: *std.Build) void {
     const join_proof = b.step("test-fiber-completed-joins", "Migrate a Linea continuation after a structured child join");
     const handoff_measurement = b.step("measure-fiber-handoff", "Collect matched plain/traced forced-handoff observations on an idle host");
     const platform_proof = b.step("test-fiber-platform-state", "Check FP, signal and protected-frame state across actual Linea handoffs");
+    const task_entry_proof = b.step("test-fiber-task-entry", "Migrate a Linea task through compiler-owned entry eligibility");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
         native_task_step.dependOn(handoff_proof);
         native_task_step.dependOn(completed_wait_proof);
@@ -2339,8 +2340,10 @@ pub fn build(b: *std.Build) void {
         native_task_step.dependOn(join_proof);
         native_task_step.dependOn(migration_metrics_step);
         native_task_step.dependOn(platform_proof);
+        native_task_step.dependOn(task_entry_proof);
         var measurement_binaries: [2]?std.Build.LazyPath = .{ null, null };
         var measurement_manifests: [2]?std.Build.LazyPath = .{ null, null };
+        var entry_archive: ?std.Build.LazyPath = null;
         const ProofCase = struct {
             source: []const u8,
             completed_wait: bool = true,
@@ -2349,11 +2352,19 @@ pub fn build(b: *std.Build) void {
             trace: bool = false,
             refusal_probes: bool = false,
             platform: bool = false,
+            entry_provenance: bool = false,
+            pinned_start: bool = false,
+            keep: bool = true,
             guard_fault: bool = false,
             completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
         };
         inline for ([_]ProofCase{
             .{ .source = "continuation.lin", .completed_wait = false },
+            .{ .source = "continuation.lin", .completed_wait = false, .entry_provenance = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .entry_provenance = true, .keep = false },
+            .{ .source = "unproven.lin", .completed_wait = false, .entry_provenance = true, .pinned_start = true },
+            .{ .source = "pinned.lin", .completed_wait = false, .entry_provenance = true },
+            .{ .source = "unknown_pinned.lin", .completed_wait = false, .entry_provenance = true },
             .{ .source = "continuation.lin", .completed_wait = false, .platform = true },
             .{ .source = "overflow_after_handoff.lin", .completed_wait = false, .platform = true, .guard_fault = true },
             .{ .source = "continuation.lin", .completed_wait = false, .trace = true },
@@ -2400,7 +2411,8 @@ pub fn build(b: *std.Build) void {
             if (proof_case.trace) handoff_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1") catch @panic("OOM");
             if (proof_case.refusal_probes) handoff_flags.append(b.allocator, "-DLINEA_FIBER_REFUSAL_PROBES_TEST=1") catch @panic("OOM");
             if (proof_case.platform) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_PLATFORM_STATE_TEST=1", "-fstack-protector-all" }) catch @panic("OOM");
-            if (std.mem.eql(u8, proof_case.source, "unproven.lin")) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
+            if (proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_ENTRY_PROVENANCE_TEST=1") catch @panic("OOM");
+            if (std.mem.eql(u8, proof_case.source, "unproven.lin") and !proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
             switch (proof_case.completion) {
                 .ordinary => {},
                 .rearm => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_REARM_TEST=1") catch @panic("OOM"),
@@ -2409,28 +2421,39 @@ pub fn build(b: *std.Build) void {
             }
             const handoff_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
             const handoff_archive = handoff_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
-            for (checked_nonfiber_objects.items) |object| handoff_runtime.addArtifactArg(object);
+            for (checked_nonfiber_objects.items) |object| {
+                if (proof_case.pinned_start and std.mem.eql(u8, object.name, "task")) {
+                    var pinned_flags: std.ArrayList([]const u8) = .empty;
+                    pinned_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+                    pinned_flags.append(b.allocator, "-Dlinea_task_start_migratable=linea_task_start_unavailable_test") catch @panic("OOM");
+                    handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "task_pinned_start", b.path("runtime/task.c"), pinned_flags.items));
+                } else handoff_runtime.addArtifactArg(object);
+            }
             handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "fiber_handoff", b.path("runtime/fiber.c"), handoff_flags.items));
+            if (proof_case.entry_provenance and !proof_case.pinned_start and proof_case.keep and std.mem.eql(u8, proof_case.source, "continuation.lin")) entry_archive = handoff_archive;
             const compile = b.addSystemCommand(&.{"env"});
             compile.addPrefixedFileArg("LINEA_RUNTIME=", handoff_archive);
             compile.addFileArg(exe.getEmittedBin());
-            compile.addArgs(&.{ "build", "--keep" });
+            compile.addArg("build");
+            if (proof_case.keep) compile.addArg("--keep");
             compile.addFileArg(main_source);
             compile.addArg("-o");
             const binary = compile.addOutputFileArg("fiber-handoff");
-            const check_calls = b.addRunArtifact(call_coverage_tool);
-            check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
-            check_calls.step.dependOn(&compile.step);
-            check_calls.step.dependOn(&run_coverage_tests.step);
-            const manifest = check_calls.captureStdOut(.{});
-            if (std.mem.eql(u8, proof_case.source, "continuation.lin") and !proof_case.refusal_probes and !proof_case.platform) {
+            const manifest: ?std.Build.LazyPath = if (proof_case.keep) blk: {
+                const check_calls = b.addRunArtifact(call_coverage_tool);
+                check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
+                check_calls.step.dependOn(&compile.step);
+                check_calls.step.dependOn(&run_coverage_tests.step);
+                break :blk check_calls.captureStdOut(.{});
+            } else null;
+            if (std.mem.eql(u8, proof_case.source, "continuation.lin") and !proof_case.refusal_probes and !proof_case.platform and !proof_case.entry_provenance) {
                 const index: usize = @intFromBool(proof_case.trace);
                 measurement_binaries[index] = binary;
                 measurement_manifests[index] = manifest;
             }
             const run_proof = b.addSystemCommand(&.{"env"});
             run_proof.addFileArg(binary);
-            run_proof.addFileInput(manifest);
+            if (manifest) |coverage| run_proof.addFileInput(coverage);
             run_proof.has_side_effects = true;
             if (proof_case.guard_fault) {
                 run_proof.addCheck(.{ .expect_term = .{ .signal = .ABRT } });
@@ -2446,7 +2469,6 @@ pub fn build(b: *std.Build) void {
                 .timer_tie => run_proof.expectStdErrEqual("native migration: timer-first readiness tie completed\n"),
                 .rearm_failure => run_proof.expectStdErrEqual("native migration: rearm failure propagated after retirement\n"),
             }
-            run_proof.step.dependOn(&check_calls.step);
             if (proof_case.trace) {
                 const trace = run_proof.captureStdErr(.{});
                 const inspect_trace = b.addRunArtifact(migration_metrics_tool);
@@ -2457,12 +2479,35 @@ pub fn build(b: *std.Build) void {
                 if (std.mem.eql(u8, proof_case.source, "unproven.lin")) inspect_trace.addArg("unproven");
                 inspect_trace.step.dependOn(&migration_metrics_tests.step);
                 migration_metrics_step.dependOn(&inspect_trace.step);
+            } else if (proof_case.entry_provenance) {
+                task_entry_proof.dependOn(&run_proof.step);
             } else if (proof_case.platform) {
                 platform_proof.dependOn(&run_proof.step);
             } else {
                 (if (std.mem.eql(u8, proof_case.source, "join.lin")) join_proof else if (std.mem.startsWith(u8, proof_case.source, "waitset")) waitset_proof else if (std.mem.startsWith(u8, proof_case.source, "io")) completed_io_proof else if (completed_wait) completed_wait_proof else handoff_proof).dependOn(&run_proof.step);
             }
         }
+        const object_files = b.addWriteFiles();
+        const object_source = object_files.addCopyFile(b.path("runtime/tests/fiber_migration/entry_object.lin"), "main.lin");
+        _ = object_files.add("linea.json", "{\"kind\":\"library\"}\n");
+        const compile_object = b.addSystemCommand(&.{"env"});
+        compile_object.addFileArg(exe.getEmittedBin());
+        compile_object.addArgs(&.{ "build", "--keep" });
+        compile_object.addFileArg(object_source);
+        compile_object.addArg("-o");
+        const entry_object = compile_object.addOutputFileArg("entry.o");
+        const object_test_module = b.createModule(.{
+            .root_source_file = b.path("build/fiber_object_entry.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .link_libc = true,
+        });
+        object_test_module.addAnonymousImport("object_ir", .{ .root_source_file = entry_object.dirname().path(b, "entry.o.mlir") });
+        object_test_module.addObjectFile(entry_object);
+        object_test_module.addObjectFile(entry_archive.?);
+        const run_object_test = b.addRunArtifact(b.addTest(.{ .root_module = object_test_module }));
+        run_object_test.has_side_effects = true;
+        task_entry_proof.dependOn(&run_object_test.step);
         const measure = b.addRunArtifact(migration_metrics_tool);
         measure.addArg("--measure");
         for (measurement_binaries, measurement_manifests) |binary, manifest| {
@@ -2483,6 +2528,7 @@ pub fn build(b: *std.Build) void {
         completed_wait_proof.dependOn(&unavailable.step);
         handoff_measurement.dependOn(&unavailable.step);
         platform_proof.dependOn(&unavailable.step);
+        task_entry_proof.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");

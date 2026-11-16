@@ -260,6 +260,35 @@ static void prove_continuation(int bind_after_first, int proven) {
 void fiber_test_pause(enum linea_fiber_pause_point point) { (void)point; }
 #endif
 
+static void check_prepared_entry_grant(void) {
+    struct linea_fiber parent = { .loop = &loop, .home = &carrier, .state = running };
+    assert(pthread_once(&carrier_once, make_carrier_key) == 0);
+    assert(pthread_setspecific(carrier_key, &carrier) == 0);
+    carrier.executing = &parent;
+    for (unsigned i = 0; i < 3; i += 1) {
+        struct linea_fiber prepared = {
+            .loop = &loop, .home = &carrier, .state = parked, .saved = 1,
+            .timer_index = no_timer, .bound = i == 2 ? &carrier : NULL,
+        };
+        if (i == 1) linea_fiber_start(&prepared);
+        else linea_fiber_start_compiled(&prepared);
+        assert(prepared.proven == (i != 1));
+        assert(parent.proven == 0);
+        assert(prepared.bound == (i == 2 ? &carrier : NULL));
+        assert(dequeue(&carrier) == &prepared && dequeue(&carrier) == NULL);
+    }
+    carrier.executing = NULL;
+    assert(pthread_setspecific(carrier_key, NULL) == 0);
+    struct carrier simulation = { .simulation = 1, .kernel = -1, .wake = -1 };
+    assert(pthread_mutex_init(&simulation.queue_lock, NULL) == 0);
+    struct linea_fiber simulated = {
+        .home = &simulation, .state = parked, .saved = 1, .timer_index = no_timer,
+    };
+    linea_fiber_start_compiled(&simulated);
+    assert(simulated.proven == 0 && simulation.ready_count == 1 && simulation.ready[0] == &simulated);
+    free_carrier(&simulation);
+}
+
 static void check_affinity(void) {
     /* A system task has no logical fiber to bind. */
     errno = EDOM;
@@ -338,6 +367,7 @@ int main(void) {
     reject_lock_inversion();
     check_transfer_claim();
     check_repeated_completed_transfer();
+    check_prepared_entry_grant();
     check_affinity();
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
     prove_continuation(0, 1);

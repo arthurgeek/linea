@@ -334,15 +334,27 @@ pub const math_functions = math: {
     break :math table;
 };
 
-/// What the runtime's own files call between themselves: the park routine
-/// every wait goes through (`runtime/park.h`), what a source calls to signal
-/// a wait set's registration and what a set calls to watch a session, a
-/// signal or a simulated descriptor, and, to run a simulation, the
-/// loop table (`runtime/loop.h`) and the simulated backend that the socket
-/// and clock entries hand an operation to (`runtime/sim.h`). No Linea
-/// declaration names them; they are owned so that no `export` takes their
-/// names.
+/// Both start paths publish the same body, release callback and typed storage.
+pub const task_start_signature: Signature = .{
+    .symbol = "linea_task_start",
+    .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes },
+    .result = .u64,
+    .starts_task = true,
+    .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } },
+};
+
+pub const task_start_migratable_signature: Signature = blk: {
+    var signature = task_start_signature;
+    signature.symbol = "linea_task_start_migratable";
+    signature.declared_by = .compiler;
+    break :blk signature;
+};
+
+/// What the runtime's own files call between themselves: park and registration
+/// operations, execution contexts and simulated backends. No Linea declaration
+/// names them; they are owned so that no `export` takes their names.
 pub const internal_functions = [_]Signature{
+    task_start_migratable_signature,
     .{ .symbol = "linea_fiber_metadata_held", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_fiber_sim_create", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_fiber_sim_switch", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
@@ -367,6 +379,7 @@ pub const internal_functions = [_]Signature{
     .{ .symbol = "linea_thread_guard_commit", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
     .{ .symbol = "linea_fiber_create", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64), cb(&.{.ptr}, .unit, 0), cb(&.{.ptr}, .unit, 0), p(.ptr), .{ .scalar = .i32, .passing = .inout } }, .result = .ptr },
     .{ .symbol = "linea_fiber_start", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_start_compiled", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_fiber_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_fiber_active", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_fiber_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
@@ -567,7 +580,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
-    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_task = true, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } } },
+    task_start_signature,
     .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } } },
     .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } } },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } }, .migration_contract = .neutral },

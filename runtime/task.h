@@ -36,6 +36,10 @@ long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity);
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at);
 
+/* Compiler-only body proof; it applies to the prepared task, not its caller. */
+unsigned long linea_task_start_migratable(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
+                                          unsigned long len, unsigned long release_at);
+
 /* Cancel prepared execution without running its body and
  * free what `linea_task_prepare_on` made. */
 void linea_task_cancel(unsigned long task);
