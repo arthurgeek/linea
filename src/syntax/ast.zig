@@ -1772,6 +1772,22 @@ pub const Ast = struct {
         return self.exprs.items(.call_flags)[id.index()].cut_short;
     }
 
+    /// Whether one of a call's arguments ended in a token the lexer refused
+    /// that took the rest of its line, so the arguments the call holds may
+    /// be fewer than were meant.
+    pub fn callCutShort(self: *const Ast, id: ExprId) bool {
+        return self.exprTag(id) == .call and self.exprs.items(.call_flags)[id.index()].cut_short;
+    }
+
+    /// Whether a line break separates token `t` from the token after it.
+    /// Every file's run ends with its own `eof`, so a token that is not one
+    /// has a next token in its own file.
+    pub fn lineBreakFollows(self: *const Ast, t: TokenId) bool {
+        if (self.tokenTag(t) == .eof) return true;
+        const gap = Span{ .start = self.tokenSpan(t).end, .end = self.tokenSpan(TokenId.at(t.index() + 1)).start };
+        return std.mem.indexOfScalar(u8, gap.slice(self.partOf(t).source), '\n') != null;
+    }
+
     /// Whether a call is `Name?(e)`, a newtype's unproven construction,
     /// rather than `Name(e)`. Meaningless for anything but `.call`.
     pub fn callFallible(self: *const Ast, id: ExprId) bool {
@@ -2599,9 +2615,9 @@ pub const Ast = struct {
         }
 
         /// Marks an already-built tuple pattern as one whose `)` was never
-        /// found.
+        /// found, or a call as one an argument of which took its line.
         pub fn markCutShort(self: *Builder, id: ExprId) void {
-            std.debug.assert(self.exprTag(id) == .tuple_pattern);
+            std.debug.assert(self.exprTag(id) == .tuple_pattern or self.exprTag(id) == .call);
             self.exprs.items(.call_flags)[id.index()].cut_short = true;
         }
 

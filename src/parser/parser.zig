@@ -4606,17 +4606,28 @@ const Parser = struct {
 
     /// Whether a list goes on after an element with no comma behind it: the
     /// element ended in a refused token that ends its line, and the next
-    /// line does not open with a word only a statement or a declaration
-    /// begins with.
+    /// line does not begin a statement or a declaration.
     fn listGoesOnPastARefusedLineEnd(self: *const Parser) bool {
-        if (!self.afterARefusedTokenEndingItsLine() or self.atStatementTokenBoundary()) return false;
-        return switch (self.cursor.peek()) {
-            .keyword_defer, .keyword_for, .keyword_while, .keyword_loop, .keyword_if, .keyword_match => false,
-            .keyword_import, .keyword_use, .keyword_pub, .keyword_internal, .keyword_export, .keyword_opaque => false,
-            .keyword_linear, .keyword_copyable, .keyword_test, .keyword_template, .keyword_derive, .keyword_impl => false,
-            .keyword_trait, .keyword_extern, .keyword_enum, .keyword_struct, .at_sign => false,
-            else => true,
-        };
+        return self.afterARefusedTokenEndingItsLine() and !self.atStatementOrDeclaration();
+    }
+
+    /// Whether the cursor is at what only a statement or a declaration
+    /// begins with: a statement's boundary, a declaration, a `defer`, or a
+    /// construct that ends in a block. The predicates the statement and
+    /// declaration readers dispatch on, so what ends a list cut short by a
+    /// refused token cannot drift from what begins the next statement.
+    fn atStatementOrDeclaration(self: *const Parser) bool {
+        if (self.atStatementTokenBoundary() or self.atDeclaration() or self.cursor.at(.keyword_defer)) return true;
+        return !self.cursor.at(.l_brace) and opensWithABlock(self.cursor.peek());
+    }
+
+    /// Whether a list that is not closed here may have been closed on a line
+    /// a refused token took: it ends right after such a line, or it read on
+    /// past one (`went_on`) and stops where a statement or a declaration
+    /// begins a line. A list that stops anywhere else is missing its closer.
+    fn closerMayHaveBeenTaken(self: *const Parser, went_on: bool) bool {
+        if (self.afterARefusedTokenEndingItsLine()) return true;
+        return went_on and (self.cursor.precededByNewline() or self.cursor.atEnd()) and self.atStatementOrDeclaration();
     }
 
     /// Whether `tag` is written between the cursor and the end of its line.
@@ -6758,8 +6769,8 @@ const Parser = struct {
         var names: std.ArrayList(TokenId) = .empty;
         defer names.deinit(self.gpa);
         var naming = false;
-        // Whether an argument ended in a literal that took its line, and
-        // with it the comma or the `)` the line may have held.
+        // Whether an argument ended in a refused token that took its line,
+        // and with it the commas, arguments or `)` the line may have held.
         var took_a_line = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
@@ -6790,10 +6801,13 @@ const Parser = struct {
             if (self.cursor.current() == before) _ = self.cursor.advance();
         }
 
-        if (self.cursor.eat(.r_paren) == null and !took_a_line) {
+        const cut = self.closerMayHaveBeenTaken(took_a_line);
+        if (self.cursor.eat(.r_paren) == null and !cut) {
             try self.reportAt(.s_paren, self.cursor.current(), "expected `)`", "this call is never closed");
         }
-        return self.builder.addCall(start, self.rangeFrom(start), callee, args.items, names.items);
+        const call = try self.builder.addCall(start, self.rangeFrom(start), callee, args.items, names.items);
+        if (took_a_line) self.builder.markCutShort(call);
+        return call;
     }
 
     /// `copy(p)`, the only duplication in the language.
@@ -6925,9 +6939,10 @@ const Parser = struct {
 
         const scrutinee = try self.parseControlHeader();
 
-        var took_a_line = false;
         var items: std.ArrayList(ExprId) = .empty;
         defer items.deinit(self.gpa);
+        // Whether the arms read on past a line a refused token took.
+        var went_on = false;
 
         if (self.cursor.eat(.l_brace) == null) {
             try self.reportAt(.s_brace, self.cursor.current(), "expected `{`", "a match lists its arms");
@@ -6968,8 +6983,8 @@ const Parser = struct {
                 // line may have held the comma, or the brace closing the
                 // `match`. The next line is an arm where it writes `=>`.
                 if (self.afterARefusedTokenEndingItsLine()) {
-                    took_a_line = true;
                     if (!self.restOfLineHolds(.fat_arrow)) break;
+                    went_on = true;
                     break :took;
                 }
                 // A `\\` line takes the rest of its line, so a comma written
@@ -6984,7 +6999,8 @@ const Parser = struct {
             if (self.cursor.current() == before) _ = self.cursor.advance();
         }
 
-        if (self.cursor.eat(.r_brace) == null and !took_a_line) {
+        const cut = self.closerMayHaveBeenTaken(went_on);
+        if (self.cursor.eat(.r_brace) == null and !cut) {
             try self.reportAt(.s_match, self.cursor.current(), "expected `}`", "this match is never closed");
         }
 
@@ -7134,7 +7150,8 @@ const Parser = struct {
         defer items.deinit(self.gpa);
         var base = ExprId.none;
         var misplaced = false;
-        var took_a_line = false;
+        // Whether the fields read on past a line a refused token took.
+        var went_on = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_brace)) {
             const before = self.cursor.current();
@@ -7187,15 +7204,16 @@ const Parser = struct {
             }
 
             if (self.cursor.eat(.comma) == null) {
-                took_a_line = took_a_line or self.afterARefusedTokenEndingItsLine();
                 // Only a field can go on a structure literal: a name and
                 // its `=`.
-                if (!took_a_line or !self.cursor.at(.identifier) or self.cursor.peekAt(1) != .equal) break;
+                if (!self.afterARefusedTokenEndingItsLine() or !self.cursor.at(.identifier) or self.cursor.peekAt(1) != .equal) break;
+                went_on = true;
             }
             if (self.cursor.current() == before) _ = self.cursor.advance();
         }
 
-        if (self.cursor.eat(.r_brace) == null and !took_a_line) {
+        const cut = self.closerMayHaveBeenTaken(went_on);
+        if (self.cursor.eat(.r_brace) == null and !cut) {
             try self.reportAt(.s_brace, self.cursor.current(), "expected `}`", "this literal is never closed");
         }
 
@@ -7238,16 +7256,18 @@ const Parser = struct {
         var elements: std.ArrayList(ExprId) = .empty;
         defer elements.deinit(self.gpa);
 
-        var took_a_line = false;
+        // Whether the elements read on past a line a refused token took.
+        var went_on = false;
         while (!self.cursor.at(.r_bracket) and !self.cursor.at(.eof)) {
             try elements.append(self.gpa, try self.parseFull());
             if (self.cursor.eat(.comma) == null) {
-                took_a_line = took_a_line or self.afterARefusedTokenEndingItsLine();
                 if (!self.listGoesOnPastARefusedLineEnd()) break;
+                went_on = true;
             }
         }
 
-        if (self.cursor.eat(.r_bracket) == null and !took_a_line) {
+        const cut = self.closerMayHaveBeenTaken(went_on);
+        if (self.cursor.eat(.r_bracket) == null and !cut) {
             try self.reportAt(
                 .s_bracket,
                 self.cursor.current(),

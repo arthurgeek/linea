@@ -1,0 +1,18 @@
+// A byte no token begins is reported where it is written. A call that holds
+// one and is closed on its line has the arguments it writes, so it is held to
+// how many its callee takes, too many or too few.
+fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+    b
+}
+
+fn too_many() -> UInt8 {
+    three("a", 1, 2, 3, $)
+}
+
+fn too_few() -> UInt8 {
+    three($)
+}
+
+fn main() -> UInt8 {
+    too_many() + too_few()
+}

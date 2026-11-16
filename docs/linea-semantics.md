@@ -489,9 +489,14 @@ more deeply is refused to the end of its line. An unclosed
 literal holds the rest of its line, and a byte no token begins may stand for
 anything, so a call, an array, a structure literal or a `match` with either
 as the last token of an element's line is not reported for the comma or the
-closing bracket that line may have held. Such a call is not reported for an
-argument missing, and is reported for too many only where the arguments up to
-and including the one holding the refused token are already too many. The lines of a multi-line
+closing bracket that line may have held. The list reads on to the next line
+unless that line begins a statement or a declaration; a separator missing
+anywhere else is reported, and so is a closing bracket missing where the list
+stops at anything but such a line. A call one of whose arguments ends in a
+token that took its line is not reported for an argument missing, and is
+reported for too many only where the arguments up to and including that one
+are already too many. A call closed on the line of its refused token is held
+to its arguments as any call is. The lines of a multi-line
 literal are consecutive: a blank line or a comment between two of its lines is
 refused. A multi-line literal cannot begin inside an interpolation, since its
 line would run over the `}` that closes the interpolation.

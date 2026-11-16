@@ -2768,6 +2768,8 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/text/an_unclosed_literal_ending_a_one_line_match_is_reported_once.lin",
     "tests/text/an_unclosed_literal_ending_a_one_line_call_is_reported_once.lin",
     "tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin",
+    "tests/text/a_closed_call_holding_a_refused_byte_is_held_to_its_arguments.lin",
+    "tests/text/an_unclosed_literal_in_a_structure_literal_excuses_only_its_own_line.lin",
     "tests/diag/a_byte_no_token_begins_ending_a_line_of_an_array_is_reported_once.lin",
     "tests/traits/an_implementation_head_holding_a_refused_type_in_a_callable_is_compared_with_no_other.lin",
     "tests/traits/a_trait_is_never_closed.lin",

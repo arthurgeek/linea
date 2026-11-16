@@ -24680,36 +24680,29 @@ const Checker = struct {
         return .{ .args = given, .owned = false };
     }
 
-    /// How many of a call's arguments are known to be written, where its
-    /// text holds a token the lexer refused: the arguments up to and
-    /// including the one that holds it. Null where the call holds none.
+    /// How many of a call's arguments are known to be written, where one
+    /// of them ended in a token the lexer refused that took the rest of its
+    /// line: the arguments up to and including that one. Null where none
+    /// did, which the parser records on the call.
     ///
     /// A literal left open takes the rest of its line, and the commas and
     /// the `)` on it, so what the arguments after it were meant to be, and
     /// how many, is not known. The arguments before it, and it, are written
-    /// whatever it took. So a call is not held to a parameter its arguments
-    /// may have filled, and is held to having too many where those it is
-    /// known to have are already too many.
+    /// whatever it took. So such a call is not held to a parameter its
+    /// arguments may have filled, and is held to having too many where those
+    /// it is known to have are already too many.
     ///
-    /// **Bound:** the call's own tokens, asked only where a count is wrong.
+    /// **Bound:** the call's arguments, asked only where a count is wrong.
     fn argumentsKnownWritten(self: *const Checker, id: ExprId) ?usize {
-        if (self.ast.exprTag(id).payload() != .call) return null;
-        const range = self.ast.exprTokens(id);
-        var refused: ?u32 = null;
-        var at = range.start.index();
-        while (at < range.end.index()) : (at += 1) {
-            if (self.ast.tokenTag(TokenId.at(at)) == .invalid) {
-                refused = at;
-                break;
-            }
+        if (!self.ast.callCutShort(id)) return null;
+        const args = self.ast.call(id).args;
+        for (args, 1..) |arg, known| {
+            const range = self.ast.exprTokens(arg);
+            if (range.end.index() == 0) continue;
+            const last = TokenId.at(range.end.index() - 1);
+            if (self.ast.tokenTag(last) == .invalid and self.ast.lineBreakFollows(last)) return known;
         }
-        const first = refused orelse return null;
-        var known: usize = 0;
-        for (self.ast.call(id).args) |arg| {
-            if (self.ast.exprTokens(arg).start.index() > first) break;
-            known += 1;
-        }
-        return known;
+        return args.len;
     }
 
     /// More arguments than there are parameters.
