@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Run` for `fn(read Meters) -> Str`
+  --> tests/traits/callable_heads/a_contract_over_a_scalar_newtype_is_no_part_of_a_head.lin:18:6
+   |
+12 | impl Run for fn(a: Meters) -> Str where carries(a) {
+   |      --- the other implementation
+18 | impl Run for fn(a: Meters) -> Str where carries() {
+   |      ^^^ no instantiation may answer to two implementations of one trait

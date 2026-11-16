@@ -1,0 +1,26 @@
+// A newtype over a scalar carries nothing, as the scalar does, so a contract
+// over a parameter of that type is no part of the callable type. The two
+// heads below are one type written two ways, and the second implementation
+// is a second answer for it.
+@copyable
+type Meters = UInt64
+
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl Run for fn(a: Meters) -> Str where carries(a) {
+    fn go(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Run for fn(a: Meters) -> Str where carries() {
+    fn go(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

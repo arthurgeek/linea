@@ -1,7 +1,12 @@
 # 213. A trait may be implemented for a callable type, keyed by its shape
 
 Status: Accepted — 2026-10-07; the sixty-parameter cap of the Shape clause is
-superseded by [0271](0271-a-callable-head-of-any-length-has-a-shape.md).
+superseded by [0271](0271-a-callable-head-of-any-length-has-a-shape.md); the
+Duplicates clause is superseded by
+[0272](0272-two-applications-of-one-type-may-each-implement-a-trait.md): two
+callable heads of one shape that are different types may each implement a
+trait. The shape as how a head is filed and found, and every other clause,
+stand.
 Extends [0081](0081-an-implementation-is-generic-over-its-head.md),
 [0093](0093-two-implementations-that-could-answer-once-are-refused.md) and
 [0148](0148-parameter-heads-match-complete-trait-keys.md).

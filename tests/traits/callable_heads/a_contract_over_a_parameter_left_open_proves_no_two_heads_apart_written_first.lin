@@ -1,0 +1,30 @@
+// A contract over a parameter of the implementation stands only where that
+// parameter is settled to a type that can carry a dependency. At `UInt8` it
+// does not, so both heads below are `fn(a: UInt8) -> Str` there.
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl[T] Run for fn(a: T) -> Str where carries(a) {
+    fn go(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[U] Run for fn(a: U) -> Str where carries() {
+    fn go(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn ask[H: Run](h: H) -> UInt8 {
+    h.go()
+}
+
+fn lit(_a: UInt8) -> Str where carries() {
+    "k"
+}
+
+fn main() -> UInt8 {
+    ask(lit)
+}

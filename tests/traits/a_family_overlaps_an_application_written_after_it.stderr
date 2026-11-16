@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Weigh` for `Crate[UInt8]`
+  --> tests/traits/a_family_overlaps_an_application_written_after_it.lin:18:6
+   |
+12 | impl[T] Weigh for Crate[T] {
+   |         ----- the other implementation
+18 | impl Weigh for Crate[UInt8] {
+   |      ^^^^^ no instantiation may answer to two implementations of one trait

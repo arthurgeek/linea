@@ -25,6 +25,53 @@ pub fn isTupleArity(count: usize) bool {
     return count >= min_tuple_arity and count <= max_tuple_arity;
 }
 
+/// Whether a head applies its declaration's own parameters and nothing else:
+/// each argument a bare name spelling one of `declared`, in the order they
+/// are declared, none twice. With `allow_subset` the head may leave
+/// parameters out, which a trait's arguments then settle; without it the head
+/// writes every one. A declaration of no parameters applies whatever it
+/// likes.
+///
+/// The one statement of the form: the parser refuses a head that fails it,
+/// and a later pass asks here whether a head it holds was refused.
+/// `names.textOf(token)` spells a token.
+pub fn headAppliesItsParameters(names: anytype, applied: []const TypeRef, declared: []const TypeParam, allow_subset: bool) bool {
+    if (declared.len == 0) return true;
+    if (!allow_subset and applied.len != declared.len) return false;
+    var next: usize = 0;
+    for (applied) |argument| {
+        if (argument.kind != .named or argument.args.len() != 0 or argument.name == .none) return false;
+        while (next < declared.len and !std.mem.eql(u8, names.textOf(argument.name), names.textOf(declared[next].name))) : (next += 1) {}
+        if (next == declared.len) return false;
+        next += 1;
+    }
+    return true;
+}
+
+test "a head applies its declaration's parameters in order, each once" {
+    const Names = struct {
+        pub fn textOf(_: @This(), at: TokenId) []const u8 {
+            return switch (at.index()) {
+                0 => "T",
+                1 => "U",
+                else => "UInt8",
+            };
+        }
+    };
+    const t: TypeRef = .{ .at = TokenId.at(0), .name = TokenId.at(0) };
+    const u: TypeRef = .{ .at = TokenId.at(1), .name = TokenId.at(1) };
+    const byte: TypeRef = .{ .at = TokenId.at(2), .name = TokenId.at(2) };
+    const declared = [_]TypeParam{ .{ .name = TokenId.at(0), .bounds = .empty }, .{ .name = TokenId.at(1), .bounds = .empty } };
+    const names: Names = .{};
+    try std.testing.expect(headAppliesItsParameters(names, &.{ t, u }, &declared, false));
+    try std.testing.expect(headAppliesItsParameters(names, &.{u}, &declared, true));
+    try std.testing.expect(!headAppliesItsParameters(names, &.{u}, &declared, false));
+    try std.testing.expect(!headAppliesItsParameters(names, &.{ u, t }, &declared, true));
+    try std.testing.expect(!headAppliesItsParameters(names, &.{ t, t }, &declared, true));
+    try std.testing.expect(!headAppliesItsParameters(names, &.{ t, byte }, &declared, true));
+    try std.testing.expect(headAppliesItsParameters(names, &.{ byte, byte }, &.{}, false));
+}
+
 test "a tuple has two to eight components" {
     try std.testing.expect(!isTupleArity(0));
     try std.testing.expect(!isTupleArity(1));

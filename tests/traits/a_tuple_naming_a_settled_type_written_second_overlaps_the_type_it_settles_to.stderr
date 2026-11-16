@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Tr` for `(UInt8, Bool)`
+  --> tests/traits/a_tuple_naming_a_settled_type_written_second_overlaps_the_type_it_settles_to.lin:23:6
+   |
+17 | impl Tr for (UInt8, Bool) {
+   |      -- the other implementation
+23 | impl Tr for (S.Reading, Bool) {
+   |      ^^ no instantiation may answer to two implementations of one trait

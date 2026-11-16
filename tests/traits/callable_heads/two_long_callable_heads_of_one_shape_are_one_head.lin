@@ -1,7 +1,7 @@
-// [N-Duplicate]. A trait takes one implementation for each callable shape,
-// and a shape of sixty-one parameters is one shape like any other: two heads
-// with the same invocation and conventions are the same head, whatever types
-// their parameters write.
+// [N-Duplicate]. A callable head of sixty-one parameters is filed by its shape
+// like any other, so a second head of that shape is compared with the first.
+// The two write the same types under other labels, and a label is no part of
+// a callable type: the second implementation repeats the first.
 trait Handle {
     fn handle(_self: Self) -> UInt8
 }
@@ -12,7 +12,7 @@ impl Handle for fn(p0: UInt8, p1: UInt8, p2: UInt8, p3: UInt8, p4: UInt8, p5: UI
     }
 }
 
-impl Handle for fn(q0: UInt16, q1: UInt16, q2: UInt16, q3: UInt16, q4: UInt16, q5: UInt16, q6: UInt16, q7: UInt16, q8: UInt16, q9: UInt16, q10: UInt16, q11: UInt16, q12: UInt16, q13: UInt16, q14: UInt16, q15: UInt16, q16: UInt16, q17: UInt16, q18: UInt16, q19: UInt16, q20: UInt16, q21: UInt16, q22: UInt16, q23: UInt16, q24: UInt16, q25: UInt16, q26: UInt16, q27: UInt16, q28: UInt16, q29: UInt16, q30: UInt16, q31: UInt16, q32: UInt16, q33: UInt16, q34: UInt16, q35: UInt16, q36: UInt16, q37: UInt16, q38: UInt16, q39: UInt16, q40: UInt16, q41: UInt16, q42: UInt16, q43: UInt16, q44: UInt16, q45: UInt16, q46: UInt16, q47: UInt16, q48: UInt16, q49: UInt16, q50: UInt16, q51: UInt16, q52: UInt16, q53: UInt16, q54: UInt16, q55: UInt16, q56: UInt16, q57: UInt16, q58: UInt16, q59: UInt16, q60: UInt16) -> UInt16 {
+impl Handle for fn(q0: UInt8, q1: UInt8, q2: UInt8, q3: UInt8, q4: UInt8, q5: UInt8, q6: UInt8, q7: UInt8, q8: UInt8, q9: UInt8, q10: UInt8, q11: UInt8, q12: UInt8, q13: UInt8, q14: UInt8, q15: UInt8, q16: UInt8, q17: UInt8, q18: UInt8, q19: UInt8, q20: UInt8, q21: UInt8, q22: UInt8, q23: UInt8, q24: UInt8, q25: UInt8, q26: UInt8, q27: UInt8, q28: UInt8, q29: UInt8, q30: UInt8, q31: UInt8, q32: UInt8, q33: UInt8, q34: UInt8, q35: UInt8, q36: UInt8, q37: UInt8, q38: UInt8, q39: UInt8, q40: UInt8, q41: UInt8, q42: UInt8, q43: UInt8, q44: UInt8, q45: UInt8, q46: UInt8, q47: UInt8, q48: UInt8, q49: UInt8, q50: UInt8, q51: UInt8, q52: UInt8, q53: UInt8, q54: UInt8, q55: UInt8, q56: UInt8, q57: UInt8, q58: UInt8, q59: UInt8, q60: UInt8) -> UInt8 {
     fn handle(_self: Self) -> UInt8 {
         1
     }

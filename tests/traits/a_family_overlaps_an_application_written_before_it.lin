@@ -1,0 +1,27 @@
+// Two implementations overlap whichever is written first. The implementation
+// for `Crate[UInt8]` comes first here, and `impl[T] Weigh for Crate[T]` after
+// it answers for `Crate[UInt8]` too.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl[T] Weigh for Crate[T] {
+    fn weigh(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    small.weigh()
+}

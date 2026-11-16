@@ -1,0 +1,27 @@
+// `impl[T] Weigh for Crate[T]` answers for every application of `Crate`,
+// `Crate[UInt8]` among them, so a second implementation for `Crate[UInt8]`
+// would give that type two answers.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl[T] Weigh for Crate[T] {
+    fn weigh(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    small.weigh()
+}

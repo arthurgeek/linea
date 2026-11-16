@@ -1,0 +1,30 @@
+// The argument a derive's head applies may be an array type. The generated
+// code reads the target's parameter as `[UInt8; 2]`, length included, in the
+// binding that builds the field.
+trait Fresh {
+    fn fresh() -> Self
+}
+
+template impl Fresh where reflect.target: struct {
+    fn fresh() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = [4, 5]
+                value
+            },
+            {},
+        )
+    }
+}
+
+struct M[T] {
+    value: T,
+}
+
+derive Fresh for M[[UInt8; 2]]
+
+fn main() -> UInt8 {
+    let held: M[[UInt8; 2]] = Fresh.fresh()
+    held.value[0] + held.value[1]
+}

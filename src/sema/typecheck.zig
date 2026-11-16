@@ -1481,6 +1481,12 @@ fn typecheckInternal(
     const z_parts = tracy.beginZone(@src(), "tc.parts");
     try c.settleDeclaredAnswers();
     try c.settleDeferredHeads(implementations);
+    // Every head and trait argument is read now, before any body asks which
+    // implementation answers for a type, so the rows a type finds by its own
+    // identity are filed under it.
+    try c.impl_index.indexGround(gpa, implementations, &c.builder);
+    c.builder.impl_index = c.impl_index;
+    c.builder.invalidateImplementationLookup();
     // An implementation whose head or trait arguments named a settled type
     // had nothing to compare while that type was unanswered, so the overlap
     // check passed over it. It is read now, and is held to the same rule.
@@ -14059,22 +14065,27 @@ const Checker = struct {
     /// is. The blanket rows are not sized by `ty`: a program declaring many
     /// blanket implementations pays their number once per such pair.
     fn prepareTraitSettlingResults(self: *Checker, owner: DeclId, ty: TypeId) !void {
-        const head = self.builder.headOf(ty);
-        const heads = [_]types_mod.Head{ head, .parameter };
-        const count: usize = if (head == .parameter) 1 else 2;
-        for (heads[0..count]) |under| {
-            var rows = self.builder.impl_index.membersOfHead(under);
-            while (rows.next()) |at| {
-                const row = self.builder.implementations[at];
-                if (!row.ofATrait() or !row.valid_key or !row.head.same(under)) continue;
-                var signatures = self.res.signatures.of(self.ast, DeclId.at(row.trait));
-                while (signatures.next()) |sig| {
-                    const params = self.ast.declParams(sig);
-                    if (params.len == 0 or params[0].convention != .sink) continue;
-                    if (declaresOwnBounds(self.constraints, sig)) continue;
-                    try self.builder.prepareTraitSettlingResult(owner, ty, @enumFromInt(at), sig);
-                }
-            }
+        var own = try self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, ty);
+        while (own.next()) |at| try self.prepareSettlingResultsOfRow(owner, ty, at);
+        if (self.builder.headOf(ty) == .parameter) return;
+        var blanket = self.builder.impl_index.membersOfHead(.parameter);
+        while (blanket.next()) |at| {
+            if (!self.builder.implementations[at].head.same(.parameter)) continue;
+            try self.prepareSettlingResultsOfRow(owner, ty, at);
+        }
+    }
+
+    /// One row's share of `prepareTraitSettlingResults`: each signature of
+    /// its trait that takes its receiver by `sink`.
+    fn prepareSettlingResultsOfRow(self: *Checker, owner: DeclId, ty: TypeId, at: u32) !void {
+        const row = self.builder.implementations[at];
+        if (!row.ofATrait() or !row.valid_key) return;
+        var signatures = self.res.signatures.of(self.ast, DeclId.at(row.trait));
+        while (signatures.next()) |sig| {
+            const params = self.ast.declParams(sig);
+            if (params.len == 0 or params[0].convention != .sink) continue;
+            if (declaresOwnBounds(self.constraints, sig)) continue;
+            try self.builder.prepareTraitSettlingResult(owner, ty, @enumFromInt(at), sig);
         }
     }
 
@@ -31856,6 +31867,14 @@ const Checker = struct {
                 if (self.ast.declTag(descriptor.derive) == .derive_impl) descriptor.derive else descriptor.target,
                 descriptor.derive_trait,
             );
+            // A standalone request's head is a written type of the source as
+            // well, and a length or a default written in an argument it
+            // applies is typed here for the same reason.
+            if (self.ast.declTag(descriptor.derive) == .derive_impl) {
+                self.current = self.program.moduleOf(descriptor.derive);
+                self.generic = descriptor.derive;
+                _ = try self.typeOfRefOf(self.current, descriptor.derive, self.ast.declHead(descriptor.derive));
+            }
 
             self.current = self.program.moduleOf(descriptor.generated_impl);
             self.generic = descriptor.generated_impl;
@@ -32837,6 +32856,17 @@ const Checker = struct {
     /// whatever its head's own parameters do, since an argument list written
     /// out is ground however generic the type it is written for.
     ///
+    /// A head that is ground as well is hashed with the list, because two
+    /// ground headers unify only where they are one header: a constructor
+    /// implementing a trait for many of its applications,
+    /// `Weigh for Crate[UInt8]` beside `Weigh for Crate[UInt16]`, costs one
+    /// lookup each. An implementation with ground arguments and an open head
+    /// is unified against every member sharing its list. Such a head applies
+    /// its constructor to its own parameters and so answers for every
+    /// application, which makes each of those pairs an overlap: an accepted
+    /// program holds one member per list beside it, and a refused one pays a
+    /// unification per report.
+    ///
     /// `among`, where given, limits the reports to pairs holding one of its
     /// members: the implementations read again once declared answers were
     /// settled, which the first asking passed over and every pair without
@@ -32864,14 +32894,16 @@ const Checker = struct {
         var ground_list: std.ArrayList(u32) = .empty;
         defer ground_list.deinit(self.gpa);
 
-        // The ground members sharing one argument list, as a chain per list:
-        // the head of each is in `alike`, keyed by a hash of the list, and
-        // `next` walks the rest. Positions are into `ground_list`, so both
-        // are sized by the chain being examined and not by the program.
-        var alike: std.AutoHashMapUnmanaged(u64, u32) = .empty;
+        // The ground members sharing one argument list, as chains per list.
+        // Members whose head is ground too are chained by header, the head
+        // hashed with the list; the others are chained by the list alone,
+        // and so is every member a second time, for an open head to meet.
+        // Positions are into `ground_list`, so all are sized by the chain
+        // being examined and not by the program.
+        var alike: GroundChains = .{};
         defer alike.deinit(self.gpa);
-        var next: std.ArrayList(u32) = .empty;
-        defer next.deinit(self.gpa);
+        var settled_heads: std.ArrayList(bool) = .empty;
+        defer settled_heads.deinit(self.gpa);
 
         for (implementations, 0..) |im, i| {
             if (im.isAmbient() or !im.ofATrait()) continue;
@@ -32975,26 +33007,94 @@ const Checker = struct {
                 }
             }
 
-            alike.clearRetainingCapacity();
-            next.clearRetainingCapacity();
-            try next.resize(self.gpa, ground_list.items.len);
+            try alike.reset(self.gpa, ground_list.items.len);
+            settled_heads.clearRetainingCapacity();
+            const slot = try self.tellingSlot(implementations, ground_list.items);
             for (ground_list.items, 0..) |at, gi| {
-                const key = hashOfTypes(implementations[at].args);
-                var walk = alike.get(key);
-                while (walk) |j| {
-                    const other = ground_list.items[j];
-                    // Hashed and then compared, so a collision costs a
-                    // comparison rather than a report about two lists that
-                    // are not the same.
-                    if (pairs.wanted(other, at) and std.mem.eql(TypeId, implementations[other].args, implementations[at].args)) {
+                const im_at = implementations[at];
+                const settled_head = try self.builder.allGround(&.{im_at.ty});
+                try settled_heads.append(self.gpa, settled_head);
+                const list_key = hashOfTypes(im_at.args);
+                const header_key = hashOfHeader(im_at.ty, im_at.args);
+                // The ground type this head writes at the slot that tells
+                // the chain's callable heads apart, hashed with the list.
+                const slot_key: ?u64 = if (slot) |chosen|
+                    if (try self.groundSlot(im_at.ty, chosen)) |root| hashOfHeader(root, im_at.args) else null
+                else
+                    null;
+                // A ground header meets the ground headers equal to it and
+                // the open heads sharing its list; an open head meets every
+                // member sharing its list. Where the chain has a telling
+                // slot, two heads that write different ground types there
+                // are never one type, so a head that writes one meets only
+                // the heads that write the same there or leave it open.
+                const chains: [3]GroundChains.Walk = if (settled_head)
+                    .{
+                        alike.walk(.by_header, header_key),
+                        alike.walk(.open_by_list, list_key),
+                        if (slot_key) |key| alike.walk(.open_by_slot, key) else .{},
+                    }
+                else if (slot_key) |key|
+                    .{ alike.walk(.open_by_list, list_key), alike.walk(.open_by_slot, key), alike.walk(.settled_by_slot, key) }
+                else
+                    .{ alike.walk(.by_list, list_key), .{}, .{} };
+                for (chains) |chain| {
+                    var walk = chain;
+                    while (walk.next()) |j| {
+                        const other = ground_list.items[j];
+                        const im_other = implementations[other];
+                        // Hashed and then compared, so a collision costs a
+                        // comparison rather than a report about two lists
+                        // that are not the same.
+                        if (!pairs.wanted(other, at)) continue;
+                        if (!std.mem.eql(TypeId, im_other.args, im_at.args)) continue;
+                        if (settled_head and settled_heads.items[j] and im_other.ty != im_at.ty) continue;
                         try self.refuseIfOverlapping(implementations, other, at);
                     }
-                    walk = if (next.items[j] == j) null else next.items[j];
                 }
-                next.items[gi] = alike.get(key) orelse @intCast(gi);
-                try alike.put(self.gpa, key, @intCast(gi));
+                try alike.note(self.gpa, .by_list, list_key, @intCast(gi));
+                if (settled_head) {
+                    try alike.note(self.gpa, .by_header, header_key, @intCast(gi));
+                    if (slot_key) |key| try alike.note(self.gpa, .settled_by_slot, key, @intCast(gi));
+                } else if (slot_key) |key| {
+                    try alike.note(self.gpa, .open_by_slot, key, @intCast(gi));
+                } else {
+                    try alike.note(self.gpa, .open_by_list, list_key, @intCast(gi));
+                }
             }
         }
+    }
+
+    /// The type a callable head writes at `slot` where that type is ground,
+    /// or null where the head is not callable, has no such slot, or leaves
+    /// it open.
+    fn groundSlot(self: *Checker, head: TypeId, slot: usize) std.mem.Allocator.Error!?TypeId {
+        if (slot >= types_mod.callableSlots(&self.builder, head)) return null;
+        const written = types_mod.callableSlot(&self.builder, head, slot);
+        return if (try self.builder.allGround(&.{written})) written else null;
+    }
+
+    /// The first slot at which two callable heads among `rows` write
+    /// different ground types, or null where none does: the slot the chain's
+    /// heads are filed by, since two that differ there can never be one type.
+    ///
+    /// **Bound:** the slots of the rows, each read once.
+    fn tellingSlot(self: *Checker, implementations: []const types_mod.Implementation, rows: []const u32) std.mem.Allocator.Error!?usize {
+        var first: std.ArrayList(?TypeId) = .empty;
+        defer first.deinit(self.gpa);
+        var chosen: ?usize = null;
+        for (rows) |at| {
+            const head = implementations[at].ty;
+            const slots = types_mod.callableSlots(&self.builder, head);
+            if (slots > first.items.len) try first.appendNTimes(self.gpa, null, slots - first.items.len);
+            for (0..@min(slots, chosen orelse slots)) |slot| {
+                const root = try self.groundSlot(head, slot) orelse continue;
+                if (first.items[slot]) |seen| {
+                    if (seen != root) chosen = slot;
+                } else first.items[slot] = root;
+            }
+        }
+        return chosen;
     }
 
     /// Whether a trait bounding the parameter `head` implements has no
@@ -33136,8 +33236,9 @@ const Checker = struct {
     /// the standard library's, the program's implementation carries it.
     ///
     /// `first` and `second` are positions in a list held in declaration order,
-    /// so the report lands where a programmer added the collision, which is
-    /// where `[N-Duplicate]` lands for the same reason.
+    /// and the report lands on whichever header is written later in the
+    /// source, which is where a programmer added the collision and where
+    /// `[N-Duplicate]` lands for the same reason.
     fn refuseIfOverlapping(
         self: *Checker,
         implementations: []const types_mod.Implementation,
@@ -33148,11 +33249,11 @@ const Checker = struct {
         const a = implementations[first];
         const b = implementations[second];
 
-        // Two implementations written identically overlap for a reason the
-        // resolver has already stated about that very pair. One mistake gets
-        // one diagnostic, and the one that names the repetition is the more
-        // useful of the two.
-        if (self.res.reportedDuplicate(a.decl, b.decl)) return;
+        // An implementation written a second time overlaps the one it
+        // repeats and whatever that one overlaps, for a reason the resolver
+        // has already stated about it. One mistake gets one diagnostic, and
+        // the one that names the repetition is the more useful of the two.
+        if (self.res.repeatsAnImplementation(a.decl) or self.res.repeatsAnImplementation(b.decl)) return;
 
         // An implementation resolution refused is reported as refused, and
         // overlapping another is the same mistake said a second time. It keeps
@@ -33192,8 +33293,17 @@ const Checker = struct {
         const a_is_library = self.declaredInLibrary(a.decl);
         const b_is_library = self.declaredInLibrary(b.decl);
         const user_first = b_is_library and !a_is_library;
-        const first_decl = if (user_first) b.decl else a.decl;
-        const second_decl = if (user_first) a.decl else b.decl;
+        // Otherwise the one written later in the source carries it. A derive
+        // is written where its request is, though the implementation it
+        // generates is declared after everything the file wrote, so the two
+        // are ordered by where each header's trait is written and not by
+        // their place in the list.
+        const a_at = self.writtenPlace(self.ast.declTrait(a.decl));
+        const b_at = self.writtenPlace(self.ast.declTrait(b.decl));
+        const written_backwards = a_at.file == b_at.file and a_at.span.start > b_at.span.start;
+        const b_first = user_first or (a_is_library == b_is_library and written_backwards);
+        const first_decl = if (b_first) b.decl else a.decl;
+        const second_decl = if (b_first) a.decl else b.decl;
 
         // The library implements `Into` for every `From`, so a direct `Into`
         // implementation collides with that bridge whatever its types are.
@@ -33236,9 +33346,85 @@ const Checker = struct {
         try self.overlapping.put(gpa, b.decl, {});
     }
 
+    /// Where a token was written in the source: its own place, or for a token
+    /// of a generated file the place of the request it was generated from.
+    fn writtenPlace(self: *const Checker, at: TokenId) Loc {
+        const file = self.ast.fileOf(at);
+        const span = self.ast.tokenSpan(at);
+        const origin = self.program.generatedOriginAt(file, span) orelse return .{ .file = file, .span = span };
+        if (origin.derive_trait == .none) return .{ .file = file, .span = span };
+        return .{ .file = self.ast.fileOf(origin.derive_trait), .span = self.ast.tokenSpan(origin.derive_trait) };
+    }
+
     fn declaredInLibrary(self: *const Checker, d: node.DeclId) bool {
         const module = self.program.moduleOf(d);
         return module != .none and self.program.get(module).library;
+    }
+
+    /// The members of one chain with ground argument lists, grouped: every
+    /// member by its list; the members whose head is ground by head and list;
+    /// the members whose head is open by list, or, where the head writes a
+    /// ground type at the slot that tells the chain's callable heads apart,
+    /// by list and that type; and the ground heads by list and that type too,
+    /// for an open head filed that way to meet. A member is a position in the
+    /// chain's ground list.
+    ///
+    /// **Bound:** five links per member.
+    const GroundChains = struct {
+        heads: [groupings]std.AutoHashMapUnmanaged(u64, u32) = @splat(.empty),
+        links: [groupings]std.ArrayList(u32) = @splat(.empty),
+
+        const groupings = 5;
+        const Grouping = enum(u3) { by_list, by_header, open_by_list, open_by_slot, settled_by_slot };
+
+        fn deinit(self: *GroundChains, gpa: std.mem.Allocator) void {
+            for (&self.heads) |*heads| heads.deinit(gpa);
+            for (&self.links) |*links| links.deinit(gpa);
+        }
+
+        fn reset(self: *GroundChains, gpa: std.mem.Allocator, members: usize) !void {
+            for (&self.heads) |*heads| heads.clearRetainingCapacity();
+            for (&self.links) |*links| {
+                links.clearRetainingCapacity();
+                try links.resize(gpa, members);
+            }
+        }
+
+        /// Puts `member` first in the chain `key` names. A member that ends
+        /// its chain links to itself.
+        fn note(self: *GroundChains, gpa: std.mem.Allocator, grouping: Grouping, key: u64, member: u32) !void {
+            const g = @intFromEnum(grouping);
+            self.links[g].items[member] = self.heads[g].get(key) orelse member;
+            try self.heads[g].put(gpa, key, member);
+        }
+
+        fn walk(self: *const GroundChains, grouping: Grouping, key: u64) Walk {
+            const g = @intFromEnum(grouping);
+            return .{ .links = self.links[g].items, .at = self.heads[g].get(key) };
+        }
+
+        const Walk = struct {
+            links: []const u32 = &.{},
+            at: ?u32 = null,
+
+            fn next(self: *Walk) ?u32 {
+                const member = self.at orelse return null;
+                self.at = if (self.links[member] == member) null else self.links[member];
+                return member;
+            }
+        };
+    };
+
+    /// A head and the arguments given the trait as one number.
+    fn hashOfHeader(head: TypeId, args: []const TypeId) u64 {
+        var h: std.hash.Wyhash = .init(args.len);
+        const head_id: u32 = @intFromEnum(head);
+        h.update(std.mem.asBytes(&head_id));
+        for (args) |t| {
+            const id: u32 = @intFromEnum(t);
+            h.update(std.mem.asBytes(&id));
+        }
+        return h.final();
     }
 
     /// A run of types as one number, so a caller grouping runs that are equal
@@ -39087,11 +39273,11 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         .{ .declarations =
         \\impl Route[Tag[UInt8]] for Pair[Bool, UInt8] {}
         \\impl[A, B] Route[Tag[B]] for Pair[A, B] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\impl[A, B] Route[Tag[B]] for Pair[A, B] {}
         \\impl Route[Tag[UInt8]] for Pair[Bool, UInt8] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\impl[A, B] Route[Tag[B]] for Pair[A, B] {}
         \\impl[A, B] Route[Other[B]] for Pair[A, B] {}
@@ -39115,11 +39301,11 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         .{ .declarations =
         \\impl[A, B] Route[A] for Pair[A, B] {}
         \\impl Route[Tag[UInt8]] for Pair[Tag[UInt8], Bool] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\impl Route[Tag[UInt8]] for Pair[Tag[UInt8], Bool] {}
         \\impl[A, B] Route[A] for Pair[A, B] {}
-        , .duplicates = 1 },
+        , .overlaps = 1 },
         .{ .declarations =
         \\trait Family { type Item }
         \\impl[A: Family, B] Route[A.Item] for Pair[A, B] {}
@@ -39137,6 +39323,50 @@ test "coherence keeps nominal and wildcard overlap semantics" {
         \\impl[A, B] Route[fn(read left: A) -> A] for Pair[A, B] {}
         \\impl[A, B] Route[fn(sink right: B) -> B] for Pair[A, B] {}
         },
+        // Two applications of one constructor are two headers, at one
+        // argument list and at none.
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt16] {}
+        \\impl Route[UInt8] for Pair[Tag[Bool], UInt8] {}
+        \\impl Route[UInt8] for Pair[Tag[UInt8], UInt8] {}
+        },
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt16] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        , .duplicates = 1 },
+        // Two callable heads of one shape are two headers where they are two
+        // types, one where only a label differs, and a generic one meets the
+        // concrete one it could be settled to.
+        .{ .declarations =
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt8 {}
+        \\impl Route[UInt8] for fn(x: Bool) -> UInt8 {}
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt16 {}
+        },
+        .{ .declarations =
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt8 {}
+        \\impl Route[UInt8] for fn(y: UInt8) -> UInt8 {}
+        , .duplicates = 1 },
+        .{ .declarations =
+        \\impl Route[UInt8] for fn(x: UInt8) -> UInt8 {}
+        \\impl[T] Route[UInt8] for fn(x: T) -> T {}
+        , .overlaps = 1 },
+        // An implementation written three times is two repetitions and no
+        // overlap.
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        , .duplicates = 2 },
+        // A family with a ground argument list meets every application
+        // sharing the list, and no application at another list.
+        .{ .declarations =
+        \\impl Route[UInt8] for Pair[Bool, UInt8] {}
+        \\impl Route[UInt16] for Pair[Bool, UInt8] {}
+        \\impl[A, B] Route[UInt8] for Pair[A, B] {}
+        \\impl Route[UInt8] for Pair[Bool, UInt16] {}
+        , .overlaps = 2 },
     };
     for (cases) |case| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);

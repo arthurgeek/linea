@@ -1,0 +1,40 @@
+// A type a trait declares is settled by each implementation. `Crate[UInt8]`
+// settles `Label` to `Bool` and `Crate[UInt16]` settles it to `UInt8`, so
+// `Crate[UInt8].Label` and `Crate[UInt16].Label` are different types.
+struct Crate[T] {
+    item: T,
+}
+
+trait Tagged {
+    type Label
+
+    fn label(self: Self) -> Self.Label
+}
+
+impl Tagged for Crate[UInt8] {
+    type Label = Bool
+
+    fn label(self: Self) -> Bool {
+        self.item > 0
+    }
+}
+
+impl Tagged for Crate[UInt16] {
+    type Label = UInt8
+
+    fn label(self: Self) -> UInt8 {
+        UInt8(self.item / 100)
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    let large: Crate[UInt16] = .{ item = 300 }
+    let full: Crate[UInt8].Label = small.label()
+    let size: Crate[UInt16].Label = large.label()
+    if full {
+        size + 10
+    } else {
+        size
+    }
+}

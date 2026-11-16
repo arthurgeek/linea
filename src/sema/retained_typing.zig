@@ -47,6 +47,7 @@ pub fn attach(gpa: Allocator, saved: *const types.Typing, relocation: Relocation
         try result.defaults.note(gpa, rawDecl(relocation, decl), param, entry.value_ptr.*);
     }
     result.impl_index = try types.ImplIndex.build(gpa, result.implementations);
+    try result.impl_index.indexGround(gpa, result.implementations, &result);
     result.supply_index = try supplyIndex(gpa, relocation, &saved.supply_index);
     result.call_index = try types.CallIndex.build(gpa, @intCast(result.expr_types.len), &result);
     return result;

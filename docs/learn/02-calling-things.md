@@ -331,6 +331,140 @@ Rust's `Coffee::cents(latte)` does.
 
 Traits are Rust's traits, with the same `impl Trait for Type` shape.
 
+### One trait for two uses of a generic type
+
+A generic type is a different type for each thing it is applied to:
+`Crate[UInt64]` and `Crate[Bool]` are two types that share a declaration. A
+trait can be implemented for each of them separately, with a body of its own:
+
+```linea
+import std.io
+
+// A crate holding one item of any type.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weighed {
+    fn grams(self: Self) -> UInt64
+}
+
+// A crate of a number holds that many grams.
+impl Weighed for Crate[UInt64] {
+    fn grams(self: Self) -> UInt64 {
+        self.item
+    }
+}
+
+// A crate of a flag is a half-kilo crate that is full or empty.
+impl Weighed for Crate[Bool] {
+    fn grams(self: Self) -> UInt64 {
+        if self.item {
+            500
+        } else {
+            0
+        }
+    }
+}
+
+// `T: Weighed` accepts either crate, and no other.
+fn shipping[T: Weighed](parcel: T) -> UInt64 {
+    parcel.grams() * 2
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let flour: Crate[UInt64] = .{ item = 750 }
+    let sealed: Crate[Bool] = .{ item = true }
+    io.println("flour: {flour.grams()} grams")?
+    io.println("sealed: {sealed.grams()} grams")?
+    io.println("shipping: {shipping(flour) + shipping(sealed)} cents")?
+    .Ok(0)
+}
+```
+
+```
+flour: 750 grams
+sealed: 500 grams
+shipping: 2500 cents
+```
+
+Each call runs the implementation written for the type of its receiver:
+`flour` is a `Crate[UInt64]` and `sealed` is a `Crate[Bool]`. Rust accepts the
+same pair, `impl Weighed for Crate<u64>` beside `impl Weighed for Crate<bool>`.
+
+A crate of anything else is a third type, and nothing implements `Weighed`
+for it. Passing a `Crate[UInt8]` to `shipping` is refused, naming the type:
+
+<!-- guide: edit 40 io.println("shipping: {shipping(flour) + shipping(sealed)} cents")? -->
+```linea
+    let labelled: Crate[UInt8] = .{ item = 3 }
+    io.println("shipping: {shipping(labelled)} cents")?
+```
+
+```
+error[T-Bound]: `T` requires `Weighed`, and `Crate[UInt8]` does not implement it
+  --> crates.lin:41:28
+   |
+41 |     io.println("shipping: {shipping(labelled)} cents")?
+   |                            ^^^^^^^^ implement it for that type, or drop the bound
+```
+
+What a trait cannot have is two implementations for the same type. Writing
+the second one again is refused, and the report names the type:
+
+<!-- guide: edit end -->
+```linea
+impl Weighed for Crate[Bool] {
+    fn grams(_self: Self) -> UInt64 {
+        250
+    }
+}
+```
+
+```
+error[N-Duplicate]: `Weighed` is already implemented for `Crate[Bool]`
+  --> crates.lin:43:6
+   |
+20 | impl Weighed for Crate[Bool] {
+   |      ------- already implemented here
+43 | impl Weighed for Crate[Bool] {
+   |      ^^^^^^^ a trait is implemented once for a type
+```
+
+An implementation for every crate, `impl[T] Weighed for Crate[T]`, is refused
+beside these two for the same reason: it would be a second answer for
+`Crate[Bool]` and for `Crate[UInt64]`.
+
+<!-- guide: edit end -->
+```linea
+impl[T] Weighed for Crate[T] {
+    fn grams(_self: Self) -> UInt64 {
+        100
+    }
+}
+```
+
+```
+error[T-Impl]: these two both answer `Weighed` for `Crate[Bool]`
+  --> crates.lin:43:9
+   |
+20 | impl Weighed for Crate[Bool] {
+   |      ------- the other implementation
+43 | impl[T] Weighed for Crate[T] {
+   |         ^^^^^^^ no instantiation may answer to two implementations of one trait
+error[T-Impl]: these two both answer `Weighed` for `Crate[UInt64]`
+  --> crates.lin:43:9
+   |
+13 | impl Weighed for Crate[UInt64] {
+   |      ------- the other implementation
+43 | impl[T] Weighed for Crate[T] {
+   |         ^^^^^^^ no instantiation may answer to two implementations of one trait
+```
+
+Linea never picks the more specific of two implementations, so a general one
+and a special case of it cannot both be written. Rust refuses that pair too,
+as conflicting implementations.
+
 ### A trait must be in scope for a dot call
 
 When a trait is declared in another module, a dot call reaches its operations

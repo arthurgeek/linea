@@ -1,0 +1,38 @@
+// Any number of applications of one generic type may each implement a trait,
+// in any order: no two of the three heads below can name one type.
+struct Crate[T] {
+    item: T,
+}
+
+trait Rank {
+    fn rank(self: Self) -> UInt8
+}
+
+impl Rank for Crate[Bool] {
+    fn rank(self: Self) -> UInt8 {
+        if self.item {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+impl Rank for Crate[UInt8] {
+    fn rank(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Rank for Crate[UInt16] {
+    fn rank(self: Self) -> UInt8 {
+        UInt8(self.item)
+    }
+}
+
+fn main() -> UInt8 {
+    let flag: Crate[Bool] = .{ item = true }
+    let byte: Crate[UInt8] = .{ item = 2 }
+    let word: Crate[UInt16] = .{ item = 3 }
+    flag.rank() * 100 + byte.rank() * 10 + word.rank()
+}

@@ -1,0 +1,22 @@
+// `impl[T] Run for fn(input: T) -> T` answers for every function taking and
+// returning one type, `fn(input: UInt8) -> UInt8` among them, so a second
+// implementation for that type would give it two answers.
+trait Run {
+    fn run(self: Self) -> UInt8
+}
+
+impl[T] Run for fn(input: T) -> T {
+    fn run(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+impl Run for fn(input: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(4)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

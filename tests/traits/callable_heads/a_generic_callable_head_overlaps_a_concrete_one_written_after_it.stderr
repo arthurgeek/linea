@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Run` for `fn(read UInt8) -> UInt8`
+  --> tests/traits/callable_heads/a_generic_callable_head_overlaps_a_concrete_one_written_after_it.lin:14:6
+   |
+8  | impl[T] Run for fn(input: T) -> T {
+   |         --- the other implementation
+14 | impl Run for fn(input: UInt8) -> UInt8 {
+   |      ^^^ no instantiation may answer to two implementations of one trait

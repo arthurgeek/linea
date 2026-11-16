@@ -1,4 +1,4 @@
-error[N-Duplicate]: `_Give` is already implemented for `Holder` with the same arguments
+error[N-Duplicate]: `_Give` is already implemented for `Holder[W]` with the same arguments
   --> tests/traits/one_implementation_per_path_however_the_head_parameter_is_spelled.lin:37:15
    |
 31 | impl[T: Pair] _Give[T.A] for Holder[T] {

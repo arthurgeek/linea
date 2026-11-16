@@ -2416,6 +2416,109 @@ fn implModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One trait implemented for `n` applications of one generic type, and each
+/// application handed once to a bound the trait answers.
+///
+/// Every implementation shares a constructor, so all of them sit on one chain
+/// of the implementation index. A lookup that walked the chain would match
+/// each of the `n` receivers against each of the `n` heads; a receiver finds
+/// the row written for its own type by that type instead.
+fn applicationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.print("pub struct W[T] {{\n    item: T,\n}}\n\n", .{});
+    try w.print("pub trait Tr {{\n    fn of(x: Self) -> UInt8\n}}\n\n", .{});
+    try w.print("fn ask[T: Tr](x: T) -> UInt8 {{\n    Tr.of(x)\n}}\n\n", .{});
+    for (0..n) |i| {
+        try w.print("pub struct S{d} {{}}\n\n", .{i});
+        try w.print("impl Tr for W[S{d}] {{\n    fn of(_x: Self) -> UInt8 {{\n        1\n    }}\n}}\n\n", .{i});
+    }
+    try w.print("fn main() -> UInt8 {{\n    var total: UInt8 = 0\n", .{});
+    for (0..n) |i| {
+        try w.print("    let x{d}: W[S{d}] = .{{ item = S{d} {{}} }}\n    total = ask(x{d})\n", .{ i, i, i, i });
+    }
+    try w.print("    total\n}}\n", .{});
+    return out.toOwnedSlice();
+}
+
+/// One trait implemented for `n` callable types of one shape, and a function
+/// of each type handed once to a bound the trait answers.
+///
+/// Every head has one shape, so all of them sit on one chain of the
+/// implementation index. A function value's type is the type a ground head
+/// writes, so each of the `n` functions finds its row by that type and
+/// matches none of the others.
+fn callableHeadsOfOneShapeModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.print("pub trait Tr {{\n    fn of(self: Self) -> UInt8\n}}\n\n", .{});
+    try w.print("fn ask[H: Tr](h: H) -> UInt8 {{\n    h.of()\n}}\n\n", .{});
+    for (0..n) |i| {
+        try w.print("pub struct S{d} {{}}\n\n", .{i});
+        try w.print("impl Tr for fn(x: S{d}) -> UInt16 {{\n    fn of(_self: Self) -> UInt8 {{\n        1\n    }}\n}}\n\n", .{i});
+        try w.print("fn f{d}(_x: S{d}) -> UInt16 {{\n    1\n}}\n\n", .{ i, i });
+    }
+    try w.print("fn main() -> UInt8 {{\n    var total: UInt8 = 0\n", .{});
+    for (0..n) |i| try w.print("    total = ask(f{d})\n", .{i});
+    try w.print("    total\n}}\n", .{});
+    return out.toOwnedSlice();
+}
+
+/// One trait implemented for `n` generic callable heads of one shape that
+/// differ in a ground parameter type, `fn(x: S0, y: T)`, `fn(x: S1, y: T)`,
+/// and a function for each handed once to a bound the trait answers.
+///
+/// The heads declare a parameter, so none is found by its own type. They
+/// are filed by the ground type each writes at the slot that tells them
+/// apart, at declaration and at lookup, so each is compared with, and each
+/// function matched against, only the heads that write the same type there.
+fn genericCallableHeadsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.print("pub trait Tr {{\n    fn of(self: Self) -> UInt8\n}}\n\n", .{});
+    try w.print("fn ask[H: Tr](h: H) -> UInt8 {{\n    h.of()\n}}\n\n", .{});
+    for (0..n) |i| {
+        try w.print("pub struct S{d} {{}}\n\n", .{i});
+        try w.print("impl[T] Tr for fn(x: S{d}, y: T) -> UInt16 {{\n    fn of(_self: Self) -> UInt8 {{\n        1\n    }}\n}}\n\n", .{i});
+        try w.print("fn f{d}(_x: S{d}, _y: Bool) -> UInt16 {{\n    1\n}}\n\n", .{ i, i });
+    }
+    try w.print("fn main() -> UInt8 {{\n    var total: UInt8 = 0\n", .{});
+    for (0..n) |i| try w.print("    total = ask(f{d})\n", .{i});
+    try w.print("    total\n}}\n", .{});
+    return out.toOwnedSlice();
+}
+
+/// One trait implemented for `n` applications of one generic type that agree
+/// in their outer argument's constructor, `W[N[S0]]`, `W[N[S1]]`, and no
+/// call.
+///
+/// Whether an implementation is one written twice is asked of each as it is
+/// declared. Filed by the constructor of one argument, these all meet and
+/// are compared pairwise; an implementation that declares no parameters is
+/// found by a hash of its whole header instead, so none is compared with
+/// another.
+fn nestedApplicationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+
+    try w.print("pub struct W[T] {{\n    item: T,\n}}\n\n", .{});
+    try w.print("pub struct N[T] {{\n    item: T,\n}}\n\n", .{});
+    try w.print("pub trait Tr {{\n    fn of(x: Self) -> UInt8\n}}\n\n", .{});
+    for (0..n) |i| {
+        try w.print("pub struct S{d} {{}}\n\n", .{i});
+        try w.print("impl Tr for W[N[S{d}]] {{\n    fn of(_x: Self) -> UInt8 {{\n        1\n    }}\n}}\n\n", .{i});
+    }
+    try w.print("fn main() -> UInt8 {{\n    0\n}}\n", .{});
+    return out.toOwnedSlice();
+}
+
 /// One trait implemented for four callable shapes, and `n` functions of those
 /// shapes each handed to a bound the trait answers.
 ///
@@ -6933,6 +7036,10 @@ test "a median taken over too few dimensions speaks for too little" {
 const sweep_dimensions = [_]Dimension{
     .{ .name = "functions", .n = 8000, .cost = throughTheTree(wideModule) },
     .{ .name = "implementations", .n = 6000, .cost = throughTheTree(implModule) },
+    .{ .name = "applications each implementing a trait and used once", .n = 4000, .cost = throughTheTree(applicationsModule) },
+    .{ .name = "nested applications each implementing a trait", .n = 4000, .cost = throughTheTree(nestedApplicationsModule) },
+    .{ .name = "callable heads of one shape each implementing a trait and used once", .n = 4000, .cost = throughTheTree(callableHeadsOfOneShapeModule) },
+    .{ .name = "generic callable heads of one shape each implementing a trait and used once", .n = 4000, .cost = throughTheTree(genericCallableHeadsModule) },
     .{ .name = "postfix calls across types", .n = 4000, .cost = throughTheTree(distinctPostfixCallsModule) },
     .{ .name = "postfix calls sharing a name", .n = 4000, .cost = throughTheTree(sharedPostfixCallsModule) },
     .{ .name = "failed postfix calls across traits", .n = 2000, .cost = throughTreeBatch(failedPostfixCallsModule, .{ .refused = .t_unknown_operation }, 1) },

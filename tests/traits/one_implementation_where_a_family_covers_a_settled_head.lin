@@ -1,8 +1,8 @@
-// One implementation per trait, trait arguments and head constructor, and a
-// family supplies the trait's arguments from its own head: `Give[T] for
-// Holder[T]` supplies `Give[UInt8]` at `Holder[UInt8]`. That is the key the
-// settled head below carries, so the two are one implementation written twice
-// and the second is where it is reported.
+// A family supplies the trait's arguments from its own head: `Give[T] for
+// Holder[T]` supplies `Give[UInt8]` at `Holder[UInt8]`. That is the header
+// the settled implementation below writes out, so `Holder[UInt8]` would have
+// two implementations of `Give[UInt8]`, and the second is where it is
+// reported.
 trait Give[U] {
     fn give(self: Self, u: U) -> UInt8
 }

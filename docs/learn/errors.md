@@ -17,6 +17,7 @@ for the code in brackets to reach the rule itself.
 | `M-Unused` | error | Testing: [Helpers that tests share](10-testing.md#helpers-that-tests-share) | [§3.9 Opaque types](../linea-semantics.md#39-opaque-types), at `[M-Unused]` |
 | `M-Vis` | error | Linea in an hour: [Modules](01-linea-in-an-hour.md#modules) | [§3.8 Visibility](../linea-semantics.md#38-visibility), at `[M-Vis]` |
 | `N-Case` | error | Linea in an hour: [A name's case says what it names](01-linea-in-an-hour.md#a-names-case-says-what-it-names) | [§3 Names](../linea-semantics.md#3-names), at `[N-Case]` |
+| `N-Duplicate` | error | Calling things: [One trait for two uses of a generic type](02-calling-things.md#one-trait-for-two-uses-of-a-generic-type) | [§3 Names](../linea-semantics.md#3-names), at `[N-Duplicate]` |
 | `N-Immutable` | error | Linea in an hour: [`let` and `var`](01-linea-in-an-hour.md#let-and-var) | [§3 Names](../linea-semantics.md#3-names), at `[N-Immutable]` |
 | `N-Shadowed` | warning | Calling things: [When the type and a trait both have the operation](02-calling-things.md#when-the-type-and-a-trait-both-have-the-operation) | [§3 Names](../linea-semantics.md#3-names), at `[N-Shadowed]` |
 | `N-Unused` | error | Copying, settling and sealing: [Phantom types: a tag that is never stored](04-copying-settling-and-sealing.md#phantom-types-a-tag-that-is-never-stored) | [§3 Names](../linea-semantics.md#3-names), at `[N-Unused]` |
@@ -43,7 +44,7 @@ for the code in brackets to reach the rule itself.
 | `S-UnitResult` | error | Linea in an hour: [`read`, `inout` and `sink`](01-linea-in-an-hour.md#read-inout-and-sink) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-UnitResult]` |
 | `T-Arity` | error | Memory: [A function's `_in` form takes the allocator](07-memory.md#a-functions-_in-form-takes-the-allocator) | [§4 Types](../linea-semantics.md#4-types), at `[T-Arity]` |
 | `T-BorrowContract` | error | Borrowing: [`borrows` — my result points into what you gave me](06-borrowing.md#borrows--my-result-points-into-what-you-gave-me) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[T-BorrowContract]` |
-| `T-Bound` | error | Calling things: [`@derive` on a generic type](02-calling-things.md#derive-on-a-generic-type) | [§4 Types](../linea-semantics.md#4-types), at `[T-Bound]` |
+| `T-Bound` | error | Calling things: [One trait for two uses of a generic type](02-calling-things.md#one-trait-for-two-uses-of-a-generic-type) | [§4 Types](../linea-semantics.md#4-types), at `[T-Bound]` |
 | `T-Call` | error | Iterating: [Asking questions: `any`, `all` and `find`](05-iterating.md#asking-questions-any-all-and-find) | [§4 Types](../linea-semantics.md#4-types), at `[T-Call]` |
 | `T-Cover` | error | Linea in an hour: [`match`](01-linea-in-an-hour.md#match) | [§4 Types](../linea-semantics.md#4-types), at `[T-Cover]` |
 | `T-Default` | error | Errors: [A checked value as a default argument](03-errors.md#a-checked-value-as-a-default-argument) | [§4 Types](../linea-semantics.md#4-types), at `[T-Default]` |
@@ -57,7 +58,7 @@ for the code in brackets to reach the rule itself.
 | `T-ExternPrototype` | error | Calling C: [The compiler holds each `extern` to C's prototype](11-calling-c.md#the-compiler-holds-each-extern-to-cs-prototype) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternPrototype]` |
 | `T-For` | error | Iterating: [Four ways to walk](05-iterating.md#four-ways-to-walk) | [§4 Types](../linea-semantics.md#4-types), at `[T-For]` |
 | `T-Format` | error | Text: [Format specs: laying a value out](08-text.md#format-specs-laying-a-value-out) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[T-Format]` |
-| `T-Impl` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
+| `T-Impl` | error | Calling things: [One trait for two uses of a generic type](02-calling-things.md#one-trait-for-two-uses-of-a-generic-type) | [§4 Types](../linea-semantics.md#4-types), at `[T-Impl]` |
 | `T-Index` | error | Linea in an hour: [Arrays, views and collections](01-linea-in-an-hour.md#arrays-views-and-collections) | [§4 Types](../linea-semantics.md#4-types), at `[T-Index]` |
 | `T-Infer` | error | Calling things: [Naming a type argument](02-calling-things.md#naming-a-type-argument) | [§4 Types](../linea-semantics.md#4-types), at `[T-Infer]` |
 | `T-LetElse` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-LetElse]` |

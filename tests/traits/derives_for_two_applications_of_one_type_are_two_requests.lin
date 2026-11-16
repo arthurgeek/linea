@@ -1,0 +1,26 @@
+// A standalone derive names the type it is for. `Mark[UInt8]` and
+// `Mark[UInt16]` are two types, so a derive for each is two requests and
+// each type gets its own implementation.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+struct Mark[T] {
+    value: T,
+}
+
+derive Score for Mark[UInt8]
+
+derive Score for Mark[UInt16]
+
+fn main() -> UInt8 {
+    let byte: Mark[UInt8] = .{ value = 3 }
+    let word: Mark[UInt16] = .{ value = 4 }
+    byte.score() * 10 + word.score()
+}

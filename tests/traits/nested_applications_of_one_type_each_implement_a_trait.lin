@@ -1,0 +1,28 @@
+// Two heads that differ only inside an argument are still two types:
+// `Crate[Option[UInt8]]` is not `Crate[Option[UInt16]]`.
+struct Crate[T] {
+    item: T,
+    count: UInt8,
+}
+
+trait Count {
+    fn count(self: Self) -> UInt8
+}
+
+impl Count for Crate[Option[UInt8]] {
+    fn count(self: Self) -> UInt8 {
+        self.count
+    }
+}
+
+impl Count for Crate[Option[UInt16]] {
+    fn count(self: Self) -> UInt8 {
+        self.count * 2
+    }
+}
+
+fn main() -> UInt8 {
+    let byte: Crate[Option[UInt8]] = .{ item = .Some(3), count = 3 }
+    let word: Crate[Option[UInt16]] = .{ item = .None, count = 2 }
+    byte.count() * 10 + word.count()
+}

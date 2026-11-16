@@ -1,0 +1,5 @@
+error[T-Infer]: nothing that uses `low` here says what `T` is
+  --> tests/traits/callable_heads/a_generic_function_meets_no_callable_head_until_its_type_is_written.lin:29:8
+   |
+29 |     go(low)
+   |        ^^^ write the function type it is used as, with a type in place of each `_`: `fn(read input: _) -> UInt8`

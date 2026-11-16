@@ -1,0 +1,28 @@
+// A derive names the type it is for. One for `Mark[UInt8]` implements the
+// trait for that application alone, and `Mark[UInt16]` takes an
+// implementation written by hand.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+struct Mark[T] { value: T }
+
+derive Score for Mark[UInt8]
+
+impl Score for Mark[UInt16] {
+    fn score(self: Self) -> UInt8 {
+        UInt8(self.value)
+    }
+}
+
+fn main() -> UInt8 {
+    let m: Mark[UInt8] = .{ value = 3 }
+    let n: Mark[UInt16] = .{ value = 4 }
+    m.score() * 10 + n.score()
+}

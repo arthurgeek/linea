@@ -11,6 +11,10 @@ for explicitly marked default implementations. Ordinary coherence rules remain.
 The constructor-only coherence partition is superseded by
 [0148](0148-parameter-heads-match-complete-trait-keys.md); the structural overlap rule remains.
 
+Extended by
+[0272](0272-two-applications-of-one-type-may-each-implement-a-trait.md): the
+overlap rule alone decides whether two different implementations may coexist.
+
 ## Context
 
 [ADR 0081](0081-an-implementation-is-generic-over-its-head.md) made an

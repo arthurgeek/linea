@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Run` is already implemented for `fn(input: UInt8) -> UInt8`
+  --> tests/traits/callable_heads/one_implementation_per_callable_head.lin:13:6
+   |
+7  | impl Run for fn(input: UInt8) -> UInt8 {
+   |      --- already implemented here
+13 | impl Run for fn(input: UInt8) -> UInt8 {
+   |      ^^^ a trait is implemented once for a type

@@ -125,7 +125,7 @@ true of a different implementation.
 | [0078](0078-a-truth-value-is-a-constant-expression.md) | A truth value is a constant expression | Accepted; extends 0020; representation superseded by 0127 |
 | [0079](0079-a-projection-is-one-structural-step.md) | A projection is one structural step for the termination measure | Accepted |
 | [0080](0080-a-dotted-type-name-resolves-through-its-module.md) | A dotted type name resolves through its module | Accepted; trait-slot clause superseded by 0110 |
-| [0081](0081-an-implementation-is-generic-over-its-head.md) | An implementation is generic over its head, and coherence keys on the constructor | Accepted; extended by 0087, 0093, 0139 and 0213; head restriction superseded by 0148; partially superseded by 0142 and 0182 |
+| [0081](0081-an-implementation-is-generic-over-its-head.md) | An implementation is generic over its head, and coherence keys on the constructor | Accepted; extended by 0087, 0093, 0139 and 0213; head restriction superseded by 0148; partially superseded by 0142 and 0182; constructor key superseded by 0272 |
 | [0182](0182-a-types-own-implementation-may-fix-its-type-arguments.md) | A type's own implementation may fix its type arguments | Accepted; partially supersedes 0081; head clause superseded by 0252 |
 | [0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md) | A type's own implementation may write a parameter inside an argument | Accepted; supersedes the head clause of 0182 |
 | [0082](0082-a-comparison-is-a-trait-call.md) | A comparison is a call on the trait it names | Accepted; extended by 0112 and 0138 |
@@ -141,7 +141,8 @@ true of a different implementation.
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |
-| [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113 and 0213; default tier superseded by 0139; coherence partition superseded by 0148 |
+| [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113, 0213 and 0272; default tier superseded by 0139; coherence partition superseded by 0148 |
+| [0272](0272-two-applications-of-one-type-may-each-implement-a-trait.md) | Two applications of one type may each implement a trait | Accepted; supersedes the constructor key of 0081 and the Duplicates clause of 0213; extends 0093 |
 | [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171, 0227 and 0229 |
 | [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096; extended by 0228 |
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
@@ -280,7 +281,7 @@ ones most likely to be superseded as the compiler grows.
 | [0225](0225-a-library-signature-states-its-allocator.md) | A library's public signature states its allocator | Accepted; extends 0215 and 0219; supersedes the server-parent clause of 0220 |
 | [0206](0206-allocator-spelling-is-shortened-by-alias-never-by-default.md) | Allocator spelling is shortened by an alias, never by a default type argument | Superseded by 0215; extends 0098 and 0194; extended by 0211 |
 | [0209](0209-a-from-derive-converts-the-variant-the-source-names.md) | A `From` derive converts the variant its source type names | Accepted; extends 0113 and 0145 |
-| [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148; parameter cap superseded by 0271 |
+| [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148; parameter cap superseded by 0271; Duplicates clause superseded by 0272 |
 | [0271](0271-a-callable-head-of-any-length-has-a-shape.md) | A callable head of any length has a shape | Accepted; supersedes the parameter cap of 0213 |
 | [0214](0214-a-route-takes-a-function-whose-parameters-name-its-inputs.md) | A route is a function whose parameters name its inputs | Accepted; refines 0185; extends 0180; `where carries(request)` clause superseded by 0216 |
 | [0216](0216-a-carrier-type-supplies-its-signatures-default-contract.md) | A carrier type supplies its signatures' default contract | Accepted; supersedes the `where carries(request)` clause of 0214 |

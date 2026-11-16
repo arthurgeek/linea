@@ -1,0 +1,32 @@
+// `S.Reading` is settled to `UInt8`, so `(S.Reading, Bool)` is `(UInt8, Bool)`,
+// and both implementations are for that one tuple type.
+trait Tr {
+    fn tr(self: Self) -> UInt8
+}
+
+trait Probe {
+    type Reading
+}
+
+struct S {}
+
+impl Probe for S {
+    type Reading = UInt8
+}
+
+impl Tr for (UInt8, Bool) {
+    fn tr(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Tr for (S.Reading, Bool) {
+    fn tr(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let x: (UInt8, Bool) = (1, true)
+    x.tr()
+}

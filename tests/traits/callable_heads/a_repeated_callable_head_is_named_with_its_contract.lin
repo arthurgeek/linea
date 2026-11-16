@@ -1,0 +1,21 @@
+// A callable head's contract is part of which head it is, so a report of a
+// repeated head names the contract with the signature.
+trait Pick {
+    fn pick(self: Self) -> UInt8
+}
+
+impl Pick for fn(b: Str, a: Str) -> Str where carries(a) {
+    fn pick(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl Pick for fn(b: Str, a: Str) -> Str where carries(a) {
+    fn pick(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

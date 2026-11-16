@@ -1,0 +1,30 @@
+// A result that carries from a parameter carries nothing once the result is
+// settled to a type that can hold no dependency. At `UInt8` both heads below
+// are `fn(a: Str) -> UInt8`.
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl[T] Run for fn(a: Str) -> T where carries(a) {
+    fn go(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[U] Run for fn(a: Str) -> U where carries() {
+    fn go(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn ask[H: Run](h: H) -> UInt8 {
+    h.go()
+}
+
+fn one(_a: Str) -> UInt8 {
+    1
+}
+
+fn main() -> UInt8 {
+    ask(one)
+}

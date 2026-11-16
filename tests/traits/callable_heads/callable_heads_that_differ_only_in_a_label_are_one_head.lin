@@ -1,0 +1,22 @@
+// A parameter's name labels a call and is no part of a callable type, so
+// `fn(input: UInt8) -> UInt8` and `fn(value: UInt8) -> UInt8` are one type
+// and the second implementation repeats the first.
+trait Run {
+    fn run(self: Self) -> UInt8
+}
+
+impl Run for fn(input: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(4)
+    }
+}
+
+impl Run for fn(value: UInt8) -> UInt8 {
+    fn run(self: Self) -> UInt8 {
+        self(5)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

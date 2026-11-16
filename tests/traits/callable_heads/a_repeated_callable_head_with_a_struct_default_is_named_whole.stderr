@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Run` is already implemented for `fn(r: Quota = .{ n = 1 }) -> UInt8`
+  --> tests/traits/callable_heads/a_repeated_callable_head_with_a_struct_default_is_named_whole.lin:19:6
+   |
+13 | impl Run for fn(r: Quota = .{ n = 1 }) -> UInt8 {
+   |      --- already implemented here
+19 | impl Run for fn(r: Quota = .{ n = 1 }) -> UInt8 {
+   |      ^^^ a trait is implemented once for a type

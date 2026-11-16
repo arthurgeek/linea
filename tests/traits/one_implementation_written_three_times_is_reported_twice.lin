@@ -1,0 +1,32 @@
+// An implementation written three times is one implementation repeated
+// twice: each repetition is reported once, against the first.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item + 1
+    }
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item + 2
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    small.weigh()
+}

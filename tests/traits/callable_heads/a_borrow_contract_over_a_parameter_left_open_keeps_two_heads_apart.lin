@@ -1,0 +1,30 @@
+// A result that borrows from a parameter depends on it whatever type the
+// parameter is settled to, so the contract stands at every type and the
+// first head is never the second. Each function reaches its own.
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl[T] Run for fn(a: T, b: Str) -> Str where borrows(a) {
+    fn go(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[U] Run for fn(a: U, b: Str) -> Str where carries() {
+    fn go(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn ask[H: Run](h: H) -> UInt8 {
+    h.go()
+}
+
+fn fixed(_a: UInt8, _b: Str) -> Str where carries() {
+    "k"
+}
+
+fn main() -> UInt8 {
+    ask(fixed)
+}

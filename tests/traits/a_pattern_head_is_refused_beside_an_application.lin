@@ -1,0 +1,36 @@
+// An implementation that declares parameters applies its constructor to them
+// and to nothing else, so `Crate[Option[T]]` is not a head. That is the one
+// mistake here: an implementation refused for the form of its head is
+// compared with no other, and the two written for one type each are valid.
+struct Crate[T] {
+    item: T,
+    count: UInt8,
+}
+
+trait Count {
+    fn count(self: Self) -> UInt8
+}
+
+impl[T] Count for Crate[Option[T]] {
+    fn count(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+impl Count for Crate[Option[UInt8]] {
+    fn count(self: Self) -> UInt8 {
+        self.count
+    }
+}
+
+impl Count for Crate[UInt8] {
+    fn count(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+fn main() -> UInt8 {
+    let byte: Crate[UInt8] = .{ item = 3, count = 1 }
+    let maybe: Crate[Option[UInt8]] = .{ item = .Some(3), count = 1 }
+    byte.count() + maybe.count()
+}

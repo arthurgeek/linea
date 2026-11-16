@@ -1,0 +1,36 @@
+// `S.Reading` is settled to `UInt8`, so the first head is `W[UInt8]`, which
+// the family `impl[T] Tr for W[T]` answers for as well.
+struct W[T] {
+    item: T,
+}
+
+trait Tr {
+    fn tr(self: Self) -> UInt8
+}
+
+trait Probe {
+    type Reading
+}
+
+struct S {}
+
+impl Probe for S {
+    type Reading = UInt8
+}
+
+impl Tr for W[S.Reading] {
+    fn tr(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[T] Tr for W[T] {
+    fn tr(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    let x: W[UInt8] = .{ item = 1 }
+    x.tr()
+}

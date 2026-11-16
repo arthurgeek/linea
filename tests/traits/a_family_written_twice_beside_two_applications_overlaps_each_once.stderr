@@ -1,0 +1,21 @@
+error[N-Duplicate]: `Weigh` is already implemented for `Crate[T]`
+  --> tests/traits/a_family_written_twice_beside_two_applications_overlaps_each_once.lin:18:9
+   |
+12 | impl[T] Weigh for Crate[T] {
+   |         ----- already implemented here
+18 | impl[T] Weigh for Crate[T] {
+   |         ^^^^^ a trait is implemented once for a type
+error[T-Impl]: these two both answer `Weigh` for `Crate[UInt8]`
+  --> tests/traits/a_family_written_twice_beside_two_applications_overlaps_each_once.lin:24:6
+   |
+12 | impl[T] Weigh for Crate[T] {
+   |         ----- the other implementation
+24 | impl Weigh for Crate[UInt8] {
+   |      ^^^^^ no instantiation may answer to two implementations of one trait
+error[T-Impl]: these two both answer `Weigh` for `Crate[UInt16]`
+  --> tests/traits/a_family_written_twice_beside_two_applications_overlaps_each_once.lin:30:6
+   |
+12 | impl[T] Weigh for Crate[T] {
+   |         ----- the other implementation
+30 | impl Weigh for Crate[UInt16] {
+   |      ^^^^^ no instantiation may answer to two implementations of one trait

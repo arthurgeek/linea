@@ -1,0 +1,24 @@
+// A derive attached to a generic type is one request for every application
+// of it, so a standalone derive for `Mark[UInt8]` would give that type a
+// second implementation.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+@derive(Score)
+struct Mark[T] {
+    value: T,
+}
+
+derive Score for Mark[UInt8]
+
+fn main() -> UInt8 {
+    let byte: Mark[UInt8] = .{ value = 3 }
+    byte.score()
+}

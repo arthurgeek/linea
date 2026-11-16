@@ -1,0 +1,14 @@
+error[N-Duplicate]: `Weigh` is already implemented for `Crate[UInt8]`
+  --> tests/traits/one_implementation_written_three_times_is_reported_twice.lin:17:6
+   |
+11 | impl Weigh for Crate[UInt8] {
+   |      ----- already implemented here
+17 | impl Weigh for Crate[UInt8] {
+   |      ^^^^^ a trait is implemented once for a type
+error[N-Duplicate]: `Weigh` is already implemented for `Crate[UInt8]`
+  --> tests/traits/one_implementation_written_three_times_is_reported_twice.lin:23:6
+   |
+11 | impl Weigh for Crate[UInt8] {
+   |      ----- already implemented here
+23 | impl Weigh for Crate[UInt8] {
+   |      ^^^^^ a trait is implemented once for a type

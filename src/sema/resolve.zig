@@ -917,17 +917,13 @@ pub const Resolution = struct {
     impl_of_decl: []const DeclId = &.{},
     /// Which module holds each file, keyed by `FileId`.
     module_of_file: std.AutoHashMapUnmanaged(FileId, ModuleId) = .empty,
-    /// Every pair of implementations already reported as one written twice,
-    /// as the later declaration and the earlier one it repeats.
-    ///
-    /// Read by the overlap check, which would otherwise report the same pair
-    /// again under its own rule: two implementations written identically
-    /// overlap trivially, and a reader shown both diagnostics is shown one
-    /// mistake twice. Recorded where the report is made rather than decided
-    /// again there, because whether two implementations are the same one is
-    /// this pass's question and the answer it gives is what the report stands
-    /// on.
-    duplicate_impls: std.AutoHashMapUnmanaged(u64, void) = .empty,
+    /// Every implementation reported as one written before it, written again.
+    /// Such a header unifies with the one it repeats and with everything
+    /// that one overlaps, and a reader shown those as overlaps too is shown
+    /// one mistake several times. Recorded where the report is made rather
+    /// than decided again by the overlap check, because whether two
+    /// implementations are the same one is this pass's question.
+    repeated_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// The implementations resolution refused and reported. Overlapping
     /// another is the same mistake, so a later pass does not report it again.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
@@ -1177,7 +1173,7 @@ pub const Resolution = struct {
         self.signatures.deinit(gpa);
         gpa.free(self.impl_of_decl);
         self.module_of_file.deinit(gpa);
-        self.duplicate_impls.deinit(gpa);
+        self.repeated_impls.deinit(gpa);
         self.refused_impls.deinit(gpa);
         self.keyless_impls.deinit(gpa);
         gpa.free(self.unwrapped_sources);
@@ -1224,14 +1220,10 @@ pub const Resolution = struct {
         try testing.expectEqual(@as(u32, 1), kept);
     }
 
-    /// Whether the pair was already reported as one implementation written
-    /// twice.
-    pub fn reportedDuplicate(self: *const Resolution, earlier: DeclId, later: DeclId) bool {
-        return self.duplicate_impls.contains(duplicateKey(earlier, later));
-    }
-
-    fn duplicateKey(earlier: DeclId, later: DeclId) u64 {
-        return (@as(u64, @intFromEnum(earlier)) << 32) | @intFromEnum(later);
+    /// Whether this implementation was reported as an earlier one written
+    /// again.
+    pub fn repeatsAnImplementation(self: *const Resolution, impl: DeclId) bool {
+        return self.repeated_impls.contains(impl);
     }
 
     /// The implementation `d` is a member of, or `.none` where none is.
@@ -3662,6 +3654,9 @@ fn hashWrittenName(ast: *const Ast, ctx: anytype, h: *std.hash.Wyhash, tok: Toke
         h.update(std.mem.asBytes(&t));
         return;
     }
+    // A type the parser could not read holds no name. It is hashed as that,
+    // and the comparison decides what two of them are.
+    if (tok == TokenId.none) return h.update("unwritten");
     const tag: u8 = @intFromEnum(ast.tokenTag(tok));
     const name = ast.tokenName(tok);
     h.update(std.mem.asBytes(&tag));
@@ -4142,7 +4137,7 @@ fn resolveInternal(
     defer r.impl_of_head.deinit(gpa);
     defer r.inherent_heads.deinit(gpa);
     errdefer gpa.free(r.impl_of_decl);
-    errdefer r.duplicate_impls.deinit(gpa);
+    errdefer r.repeated_impls.deinit(gpa);
     errdefer r.templates.deinit(gpa);
     errdefer r.unpaired_template_closures.deinit(gpa);
     errdefer r.postfix_functions.deinit(gpa);
@@ -5084,7 +5079,7 @@ fn resolveInternal(
         .signatures = signatures,
         .impl_of_decl = r.impl_of_decl,
         .module_of_file = module_of_file,
-        .duplicate_impls = r.duplicate_impls,
+        .repeated_impls = r.repeated_impls,
         .refused_impls = r.refused_impls,
         .keyless_impls = r.keyless_impls,
         .unwrapped_sources = unwrapped_sources,
@@ -6444,9 +6439,8 @@ const Resolver = struct {
     /// than replacing it: a diagnostic still reads the list to say which trait
     /// holds a name, and that runs only where a name was already not found.
     member_at: std.AutoHashMapUnmanaged(MemberKey, BindingId) = .empty,
-    /// Every pair reported as one implementation written twice, handed to the
-    /// resolution so the overlap check does not report the same pair again.
-    duplicate_impls: std.AutoHashMapUnmanaged(u64, void) = .empty,
+    /// Published as `Resolution.repeated_impls`.
+    repeated_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// See `Resolution.postfix_functions`.
     postfix_functions: std.AutoHashMapUnmanaged(ExprId, Resolution.PostfixFunction) = .empty,
     /// See `Resolution.unlent_marks`.
@@ -6718,12 +6712,8 @@ const Resolver = struct {
         while (templates.next()) |row| try self.templates.put(gpa, relocation.id(DeclId, row.key_ptr.*), relocation.id(DeclId, row.value_ptr.*));
         var unpaired = res.unpaired_template_closures.keyIterator();
         while (unpaired.next()) |closure| try self.unpaired_template_closures.put(gpa, closure.*, {});
-        var duplicates = res.duplicate_impls.iterator();
-        while (duplicates.next()) |row| {
-            const first: DeclId = @enumFromInt(@as(u32, @truncate(row.key_ptr.* >> 32)));
-            const second: DeclId = @enumFromInt(@as(u32, @truncate(row.key_ptr.*)));
-            try self.duplicate_impls.put(gpa, Resolution.duplicateKey(relocation.id(DeclId, first), relocation.id(DeclId, second)), {});
-        }
+        var repeated = res.repeated_impls.keyIterator();
+        while (repeated.next()) |impl| try self.repeated_impls.put(gpa, relocation.id(DeclId, impl.*), {});
         for (self.members.items) |held_member| try self.member_at.put(gpa, .{
             .module = held_member.module,
             .owner = held_member.owner,
@@ -8297,6 +8287,16 @@ const Resolver = struct {
         if (!is_derive and (holdsARefusedType(self.ast, written_head) or anyRefusedType(self.ast, self.ast.typeArgs(self.ast.declTraitArgs(d))))) {
             return self.refuseKeyless(d);
         }
+        // A trait implementation's head that is not its constructor applied
+        // to its own parameters was refused where it is written. It keeps its
+        // row, so its members are still read as members of that type, and is
+        // compared with no other implementation: which types such a head
+        // would answer for is a question the refusal leaves unasked.
+        if (!is_derive and trait_decl != DeclId.none and !self.ast.declHasParameterHead(d) and
+            !node.headAppliesItsParameters(WrittenNames{ .ast = self.ast }, self.ast.typeArgs(written_head.args), self.ast.declTypeParams(d), true))
+        {
+            try self.refused_impls.put(self.gpa, d, {});
+        }
         if (self.ast.declIsDefault(d)) {
             // A head the default names is still a written type name, and
             // what it reaches is recorded as any other one's is.
@@ -8514,22 +8514,69 @@ const Resolver = struct {
         return ownsAnImplSide(self.current, self.program.get(self.current).library, side, trait_module);
     }
 
-    /// How a report quotes an implementation's head: a tuple by the
-    /// declaration its arity names, since every tuple of one arity shares that
-    /// head, unit as `()`, and a name by its text.
-    fn headText(self: *const Resolver, d: DeclId) []const u8 {
+    /// How a report quotes an implementation's head: as it is written, with
+    /// the arguments it applies and, for a callable head, the contract it
+    /// promises, since both are part of which head it is. Unit is `()`.
+    ///
+    /// The head's own tokens on one line: a comment written inside it is left
+    /// out, and tokens written apart are one space apart except inside a
+    /// bracket and before a comma.
+    fn headText(self: *const Resolver, d: DeclId) ![]const u8 {
         const head = self.ast.declHead(d);
-        if (self.isTupleHead(d)) return tuple_names[head.args.len() - node.min_tuple_arity];
-        if (head.kind == .tuple or head.kind == .callable) return self.ast.writtenText(head);
-        if (self.ast.isUnitType(head)) return "()";
-        return self.ast.tokenText(head.at);
-    }
-
-    /// Whether an implementation's head is a tuple of an admitted arity,
-    /// which coherence reads as the tuple declaration of that arity.
-    fn isTupleHead(self: *const Resolver, d: DeclId) bool {
-        const head = self.ast.declHead(d);
-        return head.kind == .tuple and node.isTupleArity(head.args.len());
+        if (head.kind == .named and head.args.len() == 0) {
+            if (self.ast.isUnitType(head)) return "()";
+            return self.ast.tokenText(head.at);
+        }
+        const file = self.ast.fileOf(head.at);
+        const end = self.ast.writtenWholeSpan(head).end;
+        var out: std.ArrayList(u8) = .empty;
+        var previous: ?TokenId = null;
+        // How many brackets, parentheses and braces the head has open, so a
+        // brace inside it, as a default's struct literal writes, is not
+        // taken for the block the implementation opens.
+        var depth: usize = 0;
+        var at = head.at.index();
+        while (at < self.ast.tokenCount()) : (at += 1) {
+            const tok = TokenId.at(at);
+            const tag = self.ast.tokenTag(tok);
+            if (self.ast.fileOf(tok) != file) break;
+            // A callable head runs to the block it opens, past the contract
+            // written after its result; any other ends with its arguments.
+            if (head.kind == .callable) {
+                if ((tag == .l_brace and depth == 0) or tag == .eof) break;
+            } else if (self.ast.tokenSpan(tok).start >= end) break;
+            if (tag == .comment) continue;
+            const closes = switch (tag) {
+                .r_bracket, .r_paren, .r_brace => true,
+                else => false,
+            };
+            switch (tag) {
+                .l_bracket, .l_paren, .l_brace => depth += 1,
+                .r_bracket, .r_paren, .r_brace => depth -|= 1,
+                else => {},
+            }
+            if (previous) |before| {
+                const before_tag = self.ast.tokenTag(before);
+                // A comma written before a closing bracket separates nothing.
+                if (before_tag == .comma and closes and tag != .r_brace) out.items.len -= 1;
+                const apart = self.ast.tokenSpan(tok).start > self.ast.tokenSpan(before).end;
+                const joined = switch (before_tag) {
+                    .l_bracket, .l_paren, .dot => true,
+                    // A name and the arguments it is applied to.
+                    .identifier => tag == .l_bracket,
+                    else => false,
+                } or switch (tag) {
+                    .r_bracket, .r_paren, .comma, .semicolon => true,
+                    // A path, `mem.Handle`, and not a literal's `.{`.
+                    .dot => before_tag == .identifier,
+                    else => false,
+                };
+                if (apart and !joined) try out.append(self.sink.arena, ' ');
+            }
+            try out.appendSlice(self.sink.arena, self.ast.tokenText(tok));
+            previous = tok;
+        }
+        return out.items;
     }
 
     /// Records what the prelude publishes, once the library is resolved: the
@@ -8550,6 +8597,16 @@ const Resolver = struct {
     /// reported where it was written: a grouped type, which names nothing, or
     /// a tuple of an arity a tuple cannot have. Such a head registers nothing,
     /// so no second report names unit or a `Tuple1` nobody wrote.
+    /// How a token is spelled, for a question the parser also asks of its
+    /// cursor.
+    const WrittenNames = struct {
+        ast: *const Ast,
+
+        pub fn textOf(self: WrittenNames, at: TokenId) []const u8 {
+            return self.ast.tokenText(at);
+        }
+    };
+
     fn headRefusedByTheParser(head: node.TypeRef) bool {
         return switch (head.kind) {
             .grouped => true,
@@ -8579,7 +8636,7 @@ const Resolver = struct {
         try testing.expectEqual(@as(u32, 1), unpublished.undefined);
     }
 
-    test "a callable head is one implementation per shape and invocation" {
+    test "callable heads of other shapes, or of one shape and other types, are other heads" {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const gpa = arena.allocator();
@@ -8595,8 +8652,13 @@ const Resolver = struct {
         const distinct = try resolveWithPrelude(gpa, together, "");
         try testing.expectEqual(@as(u32, 0), distinct.duplicates);
 
-        const repeated = try std.mem.concat(gpa, u8, &.{ header, shapes[0], "impl Show for fn(b: Bool) -> Bool {}\n", footer });
-        try testing.expectEqual(@as(u32, 1), (try resolveWithPrelude(gpa, repeated, "")).duplicates);
+        // One shape and other types is another head.
+        const retyped = try std.mem.concat(gpa, u8, &.{ header, shapes[0], "impl Show for fn(b: Bool) -> Bool {}\n", footer });
+        try testing.expectEqual(@as(u32, 0), (try resolveWithPrelude(gpa, retyped, "")).duplicates);
+
+        // A label is no part of the type, so another label repeats the head.
+        const relabelled = try std.mem.concat(gpa, u8, &.{ header, shapes[0], "impl Show for fn(b: UInt8) -> UInt8 {}\n", footer });
+        try testing.expectEqual(@as(u32, 1), (try resolveWithPrelude(gpa, relabelled, "")).duplicates);
     }
 
     /// The implementations the compiler provides, recorded as implementations.
@@ -8676,17 +8738,31 @@ const Resolver = struct {
         return if (self.ast.declTag(d) == .trait_) d else null;
     }
 
-    /// At most one implementation of a trait for a type, across the program.
+    /// Reports each implementation written twice, across the program.
     ///
-    /// What licenses every consumer to take the first implementation it finds
-    /// rather than search among candidates: a bound is discharged by one and a
-    /// call runs one, and two would let those two answers differ. Asked of the
-    /// whole program at once because either module owning a side may write it,
-    /// so neither sees both on its own.
+    /// Two implementations of one trait with one head and one argument list
+    /// are two answers for every type the head names: a bound is discharged by
+    /// one and a call runs one, and two would let those two answers differ.
+    /// Asked of the whole program at once because either module owning a side
+    /// may write it, so neither sees both on its own. Two implementations
+    /// that differ and still answer for one type are the checker's to refuse,
+    /// which unifies their headers.
+    ///
+    /// **Bound:** an implementation that declares no parameters is found by a
+    /// hash of its whole header, so it is compared only with the rows the
+    /// compiler provides for its trait and head and with the earlier
+    /// implementations whose header hashes alike: one lookup each, however
+    /// many applications of one type implement the trait. An implementation
+    /// that declares parameters is compared with the earlier ones of its
+    /// trait and head that write a type of the same root, or none, at one
+    /// chosen position: a trait argument, or a type a callable head's
+    /// signature writes.
     fn checkCoherence(self: *Resolver) !void {
-        // One argument position per trait/head chain separates distinct written
-        // constructors. Choosing it scans the represented arguments once; a
-        // bare parameter or structural form remains in every candidate set.
+        // One position per trait/head chain separates the families that
+        // write different types there: among the arguments given the trait
+        // and, for a callable head, the types its signature writes. Choosing
+        // it scans the represented positions once; a bare parameter or
+        // structural form remains in every candidate set.
         const Columns = struct {
             roots: std.ArrayList(?u64) = .empty,
             position: ?usize = null,
@@ -8699,17 +8775,18 @@ const Resolver = struct {
         }
         for (self.impls.items) |it| {
             if (it.decl == DeclId.none or it.trait == DeclId.none) continue;
+            if (self.ast.declTypeParams(it.decl).len == 0) continue;
             const entry = try columns.getOrPut(self.gpa, self.coherenceKey(it));
             if (!entry.found_existing) entry.value_ptr.* = .{};
             const choice = entry.value_ptr;
-            const args = self.ast.typeArgs(it.args);
-            if (args.len > choice.roots.items.len) {
+            const count = self.familyPositions(it);
+            if (count > choice.roots.items.len) {
                 const old_len = choice.roots.items.len;
-                try choice.roots.resize(self.gpa, args.len);
+                try choice.roots.resize(self.gpa, count);
                 @memset(choice.roots.items[old_len..], null);
             }
-            for (args, 0..) |arg, position| {
-                const root = self.coherenceArgumentRoot(arg) orelse continue;
+            for (0..count) |position| {
+                const root = self.familyRootAt(it, position) orelse continue;
                 if (choice.roots.items[position]) |prior| {
                     if (prior != root) choice.position = @min(choice.position orelse position, position);
                 } else choice.roots.items[position] = root;
@@ -8727,6 +8804,15 @@ const Resolver = struct {
         defer self.gpa.free(next);
         const filtered_next = try self.gpa.alloc(u32, self.impls.items.len);
         defer self.gpa.free(filtered_next);
+        // The rows the compiler provides under each trait and head, and the
+        // implementations declaring no parameters under each header hash.
+        // Both are chained through `settled_next`, which no row is on twice.
+        var provided: std.AutoHashMapUnmanaged(u64, u32) = .empty;
+        defer provided.deinit(self.gpa);
+        var settled: std.AutoHashMapUnmanaged(u64, u32) = .empty;
+        defer settled.deinit(self.gpa);
+        const settled_next = try self.gpa.alloc(u32, self.impls.items.len);
+        defer self.gpa.free(settled_next);
 
         for (self.impls.items, 0..) |it, i| {
             // An implementation written with a length nothing settles is not
@@ -8740,6 +8826,10 @@ const Resolver = struct {
             // written and no program keeps it.
             if (!try self.lengthsAreSettled(it)) continue;
 
+            // An implementation refused for the form of its head is compared
+            // with no other: the refusal is the one report it earns.
+            if (it.decl != DeclId.none and self.refused_impls.contains(it.decl)) continue;
+
             // An inherent block implements no trait, so no other block is the
             // same implementation as it. A primitive's inherent blocks are rows
             // only so the namespace its name opens can be found, and the
@@ -8747,15 +8837,36 @@ const Resolver = struct {
             if (it.trait == DeclId.none) continue;
 
             const key = self.coherenceKey(it);
-            const position = if (columns.get(key)) |choice| choice.position orelse 0 else 0;
-            const args = self.ast.typeArgs(it.args);
-            const root = if (it.decl != DeclId.none and position < args.len)
-                self.coherenceArgumentRoot(args[position])
-            else
-                null;
-            var chain = if (root) |r| named.get(.{ .group = key, .root = r }) else first.get(key);
-            var wildcard = if (root != null) wildcards.get(key) else null;
             var found: ?Implementation = null;
+            const parameterless = it.decl != DeclId.none and self.ast.declTypeParams(it.decl).len == 0;
+            if (parameterless) {
+                const header = try self.headerHash(it);
+                for ([_]?u32{ provided.get(key), settled.get(header) }) |start| {
+                    var walk = start;
+                    while (walk) |j| {
+                        const candidate = self.impls.items[j];
+                        if (self.sameImplementation(candidate, it)) {
+                            found = candidate;
+                            break;
+                        }
+                        walk = if (settled_next[j] == j) null else settled_next[j];
+                    }
+                    if (found != null) break;
+                }
+                if (found == null) {
+                    settled_next[i] = settled.get(header) orelse @intCast(i);
+                    try settled.put(self.gpa, header, @intCast(i));
+                    continue;
+                }
+            }
+            if (it.decl == DeclId.none) {
+                settled_next[i] = provided.get(key) orelse @intCast(i);
+                try provided.put(self.gpa, key, @intCast(i));
+            }
+            const position = if (columns.get(key)) |choice| choice.position orelse 0 else 0;
+            const root = self.familyRootAt(it, position);
+            var chain = if (parameterless) null else if (root) |r| named.get(.{ .group = key, .root = r }) else first.get(key);
+            var wildcard = if (parameterless or root == null) null else wildcards.get(key);
             // Merge the two descending chains, retaining the latest matching
             // declaration as the diagnostic's earlier implementation.
             while (chain != null or wildcard != null) {
@@ -8802,6 +8913,7 @@ const Resolver = struct {
                 // this one. A row the compiler provides is the earlier of the
                 // two wherever it takes part, because those rows are recorded
                 // before any header is read.
+                try self.repeated_impls.put(self.gpa, it.decl, {});
                 if (earlier.decl == DeclId.none) {
                     try self.sink.addErrorFmt(
                         .n_duplicate,
@@ -8811,18 +8923,13 @@ const Resolver = struct {
                         "`{s}` is already implemented for `{s}`",
                         .{
                             self.ast.tokenText(at),
-                            self.headText(it.decl),
+                            try self.headText(it.decl),
                         },
                     );
                     continue;
                 }
 
                 const before = self.ast.declTrait(earlier.decl);
-                try self.duplicate_impls.put(
-                    self.gpa,
-                    Resolution.duplicateKey(earlier.decl, it.decl),
-                    {},
-                );
 
                 const labels = try self.sink.arena.alloc(Label, 2);
                 labels[0] = .{
@@ -8844,10 +8951,6 @@ const Resolver = struct {
                         "a trait has at most one default implementation"
                     else if (generic)
                         "a trait is implemented once per arguments and type"
-                    else if (self.isTupleHead(it.decl))
-                        "a trait is implemented once for all tuples of one arity"
-                    else if (it.head == .callable_)
-                        "a trait is implemented once for each callable shape"
                     else
                         "a trait is implemented once for a type",
                     .style = .primary,
@@ -8864,14 +8967,14 @@ const Resolver = struct {
                         "`{s}` is already implemented for `{s}` with the same arguments",
                         .{
                             self.ast.tokenText(at),
-                            self.headText(it.decl),
+                            try self.headText(it.decl),
                         },
                     ) else try std.fmt.allocPrint(
                         self.sink.arena,
                         "`{s}` is already implemented for `{s}`",
                         .{
                             self.ast.tokenText(at),
-                            self.headText(it.decl),
+                            try self.headText(it.decl),
                         },
                     ),
                     .labels = labels,
@@ -8880,10 +8983,53 @@ const Resolver = struct {
         }
     }
 
-    /// An explicitly applied name cannot be replaced by one of a family's
-    /// parameters, and a name that reaches a type fails `sameWrittenArgs`
-    /// against one that reaches another, whatever the reading. Hash collisions
-    /// retain extra candidates; equality remains that routine's decision.
+    /// How many positions a family is filed by: the arguments it gives the
+    /// trait, then, for a callable head, each parameter's type and the
+    /// result. A nominal family's head applies its own parameters, which
+    /// tell no two apart.
+    fn familyPositions(self: *const Resolver, it: Implementation) usize {
+        if (it.decl == DeclId.none) return 0;
+        const args = it.args.len();
+        if (it.head != .callable_) return args;
+        const callable = self.ast.callableType(self.ast.declHead(it.decl));
+        return args + (callable.params.end - callable.params.start) + 1;
+    }
+
+    /// The root of the type a family writes at one of its positions, or null
+    /// where it writes none there or one with no root.
+    fn familyRootAt(self: *const Resolver, it: Implementation, position: usize) ?u64 {
+        if (it.decl == DeclId.none) return null;
+        const args = self.ast.typeArgs(it.args);
+        if (position < args.len) return self.coherenceArgumentRoot(args[position]);
+        if (it.head != .callable_) return null;
+        const callable = self.ast.callableType(self.ast.declHead(it.decl));
+        const params = self.ast.params[callable.params.start..callable.params.end];
+        const slot = position - args.len;
+        if (slot < params.len) return self.coherenceArgumentRoot(params[slot].written);
+        if (slot == params.len and callable.result.wasWritten()) return self.coherenceArgumentRoot(callable.result);
+        return null;
+    }
+
+    /// A hash of everything `sameImplementation` compares of an
+    /// implementation that declares no parameters: its trait, its head and
+    /// the arguments it gives the trait, each hashed as the comparison reads
+    /// it, so two it calls the same hash alike.
+    fn headerHash(self: *const Resolver, it: Implementation) !u64 {
+        var h: std.hash.Wyhash = .init(self.coherenceKey(it));
+        const ctx: Coherence = .{ .res = self };
+        var left: usize = hashed_node_budget;
+        try hashType(self.ast, ctx, &h, self.ast.declHead(it.decl), .{}, &left);
+        try hashArgs(self.ast, ctx, &h, it.args, .{}, &left);
+        return h.final();
+    }
+
+    /// A name that reaches a type cannot be replaced by one of a family's
+    /// parameters, and it fails `sameWrittenArgs` against a name that reaches
+    /// another type, whatever the reading. Hash collisions retain extra
+    /// candidates; equality remains that routine's decision.
+    ///
+    /// A bare name that reaches no type is a parameter or names nothing, and
+    /// has no root.
     ///
     /// An alias with arguments is the type it names, so its root is the head
     /// of that type; an alias that is not headed by a name -- one naming a
@@ -8892,7 +9038,11 @@ const Resolver = struct {
     fn coherenceArgumentRoot(self: *const Resolver, arg: node.TypeRef) ?u64 {
         var h: std.hash.Wyhash = .init(0);
         switch (arg.kind) {
-            .named => if (arg.args.len() == 0) return null,
+            .named => if (arg.args.len() == 0) {
+                const identity = self.reachedType(arg.name) orelse return null;
+                h.update(std.mem.asBytes(&identity));
+                return h.final();
+            },
             // A tuple is rooted where its long form is, so the two spellings
             // of one argument sit in one chain and are compared.
             .tuple => {
@@ -8915,20 +9065,23 @@ const Resolver = struct {
         return h.final();
     }
 
-    /// Whether two implementations are the same one: the trait, the head
-    /// constructor, and the arguments supplied to the trait once a family's
-    /// own parameters are read at the other's head.
+    /// Whether two implementations are the same one written twice: the trait,
+    /// the head and the arguments supplied to the trait, up to the names of
+    /// the parameters each declares.
     ///
-    /// A family supplies the trait whatever its head was applied to, so
-    /// `Give[T] for Holder[T]` supplies `Give[UInt8]` at `Holder[UInt8]` and
-    /// is the same implementation as one that writes those arguments out.
-    /// Comparing what was written made those two keys, which let a settled
-    /// head sit under a family that already answers for it and never be
-    /// reached by anything.
+    /// Two implementations that declare no parameters are the same where
+    /// their heads name one type and their arguments name the same types, so
+    /// `Weigh for Crate[UInt8]` and `Weigh for Crate[UInt16]` are two.
     ///
-    /// One side is read at the other's head and never both: two families read
-    /// at each other would each be renamed into the other's parameters, and a
-    /// family read at a settled head is already the whole comparison.
+    /// Two families are the same where the head and the arguments of one,
+    /// with its parameters read as what the other's head applies in the same
+    /// positions, are the other's. One side is read and never both: two
+    /// families read at each other would each be renamed into the other's
+    /// parameters.
+    ///
+    /// A family and an implementation declaring no parameters are never the
+    /// same one. Whether a type exists that both answer for is the overlap
+    /// question, which the checker decides by unifying the two headers.
     fn sameImplementation(self: *const Resolver, a: Implementation, b: Implementation) bool {
         if (a.trait != b.trait) return false;
         if (a.head == .default_ or b.head == .default_) return a.head == .default_ and b.head == .default_;
@@ -8941,9 +9094,12 @@ const Resolver = struct {
             return self.sameArgumentsProvided(a, b);
         }
         const ctx: Coherence = .{ .res = self };
-        if (self.ast.declTypeParams(a.decl).len != 0) return sameWrittenArgs(self.ast, ctx, a.args, self.reading(a.decl, b), b.args, .{}) catch unreachable;
-        if (self.ast.declTypeParams(b.decl).len != 0) return sameWrittenArgs(self.ast, ctx, b.args, self.reading(b.decl, a), a.args, .{}) catch unreachable;
-        return sameWrittenArgs(self.ast, ctx, a.args, .{}, b.args, .{}) catch unreachable;
+        const a_family = self.ast.declTypeParams(a.decl).len != 0;
+        const b_family = self.ast.declTypeParams(b.decl).len != 0;
+        if (a_family != b_family) return false;
+        const read: Reading = if (a_family) self.reading(a.decl, b) else .{};
+        if (!(sameWrittenType(self.ast, ctx, self.ast.declHead(a.decl), read, self.ast.declHead(b.decl), .{}) catch unreachable)) return false;
+        return sameWrittenArgs(self.ast, ctx, a.args, read, b.args, .{}) catch unreachable;
     }
 
     /// What `sameWrittenArgs` reads while implementations are keyed: the
@@ -8974,6 +9130,14 @@ const Resolver = struct {
         /// the comparison reads -- and not a case to decide: answering
         /// "different" would hand the winner to declaration order, and "same"
         /// would put one symbol over what may be two types.
+        /// The key of a constant both sides were folded to, as `sameValue`
+        /// compares it.
+        pub fn valueKey(self: Coherence, id: ExprId) Error!u64 {
+            const worth = self.res.folded.worthOf(id) orelse
+                std.debug.panic("compiler defect: an unsettled constant reached a coherence key", .{});
+            return constantKey(self.res.ast, id, worth.checked());
+        }
+
         pub fn sameValue(self: Coherence, a: ExprId, b: ExprId) Error!bool {
             const x = (self.res.folded.worthOf(a) orelse
                 std.debug.panic("compiler defect: an unsettled constant reached a coherence key", .{})).checked() orelse
@@ -9029,8 +9193,9 @@ const Resolver = struct {
     /// The trait and the head constructor and nothing else. What a family
     /// supplies the trait is settled by the head it is read at, so the
     /// arguments are not a property of one implementation and cannot be part
-    /// of a key. A shared hash is verified before anything is reported, so a
-    /// coarse one costs a comparison and never an answer.
+    /// of a key; what the head applies is filed beneath the key, by the root
+    /// of one position. A shared hash is verified before anything is
+    /// reported, so a coarse one costs a comparison and never an answer.
     fn coherenceKey(_: *const Resolver, it: Implementation) u64 {
         var h: std.hash.Wyhash = .init(0);
         const trait: u32 = @intFromEnum(it.trait);
@@ -9206,7 +9371,9 @@ const Resolver = struct {
         // to read a length out of. Its head is a primitive or the array
         // constructor, and neither holds a written argument to carry a length:
         // nothing to settle is settled, and the row is keyed like any other.
-        const head: []const node.TypeRef = if (it.decl == DeclId.none) &.{} else self.ast.typeArgs(self.ast.declHead(it.decl).args);
+        // The head itself and not only what it applies: a callable head
+        // writes its lengths and defaults in its signature.
+        const head: []const node.TypeRef = if (it.decl == DeclId.none) &.{} else &.{self.ast.declHead(it.decl)};
         return self.writtenLengthsSettled(&.{ self.ast.typeArgs(it.args), head });
     }
 
@@ -9648,6 +9815,40 @@ const Resolver = struct {
     };
 
     const SourceReplacements = std.AutoHashMapUnmanaged(BindingId, []const u8);
+
+    /// The whole text of one type argument a derive's head applies, to stand
+    /// wherever the generated source names the target's parameter: every
+    /// token from the argument's first to the comma or bracket that ends it,
+    /// so an applied name keeps its arguments, an array its length, and a
+    /// callable type its defaults and contract. A callable type is written
+    /// in parentheses, since the text after it would otherwise read as part
+    /// of its result or its contract.
+    fn writtenArgumentText(self: *const Resolver, argument: node.TypeRef) ![]const u8 {
+        const ast = &self.program.ast;
+        const file = ast.fileOf(argument.at);
+        var depth: usize = 0;
+        var last = argument.at;
+        var at = argument.at.index();
+        while (at < ast.tokenCount()) : (at += 1) {
+            const tok = TokenId.at(at);
+            if (ast.fileOf(tok) != file) break;
+            switch (ast.tokenTag(tok)) {
+                .l_bracket, .l_paren, .l_brace => depth += 1,
+                .r_bracket, .r_paren, .r_brace => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                },
+                .comma => if (depth == 0) break,
+                .comment => continue,
+                .eof => break,
+                else => {},
+            }
+            last = tok;
+        }
+        const text = ast.partOf(argument.at).source[ast.tokenSpan(argument.at).start..ast.tokenSpan(last).end];
+        if (ast.withoutTypeGroups(argument).kind != .callable or argument.kind == .grouped) return text;
+        return std.fmt.allocPrint(self.sink.arena, "({s})", .{text});
+    }
     const SourceAliasOrdinals = std.AutoHashMapUnmanaged(u64, void);
     const SourceAliasSuccessors = std.AutoHashMapUnmanaged(u64, u64);
 
@@ -10876,6 +11077,15 @@ const Resolver = struct {
         // lists name one implementation is coherence's question.
         var requested_traits: std.AutoHashMapUnmanaged(u64, TokenId) = .empty;
         defer requested_traits.deinit(self.gpa);
+        // The requests for one application of a target, under a hash of the
+        // target, the trait and the head as `sameWrittenType` compares it.
+        const ApplicationRequest = struct { derive: DeclId, trait: TokenId, key: u64 };
+        var requested_applications: std.AutoHashMapUnmanaged(u64, std.ArrayList(ApplicationRequest)) = .empty;
+        defer {
+            var lists = requested_applications.valueIterator();
+            while (lists.next()) |list| list.deinit(self.gpa);
+            requested_applications.deinit(self.gpa);
+        }
         var source_alias_skip_path: std.ArrayList(u64) = .empty;
         defer source_alias_skip_path.deinit(self.gpa);
         const next_generated_alias_ordinals = try self.gpa.alloc(u64, self.program.modules.len);
@@ -10979,13 +11189,41 @@ const Resolver = struct {
                 }
                 if (!shape_matches) continue;
 
+                // A request is for the target's whole family, or for the one
+                // application a standalone head writes without declaring a
+                // parameter. Two applications are two requests, and two heads
+                // are one application where they are written as one type,
+                // whatever the spelling, by the comparison every written
+                // type is held to.
                 const request_key = (@as(u64, target.index()) << 32) | trait.index();
-                const requested = if (entry.ref.args.len() == 0)
-                    try requested_traits.getOrPut(self.gpa, request_key)
-                else
-                    null;
-                if (requested != null and requested.?.found_existing) {
-                    const earlier = requested.?.value_ptr.*;
+                const application = !attached and self.program.ast.declTypeParams(derive).len == 0 and
+                    self.program.ast.declHead(derive).args.len() != 0;
+                const earlier_request: ?TokenId = if (entry.ref.args.len() != 0)
+                    null
+                else if (application) found: {
+                    const head = self.program.ast.declHead(derive);
+                    // A length nothing settles leaves the head naming no
+                    // type, which is reported where it is written.
+                    if (!try self.writtenLengthsSettled(&.{&.{head}})) break :found null;
+                    const ctx: Coherence = .{ .res = self };
+                    var h: std.hash.Wyhash = .init(request_key);
+                    var left: usize = hashed_node_budget;
+                    try hashType(&self.program.ast, ctx, &h, head, .{}, &left);
+                    const requests = try requested_applications.getOrPut(self.gpa, h.final());
+                    if (!requests.found_existing) requests.value_ptr.* = .empty;
+                    for (requests.value_ptr.items) |earlier| {
+                        if (earlier.key != request_key) continue;
+                        if (try sameWrittenType(&self.program.ast, ctx, self.program.ast.declHead(earlier.derive), .{}, head, .{})) break :found earlier.trait;
+                    }
+                    try requests.value_ptr.append(self.gpa, .{ .derive = derive, .trait = entry.ref.name, .key = request_key });
+                    break :found null;
+                } else found: {
+                    const requested = try requested_traits.getOrPut(self.gpa, request_key);
+                    if (requested.found_existing) break :found requested.value_ptr.*;
+                    requested.value_ptr.* = entry.ref.name;
+                    break :found null;
+                };
+                if (earlier_request) |earlier| {
                     const labels = try self.sink.arena.alloc(Label, 2);
                     labels[0] = .{
                         .file = self.program.ast.fileOf(earlier),
@@ -11007,7 +11245,6 @@ const Resolver = struct {
                     });
                     continue;
                 }
-                if (requested) |first| first.value_ptr.* = entry.ref.name;
 
                 const form_start = if (!attached and self.program.ast.deriveIsGrouped(derive))
                     self.program.ast.deriveGroupOpen(derive)
@@ -11139,7 +11376,7 @@ const Resolver = struct {
                     const target_arguments = self.program.ast.typeArgs(self.program.ast.declHead(derive).args);
                     for (self.program.ast.declTypeParams(target), target_arguments) |parameter, argument| {
                         const binding = self.type_parameter_bindings.get(parameter.name) orelse continue;
-                        try replacements.put(self.gpa, binding, self.program.ast.tokenText(argument.name));
+                        try replacements.put(self.gpa, binding, try self.writtenArgumentText(argument));
                     }
                 }
                 var component_type_text: std.ArrayList([]const u8) = .empty;
@@ -17898,8 +18135,7 @@ test "a trait is implemented once for a type" {
     defer arena.deinit();
     const gpa = arena.allocator();
 
-    // What lets a bound and a call each take the first implementation they
-    // find rather than search among candidates.
+    // One implementation written twice is one answer given twice.
     const twice = try resolveSource(gpa,
         \\struct Account { balance: UInt8 }
         \\trait Measure { fn of(x: Self) -> UInt8 }
@@ -17919,6 +18155,31 @@ test "a trait is implemented once for a type" {
         \\fn main() -> UInt8 { let a: Account = .{ balance = 1 }; Measure.of(a) + Weigh.of(a) }
     );
     try testing.expectEqual(@as(u32, 0), distinct.errors);
+
+    // Two applications of one constructor are two types, and so are two
+    // tuples of one arity.
+    const applications = try resolveSource(gpa,
+        \\struct Crate[T] { item: T }
+        \\trait Measure { fn of(x: Self) -> UInt8 }
+        \\impl Measure for Crate[UInt8] { fn of(x: Self) -> UInt8 { x.item } }
+        \\impl Measure for Crate[UInt16] { fn of(_x: Self) -> UInt8 { 2 } }
+        \\impl Measure for Crate[Crate[UInt8]] { fn of(_x: Self) -> UInt8 { 3 } }
+        \\impl Measure for Crate[Crate[UInt16]] { fn of(_x: Self) -> UInt8 { 4 } }
+        \\fn main() -> UInt8 { let a: Crate[UInt8] = .{ item = 1 }; Measure.of(a) }
+    );
+    try testing.expectEqual(@as(u32, 0), applications.errors);
+
+    // The same application twice is one implementation written twice, however
+    // deep the repeated argument sits.
+    const repeated = try resolveSource(gpa,
+        \\struct Crate[T] { item: T }
+        \\trait Measure { fn of(x: Self) -> UInt8 }
+        \\impl Measure for Crate[Crate[UInt8]] { fn of(_x: Self) -> UInt8 { 3 } }
+        \\impl Measure for Crate[UInt16] { fn of(_x: Self) -> UInt8 { 2 } }
+        \\impl Measure for Crate[Crate[UInt8]] { fn of(_x: Self) -> UInt8 { 4 } }
+        \\fn main() -> UInt8 { 0 }
+    );
+    try testing.expectEqual(@as(u32, 1), repeated.errors);
 
     // And a type still takes as many inherent blocks as it likes, which is a
     // different question with the same shape.

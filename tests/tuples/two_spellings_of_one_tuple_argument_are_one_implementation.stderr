@@ -1,4 +1,4 @@
-error[N-Duplicate]: `From` is already implemented for `P` with the same arguments
+error[N-Duplicate]: `From` is already implemented for `P[A, B]` with the same arguments
   --> tests/tuples/two_spellings_of_one_tuple_argument_are_one_implementation.lin:15:12
    |
 8  | impl[A, B] From[(A, B)] for P[A, B] {

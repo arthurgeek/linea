@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Weigh` is already implemented for `Crate[UInt8]`
+  --> tests/traits/a_repeated_head_written_across_lines_is_named_on_one.lin:18:6
+   |
+11 | impl Weigh for Crate[UInt8] {
+   |      ----- already implemented here
+18 | impl Weigh for Crate[ // the small crate
+   |      ^^^^^ a trait is implemented once for a type

@@ -2961,13 +2961,32 @@ declaring module, so the implementation belongs in the trait's module
 ([M-Impl]); an inherent implementation for a callable type is a parse error. The
 head is written exactly as a callable type is, with its own parameter
 conventions, result and contract, and the implementation's parameters are
-recovered from it as from any other head. Coherence keys a callable head by its
-**shape**: the invocation and each parameter's convention, in order. Two
-implementations of one trait at one shape and one argument list are
-[N-Duplicate], whatever types the signatures write, as two tuple heads of one
-arity are, which refuses
-`fn(x: UInt64)` beside `fn(x: UInt8)`; implementations at different shapes never
-meet, and a head of any number of parameters has a shape of its own. A function
+recovered from it as from any other head. A callable head is filed and found by
+its **shape**: the invocation and each parameter's convention, in order.
+Implementations at different shapes never meet, and a head of any number of
+parameters has a shape of its own. Two heads of one shape are held to the rules
+every head is held to. They are one head where they are one callable type: the
+same invocation, the same convention, type and default at each parameter, the
+same result and the same contract; a parameter's label is no part of the type.
+So `fn(input: UInt8) -> UInt8` beside `fn(value: UInt8) -> UInt8` is one
+implementation written twice ([N-Duplicate]), `fn(x: UInt8) -> UInt8` beside
+`fn(x: Bool) -> UInt8` or beside `fn(x: UInt8) -> UInt16` is two, and
+`impl[T] Run for fn(x: T) -> T` beside `impl Run for fn(x: UInt8) -> UInt8`
+overlaps ([T-Impl]). A contract is part of a callable type only
+where it names a dependency: `carries` drops out where the result is a scalar
+(an integer, a float, `Bool`, `()`, `Never`, or a newtype over one that seeds
+no dependency of its own), and a contract that borrows nothing and whose
+source is a parameter drops out where that parameter is one. So a contract
+written over a type the implementation leaves as a parameter, or as a settled
+type's name, may stand or not, according to what that type is settled to, and
+it proves no two heads apart: `impl[T] Run for fn(a: T) -> Str where
+carries(a)` and `impl[U] Run for fn(a: U) -> Str where carries()` are both
+`fn(a: UInt8) -> Str` at `UInt8` and overlap. Two heads' contracts differ, and
+the heads are disjoint, only where a contract that stands whatever the open
+types become on one side has none the same on the other that stands or may
+stand: `fn(a: Str, b: T) -> Str where carries(a)` and
+`fn(a: Str, b: U) -> Str where carries()` never meet. The same holds of a
+callable type written as a trait argument. A function
 value implements the trait where its signature matches the written head exactly,
 contract included, binding the head's parameters: a function taking `read` where
 the head writes `inout` does not match. A closure never does, because its type
@@ -2980,9 +2999,25 @@ structurally equal. A settled type's name written among a head's arguments
 or as a trait argument is the type it is settled to: with `Probe.Reading`
 settled to `UInt8`, `impl Weighs[Probe.Reading] for Scale` overlaps
 `impl Weighs[UInt8] for Scale` and `impl[T] Weighs[UInt8] for T` alike.
-Overlap between open headers is checked at declaration time
-and rejected without ranking either declaration by specificity among ordinary
-implementations. An explicitly marked default
+Overlap is checked at declaration time and rejected
+([T-Impl]) without ranking either declaration by specificity among ordinary
+implementations. Two ordinary implementations of one trait that do not overlap
+may both be written, whatever their heads have in common. Two heads that
+declare no parameters and are settled to different types have no such
+substitution, so `impl Weigh for Crate[UInt8]` and
+`impl Weigh for Crate[UInt16]` are both valid, as are
+`Crate[Option[UInt8]]` beside `Crate[Option[UInt16]]` and `(UInt8, Bool)`
+beside `(UInt8, UInt16)`. What is compared is the type each head is settled
+to and not its spelling: with `S.Reading` settled to `UInt8`,
+`impl Weigh for Crate[S.Reading]` beside `impl Weigh for Crate[UInt8]` is one
+type given two implementations and is refused. A family and a type it could be
+settled to overlap, so `impl[T] Weigh for Crate[T]` beside
+`impl Weigh for Crate[UInt8]` is refused in either order, naming `Crate[UInt8]`
+as the type both answer for. Where both are written in one file the report stands at the
+later of the two; a derive is written where its request is. An
+implementation whose head is refused for its form is compared with no other
+([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
+An explicitly marked default
 occupies a separate fallback tier, described below. For example,
 `impl[T] Give[T] for Holder[T]` and `impl[U] Give[Bool] for Holder[U]` agree
 when `T = U` and both are `Bool`, so both would implement the trait for
@@ -3101,20 +3136,38 @@ Capability bounds are compared by the strongest requirement the complete list
 demands ([T-Bound]); Copyable includes Discardable.
 
 At most one ordinary implementation may answer a given trait declaration, trait
-argument list and head constructor. Repeating the same implementation is
-[N-Duplicate]; potential overlap between distinct open headers is checked as
-described above. Distinct concrete trait arguments describe distinct
-relationships, so `TryFrom[Int64] for UInt8` may coexist with
+argument list and receiver type: a program in which two could is refused where
+the second is declared, by one of two reports. Writing the same implementation
+twice is [N-Duplicate], reported at the second and naming its head as written:
+the same trait, the same head and the same trait arguments as written, up to
+the names of the parameters each declares. Two implementations that declare no
+parameters are the same where their heads and their trait arguments are written
+as the same types, however each is spelled: through an alias, a qualified name,
+a tuple's long form, a callable type's labels or a length that folds to the
+same value. Two that declare parameters are the same where the head and the
+arguments of one, with its parameters read as what the other's head applies in
+the same positions, are the other's, so `impl[T] Show for Holder[T]` and
+`impl[U] Show for Holder[U]` are one implementation. An implementation written
+three times is reported twice, and an implementation reported as a repetition
+takes part in no overlap report and no further repetition report. Every other pair that could answer for one type
+overlaps, as described above, and is [T-Impl]: an implementation that declares
+parameters beside one that declares none, and two headers written differently
+that are settled to the same types. Distinct heads and distinct concrete trait
+arguments describe distinct relationships, so `Weigh for Crate[UInt8]` may
+coexist with `Weigh for Crate[UInt16]`, and `TryFrom[Int64] for UInt8` with
 `TryFrom[UInt8] for UInt8`. Compiler-provided implementations also count when
-detecting duplicates.
+detecting repetitions.
 
-The head key uses the constructor. A generic implementation describes a family
-of its instantiations; its own bounds determine which family members it
-supports, but do not distinguish overlapping implementations or choose between
-them. For any concrete trait arguments and receiver there is at most one
-ordinary implementation; a default is considered only under the separate
+A generic implementation describes a family of its instantiations; its own
+bounds determine which family members it supports, but do not distinguish
+overlapping implementations or choose between them. A type that no
+implementation's head matches does not implement the trait: with `Weigh`
+implemented for `Crate[UInt8]` and `Crate[UInt16]` only, requiring it of
+`Crate[Bool]` is [T-Bound]. A default is considered only under the separate
 fallback rules above. Specialisation among ordinary implementations is
-forbidden.
+forbidden: `impl Weigh for Crate[UInt8]` cannot stand beside
+`impl[T] Weigh for Crate[T]` to answer in its place
+([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
 
 Trait identity is declaration identity. Two modules may each declare `Measure`;
 implementing one does not implement the other. Bound checking and call dispatch
@@ -3214,11 +3267,23 @@ and trailing `where` predicates, and may name one trait or a parenthesised group
 of traits. An attached request uses the following type's parameter list and
 written constraints, and adds the field requirements described below. Each
 trait entry independently names a trait, its ordinary type arguments and its
-structural template. A type requests each resolved trait taking no arguments
-once across attached and standalone requests; aliases and qualified spellings do
-not evade that rule. A trait with arguments may be requested once per argument
-list, and two requests naming one implementation are refused as coherent
-implementations are.
+structural template. A request is for one implementation. An attached request, and a
+standalone one whose head applies the target to its own parameters, request the
+implementation for every application of the type; a standalone request that
+declares no parameter and applies the target to types, `derive Score for
+Mark[UInt8]`, requests it for that application. Each implementation of a trait
+taking no arguments is requested once across attached and standalone requests
+([T-Derive]); aliases and qualified spellings of the trait do not evade that
+rule, and neither does another spelling of the application: two standalone
+heads request one application where they are written as one type, so after
+`derive Score for Mark[UInt8]` each of `derive Score for Mark[ UInt8 ]`,
+`derive Score for Mark[(UInt8)]` and `derive Score for Mark[Byte]`, with `Byte`
+an alias of `UInt8`, is the request repeated. `derive Score for Mark[UInt8]`
+beside `derive Score for Mark[UInt16]` is two requests. A trait with arguments may be requested once per argument
+list. The implementations different requests generate are held to the rules of
+ordinary implementations: two that are one implementation are [N-Duplicate],
+and two that could answer for one type overlap ([T-Impl]), as a request for
+every application does with a request, or a written implementation, for one.
 
 `@derive(From[S])` on an enum requests the implementation `From[S]` for it that
 wraps the source in the one variant whose only field has type `S`

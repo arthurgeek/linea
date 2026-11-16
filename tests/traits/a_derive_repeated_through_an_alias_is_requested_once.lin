@@ -1,0 +1,26 @@
+// `Byte` is `UInt8`, so the second derive names the application the first
+// names and requests the same implementation again.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+struct Mark[T] {
+    value: T,
+}
+
+alias Byte = UInt8
+
+derive Score for Mark[UInt8]
+
+derive Score for Mark[Byte]
+
+fn main() -> UInt8 {
+    let byte: Mark[UInt8] = .{ value = 3 }
+    byte.score()
+}

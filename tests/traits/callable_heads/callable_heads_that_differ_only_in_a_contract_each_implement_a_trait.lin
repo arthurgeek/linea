@@ -1,0 +1,42 @@
+// The contract a callable type promises is part of the type. A function whose
+// result may carry from its parameter and one whose result carries from
+// nothing are two types, so each may implement `Pick`.
+trait Pick {
+    fn pick(self: Self) -> UInt8
+}
+
+impl Pick for fn(text: Str) -> Str where carries(text) {
+    fn pick(self: Self) -> UInt8 {
+        if self("ab") == "ab" {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+impl Pick for fn(text: Str) -> Str where carries() {
+    fn pick(self: Self) -> UInt8 {
+        if self("ab") == "fixed" {
+            20
+        } else {
+            0
+        }
+    }
+}
+
+fn same(text: Str) -> Str where carries(text) {
+    copy(text)
+}
+
+fn fixed(_text: Str) -> Str where carries() {
+    "fixed"
+}
+
+fn go[H: Pick](handler: H) -> UInt8 {
+    handler.pick()
+}
+
+fn main() -> UInt8 {
+    go(same) + go(fixed)
+}

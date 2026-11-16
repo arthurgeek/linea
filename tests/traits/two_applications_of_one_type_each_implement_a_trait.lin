@@ -1,0 +1,28 @@
+// `Crate[UInt8]` and `Crate[UInt16]` are two types, so each may implement
+// `Weigh` with a body of its own. A call runs the implementation written for
+// the type of its receiver.
+struct Crate[T] {
+    item: T,
+}
+
+trait Weigh {
+    fn weigh(self: Self) -> UInt8
+}
+
+impl Weigh for Crate[UInt8] {
+    fn weigh(self: Self) -> UInt8 {
+        self.item
+    }
+}
+
+impl Weigh for Crate[UInt16] {
+    fn weigh(self: Self) -> UInt8 {
+        UInt8(self.item / 100)
+    }
+}
+
+fn main() -> UInt8 {
+    let small: Crate[UInt8] = .{ item = 4 }
+    let large: Crate[UInt16] = .{ item = 300 }
+    small.weigh() * 10 + Weigh.weigh(large)
+}
