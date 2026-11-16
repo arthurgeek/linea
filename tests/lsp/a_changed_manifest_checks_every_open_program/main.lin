@@ -1,0 +1,5 @@
+// A manifest may decide what any program holds, so when one changes the
+// program of every open document is checked again and published.
+fn main() -> UInt8 {
+    0
+}

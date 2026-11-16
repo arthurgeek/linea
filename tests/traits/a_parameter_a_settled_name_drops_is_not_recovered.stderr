@@ -1,0 +1,5 @@
+error[T-Impl]: implementation parameter `T` cannot be recovered from its key
+  --> tests/traits/a_parameter_a_settled_name_drops_is_not_recovered.lin:21:6
+   |
+21 | impl[T] Gives[Wrap[T].Element] for Scale {
+   |      ^ place the parameter in the receiver or trait arguments outside associated-type projections

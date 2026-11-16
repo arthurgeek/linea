@@ -117,6 +117,14 @@ pub const Handler = struct {
     /// outside the editor, which the client's watch reports and which drops
     /// the analysis of the module that holds it.
     cached: ?Cached = null,
+    /// The files each program was last published with something wrong in,
+    /// by the program's entry. An editor shows a file's diagnostics until
+    /// others are published for it, so a file the program no longer holds is
+    /// published once more, with none.
+    ///
+    /// **Bound:** the files that had a diagnostic when their program was
+    /// last published, over the programs the session has published.
+    flagged: std.StringHashMapUnmanaged(std.ArrayList([]u8)) = .empty,
     /// What every program under the workspace exports, held for the session.
     ///
     /// Built on the first request that reads it, so a session that never asks
@@ -339,11 +347,13 @@ pub const Handler = struct {
     /// A file under the workspace changed outside the editor.
     ///
     /// What the named files contribute to the index is replaced, and nothing
-    /// else is: a change on disk is never a walk. An analysis affected by a
-    /// changed file is dropped so the next request checks it again;
+    /// else is: a changed source file is never a walk. An analysis affected by
+    /// a changed file is dropped so the next request checks it again;
     /// publishing from here instead would check one module
     /// per notification, and a checkout delivers one notification per file it
-    /// touched.
+    /// touched. A changed manifest is the exception on both counts: the
+    /// index is dropped whole and walked again by the request that next reads
+    /// it, and the held program is checked and published once.
     ///
     /// **Bound: the files the notification names.** Per file, invalidation
     /// checks the loaded files and module directories. A prepared export index
@@ -355,18 +365,24 @@ pub const Handler = struct {
         arena: std.mem.Allocator,
         params: lsp.types.workspace.did_change_watched_files.Params,
     ) !void {
-        // A file the held program embeds is nothing an editor shows, so no
-        // document event follows its change: the program is checked again and
-        // published from here, once however many of its files the
-        // notification names, or what the editor shows about it stays as it
-        // was.
+        // A file the held program embeds, and a manifest, are nothing a
+        // document event follows the change of: what the editor shows is
+        // checked again and published from here, or it stays as it was. An
+        // embedded file belongs to the held program, which is published once
+        // however many of its files the notification names. A manifest may
+        // decide what any program holds, whichever is held when the
+        // notification arrives and wherever in it the manifest is named, so
+        // the program of every open document is published.
         var republish: ?[]const u8 = null;
+        var manifest_changed = false;
         for (params.changes) |change| {
             const path = try uri_mod.pathOf(arena, change.uri);
             if (republish == null) republish = try handler.embeddedBy(arena, path);
+            if (std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name)) manifest_changed = true;
             try handler.invalidate(arena, path);
             try handler.freshen(arena, path);
         }
+        if (manifest_changed) return handler.reportOpen(arena);
         if (republish) |entry| try handler.report(arena, entry);
     }
 
@@ -769,7 +785,7 @@ pub const Handler = struct {
             if (std.mem.eql(u8, held.entry, entry)) return &held.of;
         }
 
-        const files = try handler.documents.filesFor(arena, handler.io, root);
+        const files = try handler.documents.filesFor(arena, handler.io, root, .open_and_manifests);
 
         // The analysis copies what it was given, so the buffers above are the
         // caller's business from here and the message's arena may reclaim
@@ -794,6 +810,13 @@ pub const Handler = struct {
     /// now does once per case.
     pub fn deinit(handler: *Handler) void {
         handler.drop();
+        var flagged = handler.flagged.iterator();
+        while (flagged.next()) |kept| {
+            for (kept.value_ptr.items) |path| handler.gpa.free(path);
+            kept.value_ptr.deinit(handler.gpa);
+            handler.gpa.free(kept.key_ptr.*);
+        }
+        handler.flagged.deinit(handler.gpa);
         for (handler.embeds_watched.items) |path| handler.gpa.free(path);
         handler.embeds_watched.deinit(handler.gpa);
         handler.documents.deinit();
@@ -816,8 +839,9 @@ pub const Handler = struct {
 
     /// What the workspace exports, built if this is the first ask.
     ///
-    /// Costs one walk of the workspace the first time and nothing after it.
-    /// Borrowed from the handler, and valid until the root is replaced.
+    /// Costs one walk of the workspace and one lex and parse of each open
+    /// document the first time, and nothing after it. Borrowed from the
+    /// handler, and valid until the root is replaced.
     ///
     /// A workspace nobody has named holds no programs, so this reached before
     /// `initialize` says which directory the client opened is an index of
@@ -825,6 +849,13 @@ pub const Handler = struct {
     fn indexOf(handler: *Handler) !*workspace.Index {
         if (handler.index == null) {
             handler.index = try workspace.Index.build(handler.gpa, handler.io, handler.root);
+            // The walk reads files, and an open document is what its buffer
+            // says: each is indexed again from the buffer, as an edit after
+            // the build would be.
+            var open = handler.documents.open.iterator();
+            while (open.next()) |document| {
+                try handler.index.?.reindex(handler.io, document.key_ptr.*, document.value_ptr.*);
+            }
         }
         return &handler.index.?;
     }
@@ -849,8 +880,8 @@ pub const Handler = struct {
         try index.reindex(handler.io, path, text);
     }
 
-    /// Asks the client to say when a `.lin` file under the workspace changes
-    /// outside the editor.
+    /// Asks the client to say when a `.lin` file or a manifest under the
+    /// workspace changes outside the editor.
     ///
     /// The protocol has no static way for a server to ask for file events, so
     /// registering for them is the only way to be told -- which is why a
@@ -871,10 +902,14 @@ pub const Handler = struct {
 
         // The options a registration carries are whatever the method being
         // registered defines, so the protocol types them as any JSON value.
-        var watcher: std.json.ObjectMap = .empty;
-        try watcher.put(arena, "globPattern", .{ .string = "**/*.lin" });
+        // Source files, and the manifests that say which files a program
+        // holds, what it depends on and what it may declare.
         var watchers: std.json.Array = .init(arena);
-        try watchers.append(.{ .object = watcher });
+        for ([_][]const u8{ "**/*.lin", "**/" ++ loader.manifest_name }) |pattern| {
+            var watcher: std.json.ObjectMap = .empty;
+            try watcher.put(arena, "globPattern", .{ .string = pattern });
+            try watchers.append(.{ .object = watcher });
+        }
         var options: std.json.ObjectMap = .empty;
         try options.put(arena, "watchers", .{ .array = watchers });
 
@@ -993,6 +1028,55 @@ pub const Handler = struct {
         return null;
     }
 
+    /// Checks and publishes the program of every document the editor has
+    /// open, each program once, in the order of the documents' paths so a
+    /// session reads the same whatever order they were opened in.
+    ///
+    /// **Bound:** the open documents, sorted, and one check per program
+    /// among them; then one resolution per remembered program that was not
+    /// among them.
+    fn reportOpen(handler: *Handler, arena: std.mem.Allocator) !void {
+        var paths: std.ArrayList([]const u8) = .empty;
+        var open = handler.documents.open.keyIterator();
+        while (open.next()) |path| try paths.append(arena, path.*);
+        std.mem.sort([]const u8, paths.items, {}, struct {
+            fn before(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.before);
+
+        var published: std.StringHashMapUnmanaged(void) = .empty;
+        for (paths.items) |path| {
+            const entry = (try handler.rootFor(arena, path)).entry;
+            if ((try published.getOrPut(arena, entry)).found_existing) continue;
+            try handler.report(arena, path);
+        }
+
+        // A manifest decides which program a file belongs to. A program
+        // that was not checked again, and whose files now resolve to another
+        // program or to none, is one the change did away with: what it was
+        // last published with is taken down. One no document is open in,
+        // that its files still resolve to, keeps what it showed.
+        var gone: std.ArrayList([]const u8) = .empty;
+        var remembered = handler.flagged.iterator();
+        while (remembered.next()) |kept| {
+            const entry = kept.key_ptr.*;
+            if (published.contains(entry)) continue;
+            const now = handler.rootFor(arena, kept.value_ptr.items[0]) catch null;
+            if (now) |root| if (std.mem.eql(u8, root.entry, entry)) continue;
+            try gone.append(arena, try arena.dupe(u8, entry));
+        }
+        std.mem.sort([]const u8, gone.items, {}, struct {
+            fn before(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.before);
+        for (gone.items) |entry| {
+            try handler.clearLeft(arena, entry, null);
+            try handler.remember(entry, &.{});
+        }
+    }
+
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
     ///
     /// The loader's module directories include namespace dependencies on files
@@ -1003,10 +1087,23 @@ pub const Handler = struct {
     ///
     /// Bound: one program-file scan and one module-directory scan, plus
     /// resolution of the changed path's program when errors were reported.
-    /// No dependency index is rebuilt.
+    /// No dependency index is rebuilt; a changed manifest drops it.
     fn invalidate(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !void {
-        const held = handler.cached orelse return;
         const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        // A manifest decides where a program's files sit, which libraries it
+        // depends on and which modules may declare `extern`, for its own
+        // program and for every program that depends on it. Which of the
+        // held analysis and the index it reaches is not worked out: both are
+        // dropped, and each is built again by the next request that reads it.
+        if (std.mem.eql(u8, std.fs.path.basename(named), loader.manifest_name)) {
+            handler.drop();
+            if (handler.index) |*index| {
+                index.deinit();
+                handler.index = null;
+            }
+            return;
+        }
+        const held = handler.cached orelse return;
         if (held.of.fileNamed(named) != null) {
             handler.drop();
             return;
@@ -1081,21 +1178,71 @@ pub const Handler = struct {
         const checked = try handler.check(arena, path);
 
         const publication = try publish.Publication.init(arena, checked);
+        var held: std.StringHashMapUnmanaged(void) = .empty;
+        var wrong: std.ArrayList([]const u8) = .empty;
         var it = publish.files(&checked.program);
         while (it.next()) |file| {
             const diagnostics = try publication.forFile(arena, file, handler.offset_encoding);
-            try handler.transport.writeNotification(
-                handler.io,
-                arena,
-                "textDocument/publishDiagnostics",
-                lsp.types.publish_diagnostics.Params,
-                .{
-                    .uri = try uri_mod.uriOf(arena, checked.table.get(file).path),
-                    .diagnostics = diagnostics,
-                },
-                .{ .emit_null_optional_fields = false },
-            );
+            const file_path = checked.table.get(file).path;
+            try held.put(arena, file_path, {});
+            if (diagnostics.len != 0) try wrong.append(arena, file_path);
+            try handler.publishFor(arena, file_path, diagnostics);
         }
+        const entry = (try handler.rootFor(arena, path)).entry;
+        try handler.clearLeft(arena, entry, &held);
+        try handler.remember(entry, wrong.items);
+    }
+
+    fn publishFor(handler: *Handler, arena: std.mem.Allocator, path: []const u8, diagnostics: []const lsp.types.Diagnostic) !void {
+        try handler.transport.writeNotification(
+            handler.io,
+            arena,
+            "textDocument/publishDiagnostics",
+            lsp.types.publish_diagnostics.Params,
+            .{
+                .uri = try uri_mod.uriOf(arena, path),
+                .diagnostics = diagnostics,
+            },
+            .{ .emit_null_optional_fields = false },
+        );
+    }
+
+    /// Publishes no diagnostics for each file the program at `entry` was
+    /// last published with something wrong in and no longer holds. `held`
+    /// is every file just published, or null where the program itself is
+    /// gone.
+    ///
+    /// **Bound:** the files remembered for this one program.
+    fn clearLeft(handler: *Handler, arena: std.mem.Allocator, entry: []const u8, held: ?*const std.StringHashMapUnmanaged(void)) !void {
+        const before = handler.flagged.getPtr(entry) orelse return;
+        for (before.items) |old| {
+            if (held) |now| if (now.contains(old)) continue;
+            try handler.publishFor(arena, old, &.{});
+        }
+    }
+
+    /// Replaces what is remembered for the program at `entry` with `wrong`,
+    /// the files just published with a diagnostic.
+    fn remember(handler: *Handler, entry: []const u8, wrong: []const []const u8) !void {
+        const gpa = handler.gpa;
+        if (handler.flagged.getPtr(entry)) |before| {
+            for (before.items) |old| gpa.free(old);
+            before.clearRetainingCapacity();
+            if (wrong.len == 0) {
+                var removed = handler.flagged.fetchRemove(entry).?;
+                removed.value.deinit(gpa);
+                gpa.free(removed.key);
+                return;
+            }
+        } else {
+            if (wrong.len == 0) return;
+            const key = try gpa.dupe(u8, entry);
+            errdefer gpa.free(key);
+            try handler.flagged.put(gpa, key, .empty);
+        }
+        const list = handler.flagged.getPtr(entry).?;
+        try list.ensureTotalCapacity(gpa, wrong.len);
+        for (wrong) |file_path| list.appendAssumeCapacity(try gpa.dupe(u8, file_path));
     }
 };
 
@@ -1580,6 +1727,34 @@ test "a file changed on disk changes what the index offers" {
     try std.testing.expectEqualStrings("after", then[0]);
 }
 
+test "a manifest changed on disk changes which files the program holds" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "main.lin", .text = "pub fn here() -> UInt8 { 1 }\n" },
+        .{ .at = "src/main.lin", .text = "pub fn there() -> UInt8 { 2 }\n" },
+    });
+    defer ws.deinit();
+    const a = ws.arena.allocator();
+
+    // The root's own file and the module `src` beside it are both the
+    // program's.
+    try std.testing.expectEqual(@as(usize, 2), (try ws.offered()).len);
+    _ = try ws.handler.check(a, try ws.main());
+    try std.testing.expect(ws.handler.cached != null);
+
+    // The manifest now says the program's files sit under `src`. No source
+    // file changed. The held program is the one to publish again.
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "linea.json", .data = "{ \"source\": \"src\" }" });
+    try ws.handler.invalidate(a, try ws.pathAt("linea.json"));
+
+    // What was checked under the old manifest is not kept, and the file
+    // above `src` is no longer one of the program's.
+    try std.testing.expect(ws.handler.cached == null);
+    const program = try ws.handler.entryFor(a, try ws.pathAt("src/main.lin"));
+    const then = (try ws.handler.indexOf()).offers(program, "");
+    try std.testing.expectEqual(@as(usize, 1), then.len);
+    try std.testing.expectEqualStrings("there", then[0].name);
+}
+
 test "a file deleted on disk is offered no longer" {
     var ws = try Rooted.init(std.testing.allocator, "pub fn gone() -> UInt8 { 1 }\n");
     defer ws.deinit();
@@ -1619,6 +1794,30 @@ test "an edit to an open buffer changes what the index offers before the file is
     const then = try ws.offered();
     try std.testing.expectEqual(@as(usize, 1), then.len);
     try std.testing.expectEqualStrings("after", then[0]);
+}
+
+test "an index built while a buffer is open holds what the buffer says" {
+    var ws = try Rooted.init(std.testing.allocator, "pub fn before() -> UInt8 { 1 }\n");
+    defer ws.deinit();
+
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    // The edit arrives before anything asked for the index, and a changed
+    // manifest drops an index that was built: either way the next ask walks
+    // the files on disk, which still say `before`.
+    const a = ws.arena.allocator();
+    try ws.handler.@"textDocument/didChange"(a, .{
+        .textDocument = .{ .uri = try ws.main(), .version = 2 },
+        .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
+            .text = "pub fn after() -> UInt8 { 1 }\n",
+        } }},
+    });
+
+    const offered = try ws.offered();
+    try std.testing.expectEqual(@as(usize, 1), offered.len);
+    try std.testing.expectEqualStrings("after", offered[0]);
 }
 
 test "byte-identical open and change retain the checked module" {
@@ -1797,4 +1996,37 @@ test "watched dependency changes and missing imports invalidate analysis" {
     try std.testing.expect(ws.handler.cached == null);
     const repaired = try ws.handler.check(a, main);
     try std.testing.expect(!repaired.sink.hasErrors());
+}
+
+test "a file the program never reaches is not read, and one it reaches is read once" {
+    // Comment lines, so each file is a program however long it is.
+    const megabyte = "// " ++ "x" ** 60 ++ "\n";
+    const reached = megabyte ** (1 << 14);
+    const unreached = megabyte ** (1 << 15);
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "main.lin", .text = "import kept\n\nfn main() -> UInt8 {\n    kept.size()\n}\n" },
+        .{ .at = "kept/kept.lin", .text = reached ++ "pub fn size() -> UInt8 {\n    4\n}\n" },
+        .{ .at = "notes/notes.lin", .text = unreached ++ "this is no program at all\n" },
+    });
+    defer ws.deinit();
+    const a = ws.arena.allocator();
+
+    const main_path = try ws.main();
+    const listed_before = ws.arena.queryCapacity();
+    const checked = try ws.handler.check(a, main_path);
+    const listed = ws.arena.queryCapacity() - listed_before;
+
+    // `notes` would not parse, and no import names it: nothing is reported
+    // and it is no file of the program. `kept` is one, though the editor
+    // never opened it.
+    try std.testing.expectEqual(@as(usize, 0), checked.sink.items().len);
+    try std.testing.expect(checked.fileNamed(try loader.canonical(a, try ws.pathAt("kept/kept.lin"))) != null);
+    try std.testing.expect(checked.fileNamed(try loader.canonical(a, try ws.pathAt("notes/notes.lin"))) == null);
+
+    // Listing the files read neither: what the request's arena grew by is
+    // under either file's size. And the reached file is held once, though
+    // two loads read the program: under twice its megabyte.
+    try std.testing.expect(listed < reached.len);
+    try std.testing.expect(checked.source_arena.queryCapacity() < 2 * reached.len);
+    try std.testing.expect(checked.source_arena.queryCapacity() >= reached.len);
 }

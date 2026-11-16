@@ -164,7 +164,7 @@ pub fn dumpMono(
     defer gpa.free(receivers);
     @memset(receivers, node.ExprId.none);
     for (typing.postfix) |postfix| {
-        if (postfix.args.len > 0) receivers[postfix.call] = postfix.args[0];
+        if (postfix.args.len > 0) receivers[postfix.call.index()] = postfix.args[0];
     }
 
     // The types first, because a signature below names them. An instantiation
