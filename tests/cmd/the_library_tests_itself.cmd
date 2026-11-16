@@ -426,6 +426,7 @@ The library tests itself.
   ok    http.a_new_header_list_is_empty
   ok    http.a_new_request_holds_its_method_target_and_body
   ok    http.a_new_router_answers_404
+  ok    http.a_newcomer_at_capacity_closes_the_connection_idle_longest_and_keeps_the_rest
   ok    http.a_param_value_is_found_by_its_exact_name_once
   ok    http.a_param_value_parses_borrows_or_is_optional
   ok    http.a_parameter_beats_a_remainder
@@ -439,6 +440,7 @@ The library tests itself.
   ok    http.a_path_value_decodes_escapes_after_matching
   ok    http.a_path_value_is_found_by_its_exact_name
   ok    http.a_pattern_ending_in_a_slash_matches_that_path_alone
+  ok    http.a_pattern_has_one_capture_for_each_named_segment
   ok    http.a_pattern_splits_into_its_method_and_path
   ok    http.a_percent_error_displays_its_reason
   ok    http.a_policy_of_no_threads_is_refused_and_closes_the_listener
@@ -873,6 +875,7 @@ The library tests itself.
   ok    iter.peekable_yields_every_item_once_in_order
   ok    iter.position_counts_from_zero
   ok    iter.position_hands_linear_items_to_its_predicate
+  ok    iter.position_lends_a_predicate_the_caller_uses_again
   ok    iter.reduce_combines_from_the_first_item
   ok    iter.releasing_a_copied_releases_its_iterator_once
   ok    iter.releasing_a_filter_map_releases_its_iterator_once
@@ -1638,4 +1641,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1635 passed, 0 failed
+  1638 passed, 0 failed

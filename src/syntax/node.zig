@@ -728,6 +728,10 @@ pub const TypeRef = struct {
     dot: TokenId = .none,
     /// The structural signature, for a callable type. `.none` otherwise.
     callable: CallableTypeId = .none,
+    /// The token after the last one the parser stepped over, for a type
+    /// [S-Nesting] refused: the tokens from `at` up to this one are what the
+    /// program wrote there, and no node holds them. `.none` otherwise.
+    stepped_to: TokenId = .none,
 
     /// Whether anything was written at all.
     ///

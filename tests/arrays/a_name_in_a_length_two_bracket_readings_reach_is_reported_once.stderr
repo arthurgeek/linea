@@ -3,8 +3,3 @@ error[N-Undefined]: undefined name `missing`
    |
 23 |     let _b = shelf.empty[Slot[[UInt8; missing]]]()
    |                                       ^^^^^^^ no binding with this name is in scope
-error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
-  --> tests/arrays/a_name_in_a_length_two_bracket_readings_reach_is_reported_once.lin:23:39
-   |
-23 |     let _b = shelf.empty[Slot[[UInt8; missing]]]()
-   |                                       ^^^^^^^ this is not a constant

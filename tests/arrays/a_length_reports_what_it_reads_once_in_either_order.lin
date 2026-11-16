@@ -1,0 +1,22 @@
+// A length is read once, whichever declaration is written first. What is
+// wrong inside it is reported once, and a call is no form a constant
+// expression has, so the length is reported for that as well. The
+// initialiser is not held against an annotation that was refused.
+let table: Option[[UInt8; later.len()]] = .None
+
+let later: [UInt8; 2] = [1, 2]
+
+let earlier: [UInt8; 2] = [3, 4]
+
+let second: Option[[UInt8; earlier.len()]] = .None
+
+fn main() -> UInt8 {
+    let first = match table {
+        Some(_) => 1,
+        None => 0,
+    }
+    match second {
+        Some(_) => first + 1,
+        None => first,
+    }
+}

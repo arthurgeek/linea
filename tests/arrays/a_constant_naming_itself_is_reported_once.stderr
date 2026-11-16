@@ -1,0 +1,5 @@
+error[T-Const]: `second` names itself through `first`
+ --> tests/arrays/a_constant_naming_itself_is_reported_once.lin:5:20
+  |
+5 | let first: UInt8 = second
+  |                    ^^^^^^ a constant's value cannot be worked out from itself

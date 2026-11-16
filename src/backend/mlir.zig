@@ -155,7 +155,8 @@ fn endLine(w: *std.Io.Writer, here: ?FunctionEmitter.Here) std.Io.Writer.Error!v
 fn writeCanonicalNanAt(w: *std.Io.Writer, module: *const Module, ty: TypeId, address: []const u8, tag: []const u8, here: ?FunctionEmitter.Here) std.Io.Writer.Error!void {
     const bits = floatBitsOf(module.representationOf(ty).computation) orelse return;
     const t = floatType(bits);
-    var buffers: [4][32]u8 = undefined;
+    // The longest tag a caller builds is 43 bytes, and one letter follows it.
+    var buffers: [4][64]u8 = undefined;
     const names: CanonicalNames = .{
         .raw = std.fmt.bufPrint(&buffers[0], "{s}l", .{tag}) catch unreachable,
         .unordered = std.fmt.bufPrint(&buffers[1], "{s}u", .{tag}) catch unreachable,
@@ -1963,7 +1964,9 @@ const FunctionEmitter = struct {
             self.w = &address;
             try self.writeValue(a);
             self.w = saved;
-            var tag_buffer: [32]u8 = undefined;
+            // Two letters, an underscore and two machine words in decimal:
+            // at most 43 bytes.
+            var tag_buffer: [48]u8 = undefined;
             const tag = std.fmt.bufPrint(&tag_buffer, "fc{d}_{d}", .{ n, i }) catch unreachable;
             try writeCanonicalNanAt(w, module, callee.locals[i], address.buffered(), tag, .{ .emitter = self, .span = span });
         };

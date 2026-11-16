@@ -1,0 +1,10 @@
+error[T-UnknownOperation]: `UInt8` has no operation `min`
+ --> tests/arrays/a_method_call_as_a_length_is_no_constant.lin:7:30
+  |
+7 | fn take(_row: borrow [UInt8; limit.min(2)]) -> UInt8 {
+  |                              ^^^^^^^^^ `Sequence` declares it, and `UInt8` does not implement `Sequence`
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/arrays/a_method_call_as_a_length_is_no_constant.lin:7:30
+  |
+7 | fn take(_row: borrow [UInt8; limit.min(2)]) -> UInt8 {
+  |                              ^^^^^^^^^^^^ this is not a constant

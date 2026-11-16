@@ -1,0 +1,15 @@
+// [L-Size]. `Edge` fits with a narrow argument and not with `UInt64`, so
+// `Edge[UInt64]` is the type that is too wide, and it is the one report.
+struct Edge[T] {
+    fixed: [UInt8; 4294967290],
+    last: T,
+}
+
+fn weigh(_given: borrow Edge[UInt64]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}

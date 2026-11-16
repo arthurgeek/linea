@@ -1,0 +1,22 @@
+// A constant whose initialiser is refused is reported where it is declared.
+// A constant worked out from it has no value only because of that, and so
+// has an array length naming either: the first constant's report is the
+// only one, in a field and in a parameter.
+let flag: UInt8 = true
+
+let next = flag + 1
+
+let after = next + 1
+
+struct Shelf {
+    items: [UInt8; next],
+}
+
+fn take(_shelf: borrow Shelf, _row: borrow [UInt8; after]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _taker = take
+    0
+}

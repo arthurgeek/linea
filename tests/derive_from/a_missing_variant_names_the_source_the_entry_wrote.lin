@@ -1,0 +1,25 @@
+// A template may wrap a type built from its parameter. The report of a
+// missing variant names that type with the entry's argument in the
+// parameter's place, which is the type a variant would have to hold.
+trait Lift[T] {
+    fn lift(sink value: Option[T]) -> Self
+}
+
+template impl[S] Lift[S] where reflect.target: enum {
+    fn lift(sink value: Option[S]) -> Self {
+        reflect.wrap(value)
+    }
+}
+
+@derive(Lift[UInt16])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    match Choice.Unknown {
+        Only(code) => code,
+        Unknown => 0,
+    }
+}

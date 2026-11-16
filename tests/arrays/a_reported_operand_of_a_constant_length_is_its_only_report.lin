@@ -1,0 +1,16 @@
+// [T-Operands]. A length written as a sum is a constant expression by its
+// form. Where an operand of it is refused, the length has no count only
+// because of that, so the operand's report is the only one, in a parameter
+// and in a field.
+struct Shelf {
+    items: [UInt8; 2 + false],
+}
+
+fn take(_shelf: borrow Shelf, _row: borrow [UInt8; 1 + true]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _taker = take
+    0
+}

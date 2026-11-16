@@ -1,0 +1,10 @@
+error[T-Const]: `chosen` is not a constant expression
+  --> tests/arrays/a_constant_that_is_no_constant_expression_is_reported_once.lin:11:21
+   |
+11 | let chosen: UInt8 = if true {
+   |                     ^^^^^^^^^ give it something the language can work out without running anything
+error[T-Const]: `count` is not a constant expression
+ --> tests/arrays/a_constant_that_is_no_constant_expression_is_reported_once.lin:9:20
+  |
+9 | let count: UInt8 = three()
+  |                    ^^^^^^^ give it something the language can work out without running anything

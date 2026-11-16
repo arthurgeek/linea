@@ -572,6 +572,28 @@ pub const Scope = struct {
     to: u32,
 };
 
+/// A derive entry whose template wraps a source that no single variant of
+/// the target holds: none has it as its only field, or two do.
+pub const UnwrappedSource = struct {
+    target: DeclId,
+    /// The declaration whose type parameters the entry's arguments read:
+    /// the standalone request, or the target an attached request sits on.
+    owner: DeclId,
+    trait: node.DeriveTraitId,
+    /// The wrapped parameter's written type, as the template writes it.
+    wrapped: node.TypeRef,
+    /// The template whose parameters `wrapped` is written with.
+    template: DeclId,
+    /// The entry's argument that is the source: the one standing for the
+    /// template parameter the wrapped type names. Null where the wrapped
+    /// type is not one parameter alone, so every argument is part of the
+    /// source.
+    source: ?node.TypeRef,
+    /// The first two variants holding the source, by position in the
+    /// target, or null where none holds it.
+    holders: ?[2]expanded_mod.CaseOrdinal,
+};
+
 /// Which binding each name reference names.
 pub const Resolution = struct {
     /// Qualified variant selections, in declaration order. Generic
@@ -909,6 +931,15 @@ pub const Resolution = struct {
     /// The implementations resolution refused and reported. Overlapping
     /// another is the same mistake, so a later pass does not report it again.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The refused implementations whose head or trait arguments hold a type
+    /// the parser refused. Such an implementation has no key, where one
+    /// refused for the module it is written in keeps the key it wrote.
+    keyless_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// The derive entries whose source no single variant of the target
+    /// wraps, in the order expansion met them. The type checker reports
+    /// each, once it has typed the entry's written arguments: a source that
+    /// is not a type is reported as that and not as a missing variant.
+    unwrapped_sources: []const UnwrappedSource = &.{},
     /// The one structural template each resolved trait declares.
     templates: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
 
@@ -1148,6 +1179,8 @@ pub const Resolution = struct {
         self.module_of_file.deinit(gpa);
         self.duplicate_impls.deinit(gpa);
         self.refused_impls.deinit(gpa);
+        self.keyless_impls.deinit(gpa);
+        gpa.free(self.unwrapped_sources);
         self.templates.deinit(gpa);
         self.unpaired_template_closures.deinit(gpa);
         self.postfix_functions.deinit(gpa);
@@ -1162,6 +1195,12 @@ pub const Resolution = struct {
     /// Whether resolution refused this `impl`.
     pub fn isRefusedImpl(self: *const Resolution, impl: DeclId) bool {
         return self.refused_impls.contains(impl);
+    }
+
+    /// Whether resolution refused this `impl` for a type the parser refused
+    /// in its head or trait arguments, which leaves it no key.
+    pub fn isKeylessImpl(self: *const Resolution, impl: DeclId) bool {
+        return self.keyless_impls.contains(impl);
     }
 
     test "an implementation resolution refused is the one isRefusedImpl names" {
@@ -4122,6 +4161,8 @@ fn resolveInternal(
     errdefer r.alias_heads.deinit(gpa);
     errdefer r.refused_operations.deinit(gpa);
     errdefer r.refused_impls.deinit(gpa);
+    errdefer r.keyless_impls.deinit(gpa);
+    defer r.unwrapped_sources.deinit(gpa);
     errdefer r.spelled.deinit(gpa);
     errdefer r.written.deinit(gpa);
     errdefer r.scopes.deinit(gpa);
@@ -4976,6 +5017,8 @@ fn resolveInternal(
     errdefer finished_ambient.deinit(gpa);
     var finished_referenced = referenced.freeze();
     errdefer finished_referenced.deinit(gpa);
+    const unwrapped_sources = try r.unwrapped_sources.toOwnedSlice(gpa);
+    errdefer gpa.free(unwrapped_sources);
 
     const normalized_constraints = constraints;
     constraints = .{};
@@ -5043,6 +5086,8 @@ fn resolveInternal(
         .module_of_file = module_of_file,
         .duplicate_impls = r.duplicate_impls,
         .refused_impls = r.refused_impls,
+        .keyless_impls = r.keyless_impls,
+        .unwrapped_sources = unwrapped_sources,
         .templates = r.templates,
         .unpaired_template_closures = r.unpaired_template_closures,
         .postfix_functions = r.postfix_functions,
@@ -6609,6 +6654,10 @@ const Resolver = struct {
     /// module may write them, or for a head that names an alias or no type.
     /// Published as `Resolution.refused_impls`.
     refused_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Published as `Resolution.keyless_impls`.
+    keyless_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Published as `Resolution.unwrapped_sources`.
+    unwrapped_sources: std.ArrayList(UnwrappedSource) = .empty,
     spelled: std.ArrayList(TokenId) = .empty,
     written: std.ArrayList(BindingId) = .empty,
     /// Type parameter bindings keyed by their unique declaration token.
@@ -8225,6 +8274,13 @@ const Resolver = struct {
     ///
     /// Naming it is not using it. A type whose only mention is an `impl` is
     /// still a type nothing needs, and [N-Unused] is what says so.
+    /// Refuses an implementation whose head or trait arguments hold a type
+    /// the parser refused.
+    fn refuseKeyless(self: *Resolver, d: DeclId) !void {
+        try self.refused_impls.put(self.gpa, d, {});
+        try self.keyless_impls.put(self.gpa, d, {});
+    }
+
     fn implTarget(self: *Resolver, d: DeclId) !void {
         const is_derive = self.ast.declTag(d) == .derive_impl;
         const trait_decl = if (is_derive) DeclId.none else try self.implTrait(d);
@@ -8234,7 +8290,13 @@ const Resolver = struct {
         // A head the parser refused names no type, and was reported where it
         // was written. Nothing is recorded for it, so its members are the
         // members of nothing rather than of unit or of a tuple nobody wrote.
-        if (headRefusedByTheParser(written_head)) return self.refused_impls.put(self.gpa, d, {});
+        if (headRefusedByTheParser(written_head)) return self.refuseKeyless(d);
+        // An implementation whose head or trait arguments hold a type the
+        // parser refused has no key to read: it is compared with no other,
+        // and is not asked whether its parameters can be recovered from one.
+        if (!is_derive and (holdsARefusedType(self.ast, written_head) or anyRefusedType(self.ast, self.ast.typeArgs(self.ast.declTraitArgs(d))))) {
+            return self.refuseKeyless(d);
+        }
         if (self.ast.declIsDefault(d)) {
             // A head the default names is still a written type name, and
             // what it reaches is recorded as any other one's is.
@@ -8459,7 +8521,7 @@ const Resolver = struct {
         const head = self.ast.declHead(d);
         if (self.isTupleHead(d)) return tuple_names[head.args.len() - node.min_tuple_arity];
         if (head.kind == .tuple or head.kind == .callable) return self.ast.writtenText(head);
-        if (self.ast.tokenTag(head.at) == .l_paren) return "()";
+        if (self.ast.isUnitType(head)) return "()";
         return self.ast.tokenText(head.at);
     }
 
@@ -10419,6 +10481,24 @@ const Resolver = struct {
         return declaring;
     }
 
+    /// Whether a written type holds, among its arguments at any depth, a
+    /// type the parser began and refused.
+    ///
+    /// **Bound:** the written type's own nodes, once each.
+    fn holdsARefusedType(ast: *const Ast, ref: node.TypeRef) bool {
+        return anyRefusedType(ast, ast.typeArgs(ref.args));
+    }
+
+    /// Whether one of `written` is, or holds at any depth, a type the parser
+    /// began and refused.
+    fn anyRefusedType(ast: *const Ast, written: []const node.TypeRef) bool {
+        for (written) |each| {
+            if (!each.wasWritten() and !each.isOmitted()) return true;
+            if (holdsARefusedType(ast, each)) return true;
+        }
+        return false;
+    }
+
     /// The declaration a standalone derive request targets: the prelude's
     /// tuple declaration for a tuple head, and otherwise the declared type
     /// its name reached. Null where the head reached nothing, which
@@ -10428,14 +10508,22 @@ const Resolver = struct {
         const ast = &self.program.ast;
         const head = ast.declHead(derive);
         // Reported where it was written, as an implementation's refused head
-        // is; it targets nothing, and nothing more is said about it.
+        // is; it targets nothing, and nothing more is said about it. A head
+        // holding a type the parser refused is the same: expanding it would
+        // write the refused text again and report it again.
         if (headRefusedByTheParser(head)) return null;
+        if (holdsARefusedType(ast, head)) {
+            // The request still names its target, which a derive uses.
+            const named = self.writtenBindingAt(ast.declName(derive));
+            if (named != BindingId.none) self.bindings.items[named.index()].used = true;
+            return null;
+        }
         if (head.kind == .tuple) return self.tupleDecl(head);
         const binding = self.writtenBindingAt(ast.declName(derive));
         const not_a_declaration = "derive targets a concrete declaration, not a primitive or another kind of name";
         if (binding == BindingId.none) {
             // Unit reaches no binding, and is no declaration either.
-            if (ast.tokenTag(head.at) == .l_paren) try self.refuseUnsupportedDerive(derive, not_a_declaration);
+            if (ast.isUnitType(head)) try self.refuseUnsupportedDerive(derive, not_a_declaration);
             return null;
         }
         const held = self.bindings.items[binding.index()];
@@ -11252,7 +11340,7 @@ const Resolver = struct {
 
                 var wrapped_cases: std.ArrayList(expanded_mod.CaseOrdinal) = .empty;
                 defer wrapped_cases.deinit(self.gpa);
-                if (!try self.selectWrappedVariants(&wrapped_cases, template_plan.reflection_members, template_plan.template, derive, attached, target, entry)) continue;
+                if (!try self.selectWrappedVariants(&wrapped_cases, template_plan.reflection_members, template_plan.template, derive, attached, target, derive_trait)) continue;
 
                 var text: std.ArrayList(u8) = .empty;
                 defer text.deinit(self.gpa);
@@ -11638,10 +11726,11 @@ const Resolver = struct {
     /// many aliases the type it names passes through, itself included.
     const AliasWalk = union(enum) { walking, settled: u32 };
 
-    /// Whether every name a written type reaches settled: a name nothing
-    /// declares, an alias whose own type fails, and an alias that reaches itself
-    /// have each been reported where they are written. A chain of aliases of
-    /// any length settles when it ends at a type.
+    /// Whether every name a written type reaches settled: a type the parser
+    /// refused, a name nothing declares, an alias whose own type fails, and an
+    /// alias that reaches itself have each been reported where they are
+    /// written. A chain of aliases of any length settles when it ends at a
+    /// type.
     fn writtenSettled(self: *Resolver, ref: node.TypeRef) std.mem.Allocator.Error!bool {
         return try self.writtenLinks(ref) != null;
     }
@@ -11657,9 +11746,12 @@ const Resolver = struct {
     fn writtenLinks(self: *Resolver, ref: node.TypeRef) std.mem.Allocator.Error!?u32 {
         const ast = &self.program.ast;
         const x = ast.withoutTypeGroups(ref);
+        // A type the parser refused was reported where it was written.
+        if (!x.wasWritten()) return null;
         var links: u32 = 0;
         switch (x.kind) {
-            .named => if (x.name != TokenId.none) {
+            // Unit names no declaration, so there is nothing of it to settle.
+            .named => if (!ast.isUnitType(x)) {
                 const binding = self.writtenBinding(x.name);
                 if (binding == BindingId.none) return null;
                 const held = self.bindings.items[binding.index()];
@@ -11689,12 +11781,29 @@ const Resolver = struct {
         return links;
     }
 
+    /// The argument of a derive entry that stands for the template parameter
+    /// `wrapped` names, or null where `wrapped` is not one parameter of the
+    /// template or the entry writes no argument for it.
+    ///
+    /// **Bound:** the template's type parameters, once.
+    fn wrappedArgument(self: *const Resolver, template: DeclId, wrapped: node.TypeRef, arguments: []const node.TypeRef) ?node.TypeRef {
+        const ast = &self.program.ast;
+        const named = ast.withoutTypeGroups(wrapped);
+        if (named.kind != .named or named.name == TokenId.none or named.args.len() != 0) return null;
+        for (ast.declTypeParams(template), 0..) |parameter, index| {
+            if (ast.tokenName(parameter.name) != ast.tokenName(named.name)) continue;
+            return if (index < arguments.len) arguments[index] else null;
+        }
+        return null;
+    }
+
     /// Selects the variant each `reflect.wrap` of a template's members
     /// constructs: the one variant of `target` with exactly one field whose
     /// written type is the wrapped parameter's, once the entry's trait
     /// arguments stand for the template's parameters. Appends one case per
-    /// wrap to `out`, in member order. Reports [T-Derive] and returns false
-    /// where no variant qualifies or two do.
+    /// wrap to `out`, in member order. Where no variant qualifies or two do
+    /// it returns false and records the entry in `unwrapped_sources`, which
+    /// the type checker reports as [T-Derive].
     ///
     /// Types are compared by `sameWrittenType`, the one answer to whether two
     /// written types name one type, so an alias and the type it names select
@@ -11707,10 +11816,11 @@ const Resolver = struct {
         derive: DeclId,
         attached: bool,
         target: DeclId,
-        entry: node.DeriveTrait,
+        derive_trait: node.DeriveTraitId,
     ) !bool {
         const ast = &self.program.ast;
         const identity: WrapIdentity = .{ .res = self };
+        const entry = ast.deriveTrait(derive_trait);
         const variants = ast.declVariants(target);
         for (members) |reflected| {
             for (reflected.wraps) |wrap| {
@@ -11754,7 +11864,15 @@ const Resolver = struct {
                 // A source or a payload that failed to resolve has its own
                 // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                for (written_arguments) |argument| settled = settled and try self.writtenSettled(argument);
+                // Only the argument the template wraps is the source; another
+                // argument's mistake is reported where it is written and
+                // leaves the source as it stands.
+                const source = self.wrappedArgument(template, wrapped, written_arguments);
+                if (source) |argument| {
+                    settled = try self.writtenSettled(argument);
+                } else for (written_arguments) |argument| {
+                    settled = settled and try self.writtenSettled(argument);
+                }
                 for (variants) |variant| {
                     const fields = ast.variantFields(variant);
                     if (fields.len != 1) continue;
@@ -11765,61 +11883,14 @@ const Resolver = struct {
                     settled = settled and links != null and links.? <= max_answer_links;
                 }
                 if (!settled) return false;
-                const source_text = ast.writtenText(if (written_arguments.len == 1) written_arguments[0] else wrapped);
-                const target_name = ast.tokenText(ast.declName(target));
-                const file = ast.fileOf(entry.ref.name);
-                const labels = try self.sink.arena.alloc(Label, if (second != null) 3 else 1);
-                labels[0] = .{
-                    .file = file,
-                    .span = ast.rangeSpan(entry.tokens),
-                    .message = if (second != null) "the conversion would wrap the source in either variant" else "no variant wraps this source",
-                    .style = .primary,
-                };
-                if (second) |later| {
-                    for ([_]usize{ selected.?, later }, 1..) |index, slot| {
-                        labels[slot] = .{
-                            .file = ast.fileOf(variants[index].name),
-                            .span = ast.tokenSpan(variants[index].name),
-                            .message = "this variant holds the source's type",
-                            .style = .secondary,
-                        };
-                    }
-                    try self.sink.add(.{
-                        .severity = .err,
-                        .code = .t_derive,
-                        .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` has two variants wrapping `{s}`", .{ target_name, source_text }),
-                        .labels = labels,
-                        .notes = try self.sink.arena.dupe([]const u8, &.{"write the conversion by hand, or give each variant its own type"}),
-                    });
-                    return false;
-                }
-                var shapes: std.ArrayList(u8) = .empty;
-                defer shapes.deinit(self.gpa);
-                if (variants.len == 0) try shapes.appendSlice(self.gpa, "no variants");
-                for (variants, 0..) |variant, index| {
-                    if (index != 0) try shapes.appendSlice(self.gpa, ", ");
-                    try shapes.appendSlice(self.gpa, "`");
-                    try shapes.appendSlice(self.gpa, ast.tokenText(variant.name));
-                    const fields = ast.variantFields(variant);
-                    if (fields.len != 0) try shapes.append(self.gpa, '(');
-                    for (fields, 0..) |field, field_index| {
-                        if (field_index != 0) try shapes.appendSlice(self.gpa, ", ");
-                        try shapes.appendSlice(self.gpa, ast.writtenText(field.written));
-                    }
-                    if (fields.len != 0) try shapes.append(self.gpa, ')');
-                    try shapes.appendSlice(self.gpa, "`");
-                }
-                try self.sink.add(.{
-                    .severity = .err,
-                    .code = .t_derive,
-                    .message = try std.fmt.allocPrint(self.sink.arena, "no variant of `{s}` wraps exactly `{s}`", .{ target_name, source_text }),
-                    .labels = labels,
-                    .notes = try self.sink.arena.dupe([]const u8, &.{
-                        try std.fmt.allocPrint(self.sink.arena, "a variant wraps a source when its only field has the source's type; `{s}` has {s}", .{
-                            target_name,
-                            shapes.items,
-                        }),
-                    }),
+                try self.unwrapped_sources.append(self.gpa, .{
+                    .target = target,
+                    .owner = if (attached) target else derive,
+                    .trait = derive_trait,
+                    .wrapped = wrapped,
+                    .source = source,
+                    .template = template,
+                    .holders = if (second) |later| .{ @enumFromInt(selected.?), @enumFromInt(later) } else null,
                 });
                 return false;
             }
@@ -12483,6 +12554,7 @@ const Resolver = struct {
     }
 
     fn useRefIn(self: *Resolver, ref: node.TypeRef, context: TypeUseContext) std.mem.Allocator.Error!void {
+        if (ref.stepped_to != .none) return self.useSteppedOverType(ref);
         if (try self.reflectionComponentType(ref)) return;
         if (ref.kind == .callable) return self.useCallableTypeIn(self.ast.callableType(ref), context.ofArguments());
         if (ref.kind == .selection) {
@@ -12509,7 +12581,7 @@ const Resolver = struct {
                         if (self.valueNamed(ref.name)) |value| return self.refuseValueHead(ref, value, context);
                     }
                     if (try self.refuseAliasedTrait(ref.name)) return;
-                    self.reportUnknownType(ref.name);
+                    try self.reportUnknownType(ref.name);
                 },
             }
         }
@@ -13597,22 +13669,22 @@ const Resolver = struct {
     /// Reported rather than left, because an annotation naming nothing poisons
     /// what it annotates, and a poisoned value nobody diagnosed is every rule
     /// about it silently skipped.
-    fn reportUnknownType(self: *Resolver, tok: TokenId) void {
-        if (self.refuseHolderNameInTest(tok, .annotation) catch true) return;
+    fn reportUnknownType(self: *Resolver, tok: TokenId) std.mem.Allocator.Error!void {
+        if (try self.refuseHolderNameInTest(tok, .annotation)) return;
         // `Self` names the type of an implementation for a named type or a
         // tuple; an implementation for `()` has no name to stand for.
         const label = if (namesSelf(self.ast, tok))
             "`Self` is declared in an implementation for a named type or a tuple; write the type, as `()` for unit"
         else
             "no type with this name is declared here";
-        self.sink.addErrorFmt(
+        try self.sink.addErrorFmt(
             .n_undefined,
             self.ast.fileOf(tok),
             self.ast.tokenSpan(tok),
             label,
             "undefined name `{s}`",
             .{self.ast.tokenText(tok)},
-        ) catch {};
+        );
     }
 
     /// Resolves one constant's initialiser.
@@ -15221,6 +15293,56 @@ const Resolver = struct {
             switch (found) {
                 .binding => |b| self.bindings.items[b.index()].used = true,
                 .type_parameter, .unresolved_use => {},
+            }
+        }
+    }
+
+    /// The names written inside a type [S-Nesting] refused and stepped over.
+    ///
+    /// The parser keeps no node inside such a type, so what a name written in
+    /// a type position reaches is marked used: a type parameter in scope, a
+    /// type the enclosing trait declares, a type of this module, and a module
+    /// the file imports where a dot follows the name. Between the `;` of an
+    /// array and its `]` stands a length, an expression, so any name in scope
+    /// counts there. [N-Unused] for one of them would be a consequence of the
+    /// error already reported. A name after a dot is a member of what
+    /// precedes it and a name before a colon is a callable type's parameter,
+    /// so neither is a use of a declaration spelled the same, and nothing
+    /// that is not a type counts where a type is written. No name is recorded
+    /// as reaching anything, and nothing inside is reported. Each token of
+    /// the type is read once.
+    fn useSteppedOverType(self: *Resolver, ref: node.TypeRef) void {
+        const end = ref.stepped_to.index();
+        var in_length = false;
+        for (ref.at.index()..end) |i| {
+            const tok = TokenId.at(@intCast(i));
+            switch (self.ast.tokenTag(tok)) {
+                .semicolon => in_length = true,
+                .r_bracket => in_length = false,
+                else => {},
+            }
+            if (self.ast.tokenTag(tok) != .identifier) continue;
+            const after = if (i + 1 < end) self.ast.tokenTag(TokenId.at(@intCast(i + 1))) else .invalid;
+            if (i > ref.at.index() and self.ast.tokenTag(TokenId.at(@intCast(i - 1))) == .dot) continue;
+            const name = self.ast.tokenName(tok);
+            if (in_length) {
+                if (self.lookupName(name)) |found| switch (found) {
+                    .binding, .unresolved_use => |b| self.bindings.items[b.index()].used = true,
+                    .type_parameter => {},
+                };
+                continue;
+            }
+            if (after == .colon) continue;
+            if (self.typeParamNamedInScope(name)) |found| {
+                if (self.marks_for == found.of and found.at < self.used_type_params.items.len) {
+                    self.used_type_params.items[found.at] = true;
+                }
+            } else if (self.declaredTypeHere(name)) |declared| {
+                self.bindings.items[declared.index()].used = true;
+            } else if (self.type_in_module.get(name)) |declared| {
+                self.bindings.items[declared.index()].used = true;
+            } else if (after == .dot) {
+                if (self.moduleNamed(name, self.ast.fileOf(tok))) |module| self.bindings.items[module.index()].used = true;
             }
         }
     }

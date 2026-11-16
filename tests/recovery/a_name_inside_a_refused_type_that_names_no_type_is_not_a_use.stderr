@@ -1,0 +1,25 @@
+error[S-Nesting]: this type nests too deeply
+  --> tests/recovery/a_name_inside_a_refused_type_that_names_no_type_is_not_a_use.lin:21:7028
+   |
+21 | ... tion[Option[Option[Option[Option[Option[Option[Option[Option[fn(read helper: UInt8) -> UInt8]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
+   |                                                                 ^ the limit is 1000 levels
+error[N-Unused]: `Item` is never used
+ --> tests/recovery/a_name_inside_a_refused_type_that_names_no_type_is_not_a_use.lin:9:8
+  |
+9 | struct Item {}
+  |        ^^^^ name it in an annotation, or remove it
+error[N-Unused]: `Leaf` is never used
+  --> tests/recovery/a_name_inside_a_refused_type_that_names_no_type_is_not_a_use.lin:11:8
+   |
+11 | struct Leaf {}
+   |        ^^^^ name it in an annotation, or remove it
+error[N-Unused]: `helper` is never used
+  --> tests/recovery/a_name_inside_a_refused_type_that_names_no_type_is_not_a_use.lin:13:4
+   |
+13 | fn helper() -> UInt8 {
+   |    ^^^^^^ call it, or name it with a leading `_`
+error[N-Unused]: `assist` is never used
+  --> tests/recovery/a_name_inside_a_refused_type_that_names_no_type_is_not_a_use.lin:17:4
+   |
+17 | fn assist() -> UInt8 {
+   |    ^^^^^^ call it, or name it with a leading `_`

@@ -1,0 +1,13 @@
+// Unit is a type like any other source: `@derive(From[()])` needs a variant
+// whose only field is `()`, and an array of units needs one holding that
+// array.
+@derive(From[()], From[[(); 7]])
+enum Choice {
+    Only(UInt8),
+}
+
+fn main() -> UInt8 {
+    match Choice.Only(0) {
+        Only(code) => code,
+    }
+}

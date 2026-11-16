@@ -1,0 +1,5 @@
+error[S-Nesting]: this type nests too deeply
+ --> tests/recovery/a_constant_annotated_with_a_refused_type_is_its_only_report.lin:8:7016
+  |
+8 | ... Option[Option[Option[Option[Option[Option[Option[Option[Leaf[UInt8]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
+  |                                                                 ^ the limit is 1000 levels
