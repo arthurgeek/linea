@@ -1,0 +1,14 @@
+// [T-ArraySize]. A call of an operation is no form a constant expression
+// has, so a length written as one is no count, whatever else is wrong with
+// the call: an operation the receiver does not have is reported as that,
+// and the length is reported for its form.
+let limit: UInt8 = 3
+
+fn take(_row: borrow [UInt8; limit.min(2)]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _taker = take
+    limit
+}

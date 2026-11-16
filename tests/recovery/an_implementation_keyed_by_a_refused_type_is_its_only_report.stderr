@@ -1,0 +1,5 @@
+error[S-Nesting]: this type nests too deeply
+  --> tests/recovery/an_implementation_keyed_by_a_refused_type_is_its_only_report.lin:10:7014
+   |
+10 | ... tion[Option[Option[Option[Option[Option[Option[Option[Option[Leaf[T]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
+   |                                                                 ^ the limit is 1000 levels

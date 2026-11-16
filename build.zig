@@ -1163,6 +1163,28 @@ fn checkTreeIsTidy(b: *std.Build, tree: Tree, failed: *bool) void {
         }
     };
 
+    // An error a pass hands to no one.
+    //
+    // Inside a pass an error is a refused allocation, and one that is
+    // discarded can lose a report, so a program whose one error was lost
+    // checks clean. Every discard in a pass file is refused unless
+    // `discards_allowed` names it with a reason.
+    if (std.mem.eql(u8, tree.dir, "src")) for (source.unexplainedDiscards(b.allocator, files, &source.discards_allowed)) |discard| {
+        std.debug.print("discarded failure: src/{s}\n", .{discard});
+        failed.* = true;
+    };
+
+    // Outside the passes, where an error is often the answer to a question
+    // put to the file system, only a report whose failure is discarded.
+    for (files) |f| {
+        if (std.mem.eql(u8, tree.dir, "src") and source.isPassFile(f.path)) continue;
+        if (std.mem.indexOf(u8, f.text, "catch") == null) continue;
+        for (source.swallowedReports(b.allocator, f)) |swallow| {
+            std.debug.print("swallowed report: {s}/{s}, {s}\n", .{ tree.dir, f.path, swallow });
+            failed.* = true;
+        }
+    }
+
     // A declaration nobody names.
     //
     // [N-Unused] makes this an error in the language this compiler implements,
@@ -2725,6 +2747,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/derive_from/a_derive_entry_with_trailing_garbage_is_reported_once.lin",
     "tests/derive_from/a_derive_entry_without_a_source_is_reported_once.lin",
     "tests/derive_from/a_derive_request_missing_its_closing_parenthesis_is_reported_once.lin",
+    "tests/derive_from/a_from_derive_stays_silent_after_a_written_unit_result.lin",
     "tests/traits/an_unnamed_callable_parameter_in_two_implementations_is_refused_by_the_parser.lin",
     "tests/defer_let/a_defer_let_binds_one_name.lin",
     "tests/defer_let/a_defer_let_read_binds_nothing_to_release.lin",

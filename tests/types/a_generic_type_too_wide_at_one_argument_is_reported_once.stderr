@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Edge[UInt64]` is wider
+ --> tests/types/a_generic_type_too_wide_at_one_argument_is_reported_once.lin:3:8
+  |
+3 | struct Edge[T] {
+  |        ^^^^ hold fewer parts, or nest them less deeply

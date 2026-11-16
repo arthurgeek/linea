@@ -7,6 +7,8 @@
 // A ring of constants is what settles no length however much of the program is
 // read: every member waits on the next and the last waits on the first, so
 // there is nothing later to learn.
+// The ring is reported once, where it closes, and each
+// length naming a member has no count only because of it.
 let a: UInt8 = b
 
 let b: UInt8 = a

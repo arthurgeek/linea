@@ -1,0 +1,14 @@
+// A derive's argument is a written type, held to what any written type is
+// held to. An array length past the limit is reported where it is written,
+// whether the array's element is a number or unit, and the derive says
+// nothing about the variant such a source would need.
+@derive(From[[UInt8; 4294967296]], From[[(); 4294967296]])
+enum Choice {
+    Only(UInt8),
+}
+
+fn main() -> UInt8 {
+    match Choice.Only(0) {
+        Only(code) => code,
+    }
+}

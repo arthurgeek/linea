@@ -1,0 +1,16 @@
+// [L-Size]. `Row` holds 4294967295 of its parameter, so `Row[UInt16]` holds
+// an array no place writes. It is reported at the declaration whose
+// application made it, naming that application and the part that is too
+// wide.
+struct Row[T] {
+    items: [T; 4294967295],
+}
+
+fn weigh(_given: borrow Row[UInt16]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}

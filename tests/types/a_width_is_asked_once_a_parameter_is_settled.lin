@@ -1,0 +1,15 @@
+// A type written with a parameter has no width until the parameter is
+// settled. `Row[T]` holds 2^30 of whatever `T` is, and `Row[UInt8]` is 2^30
+// bytes wide, which a type may be.
+struct Row[T] {
+    items: [T; 1073741824],
+}
+
+fn weigh(_given: borrow Row[UInt8]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}

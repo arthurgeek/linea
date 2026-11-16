@@ -1,0 +1,14 @@
+// [L-Size]. An array type is declared nowhere, so one too wide is reported
+// at the type that first writes it.
+struct Holder {
+    count: UInt8,
+}
+
+fn weigh(_given: borrow Holder, _wide: borrow [UInt16; 2147483648], _again: borrow [UInt16; 2147483648]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}

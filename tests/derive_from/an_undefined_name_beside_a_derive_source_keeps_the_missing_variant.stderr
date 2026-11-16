@@ -1,0 +1,12 @@
+error[N-Undefined]: undefined name `Missing`
+  --> tests/derive_from/an_undefined_name_beside_a_derive_source_keeps_the_missing_variant.lin:14:14
+   |
+14 | @derive(Conv[Missing, UInt32])
+   |              ^^^^^^^ no type with this name is declared here
+error[T-Derive]: no variant of `Choice` wraps exactly `UInt32`
+  --> tests/derive_from/an_undefined_name_beside_a_derive_source_keeps_the_missing_variant.lin:14:9
+   |
+14 | @derive(Conv[Missing, UInt32])
+   |         ^^^^^^^^^^^^^^^^^^^^^ no variant wraps this source
+   |
+   = help: a variant wraps a source when its only field has the source's type; `Choice` has `Only(UInt8)`, `Unknown`

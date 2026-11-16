@@ -1,0 +1,51 @@
+// A constant whose initialiser is refused is reported where it is declared,
+// once, whichever declaration reads it first. An array length naming it has
+// no count only because of that mistake, so the length says nothing more: in
+// a field, a payload, an alias, a generic type's field or a parameter.
+let flag: UInt8 = true
+
+let word: UInt8 = "a"
+
+let half: UInt8 = 1.5
+
+let cast: UInt8 = UInt8(true)
+
+let below: UInt8 = -1
+
+let twice: UInt8 = false
+
+struct Shelf {
+    items: [UInt8; flag],
+}
+
+enum Crate {
+    Full([UInt8; word]),
+    Empty,
+}
+
+alias Row = [UInt8; half]
+
+struct Rack[T] {
+    items: [T; cast],
+}
+
+struct Bin {
+    items: [UInt8; twice],
+}
+
+fn take(
+    _shelf: borrow Shelf,
+    _crate: borrow Crate,
+    _row: borrow Row,
+    _rack: borrow Rack[UInt8],
+    _bin: borrow Bin,
+    _below: borrow [UInt8; below],
+    _twice: borrow [UInt8; twice + 1],
+) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _taker = take
+    0
+}

@@ -1,0 +1,15 @@
+// `@derive(From[()])` wraps unit in the variant whose only field is `()`.
+@derive(From[()])
+enum Signal {
+    Empty(()),
+    Code(UInt8),
+}
+
+fn main() -> UInt8 {
+    let nothing = ()
+    let signal: Signal = nothing.into()
+    match signal {
+        Empty(_) => 0,
+        Code(code) => code,
+    }
+}

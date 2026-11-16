@@ -1,0 +1,15 @@
+// A name nothing declares is reported where it is written. Written as an
+// array's length it leaves the length with no count, which only follows from
+// the name, so the length is not reported as well.
+struct Shelf {
+    items: [UInt8; missing],
+}
+
+fn take(_shelf: borrow Shelf, _row: borrow [UInt8; absent]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _taker = take
+    0
+}
