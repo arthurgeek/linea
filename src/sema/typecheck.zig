@@ -31383,6 +31383,14 @@ const Checker = struct {
                 self.generic = if (self.ast.declTag(descriptor.derive) == .derive_impl) descriptor.derive else descriptor.target;
                 _ = try self.typeOfRefOf(self.current, self.generic, argument);
             }
+            // A standalone request's head is a written type of the source as
+            // well, and a length or a default written in an argument it
+            // applies is typed here for the same reason.
+            if (self.ast.declTag(descriptor.derive) == .derive_impl) {
+                self.current = self.program.moduleOf(descriptor.derive);
+                self.generic = descriptor.derive;
+                _ = try self.typeOfRefOf(self.current, descriptor.derive, self.ast.declHead(descriptor.derive));
+            }
 
             self.current = self.program.moduleOf(descriptor.generated_impl);
             self.generic = descriptor.generated_impl;
@@ -32509,19 +32517,35 @@ const Checker = struct {
 
             try alike.reset(self.gpa, ground_list.items.len);
             settled_heads.clearRetainingCapacity();
+            const slot = try self.tellingSlot(implementations, ground_list.items);
             for (ground_list.items, 0..) |at, gi| {
                 const im_at = implementations[at];
                 const settled_head = try self.builder.allGround(&.{im_at.ty});
                 try settled_heads.append(self.gpa, settled_head);
                 const list_key = hashOfTypes(im_at.args);
                 const header_key = hashOfHeader(im_at.ty, im_at.args);
+                // The ground type this head writes at the slot that tells
+                // the chain's callable heads apart, hashed with the list.
+                const slot_key: ?u64 = if (slot) |chosen|
+                    if (try self.groundSlot(im_at.ty, chosen)) |root| hashOfHeader(root, im_at.args) else null
+                else
+                    null;
                 // A ground header meets the ground headers equal to it and
                 // the open heads sharing its list; an open head meets every
-                // member sharing its list.
-                const chains: [2]GroundChains.Walk = if (settled_head)
-                    .{ alike.walk(.by_header, header_key), alike.walk(.open_by_list, list_key) }
+                // member sharing its list. Where the chain has a telling
+                // slot, two heads that write different ground types there
+                // are never one type, so a head that writes one meets only
+                // the heads that write the same there or leave it open.
+                const chains: [3]GroundChains.Walk = if (settled_head)
+                    .{
+                        alike.walk(.by_header, header_key),
+                        alike.walk(.open_by_list, list_key),
+                        if (slot_key) |key| alike.walk(.open_by_slot, key) else .{},
+                    }
+                else if (slot_key) |key|
+                    .{ alike.walk(.open_by_list, list_key), alike.walk(.open_by_slot, key), alike.walk(.settled_by_slot, key) }
                 else
-                    .{ alike.walk(.by_list, list_key), .{} };
+                    .{ alike.walk(.by_list, list_key), .{}, .{} };
                 for (chains) |chain| {
                     var walk = chain;
                     while (walk.next()) |j| {
@@ -32537,9 +32561,48 @@ const Checker = struct {
                     }
                 }
                 try alike.note(self.gpa, .by_list, list_key, @intCast(gi));
-                try alike.note(self.gpa, if (settled_head) .by_header else .open_by_list, if (settled_head) header_key else list_key, @intCast(gi));
+                if (settled_head) {
+                    try alike.note(self.gpa, .by_header, header_key, @intCast(gi));
+                    if (slot_key) |key| try alike.note(self.gpa, .settled_by_slot, key, @intCast(gi));
+                } else if (slot_key) |key| {
+                    try alike.note(self.gpa, .open_by_slot, key, @intCast(gi));
+                } else {
+                    try alike.note(self.gpa, .open_by_list, list_key, @intCast(gi));
+                }
             }
         }
+    }
+
+    /// The type a callable head writes at `slot` where that type is ground,
+    /// or null where the head is not callable, has no such slot, or leaves
+    /// it open.
+    fn groundSlot(self: *Checker, head: TypeId, slot: usize) std.mem.Allocator.Error!?TypeId {
+        if (slot >= types_mod.callableSlots(&self.builder, head)) return null;
+        const written = types_mod.callableSlot(&self.builder, head, slot);
+        return if (try self.builder.allGround(&.{written})) written else null;
+    }
+
+    /// The first slot at which two callable heads among `rows` write
+    /// different ground types, or null where none does: the slot the chain's
+    /// heads are filed by, since two that differ there can never be one type.
+    ///
+    /// **Bound:** the slots of the rows, each read once.
+    fn tellingSlot(self: *Checker, implementations: []const types_mod.Implementation, rows: []const u32) std.mem.Allocator.Error!?usize {
+        var first: std.ArrayList(?TypeId) = .empty;
+        defer first.deinit(self.gpa);
+        var chosen: ?usize = null;
+        for (rows) |at| {
+            const head = implementations[at].ty;
+            const slots = types_mod.callableSlots(&self.builder, head);
+            if (slots > first.items.len) try first.appendNTimes(self.gpa, null, slots - first.items.len);
+            for (0..@min(slots, chosen orelse slots)) |slot| {
+                const root = try self.groundSlot(head, slot) orelse continue;
+                if (first.items[slot]) |seen| {
+                    if (seen != root) chosen = slot;
+                } else first.items[slot] = root;
+            }
+        }
+        return chosen;
     }
 
     /// Whether a trait bounding the parameter `head` implements has no
@@ -32806,19 +32869,21 @@ const Checker = struct {
         return module != .none and self.program.get(module).library;
     }
 
-    /// The members of one chain with ground argument lists, grouped three
-    /// ways: every member by its list, the members whose head is ground by
-    /// head and list, and the members whose head is open by list. A member is
-    /// a position in the chain's ground list, and is in the first grouping
-    /// and one of the other two.
+    /// The members of one chain with ground argument lists, grouped: every
+    /// member by its list; the members whose head is ground by head and list;
+    /// the members whose head is open by list, or, where the head writes a
+    /// ground type at the slot that tells the chain's callable heads apart,
+    /// by list and that type; and the ground heads by list and that type too,
+    /// for an open head filed that way to meet. A member is a position in the
+    /// chain's ground list.
     ///
-    /// **Bound:** three links per member.
+    /// **Bound:** five links per member.
     const GroundChains = struct {
         heads: [groupings]std.AutoHashMapUnmanaged(u64, u32) = @splat(.empty),
         links: [groupings]std.ArrayList(u32) = @splat(.empty),
 
-        const groupings = 3;
-        const Grouping = enum(u2) { by_list, by_header, open_by_list };
+        const groupings = 5;
+        const Grouping = enum(u3) { by_list, by_header, open_by_list, open_by_slot, settled_by_slot };
 
         fn deinit(self: *GroundChains, gpa: std.mem.Allocator) void {
             for (&self.heads) |*heads| heads.deinit(gpa);

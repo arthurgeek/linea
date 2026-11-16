@@ -3542,6 +3542,13 @@ pub const ImplIndex = struct {
     /// asking for the rows under one type's head walks.
     ground_by_type: Chain(.newest_first) = .empty,
     open_by_head: Chain(.newest_first) = .empty,
+    /// The open callable rows that write a ground type at the slot their
+    /// shape's heads are told apart by, under that type: by trait and head,
+    /// and by head alone. A row filed here is on neither `open` nor
+    /// `open_by_head`. `telling_slots` holds the slot chosen for each head.
+    open_by_slot: Chain(.newest_first) = .empty,
+    open_by_head_slot: Chain(.newest_first) = .empty,
+    telling_slots: std.AutoHashMapUnmanaged(u64, u32) = .empty,
     /// Every other row, chained as `chained` is: the families and the heads
     /// no type identity finds, which a lookup walks and matches one by one.
     open: Chain(.newest_first) = .empty,
@@ -3606,7 +3613,27 @@ pub const ImplIndex = struct {
         self.ground_by_header.deinit(gpa);
         self.ground_by_type.deinit(gpa);
         self.open_by_head.deinit(gpa);
+        self.open_by_slot.deinit(gpa);
+        self.open_by_head_slot.deinit(gpa);
+        self.telling_slots.deinit(gpa);
         self.open.deinit(gpa);
+    }
+
+    fn slotKey(trait: u32, head: Head, root: TypeId) u64 {
+        var h: std.hash.Wyhash = .init(key(trait, head));
+        h.update(std.mem.asBytes(&root));
+        return h.final();
+    }
+
+    /// The ground type an open callable row writes at the slot its head's
+    /// rows are told apart by, or null where the row is not one, its head
+    /// has no such slot, or it leaves that slot open.
+    fn tellingRoot(self: *const ImplIndex, pool: anytype, row: Implementation) !?TypeId {
+        if (row.head != .callable_ or !row.valid_key or row.ty == .poison) return null;
+        const slot = self.telling_slots.get(key(0, row.head)) orelse return null;
+        if (slot >= callableSlots(pool, row.ty)) return null;
+        const written = callableSlot(pool, row.ty, slot);
+        return if (try groundKnown(pool, written)) written else null;
     }
 
     fn receiverKey(trait: u32, receiver: TypeId) u64 {
@@ -3662,12 +3689,42 @@ pub const ImplIndex = struct {
         self.ground_by_header.deinit(gpa);
         self.ground_by_type.deinit(gpa);
         self.open_by_head.deinit(gpa);
+        self.open_by_slot.deinit(gpa);
+        self.open_by_head_slot.deinit(gpa);
         self.open.deinit(gpa);
         self.ground_by_receiver = .empty;
         self.ground_by_header = .empty;
         self.ground_by_type = .empty;
         self.open_by_head = .empty;
+        self.open_by_slot = .empty;
+        self.open_by_head_slot = .empty;
         self.open = .empty;
+        self.telling_slots.clearRetainingCapacity();
+
+        // The slot each callable head's open rows are told apart by: the
+        // first at which two of them write different ground types. A
+        // receiver writes a ground type there too, so it walks only the
+        // rows that write the same one or leave the slot open.
+        {
+            var first: std.AutoHashMapUnmanaged(u64, TypeId) = .empty;
+            defer first.deinit(gpa);
+            for (impls) |row| {
+                if (row.head != .callable_ or !row.valid_key or row.ty == .poison or try foundByType(pool, row)) continue;
+                const head_key = key(0, row.head);
+                const limit = self.telling_slots.get(head_key) orelse std.math.maxInt(u32);
+                for (0..@min(callableSlots(pool, row.ty), limit)) |slot| {
+                    const written = callableSlot(pool, row.ty, slot);
+                    if (!try groundKnown(pool, written)) continue;
+                    const seen = try first.getOrPut(gpa, slotKey(@intCast(slot), row.head, .poison));
+                    if (!seen.found_existing) {
+                        seen.value_ptr.* = written;
+                    } else if (seen.value_ptr.* != written) {
+                        try self.telling_slots.put(gpa, head_key, @intCast(slot));
+                        break;
+                    }
+                }
+            }
+        }
         // Backwards, as `build` files them, so each walk runs in list order.
         var at: usize = impls.len;
         while (at > 0) {
@@ -3677,6 +3734,9 @@ pub const ImplIndex = struct {
                 try self.ground_by_receiver.note(gpa, receiverKey(row.trait, row.ty), @intCast(at));
                 try self.ground_by_header.note(gpa, headerKey(row.trait, row.ty, row.args), @intCast(at));
                 try self.ground_by_type.note(gpa, @intFromEnum(row.ty), @intCast(at));
+            } else if (try self.tellingRoot(pool, row)) |root| {
+                try self.open_by_slot.note(gpa, slotKey(row.trait, row.head, root), @intCast(at));
+                try self.open_by_head_slot.note(gpa, slotKey(0, row.head, root), @intCast(at));
             } else {
                 try self.open.note(gpa, key(row.trait, row.head), @intCast(at));
                 try self.open_by_head.note(gpa, key(0, row.head), @intCast(at));
@@ -3739,6 +3799,9 @@ pub const ImplIndex = struct {
         const head = pool.headOf(held);
         var all = self.candidates(impls, trait, head, defaults);
         if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(pool, held)) return all;
+        // A closure has a callable head's shape and is no callable type, so
+        // nothing is found by its type.
+        if (head == .callable_ and pool.get(held) != .callable) return all;
         const by_header = if (args) |given| for (given) |arg| {
             if (!try groundKnown(pool, arg)) break false;
         } else true else false;
@@ -3752,7 +3815,17 @@ pub const ImplIndex = struct {
         };
         all.chain = &self.open;
         all.run = self.open.walk(key(trait, head));
+        if (try self.receiverRoot(pool, head, held)) |root| all.told = self.open_by_slot.walk(slotKey(trait, head, root));
         return all;
+    }
+
+    /// The type a ground callable receiver writes at the slot its head's
+    /// open rows are told apart by, or null where no row is filed by one.
+    fn receiverRoot(self: *const ImplIndex, pool: anytype, head: Head, held: TypeId) !?TypeId {
+        if (head != .callable_) return null;
+        const slot = self.telling_slots.get(key(0, head)) orelse return null;
+        if (slot >= callableSlots(pool, held)) return null;
+        return callableSlot(pool, held, slot);
     }
 
     pub const CandidateIterator = struct {
@@ -3767,6 +3840,9 @@ pub const ImplIndex = struct {
         /// where the ground rows were found by the receiver's type.
         chain: *const Chain(.newest_first),
         found: ?Found = null,
+        /// The open rows of the receiver's head that write the receiver's
+        /// own type at the slot they are told apart by.
+        told: ?Chain(.newest_first).Walk = null,
 
         const Found = struct {
             receiver: TypeId,
@@ -3785,6 +3861,13 @@ pub const ImplIndex = struct {
                     return row_index;
                 }
                 self.found = null;
+            }
+            if (self.told) |*told| {
+                while (told.next()) |row_index| {
+                    const row = self.impls[row_index];
+                    if (row.trait == self.trait and row.head.same(self.heads[0]) and row.valid_key) return row_index;
+                }
+                self.told = null;
             }
             while (self.at < self.count) {
                 while (self.run.next()) |row_index| {
@@ -3828,11 +3911,15 @@ pub const ImplIndex = struct {
         if (!self.ground_indexed or !headFoundByType(head) or !try groundKnown(pool, held)) {
             return .{ .impls = impls, .head = head, .open = self.by_head.walk(key(0, head)) };
         }
+        if (head == .callable_ and pool.get(held) != .callable) {
+            return .{ .impls = impls, .head = head, .open = self.by_head.walk(key(0, head)) };
+        }
         return .{
             .impls = impls,
             .head = head,
             .receiver = held,
             .found = self.ground_by_type.walk(@intFromEnum(held)),
+            .told = if (try self.receiverRoot(pool, head, held)) |root| self.open_by_head_slot.walk(slotKey(0, head, root)) else null,
             .open = self.open_by_head.walk(key(0, head)),
         };
     }
@@ -3842,6 +3929,7 @@ pub const ImplIndex = struct {
         head: Head,
         receiver: TypeId = .poison,
         found: ?Chain(.newest_first).Walk = null,
+        told: ?Chain(.newest_first).Walk = null,
         open: Chain(.newest_first).Walk,
 
         pub fn next(self: *RowsUnder) ?u32 {
@@ -3850,6 +3938,12 @@ pub const ImplIndex = struct {
                     if (self.impls[at].ty == self.receiver) return at;
                 }
                 self.found = null;
+            }
+            if (self.told) |*told| {
+                while (told.next()) |at| {
+                    if (self.impls[at].head.same(self.head)) return at;
+                }
+                self.told = null;
             }
             while (self.open.next()) |at| {
                 if (self.impls[at].head.same(self.head)) return at;
@@ -14758,6 +14852,24 @@ fn ground(typing: anytype, t: TypeId, memo: ?GroundMemo) std.mem.Allocator.Error
     return result;
 }
 
+/// The types a callable type writes, in order: each parameter's and then the
+/// result's, or none for a type that is not callable. Two callable types of
+/// one shape can be one type only where they agree at every one of these
+/// slots, so a slot where both are ground and differ tells them apart.
+pub fn callableSlots(pool: anytype, t: TypeId) usize {
+    return switch (pool.get(t)) {
+        .callable => |signature| signature.param_count + 1,
+        else => 0,
+    };
+}
+
+/// The type a callable type writes at `slot` of `callableSlots`.
+pub fn callableSlot(pool: anytype, t: TypeId, slot: usize) TypeId {
+    const signature = pool.get(t).callable;
+    const params = pool.callableParams(signature);
+    return if (slot < params.len) params[slot].ty else signature.result;
+}
+
 /// A substitution making two implementation heads and their trait arguments
 /// coincide, returned as the resolved types of `a`. Returns null when no such
 /// substitution exists. The caller owns the returned slice.
@@ -14868,6 +14980,21 @@ pub fn unifyWitness(
         try contractsStanding(gpa, pool, &subst, sy, &standing_y);
         if (!try contractsMayAgree(gpa, sx.contracts, standing_x.items, sy.contracts, standing_y.items)) return null;
     }
+    // The witness names a settlement both headers answer for. Where two
+    // signatures agree once every undecided contract is dropped, the open
+    // types those contracts rest on are settled to a scalar, which is what
+    // drops them: the witness then spells one type whichever header is read
+    // first, and no contract over a type nothing settled.
+    for (contracts_to_compare.items) |pair| {
+        const sx = pool.get(pair.x).callable;
+        const sy = pool.get(pair.y).callable;
+        try contractsStanding(gpa, pool, &subst, sx, &standing_x);
+        try contractsStanding(gpa, pool, &subst, sy, &standing_y);
+        if (!try agreeWithUndecidedDropped(gpa, sx.contracts, standing_x.items, sy.contracts, standing_y.items)) continue;
+        try settleUndecided(gpa, pool, &subst, sx, standing_x.items);
+        try contractsStanding(gpa, pool, &subst, sy, &standing_y);
+        try settleUndecided(gpa, pool, &subst, sy, standing_y.items);
+    }
 
     const out = try gpa.alloc(TypeId, a.len);
     errdefer gpa.free(out);
@@ -14915,6 +15042,53 @@ fn contractsStanding(
         const scalar_source: ?TypeId = if (source) |held| if (leftOpen(pool, held)) TypeId.u8 else held else null;
         const scalar = contractNamesDependency(pool, contract, scalar_result, scalar_source);
         try standing.append(gpa, if (carrying and scalar) .stands else if (!carrying and !scalar) .dropped else .undecided);
+    }
+}
+
+/// Whether the contracts that stand on each side are the same list once
+/// every undecided one is left out.
+fn agreeWithUndecidedDropped(
+    gpa: std.mem.Allocator,
+    x: []const CallableContract,
+    x_standing: []const ContractStanding,
+    y: []const CallableContract,
+    y_standing: []const ContractStanding,
+) std.mem.Allocator.Error!bool {
+    var kept_x: std.ArrayList(CallableContract) = .empty;
+    defer kept_x.deinit(gpa);
+    var kept_y: std.ArrayList(CallableContract) = .empty;
+    defer kept_y.deinit(gpa);
+    for (x, x_standing) |contract, standing| if (standing == .stands) try kept_x.append(gpa, contract);
+    for (y, y_standing) |contract, standing| if (standing == .stands) try kept_y.append(gpa, contract);
+    return sameContracts(kept_x.items, kept_y.items);
+}
+
+/// Binds the parameter each undecided contract of `signature` rests on to a
+/// scalar, so the contract is dropped: the result's where it is open and the
+/// contract carries, and otherwise the source parameter's. A settled
+/// reference is no parameter and is left as it is.
+fn settleUndecided(
+    gpa: std.mem.Allocator,
+    pool: *Typing.Builder,
+    subst: *Substitution,
+    signature: CallableSignature,
+    standing: []const ContractStanding,
+) std.mem.Allocator.Error!void {
+    const params = pool.callableParams(signature);
+    for (signature.contracts, standing) |contract, how| {
+        if (how != .undecided) continue;
+        const result = resolveBound(subst, signature.result);
+        if (contract.kind == .carries and pool.get(result) == .parameter) {
+            try subst.put(gpa, result, .u8);
+            continue;
+        }
+        switch (contract.source.root) {
+            .parameter => |index| {
+                const source = resolveBound(subst, params[index].ty);
+                if (pool.get(source) == .parameter) try subst.put(gpa, source, .u8);
+            },
+            .capture, .callee => {},
+        }
     }
 }
 

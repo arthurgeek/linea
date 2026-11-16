@@ -8469,6 +8469,10 @@ const Resolver = struct {
         const end = self.ast.writtenWholeSpan(head).end;
         var out: std.ArrayList(u8) = .empty;
         var previous: ?TokenId = null;
+        // How many brackets, parentheses and braces the head has open, so a
+        // brace inside it, as a default's struct literal writes, is not
+        // taken for the block the implementation opens.
+        var depth: usize = 0;
         var at = head.at.index();
         while (at < self.ast.tokenCount()) : (at += 1) {
             const tok = TokenId.at(at);
@@ -8477,20 +8481,35 @@ const Resolver = struct {
             // A callable head runs to the block it opens, past the contract
             // written after its result; any other ends with its arguments.
             if (head.kind == .callable) {
-                if (tag == .l_brace or tag == .eof) break;
+                if ((tag == .l_brace and depth == 0) or tag == .eof) break;
             } else if (self.ast.tokenSpan(tok).start >= end) break;
             if (tag == .comment) continue;
+            const closes = switch (tag) {
+                .r_bracket, .r_paren, .r_brace => true,
+                else => false,
+            };
+            switch (tag) {
+                .l_bracket, .l_paren, .l_brace => depth += 1,
+                .r_bracket, .r_paren, .r_brace => depth -|= 1,
+                else => {},
+            }
             if (previous) |before| {
+                const before_tag = self.ast.tokenTag(before);
+                // A comma written before a closing bracket separates nothing.
+                if (before_tag == .comma and closes and tag != .r_brace) out.items.len -= 1;
                 const apart = self.ast.tokenSpan(tok).start > self.ast.tokenSpan(before).end;
-                const opened = switch (self.ast.tokenTag(before)) {
-                    .l_bracket, .l_paren => true,
+                const joined = switch (before_tag) {
+                    .l_bracket, .l_paren, .dot => true,
+                    // A name and the arguments it is applied to.
+                    .identifier => tag == .l_bracket,
+                    else => false,
+                } or switch (tag) {
+                    .r_bracket, .r_paren, .comma, .semicolon => true,
+                    // A path, `mem.Handle`, and not a literal's `.{`.
+                    .dot => before_tag == .identifier,
                     else => false,
                 };
-                const closing = switch (tag) {
-                    .r_bracket, .r_paren, .comma => true,
-                    else => false,
-                };
-                if (apart and !opened and !closing) try out.append(self.sink.arena, ' ');
+                if (apart and !joined) try out.append(self.sink.arena, ' ');
             }
             try out.appendSlice(self.sink.arena, self.ast.tokenText(tok));
             previous = tok;
@@ -8673,13 +8692,15 @@ const Resolver = struct {
     /// implementations whose header hashes alike: one lookup each, however
     /// many applications of one type implement the trait. An implementation
     /// that declares parameters is compared with the earlier ones of its
-    /// trait and head whose trait argument at one chosen position has the same
-    /// root, or none.
+    /// trait and head that write a type of the same root, or none, at one
+    /// chosen position: a trait argument, or a type a callable head's
+    /// signature writes.
     fn checkCoherence(self: *Resolver) !void {
-        // One argument position per trait/head chain separates the families
-        // whose trait arguments name different types. Choosing it scans the
-        // represented arguments once; a bare parameter or structural form
-        // remains in every candidate set.
+        // One position per trait/head chain separates the families that
+        // write different types there: among the arguments given the trait
+        // and, for a callable head, the types its signature writes. Choosing
+        // it scans the represented positions once; a bare parameter or
+        // structural form remains in every candidate set.
         const Columns = struct {
             roots: std.ArrayList(?u64) = .empty,
             position: ?usize = null,
@@ -8696,14 +8717,14 @@ const Resolver = struct {
             const entry = try columns.getOrPut(self.gpa, self.coherenceKey(it));
             if (!entry.found_existing) entry.value_ptr.* = .{};
             const choice = entry.value_ptr;
-            const args = self.ast.typeArgs(it.args);
-            if (args.len > choice.roots.items.len) {
+            const count = self.familyPositions(it);
+            if (count > choice.roots.items.len) {
                 const old_len = choice.roots.items.len;
-                try choice.roots.resize(self.gpa, args.len);
+                try choice.roots.resize(self.gpa, count);
                 @memset(choice.roots.items[old_len..], null);
             }
-            for (args, 0..) |arg, position| {
-                const root = self.coherenceArgumentRoot(arg) orelse continue;
+            for (0..count) |position| {
+                const root = self.familyRootAt(it, position) orelse continue;
                 if (choice.roots.items[position]) |prior| {
                     if (prior != root) choice.position = @min(choice.position orelse position, position);
                 } else choice.roots.items[position] = root;
@@ -8781,11 +8802,7 @@ const Resolver = struct {
                 try provided.put(self.gpa, key, @intCast(i));
             }
             const position = if (columns.get(key)) |choice| choice.position orelse 0 else 0;
-            const args = self.ast.typeArgs(it.args);
-            const root = if (it.decl != DeclId.none and position < args.len)
-                self.coherenceArgumentRoot(args[position])
-            else
-                null;
+            const root = self.familyRootAt(it, position);
             var chain = if (parameterless) null else if (root) |r| named.get(.{ .group = key, .root = r }) else first.get(key);
             var wildcard = if (parameterless or root == null) null else wildcards.get(key);
             // Merge the two descending chains, retaining the latest matching
@@ -8902,6 +8919,33 @@ const Resolver = struct {
                 });
             }
         }
+    }
+
+    /// How many positions a family is filed by: the arguments it gives the
+    /// trait, then, for a callable head, each parameter's type and the
+    /// result. A nominal family's head applies its own parameters, which
+    /// tell no two apart.
+    fn familyPositions(self: *const Resolver, it: Implementation) usize {
+        if (it.decl == DeclId.none) return 0;
+        const args = it.args.len();
+        if (it.head != .callable_) return args;
+        const callable = self.ast.callableType(self.ast.declHead(it.decl));
+        return args + (callable.params.end - callable.params.start) + 1;
+    }
+
+    /// The root of the type a family writes at one of its positions, or null
+    /// where it writes none there or one with no root.
+    fn familyRootAt(self: *const Resolver, it: Implementation, position: usize) ?u64 {
+        if (it.decl == DeclId.none) return null;
+        const args = self.ast.typeArgs(it.args);
+        if (position < args.len) return self.coherenceArgumentRoot(args[position]);
+        if (it.head != .callable_) return null;
+        const callable = self.ast.callableType(self.ast.declHead(it.decl));
+        const params = self.ast.params[callable.params.start..callable.params.end];
+        const slot = position - args.len;
+        if (slot < params.len) return self.coherenceArgumentRoot(params[slot].written);
+        if (slot == params.len and callable.result.wasWritten()) return self.coherenceArgumentRoot(callable.result);
+        return null;
     }
 
     /// A hash of everything `sameImplementation` compares of an
@@ -9709,6 +9753,40 @@ const Resolver = struct {
     };
 
     const SourceReplacements = std.AutoHashMapUnmanaged(BindingId, []const u8);
+
+    /// The whole text of one type argument a derive's head applies, to stand
+    /// wherever the generated source names the target's parameter: every
+    /// token from the argument's first to the comma or bracket that ends it,
+    /// so an applied name keeps its arguments, an array its length, and a
+    /// callable type its defaults and contract. A callable type is written
+    /// in parentheses, since the text after it would otherwise read as part
+    /// of its result or its contract.
+    fn writtenArgumentText(self: *const Resolver, argument: node.TypeRef) ![]const u8 {
+        const ast = &self.program.ast;
+        const file = ast.fileOf(argument.at);
+        var depth: usize = 0;
+        var last = argument.at;
+        var at = argument.at.index();
+        while (at < ast.tokenCount()) : (at += 1) {
+            const tok = TokenId.at(at);
+            if (ast.fileOf(tok) != file) break;
+            switch (ast.tokenTag(tok)) {
+                .l_bracket, .l_paren, .l_brace => depth += 1,
+                .r_bracket, .r_paren, .r_brace => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                },
+                .comma => if (depth == 0) break,
+                .comment => continue,
+                .eof => break,
+                else => {},
+            }
+            last = tok;
+        }
+        const text = ast.partOf(argument.at).source[ast.tokenSpan(argument.at).start..ast.tokenSpan(last).end];
+        if (ast.withoutTypeGroups(argument).kind != .callable or argument.kind == .grouped) return text;
+        return std.fmt.allocPrint(self.sink.arena, "({s})", .{text});
+    }
     const SourceAliasOrdinals = std.AutoHashMapUnmanaged(u64, void);
     const SourceAliasSuccessors = std.AutoHashMapUnmanaged(u64, u64);
 
@@ -11210,7 +11288,7 @@ const Resolver = struct {
                     const target_arguments = self.program.ast.typeArgs(self.program.ast.declHead(derive).args);
                     for (self.program.ast.declTypeParams(target), target_arguments) |parameter, argument| {
                         const binding = self.type_parameter_bindings.get(parameter.name) orelse continue;
-                        try replacements.put(self.gpa, binding, self.program.ast.tokenText(argument.name));
+                        try replacements.put(self.gpa, binding, try self.writtenArgumentText(argument));
                     }
                 }
                 var component_type_text: std.ArrayList([]const u8) = .empty;

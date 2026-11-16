@@ -1,4 +1,4 @@
-error[T-Impl]: these two both answer `Take[fn(read T) -> Str where carries()]` for `Shelf`
+error[T-Impl]: these two both answer `Take[fn(read UInt8) -> Str]` for `Shelf`
   --> tests/traits/a_contract_left_open_in_a_trait_argument_proves_no_two_implementations_apart_written_second.lin:15:9
    |
 9  | impl[U] Take[fn(a: U) -> Str where carries()] for Shelf {

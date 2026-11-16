@@ -218,6 +218,26 @@ compared with the others of their trait and head constructor whose trait
 argument at one chosen position has the same root: quadratic in the families
 of one trait for one constructor that agree there.
 
+**Callable families are told apart by one slot of their signature.** A
+callable head that declares parameters is found by no type of its own, and a
+trait may be implemented for many of one shape, `impl[T] Run for fn(x: A, y:
+T)` beside `impl[T] Run for fn(x: B, y: T)`. For each (trait, shape) the
+resolver, the overlap check and the lookup index each choose one slot, the
+first parameter or result at which two such heads write different ground
+types, and file each head under the type it writes there. At declaration a
+head is compared with the heads that write the same type at that slot or
+leave it open; at lookup a function is matched against those and no others.
+What remains quadratic is exact: the callable families of one trait and shape
+that write the same ground type at the chosen slot, those that leave it open,
+and every family of a shape whose heads differ at no ground slot. One slot is
+chosen, not the best one, so heads that differ only at a later slot than the
+first telling one are among them.
+
+**Groundness is read two ways.** The checker's pool remembers whether a type
+is ground (`Builder.allGround`), and the overlap check and the index both ask
+it there. A finished pool, which a retained library and the ownership pass
+read, has nowhere to remember it and walks the type each time.
+
 **Measured.** `zig build sweep -Drelease` holds both shapes as dimensions.
 "Applications each implementing a trait and used once", one implementation
 for each of n applications and each handed once to a bound, read n^1.04
@@ -226,7 +246,8 @@ on the same machine reads n^1.04. "Nested applications each implementing a
 trait", n heads that agree in an outer constructor, read n^0.95 (67 ms,
 129 ms and 247 ms). "Callable heads of one shape each implementing a trait
 and used once" read n^1.06 (106 ms, 219 ms and 453 ms) where a linear
-doubling read n^1.06. Before the index and the header hash a debug compiler
+doubling read n^1.06. "Generic callable heads of one shape each implementing
+a trait and used once" read n^1.03 (173 ms, 350 ms and 715 ms). Before the index and the header hash a debug compiler
 took 14.5 s and 4.5 s to check the two shapes at 2000; it takes 2.6 s and
 2.3 s, of which about 2 s is reading the library.
 
@@ -246,6 +267,17 @@ one written later, which for a derive is where its request is written and not
 where the implementation it generates is declared. An implementation written three
 times is reported twice, each time against the first, and not as an overlap as
 well.
+
+**An overlap names a type both headers answer for.** Where two callable
+headers agree once every undecided contract is dropped, the witness settles
+the open types those contracts rest on to `UInt8`, a scalar that drops them,
+so the report reads "these two both answer `Run` for `fn(read UInt8) -> Str`"
+whichever header is written first.
+
+**A derive's head is substituted whole.** The code a standalone derive
+generates reads the target's parameter as the whole argument the head writes,
+`M[UInt8]`, `[UInt8; 2]`, `(UInt8, Bool)` or a callable type, where it read
+only the argument's head name and failed on an argument that has none.
 
 **A head refused for its form earns one report.** Two heads that break 0081's
 head rule, `Pair[T, UInt8]` beside `Pair[T, T]`, were reported as one

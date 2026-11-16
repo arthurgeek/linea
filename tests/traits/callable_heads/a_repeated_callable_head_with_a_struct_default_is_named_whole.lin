@@ -1,0 +1,27 @@
+// A default written as a struct literal holds braces of its own. The head
+// ends at the block the implementation opens, so a report of a repeated head
+// names the whole signature, default included.
+@copyable
+struct Quota {
+    n: UInt8,
+}
+
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl Run for fn(r: Quota = .{ n = 1 }) -> UInt8 {
+    fn go(self: Self) -> UInt8 {
+        self()
+    }
+}
+
+impl Run for fn(r: Quota = .{ n = 1 }) -> UInt8 {
+    fn go(self: Self) -> UInt8 {
+        self() + 1
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

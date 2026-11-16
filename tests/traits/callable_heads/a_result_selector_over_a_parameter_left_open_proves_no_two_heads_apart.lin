@@ -1,0 +1,22 @@
+// A contract that names one case of the result is dropped like any other
+// where its source is settled to a type that carries nothing. At `UInt8`
+// both heads below are `fn(a: UInt8) -> Result[Str, Str]`.
+trait Run {
+    fn go(self: Self) -> UInt8
+}
+
+impl[T] Run for fn(a: T) -> Result[Str, Str] where carries(.Err: a) {
+    fn go(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+impl[U] Run for fn(a: U) -> Result[Str, Str] where carries() {
+    fn go(_self: Self) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,48 @@
+// The argument a derive's head applies may be a callable type, default
+// included. The generated code reads the target's parameter as that whole
+// type, in the requirement the template states of the field and in the
+// binding that builds it.
+trait Fresh {
+    fn fresh() -> Self
+}
+
+impl Fresh for UInt8 {
+    fn fresh() -> UInt8 {
+        3
+    }
+}
+
+fn add_two(x: UInt8 = 1) -> UInt8 {
+    x + 2
+}
+
+impl Fresh for fn(x: UInt8 = 1) -> UInt8 {
+    fn fresh() -> Self {
+        add_two
+    }
+}
+
+template impl Fresh where reflect.target: struct, reflect.components: Fresh {
+    fn fresh() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Fresh.fresh()
+                value
+            },
+            {},
+        )
+    }
+}
+
+struct M[T] {
+    value: T,
+}
+
+derive Fresh for M[fn(x: UInt8 = 1) -> UInt8]
+
+fn main() -> UInt8 {
+    let held: M[fn(x: UInt8 = 1) -> UInt8] = Fresh.fresh()
+    let M { value } = held
+    value(4) + value()
+}

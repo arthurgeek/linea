@@ -1,0 +1,39 @@
+// A derive names the type it is for, and the code it generates reads the
+// target's parameter as the whole argument the head writes. For
+// `M[M[UInt8]]` the field `value: T` is an `M[UInt8]`, in the requirement the
+// template states of it and in the binding that builds it.
+trait Fresh {
+    fn fresh() -> Self
+}
+
+impl Fresh for UInt8 {
+    fn fresh() -> UInt8 {
+        3
+    }
+}
+
+template impl Fresh where reflect.target: struct, reflect.components: Fresh {
+    fn fresh() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Fresh.fresh()
+                value
+            },
+            {},
+        )
+    }
+}
+
+struct M[T] {
+    value: T,
+}
+
+derive Fresh for M[UInt8]
+
+derive Fresh for M[M[UInt8]]
+
+fn main() -> UInt8 {
+    let nested: M[M[UInt8]] = Fresh.fresh()
+    nested.value.value
+}

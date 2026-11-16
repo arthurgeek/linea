@@ -1,0 +1,48 @@
+// The argument a derive's head applies may be a tuple. The generated code
+// reads the target's parameter as `(UInt8, Bool)`, in the requirement the
+// template states of the field and in the binding that builds it.
+trait Fresh {
+    fn fresh() -> Self
+}
+
+impl Fresh for UInt8 {
+    fn fresh() -> UInt8 {
+        3
+    }
+}
+
+impl Fresh for (UInt8, Bool) {
+    fn fresh() -> (UInt8, Bool) {
+        (5, true)
+    }
+}
+
+template impl Fresh where reflect.target: struct, reflect.components: Fresh {
+    fn fresh() -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Fresh.fresh()
+                value
+            },
+            {},
+        )
+    }
+}
+
+struct M[T] {
+    value: T,
+}
+
+derive Fresh for M[(UInt8, Bool)]
+
+fn main() -> UInt8 {
+    let pair: M[(UInt8, Bool)] = Fresh.fresh()
+    let M { value } = pair
+    let (count, set) = value
+    if set {
+        count
+    } else {
+        0
+    }
+}

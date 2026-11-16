@@ -1,4 +1,4 @@
-error[T-Impl]: these two both answer `Run` for `fn(read T) -> Str where carries()`
+error[T-Impl]: these two both answer `Run` for `fn(read UInt8) -> Str`
   --> tests/traits/callable_heads/a_contract_over_a_parameter_left_open_proves_no_two_heads_apart_written_second.lin:14:9
    |
 8  | impl[U] Run for fn(a: U) -> Str where carries() {
