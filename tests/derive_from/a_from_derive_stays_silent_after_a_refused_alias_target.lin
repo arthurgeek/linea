@@ -1,0 +1,16 @@
+// An alias whose own type is refused is reported where it is declared, and
+// a derive naming it as a source says nothing more.
+alias Bad = [UInt8; true]
+
+@derive(From[Bad], From[Option[Bad]])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    match Choice.Unknown {
+        Only(code) => code,
+        Unknown => 0,
+    }
+}

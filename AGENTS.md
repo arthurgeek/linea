@@ -694,6 +694,40 @@ APIs.
   written out where the restriction is intended, and no default on a public
   function's allocator parameter ([T-DefaultedAllocator]). Bodies, private
   helpers and programs keep the short form.
+- A pass hands every error on. Inside a pass an error is a refused
+  allocation, and one that is discarded can lose a report, so the program
+  checks clean. `build.zig` reads the pass directories of `src/` (`lexer`,
+  `parser`, `syntax`, `sema`, `ownership`, `mir`, `diagnostics`, `backend`)
+  and refuses, outside `test` blocks and whatever is called: `catch {}`;
+  `catch { … }` with no `return error.…`; `catch return`, `catch break` and
+  `catch continue` without an error value; `catch` with a value;
+  `catch unreachable`, which is undefined behaviour in a ReleaseFast build
+  where the call can fail; and `catch |e| …` or `else |e| …` whose body does
+  not end by handing the error on. A body ends that way when its last
+  statement, or the expression itself, is `return e`, `return error.…`,
+  `unreachable` or `@panic(…)`, or is a `switch (e)` whose `error.OutOfMemory`
+  prong (its `else` prong where it names none) returns the error; a `return`
+  on one path of several does not count. `try`, `catch |e| return e`,
+  `catch return error.…` and `catch @panic(…)` pass. A discard that loses
+  nothing, such as arithmetic overflow that is itself the answer or a call
+  whose error set is empty, is named in `discards_allowed`
+  (`build/source.zig`) by file, function, the call before `catch` (`else` for
+  an `else |…|`) and the number of such discards the function holds, with the
+  reason. Two functions of one name in a file are written `name#1`, `name#2`
+  in file order. The gate fails where a function holds more or fewer such
+  discards than its entry states, so a new one needs its own reason. Two
+  spellings escape a scan of tokens and are left to review: binding a call's
+  result to a constant and discarding that, and passing it to
+  `std.mem.doNotOptimizeAway`. Elsewhere in `src/` and in `build/`, where an error is often
+  the answer to a question put to the file system, only a discard written
+  directly after a call a pass reports through is refused: `add` on a
+  receiver ending in `sink`, `put` on one ending in `refused`, `addError`,
+  `addErrorFmt`, `addNote`, `addFix`, `noteRefused`, `noteRefusedDemand`,
+  `record`, `sealedAt`, `explainShadowedHead`, `typeName`, `helpName`,
+  `poisonPattern`, `settlePatternAs`, any name beginning `report` or `refuse`,
+  and a `catch return` answered with `record` or `recordMismatch`; there
+  `catch |e|`, `catch unreachable`, `catch @panic` and `catch return error.…`
+  pass.
 - Branch names are semantic and describe the code, never a milestone or plan.
 - PR titles and commits use one semantic form, for example `feat(sema): ...`,
   `fix(mir): ...` or `refactor(support): ...`. A merge lands one squashed commit

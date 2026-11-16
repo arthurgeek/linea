@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Shown`, and `Bool` does not implement it
+  --> tests/derive_from/an_unmet_bound_in_a_derive_source_is_its_only_report.lin:13:14
+   |
+13 | @derive(From[Box[Bool]])
+   |              ^^^ implement it for that type, or drop the bound

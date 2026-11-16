@@ -1,0 +1,59 @@
+// [L-Size]. Each alias holds the one before it twice, so `Twice40[UInt8]` is
+// 2^41 bytes wide. The width crosses the limit at one type, the `Pair`
+// holding two halves of 2^31 bytes, and that type is the one report: the
+// types that hold it are too wide because it is, and a type still written
+// with a parameter has no width to ask about until the parameter is settled.
+struct Pair[A, B] {
+    left: A,
+    right: B,
+}
+
+alias Twice0[T] = Pair[T, T]
+alias Twice1[T] = Pair[Twice0[T], Twice0[T]]
+alias Twice2[T] = Pair[Twice1[T], Twice1[T]]
+alias Twice3[T] = Pair[Twice2[T], Twice2[T]]
+alias Twice4[T] = Pair[Twice3[T], Twice3[T]]
+alias Twice5[T] = Pair[Twice4[T], Twice4[T]]
+alias Twice6[T] = Pair[Twice5[T], Twice5[T]]
+alias Twice7[T] = Pair[Twice6[T], Twice6[T]]
+alias Twice8[T] = Pair[Twice7[T], Twice7[T]]
+alias Twice9[T] = Pair[Twice8[T], Twice8[T]]
+alias Twice10[T] = Pair[Twice9[T], Twice9[T]]
+alias Twice11[T] = Pair[Twice10[T], Twice10[T]]
+alias Twice12[T] = Pair[Twice11[T], Twice11[T]]
+alias Twice13[T] = Pair[Twice12[T], Twice12[T]]
+alias Twice14[T] = Pair[Twice13[T], Twice13[T]]
+alias Twice15[T] = Pair[Twice14[T], Twice14[T]]
+alias Twice16[T] = Pair[Twice15[T], Twice15[T]]
+alias Twice17[T] = Pair[Twice16[T], Twice16[T]]
+alias Twice18[T] = Pair[Twice17[T], Twice17[T]]
+alias Twice19[T] = Pair[Twice18[T], Twice18[T]]
+alias Twice20[T] = Pair[Twice19[T], Twice19[T]]
+alias Twice21[T] = Pair[Twice20[T], Twice20[T]]
+alias Twice22[T] = Pair[Twice21[T], Twice21[T]]
+alias Twice23[T] = Pair[Twice22[T], Twice22[T]]
+alias Twice24[T] = Pair[Twice23[T], Twice23[T]]
+alias Twice25[T] = Pair[Twice24[T], Twice24[T]]
+alias Twice26[T] = Pair[Twice25[T], Twice25[T]]
+alias Twice27[T] = Pair[Twice26[T], Twice26[T]]
+alias Twice28[T] = Pair[Twice27[T], Twice27[T]]
+alias Twice29[T] = Pair[Twice28[T], Twice28[T]]
+alias Twice30[T] = Pair[Twice29[T], Twice29[T]]
+alias Twice31[T] = Pair[Twice30[T], Twice30[T]]
+alias Twice32[T] = Pair[Twice31[T], Twice31[T]]
+alias Twice33[T] = Pair[Twice32[T], Twice32[T]]
+alias Twice34[T] = Pair[Twice33[T], Twice33[T]]
+alias Twice35[T] = Pair[Twice34[T], Twice34[T]]
+alias Twice36[T] = Pair[Twice35[T], Twice35[T]]
+alias Twice37[T] = Pair[Twice36[T], Twice36[T]]
+alias Twice38[T] = Pair[Twice37[T], Twice37[T]]
+alias Twice39[T] = Pair[Twice38[T], Twice38[T]]
+alias Twice40[T] = Pair[Twice39[T], Twice39[T]]
+
+fn _take(_given: Twice40[UInt8]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,5 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `[UInt16; 2147483648]` is wider
+ --> tests/types/an_array_too_wide_is_reported_where_it_is_written.lin:7:47
+  |
+7 | fn weigh(_given: borrow Holder, _wide: borrow [UInt16; 2147483648], _again: borrow [UInt16; 2147483648]) -> UInt8 {
+  |                                               ^^^^^^^^^^^^^^^^^^^^ hold fewer parts, or nest them less deeply

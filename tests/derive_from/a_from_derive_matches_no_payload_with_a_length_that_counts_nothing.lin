@@ -1,3 +1,7 @@
+// [T-ArraySize]. A derive's source is a written type, held to what any
+// written type is held to. A length that is not a number counts nothing, so
+// the source names no type a payload could match: the length is reported
+// where it is written, and the derive says nothing about a variant.
 @derive(From[[UInt8; true]])
 enum Frame {
     Pair([UInt8; 2]),

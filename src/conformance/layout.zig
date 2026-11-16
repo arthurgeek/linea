@@ -44,37 +44,6 @@ pub const Oracle = struct {
     }
 };
 
-/// Whether a type contributes no bytes, answered from its structure.
-///
-/// A part of width zero contributes no C member: ISO C has no zero-size member
-/// and no empty structure, so there is no text that stands for one. Linea's own
-/// arithmetic gives the rest -- `alignUp(at, 1) + 0 == at`, so such a part never
-/// moves what follows it and never raises the enclosing alignment.
-///
-/// Read from the type and never from the table, which is the one place the
-/// transcription is most tempting: a member's size looked up in `layouts` would
-/// make `cc` confirm a number this property handed it.
-fn isZeroWidth(typing: *const Typing, t: TypeId) bool {
-    // An instantiation with its parts unwritten holds a parameter, and has
-    // no parts to read: it is no width the oracle can state.
-    if (typing.isShell(t)) return false;
-    return switch (typing.get(t)) {
-        .unit, .never => true,
-        .newtype => |n| isZeroWidth(typing, n.base),
-        .array => |a| a.count == 0 or isZeroWidth(typing, a.element),
-        .struct_ => {
-            for (0..typing.fieldCount(t)) |i| {
-                if (!isZeroWidth(typing, typing.fieldType(t, @intCast(i)))) return false;
-            }
-            return true;
-        },
-        // A tag is a full word whatever its variants carry, so an enum is never
-        // zero-width.
-        .enum_ => false,
-        else => false,
-    };
-}
-
 /// Whether this type is one the oracle emits a declaration for.
 fn isAggregate(typing: *const Typing, t: TypeId) bool {
     return switch (typing.get(t)) {
@@ -110,6 +79,58 @@ const Emitter = struct {
     namespace: usize,
     compared: u32 = 0,
     skipped: u32 = 0,
+    /// What `isZeroWidth` and `partExpressible` answered for each type, by
+    /// its place in the pool. A type is one entry however often it is named:
+    /// aliases that each name the one before twice reach one type by a
+    /// million million paths, and an answer read again costs nothing.
+    zero_width: []Answer,
+    part_expressible: []Answer,
+
+    const Answer = enum(u2) { unasked, no, yes };
+
+    /// Whether a type contributes no bytes, answered from its structure.
+    ///
+    /// A part of width zero contributes no C member: ISO C has no zero-size
+    /// member and no empty structure, so there is no text that stands for
+    /// one. Linea's own arithmetic gives the rest -- `alignUp(at, 1) + 0 ==
+    /// at`, so such a part never moves what follows it and never raises the
+    /// enclosing alignment.
+    ///
+    /// Read from the type and never from the table, which is the one place
+    /// the transcription is most tempting: a member's size looked up in
+    /// `layouts` would make `cc` confirm a number this property handed it.
+    ///
+    /// **Bound:** each type's parts are read once; a type asked about again
+    /// answers from `zero_width`.
+    fn isZeroWidth(self: *Emitter, t: TypeId) bool {
+        const at = @intFromEnum(t);
+        if (at < self.zero_width.len and self.zero_width[at] != .unasked) return self.zero_width[at] == .yes;
+        const answer = self.isZeroWidthOnce(t);
+        if (at < self.zero_width.len) self.zero_width[at] = if (answer) .yes else .no;
+        return answer;
+    }
+
+    fn isZeroWidthOnce(self: *Emitter, t: TypeId) bool {
+        const typing = self.typing;
+        // An instantiation with its parts unwritten holds a parameter, and
+        // has no parts to read: it is no width the oracle can state.
+        if (typing.isShell(t)) return false;
+        return switch (typing.get(t)) {
+            .unit, .never => true,
+            .newtype => |n| self.isZeroWidth(n.base),
+            .array => |a| a.count == 0 or self.isZeroWidth(a.element),
+            .struct_ => {
+                for (0..typing.fieldCount(t)) |i| {
+                    if (!self.isZeroWidth(typing.fieldType(t, @intCast(i)))) return false;
+                }
+                return true;
+            },
+            // A tag is a full word whatever its variants carry, so an enum is
+            // never zero-width.
+            .enum_ => false,
+            else => false,
+        };
+    }
 
     /// What a member of this type is spelled as in C, or why it cannot be.
     ///
@@ -155,7 +176,7 @@ const Emitter = struct {
 
     /// Writes one member, answering with what it was able to say.
     fn member(self: *Emitter, t: TypeId, index: u32) Error!Spelled {
-        if (isZeroWidth(self.typing, t)) return .zero_width;
+        if (self.isZeroWidth(t)) return .zero_width;
 
         var buf: [64]u8 = undefined;
         switch (self.typing.get(t)) {
@@ -214,11 +235,21 @@ const Emitter = struct {
         }
     }
 
+    /// **Bound:** each type's parts are read once; a type asked about again
+    /// answers from `part_expressible`.
     fn partExpressible(self: *Emitter, t: TypeId) bool {
+        const at = @intFromEnum(t);
+        if (at < self.part_expressible.len and self.part_expressible[at] != .unasked) return self.part_expressible[at] == .yes;
+        const answer = self.partExpressibleOnce(t);
+        if (at < self.part_expressible.len) self.part_expressible[at] = if (answer) .yes else .no;
+        return answer;
+    }
+
+    fn partExpressibleOnce(self: *Emitter, t: TypeId) bool {
         // An instantiation with its parts unwritten holds a parameter, which
         // has no C form.
         if (self.typing.isShell(t)) return false;
-        if (isZeroWidth(self.typing, t)) return true;
+        if (self.isZeroWidth(t)) return true;
         return switch (self.typing.get(t)) {
             .integer => |i| i.bits == 8 or i.bits == 16 or i.bits == 32 or i.bits == 64,
             .boolean, .float, .borrow => true,
@@ -255,7 +286,7 @@ const Emitter = struct {
         // What this gives up is stated rather than hidden: such a type's size
         // is not diffed. It is also the one size the rule fixes outright,
         // where every other is arithmetic over parts.
-        if (isZeroWidth(self.typing, t)) {
+        if (self.isZeroWidth(t)) {
             self.skipped += 1;
             return;
         }
@@ -365,7 +396,7 @@ const Emitter = struct {
         var name_buf: [64]u8 = undefined;
         const name = typeName(&name_buf, self.namespace, at);
         for (0..self.typing.fieldCount(t)) |i| {
-            if (isZeroWidth(self.typing, self.typing.fieldType(t, @intCast(i)))) continue;
+            if (self.isZeroWidth(self.typing.fieldType(t, @intCast(i)))) continue;
             try self.out.print(
                 "_Static_assert(offsetof({s}, m{d}) == {d}, \"offset {d} of o{d}_t{d}\");\n",
                 .{ name, i, self.typing.fieldOffset(t, @intCast(i)), i, self.namespace, at },
@@ -414,6 +445,13 @@ pub fn of(
     defer gpa.free(done);
     @memset(done, false);
 
+    const zero_width = try gpa.alloc(Emitter.Answer, typing.pool.len);
+    defer gpa.free(zero_width);
+    @memset(zero_width, .unasked);
+    const part_expressible = try gpa.alloc(Emitter.Answer, typing.pool.len);
+    defer gpa.free(part_expressible);
+    @memset(part_expressible, .unasked);
+
     var e: Emitter = .{
         .gpa = gpa,
         .typing = typing,
@@ -421,6 +459,8 @@ pub fn of(
         .out = &out.writer,
         .done = done,
         .namespace = namespace,
+        .zero_width = zero_width,
+        .part_expressible = part_expressible,
     };
 
     for (0..typing.pool.len) |i| {

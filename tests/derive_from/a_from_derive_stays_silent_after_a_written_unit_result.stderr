@@ -1,0 +1,7 @@
+error[S-UnitResult]: a function that returns nothing writes no result type
+ --> tests/derive_from/a_from_derive_stays_silent_after_a_written_unit_result.lin:3:19
+  |
+3 | @derive(From[fn() -> ()])
+  |                   ^^^^^ a function writing no result returns `()`
+  |
+  = help: remove `-> ()`

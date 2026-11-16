@@ -1,0 +1,5 @@
+error[S-Nesting]: this type nests too deeply
+  --> tests/recovery/a_type_past_the_nesting_limit_is_its_only_report.lin:12:7017
+   |
+12 | ... tion[Option[Option[Option[Option[Option[Option[Option[Option[UInt8]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] ...
+   |                                                                 ^ the limit is 1000 levels

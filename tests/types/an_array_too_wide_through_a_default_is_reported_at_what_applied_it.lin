@@ -1,0 +1,15 @@
+// [L-Size]. `Crate` written bare takes its parameter's default, so it holds
+// an array no place writes. It is reported at the declaration whose
+// application made it.
+struct Crate[T = UInt16] {
+    items: [T; 2147483648],
+}
+
+fn weigh(_given: borrow Crate) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}

@@ -1,0 +1,14 @@
+error[T-Derive]: no variant of `Choice` wraps exactly `()`
+ --> tests/derive_from/a_from_derive_needs_a_variant_holding_unit.lin:4:9
+  |
+4 | @derive(From[()], From[[(); 7]])
+  |         ^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type; `Choice` has `Only(UInt8)`
+error[T-Derive]: no variant of `Choice` wraps exactly `[(); 7]`
+ --> tests/derive_from/a_from_derive_needs_a_variant_holding_unit.lin:4:19
+  |
+4 | @derive(From[()], From[[(); 7]])
+  |                   ^^^^^^^^^^^^^ no variant wraps this source
+  |
+  = help: a variant wraps a source when its only field has the source's type; `Choice` has `Only(UInt8)`

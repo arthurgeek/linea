@@ -1,0 +1,24 @@
+// A derive's source is a written type, and a type whose argument does not
+// meet the bound it is written under is refused as a type. That refusal is
+// the report: the derive says nothing about the variant such a source would
+// need.
+trait Shown {
+    fn show(self: Self) -> UInt8
+}
+
+struct Box[T: Shown] {
+    item: T,
+}
+
+@derive(From[Box[Bool]])
+enum Choice {
+    Only(UInt8),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    match Choice.Unknown {
+        Only(code) => code,
+        Unknown => 0,
+    }
+}

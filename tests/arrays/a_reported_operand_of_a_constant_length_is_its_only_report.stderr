@@ -1,0 +1,12 @@
+error[T-Operands]: expected `Int64`, found `Bool`
+ --> tests/arrays/a_reported_operand_of_a_constant_length_is_its_only_report.lin:6:24
+  |
+6 |     items: [UInt8; 2 + false],
+  |                    - expected because of this operand
+  |                        ^^^^^ expected `Int64`, found `Bool`
+error[T-Operands]: expected `Int64`, found `Bool`
+ --> tests/arrays/a_reported_operand_of_a_constant_length_is_its_only_report.lin:9:56
+  |
+9 | fn take(_shelf: borrow Shelf, _row: borrow [UInt8; 1 + true]) -> UInt8 {
+  |                                                    - expected because of this operand
+  |                                                        ^^^^ expected `Int64`, found `Bool`

@@ -1,0 +1,34 @@
+error[T-Literal]: `UInt8` cannot hold -1
+  --> tests/arrays/a_refused_constant_is_reported_once_wherever_a_length_reads_it.lin:13:20
+   |
+13 | let below: UInt8 = -1
+   |                    ^^ value is out of range for its type
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/arrays/a_refused_constant_is_reported_once_wherever_a_length_reads_it.lin:15:20
+   |
+15 | let twice: UInt8 = false
+   |            ----- expected because of this annotation
+   |                    ^^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+ --> tests/arrays/a_refused_constant_is_reported_once_wherever_a_length_reads_it.lin:5:19
+  |
+5 | let flag: UInt8 = true
+  |           ----- expected because of this annotation
+  |                   ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Str`
+ --> tests/arrays/a_refused_constant_is_reported_once_wherever_a_length_reads_it.lin:7:19
+  |
+7 | let word: UInt8 = "a"
+  |           ----- expected because of this annotation
+  |                   ^^^ expected `UInt8`, found `Str`
+error[T-Mismatch]: expected `UInt8`, found `Float64`
+ --> tests/arrays/a_refused_constant_is_reported_once_wherever_a_length_reads_it.lin:9:19
+  |
+9 | let half: UInt8 = 1.5
+  |           ----- expected because of this annotation
+  |                   ^^^ expected `UInt8`, found `Float64`
+error[T-Convert]: `Bool` does not convert to `UInt8`
+  --> tests/arrays/a_refused_constant_is_reported_once_wherever_a_length_reads_it.lin:11:19
+   |
+11 | let cast: UInt8 = UInt8(true)
+   |                   ^^^^^^^^^^^ a conversion is between numbers

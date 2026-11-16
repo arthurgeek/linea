@@ -2108,7 +2108,7 @@ const Printer = struct {
                 // one place a written type is printed -- it used to be spelled
                 // at the return, the only position that could hold one, and a
                 // type argument became the second.
-                if (ref.name != TokenId.none and self.ast.tokenTag(ref.name) == .l_paren) {
+                if (self.ast.isUnitType(ref)) {
                     return self.write("()");
                 }
                 try self.write(self.textOf(ref.name));

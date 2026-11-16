@@ -1,0 +1,20 @@
+error[T-UnknownOperation]: `[UInt8; 2]` has no operation `len`
+ --> tests/arrays/a_length_reports_what_it_reads_once_in_either_order.lin:5:27
+  |
+5 | let table: Option[[UInt8; later.len()]] = .None
+  |                           ^^^^^^^^^ no operation of this name is declared for this type
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/arrays/a_length_reports_what_it_reads_once_in_either_order.lin:5:27
+  |
+5 | let table: Option[[UInt8; later.len()]] = .None
+  |                           ^^^^^^^^^^^ this is not a constant
+error[T-UnknownOperation]: `[UInt8; 2]` has no operation `len`
+  --> tests/arrays/a_length_reports_what_it_reads_once_in_either_order.lin:11:28
+   |
+11 | let second: Option[[UInt8; earlier.len()]] = .None
+   |                            ^^^^^^^^^^^ no operation of this name is declared for this type
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+  --> tests/arrays/a_length_reports_what_it_reads_once_in_either_order.lin:11:28
+   |
+11 | let second: Option[[UInt8; earlier.len()]] = .None
+   |                            ^^^^^^^^^^^^^ this is not a constant

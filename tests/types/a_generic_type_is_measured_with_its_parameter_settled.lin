@@ -1,0 +1,16 @@
+// A generic type has no width until its parameter is settled. `Edge[UInt8]`
+// is 4294967291 bytes wide, which a type may be, whatever `Edge` would be
+// with a wider argument.
+struct Edge[T] {
+    fixed: [UInt8; 4294967290],
+    last: T,
+}
+
+fn weigh(_given: borrow Edge[UInt8]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let _weigher = weigh
+    0
+}
