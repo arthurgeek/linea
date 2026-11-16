@@ -23,6 +23,7 @@ const resolveTree = resolve_mod.resolveTree;
 const resolve = resolve_mod.resolve;
 const typecheck = @import("../sema/typecheck.zig").typecheck;
 const typecheckTree = @import("../sema/typecheck.zig").typecheckTree;
+const generated_text = @import("../sema/generated_text.zig");
 const loader = @import("../driver/loader.zig");
 const isCatchAll = @import("../sema/typecheck.zig").isCatchAll;
 const FileTable = @import("../support/source.zig").FileTable;
@@ -157,13 +158,14 @@ fn removeUnusedMaterializedAliases(
     for (uses.aliases.items) |alias| removed[alias.declaration.index()] = !alias.live;
 }
 
-/// Replaces every admitted derive in the primary root with the immutable
-/// ordinary source file expansion produced for it.
+/// Replaces every admitted derive in the primary root with the ordinary
+/// source file expansion produced for it, as checking settled it.
 pub fn materializeDerives(
     gpa: std.mem.Allocator,
     program: *const Program,
     expanded: *const ExpandedProgram,
     resolution: *const Resolution,
+    typing: *const Typing,
 ) !?MaterializedDerives {
     const selected = try gpa.alloc(bool, program.ast.declCount());
     defer gpa.free(selected);
@@ -261,6 +263,8 @@ pub fn materializeDerives(
         initialized += 1;
     }
 
+    const settled_texts = try generated_text.settledGeneratedTexts(gpa, expanded, resolution, typing);
+    defer generated_text.freeTexts(gpa, settled_texts);
     for (0..expanded.generatedSourceCount()) |raw| {
         const generated = expanded.generatedSource(@intCast(raw));
         if (generated.module == .none or program.get(generated.module).library) continue;
@@ -271,7 +275,7 @@ pub fn materializeDerives(
                 return error.GeneratedSourcePathCollision;
             }
         }
-        const text = gpa.dupe(u8, generated.text) catch |err| {
+        const text = gpa.dupe(u8, settled_texts[raw]) catch |err| {
             gpa.free(path);
             return err;
         };
@@ -2549,9 +2553,11 @@ test "materialized derives are ordinary source files" {
     defer expanded.deinit(gpa);
     var resolution = resolved.resolution;
     defer resolution.deinit(gpa);
+    var typing = try typecheck(gpa, &expanded, &resolution, &sink);
+    defer typing.deinit(gpa);
     try testing.expect(!sink.hasErrors());
 
-    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution)).?;
+    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution, &typing)).?;
     defer materialized.deinit(gpa);
     try testing.expectEqual(@as(usize, 2), materialized.files.len);
     try testing.expect(std.mem.indexOf(u8, materialized.files[0].text, "derive Mark for Target") == null);
@@ -2635,7 +2641,7 @@ test "materialized declaration attributes preserve types policies and comments" 
     defer typing.deinit(gpa);
     try testing.expect(!sink.hasErrors());
 
-    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution)).?;
+    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution, &typing)).?;
     defer materialized.deinit(gpa);
     const source = materialized.files[0].text;
     try testing.expect(std.mem.indexOf(u8, source, "struct Target") != null);
@@ -2714,7 +2720,7 @@ test "materialized attributes remove derives inside formatting escape hatches" {
     defer typing.deinit(gpa);
     try testing.expect(!sink.hasErrors());
 
-    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution)).?;
+    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution, &typing)).?;
     defer materialized.deinit(gpa);
     const source = materialized.files[0].text;
     try testing.expect(std.mem.indexOf(u8, source, "struct Target") != null);
@@ -2780,7 +2786,7 @@ test "materialized attributes remove derive-only aliases and keep nominal type i
     defer typing.deinit(gpa);
     try testing.expect(!sink.hasErrors());
 
-    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution)).?;
+    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution, &typing)).?;
     defer materialized.deinit(gpa);
     const source = materialized.files[0].text;
     try testing.expect(std.mem.indexOf(u8, source, "import std.cmp as laws") != null);
@@ -2842,7 +2848,7 @@ test "materialized attributes preserve trait imports used by postfix calls" {
     defer typing.deinit(gpa);
     try testing.expect(!sink.hasErrors());
 
-    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution)).?;
+    var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution, &typing)).?;
     defer materialized.deinit(gpa);
     var materialized_table: FileTable = .empty;
     var materialized_sink = Sink.init(gpa);

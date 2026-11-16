@@ -36,6 +36,7 @@ const GeneratedImport = expanded_mod.GeneratedImport;
 const GeneratedImplementation = expanded_mod.GeneratedImplementation;
 const GeneratedImplementationId = expanded_mod.GeneratedImplementationId;
 const ComponentRequirement = expanded_mod.ComponentRequirement;
+const WrapSite = expanded_mod.WrapSite;
 const ComponentRequirementRange = expanded_mod.ComponentRequirementRange;
 const GeneratedOriginSegment = expanded_mod.GeneratedOriginSegment;
 const GeneratedSources = expanded_mod.GeneratedSources;
@@ -574,24 +575,32 @@ pub const Scope = struct {
 
 /// A derive entry whose template wraps a source that no single variant of
 /// the target holds: none has it as its only field, or two do.
+/// The argument of a derive entry that stands for the template parameter
+/// `wrapped` names, or null where `wrapped` is not one parameter of the
+/// template or the entry writes no argument for it. The resolver asks it to
+/// decide whether a source names a type, and the checker to find the source
+/// a refusal points at.
+///
+/// **Bound:** the template's type parameters, once.
+pub fn wrappedArgument(ast: *const Ast, template: DeclId, wrapped: node.TypeRef, arguments: []const node.TypeRef) ?node.TypeRef {
+    const named = ast.withoutTypeGroups(wrapped);
+    if (named.kind != .named or named.name == TokenId.none or named.args.len() != 0) return null;
+    for (ast.declTypeParams(template), 0..) |parameter, index| {
+        if (ast.tokenName(parameter.name) != ast.tokenName(named.name)) continue;
+        return if (index < arguments.len) arguments[index] else null;
+    }
+    return null;
+}
+
+/// A derive entry whose wrapped source names no type, which generates no
+/// implementation. The checker types the arguments it wrote, so the bounds
+/// they are written under are still checked.
 pub const UnwrappedSource = struct {
     target: DeclId,
     /// The declaration whose type parameters the entry's arguments read:
     /// the standalone request, or the target an attached request sits on.
     owner: DeclId,
     trait: node.DeriveTraitId,
-    /// The wrapped parameter's written type, as the template writes it.
-    wrapped: node.TypeRef,
-    /// The template whose parameters `wrapped` is written with.
-    template: DeclId,
-    /// The entry's argument that is the source: the one standing for the
-    /// template parameter the wrapped type names. Null where the wrapped
-    /// type is not one parameter alone, so every argument is part of the
-    /// source.
-    source: ?node.TypeRef,
-    /// The first two variants holding the source, by position in the
-    /// target, or null where none holds it.
-    holders: ?[2]expanded_mod.CaseOrdinal,
 };
 
 /// Which binding each name reference names.
@@ -931,10 +940,9 @@ pub const Resolution = struct {
     /// the parser refused. Such an implementation has no key, where one
     /// refused for the module it is written in keeps the key it wrote.
     keyless_impls: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
-    /// The derive entries whose source no single variant of the target
-    /// wraps, in the order expansion met them. The type checker reports
-    /// each, once it has typed the entry's written arguments: a source that
-    /// is not a type is reported as that and not as a missing variant.
+    /// The derive entries whose wrapped source names no type, in the order
+    /// expansion met them. Each generated no implementation, and the type
+    /// checker types the arguments it wrote.
     unwrapped_sources: []const UnwrappedSource = &.{},
     /// The one structural template each resolved trait declares.
     templates: std.AutoHashMapUnmanaged(DeclId, DeclId) = .empty,
@@ -9907,6 +9915,15 @@ const Resolver = struct {
         }
     };
 
+    /// A rendered wrap before its generated file is parsed: the plan whose
+    /// text holds it and where in that text the placeholder's name starts.
+    const PendingWrap = struct {
+        plan: u32,
+        offset: u32,
+        member: DeclId,
+        parameter: u32,
+    };
+
     const PendingOriginSegment = struct {
         generated_file: u32,
         span: Span,
@@ -11050,6 +11067,8 @@ const Resolver = struct {
         }
         var pending_origins: std.ArrayList(PendingOriginSegment) = .empty;
         defer pending_origins.deinit(self.gpa);
+        var pending_wraps: std.ArrayList(PendingWrap) = .empty;
+        defer pending_wraps.deinit(self.gpa);
         const occupied_names = try self.gpa.alloc(std.StringHashMapUnmanaged(void), self.program.modules.len);
         defer self.gpa.free(occupied_names);
         for (occupied_names) |*occupied| occupied.* = .empty;
@@ -11575,14 +11594,14 @@ const Resolver = struct {
                     continue;
                 }
 
-                var wrapped_cases: std.ArrayList(expanded_mod.CaseOrdinal) = .empty;
-                defer wrapped_cases.deinit(self.gpa);
-                if (!try self.selectWrappedVariants(&wrapped_cases, template_plan.reflection_members, template_plan.template, derive, attached, target, derive_trait)) continue;
+                if (!try self.wrappedSourcesSettled(template_plan.reflection_members, template_plan.template, derive, attached, target, derive_trait)) continue;
 
                 var text: std.ArrayList(u8) = .empty;
                 defer text.deinit(self.gpa);
                 var entry_origins: std.ArrayList(PendingOriginSegment) = .empty;
                 defer entry_origins.deinit(self.gpa);
+                var entry_wraps: std.ArrayList(PendingWrap) = .empty;
+                defer entry_wraps.deinit(self.gpa);
                 var representable = true;
                 for (imports.items) |import_plan| {
                     try text.appendSlice(self.gpa, "import ");
@@ -11618,11 +11637,8 @@ const Resolver = struct {
                 else
                     try self.appendSourceRangeReplacingBindings(&text, self.deriveTargetRange(derive), &replacements);
                 try text.appendSlice(self.gpa, " {\n");
-                var wrapped_at: usize = 0;
                 for (template_plan.members, template_plan.free_references, template_plan.reflection_members) |member_plan, free_references, *reflection_plan| {
                     const template_member = member_plan.member;
-                    const member_wrapped = wrapped_cases.items[wrapped_at..][0..reflection_plan.wraps.len];
-                    wrapped_at += reflection_plan.wraps.len;
                     const rendered_references = try self.gpa.alloc(reflection.FreeReference, free_references.len);
                     defer self.gpa.free(rendered_references);
                     for (free_references, rendered_references) |reference, *rendered_reference| {
@@ -11653,7 +11669,6 @@ const Resolver = struct {
                         rendered_references,
                         alias,
                         template_arguments,
-                        member_wrapped,
                         .{ .offsets = component_offsets.items, .text = component_type_text.items },
                     ) catch |err| switch (err) {
                         error.Overflow, error.GeneratedSourceTooLarge => {
@@ -11664,6 +11679,19 @@ const Resolver = struct {
                     };
                     defer rendered.deinit(self.gpa);
                     try text.appendSlice(self.gpa, rendered.text);
+                    for (rendered.wraps) |wrap| {
+                        const offset = std.math.add(u32, member_base, wrap.offset) catch {
+                            representable = false;
+                            break;
+                        };
+                        try entry_wraps.append(self.gpa, .{
+                            .plan = 0,
+                            .offset = offset,
+                            .member = template_member,
+                            .parameter = wrap.parameter,
+                        });
+                    }
+                    if (!representable) break;
                     for (rendered.origins) |origin| {
                         const start = std.math.add(u32, member_base, origin.start) catch {
                             representable = false;
@@ -11709,6 +11737,7 @@ const Resolver = struct {
                 try plans.ensureUnusedCapacity(self.gpa, 1);
                 try texts.ensureUnusedCapacity(self.gpa, 1);
                 try pending_origins.ensureUnusedCapacity(self.gpa, entry_origins.items.len);
+                try pending_wraps.ensureUnusedCapacity(self.gpa, entry_wraps.items.len);
                 const reservation = capacity.reserve(
                     owned_text.len,
                     pending_requirements.component_count,
@@ -11739,6 +11768,11 @@ const Resolver = struct {
                     var committed = origin;
                     committed.generated_file = reservation.generated_file;
                     pending_origins.appendAssumeCapacity(committed);
+                }
+                for (entry_wraps.items) |wrap| {
+                    var committed = wrap;
+                    committed.plan = @intCast(plans.items.len - 1);
+                    pending_wraps.appendAssumeCapacity(committed);
                 }
                 texts.appendAssumeCapacity(owned_text);
                 text_handed_off = true;
@@ -11805,9 +11839,13 @@ const Resolver = struct {
         defer generated_implementations.deinit(self.gpa);
         var component_requirements: std.ArrayList(ComponentRequirement) = .empty;
         defer component_requirements.deinit(self.gpa);
+        var wrap_sites: std.ArrayList(WrapSite) = .empty;
+        defer wrap_sites.deinit(self.gpa);
+        var wraps_at: usize = 0;
         for (plans.items, 0..) |plan, ordinal| {
             try generated_implementations.ensureUnusedCapacity(self.gpa, 1);
             try component_requirements.ensureUnusedCapacity(self.gpa, plan.requirements.len);
+            const exprs_before = parser.view().exprCount();
             const range = try parser.add(&.{.{
                 .file = .from(plan.generated_file),
                 .source = .{
@@ -11861,6 +11899,36 @@ const Resolver = struct {
             {
                 return error.InvalidGeneratedDeclarationCount;
             }
+            // The placeholders this file holds, found by where their names
+            // start: each is the one contextual variant reference the parse
+            // made there.
+            const plan_wraps_start = wraps_at;
+            while (wraps_at < pending_wraps.items.len and pending_wraps.items[wraps_at].plan == ordinal) wraps_at += 1;
+            const plan_wraps = pending_wraps.items[plan_wraps_start..wraps_at];
+            if (plan_wraps.len != 0) {
+                var by_offset: std.AutoHashMapUnmanaged(u32, usize) = .empty;
+                defer by_offset.deinit(self.gpa);
+                for (plan_wraps, 0..) |wrap, i| try by_offset.put(self.gpa, wrap.offset, i);
+                const found = try self.gpa.alloc(ExprId, plan_wraps.len);
+                defer self.gpa.free(found);
+                @memset(found, ExprId.none);
+                const parsed = parser.view();
+                for (exprs_before..parsed.exprCount()) |raw| {
+                    const id = ExprId.at(@intCast(raw));
+                    if (parsed.exprTag(id) != .variant_ref or parsed.unaryOperand(id) != ExprId.none) continue;
+                    const at = by_offset.get(parsed.tokenSpan(parsed.exprMain(id)).start) orelse continue;
+                    found[at] = id;
+                }
+                for (plan_wraps, found) |wrap, callee| {
+                    if (callee == ExprId.none) return error.InvalidGeneratedDeclarationCount;
+                    try wrap_sites.append(self.gpa, .{
+                        .callee = callee,
+                        .implementation = plan.implementation,
+                        .member = wrap.member,
+                        .parameter = wrap.parameter,
+                    });
+                }
+            }
             generated_implementations.appendAssumeCapacity(.{
                 .generated_impl = generated_impl,
                 .derive = plan.derive,
@@ -11900,6 +11968,7 @@ const Resolver = struct {
                 .generated = generated.items,
                 .imports = generated_imports.items,
                 .origin_segments = generated_origins.items,
+                .wrap_sites = wrap_sites.items,
             },
         );
         return try ExpandedProgram.init(
@@ -11914,6 +11983,7 @@ const Resolver = struct {
             generated.items,
             generated_imports.items,
             generated_origins.items,
+            wrap_sites.items,
         );
     }
 
@@ -11936,28 +12006,6 @@ const Resolver = struct {
             label,
         );
     }
-
-    /// How `selectWrappedVariants` reads written names: coherence's reading,
-    /// with array lengths compared as a bound's constants are. The selector
-    /// folds every length it compares first, so two lengths match when they
-    /// count the same.
-    const WrapIdentity = struct {
-        res: *const Resolver,
-
-        pub const Error = error{};
-
-        pub fn reaches(self: WrapIdentity, tok: TokenId) Reached {
-            return (Coherence{ .res = self.res }).reaches(tok);
-        }
-
-        pub fn tuple(self: WrapIdentity, arity: usize) ?DeclId {
-            return tupleDeclIn(self.res.tuple_decls, arity);
-        }
-
-        pub fn sameValue(self: WrapIdentity, a: ExprId, b: ExprId) Error!bool {
-            return sameBoundConstant(self.res.ast, a, b, checkedWorth(&self.res.folded, a), checkedWorth(&self.res.folded, b));
-        }
-    };
 
     /// What `writtenLinks` knows of an alias: that it is being walked, or how
     /// many aliases the type it names passes through, itself included.
@@ -12018,36 +12066,16 @@ const Resolver = struct {
         return links;
     }
 
-    /// The argument of a derive entry that stands for the template parameter
-    /// `wrapped` names, or null where `wrapped` is not one parameter of the
-    /// template or the entry writes no argument for it.
-    ///
-    /// **Bound:** the template's type parameters, once.
-    fn wrappedArgument(self: *const Resolver, template: DeclId, wrapped: node.TypeRef, arguments: []const node.TypeRef) ?node.TypeRef {
-        const ast = &self.program.ast;
-        const named = ast.withoutTypeGroups(wrapped);
-        if (named.kind != .named or named.name == TokenId.none or named.args.len() != 0) return null;
-        for (ast.declTypeParams(template), 0..) |parameter, index| {
-            if (ast.tokenName(parameter.name) != ast.tokenName(named.name)) continue;
-            return if (index < arguments.len) arguments[index] else null;
-        }
-        return null;
-    }
-
-    /// Selects the variant each `reflect.wrap` of a template's members
-    /// constructs: the one variant of `target` with exactly one field whose
-    /// written type is the wrapped parameter's, once the entry's trait
-    /// arguments stand for the template's parameters. Appends one case per
-    /// wrap to `out`, in member order. Where no variant qualifies or two do
-    /// it returns false and records the entry in `unwrapped_sources`, which
-    /// the type checker reports as [T-Derive].
-    ///
-    /// Types are compared by `sameWrittenType`, the one answer to whether two
-    /// written types name one type, so an alias and the type it names select
-    /// the same variant.
-    fn selectWrappedVariants(
+    /// Whether every source a template's `reflect.wrap` reads names a type:
+    /// the entry's argument standing for the wrapped parameter, or every
+    /// argument where the wrapped type is not one parameter alone. A source
+    /// naming nothing was reported where it is written, and the entry
+    /// generates no implementation; it is recorded in `unwrapped_sources` so
+    /// the checker still types the arguments it wrote. Which variant a wrap
+    /// constructs is the checker's question, asked of the types the
+    /// generated implementation settles.
+    fn wrappedSourcesSettled(
         self: *Resolver,
-        out: *std.ArrayList(expanded_mod.CaseOrdinal),
         members: []const ReflectionMemberPlan,
         template: DeclId,
         derive: DeclId,
@@ -12056,78 +12084,21 @@ const Resolver = struct {
         derive_trait: node.DeriveTraitId,
     ) !bool {
         const ast = &self.program.ast;
-        const identity: WrapIdentity = .{ .res = self };
-        const entry = ast.deriveTrait(derive_trait);
-        const variants = ast.declVariants(target);
+        const written_arguments = ast.typeArgs(ast.deriveTrait(derive_trait).ref.args);
         for (members) |reflected| {
             for (reflected.wraps) |wrap| {
                 const wrapped = ast.declParams(reflected.member)[wrap.parameter].written;
-                const template_reading: Reading = .{
-                    .family = template,
-                    .applied = ast.typeArgs(entry.ref.args),
-                };
-                // An attached request spells the target's own parameters; a
-                // written head applies the target's parameters to its own.
-                const target_reading: Reading = if (attached) .{} else .{
-                    .family = target,
-                    .applied = ast.typeArgs(ast.declHead(derive).args),
-                };
-                // Lengths are folded before any is compared. One that counts
-                // nothing is left as it is spelled and reported where it is
-                // written, so it matches a payload spelled the same and the
-                // derive adds no report of its own.
-                _ = try self.writtenLengthsSettled(&.{
-                    &.{wrapped},
-                    template_reading.applied,
-                    target_reading.applied,
-                });
-                var selected: ?usize = null;
-                var second: ?usize = null;
-                for (variants, 0..) |variant, index| {
-                    const fields = ast.variantFields(variant);
-                    if (fields.len != 1) continue;
-                    _ = try self.writtenLengthsSettled(&.{&.{fields[0].written}});
-                    if (!try sameWrittenType(ast, identity, wrapped, template_reading, fields[0].written, target_reading)) continue;
-                    if (selected == null) selected = index else {
-                        second = index;
-                        break;
-                    }
-                }
-                if (selected != null and second == null) {
-                    try out.append(self.gpa, @enumFromInt(selected.?));
-                    continue;
-                }
-                const written_arguments = ast.typeArgs(entry.ref.args);
-                // A source or a payload that failed to resolve has its own
-                // report; a missing variant would say the same mistake twice.
                 var settled = true;
-                // Only the argument the template wraps is the source; another
-                // argument's mistake is reported where it is written and
-                // leaves the source as it stands.
-                const source = self.wrappedArgument(template, wrapped, written_arguments);
-                if (source) |argument| {
+                if (wrappedArgument(ast, template, wrapped, written_arguments)) |argument| {
                     settled = try self.writtenSettled(argument);
                 } else for (written_arguments) |argument| {
                     settled = settled and try self.writtenSettled(argument);
                 }
-                for (variants) |variant| {
-                    const fields = ast.variantFields(variant);
-                    if (fields.len != 1) continue;
-                    // A payload named through more aliases than a chain may
-                    // pass through is refused where the enum is declared
-                    // ([T-AnswerDepth]), and has no type to compare.
-                    const links = try self.writtenLinks(fields[0].written);
-                    settled = settled and links != null and links.? <= max_answer_links;
-                }
-                if (!settled) return false;
+                if (settled) continue;
                 try self.unwrapped_sources.append(self.gpa, .{
                     .target = target,
                     .owner = if (attached) target else derive,
                     .trait = derive_trait,
-                    .wrapped = wrapped,
-                    .source = source,
-                    .template = template,
-                    .holders = if (second) |later| .{ @enumFromInt(selected.?), @enumFromInt(later) } else null,
                 });
                 return false;
             }

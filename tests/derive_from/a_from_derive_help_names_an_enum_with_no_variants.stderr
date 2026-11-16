@@ -1,8 +1,3 @@
-error[N-Unused]: `Vacant` is never used
- --> tests/derive_from/a_from_derive_help_names_an_enum_with_no_variants.lin:2:6
-  |
-2 | enum Vacant {}
-  |      ^^^^^^ name it in an annotation, or remove it
 error[T-Derive]: no variant of `Vacant` wraps exactly `UInt8`
  --> tests/derive_from/a_from_derive_help_names_an_enum_with_no_variants.lin:1:9
   |

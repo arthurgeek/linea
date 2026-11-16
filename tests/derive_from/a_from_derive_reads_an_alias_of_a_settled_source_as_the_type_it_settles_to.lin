@@ -1,0 +1,31 @@
+// `Reading` names `Celsius.Reading`, which the implementation of `Measure`
+// for `Celsius` settles to `Kelvin`, so `From[Reading]` wraps a reading in
+// `Hot`.
+trait Measure {
+    type Reading
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Celsius {}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+}
+
+alias Reading = Celsius.Reading
+
+@derive(From[Reading])
+enum Temp {
+    Hot(Kelvin),
+    Unknown,
+}
+
+fn main() -> UInt8 {
+    match Temp.from(Kelvin { degrees = 7 }) {
+        Hot(kelvin) => kelvin.degrees - 7,
+        Unknown => 1,
+    }
+}

@@ -922,7 +922,7 @@ pub const discards_allowed = [_]DiscardAllowed{
     .{ .path = "sema/resolve.zig", .function = "nextGeneratedFile", .callee = "std.math.add", .reason = "a file number that overflows leaves no next file, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "componentCount", .callee = "std.math.add", .reason = "a count that overflows is no count, which is the answer" },
     .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.fmt.parseInt", .reason = "an alias whose suffix is no number was not generated here, and the next is read" },
-    .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.math.add", .sites = 2, .reason = "an origin that overflows is not representable, which the entry is then refused for" },
+    .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.math.add", .sites = 3, .reason = "an origin or a wrap placeholder whose offset overflows is not representable, which the entry is then refused for" },
     .{ .path = "sema/typecheck.zig", .function = "roundFloatLiteral", .callee = "std.fmt.parseFloat", .sites = 2, .reason = "text that is no float rounds to nothing, which is the answer" },
     .{ .path = "sema/typecheck.zig", .function = "hashArgs", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
     .{ .path = "sema/typecheck.zig", .function = "hash#2", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },

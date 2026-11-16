@@ -141,7 +141,7 @@ true of a different implementation.
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |
-| [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113, 0213 and 0272; default tier superseded by 0139; coherence partition superseded by 0148 |
+| [0093](0093-two-implementations-that-could-answer-once-are-refused.md) | Two implementations that could answer for one instantiation are refused | Accepted; extends 0081; extended by 0113, 0213, 0272 and 0274; default tier superseded by 0139; coherence partition superseded by 0148 |
 | [0272](0272-two-applications-of-one-type-may-each-implement-a-trait.md) | Two applications of one type may each implement a trait | Accepted; supersedes the constructor key of 0081 and the Duplicates clause of 0213; extends 0093 |
 | [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171, 0227 and 0229 |
 | [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096; extended by 0228 |
@@ -152,7 +152,7 @@ true of a different implementation.
 | [0109](0109-text-io-and-formatting-have-separate-modules.md) | Text, I/O and formatting have separate modules | Accepted |
 | [0110](0110-a-trait-reference-may-be-qualified.md) | A trait reference may be qualified | Accepted; supersedes ADR 0080's bare trait-slot clause |
 | [0112](0112-comparable-carries-equality-compatible-order.md) | Comparable carries an equality-compatible order | Accepted; extends 0082 |
-| [0113](0113-structural-derivation-is-library-defined-source.md) | Structural derivation is library-defined source | Accepted; extends 0035, 0045, 0049 and 0093; extended by 0138, 0145, 0209 and 0258; partially superseded by 0142 |
+| [0113](0113-structural-derivation-is-library-defined-source.md) | Structural derivation is library-defined source | Accepted; extends 0035, 0045, 0049 and 0093; extended by 0138, 0145, 0209 and 0258; partially superseded by 0142 and 0274 |
 | [0258](0258-a-template-decides-what-its-descriptors-settle.md) | A template decides what its descriptors settle | Accepted; extends 0113 |
 | [0261](0261-an-owning-task-holds-nothing-that-waits.md) | An owning task holds nothing that waits | Accepted; supersedes the owning-task clause of 0250 §9 and the `Owned` job clause of 0253 §4; extends 0250 §5 |
 | [0145](0145-closed-attributes-attach-ordinary-derive-requests.md) | Closed attributes attach ordinary derive requests | Accepted; extends 0056 and 0113; extended by 0209; generic constraint clause superseded by 0165 |
@@ -280,7 +280,8 @@ ones most likely to be superseded as the compiler grows.
 | [0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md) | A constructor or function that allocates pairs a system form with an `_in` form | Accepted; supersedes the every-allocating-API clause of 0191; server-parent clause superseded by 0225 |
 | [0225](0225-a-library-signature-states-its-allocator.md) | A library's public signature states its allocator | Accepted; extends 0215 and 0219; supersedes the server-parent clause of 0220 |
 | [0206](0206-allocator-spelling-is-shortened-by-alias-never-by-default.md) | Allocator spelling is shortened by an alias, never by a default type argument | Superseded by 0215; extends 0098 and 0194; extended by 0211 |
-| [0209](0209-a-from-derive-converts-the-variant-the-source-names.md) | A `From` derive converts the variant its source type names | Accepted; extends 0113 and 0145 |
+| [0209](0209-a-from-derive-converts-the-variant-the-source-names.md) | A `From` derive converts the variant its source type names | Accepted; extends 0113 and 0145; variant selection superseded by 0274 |
+| [0274](0274-a-from-derive-selects-its-variant-by-type-identity.md) | A `From` derive selects its variant by type identity | Accepted; supersedes the variant selection of 0209 and the erasure of `reflect.wrap` before checking in 0113; extends 0093 |
 | [0213](0213-a-trait-may-be-implemented-for-a-callable-type.md) | A trait may be implemented for a callable type, keyed by its shape | Accepted; extends 0081, 0093 and 0148; parameter cap superseded by 0271; Duplicates clause superseded by 0272 |
 | [0271](0271-a-callable-head-of-any-length-has-a-shape.md) | A callable head of any length has a shape | Accepted; supersedes the parameter cap of 0213 |
 | [0214](0214-a-route-takes-a-function-whose-parameters-name-its-inputs.md) | A route is a function whose parameters name its inputs | Accepted; refines 0185; extends 0180; `where carries(request)` clause superseded by 0216 |

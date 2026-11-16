@@ -174,8 +174,10 @@ pub const OrdinalPlan = struct {
     operand: ExprId,
 };
 
-/// One `reflect.wrap(value)`: the callee is replaced by the constructor of
-/// the variant the derive selected for `parameter`'s written type.
+/// One `reflect.wrap(value)`: the callee is rendered as the contextual
+/// variant reference `.wrap`, which names no variant. The checker selects the
+/// variant whose one payload is the type of `parameter`, and the text written
+/// after checking names that variant in its place.
 pub const WrapPlan = struct {
     call: ExprId,
     callee: ExprId,
@@ -289,13 +291,27 @@ pub const OriginSegment = struct {
     component_ordinal: ?ComponentOrdinal,
 };
 
+/// The name the rendered `.wrap` placeholder spells. The checker reads the
+/// reference by its position, never by this name, so a variant named `wrap`
+/// is not confused with it.
+pub const wrap_placeholder = "wrap";
+
+/// One rendered `reflect.wrap`: where in the member's text the placeholder's
+/// name starts, and which of the member's parameters it wraps.
+pub const RenderedWrap = struct {
+    offset: u32,
+    parameter: u32,
+};
+
 pub const RenderedMember = struct {
     text: []u8,
     origins: []OriginSegment,
+    wraps: []RenderedWrap,
 
     pub fn deinit(self: *RenderedMember, gpa: std.mem.Allocator) void {
         gpa.free(self.text);
         gpa.free(self.origins);
+        gpa.free(self.wraps);
         self.* = undefined;
     }
 };
@@ -336,13 +352,12 @@ const Renderer = struct {
     free_references: []const FreeReference,
     qualifier: ?[]const u8,
     template_arguments: []const []const u8,
-    /// The variant each `plan.wraps` entry constructs, in the same order.
-    wrapped: []const CaseOrdinal,
     source: []const u8,
     target: DeclId,
     component_types: ComponentTypes,
     out: std.ArrayList(u8) = .empty,
     origins: std.ArrayList(OriginSegment) = .empty,
+    wraps: std.ArrayList(RenderedWrap) = .empty,
     operations: []Operation,
     bindings: std.ArrayList([]const u8) = .empty,
     binding_index: std.AutoHashMapUnmanaged(BindingKey, u32) = .empty,
@@ -357,6 +372,7 @@ const Renderer = struct {
     fn deinit(self: *Renderer) void {
         self.out.deinit(self.gpa);
         self.origins.deinit(self.gpa);
+        self.wraps.deinit(self.gpa);
         self.parameter_positions.deinit(self.gpa);
         self.local_copies.deinit(self.gpa);
         for (self.bindings.items) |name| self.gpa.free(name);
@@ -525,7 +541,7 @@ const Renderer = struct {
                 .text => try self.renderText(self.plan.texts[operation.index], state),
                 .decision => try self.renderDecision(self.plan.decisions[operation.index], state),
                 .ordinal => try self.renderOrdinal(self.plan.ordinals[operation.index]),
-                .wrap => try self.renderWrap(self.plan.wraps[operation.index], self.wrapped[operation.index]),
+                .wrap => try self.renderWrap(self.plan.wraps[operation.index]),
                 .type_parameter => {
                     const reference = self.plan.type_parameters[operation.index];
                     if (reference.selection_base) try self.append("(");
@@ -957,14 +973,15 @@ const Renderer = struct {
         try self.endOrigin(outer_origin);
     }
 
-    /// Renders the callee of `reflect.wrap(value)` as the selected variant's
-    /// constructor, leaving the argument list as written.
-    fn renderWrap(self: *Renderer, plan: WrapPlan, case: CaseOrdinal) RenderError!void {
+    /// Renders the callee of `reflect.wrap(value)` as the placeholder `.wrap`,
+    /// leaving the argument list as written, and records where its name is.
+    fn renderWrap(self: *Renderer, plan: WrapPlan) RenderError!void {
         if (self.ast.declTag(self.target) != .enum_) return error.UnsupportedReflectionTarget;
-        const origin = try self.beginOrigin(plan.call, .{ .case = case });
-        try self.append(self.ast.tokenText(self.ast.declName(self.target)));
+        const origin = try self.beginOrigin(plan.call, .{});
         try self.append(".");
-        try self.append(self.caseName(case));
+        const offset = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        try self.wraps.append(self.gpa, .{ .offset = offset, .parameter = plan.parameter });
+        try self.append(wrap_placeholder);
         try self.endOrigin(origin);
     }
 
@@ -1083,10 +1100,8 @@ pub fn renderMember(
     free_references: []const FreeReference,
     qualifier: ?[]const u8,
     template_arguments: []const []const u8,
-    wrapped: []const CaseOrdinal,
     component_types: ComponentTypes,
 ) RenderError!RenderedMember {
-    std.debug.assert(wrapped.len == plan.wraps.len);
     const existing_reflection_operations = try std.math.add(
         usize,
         try std.math.add(usize, plan.cases.len, plan.same_cases.len),
@@ -1222,7 +1237,6 @@ pub fn renderMember(
         .free_references = free_references,
         .qualifier = qualifier,
         .template_arguments = template_arguments,
-        .wrapped = wrapped,
         .source = source,
         .target = target,
         .component_types = component_types,
@@ -1238,5 +1252,7 @@ pub fn renderMember(
     const text = try renderer.out.toOwnedSlice(gpa);
     errdefer gpa.free(text);
     const origins = try renderer.origins.toOwnedSlice(gpa);
-    return .{ .text = text, .origins = origins };
+    errdefer gpa.free(origins);
+    const wraps = try renderer.wraps.toOwnedSlice(gpa);
+    return .{ .text = text, .origins = origins, .wraps = wraps };
 }

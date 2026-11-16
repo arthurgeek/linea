@@ -1,0 +1,5 @@
+error[T-Impl]: `Thermo` has no available associated type `Reading`
+  --> tests/derive_from/a_from_derive_refuses_a_settled_source_whose_implementation_is_missing.lin:17:14
+   |
+17 | @derive(From[Thermo.Reading])
+   |              ^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

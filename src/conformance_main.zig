@@ -19207,6 +19207,7 @@ fn checkMaterializedDerives(
     program: *const Program,
     expanded: *const ExpandedProgram,
     resolution: *const Resolution,
+    typing: *const Typing,
     original_ir: []const u8,
     original_answer: []const u8,
     original_output: []const u8,
@@ -19215,7 +19216,7 @@ fn checkMaterializedDerives(
     beside: []const loader.InMemoryFile,
     foreign: Foreign,
 ) !void {
-    var materialized = (try transform_mod.materializeDerives(gpa, program, expanded, resolution)) orelse return;
+    var materialized = (try transform_mod.materializeDerives(gpa, program, expanded, resolution, typing)) orelse return;
     defer materialized.deinit(gpa);
 
     var files: std.ArrayList(loader.InMemoryFile) = .empty;
@@ -22477,6 +22478,7 @@ fn checkCase(
                                 &program,
                                 &settled.expanded,
                                 &settled.res,
+                                &settled.typing,
                                 ir.written(),
                                 ran.text,
                                 ran.output,
