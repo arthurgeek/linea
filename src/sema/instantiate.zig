@@ -891,7 +891,7 @@ pub fn instantiate(
 
     // Type sizes require the complete pool. Missing implementations were
     // reported at their call sites during instance discovery.
-    try reportOversizedTypes(sink, program, &out.pool, @intCast(typing.pool.len), null);
+    try reportOversizedTypes(sink, program, &out.pool, @intCast(typing.pool.len), &typing.written_arrays);
 
     try out.pool.seal();
     return out;

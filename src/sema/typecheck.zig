@@ -813,6 +813,7 @@ fn typecheckInternal(
     defer c.deinitCheckedTemplateRequirements();
     defer c.invalid_templates.deinit(gpa);
     defer c.suppressed_generated_implementations.deinit(gpa);
+    defer c.refused_bindings.deinit(gpa);
     defer c.discarded_components.deinit(gpa);
     defer c.suppressed_generated_bodies.deinit(gpa);
     defer {
@@ -1809,6 +1810,7 @@ fn typecheckInternal(
     try c.checkPolyRec();
     try c.builder.fillMinted();
     try reportOversizedTypes(sink, program, &c.builder, 0, &c.written_arrays);
+    try c.placeSubstitutedArrays();
 
     // The binding types pass to the caller rather than being freed: lowering
     // needs a parameter's type, and reading a declared one back out of its
@@ -2065,6 +2067,8 @@ fn typecheckInternal(
     // Handed on rather than freed: what a written type settled to is the
     // checker's answer, and every renderer below here was working it out again.
     typing.written_types = c.written_types;
+    typing.written_arrays = c.written_arrays;
+    c.written_arrays = .empty;
     typing.variant_uses = c.variant_uses;
     c.variant_uses = .empty;
     // Handed on rather than freed: which part of a value each pattern part
@@ -5106,9 +5110,7 @@ fn operandHint(builder: *const Typing.Builder, t: TypeId) ?[]const u8 {
     return null;
 }
 
-/// Where the program first writes each array type, which no declaration
-/// names.
-pub const WrittenArrays = std.AutoHashMapUnmanaged(TypeId, Loc);
+const WrittenArrays = types_mod.WrittenArrays;
 
 /// Reports every type in `builder` at or after `from` whose width crosses what
 /// [L-Size] allows.
@@ -5144,7 +5146,7 @@ pub fn reportOversizedTypes(
     program: *const ExpandedProgram,
     builder: *Typing.Builder,
     from: u32,
-    written_arrays: ?*const WrittenArrays,
+    written_arrays: *const WrittenArrays,
 ) !void {
     const ast = &program.ast;
     try builder.writeHeldParts();
@@ -5186,20 +5188,23 @@ pub fn reportOversizedTypes(
             try reportOversized(sink, ast.fileOfDecl(d), ast.declNameSpan(d), builder.nameOf(t));
             continue;
         }
-        if (written_arrays) |written| if (written.get(t)) |at| {
+        if (written_arrays.get(t)) |at| {
             try reportOversized(sink, at.file, at.span, builder.nameOf(t));
             continue;
-        };
+        }
 
         // A type no declaration names and no place writes was made by
-        // applying a declaration that holds it: an array of a parameter, once
-        // the parameter is settled. It is reported at that declaration,
-        // naming the application and the part.
+        // substitution, from an array of a parameter once the parameter is
+        // settled. Where that array is a part of a declared type, it is
+        // reported at the declaration, naming the application and the part.
+        // Anywhere else, in a body or a signature, it is reported where the
+        // array of the parameter is written.
+        const made_from = builder.arraySourcePlace(written_arrays, t);
         if (!holders_read) {
             holders_read = true;
             try readHolders(builder, &holders);
         }
-        if (holders.get(t)) |holder| if (builder.view().declOfType(holder.of)) |d| {
+        if (holders.get(t)) |holder| if (builder.view().declOfType(holder.of)) |d| if (made_from == null or writtenWithin(ast, d, made_from.?)) {
             const labels = try sink.arena.alloc(Label, 1);
             labels[0] = .{ .file = ast.fileOfDecl(d), .span = ast.declNameSpan(d), .message = "hold fewer parts, or nest them less deeply", .style = .primary };
             try sink.add(.{
@@ -5213,8 +5218,19 @@ pub fn reportOversizedTypes(
             });
             continue;
         };
+        if (made_from) |at| {
+            try reportOversized(sink, at.file, at.span, builder.nameOf(t));
+            continue;
+        }
         try reportOversized(sink, program.source.primaryFile(), Span.empty, builder.nameOf(t));
     }
+}
+
+/// Whether `place` lies in the text of declaration `d`.
+fn writtenWithin(ast: *const Ast, d: node.DeclId, place: Loc) bool {
+    if (ast.fileOfDecl(d) != place.file) return false;
+    const whole = ast.declSpan(d);
+    return place.span.start >= whole.start and place.span.end <= whole.end;
 }
 
 /// The first type that holds each array type as a part, and the part's name.
@@ -6461,6 +6477,9 @@ const Checker = struct {
     /// Whether each constant was refused where it is declared: checking it
     /// made a report, or it stands on a ring. Indexed by binding.
     constant_refused: []bool,
+    /// The bindings refused where they are declared, and what an expression
+    /// naming one would be worth were its value known.
+    refused_bindings: RefusedBindings = .{},
     /// Whether each constant's initialiser has been checked, so it is typed
     /// once whichever reference reached it first. An ordering, not a value:
     /// what the constant is worth is the fold's answer and is asked for
@@ -6826,6 +6845,7 @@ const Checker = struct {
             try self.constant_materializations.put(gpa, entry.key_ptr.*, .{ .fields = fields, .variant = entry.value_ptr.variant });
         }
         self.defaults.values = try saved.defaults.values.clone(gpa);
+        self.written_arrays = try saved.written_arrays.clone(gpa);
         inline for (.{ "calls", "recovered_call_args", "recovered_calls", "function_values", "postfix", "named", "projected", "traversals", "expansions", "range_places" }) |field| {
             for (@field(saved, field)) |row| try @field(self, field).append(gpa, try copyRetained(gpa, row));
         }
@@ -10544,8 +10564,8 @@ const Checker = struct {
     fn countLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
         var named: std.ArrayList(BindingId) = .empty;
         defer named.deinit(self.gpa);
-        var undeclared = false;
-        try self.constantDependenciesWithin(length, &named, &undeclared);
+        var unread: Unread = .{};
+        try self.constantDependenciesWithin(length, &named, &unread);
 
         // A declared type is read before the constants are typed and
         // checked. A length naming one is folded here, which needs no type,
@@ -10572,8 +10592,9 @@ const Checker = struct {
         // whatever else is wrong inside it, so it is still reported. A length
         // typed as nothing is not taken as reported: a name read before what
         // it stands for is typed has no type and no report.
-        if (undeclared) return null;
+        if (unread.undeclared or unread.refused_part) return null;
         if (try self.readsARefusedConstant(&named)) return null;
+        if (try self.onlyRefusedBindingsLeaveItWithoutAValue(length)) return null;
         const value = try self.worth(length);
         if (value.isConstant() and self.sink.error_count != reported_before) return null;
 
@@ -11615,7 +11636,14 @@ const Checker = struct {
                 .args_len = @intCast(wanted),
             });
         }
-        return self.builder.substitute(named, @intCast(alias.index()), supplied);
+        const applied = try self.builder.substitute(named, @intCast(alias.index()), supplied);
+        // A settled reference the alias holds over one of its parameters is
+        // settled by the substitution, which finds no implementation while
+        // heads and parts are first read: no head is settled yet to answer
+        // it. The application is read again once they are, as a settled
+        // reference written out is.
+        if (self.deferring_selections and try self.builder.anyUnsettled(&.{applied})) self.skipped_selection = true;
+        return applied;
     }
 
     /// Refuses a written type given a number of type arguments its head does
@@ -16925,6 +16953,11 @@ const Checker = struct {
             TypeId.poison
         else
             try self.check(d.init, annotated);
+        // A binding whose initialiser was refused has no value for a
+        // constant expression naming it to read.
+        if (d.init != ExprId.none and d.pattern == ExprId.none and self.builder.exprType(d.init) == .poison) {
+            try self.bindingRefused(.{ .stmt = s });
+        }
 
         // `let _ = e` is how a program says it does not want a value, and for
         // every value but one that is a complete answer. A `Result` is a report
@@ -17058,79 +17091,233 @@ const Checker = struct {
         return null;
     }
 
-    fn constantDependenciesWithinRef(self: *Checker, ref: node.TypeRef, out: *std.ArrayList(BindingId), undeclared: ?*bool) std.mem.Allocator.Error!void {
-        try self.constantDependenciesWithin(ref.length, out, undeclared);
-        for (self.ast.typeArgs(ref.args)) |arg| try self.constantDependenciesWithinRef(arg, out, undeclared);
+    /// Gives each array type this check made by substitution the place the
+    /// array it was made from is written, so a pass that substitutes into it
+    /// again finds that place from the type alone.
+    ///
+    /// **Bound:** each array made by substitution, and the substitutions
+    /// between it and a written one.
+    fn placeSubstitutedArrays(self: *Checker) std.mem.Allocator.Error!void {
+        var made = self.builder.array_sources.keyIterator();
+        while (made.next()) |array| {
+            if (self.written_arrays.contains(array.*)) continue;
+            const place = self.builder.arraySourcePlace(&self.written_arrays, array.*) orelse continue;
+            try self.written_arrays.put(self.gpa, array.*, place);
+        }
     }
 
-    /// Appends to `out` each constant an expression names. Where
-    /// `undeclared` is given, it is set if the expression holds a name that
-    /// reaches no declaration, a part the parser refused, or a local binding
-    /// whose initialiser was refused, each of which was reported where it is
-    /// written.
-    fn constantDependenciesWithin(self: *Checker, id: ExprId, out: *std.ArrayList(BindingId), undeclared: ?*bool) std.mem.Allocator.Error!void {
+    /// The bindings refused where they are declared, and what tells an
+    /// expression they alone leave without a value from one that is no
+    /// constant for a reason of its own.
+    ///
+    /// A local whose initialiser was refused, and a constant refused for any
+    /// rule, has no value, so an expression naming it has none either. That
+    /// is a consequence only where the binding is the sole reason: `count + 1`
+    /// would be a count, and `get() + count` would not whatever `count` held.
+    /// `folded` is the routine that folds every constant expression, run
+    /// with each refused binding worth nothing: a form the definition does
+    /// not admit is still no constant there, and a form it admits is worth
+    /// nothing where a refused binding is read. No value is put in a refused
+    /// binding's place, so nothing is said of what the expression would have
+    /// been worth: `10 / (count - 1)` has no value because `count` has none.
+    const RefusedBindings = struct {
+        count: u32 = 0,
+        folded: constfold.Memo = .empty,
+        /// Whether the binding at each site asked about is refused or is
+        /// worked out from one that is, by the site's key. A site on the
+        /// walk's own path is `.open`.
+        reached: std.AutoHashMapUnmanaged(u64, Standing) = .empty,
+
+        const Standing = enum { open, refused, clear };
+
+        fn deinit(self: *RefusedBindings, gpa: std.mem.Allocator) void {
+            self.folded.deinit(gpa);
+            self.reached.deinit(gpa);
+        }
+    };
+
+    /// Records that the binding declared at `site` was refused there.
+    fn bindingRefused(self: *Checker, site: constfold.Reach) std.mem.Allocator.Error!void {
+        self.refused_bindings.count += 1;
+        try self.refused_bindings.folded.assume(self.gpa, site, .absent);
+        try self.refused_bindings.reached.put(self.gpa, site.key(), .refused);
+    }
+
+    /// Whether `id` is a constant expression that has no value only because
+    /// of bindings refused where they are declared.
+    fn onlyRefusedBindingsLeaveItWithoutAValue(self: *Checker, id: ExprId) std.mem.Allocator.Error!bool {
+        if (self.refused_bindings.count == 0) return false;
+        const without = try constfold.foldConstant(self.gpa, self.ast, self.res.nameSites(), &self.refused_bindings.folded, id);
+        if (without != .absent) return false;
+        return self.namesARefusedBinding(id);
+    }
+
+    /// The bindings one expression names, and how many of them the walk has
+    /// asked about.
+    const NamedSites = struct { site: ?constfold.Reach, names: []const constfold.Reach, next: usize = 0, refused: bool = false };
+
+    /// Whether `id` names a binding refused where it is declared, or one
+    /// whose initialiser does, however many bindings lie between.
+    ///
+    /// **Bound:** each binding's initialiser is read once, whichever
+    /// expressions ask and in whatever order, and a chain of bindings is
+    /// followed with a list and not with the stack.
+    fn namesARefusedBinding(self: *Checker, id: ExprId) std.mem.Allocator.Error!bool {
+        var path: std.ArrayList(NamedSites) = .empty;
+        defer {
+            for (path.items) |entry| self.gpa.free(entry.names);
+            path.deinit(self.gpa);
+        }
+        try path.append(self.gpa, .{ .site = null, .names = try self.sitesNamedIn(id) });
+        var answer = false;
+        while (path.items.len != 0) {
+            const top = &path.items[path.items.len - 1];
+            if (top.refused or top.next == top.names.len) {
+                const done = path.pop().?;
+                self.gpa.free(done.names);
+                if (done.site) |site| try self.refused_bindings.reached.put(self.gpa, site.key(), if (done.refused) .refused else .clear);
+                if (path.items.len == 0) {
+                    answer = done.refused;
+                } else if (done.refused) {
+                    path.items[path.items.len - 1].refused = true;
+                }
+                continue;
+            }
+            const named = top.names[top.next];
+            top.next += 1;
+            if (self.refused_bindings.reached.get(named.key())) |known| {
+                if (known == .refused) top.refused = true;
+                continue;
+            }
+            const initialiser = constfold.initialiserOf(self.ast, named) orelse {
+                try self.refused_bindings.reached.put(self.gpa, named.key(), .clear);
+                continue;
+            };
+            try self.refused_bindings.reached.put(self.gpa, named.key(), .open);
+            const names = try self.sitesNamedIn(initialiser);
+            errdefer self.gpa.free(names);
+            try path.append(self.gpa, .{ .site = named, .names = names });
+        }
+        return answer;
+    }
+
+    /// The binding each name in `id` reaches. The caller owns the slice.
+    fn sitesNamedIn(self: *Checker, id: ExprId) std.mem.Allocator.Error![]const constfold.Reach {
+        var constants: std.ArrayList(BindingId) = .empty;
+        defer constants.deinit(self.gpa);
+        var sites: std.ArrayList(constfold.Reach) = .empty;
+        errdefer sites.deinit(self.gpa);
+        var unread: Unread = .{ .sites = &sites };
+        try self.constantDependenciesWithin(id, &constants, &unread);
+        return sites.toOwnedSlice(self.gpa);
+    }
+
+    /// What an expression holds that was reported where it is written and
+    /// leaves it unread.
+    const Unread = struct {
+        /// A name that reaches no binding.
+        undeclared: bool = false,
+        /// A part the parser refused.
+        refused_part: bool = false,
+        /// Where given, the binding each name reaches is appended.
+        sites: ?*std.ArrayList(constfold.Reach) = null,
+    };
+
+    test "slow: a length naming the last of a long chain of locals is read without a frame per local" {
+        try slow_tests.skipUnlessRun();
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const links = 200_000;
+        // The chain's first local is a number, then refused, and each later
+        // one names the one before it, alone and then in a sum.
+        const Chain = struct { first: []const u8, step: []const u8, errors: usize };
+        for ([_]Chain{
+            .{ .first = "1", .step = "", .errors = 0 },
+            .{ .first = "true", .step = "", .errors = 1 },
+            .{ .first = "true", .step = " + 0", .errors = 1 },
+        }) |chain| {
+            var text: std.ArrayList(u8) = .empty;
+            try text.print(gpa, "fn main() -> UInt8 {{\n    let v0: UInt64 = {s}\n", .{chain.first});
+            for (1..links) |i| try text.print(gpa, "    let v{d} = v{d}{s}\n", .{ i, i - 1, chain.step });
+            try text.print(gpa, "    let held: [UInt8; v{d}] = [0]\n    held[0]\n}}\n", .{links - 1});
+            const sink = try diagnose(gpa, text.items);
+            try testing.expectEqual(chain.errors, sink.items().len);
+        }
+    }
+
+    fn constantDependenciesWithinRef(self: *Checker, ref: node.TypeRef, out: *std.ArrayList(BindingId), unread: ?*Unread) std.mem.Allocator.Error!void {
+        try self.constantDependenciesWithin(ref.length, out, unread);
+        for (self.ast.typeArgs(ref.args)) |arg| try self.constantDependenciesWithinRef(arg, out, unread);
+    }
+
+    /// Appends to `out` each constant an expression names, and says in
+    /// `unread`, where it is given, what the expression holds that was
+    /// reported where it is written.
+    fn constantDependenciesWithin(self: *Checker, id: ExprId, out: *std.ArrayList(BindingId), unread: ?*Unread) std.mem.Allocator.Error!void {
         if (id == .none) return;
         const target = self.res.targetOf(id);
         if (target != .none and self.res.kindOf(target) == .constant) try out.append(self.gpa, target);
-        if (undeclared) |found| switch (self.ast.exprTag(id)) {
-            .err => found.* = true,
-            .name_ref => if (target == .none) {
-                found.* = true;
-            } else switch (reached: {
-                const names = self.res.nameSites();
-                break :reached names.reaches(names.ctx, id);
-            }) {
-                // A local binding whose initialiser was refused where it is
-                // declared.
-                .stmt => |declared| {
-                    const initializer = self.ast.stmtData(declared).init;
-                    if (initializer != ExprId.none and self.builder.exprType(initializer) == .poison) found.* = true;
-                },
-                .decl, .nothing => {},
+        if (unread) |found| switch (self.ast.exprTag(id)) {
+            .err => found.refused_part = true,
+            .name_ref, .field => {
+                if (target == .none and self.ast.exprTag(id) == .name_ref) found.undeclared = true;
+                if (found.sites) |sites| {
+                    const names = self.res.nameSites();
+                    const site = names.reaches(names.ctx, id);
+                    if (site != .nothing) try sites.append(self.gpa, site);
+                }
             },
             else => {},
         };
         switch (self.ast.exprTag(id).payload()) {
             .none => {},
-            .unary => try self.constantDependenciesWithin(self.ast.unaryOperand(id), out, undeclared),
+            .unary => try self.constantDependenciesWithin(self.ast.unaryOperand(id), out, unread),
             .binary => {
                 const two = self.ast.binary(id);
-                try self.constantDependenciesWithin(two.lhs, out, undeclared);
-                try self.constantDependenciesWithin(two.rhs, out, undeclared);
+                try self.constantDependenciesWithin(two.lhs, out, unread);
+                try self.constantDependenciesWithin(two.rhs, out, unread);
             },
             .conditional => {
                 const conditional = self.ast.conditional(id);
-                try self.constantDependenciesWithin(conditional.cond, out, undeclared);
-                try self.constantDependenciesWithin(conditional.then, out, undeclared);
-                try self.constantDependenciesWithin(conditional.otherwise, out, undeclared);
+                try self.constantDependenciesWithin(conditional.cond, out, unread);
+                try self.constantDependenciesWithin(conditional.then, out, unread);
+                try self.constantDependenciesWithin(conditional.otherwise, out, unread);
             },
             .range => {
                 const ends = self.ast.rangeEnds(id);
-                try self.constantDependenciesWithin(ends.lhs, out, undeclared);
-                try self.constantDependenciesWithin(ends.rhs, out, undeclared);
+                try self.constantDependenciesWithin(ends.lhs, out, unread);
+                try self.constantDependenciesWithin(ends.rhs, out, unread);
             },
             .call => {
                 const call = self.ast.call(id);
-                try self.constantDependenciesWithin(call.callee, out, undeclared);
-                for (call.args) |arg| try self.constantDependenciesWithin(arg, out, undeclared);
+                try self.constantDependenciesWithin(call.callee, out, unread);
+                // A structure literal holds a label and then a value for
+                // each field. A label is the field's name and not a name
+                // nothing declares.
+                const labelled = self.ast.exprTag(id) == .struct_literal;
+                for (call.args, 0..) |arg, at| {
+                    if (labelled and at % 2 == 0 and self.ast.exprTag(arg) == .name_ref) continue;
+                    try self.constantDependenciesWithin(arg, out, unread);
+                }
             },
             .interpolation => {
-                for (self.ast.interpolation(id).pieces) |piece| try self.constantDependenciesWithin(piece, out, undeclared);
+                for (self.ast.interpolation(id).pieces) |piece| try self.constantDependenciesWithin(piece, out, unread);
             },
             .lambda => {
                 const lambda = self.ast.lambda(id);
-                for (lambda.captures) |capture| try self.constantDependenciesWithin(capture.source, out, undeclared);
-                for (lambda.params) |param| try self.constantDependenciesWithin(param.default, out, undeclared);
-                try self.constantDependenciesWithin(lambda.body, out, undeclared);
+                for (lambda.captures) |capture| try self.constantDependenciesWithin(capture.source, out, unread);
+                for (lambda.params) |param| try self.constantDependenciesWithin(param.default, out, unread);
+                try self.constantDependenciesWithin(lambda.body, out, unread);
             },
             .block => {
                 const body = self.ast.blockOf(id);
                 for (self.ast.blockStmts(body)) |statement| {
                     const held = self.ast.stmtData(statement);
-                    try self.constantDependenciesWithin(held.init, out, undeclared);
-                    try self.constantDependenciesWithin(held.pattern, out, undeclared);
+                    try self.constantDependenciesWithin(held.init, out, unread);
+                    try self.constantDependenciesWithin(held.pattern, out, unread);
                 }
-                try self.constantDependenciesWithin(body.tail, out, undeclared);
+                try self.constantDependenciesWithin(body.tail, out, unread);
             },
         }
     }
@@ -17144,6 +17331,7 @@ const Checker = struct {
     fn markNotConstant(self: *Checker, id: ExprId) std.mem.Allocator.Error!void {
         self.folds.set(id, .not_constant);
         try self.folded.recordNotConstant(self.gpa, id);
+        try self.refused_bindings.folded.recordNotConstant(self.gpa, id);
     }
 
     /// What an expression is worth, remembered by the shared constant folder.
@@ -17246,15 +17434,20 @@ const Checker = struct {
     /// language cannot work out has no value to bind.
     ///
     fn checkConstant(self: *Checker, b: BindingId) std.mem.Allocator.Error!void {
-        const d = self.res.declaredBy(b);
-        const init_expr = self.ast.declInit(d);
-        if (init_expr == ExprId.none) return;
         // Whatever is reported while the constant is checked is its own
         // declaration being refused, for whichever rule.
         const reported_before = self.sink.error_count;
-        defer if (self.sink.error_count != reported_before) {
+        try self.checkConstantOnce(b);
+        if (self.sink.error_count != reported_before) {
             self.constant_refused[b.index()] = true;
-        };
+            try self.bindingRefused(self.siteOf(b));
+        }
+    }
+
+    fn checkConstantOnce(self: *Checker, b: BindingId) std.mem.Allocator.Error!void {
+        const d = self.res.declaredBy(b);
+        const init_expr = self.ast.declInit(d);
+        if (init_expr == ExprId.none) return;
 
         // Saved rather than cleared, because this runs inside the check of
         // whichever constant named this one and that check has more to do.
@@ -17293,24 +17486,42 @@ const Checker = struct {
         // A constant's type is settled before anything outside its
         // initializer reads it, so its open literals fall back here.
         const scope = self.openScope();
+        const reported_before_initialiser = self.sink.error_count;
         const initializer_type = try self.check(init_expr, annotated);
         try self.closeScope(scope);
         const inferred = try self.builder.resolveOpen(initializer_type, &self.open_types);
         if (!annotation.wasWritten()) self.setBindingType(b, inferred);
         // A written type that failed to resolve was reported where it is
-        // written, and a constant with no type has no value to check.
-        if (annotation.wasWritten() and want == .poison) return;
+        // written. A constant with no type has no value to hold against one,
+        // and its initialiser is still held to a constant expression's form.
+        const untyped = annotation.wasWritten() and want == .poison;
 
         // An initialiser the checker poisoned has already been told what is
         // wrong with it, and whether the definition admits its form is a
-        // question about an expression that no longer exists.
-        if (self.builder.exprType(init_expr) == .poison) return;
+        // question about an expression that no longer exists. One read
+        // against a refused annotation has no type and was told nothing, so
+        // its form is still asked about.
+        if (self.builder.exprType(init_expr) == .poison and
+            (!untyped or self.sink.error_count != reported_before_initialiser)) return;
+        // A part the parser refused and a name nothing declares were each
+        // reported where they are written, and are why the initialiser has
+        // no constant form.
+        {
+            var named: std.ArrayList(BindingId) = .empty;
+            defer named.deinit(self.gpa);
+            var unread: Unread = .{};
+            try self.constantDependenciesWithin(init_expr, &named, &unread);
+            if (unread.refused_part or unread.undeclared) return;
+        }
 
         // A traversal binds a name to an expression the same way, and is held
         // to a different demand: what it names is an iterator a walk runs,
         // built where the walk is, so nothing works it out where it is
         // written and there is no value for a constant expression to be.
-        if (self.ast.declTag(d) == .traversal_) return self.checkTraversal(init_expr);
+        if (self.ast.declTag(d) == .traversal_) {
+            if (!untyped) try self.checkTraversal(init_expr);
+            return;
+        }
 
         // Whether the form is one the definition admits, decided by the routine
         // that folds a constant expression wherever one is read and by nothing
@@ -17319,7 +17530,9 @@ const Checker = struct {
         // the whole of what is wrong with it, and that was reported where it
         // closed.
         const value = try self.worth(init_expr);
-        if (value.checked()) |checked| {
+        if (untyped) {
+            if (value.isConstant()) return;
+        } else if (value.checked()) |checked| {
             if (try self.refuseObligedConstant(.t_const, init_expr, self.binding_types.get(b))) return;
             switch (try self.validateConstant(checked, self.binding_types.get(b))) {
                 .planned => {
@@ -17370,6 +17583,7 @@ const Checker = struct {
         for (ring) |m| {
             self.ring_said[m.index()] = true;
             self.constant_refused[m.index()] = true;
+            try self.bindingRefused(self.siteOf(m));
         }
         if (said) return;
 
@@ -24466,6 +24680,38 @@ const Checker = struct {
         return .{ .args = given, .owned = false };
     }
 
+    /// How many of a call's arguments are known to be written, where its
+    /// text holds a token the lexer refused: the arguments up to and
+    /// including the one that holds it. Null where the call holds none.
+    ///
+    /// A literal left open takes the rest of its line, and the commas and
+    /// the `)` on it, so what the arguments after it were meant to be, and
+    /// how many, is not known. The arguments before it, and it, are written
+    /// whatever it took. So a call is not held to a parameter its arguments
+    /// may have filled, and is held to having too many where those it is
+    /// known to have are already too many.
+    ///
+    /// **Bound:** the call's own tokens, asked only where a count is wrong.
+    fn argumentsKnownWritten(self: *const Checker, id: ExprId) ?usize {
+        if (self.ast.exprTag(id).payload() != .call) return null;
+        const range = self.ast.exprTokens(id);
+        var refused: ?u32 = null;
+        var at = range.start.index();
+        while (at < range.end.index()) : (at += 1) {
+            if (self.ast.tokenTag(TokenId.at(at)) == .invalid) {
+                refused = at;
+                break;
+            }
+        }
+        const first = refused orelse return null;
+        var known: usize = 0;
+        for (self.ast.call(id).args) |arg| {
+            if (self.ast.exprTokens(arg).start.index() > first) break;
+            known += 1;
+        }
+        return known;
+    }
+
     /// More arguments than there are parameters.
     ///
     /// Counted rather than named, because there is no name to report one by: an
@@ -24481,12 +24727,17 @@ const Checker = struct {
         found: usize,
         receiver: usize,
     ) std.mem.Allocator.Error!void {
-        const note = if (found == wanted + 1) try self.allocatorFormNote(owner) else null;
+        // Where a refused token took the end of the call, `found` counts
+        // only the arguments known to be written, with the receiver a
+        // postfix call counts.
+        const counted = if (self.argumentsKnownWritten(id)) |known| known + (found -| self.ast.call(id).args.len) else found;
+        if (counted <= wanted) return;
+        const note = if (counted == wanted + 1) try self.allocatorFormNote(owner) else null;
         const notes: []const []const u8 = if (note) |text| try self.sink.arena.dupe([]const u8, &.{text}) else &.{};
         _ = try self.reportWithOriginNotes(
             .t_arity,
             id,
-            try std.fmt.allocPrint(self.sink.arena, "expected {d} argument(s), found {d}", .{ wanted -| receiver, found -| receiver }),
+            try std.fmt.allocPrint(self.sink.arena, "expected {d} argument(s), found {d}", .{ wanted -| receiver, counted -| receiver }),
             "the wrong number of arguments",
             owner.origin(self),
             notes,
@@ -24690,6 +24941,7 @@ const Checker = struct {
         owner: CallParameters,
         at: usize,
     ) std.mem.Allocator.Error!void {
+        if (self.argumentsKnownWritten(id) != null) return;
         _ = try self.reportWithOrigin(
             .t_missing_argument,
             id,

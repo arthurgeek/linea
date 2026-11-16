@@ -1,0 +1,40 @@
+// An alias writes the type it names. `Read` is `Celsius.Reading`, which
+// `Celsius` settles to `Kelvin`, so the derived conversion takes a `Kelvin`.
+trait Measure {
+    type Reading
+
+    fn degrees_of(self: Self) -> UInt8
+}
+
+struct Kelvin {
+    degrees: UInt8,
+}
+
+struct Celsius {
+    degrees: UInt8,
+}
+
+impl Measure for Celsius {
+    type Reading = Kelvin
+
+    fn degrees_of(self: Self) -> UInt8 {
+        self.degrees
+    }
+}
+
+alias Read = Celsius.Reading
+
+@derive(From[Read])
+enum Outcome {
+    Hot(Read),
+    Cold,
+}
+
+fn main() -> UInt8 {
+    let warm = Celsius { degrees = 2 }
+    let outcome: Outcome = From.from(Kelvin { degrees = 2 })
+    match outcome {
+        Hot(reading) => reading.degrees - warm.degrees_of(),
+        Cold => 1,
+    }
+}

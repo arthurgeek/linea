@@ -1,0 +1,5 @@
+error[S-String]: this literal interpolates too deeply
+ --> tests/text/a_constant_interpolating_seventeen_deep_is_reported_once.lin:3:44
+  |
+3 | let deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
+  |                                            ^^ an interpolation inside an interpolation, too many times over

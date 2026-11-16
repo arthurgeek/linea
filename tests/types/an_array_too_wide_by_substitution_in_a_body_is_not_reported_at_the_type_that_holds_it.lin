@@ -1,0 +1,13 @@
+// [L-Size]. `probe` writes an array of three of its parameter and holds it in
+// an `Option`. The array is too wide once the parameter is an array of
+// 2000000000 bytes, and `Option` wrote none of it, so it is reported where
+// the body writes it.
+fn probe[T: Discardable](sink _given: Option[T]) -> UInt8 {
+    let _held: Option[[T; 3]] = .None
+    0
+}
+
+fn main() -> UInt8 {
+    let none: Option[[UInt8; 2000000000]] = .None
+    probe(none)
+}

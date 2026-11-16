@@ -1,0 +1,21 @@
+// An array length naming a local worked out from a refused one says nothing
+// more where that local is the only reason it has no count. A call and a block
+// are no forms a constant expression has, so a length naming a local worked
+// out through either is reported whatever else the local reads.
+fn get() -> UInt64 {
+    3
+}
+
+fn main() -> UInt8 {
+    let count: UInt64 = true
+    let through_a_call = get() + count
+    let _first: [UInt8; through_a_call] = [1]
+    let through_a_block = {
+        let _unused = count
+        2
+    }
+    let _second: [UInt8; through_a_block] = [1, 2]
+    let twice = count + count
+    let _third: [UInt8; twice] = [1]
+    0
+}

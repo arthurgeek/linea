@@ -1,0 +1,8 @@
+// A literal ends at its line. One left open as an array's element took the
+// comma after it, so the elements on the next line are still read as the
+// array's, and a mistake among them is reported.
+fn main() -> UInt8 {
+    let _held = [1, "unterminated
+        2, nope]
+    0
+}

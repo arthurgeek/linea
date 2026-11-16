@@ -1,0 +1,11 @@
+// A literal ends at its line. One left open as a call's first argument took
+// the comma after it, so the argument on the next line is still read as the
+// call's and the call is not reported as unclosed.
+fn show(_text: Str, flag: Bool) -> UInt8 {
+    if flag { 1 } else { 0 }
+}
+
+fn main() -> UInt8 {
+    show("unterminated,
+        true)
+}

@@ -1,0 +1,11 @@
+// A constant whose annotation and initialiser each name something nothing
+// declares is reported for the two names. Its initialiser is not also
+// reported as no constant expression.
+let table: Nope = nope
+
+let called: Nope = missing()
+
+fn main() -> UInt8 {
+    let _both = (table, called)
+    0
+}

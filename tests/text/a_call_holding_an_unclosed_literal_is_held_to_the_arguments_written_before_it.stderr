@@ -1,0 +1,46 @@
+error[S-String]: unterminated string literal
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:10:28
+   |
+10 |     three("a", 1, 2, 3, 4, "y)
+   |                            ^^^ string starts here and is never closed
+error[S-String]: unterminated string literal
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:14:28
+   |
+14 |     three("a", 1, 2, 3, 4, "y
+   |                            ^^ string starts here and is never closed
+error[S-String]: unterminated string literal
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:19:36
+   |
+19 |     three("a", three("b", 1, 2, 3, "x), 2)
+   |                                    ^^^^^^^ string starts here and is never closed
+error[S-String]: unterminated string literal
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:23:11
+   |
+23 |     three("x)
+   |           ^^^ string starts here and is never closed
+error[S-String]: unterminated string literal
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:27:16
+   |
+27 |     three("a", "x)
+   |                ^^^ string starts here and is never closed
+error[T-Arity]: expected 3 argument(s), found 6
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:10:5
+   |
+5  | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+   |    ----- declared here
+10 |     three("a", 1, 2, 3, 4, "y)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
+error[T-Arity]: expected 3 argument(s), found 6
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:14:5
+   |
+5  | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+   |    ----- declared here
+14 |     three("a", 1, 2, 3, 4, "y
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments
+error[T-Arity]: expected 3 argument(s), found 5
+  --> tests/text/a_call_holding_an_unclosed_literal_is_held_to_the_arguments_written_before_it.lin:19:16
+   |
+5  | fn three(_a: Str, b: UInt8, _c: UInt8) -> UInt8 {
+   |    ----- declared here
+19 |     three("a", three("b", 1, 2, 3, "x), 2)
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the wrong number of arguments

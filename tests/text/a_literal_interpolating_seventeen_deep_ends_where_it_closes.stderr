@@ -1,0 +1,5 @@
+error[S-String]: this literal interpolates too deeply
+ --> tests/text/a_literal_interpolating_seventeen_deep_ends_where_it_closes.lin:4:66
+  |
+4 | fn deep() -> UInt8 { let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"; 0 }
+  |                                                                  ^^ an interpolation inside an interpolation, too many times over

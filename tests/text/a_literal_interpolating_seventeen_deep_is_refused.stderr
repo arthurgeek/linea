@@ -3,19 +3,3 @@ error[S-String]: this literal interpolates too deeply
   |
 3 |     let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
   |                                                 ^^ an interpolation inside an interpolation, too many times over
-error[S-String]: unterminated string literal
- --> tests/text/a_literal_interpolating_seventeen_deep_is_refused.lin:3:85
-  |
-3 |     let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
-  |                                                                                     ^ string starts here and is never closed
-error[S-Entry]: a program is a list of declarations
- --> tests/text/a_literal_interpolating_seventeen_deep_is_refused.lin:3:85
-  |
-3 |     let _deep = "{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{"{1}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"}"
-  |                                                                                     ^ expected `fn` here
-error[T-Mismatch]: expected `UInt8`, found `()`
- --> tests/text/a_literal_interpolating_seventeen_deep_is_refused.lin:2:20
-  |
-2 | fn main() -> UInt8 {
-  |              ----- expected because of this return type
-  |                    ^ this body produces nothing

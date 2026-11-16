@@ -1,0 +1,20 @@
+error[N-Undefined]: undefined name `Nope`
+ --> tests/arrays/a_constant_with_a_refused_annotation_and_an_undefined_initialiser_is_reported_for_those.lin:4:12
+  |
+4 | let table: Nope = nope
+  |            ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `Nope`
+ --> tests/arrays/a_constant_with_a_refused_annotation_and_an_undefined_initialiser_is_reported_for_those.lin:6:13
+  |
+6 | let called: Nope = missing()
+  |             ^^^^ no type with this name is declared here
+error[N-Undefined]: undefined name `nope`
+ --> tests/arrays/a_constant_with_a_refused_annotation_and_an_undefined_initialiser_is_reported_for_those.lin:4:19
+  |
+4 | let table: Nope = nope
+  |                   ^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `missing`
+ --> tests/arrays/a_constant_with_a_refused_annotation_and_an_undefined_initialiser_is_reported_for_those.lin:6:20
+  |
+6 | let called: Nope = missing()
+  |                    ^^^^^^^ no binding with this name is in scope

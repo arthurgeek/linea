@@ -482,7 +482,16 @@ holds for a raw literal too, and an unclosed raw literal is reported as
 unterminated with the closing sequence it needs. A raw literal opens with at
 most eight `#`; one opened with more is refused. A literal inside an
 interpolation may interpolate in turn, with at most 16 interpolations open at
-once; a literal that opens one more is refused. The lines of a multi-line
+once; a literal that opens one more is refused whole, from its quote to the
+quote that closes it, and what follows it is read as written. That close is
+found through as many as 80 interpolations open at once; a literal nested
+more deeply is refused to the end of its line. An unclosed
+literal holds the rest of its line, and a byte no token begins may stand for
+anything, so a call, an array, a structure literal or a `match` with either
+as the last token of an element's line is not reported for the comma or the
+closing bracket that line may have held. Such a call is not reported for an
+argument missing, and is reported for too many only where the arguments up to
+and including the one holding the refused token are already too many. The lines of a multi-line
 literal are consecutive: a blank line or a comment between two of its lines is
 refused. A multi-line literal cannot begin inside an interpolation, since its
 line would run over the `}` that closes the interpolation.
@@ -874,8 +883,12 @@ request whose head holds a refused type is not expanded, so the refused text is
 not written out and reported a second time; it still uses the type its head
 names. An implementation whose head or trait arguments hold a refused type has
 no key: it is compared with no other implementation and is not asked whether
-its parameters can be recovered ([T-Impl]). An initialiser is not held against
-an annotation that was refused, at module level as in a function. A type whose arguments stand past the limit
+its parameters can be recovered ([T-Impl]). A callable type holds the types of
+its parameters and its result, so a head applied to `fn(x: ) -> UInt8` holds
+a refused type. An initialiser is not held against
+an annotation that was refused, at module level as in a function; a
+constant's initialiser is still a constant expression ([T-Const]), which is
+asked of its form and not of its type. A type whose arguments stand past the limit
 is refused with them, wherever it is written, so it is not reported for the
 arguments it lacks ([T-Bound]), and a derive naming it as a source is not
 reported for the variant that source would need ([T-Derive]). A name written
@@ -1357,7 +1370,10 @@ the type attributes are refused ([S-Entry], [M-Export]), and it is capitalised
 An alias may declare type parameters, `alias Step[T] = fn(value: T) -> T`, each
 with the bounds a declaration's parameters take. Writing `Step[UInt8]`
 substitutes the arguments for the parameters in `T`, and the arguments must
-meet those bounds ([T-Bound]). An alias is written with as many arguments as it
+meet those bounds ([T-Bound]). A settled reference `T` writes over a parameter
+is settled by the argument: with `alias Read[M: Measure] = M.Reading`,
+`Read[Celsius]` is the type `Celsius` settles `Reading` to, in an
+implementation's head and a derive's argument as in an annotation. An alias is written with as many arguments as it
 declares parameters, less those with a default ([T-ArgumentDefault]), so `Step`
 alone and `Meters[UInt8]` are [T-Bound] as they would be for a structure. Every
 parameter must appear in `T` ([N-Unused]), and `phantom` is refused
@@ -4480,7 +4496,11 @@ that first writes it. An array no place writes, made by settling the parameter
 of a declaration that holds an array of it, is reported at that declaration,
 naming the application and the part: `struct Row[T] { items: [T; 4294967295] }`
 applied as `Row[UInt16]` reports that `Row[UInt16]` is wider, because its part
-`items` is `[UInt16; 4294967295]`.
+`items` is `[UInt16; 4294967295]`. An array made by settling the parameter of
+an array written anywhere else, in a body or a signature, is reported where
+that array is written: `let held: Option[[T; 3]]` in a function applied at
+`[UInt8; 2000000000]` is reported at `[T; 3]`, naming
+`[[UInt8; 2000000000]; 3]`.
 
 A type still written with a type parameter has no width, so the limit is asked
 of each type that settles the parameter and not of the one that holds it:

@@ -1,0 +1,9 @@
+// A local binding whose initialiser is refused is reported where it is
+// declared. A length that divides by it or takes a remainder by it has no
+// count only because of that, so the length says nothing more.
+fn main() -> UInt8 {
+    let count: UInt64 = true
+    let _divided: [UInt8; 10 / (count - 1)] = [1]
+    let _left_over: [UInt8; 10 % (count - 1)] = [1]
+    0
+}

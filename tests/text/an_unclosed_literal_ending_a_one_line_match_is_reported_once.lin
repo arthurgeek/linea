@@ -1,0 +1,7 @@
+// A literal ends at its line. One left open as the body of an arm written on
+// the line of its `match` took the brace that closes it, so the line below,
+// which writes no arm, is the next statement.
+fn main() -> UInt8 {
+    let _said = match 1 { 1 => "x }
+    nope
+}

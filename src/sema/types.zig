@@ -6459,6 +6459,9 @@ pub const LiteralValue = union(enum) {
     float: f64,
 };
 
+/// Where the program writes an array type, by the type.
+pub const WrittenArrays = std.AutoHashMapUnmanaged(TypeId, Loc);
+
 pub const ImplementationId = enum(u32) {
     _,
 
@@ -7036,6 +7039,10 @@ pub const Typing = struct {
     /// wrote it. `.poison` where that token wrote no type, which is also what
     /// a refused one settles to -- neither has a name worth printing.
     written_types: []const TypeId = &.{},
+    /// Where the program first writes each array type, which no declaration
+    /// names, and for an array type the check made by substitution, where the
+    /// array it was made from is written.
+    written_arrays: WrittenArrays = .empty,
     /// Every settled reference awaiting an instantiation, and the run of trait
     /// arguments each one's key holds.
     ///
@@ -7324,6 +7331,7 @@ pub const Typing = struct {
         gpa.free(self.declared_callables);
         self.contextual_constraints.deinit(gpa);
         gpa.free(self.written_types);
+        self.written_arrays.deinit(gpa);
         self.variant_uses.deinit(gpa);
         self.part_selections.deinit(gpa);
         gpa.free(self.standins);
@@ -9379,6 +9387,10 @@ pub const Typing = struct {
         /// candidate's complete parameter run is compared before reuse.
         interned_callables: Chain(.newest_first) = .empty,
         interned_arrays: std.AutoHashMapUnmanaged(ArrayKey, TypeId) = .empty,
+        /// The array type each array type minted by substitution was made
+        /// from, which is always the older of the two. An array that was in
+        /// the pool before a substitution arrived at it has no entry.
+        array_sources: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
         borrowed_types: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
         capability_facts: CapabilityFacts = .{},
         scoped_capability_facts: ScopedCapabilityFacts = .{},
@@ -10084,7 +10096,10 @@ pub const Typing = struct {
                 .array => |a| {
                     const to = try substitution.apply(self, a.element);
                     if (to == a.element) return ty;
-                    return self.arrayOf(to, a.count);
+                    const minted_from = self.pool.items.len;
+                    const made = try self.arrayOf(to, a.count);
+                    if (@intFromEnum(made) >= minted_from) try self.array_sources.put(self.gpa, made, ty);
+                    return made;
                 },
                 .callable => |signature| {
                     const params = self.callableParams(signature);
@@ -12049,6 +12064,7 @@ pub const Typing = struct {
             self.callable_params.deinit(self.gpa);
             self.interned_callables.deinit(self.gpa);
             self.interned_arrays.deinit(self.gpa);
+            self.array_sources.deinit(self.gpa);
             self.capability_facts.deinit(self.gpa);
             self.scoped_capability_facts.deinit(self.gpa);
             self.prepared_implementations.deinit(self.gpa);
@@ -12272,6 +12288,22 @@ pub const Typing = struct {
             self.pool.appendAssumeCapacity(.{ .borrow = .{ .referent = referent, .name = name } });
             self.laid_out.appendAssumeCapacity(.{});
             return id;
+        }
+
+        /// Where the array type `t` came from is written: the place of the
+        /// nearest array it was made from by substitution that `written`
+        /// holds. Null where `t` was made by no substitution, or from an
+        /// array no place writes.
+        ///
+        /// **Bound:** the substitutions between `t` and that array, each of
+        /// which names an older type.
+        pub fn arraySourcePlace(self: *const Builder, written: *const WrittenArrays, t: TypeId) ?Loc {
+            var at = t;
+            while (self.array_sources.get(at)) |source| {
+                if (written.get(source)) |place| return place;
+                at = source;
+            }
+            return null;
         }
 
         /// Expected O(1) lookup per structural array key, independent of the
@@ -14369,6 +14401,8 @@ pub const Typing = struct {
             self.interned_callables.deinit(self.gpa);
             self.interned_arrays.deinit(self.gpa);
             self.interned_arrays = .empty;
+            self.array_sources.deinit(self.gpa);
+            self.array_sources = .empty;
             self.borrowed_types.deinit(self.gpa);
             self.borrowed_types = .empty;
             self.interned_callables = .empty;
@@ -15081,10 +15115,11 @@ fn agreeWithUndecidedDropped(
     return sameContracts(kept_x.items, kept_y.items);
 }
 
-/// Binds the parameter each undecided contract of `signature` rests on to a
-/// scalar, so the contract is dropped: the result's where it is open and the
-/// contract carries, and otherwise the source parameter's. A settled
-/// reference is no parameter and is left as it is.
+/// Binds the parameters each undecided contract of `signature` rests on to a
+/// scalar, so the contract is dropped and the witness names no type left
+/// open: the result's where it is open and the contract carries, and the
+/// source parameter's where it is open. A settled reference is no parameter
+/// and is left as it is.
 fn settleUndecided(
     gpa: std.mem.Allocator,
     pool: *Typing.Builder,
@@ -15096,10 +15131,7 @@ fn settleUndecided(
     for (signature.contracts, standing) |contract, how| {
         if (how != .undecided) continue;
         const result = resolveBound(subst, signature.result);
-        if (contract.kind == .carries and pool.get(result) == .parameter) {
-            try subst.put(gpa, result, .u8);
-            continue;
-        }
+        if (contract.kind == .carries and pool.get(result) == .parameter) try subst.put(gpa, result, .u8);
         switch (contract.source.root) {
             .parameter => |index| {
                 const source = resolveBound(subst, params[index].ty);
