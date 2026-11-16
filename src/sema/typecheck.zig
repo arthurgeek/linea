@@ -6796,6 +6796,10 @@ const Checker = struct {
     /// one is rejected by that same path rather than by a rule of its own.
     const Loop = struct {
         settled: ?Expected,
+        /// Whether the loop stands where a written type that was refused is
+        /// expected, so the values its `break`s carry are result positions
+        /// of that refused context.
+        refused: bool = false,
         /// Whether any `break` was seen. A `loop` with none does not complete,
         /// so it produces no value rather than producing Unit.
         broke: bool,
@@ -17658,9 +17662,11 @@ const Checker = struct {
 
     /// Records `root`, reached by an expected type that was refused, and the
     /// result positions under it that an expected type flows into: a group's
-    /// operand, a block's tail, an `if`'s and a `match`'s arms, an
-    /// arithmetic or negated operand, an array's and a tuple's elements, a
-    /// variant's payload, a structure literal's values and a lambda's body.
+    /// operand, a copy's operand, a block's tail, an `if`'s and a `match`'s
+    /// arms, an arithmetic or negated operand, an array's and a tuple's
+    /// elements, a variant's payload, a structure literal's values and a
+    /// lambda's body. A `loop` or a `for` among them is marked on its frame,
+    /// and the values its `break`s carry are noted when they are checked.
     /// A sub-expression anywhere else is checked against its own
     /// expectation, which the refusal says nothing about.
     ///
@@ -17674,7 +17680,7 @@ const Checker = struct {
         while (pending.pop()) |id| {
             if (id == .none or (try self.refused_contexts.getOrPut(self.gpa, id)).found_existing) continue;
             switch (self.ast.exprTag(id)) {
-                .grouped, .negate => try pending.append(self.gpa, self.ast.unaryOperand(id)),
+                .grouped, .negate, .copy_ => try pending.append(self.gpa, self.ast.unaryOperand(id)),
                 .add, .sub, .mul, .div, .rem => {
                     const two = self.ast.binary(id);
                     try pending.append(self.gpa, two.lhs);
@@ -19727,6 +19733,7 @@ const Checker = struct {
         try self.loops.append(self.gpa, .{
             .settled = settled,
             .broke = false,
+            .refused = self.refused_contexts.contains(id),
         });
         const writable = self.ast.exprTag(id) == .for_inout;
         const lent = if (lends) try self.walkLendBegin(id, binder, writable) else 0;
@@ -19872,7 +19879,7 @@ const Checker = struct {
             break :blk .{ .ty = self.builder.argsOf(inst)[0], .at = want.at, .reason = want.reason };
         };
 
-        try self.loops.append(self.gpa, .{ .settled = settled, .broke = false });
+        try self.loops.append(self.gpa, .{ .settled = settled, .broke = false, .refused = self.refused_contexts.contains(id) });
         try self.lendBegin(id, iterator, true);
         const body = try self.check(f.args[1], null);
         _ = self.lent_now.pop();
@@ -19934,6 +19941,7 @@ const Checker = struct {
         try self.loops.append(self.gpa, .{
             .settled = expected,
             .broke = false,
+            .refused = self.refused_contexts.contains(id),
         });
 
         const body = try self.check(self.ast.unaryOperand(id), null);
@@ -19986,6 +19994,7 @@ const Checker = struct {
             break :blk TypeId.unit;
         } else blk: {
             const before = frame.settled;
+            if (frame.refused and before == null) try self.noteRefusedContext(value);
             const checked = try self.check(value, before);
             frame = &self.loops.items[depth];
             // A `break` inside the value may settle the loop's type first,
