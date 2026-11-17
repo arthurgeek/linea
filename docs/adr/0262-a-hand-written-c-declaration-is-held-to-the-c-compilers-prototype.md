@@ -3,7 +3,9 @@
 Status: Accepted — 2026-11-08. Extends
 [0228](0228-a-granted-module-calls-c.md), whose consequence "nothing checks a
 hand-written declaration against the real C signature" it answers for every
-position lowering fixes, and whose manifest it gains `"headers"` in.
+position lowering fixes, and whose manifest it gains `"headers"` in. The clause
+refusing every symbol C makes an `ifunc` is superseded by
+[0279](0279-an-extern-naming-a-c-ifunc-is-held-to-its-declared-type.md).
 
 ## Context
 

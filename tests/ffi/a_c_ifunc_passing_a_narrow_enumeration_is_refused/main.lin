@@ -1,0 +1,5 @@
+import level
+
+fn main() -> UInt8 {
+    UInt8(level.of(-1))
+}

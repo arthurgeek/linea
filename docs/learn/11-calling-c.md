@@ -172,6 +172,95 @@ match the width C passes it at: an `enum` whose values fit 32 bits is an
 C function whose declaration disagrees with it. What C does with the values
 it is handed is still yours to get right, as the end of this chapter lists.
 
+### An `ifunc` is held to the type C declares for it
+
+C can let the program's loader choose which function a symbol calls, once, when
+the program starts: `__attribute__((ifunc("resolver")))` on a declaration
+makes the symbol whatever function `resolver` answers. Libraries use it to pick
+a version of a function that suits the processor. Every C caller still calls
+the symbol through the type the declaration states, and so does an `extern`:
+the compiler holds it to that type as it holds a plain function.
+
+`squares/linea.json`:
+
+```json
+{ "extern": ["sums"], "native": ["sums/sums.c"] }
+```
+
+`squares/sums/sums.c`:
+
+```c
+#include <stdint.h>
+
+static int64_t sum_squares_closed_form(int64_t count) {
+    return count * (count + 1) * (2 * count + 1) / 6;
+}
+
+/* The loader calls this once, as the program starts, and binds the symbol
+ * `sum_squares` to the function it answers. */
+static void *sum_squares_resolve(void) { return (void *)sum_squares_closed_form; }
+
+int64_t sum_squares(int64_t count) __attribute__((ifunc("sum_squares_resolve")));
+```
+
+`squares/sums/sums.lin`:
+
+```linea
+// C declares `int64_t sum_squares(int64_t)`, whichever function the loader
+// binds the symbol to, so this declaration says the same.
+extern fn sum_squares(count: Int64) -> Int64
+
+pub fn up_to(count: Int64) -> Int64 {
+    sum_squares(count)
+}
+```
+
+`squares/main.lin`:
+
+```linea
+import std.io
+import sums
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{sums.up_to(10)}")?
+    .Ok(0)
+}
+```
+
+```
+385
+```
+
+An `extern` of another type is refused, as it is for a plain function:
+
+<!-- guide: edit squares/sums/sums.lin 3 extern fn sum_squares(count: Int64) -> Int64 -->
+```linea
+extern fn sum_squares(count: Int32) -> Int64
+```
+
+<!-- guide: edit squares/sums/sums.lin 5 pub fn up_to(count: Int64) -> Int64 { -->
+```linea
+pub fn up_to(count: Int32) -> Int64 {
+```
+
+```
+error[T-ExternPrototype]: C declares `int64_t sum_squares(int64_t)`, and this declaration calls it as `int64_t sum_squares(int32_t)`
+ --> squares/sums/sums.lin:3:30
+  |
+3 | extern fn sum_squares(count: Int32) -> Int64
+  |                              ^^^^^ C takes `int64_t` here
+  |
+  = note: `sum_squares` is declared by `sums/sums.c`
+  = help: declare `count` as `Int64`, or a newtype over it, the Linea type of C's `int64_t`
+```
+
+So is an `ifunc` declared without a prototype, `int64_t sum_squares()`, which
+states no parameter types to hold the `extern` to.
+
+What the resolver answers is believed, as the rest of a C declaration is: a
+resolver answering a function of another type breaks C's own rules, and the
+compiler cannot see it.
+
 ### `headers` names the C library's declarations
 
 A project's own C under `"native"` declares the functions it defines. A
@@ -2170,6 +2259,8 @@ write one, check each of these against the C library's documentation:
    its copies at once, and that the object is never freed while a copy
    lives: C takes the newtype only `read`, and the wrapper never frees the
    object through an address it took out of one.
+9. An `ifunc`'s resolver answers a function of the type its declaration
+   states.
 
 The compiler holds the rest: each `extern` matches its C prototype in the
 number, width, signedness and passing of its parameters and in its result, an

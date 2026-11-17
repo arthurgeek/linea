@@ -1,0 +1,5 @@
+import twice
+
+fn main() -> UInt8 {
+    UInt8(twice.of(21))
+}

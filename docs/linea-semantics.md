@@ -5095,8 +5095,11 @@ through an `__asm__` label or `overloadable`, as glibc sends `lseek` to
 C declaration must give it the same one, and a symbol no Linea declaration
 can be emitted under is refused, as is one in the runtime's `linea_`
 namespace, one the runtime owns, and one Linea or LLVM emits its own code
-under (`lin.`, `lcb.`, `llvm.`). A symbol C makes an `ifunc`, an alias, a
-variable or anything but a function it declares or defines is refused. Every
+under (`lin.`, `lcb.`, `llvm.`). A symbol C makes an alias, a variable or
+anything but a function it declares or defines is refused. A symbol C makes an
+`ifunc` is held to the function type C declares for it, as a function is; the
+`ifunc` does not say how C extends an enumeration narrower than 32 bits, so
+such an enumeration matches nothing there. Every
 `extern` of one name must reach one symbol in every root that declares it,
 and every `extern` reaching one symbol must imply one prototype. An
 `export` is held to the same rules wherever its root's C declarations declare

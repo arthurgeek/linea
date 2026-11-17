@@ -1,0 +1,5 @@
+extern fn twice_of(value: Int32) -> Int32
+
+pub fn of(value: Int32) -> Int32 {
+    twice_of(value)
+}

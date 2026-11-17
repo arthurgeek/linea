@@ -345,9 +345,15 @@ fn heldAcross(reporter: *Reporter, subject: Subject, units: []const Unit, found:
                 try reporter.unread(subject, "`cc` names no symbol for it");
                 return null;
             };
-            if (linked.kind != .function) {
-                try reporter.notFunction(subject, unit.shown, linked.kind);
-                return null;
+            switch (linked.kind) {
+                // The loader binds an `ifunc` to the function its resolver
+                // answers, and C calls that function through the type the
+                // declaration states, which `compare` holds the `extern` to.
+                .function, .ifunc => {},
+                .alias, .other => {
+                    try reporter.notFunction(subject, unit.shown, linked.kind == .alias);
+                    return null;
+                },
             }
             const name = callableSymbol(linked.symbol) orelse {
                 try reporter.unnameable(subject, unit.shown, linked.symbol);
@@ -519,21 +525,23 @@ test "an error at a probe is not a failure to read the declarations" {
 
 /// What the IR says of one function: the symbol C calls it by, as the IR
 /// spells it, what the IR makes of that symbol, and the function's signature
-/// where the IR declares or defines it.
+/// where the IR declares or defines it, or states it for an `ifunc`.
 const Linked = struct {
     symbol: []const u8,
     kind: Kind,
     signature: ?Signature,
 
     /// A symbol is held to a prototype only where the IR declares or
-    /// defines it as a function. Every other kind of global, whatever the C
-    /// declaration says, names code or data no prototype describes.
+    /// defines it as a function, or as an `ifunc` of the function type C
+    /// declares. Every other kind of global, whatever the C declaration
+    /// says, names code or data no prototype describes.
     const Kind = enum {
         function,
+        /// An `ifunc`, bound when the program loads to the function its
+        /// resolver answers, which C calls through the declared type.
+        ifunc,
         /// An `alias` of another symbol.
         alias,
-        /// An `ifunc`, resolved to some function when the program loads.
-        ifunc,
         /// A variable, or anything else that is not a function.
         other,
     };
@@ -543,6 +551,11 @@ const Linked = struct {
 const Signature = struct {
     result: Passed,
     params: []const Passed,
+    /// Whether the IR states how a value narrower than 32 bits is extended.
+    /// A `declare` or `define` carries `signext` or `zeroext` where C extends
+    /// one; an `ifunc` states only the function's type, so the absence of
+    /// either says nothing there.
+    extensions: bool = true,
 };
 
 /// How the IR passes one value: an integer of `bits`, extended by sign or by
@@ -563,6 +576,9 @@ const IrIndex = struct {
     targets: std.StringHashMapUnmanaged(?[]const u8) = .empty,
     /// What the last global line of each IR name makes of it.
     kinds: std.StringHashMapUnmanaged(Linked.Kind) = .empty,
+    /// The function type the last `ifunc` line of each IR name states, from
+    /// its result to the end of the line.
+    ifunc_types: std.StringHashMapUnmanaged([]const u8) = .empty,
     /// The last `declare` or `define` line of each IR name.
     functions: std.StringHashMapUnmanaged(Declared) = .empty,
     /// Every `declare` or `define` line, in order, by the symbol an `extern`
@@ -582,12 +598,10 @@ const IrIndex = struct {
                     const target = try index.targets.getOrPut(arena, name);
                     if (!target.found_existing) target.value_ptr.* = if (std.mem.indexOf(u8, line, " ptr @")) |at| irName(line[at + " ptr ".len ..]) else null;
                 }
-                try index.kinds.put(arena, name, if (std.mem.indexOf(u8, line, " alias ") != null)
-                    .alias
-                else if (std.mem.indexOf(u8, line, " ifunc ") != null)
-                    .ifunc
-                else
-                    .other);
+                if (std.mem.indexOf(u8, line, " ifunc ")) |at| {
+                    try index.kinds.put(arena, name, .ifunc);
+                    try index.ifunc_types.put(arena, name, line[at + " ifunc ".len ..]);
+                } else try index.kinds.put(arena, name, if (std.mem.indexOf(u8, line, " alias ") != null) .alias else .other);
                 continue;
             }
             if (!std.mem.startsWith(u8, line, "declare ") and !std.mem.startsWith(u8, line, "define ")) continue;
@@ -608,7 +622,12 @@ const IrIndex = struct {
     fn linkedOf(self: *const IrIndex, arena: std.mem.Allocator, unit: usize, index: usize) !?Linked {
         const global = try std.fmt.allocPrint(arena, "{s}{d}_{d}", .{ symbol_prefix, unit, index });
         const named = (self.targets.get(global) orelse return null) orelse return null;
-        const signature = if (self.functions.get(named)) |declared| signatureOf(arena, declared.line, declared.at) catch null else null;
+        if (self.ifunc_types.get(named)) |stated| {
+            var signature = try ifuncSignature(arena, stated);
+            if (signature) |*held| held.extensions = false;
+            return .{ .symbol = named, .kind = .ifunc, .signature = signature };
+        }
+        const signature = if (self.functions.get(named)) |declared| try signatureOf(arena, declared.line, declared.at) else null;
         // A global of the symbol's name is never a function, so it decides; a
         // function is one only where a `declare` or `define` gives a signature.
         const kind = self.kinds.get(named) orelse if (signature != null) Linked.Kind.function else .other;
@@ -668,6 +687,17 @@ fn signatureOf(arena: std.mem.Allocator, line: []const u8, at: usize) !?Signatur
     try appendPassed(arena, &params, line[start..close]);
     const head = line[std.mem.indexOfScalar(u8, line, ' ').? + 1 .. at];
     return .{ .result = passedOf(head), .params = params.items };
+}
+
+/// The signature an `ifunc` line states after the word `ifunc`, as
+/// `i64 (i64), ptr @resolve`: its result, then its parameters.
+fn ifuncSignature(arena: std.mem.Allocator, stated: []const u8) !?Signature {
+    const open = std.mem.indexOfScalar(u8, stated, '(') orelse return null;
+    if (open == 0) return null;
+    // `signatureOf` reads the result between the line's first space and the
+    // name, so the stated type is read as a line `ifunc RESULT (PARAMS)`.
+    const line = try std.fmt.allocPrint(arena, "ifunc {s}", .{stated});
+    return signatureOf(arena, line, "ifunc ".len + open - 1);
 }
 
 /// Appends how the IR passes the parameter `piece` spells, where it spells
@@ -769,9 +799,16 @@ test "the IR names the symbol C reaches and how it passes each value" {
     try testing.expectEqual(@as(?Linked, null), try index.linkedOf(arena, 0, 2));
     const resolved =
         \\@linea_symbol_0_0 = constant ptr @twice, align 8
-        \\@twice = ifunc i64 (i64), ptr @resolve
+        \\@twice = ifunc i8 (i64, ptr), ptr @resolve
     ;
-    try testing.expectEqual(Linked.Kind.ifunc, (try (try IrIndex.of(arena, resolved)).linkedOf(arena, 0, 0)).?.kind);
+    const ifunc = (try (try IrIndex.of(arena, resolved)).linkedOf(arena, 0, 0)).?;
+    try testing.expectEqual(Linked.Kind.ifunc, ifunc.kind);
+    const stated = ifunc.signature.?;
+    try testing.expect(!stated.extensions);
+    try testing.expectEqual(Passed{ .bits = 8, .kind = .integer }, stated.result);
+    try testing.expectEqual(@as(usize, 2), stated.params.len);
+    try testing.expectEqual(Passed{ .bits = 64, .kind = .integer }, stated.params[0]);
+    try testing.expectEqual(Passed.Kind.pointer, stated.params[1].kind);
     const variable =
         \\@linea_symbol_0_0 = constant ptr @count, align 8
         \\@count = global i32 0, align 4
@@ -812,16 +849,20 @@ fn widenEnumerations(ctype: *CType, signature: Signature) void {
     const function = &ctype.shape.function;
     const params = @constCast(function.params);
     if (params.len == signature.params.len) {
-        for (params, signature.params) |*param, passed| widen(param, passed);
+        for (params, signature.params) |*param, passed| widen(param, passed, signature.extensions);
     }
-    widen(@constCast(function.result), signature.result);
+    widen(@constCast(function.result), signature.result, signature.extensions);
 }
 
-fn widen(c: *CType, passed: Passed) void {
+/// Gives the enumeration `c` the width and extension `passed` states. Where
+/// the IR does not state extensions, an enumeration narrower than 32 bits is
+/// left unknown, which matches nothing, since its signedness is how C passes it.
+fn widen(c: *CType, passed: Passed, extensions: bool) void {
     if (c.shape != .enumeration) return;
     const bits = passed.bits orelse return;
     switch (bits) {
-        8, 16, 32, 64 => {},
+        8, 16 => if (!extensions) return,
+        32, 64 => {},
         else => return,
     }
     // Narrower than 32 bits, the extension says the signedness; a 32- or
@@ -847,7 +888,8 @@ pub const CType = struct {
         /// An enumeration, whose integer type the C compiler chooses from its
         /// values, or from the type it is declared over. Null until the IR
         /// says how C passes it, which it says only for a parameter or a
-        /// result, not behind a pointer or in a callback.
+        /// result, not behind a pointer or in a callback, and for an `ifunc`
+        /// only where it is 32 or 64 bits wide.
         enumeration: ?Enumeration,
         float: u8,
         void,
@@ -1316,12 +1358,10 @@ const Reporter = struct {
         );
     }
 
-    fn notFunction(self: *Reporter, subject: Subject, shown: []const u8, kind: Linked.Kind) !void {
-        const what = switch (kind) {
-            .alias => "an alias of another function",
-            .ifunc => "an `ifunc`, which the program's loader resolves to some function",
-            .other, .function => "something that is not a function",
-        };
+    /// Reports a symbol C makes an alias, or anything else that is not a
+    /// function, where `alias` says which.
+    fn notFunction(self: *Reporter, subject: Subject, shown: []const u8, alias: bool) !void {
+        const what = if (alias) "an alias of another function" else "something that is not a function";
         try self.report(
             self.atName(subject, "C's symbol for this is not a function its declaration describes"),
             try self.declaredBy(subject, shown),
@@ -1535,7 +1575,7 @@ fn untranslatable(a: std.mem.Allocator, c: CType) !?[]const u8 {
     return switch (c.shape) {
         .boolean => "C's `bool` has no Linea type that crosses: call it through a C function, built under \"native\", that takes an integer",
         .object => "C takes a structure by value, which no Linea type crosses as: call it through a C function, built under \"native\", that takes its address",
-        .enumeration => |width| if (width == null) try std.fmt.allocPrint(a, "C's `{s}` is an enumeration behind a pointer or in a callback, whose width only the C compiler knows: call it through a C function, built under \"native\", that takes an integer", .{c.spelled}) else null,
+        .enumeration => |width| if (width == null) try std.fmt.allocPrint(a, "C's `{s}` is an enumeration whose width or extension the C compiler does not state here, as it does not behind a pointer, in a callback, or through an `ifunc` for one narrower than 32 bits: call it through a C function, built under \"native\", that takes an integer", .{c.spelled}) else null,
         .void, .function, .other => try std.fmt.allocPrint(a, "C's `{s}` has no Linea type that crosses", .{c.spelled}),
         .float => |bits| if (bits != 64) try std.fmt.allocPrint(a, "C's `{s}` has no Linea type that crosses", .{c.spelled}) else null,
         else => null,
