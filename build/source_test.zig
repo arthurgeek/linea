@@ -18,7 +18,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";

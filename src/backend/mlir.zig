@@ -3678,7 +3678,7 @@ test "aggregate tail calls use the final return destination only across an empty
         defer output.deinit();
         const link_symbols = try linkSymbols(gpa, &module, &.{});
         defer gpa.free(link_symbols);
-        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, null, link_symbols);
+        try emitFunction(gpa, &output.writer, &module, &mir, &map, source.path, .at(0), 0, .{}, link_symbols);
         const forwards = shape == .direct or shape == .copied_join;
         try testing.expectEqual(forwards, std.mem.indexOf(u8, output.written(), "func.call @lin.tail(%sret,") != null);
         try testing.expectEqual(!forwards, std.mem.indexOf(u8, output.written(), "%rs") != null);
