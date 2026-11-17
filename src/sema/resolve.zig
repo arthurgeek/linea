@@ -893,6 +893,11 @@ pub const Resolution = struct {
     /// block is resolved, so a reader of this chain does not decide ownership
     /// a second time.
     under_decl: Chain(.newest_first) = .empty,
+    /// The rows of `under` and of `under_decl` again, each chained under its
+    /// member's name as well, so a lookup that knows the name it wants walks
+    /// the members of that name and not every member the type declares.
+    under_named: Chain(.newest_first) = .empty,
+    under_decl_named: Chain(.newest_first) = .empty,
     /// Which namespace each primitive's name opens.
     ///
     /// A primitive is declared by no module, so the namespace its name opens is
@@ -1155,6 +1160,8 @@ pub const Resolution = struct {
         gpa.free(self.namespaced);
         self.under.deinit(gpa);
         self.under_decl.deinit(gpa);
+        self.under_named.deinit(gpa);
+        self.under_decl_named.deinit(gpa);
         gpa.free(self.builtin_namespaces);
         gpa.free(self.ambient_impls);
         gpa.free(self.tokens);
@@ -1761,6 +1768,28 @@ pub const Resolution = struct {
     /// declares and never what the program holds.
     pub fn membersOfType(self: *const Resolution, d: DeclId) Members {
         return .{ .of = self, .rows = self.under_decl.walk(@intFromEnum(d)) };
+    }
+
+    /// `membersOfType`, less the members not named `name`. The chain is
+    /// hashed, so a walk may also offer a member of another name, which the
+    /// caller's own name check drops.
+    ///
+    /// Costs one lookup and the members of that name.
+    pub fn membersOfTypeNamed(self: *const Resolution, d: DeclId, name: StringId) Members {
+        return .{ .of = self, .rows = self.under_decl_named.walk(namedMemberKey(@intFromEnum(d), name)) };
+    }
+
+    /// `membersUnder`, less the members not named `name`, as
+    /// `membersOfTypeNamed` is.
+    pub fn membersUnderNamed(self: *const Resolution, m: ModuleId, owner: StringId, name: StringId) Members {
+        return .{ .of = self, .rows = self.under_named.walk(namedMemberKey(underKey(m, owner), name)) };
+    }
+
+    /// The key a member is chained under by its owner's key and its name.
+    fn namedMemberKey(owner: u64, name: StringId) u64 {
+        var h: std.hash.Wyhash = .init(owner);
+        h.update(std.mem.asBytes(&name));
+        return h.final();
     }
 
     test "a type's members are the ones its inherent blocks wrote, in order" {
@@ -4937,6 +4966,10 @@ fn resolveInternal(
     errdefer under.deinit(gpa);
     var under_decl: Chain(.newest_first) = .empty;
     errdefer under_decl.deinit(gpa);
+    var under_named: Chain(.newest_first) = .empty;
+    errdefer under_named.deinit(gpa);
+    var under_decl_named: Chain(.newest_first) = .empty;
+    errdefer under_decl_named.deinit(gpa);
 
     // The declaration each inherent `impl` names, as the head walk settled
     // it. Sized by the inherent blocks and read once per member below, so
@@ -4956,9 +4989,12 @@ fn resolveInternal(
         row -= 1;
         const key = Resolution.underKey(namespace_rows[row].module, namespace_rows[row].owner);
         try under.note(gpa, key, @intCast(row));
+        const name = r.bindings.items[namespace_rows[row].binding.index()].name;
+        try under_named.note(gpa, Resolution.namedMemberKey(key, name), @intCast(row));
         const member = r.bindings.items[namespace_rows[row].binding.index()].decl;
         if (names_of_impl.get(r.implEnclosing(member))) |d| {
             try under_decl.note(gpa, @intFromEnum(d), @intCast(row));
+            try under_decl_named.note(gpa, Resolution.namedMemberKey(@intFromEnum(d), name), @intCast(row));
         }
     }
 
@@ -5055,6 +5091,8 @@ fn resolveInternal(
         .namespaced = namespace_rows,
         .under = under,
         .under_decl = under_decl,
+        .under_named = under_named,
+        .under_decl_named = under_decl_named,
         .builtin_namespaces = builtin_rows,
         .ambient_impls = provided_rows,
         .tokens = tokens,

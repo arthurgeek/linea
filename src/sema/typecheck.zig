@@ -3330,6 +3330,12 @@ pub const Reach = struct {
         var bounds: std.ArrayList(types_mod.BoundTrait) = .empty;
         defer bounds.deinit(gpa);
         try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
+        // Every key already in `out` and every one added here, so a key
+        // reached along two routes is appended once without comparing it with
+        // each key before it.
+        var present: AssociatedSet = .empty;
+        defer present.deinit(gpa);
+        for (out.items) |entry| try present.put(gpa, entry, {});
         const first = out.items.len;
         for (bounds.items) |bound| {
             const trait = bound.trait;
@@ -3337,38 +3343,45 @@ pub const Reach = struct {
             while (members.next()) |sig| {
                 if (!settlesAType(self.ast, sig)) continue;
                 if (wanted) |name| if (self.ast.tokenName(self.ast.declName(sig)) != name) continue;
-                try appendAssociated(gpa, out, .{ .sig = sig, .trait = trait, .args = bound.args });
+                try appendAssociated(gpa, out, &present, .{ .sig = sig, .trait = trait, .args = bound.args });
             }
         }
         if (wanted != null and out.items.len != first) return;
-        const bound_end = out.items.len;
         // Bare parameters and projections expose only promised members.
         if (self.typing.get(held) == .parameter) return;
+        var promised: std.AutoHashMapUnmanaged(StringId, void) = .empty;
+        defer promised.deinit(gpa);
+        for (out.items[first..]) |bound| try promised.put(gpa, self.ast.tokenName(self.ast.declName(bound.sig)), {});
         var candidates: std.ArrayList(Applicable) = .empty;
         defer candidates.deinit(gpa);
         try self.eachDirectKind(gpa, held, &candidates, wanted, .associated, false);
         var keys: std.ArrayList([]const TypeId) = .empty;
         defer keys.deinit(gpa);
         for (candidates.items) |candidate| {
-            const name = self.ast.tokenName(self.ast.declName(candidate.sig));
-            var promised = false;
-            for (out.items[first..bound_end]) |bound| {
-                if (self.ast.tokenName(self.ast.declName(bound.sig)) == name) {
-                    promised = true;
-                    break;
-                }
-            }
-            if (promised) continue;
+            if (promised.contains(self.ast.tokenName(self.ast.declName(candidate.sig)))) continue;
             keys.clearRetainingCapacity();
             _ = try self.index.keys(gpa, self.impls, self.typing, candidate.trait, held, self.scope, &keys);
-            for (keys.items) |args| try appendAssociated(gpa, out, .{ .sig = candidate.sig, .trait = candidate.trait, .args = args });
+            for (keys.items) |args| try appendAssociated(gpa, out, &present, .{ .sig = candidate.sig, .trait = candidate.trait, .args = args });
         }
     }
 
-    fn appendAssociated(gpa: std.mem.Allocator, out: *std.ArrayList(Associated), candidate: Associated) !void {
-        for (out.items) |present| {
-            if (present.sig == candidate.sig and present.trait == candidate.trait and std.mem.eql(TypeId, present.args, candidate.args)) return;
+    /// Associated keys compared whole: the member, its trait and the trait's
+    /// arguments.
+    const AssociatedSet = std.HashMapUnmanaged(Associated, void, struct {
+        pub fn hash(_: @This(), key: Associated) u64 {
+            var h: std.hash.Wyhash = .init(@intFromEnum(key.sig));
+            h.update(std.mem.asBytes(&key.trait));
+            h.update(std.mem.sliceAsBytes(key.args));
+            return h.final();
         }
+        pub fn eql(_: @This(), a: Associated, b: Associated) bool {
+            return a.sig == b.sig and a.trait == b.trait and std.mem.eql(TypeId, a.args, b.args);
+        }
+    }, std.hash_map.default_max_load_percentage);
+
+    fn appendAssociated(gpa: std.mem.Allocator, out: *std.ArrayList(Associated), present: *AssociatedSet, candidate: Associated) !void {
+        const entry = try present.getOrPut(gpa, candidate);
+        if (entry.found_existing) return;
         try out.append(gpa, candidate);
     }
 
@@ -3537,13 +3550,15 @@ pub const Reach = struct {
         const first = out.items.len;
         const observed = self.typing.observedReceiver(held).receiver;
 
+        // A lookup that knows the name walks the members of that name alone;
+        // completion, which asks for every name, walks them all.
         if (self.typing.declOfType(observed)) |origin| {
-            var rows = self.res.membersOfType(origin);
+            var rows = if (wanted) |name| self.res.membersOfTypeNamed(origin, name) else self.res.membersOfType(origin);
             while (rows.next()) |b| try self.appendOwn(gpa, held, b, out, wanted, kind, dropped);
         } else {
             for (self.res.builtin_namespaces) |n| {
                 if (n.of != observed) continue;
-                var rows = self.res.membersUnder(n.module, n.owner);
+                var rows = if (wanted) |name| self.res.membersUnderNamed(n.module, n.owner, name) else self.res.membersUnder(n.module, n.owner);
                 while (rows.next()) |b| try self.appendOwn(gpa, held, b, out, wanted, kind, dropped);
             }
         }
