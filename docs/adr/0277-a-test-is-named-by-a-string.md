@@ -29,8 +29,8 @@ way, and a reader typing it back as a filter had to retype the underscores.
 
 A test is written `test "what it checks" { … }`, and with a written result
 `test "what it checks" -> Result[(), E] { … }`. `test trap "…" { … }` marks a
-test that must stop the program. The string is the test's name; there is no
-parameter list, and `test fn` is not a test.
+test that must stop the program. The string is the test's name, and there is
+no parameter list.
 
 - A test binds no name. Nothing in the language can write a reference to a
   string, so the rules about a test's name in the namespace are gone: a test
@@ -46,8 +46,7 @@ parameter list, and `test fn` is not a test.
   writing `.` and `\` as `\.` and `\\`, so the name stays one spelling of one
   test. `linea test --filter TEXT` runs the tests whose reported names hold
   `TEXT`.
-- `test fn name()` is refused under [S-Test] with a help writing the string, and
-  a fix that puts it in place of `fn name()`.
+- A `test` followed by anything but a string is refused ([S-Test]).
 
 Everything else [S-Test] says stands: where a test may sit, no visibility, no
 `Self` or implementation parameters, `where` refused, and an omitted result
@@ -65,11 +64,6 @@ The rules removed are the test-named-`main` diagnostic, the refusal of an
 expression naming a test, and the resolver's checks of a test's parameters, now
 the parser's at the brackets or parentheses written after the name.
 
-Every test in the repository was rewritten mechanically: underscores became
-spaces, except inside an identifier the file declares as a function, which keeps
-its underscores so a name like `"each_allocation_failure walks every attempt"`
-still names the function it tests.
-
 A reported name can hold spaces, so a shell user quotes it when passing it to
 `--filter`. A dot in a test's name is written `\.` in the report, which a filter
 matches as written.
@@ -81,11 +75,9 @@ declaration nothing can name. And a name a reader writes as a sentence would go
 on being spelled with underscores, in source and in every report. Rejected
 because every rule it keeps exists only to manage a name nobody uses.
 
-**Accept both forms.** Lets old code keep compiling. Rejected because the
-language is unreleased and has nothing to stay compatible with, and two
-spellings of one declaration would put the namespace rules back for one of
-them: the formatter, the grammar, the language server and the runner would each
-answer twice.
+**Accept both forms.** Rejected because two spellings of one declaration
+would put the namespace rules back for one of them: the formatter, the grammar,
+the language server and the runner would each answer twice.
 
 **A string beside an identifier, `test fn name() "description"`.** Keeps an
 identifier for tools and adds prose for reports. Rejected because it names one

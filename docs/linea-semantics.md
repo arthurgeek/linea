@@ -399,9 +399,8 @@ character and holds no control character: `linea test` prints it on one line
 of its report and hands it to the test binary as an argument. A test takes no
 parameters and no type parameters, since the compiler writes its one call and
 has nothing to pass or settle; brackets or parentheses after the name are
-refused. `test fn name()` does not declare a test, and is refused with a help
-that writes the string the name would be. A test has **no visibility**: `pub`
-would export something no import can name. A test may sit at module scope,
+refused, and so is a `test` followed by anything but a string. A test has
+**no visibility**: `pub` would export something no import can name. A test may sit at module scope,
 inside an inherent `impl` beside the members it tests, or inside a trait
 declaration beside the operation it tests. Inside an implementation for a trait
 it is refused, because a trait implementation declares only what its trait

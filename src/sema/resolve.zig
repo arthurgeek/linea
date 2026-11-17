@@ -5538,8 +5538,8 @@ pub fn refuseSeveralEntryPoints(program: *const Program, sink: *Sink) !bool {
 
 pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
     if (ast.declTag(d) != .function) return false;
-    // A test written as a function is refused by [S-Test], and is still not
-    // a function the runtime starts.
+    // A function after a `test` the parser refused is still marked a test,
+    // and is not a function the runtime starts.
     if (ast.declIsTest(d)) return false;
     if (ast.memberOwner(d) != TokenId.none) return false;
     const name = ast.declName(d);
@@ -7399,8 +7399,8 @@ const Resolver = struct {
     };
 
     /// Notes a test of the module being declared under the name its string
-    /// decodes to. A name the parser refused, an interpolated or multi-line
-    /// one or one written as a function's, names no test and is not noted.
+    /// decodes to. A name the parser refused, interpolated, multi-line or not
+    /// a string at all, names no test and is not noted.
     fn noteTest(self: *Resolver, d: DeclId) !void {
         if (self.ast.declTag(d) != .function) return;
         const name = self.ast.declName(d);

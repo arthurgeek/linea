@@ -2,7 +2,7 @@ error[S-Test]: a test is named by a string
  --> tests/decl/only_a_function_is_a_test.lin:2:1
   |
 2 | test struct Box { x: UInt8 }
-  | ^^^^ write `test "what it checks" { … }`; this declares no body to run
+  | ^^^^ write the test's name as a string after `test`
 error[N-Unused]: `Box` is never used
  --> tests/decl/only_a_function_is_a_test.lin:2:13
   |

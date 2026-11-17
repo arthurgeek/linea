@@ -13,7 +13,6 @@ const Interner = @import("../support/interner.zig").Interner;
 const StringId = @import("../support/interner.zig").StringId;
 const Code = @import("../diagnostics/diagnostic.zig").Code;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
-const diagnostic_mod = @import("../diagnostics/diagnostic.zig");
 const text_mod = @import("../support/text.zig");
 const lexer_mod = @import("../lexer/lexer.zig");
 const tokenize = lexer_mod.tokenize;
@@ -879,8 +878,6 @@ const Parser = struct {
             // Whether what follows is the one form a test may be, read before
             // the dispatch consumes it.
             const at_test_name = is_test and self.atTestName();
-            const at_function = self.cursor.at(.keyword_fn);
-            if (is_test and at_function) try self.refuseTestFunction();
 
             const declared: ?node.DeclId = if (at_test_name)
                 try self.parseTest()
@@ -929,12 +926,12 @@ const Parser = struct {
                 } else {
                     self.builder.markVisibility(d, visibility, at);
                 }
-                if (is_test and !at_test_name and !at_function) {
+                if (is_test and !at_test_name) {
                     try self.reportAt(
                         .s_test,
                         at,
                         "a test is named by a string",
-                        "write `test \"what it checks\" { … }`; this declares no body to run",
+                        "write the test's name as a string after `test`",
                     );
                 } else if (is_test and visibility != .private) {
                     // Nothing in the language may name a test: the compiler
@@ -1402,14 +1399,12 @@ const Parser = struct {
                         "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
-                if (self.cursor.at(.keyword_fn)) {
-                    try self.refuseTestFunction();
-                } else if (!self.atTestName()) {
+                if (!self.atTestName()) {
                     try self.reportAt(
                         .s_test,
                         at,
                         "a test is named by a string",
-                        "write `test \"what it checks\" { … }`; this declares no body to run",
+                        "write the test's name as a string after `test`",
                     );
                 }
             }
@@ -1917,29 +1912,24 @@ const Parser = struct {
                         "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
-                if (self.cursor.at(.keyword_fn)) {
-                    try self.refuseTestFunction();
-                } else if (!self.atTestName()) {
+                if (!self.atTestName()) {
                     try self.reportAt(
                         .s_test,
                         at,
                         "a test is named by a string",
-                        "write `test \"what it checks\" { … }`; this declares no body to run",
+                        "write the test's name as a string after `test`",
                     );
                 }
             }
 
-            // Only a test's name or a function is marked a test. A projection
-            // or a type written after `test` was refused above and stays the
-            // member it is, so nothing reports it again as a test or as a name
-            // nothing uses. A function written after `test` keeps its body, so
-            // it is read with one and checked as the test it was meant to be.
+            // Only a test's name is marked a test. Whatever else follows a
+            // `test` was refused above and stays the member it is, so nothing
+            // reports it again as a test or as a name nothing uses.
             const at_test_name = is_test and self.atTestName();
-            const tests_a_function = is_test and (at_test_name or self.cursor.at(.keyword_fn));
             const declared: ?node.DeclId = if (at_test_name)
                 try self.parseTest()
             else if (self.cursor.at(.keyword_fn))
-                try (if (is_test) self.parseFunction(.member) else self.parseSignature())
+                try self.parseSignature()
             else if (self.atProjection())
                 try self.parseProjection(.signature)
             else if (self.atAssociatedType())
@@ -1954,8 +1944,8 @@ const Parser = struct {
                 // implement -- so `pub` on one would say nothing.
                 self.builder.markVisibility(d, .private, at);
                 self.builder.markOwner(d, name);
-                self.builder.markTest(d, tests_a_function);
-                self.builder.markExpectedTrap(d, tests_a_function and expects_trap);
+                self.builder.markTest(d, at_test_name);
+                self.builder.markExpectedTrap(d, at_test_name and expects_trap);
             } else {
                 // A `test` followed by no function was reported where it was
                 // read, and is one mistake, as is an `export` the trait's
@@ -3287,70 +3277,6 @@ const Parser = struct {
         all[32] = 0x7f;
         break :blk all;
     };
-
-    /// Refuses `test fn name()`, read with the cursor at its `fn`: a test is
-    /// named by a string. The help writes the name that string would be,
-    /// the identifier's words apart, and the fix puts it in place of
-    /// everything from `fn` to the parameter list's `)`. The function is read
-    /// after this as it was written, so its body is still checked.
-    fn refuseTestFunction(self: *Parser) !void {
-        const fn_at = self.cursor.current();
-        const name = self.cursor.ahead(1) orelse return self.reportAt(.s_test, fn_at, "a test is named by a string", "write `test \"what it checks\" { … }`");
-        if (self.cursor.tags[name.index()] != .identifier) {
-            return self.reportAt(.s_test, fn_at, "a test is named by a string", "write `test \"what it checks\" { … }`");
-        }
-        const spelled = self.cursor.textOf(name);
-        const string = try std.fmt.allocPrint(self.sink.arena, "\"{s}\"", .{spelled});
-        for (string[1 .. string.len - 1]) |*c| {
-            if (c.* == '_') c.* = ' ';
-        }
-
-        // The `)` that closes the parameter list: past the name and any type
-        // parameters, the parenthesis that closes the first one opened. One
-        // walk over the header's tokens, which ends at the first brace.
-        const tags = self.cursor.tags;
-        var closes: ?TokenId = null;
-        var depth: usize = 0;
-        var i = name.index() + 1;
-        while (i < tags.len) : (i += 1) {
-            const tag = tags[i];
-            if (tag.isTrivia()) continue;
-            switch (tag) {
-                .l_paren, .l_bracket => depth += 1,
-                .r_paren, .r_bracket => {
-                    if (depth == 0) break;
-                    depth -= 1;
-                    if (depth == 0 and tag == .r_paren) {
-                        closes = TokenId.at(i);
-                        break;
-                    }
-                },
-                .l_brace, .r_brace, .eof => break,
-                else => if (depth == 0) break,
-            }
-        }
-
-        const help = try std.fmt.allocPrint(self.sink.arena, "write `test {s}`", .{string});
-        const notes = try self.sink.arena.dupe([]const u8, &.{help});
-        const span = self.cursor.spanAt(fn_at);
-        const labels = try self.sink.arena.dupe(Label, &.{.{ .file = self.file, .span = span, .message = "a test is not declared as a function" }});
-        const fixes: []const diagnostic_mod.Fix = if (closes) |close| fixes: {
-            const edits = try self.sink.arena.dupe(diagnostic_mod.Edit, &.{.{
-                .file = self.file,
-                .span = .{ .start = span.start, .end = self.cursor.spanAt(close).end },
-                .text = string,
-            }});
-            break :fixes try self.sink.arena.dupe(diagnostic_mod.Fix, &.{.{ .kind = .test_name, .note = 0, .edits = edits }});
-        } else &.{};
-        try self.sink.add(.{
-            .severity = .err,
-            .code = .s_test,
-            .message = "a test is named by a string",
-            .labels = labels,
-            .notes = notes,
-            .fixes = fixes,
-        });
-    }
 
     fn parseContractPath(self: *Parser) !node.ContractPath {
         const start = self.cursor.current();
@@ -10461,7 +10387,7 @@ test "a test is named by a string and has a function's result and body" {
     );
     try testing.expectEqual(@as(u32, 0), plain.errors);
 
-    // A test is not declared as a function.
+    // `test` followed by anything but a string is not a test.
     const declared = try parseProgramText(gpa,
         \\test fn a_thing_holds() -> Result[(), IoError] { return .Ok(()) }
         \\fn main() -> UInt8 { 0 }

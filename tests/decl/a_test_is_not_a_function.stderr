@@ -1,7 +1,0 @@
-error[S-Test]: a test is named by a string
- --> tests/decl/a_test_is_not_a_function.lin:8:6
-  |
-8 | test fn doubling_two_gives_four() {
-  |      ^^ a test is not declared as a function
-  |
-  = help: write `test "doubling two gives four"`

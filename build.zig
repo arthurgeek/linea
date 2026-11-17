@@ -2740,7 +2740,6 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/ranges/a_chain_in_a_pattern_is_one_mistake.lin",
     "tests/decl/impl_takes_no_modifier.lin",
     "tests/decl/an_impl_is_not_a_test.lin",
-    "tests/decl/a_test_is_not_a_function.lin",
     "tests/decl/a_test_is_not_generic.lin",
     "tests/decl/a_test_takes_no_parameters.lin",
     "tests/decl/only_a_function_is_a_test.lin",
