@@ -587,20 +587,24 @@ pub const runtime_functions = [_]Signature{
     // retains only the task record; neither success nor failure retains the
     // preparing carrier. Cancellation joins that same unstarted record.
     .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } }, .migration_contract = .neutral },
-    .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
+    .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } }, .migration_contract = .neutral },
     // The caller only exchanges fixed-stack request/result storage under the
     // queue's park lock. The owner executes the job in its own task; no callback
     // runs here. Completed-park normalization retires carrier-local state before
     // the caller resumes and reacquires the queue lock on another carrier.
     .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } }, .migration_contract = .neutral },
-    .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`task.own`" } } },
-    .{ .symbol = "linea_owner_answer", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } } },
-    .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
-    .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
-    .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
+    // The owning task invokes jobs in Linea after next returns. These entries
+    // exchange bytes under the queue's source lock and retain logical loop
+    // identities, never carrier TLS. Job-side native guards still bind an
+    // owner that actually acquires a thread-dependent foreign resource.
+    .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`task.own`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_answer", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } }, .migration_contract = .neutral },
     task_start_signature,
     .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } }, .migration_contract = .neutral },
-    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } } },
+    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`choose_left` and `choose_right` on a `session.Chan`" } } },
     .{ .symbol = "linea_chan_offer", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`offer` on a `session.Chan`" } } },
@@ -640,6 +644,30 @@ pub fn signatureOf(name: []const u8) ?*const Signature {
         if (std.mem.eql(u8, signature.symbol, name)) return signature;
     }
     return null;
+}
+
+/// Emitted code also calls compiler-owned entries, which ordinary extern
+/// declarations cannot name. Their contracts use the same registry without
+/// granting declarations access to those privileged signatures.
+pub fn migrationContractOf(name: []const u8) MigrationContract {
+    if (signatureOf(name)) |signature| return signature.migration_contract;
+    for (internal_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, name)) return signature.migration_contract;
+    }
+    for (math_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, name)) return signature.migration_contract;
+    }
+    return .unknown;
+}
+
+test "migration contracts include audited compiler entries without exposing extern declarations" {
+    try testing.expect(signatureOf(task_start_migratable_signature.symbol) == null);
+    try testing.expectEqual(MigrationContract.neutral, migrationContractOf(task_start_migratable_signature.symbol));
+    for (math_functions) |signature| {
+        try testing.expect(signatureOf(signature.symbol) == null);
+        try testing.expectEqual(MigrationContract.neutral, migrationContractOf(signature.symbol));
+    }
+    try testing.expectEqual(MigrationContract.unknown, migrationContractOf("unclassified_user_ffi"));
 }
 
 test "a runtime function is found by its whole symbol" {

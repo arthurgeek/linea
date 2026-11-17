@@ -35,6 +35,36 @@ fn main() -> UInt8 {
         if io.current() != execution {
             panic("a migrated task changed its inherited loop")
         }
+        let before_owner = task.current_carrier().unwrap()
+        let owner = task.own(UInt64(3)).unwrap()
+        let client = owner.client()
+        for _job in 0..2 {
+            let moved = client.call(|inout state: UInt64| {
+                let original = task.current_carrier().unwrap()
+                state += 2
+                var yields = UInt64(0)
+                while yields < 65536 && original == task.current_carrier().unwrap() {
+                    time.sleep(time.Duration.from_nanoseconds(0))
+                    yields += 1
+                }
+                original != task.current_carrier().unwrap()
+            })
+            if !moved {
+                panic("an owning task's queue operations pinned its execution")
+            }
+        }
+        let state = owner.close()
+        if state != 7 {
+            panic("an owning task lost its serialized state")
+        }
+        attempts = 0
+        while attempts < 65536 && before_owner == task.current_carrier().unwrap() {
+            time.sleep(time.Duration.from_nanoseconds(0))
+            attempts += 1
+        }
+        if before_owner == task.current_carrier().unwrap() {
+            panic("an owning task's lifecycle pinned its caller")
+        }
         me.close()
     }
     task.start(body, on: execution).unwrap().close()

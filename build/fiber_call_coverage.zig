@@ -7,7 +7,7 @@ const Row = struct { function: []const u8, line: usize, kind: Kind, target: []co
 const Lookup = *const fn ([]const u8) runtime_symbols.MigrationContract;
 
 fn nativeContract(name: []const u8) runtime_symbols.MigrationContract {
-    return if (runtime_symbols.signatureOf(name)) |signature| signature.migration_contract else .unknown;
+    return runtime_symbols.migrationContractOf(name);
 }
 
 fn symbol(text: []const u8) ?[]const u8 {
