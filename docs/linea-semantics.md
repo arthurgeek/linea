@@ -2821,10 +2821,16 @@ lists are distinct bounds with independently defined associated types:
 `[C: Lookup[UInt64] + Lookup[Bool]]` cannot resolve `C.Elem` through either.
 Source order never selects a bound.
 
-An associated type definition cannot use a settled reference: `type Item =
-Self.Other` would define one associated type through another in the same
-implementation; reading another implementation's is described below. An
-implementation defines each associated type exactly once; duplicate definitions are [N-Duplicate].
+An associated type definition may read another type its own implementation
+settles through `Self`: `type Item = Self.Other`, `type Held =
+Option[Self.Item]` or `type Second = fn(value: Self.First) -> UInt8`. There
+`Self.Name` is what the enclosing implementation settles `Name` to, read through
+that implementation's own trait and arguments, so it names that
+implementation's definition even where another trait implemented for the type
+declares the same name. It is decided as a definition reading another
+implementation's is, below, and a definition that reads back to itself through
+`Self`, `type Item = Self.Item`, is the same cycle. An implementation defines
+each associated type exactly once; duplicate definitions are [N-Duplicate].
 
 What a part, a settled type, a delegated element or an alias names never
 depends on the order declarations are written in: each is decided once, after
@@ -2873,7 +2879,7 @@ A definition may read another implementation's settled type, `type Dual =
 Pong.Dual`, and means what that definition means, whichever implementation is
 written first. A definition that reads back to itself through such references,
 `Ping.Dual` reading `Pong.Dual` reading `Ping.Dual`, or `type Dual = Echo.Dual`
-inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
+or `type Dual = Self.Dual` inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
 once per cycle at the definition on it written first, naming each definition
 and the type it is written as. The reference may sit inside an argument:
 `type D = Option[B.D]` with `type D = Option[A.D]` is the same cycle. A

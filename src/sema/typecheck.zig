@@ -5594,37 +5594,12 @@ fn refNamesSelf(ast: *const Ast, written: node.TypeRef) bool {
     return ref.kind == .named and namesSelf(ast, ref.name);
 }
 
-/// The first settled reference headed by `Self` anywhere inside a written
-/// type, or null where it holds none.
-///
-/// Asked of the whole thing rather than of its head: `Option[Self.Item]` is a
-/// settled reference one level in, and a reader that looked only at the head
-/// would find the constructor and stop.
-///
-/// **Bound:** the written type's own arguments, which are the tokens it
-/// occupies.
+/// Whether a written selection is headed by `Self`, through any number of
+/// selections: `Self.Item` and `Self.Item.Inner` are.
 fn selectionStartsWithSelf(ast: *const Ast, written: node.TypeRef) bool {
     var ref = ast.withoutTypeGroups(written);
     while (ref.kind == .selection) ref = ast.withoutTypeGroups(ast.selectionBase(ref));
     return refNamesSelf(ast, ref);
-}
-
-fn firstSelfSettledRef(ast: *const Ast, ref: node.TypeRef) ?node.TypeRef {
-    if (ref.kind == .selection) {
-        if (selectionStartsWithSelf(ast, ref)) return ref;
-        if (firstSelfSettledRef(ast, ast.selectionBase(ref))) |found| return found;
-    }
-    if (ref.kind == .callable) {
-        const callable = ast.callableType(ref);
-        for (ast.params[callable.params.start..callable.params.end]) |param| {
-            if (firstSelfSettledRef(ast, param.written)) |found| return found;
-        }
-        if (firstSelfSettledRef(ast, callable.result)) |found| return found;
-    }
-    for (ast.typeArgs(ref.args)) |a| {
-        if (firstSelfSettledRef(ast, a)) |found| return found;
-    }
-    return null;
 }
 
 /// Whether a parameter declares a value for the calls that leave it out.
@@ -31451,25 +31426,6 @@ const Checker = struct {
         }
 
         const written = self.ast.declReturnRef(member);
-
-        // A definition reads what another implementation settled, never
-        // another definition of its own implementation: `type Item =
-        // Self.Other` is refused rather than read.
-        if (firstSelfSettledRef(self.ast, written)) |found| {
-            self.decl_returns.set(member, .poison);
-            if (self.refusedBefore(found.name)) return;
-            try self.noteRefused(found.name);
-            try self.sink.addErrorFmt(
-                .t_impl,
-                self.ast.fileOf(found.at),
-                self.ast.writtenSpan(found),
-                "write the type itself",
-                "a settled type is not written as a settled reference",
-                .{},
-            );
-            return;
-        }
-
         self.current = self.program.moduleOf(member);
         self.generic = member;
         self.decl_returns.set(member, try self.typeOfRefOf(self.current, member, written));

@@ -1,0 +1,25 @@
+// A settled type written off another of its own implementation may sit
+// anywhere inside the type it writes: `Second` takes a `Self.First`, which is
+// the `UInt8` this implementation settles `First` to.
+trait Pair {
+    type First
+    type Second
+}
+
+struct Value {
+    value: UInt8,
+}
+
+impl Pair for Value {
+    type First = UInt8
+    type Second = fn(read value: Self.First) -> UInt8
+}
+
+fn apply(value: Value, call: Value.Second) -> UInt8 {
+    call(value.value)
+}
+
+fn main() -> UInt8 {
+    let value: Value = .{ value = 4 }
+    apply(value, |n| n + 1)
+}

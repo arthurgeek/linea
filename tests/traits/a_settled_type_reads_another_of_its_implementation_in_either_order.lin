@@ -1,8 +1,6 @@
-// One settled type written off another, with the two traits declaring their
-// types in opposite orders. Both are refused and the two refusals are the
-// same: what an implementation settled cannot depend on which of its trait's
-// declarations came first, and a reading that settled them in that order would
-// make one of these mean a type and the other mean nothing.
+// A settled type may be written off another of its own implementation through
+// `Self`, whichever of the two the trait declares first: `Self.Other` is the
+// `UInt8` this implementation settles `Other` to.
 struct Coins {
     count: UInt8,
 }

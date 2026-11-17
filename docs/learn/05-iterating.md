@@ -306,6 +306,62 @@ error[T-Impl]: this associated type is defined through itself: `Hall.Reading` is
   |                    ^^^^^^^^^^^^^^^^^^^^ define it as a type that does not read back to itself
 ```
 
+An implementation may also settle one of its types in terms of another it
+settles, by writing `Self.` before the name. A sensor that reports the lowest
+and highest readings it saw names that pair after its reading:
+
+```linea
+import std.io
+
+// A sensor names the type of one reading, and of the lowest and highest
+// readings it saw, which it reports together as a `Range`.
+trait Sensor {
+    type Reading
+    type Range
+
+    fn measure(self: Self) -> Self.Reading
+    fn range(self: Self) -> Self.Range
+}
+
+struct Thermometer {
+    celsius: Int64,
+    low: Int64,
+    high: Int64,
+}
+
+// `Self.Reading` is the `Int64` this implementation settles `Reading` to, so
+// a thermometer's range is a pair of `Int64`s.
+impl Sensor for Thermometer {
+    type Reading = Int64
+    type Range = (Self.Reading, Self.Reading)
+
+    fn measure(self: Self) -> Int64 {
+        self.celsius
+    }
+
+    fn range(self: Self) -> (Int64, Int64) {
+        (self.low, self.high)
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let hall = Thermometer { celsius = 21, low = 17, high = 24 }
+    let (low, high) = hall.range()
+    io.println("The hall reads {hall.measure()}, between {low} and {high}.")?
+    .Ok(0)
+}
+```
+
+```
+The hall reads 21, between 17 and 24.
+```
+
+`Self.Reading` inside `impl Sensor for Thermometer` is the `Int64` that same
+implementation settles `Reading` to, whichever of the two lines comes first.
+Rust writes it `type Range = (Self::Reading, Self::Reading)`. Written through
+`Self`, the hall's mistake above is the same cycle: `type Reading =
+Option[Self.Reading]` is refused with the same error.
+
 An array is not a sequence. A `for` walks an array directly, element by
 element, and `as_slice()` lends an array out as a slice, which is a sequence:
 that is how the chains below start from one.
