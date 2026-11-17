@@ -331,7 +331,7 @@ jobs:
         # runtime linked, so the C the corpus reaches only through programs is
         # also driven directly: the task tests' threads, sessions and
         # concurrent allocation included.
-        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
+        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task test-fiber-completion-backend -Dsanitize=${{ matrix.sanitizer }}
 
       # The conformance suite's recorded outcomes live outside Zig's build
       # cache: their own key covers the emitted IR, runtime, commands and Nix
@@ -938,8 +938,8 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Contexts, parks, socket waits and fault recovery
-        run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-clock -Drelease
+      - name: Contexts, parks, kernel completions and fault recovery
+        run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-clock test-fiber-completion-backend -Drelease
 
       - name: Public execution APIs and foreign callbacks
         run: |
