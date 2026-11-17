@@ -95,9 +95,14 @@ uint8_t linea_waitset_take(unsigned long set, unsigned long slot, unsigned long 
 long linea_waitset_withdraw(unsigned long set);
 
 /* Move a set to the calling task's Io, if it is not there already. Only a
- * set whose registrations are all session endpoints moves; any other traps.
- * Nothing may be waiting on the set while it moves. */
+ * set whose registrations are all session endpoints moves; any other traps,
+ * and so does a move into or out of a simulation. Nothing may be waiting on
+ * the set while it moves. */
 void linea_waitset_rehome(unsigned long set);
+
+#if defined(LINEA_WAITSET_PAUSES)
+void linea_waitset_test_age(unsigned long set, unsigned long slot);
+#endif
 
 /* Free an empty set. A set still holding a registration traps. */
 void linea_waitset_close(unsigned long set);

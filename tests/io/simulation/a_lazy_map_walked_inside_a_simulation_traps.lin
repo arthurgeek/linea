@@ -1,0 +1,32 @@
+import std.io
+import std.task
+import std.time
+
+// Double `n` after a second.
+fn slowly_doubled(sink n: UInt64) -> UInt64 {
+    time.sleep(time.Duration.from_milliseconds(1000))
+    n * 2
+}
+
+// A lazy map's workers run outside the simulation, so a run that waits for
+// them would wait on the real world. Stopped, the map only waits for the
+// workers already busy; its wait set crosses into the simulation as any
+// session does, and traps.
+fn main() -> UInt8 {
+    var doubled = task.lazy_map(.Threads(2), UInt64(1)..=10, slowly_doubled)
+    let _first = &doubled.next()
+    &doubled.stop()
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let total = &sim.run(
+        inout [inout doubled] |inout _world| -> UInt64 {
+            var sum = UInt64(0)
+            for n in &doubled {
+                sum += n
+            }
+            sum
+        },
+    )
+    sim.close()
+    doubled.release()
+    UInt8(total % 256)
+}

@@ -823,7 +823,6 @@ where I.Item: Owned {
             let free: Option[Busy[I, R, A]] = .None
             &self.busy.push(free).unwrap()
             &self.free.push(self.running_at_most - 1 - at).unwrap()
-            &self.waiting.push(0).unwrap()
         }
         // The set keeps every busy worker registered from when it takes a
         // chunk until it answers, so a wait costs the same however many
@@ -940,6 +939,16 @@ where I.Item: Owned {
                     linea_waitset_rehome(me.set)
                     let watched = linea_waitset_reserve(me.set) / slot_shift
                     linea_waitset_received(me.set, watched, waiting.number())
+                    // The set numbers a slot below `running_at_most` while it
+                    // reuses its slots, and a higher one each time it retires
+                    // a slot whose generation would wrap, after four billion
+                    // reuses; the names grow to cover it.
+                    while me.waiting.length() <= watched {
+                        match &me.waiting.push(0) {
+                            Ok(_) => {},
+                            Err(_) => panic("the names of a lazy map's wait set slots could not grow"),
+                        }
+                    }
                     let _free = mem.exchange(&me.waiting[watched], spot)
                 }
                 let entry: Busy[I, R, A] = .{ worker = waiting, chunk = number }

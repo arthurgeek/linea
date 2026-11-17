@@ -90,14 +90,20 @@ Handing out a chunk and waiting for an answer therefore cost the same
 however many workers there are. A map is a value and may move into a task on
 another Io; the set then follows it. The runtime gains one operation for
 this, `linea_waitset_rehome`, which moves a set whose registrations are all
-session endpoints to the calling task's Io and traps for any other set. A
+session endpoints to the calling task's Io and traps for any other set,
+and for a move into or out of a simulation, with the message every session
+crossing a simulation's boundary gives
+(`tests/io/simulation/a_lazy_map_walked_inside_a_simulation_traps.lin`). A
 session endpoint is signalled by its peer wherever the peer runs, so nothing
 the set watches belongs to the Io it was opened on; a timer, a descriptor or
 a signal is watched through that Io's kernel queue and would not move. The
 map rehomes its set before each registration, wait and close, so a map moved
 after its first result keeps working on the new Io
 (`tests/tasks/a_lazy_map_moves_to_a_task_on_another_io.lin`). `task.WaitSet`
-does not move, as before.
+does not move, as before. The set numbers its slots below `max` while it reuses
+them, and a new number each time it retires a slot whose generation would
+wrap, so the map's names for the slots grow when a slot's number reaches
+them.
 
 ### 2. A lazy map is linear and is settled explicitly
 

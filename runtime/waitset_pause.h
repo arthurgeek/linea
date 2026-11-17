@@ -16,6 +16,7 @@ enum linea_pause_point {
     linea_pause_watch_after_publish,
     linea_pause_send_filled,
     linea_pause_body_finished,
+    linea_pause_rehome_before_lock,
     linea_pause_points
 };
 
