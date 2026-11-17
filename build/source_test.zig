@@ -4759,6 +4759,11 @@ test "a pass file hands every error on, whatever is called" {
         .{ .statement = "self.visit(d) catch |err| { if (self.strict) { return err; } };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch |err| { return err; self.undo(); };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch { if (self.strict) return error.OutOfMemory; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        // A block without a capture hands nothing on unless it returns an
+        // error: stopping the process inside one is written `catch @panic(…)`.
+        .{ .statement = "self.visit(d) catch { unreachable; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch { self.undo(); unreachable; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch { @panic(\"OOM\"); };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => {}, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.Refused => return err, else => {} };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
     };

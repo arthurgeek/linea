@@ -634,7 +634,7 @@ pub const Discard = struct {
 /// Every place a file leaves an error unhanded-on outside its `test`
 /// blocks, in the order written:
 ///
-/// - `catch {}` and any other `catch { … }` whose block has no
+/// - `catch {}` and any other `catch { … }` whose block does not end in
 ///   `return error.…`;
 /// - `catch return`, `catch break` and `catch continue` with no error value;
 /// - `catch` followed by a value;
@@ -747,7 +747,11 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
             .keyword_continue => "catch continue",
             .l_brace => {
                 if (partner[i + 1] == i + 2) break :form "catch {}";
-                if (handsTheErrorOn(&tree, partner, i + 1, "")) continue;
+                // With no capture there is no error to hand on but a new
+                // one, so only a block ending in `return error.…` passes.
+                if (lastStatement(&tree, partner, i + 1)) |last| {
+                    if (tags[last] == .keyword_return and tags[last + 1] == .keyword_error) continue;
+                }
                 break :form "catch { … } that does not return an error";
             },
             else => "catch with a value",
@@ -781,7 +785,14 @@ fn handsTheErrorOn(tree: *const std.zig.Ast, partner: []const u32, start: u32, n
     const tags = tree.tokens.items(.tag);
     if (start >= tags.len) return false;
     if (tags[start] != .l_brace or partner[start] == 0) return statementHandsOn(tree, partner, start, name);
+    const last = lastStatement(tree, partner, start) orelse return false;
+    return statementHandsOn(tree, partner, last, name);
+}
 
+/// The first token of the last statement of the block whose `{` is at
+/// `start`, or null for an empty block.
+fn lastStatement(tree: *const std.zig.Ast, partner: []const u32, start: u32) ?u32 {
+    const tags = tree.tokens.items(.tag);
     // The start of the block's last statement: after the last `;` that
     // ends one, or after a braced statement that needs none.
     const end = partner[start];
@@ -807,7 +818,7 @@ fn handsTheErrorOn(tree: *const std.zig.Ast, partner: []const u32, start: u32, n
         }
     }
     if (current < end) last = current;
-    return last < end and statementHandsOn(tree, partner, last, name);
+    return if (last < end) last else null;
 }
 
 /// Whether the statement or expression at `at` hands the error on:
