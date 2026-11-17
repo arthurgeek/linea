@@ -313,6 +313,93 @@ static void check_queue_lane_progress(void) {
     assert(dequeue(&carrier) == NULL);
 }
 
+struct steal_gate {
+    pthread_mutex_t lock;
+    pthread_cond_t changed;
+    unsigned waiting;
+    int start;
+};
+
+struct thief_call {
+    struct steal_gate *gate;
+    struct carrier *carrier;
+    struct linea_fiber *selected;
+};
+
+static void *compete_for_work(void *argument) {
+    struct thief_call *call = argument;
+    assert(pthread_setspecific(carrier_key, call->carrier) == 0);
+    assert(pthread_mutex_lock(&call->gate->lock) == 0);
+    call->gate->waiting += 1;
+    assert(pthread_cond_broadcast(&call->gate->changed) == 0);
+    while (!call->gate->start) assert(pthread_cond_wait(&call->gate->changed, &call->gate->lock) == 0);
+    assert(pthread_mutex_unlock(&call->gate->lock) == 0);
+    call->selected = steal_for_dispatch(call->carrier);
+    assert(pthread_setspecific(carrier_key, NULL) == 0);
+    return NULL;
+}
+
+static void check_idle_steal_claim(int concurrent) {
+    struct carrier peers[3];
+    memset(peers, 0, sizeof peers);
+    struct fiber_loop stealing = { .count = 3, .carriers = peers };
+    assert(pthread_mutex_init(&stealing.metadata, NULL) == 0);
+    for (size_t i = 0; i < 3; i += 1) {
+        peers[i].loop = &stealing;
+        assert(pthread_mutex_init(&peers[i].queue_lock, NULL) == 0);
+        assert(make_poller(&peers[i]) == 0);
+    }
+    struct linea_fiber busy = { .home = &peers[0], .loop = &stealing, .state = running };
+    peers[0].executing = &busy;
+    struct linea_fiber work = {
+        .home = &peers[0], .loop = &stealing, .state = runnable, .saved = 1,
+        .proven = 1, .waiting = waiting_yield, .transfer_ready = 1, .timer_index = no_timer,
+    };
+    struct linea_fiber pinned = {
+        .home = &peers[0], .loop = &stealing, .bound = &peers[0],
+        .state = runnable, .saved = 1, .waiting = waiting_yield, .timer_index = no_timer,
+    };
+    lock_fiber(&work);
+    enqueue_locked(&pinned);
+    enqueue_locked(&work);
+    unlock_fiber(&work);
+    assert(pthread_once(&carrier_once, make_carrier_key) == 0);
+    struct carrier *winner;
+    if (concurrent) {
+        struct steal_gate gate = {0};
+        assert(pthread_mutex_init(&gate.lock, NULL) == 0);
+        assert(pthread_cond_init(&gate.changed, NULL) == 0);
+        struct thief_call calls[] = { { .gate = &gate, .carrier = &peers[1] }, { .gate = &gate, .carrier = &peers[2] } };
+        pthread_t threads[2];
+        for (size_t i = 0; i < 2; i += 1) assert(pthread_create(&threads[i], NULL, compete_for_work, &calls[i]) == 0);
+        assert(pthread_mutex_lock(&gate.lock) == 0);
+        while (gate.waiting != 2) assert(pthread_cond_wait(&gate.changed, &gate.lock) == 0);
+        gate.start = 1;
+        assert(pthread_cond_broadcast(&gate.changed) == 0);
+        assert(pthread_mutex_unlock(&gate.lock) == 0);
+        for (size_t i = 0; i < 2; i += 1) assert(pthread_join(threads[i], NULL) == 0);
+        assert((calls[0].selected == &work) + (calls[1].selected == &work) == 1);
+        assert(calls[0].selected == NULL || calls[1].selected == NULL);
+        winner = calls[0].selected != NULL ? &peers[1] : &peers[2];
+        assert(pthread_cond_destroy(&gate.changed) == 0);
+        assert(pthread_mutex_destroy(&gate.lock) == 0);
+    } else {
+        assert(pthread_setspecific(carrier_key, &peers[1]) == 0);
+        assert(steal_for_dispatch(&peers[1]) == &work);
+        winner = &peers[1];
+        assert(pthread_setspecific(carrier_key, &peers[2]) == 0);
+        assert(steal_for_dispatch(&peers[2]) == NULL);
+    }
+    assert(work.home == winner && work.claimed == dispatch_claim && work.claimant == winner);
+    assert(work.state == runnable && work.saved && !work.queued);
+    assert(peers[0].executing == &busy && busy.state == running);
+    assert(dequeue(&peers[0]) == &pinned && dequeue(&peers[0]) == NULL);
+    assert(dequeue(&peers[1]) == NULL && dequeue(&peers[2]) == NULL);
+    assert(pthread_setspecific(carrier_key, NULL) == 0);
+    for (size_t i = 0; i < 3; i += 1) free_carrier(&peers[i]);
+    assert(pthread_mutex_destroy(&stealing.metadata) == 0);
+}
+
 static void check_affinity(void) {
     /* A system task has no logical fiber to bind. */
     errno = EDOM;
@@ -393,6 +480,8 @@ int main(void) {
     check_repeated_completed_transfer();
     check_prepared_entry_grant();
     check_queue_lane_progress();
+    check_idle_steal_claim(0);
+    check_idle_steal_claim(1);
     check_affinity();
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
     prove_continuation(0, 1);

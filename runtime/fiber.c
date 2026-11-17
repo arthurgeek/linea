@@ -154,6 +154,7 @@ struct carrier {
     struct linea_fiber *first, *last;
     struct linea_fiber *stealable_first, *stealable_last;
     int prefer_stealable;
+    unsigned long next_victim;
     struct linea_fiber **timers;
     size_t timer_count, timer_capacity;
     int kernel;
@@ -710,8 +711,9 @@ static void abort_transfer(struct transfer_claim *claim) {
     wake_carrier(claim->source);
 }
 
-static int commit_transfer(struct transfer_claim *claim, struct carrier *target) {
+static int finish_transfer(struct transfer_claim *claim, struct carrier *target, int dispatch) {
     struct carrier *source = claim->source;
+    if (dispatch && current_carrier() != target) fail("linea: a thief claimed another carrier's dispatch\n");
     lock_carrier(source);
     require_transfer(claim);
     struct linea_fiber *f = claim->fiber;
@@ -721,6 +723,7 @@ static int commit_transfer(struct transfer_claim *claim, struct carrier *target)
         unlock_carrier(source);
         return 0;
     }
+    if (dispatch && target->executing != NULL) fail("linea: a running carrier claimed stolen work\n");
     if (!clean_runnable(f, source)) {
         unlock_carrier(source);
         return 0;
@@ -739,14 +742,38 @@ static int commit_transfer(struct transfer_claim *claim, struct carrier *target)
     if (source->loop->trace_counts.active_claims == 0) fail("linea: a trace claim underflowed\n");
     source->loop->trace_counts.active_claims -= 1;
 #endif
-    f->claimed = no_claim;
-    f->claimant = NULL;
-    enqueue_locked(f);
+    f->claimed = dispatch ? dispatch_claim : no_claim;
+    f->claimant = dispatch ? target : NULL;
+    if (!dispatch) enqueue_locked(f);
     claim->fiber = NULL;
     unlock_carrier(source);
-    wake_carrier(target);
+    if (!dispatch) wake_carrier(target);
     return 1;
 }
+
+static int commit_transfer(struct transfer_claim *claim, struct carrier *target) {
+    return finish_transfer(claim, target, 0);
+}
+
+#if !defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+static struct linea_fiber *steal_for_dispatch(struct carrier *target) {
+    struct fiber_loop *loop = target->loop;
+    if (loop == NULL || loop->count < 2) return NULL;
+    if (current_carrier() != target) fail("linea: a thief selected work for another carrier\n");
+    for (unsigned long visited = 0; visited < loop->count; visited += 1) {
+        const unsigned long index = target->next_victim;
+        target->next_victim = index + 1 == loop->count ? 0 : index + 1;
+        struct carrier *source = &loop->carriers[index];
+        if (source == target) continue;
+        struct transfer_claim claim = reserve_ready_runnable(source);
+        if (claim.fiber == NULL) continue;
+        struct linea_fiber *f = claim.fiber;
+        if (finish_transfer(&claim, target, 1)) return f;
+        abort_transfer(&claim);
+    }
+    return NULL;
+}
+#endif
 #endif
 
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
