@@ -2367,31 +2367,45 @@ pub fn build(b: *std.Build) void {
             const files = b.addWriteFiles();
             const scheduling_source = files.addCopyFile(b.path("runtime/tests/fiber_migration/scheduling_workload.lin"), "main.lin");
             var binaries: [4]std.Build.LazyPath = undefined;
-            var manifests: [3]std.Build.LazyPath = undefined;
-            for ([_][]const u8{ "pinned", "forced", "stealing" }, 0..) |policy, i| {
-                var flags: std.ArrayList([]const u8) = .empty;
-                flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
-                if (i == 0) flags.append(b.allocator, "-DLINEA_FIBER_SCHEDULING_PINNED_TEST=1") catch @panic("OOM");
-                if (i == 1) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
-                const archive = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
-                const scheduling_archive = archive.addOutputFileArg(runtime_symbols.archive_name);
-                for (ordinary_nonfiber_objects.items) |object| archive.addArtifactArg(object);
-                archive.addArtifactArg(runtimeObject(b, runtime_target, b.fmt("fiber_scheduling_{s}", .{policy}), b.path("runtime/fiber.c"), flags.items));
-                const compile = b.addSystemCommand(&.{"env"});
-                compile.addPrefixedFileArg("LINEA_RUNTIME=", scheduling_archive);
-                compile.addFileArg(exe.getEmittedBin());
-                compile.addArgs(&.{ "build", "--keep" });
-                compile.addFileArg(scheduling_source);
-                compile.addArg("-o");
-                const binary = compile.addOutputFileArg("scheduling-workload");
-                binaries[if (i == 0) 0 else i + 1] = binary;
-                if (i == 0) binaries[1] = binary;
-                const coverage = b.addRunArtifact(call_coverage_tool);
-                coverage.addFileArg(binary.dirname().path(b, "scheduling-workload.mlir"));
-                coverage.step.dependOn(&compile.step);
-                coverage.step.dependOn(&run_coverage_tests.step);
-                manifests[i] = coverage.captureStdOut(.{});
+            var diagnostics: [4]std.Build.LazyPath = undefined;
+            var manifests: [6]std.Build.LazyPath = undefined;
+            for ([_]bool{ false, true }, 0..) |diagnostic, variant| {
+                for ([_][]const u8{ "pinned", "forced", "stealing" }, 0..) |policy, i| {
+                    var flags: std.ArrayList([]const u8) = .empty;
+                    flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+                    if (diagnostic) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1", "-DLINEA_FIBER_SCHEDULING_COUNTS_TEST=1" }) catch @panic("OOM");
+                    if (i == 0) flags.append(b.allocator, "-DLINEA_FIBER_SCHEDULING_PINNED_TEST=1") catch @panic("OOM");
+                    if (i == 1) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
+                    const archive = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+                    const scheduling_archive = archive.addOutputFileArg(runtime_symbols.archive_name);
+                    for (ordinary_nonfiber_objects.items) |object| archive.addArtifactArg(object);
+                    archive.addArtifactArg(runtimeObject(b, runtime_target, b.fmt("fiber_scheduling_{s}_{d}", .{ policy, variant }), b.path("runtime/fiber.c"), flags.items));
+                    const compile = b.addSystemCommand(&.{"env"});
+                    compile.addPrefixedFileArg("LINEA_RUNTIME=", scheduling_archive);
+                    compile.addFileArg(exe.getEmittedBin());
+                    compile.addArgs(&.{ "build", "--keep" });
+                    compile.addFileArg(scheduling_source);
+                    compile.addArg("-o");
+                    const binary = compile.addOutputFileArg("scheduling-workload");
+                    const selected = if (diagnostic) &diagnostics else &binaries;
+                    selected[if (i == 0) 0 else i + 1] = binary;
+                    if (i == 0) selected[1] = binary;
+                    const coverage = b.addRunArtifact(call_coverage_tool);
+                    coverage.addFileArg(binary.dirname().path(b, "scheduling-workload.mlir"));
+                    coverage.step.dependOn(&compile.step);
+                    coverage.step.dependOn(&run_coverage_tests.step);
+                    manifests[variant * 3 + i] = coverage.captureStdOut(.{});
+                }
             }
+            const populations = b.addRunArtifact(scheduling_tool);
+            populations.addArg("--populations");
+            for (diagnostics) |binary| populations.addFileArg(binary);
+            for (manifests[3..]) |manifest| populations.addFileInput(manifest);
+            populations.step.dependOn(&scheduling_tests.step);
+            populations.has_side_effects = true;
+            const population_report = populations.captureStdOut(.{});
+            scheduling_proof.dependOn(&populations.step);
+            scheduling_measurement.dependOn(&b.addInstallFile(population_report, "fiber-scheduling-populations.tsv").step);
             for ([_]bool{ false, true }) |measure| {
                 const run = b.addRunArtifact(scheduling_tool);
                 run.addArg(if (measure) "--measure" else "--check");
@@ -2400,6 +2414,7 @@ pub fn build(b: *std.Build) void {
                 run.step.dependOn(&scheduling_tests.step);
                 run.has_side_effects = true;
                 if (measure) {
+                    run.step.dependOn(&populations.step);
                     const observations = run.captureStdOut(.{});
                     scheduling_measurement.dependOn(&b.addInstallFile(observations, "fiber-scheduling-measurements.tsv").step);
                 } else scheduling_proof.dependOn(&run.step);

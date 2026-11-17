@@ -592,11 +592,21 @@ struct trace_ticket { unsigned long lower; struct trace_event *event; };
 static struct trace_event trace_events[trace_capacity];
 static unsigned long trace_count, trace_identities;
 
+static int trace_execution_eligible(struct linea_fiber *f) {
+    require_metadata(f);
+#if defined(LINEA_FIBER_CAN_MIGRATE)
+    return f->proven && f->bound == NULL;
+#else
+    (void)f;
+    return 0;
+#endif
+}
+
 /* This is contract eligibility of live fibers, independent of runnable state
  * or source normalization. Never/initial/current/ever-transferred are distinct. */
 static void trace_update_eligibility(struct linea_fiber *f) {
     require_metadata(f);
-    const int eligible = f->trace_entered && f->proven && f->bound == NULL && !f->retired;
+    const int eligible = f->trace_entered && trace_execution_eligible(f) && !f->retired;
     struct trace_counts *counts = &f->loop->trace_counts;
     if (eligible && !f->trace_counted) {
         counts->current_eligible += 1;
@@ -638,6 +648,9 @@ static void trace_end(struct trace_ticket *ticket) {
 }
 
 static void trace_dump(struct trace_counts counts) {
+    char line[256];
+    int length;
+#if !defined(LINEA_FIBER_SCHEDULING_COUNTS_TEST)
     const unsigned long count = __atomic_load_n(&trace_count, __ATOMIC_ACQUIRE);
     const unsigned long kept = count < trace_capacity ? count : trace_capacity;
     unsigned long dropped = count - kept;
@@ -647,8 +660,7 @@ static void trace_dump(struct trace_counts counts) {
     if (clock_getres(CLOCK_MONOTONIC, &resolution) != 0) fail("linea: a trace clock has no resolution\n");
     const unsigned long resolution_ns = (unsigned long)resolution.tv_sec * 1000000000UL + (unsigned long)resolution.tv_nsec;
     if (resolution_ns == 0) fail("linea: a trace clock reported zero resolution\n");
-    char line[256];
-    int length = snprintf(line, sizeof line, "migration-trace-v1 units=ns dropped=%lu resolution_ns=%lu\n", dropped, resolution_ns);
+    length = snprintf(line, sizeof line, "migration-trace-v1 units=ns dropped=%lu resolution_ns=%lu\n", dropped, resolution_ns);
     if (length <= 0 || (size_t)length >= sizeof line) fail("linea: a trace header overflowed\n");
     report_bytes(line, (unsigned long)length);
     for (unsigned long i = 0; i < kept; i += 1) {
@@ -659,6 +671,7 @@ static void trace_dump(struct trace_counts counts) {
         if (length <= 0 || (size_t)length >= sizeof line) fail("linea: a trace row overflowed\n");
         report_bytes(line, (unsigned long)length);
     }
+#endif
     report_bytes("counts", 6);
 #define TRACE_COUNTER_WRITE(name) \
     length = snprintf(line, sizeof line, " " #name "=%lu", counts.name); \
@@ -1063,15 +1076,6 @@ void fiber_test_pause(enum linea_fiber_pause_point point) {
         f->proven = 0;
 #elif !defined(LINEA_FIBER_ENTRY_PROVENANCE_TEST)
         f->proven = 1;
-#endif
-#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
-        if (!f->trace_entered) {
-            f->trace_entered = 1;
-            f->trace_initially_eligible = f->proven && f->bound == NULL;
-            TRACE_COUNT(f->loop, started);
-            if (f->trace_initially_eligible) TRACE_COUNT(f->loop, initially_eligible);
-        }
-        trace_update_eligibility(f);
 #endif
 #if defined(LINEA_FIBER_REFUSAL_PROBES_TEST)
         if (clean_runnable(f, source)) fail("linea: an executing fiber was transferable\n");
@@ -1978,6 +1982,17 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
 #endif
     linea_thread_guard_prepare((unsigned long)f->mapping, (unsigned long)f->mapping + guard_bytes);
     linea_fiber_pause(linea_fiber_entering);
+#if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
+    lock_fiber(f);
+    if (!f->trace_entered) {
+        f->trace_entered = 1;
+        f->trace_initially_eligible = trace_execution_eligible(f);
+        TRACE_COUNT(f->loop, started);
+        if (f->trace_initially_eligible) TRACE_COUNT(f->loop, initially_eligible);
+    }
+    trace_update_eligibility(f);
+    unlock_fiber(f);
+#endif
 #if __has_feature(address_sanitizer)
     __sanitizer_start_switch_fiber(&c->asan_stack, f->stack, f->stack_bytes);
 #endif

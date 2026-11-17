@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
+const metrics = @import("fiber_migration_metrics.zig");
 
 const Observation = struct {
     tasks: u64,
@@ -101,18 +102,110 @@ fn run(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, workload: []const
     return validate(result, workload, control, checksum);
 }
 
+fn populations(result: std.process.RunResult, workload: []const u8, control: []const u8, checksum: ?u64) !struct { observation: Observation, counts: metrics.Counts } {
+    var plain = result;
+    plain.stderr = &.{};
+    const observation = try validate(plain, workload, control, checksum);
+    var lines = std.mem.tokenizeScalar(u8, result.stderr, '\n');
+    var last: ?metrics.Counts = null;
+    while (lines.next()) |line| {
+        const counts = try metrics.readCounts(line);
+        if (last) |previous| {
+            if (counts.started < previous.started or counts.retired < previous.retired)
+                return error.RegressedPopulation;
+        }
+        if (counts.retired > counts.started) return error.BadPopulation;
+        last = counts;
+    }
+    const counts = last orelse return error.MissingPopulation;
+    if (counts.started != observation.tasks or counts.retired != observation.tasks or
+        counts.current_eligible != 0 or counts.active_claims != 0 or
+        counts.initially_eligible > counts.started or
+        counts.never_eligible != counts.started - counts.initially_eligible or
+        counts.peak_eligible > counts.initially_eligible or
+        counts.initially_then_restricted > counts.initially_eligible or
+        counts.first_restrictions > counts.started or counts.guard_requests < counts.first_restrictions or
+        counts.ever_transferred > counts.initially_eligible or
+        counts.transfers < counts.ever_transferred) return error.BadPopulation;
+    const pinned = std.mem.eql(u8, control, "pinned") or std.mem.eql(u8, control, "placement");
+    if (pinned) {
+        if (counts.initially_eligible != 0 or counts.transfers != 0) return error.BadPopulation;
+    } else if (counts.initially_eligible != observation.tasks) return error.BadPopulation;
+    if (std.mem.eql(u8, workload, "affinity") and counts.first_restrictions != observation.tasks)
+        return error.BadPopulation;
+    if (std.mem.eql(u8, control, "forced") and !std.mem.eql(u8, workload, "affinity") and counts.transfers == 0)
+        return error.MissingTransfer;
+    return .{ .observation = observation, .counts = counts };
+}
+
+test "diagnostic populations cannot be inferred from timing observations" {
+    const plain = std.process.RunResult{ .term = .{ .exited = 0 }, .stdout = @constCast(example), .stderr = &.{} };
+    try testing.expectError(error.MissingPopulation, populations(plain, "imbalanced", "pinned", 91));
+    var malformed = plain;
+    malformed.stderr = @constCast("counts started=32\n");
+    try testing.expectError(error.MissingCounter, populations(malformed, "imbalanced", "pinned", 91));
+}
+
+test "diagnostic populations require a complete retired workload and monotonic snapshots" {
+    var counts = std.mem.zeroes(metrics.Counts);
+    counts.started = 32;
+    counts.retired = 32;
+    counts.never_eligible = 32;
+    var text: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer text.deinit();
+    try text.writer.writeAll("counts");
+    inline for (std.meta.fields(metrics.Counts)) |field|
+        try text.writer.print(" {s}={d}", .{ field.name, @field(counts, field.name) });
+    try text.writer.writeByte('\n');
+    const result = std.process.RunResult{ .term = .{ .exited = 0 }, .stdout = @constCast(example), .stderr = text.written() };
+    try testing.expectEqual(@as(u64, 32), (try populations(result, "imbalanced", "pinned", 91)).counts.retired);
+    const incomplete = try std.mem.replaceOwned(u8, testing.allocator, text.written(), "retired=32", "retired=31");
+    defer testing.allocator.free(incomplete);
+    var bad = result;
+    bad.stderr = incomplete;
+    try testing.expectError(error.BadPopulation, populations(bad, "imbalanced", "pinned", 91));
+    const earlier = try std.mem.replaceOwned(u8, testing.allocator, text.written(), "started=32", "started=31");
+    defer testing.allocator.free(earlier);
+    const regressed = try std.mem.concat(testing.allocator, u8, &.{ text.written(), earlier });
+    defer testing.allocator.free(regressed);
+    bad.stderr = regressed;
+    try testing.expectError(error.RegressedPopulation, populations(bad, "imbalanced", "pinned", 91));
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.arena.allocator();
     const args = try init.minimal.args.toSlice(gpa);
     if (args.len != 6) return error.ExpectedModeAndFourBinaries;
     const measure = std.mem.eql(u8, args[1], "--measure");
-    if (!measure and !std.mem.eql(u8, args[1], "--check")) return error.BadMode;
+    const diagnose = std.mem.eql(u8, args[1], "--populations");
+    if (!measure and !diagnose and !std.mem.eql(u8, args[1], "--check")) return error.BadMode;
     var buffer: [4096]u8 = undefined;
     var output = std.Io.File.stdout().writer(init.io, &buffer);
     if (measure) try output.interface.writeAll("workload\ttrial\tcontrol\ttasks\tchecksum\twall_ns\tadmission_ns\tyield_ns\tmaximum_ns\tmoves\tfirst_count\n");
+    if (diagnose) {
+        try output.interface.writeAll("workload\tcontrol");
+        inline for (std.meta.fields(metrics.Counts)) |field| try output.interface.print("\t{s}", .{field.name});
+        try output.interface.writeByte('\n');
+    }
     for (workloads) |workload| {
         var checksum: ?u64 = null;
         for (controls, 0..) |control, i| {
+            if (diagnose) {
+                const result = try std.process.run(gpa, init.io, .{
+                    .argv = &.{ args[i + 2], workload, control },
+                    .stdout_limit = .limited(4096),
+                    .stderr_limit = .limited(256 << 10),
+                    .timeout = .{ .duration = .{ .raw = .fromSeconds(60), .clock = .awake } },
+                });
+                defer gpa.free(result.stdout);
+                defer gpa.free(result.stderr);
+                const diagnostic = try populations(result, workload, control, checksum);
+                checksum = diagnostic.observation.checksum;
+                try output.interface.print("{s}\t{s}", .{ workload, control });
+                inline for (std.meta.fields(metrics.Counts)) |field| try output.interface.print("\t{d}", .{@field(diagnostic.counts, field.name)});
+                try output.interface.writeByte('\n');
+                continue;
+            }
             const observation = try run(gpa, init.io, args[i + 2], workload, control, checksum);
             checksum = observation.checksum;
         }

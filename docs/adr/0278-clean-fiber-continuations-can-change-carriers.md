@@ -101,6 +101,9 @@ Idle carriers can execute new and already-started eligible work. Native affinity
 and borrowed-buffer lifetime remain conservative. The mutex, wakeups and
 migration can add contention and damage cache locality; matched pinned,
 placement-only, forced-transfer and stealing controls measure those costs.
+Eligibility and refusal populations come from separate untimed companion
+invocations of the same workloads and controls. They are reported separately,
+and do not claim to describe every interleaving of an uninstrumented trial.
 Work stealing cannot interrupt running code that never yields or rescue a
 carrier blocked inside arbitrary native code.
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 const Interval = struct { lower: u64, upper: u64, censored: bool };
-const Counts = struct {
+pub const Counts = struct {
     started: u64,
     retired: u64,
     initially_eligible: u64,
@@ -50,7 +50,7 @@ fn number(text: ?[]const u8) !u64 {
     return std.fmt.parseInt(u64, text orelse return error.BadTrace, 10) catch return error.BadTrace;
 }
 
-fn readCounts(line: []const u8) !Counts {
+pub fn readCounts(line: []const u8) !Counts {
     var fields = std.mem.tokenizeAny(u8, line, " \t\r");
     if (!std.mem.eql(u8, fields.next() orelse return error.BadTrace, "counts")) return error.BadTrace;
     var counts: Counts = undefined;
