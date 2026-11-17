@@ -1,0 +1,25 @@
+import std.session
+import std.task
+
+use session.Chan
+use session.Send
+use session.End
+
+// Each round builds a body whose one capture is a function of no bytes, and
+// the task it starts takes that body; the next round builds it again.
+fn spread[F: fn() -> UInt64 + Copyable + Shareable](job: F, rounds: UInt64) -> UInt64 {
+    var total = UInt64(0)
+    for _ in 0..rounds {
+        let body = sink [sink job = copy(job)] |sink me: Chan[Send[UInt64, End]]| {
+            me.send(job()).close()
+        }
+        let (value, done) = task.prepare(body).unwrap().start().recv()
+        done.close()
+        total += value
+    }
+    total
+}
+
+fn main() -> UInt8 {
+    UInt8(spread(|| UInt64(2), 3))
+}

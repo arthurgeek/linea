@@ -1530,13 +1530,16 @@ pub const Phase = struct {
     /// part read and what is read can hold a dependency. A value used whole
     /// -- passed, returned, or the carrier of the address being the value
     /// itself -- uses every part; a read through an address uses the bytes
-    /// the address covers.
+    /// the address covers. A value of no bytes reads no storage, so a move
+    /// that emptied its root is no reason to refuse it: a part that covers
+    /// every byte of a record moves the record out, and the zero-sized
+    /// fields beside it are still the program's to read.
     fn use(self: *Phase, at: InstId, b: Base, ty: TypeId, whole: bool) !void {
         if (b.carrier != no_entity and self.stale[b.carrier] != empty_set and self.mayCarry(ty)) {
             const a: Access = if (whole) Access.whole(held_whole - 1) else self.accessOf(b, ty);
             if (self.staleWithin(self.stale[b.carrier], a)) |d| try self.refuse(.stale, at, b.carrier, self.causeOf(d));
         }
-        if (b.root != no_entity and self.moved[b.root]) try self.refuse(.moved, at, b.root, self.moved_at[b.root]);
+        if (b.root != no_entity and self.moved[b.root] and self.layoutSize(ty) != 0) try self.refuse(.moved, at, b.root, self.moved_at[b.root]);
     }
 
     fn useValue(self: *Phase, at: InstId, v: InstId) !void {
@@ -1666,9 +1669,11 @@ pub const Phase = struct {
     }
 
     /// Whether taking `src` as a whole `ty` moves its root out: a whole owned
-    /// root or returned temporary. A lent root stays its lender's.
+    /// root or returned temporary. A lent root stays its lender's. Taking a
+    /// value of no bytes empties no storage, so of a record whose every field
+    /// is zero-sized, each field is taken on its own.
     fn movesOut(self: *const Phase, src: Base, ty: TypeId) bool {
-        return self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
+        return self.layoutSize(ty) != 0 and self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
     }
 
     fn moveOut(self: *Phase, at: InstId, src: Base, ty: TypeId) !void {
