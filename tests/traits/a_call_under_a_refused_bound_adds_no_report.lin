@@ -1,0 +1,14 @@
+// `Scale` declares a default for its parameter, which a trait may not, and
+// the bound `Scale` written without an argument is refused for it. A call
+// through `S` is not refused again for what that bound would have said.
+trait Scale[T = UInt8] {
+    fn scale(self: Self, by: T) -> UInt8
+}
+
+fn _go[S: Scale + Scale[UInt16]](s: S) -> UInt8 {
+    s.scale(UInt8(1))
+}
+
+fn main() -> UInt8 {
+    0
+}

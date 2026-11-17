@@ -1,7 +1,8 @@
 // `S` implements `Scale` at `UInt8` and at `UInt16`. A call through `Scale`
 // runs the implementation its arguments settle, and the generic function is
 // checked where it is written: the literal `1` fits both, so the call does
-// not say which it means, and `true` fits neither.
+// not say which it means, and neither `true` nor `70000` fits either, so
+// each is a call at a list `S` does not carry.
 trait Scale[T] {
     fn scale(self: Self, by: T) -> UInt8
 }
@@ -12,6 +13,10 @@ fn _either[S: Scale[UInt8] + Scale[UInt16]](s: S) -> UInt8 {
 
 fn _neither[S: Scale[UInt8] + Scale[UInt16]](s: S) -> UInt8 {
     Scale.scale(s, true) + s.scale(false)
+}
+
+fn _too_large[S: Scale[UInt8] + Scale[UInt16]](s: S) -> UInt8 {
+    s.scale(70000)
 }
 
 fn _one[S: Scale[UInt8] + Scale[UInt16]](s: S) -> UInt8 {

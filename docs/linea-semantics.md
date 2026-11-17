@@ -3808,9 +3808,12 @@ lists leaves the call's arguments and result to settle which list it means, and
 the call is checked where the generic body is written: a list its bounds do not
 carry is [T-Bound], so `Scale.scale(s, true)` under `S: Scale[UInt8] +
 Scale[UInt16]` is refused there rather than at an instantiation. A literal
-fitting exactly one of the lists takes that list's type; one fitting several,
-`Scale.scale(s, 1)` under the same bounds, does not say which implementation
-runs and is [N-Ambiguous].
+fits a list where the list's type can hold its value, as [T-Literal] decides:
+one fitting exactly one of the lists takes that list's type, so `s.scale(300)`
+under those bounds is a call at `Scale[UInt16]`; one fitting several,
+`Scale.scale(s, 1)`, does not say which implementation runs and is
+[N-Ambiguous]; and one fitting none, `s.scale(70000)`, takes its default type
+and is [T-Bound] for the list that names it.
 
 A bound may instead be a structural callable type. Its parameter and result
 types must match exactly; result dependencies must fit the promised upper bound,

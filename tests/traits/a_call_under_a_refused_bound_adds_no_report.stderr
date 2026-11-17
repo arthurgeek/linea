@@ -1,0 +1,10 @@
+error[T-ArgumentDefault]: only a struct, an enum or an alias gives a type parameter a default
+ --> tests/traits/a_call_under_a_refused_bound_adds_no_report.lin:4:15
+  |
+4 | trait Scale[T = UInt8] {
+  |               ^ this declaration's type arguments are written or settled by a call
+error[T-Bound]: `Scale` takes 1 type argument(s), and this bound supplies 0
+ --> tests/traits/a_call_under_a_refused_bound_adds_no_report.lin:8:11
+  |
+8 | fn _go[S: Scale + Scale[UInt16]](s: S) -> UInt8 {
+  |           ^^^^^ supply the arguments it declares

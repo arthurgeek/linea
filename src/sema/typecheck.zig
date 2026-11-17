@@ -13326,6 +13326,8 @@ const Checker = struct {
         errdefer self.gpa.free(out);
         @memset(out, .poison);
         self.seedTraitArgsFromBound(trait, out);
+        // The values this call's own literals fold to are queued from here.
+        const values_from: u32 = @intCast(self.open_types.pending.items.len);
 
         const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
             .callable => |callable| callable,
@@ -13359,7 +13361,7 @@ const Checker = struct {
                 _ = try self.settle(param.ty, got, trait, out, &ignored);
             }
         }
-        if (!argument_poisoned and !try self.settleLiteralTraitArgs(id, trait, out)) {
+        if (!argument_poisoned and !try self.settleLiteralTraitArgs(id, trait, out, values_from)) {
             @memset(out, .poison);
             return out;
         }
@@ -13398,7 +13400,7 @@ const Checker = struct {
     ///
     /// **Bound:** the bounds and implementations `keys` reads for the
     /// parameter, each compared once against the trait's parameters.
-    fn settleLiteralTraitArgs(self: *Checker, id: ExprId, trait: node.DeclId, out: []TypeId) std.mem.Allocator.Error!bool {
+    fn settleLiteralTraitArgs(self: *Checker, id: ExprId, trait: node.DeclId, out: []TypeId, values_from: u32) std.mem.Allocator.Error!bool {
         const receiver = self.self_at_call orelse return true;
         if (receiver == .poison or self.builder.get(receiver) != .parameter) return true;
         for (out) |*slot| {
@@ -13421,14 +13423,14 @@ const Checker = struct {
             const fits = for (out, key) |slot, settled| {
                 if (slot == .poison) continue;
                 if (self.openVariable(slot)) |v| {
-                    if (!try self.fitsOpen(v, settled)) break false;
+                    if (!try self.fitsOpen(v, settled) or !self.valuesFit(v, settled, values_from)) break false;
                 } else if (slot != settled) break false;
             } else true;
             if (fits) try fitting.append(self.gpa, key);
         }
         switch (fitting.items.len) {
-            // No bound fits, which the missing implementation reports once
-            // the literals take their default types.
+            // No bound fits, so the literals take their default types and
+            // the call is refused for the list the bounds do not carry.
             0 => return true,
             1 => {
                 for (out, fitting.items[0]) |*slot, settled| {
@@ -13560,6 +13562,13 @@ const Checker = struct {
         if (self.builder.awaitsTypes(rec.self_ty, rec.args)) {
             if (self.builder.get(rec.self_ty) != .parameter) return;
             for (rec.args) |a| if (self.builder.get(a) == .open_type) return;
+            // A bound on the trait written with the wrong number of arguments
+            // was refused where it is written, and what it would have
+            // carried is unknown: a call missing it is that mistake again.
+            const declared = self.ast.declTypeParams(node.DeclId.at(rec.trait)).len;
+            for (self.builder.boundsOn(rec.self_ty)) |bound| {
+                if (bound.trait.index() == rec.trait and bound.args.len != declared) return;
+            }
         }
 
         const trait = node.DeclId.at(rec.trait);
@@ -14344,7 +14353,7 @@ const Checker = struct {
                 } else try self.literal_values.put(self.gpa, literal, .{ .float = rounded.value });
                 continue;
             }
-            if (self.integerLiteralFits(t, waiting.value)) continue;
+            if (self.waitingFits(waiting, t)) continue;
             if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
             self.folds.set(waiting.expr, .absent);
             switch (waiting.rule) {
@@ -14503,6 +14512,33 @@ const Checker = struct {
             // A type holding the variable it would settle is no type at all.
             .any => !(to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))),
         };
+    }
+
+    /// Whether every value queued from `from` on for the open variable `v`
+    /// fits `t`, by the rule that refuses one at the type it settles to:
+    /// `300` does not fit a `UInt8`, though the literal's family does.
+    ///
+    /// **Bound:** the values queued from `from`, which a caller takes as its
+    /// own arguments' start.
+    fn valuesFit(self: *Checker, v: u32, t: TypeId, from: u32) bool {
+        const root = self.open_types.find(v);
+        for (self.open_types.pending.items[from..]) |waiting| {
+            if (self.open_types.find(waiting.v) != root) continue;
+            if (!self.waitingFits(waiting, t)) return false;
+        }
+        return true;
+    }
+
+    /// Whether a value folded while its type was open fits `t`: an integer
+    /// within its range, a float literal that rounds to one of its values.
+    fn waitingFits(self: *const Checker, waiting: open_types_mod.Pending, t: TypeId) bool {
+        if (waiting.rule == .float_literal) {
+            const bits = t.floatBits() orelse return false;
+            const literal = self.literalSpelling(waiting.expr, .float_literal).?.literal;
+            const rounded = roundFloatLiteral(self.ast.tokenText(self.ast.exprMain(literal)), bits).?;
+            return rounded.refusal == null;
+        }
+        return self.integerLiteralFits(t, waiting.value);
     }
 
     /// Whether `t` mentions the open variable whose root is `root`.
