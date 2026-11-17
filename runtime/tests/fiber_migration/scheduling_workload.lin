@@ -1,4 +1,5 @@
 import std.env
+import native_process
 import std.io
 import std.mem
 import std.session
@@ -23,8 +24,8 @@ struct Observation {
 fn work(index: UInt64, queued: time.Instant, locality: Bool, affinity: Bool) -> Observation {
     let admission_ns = queued.elapsed().nanoseconds()
     let first = task.current_carrier().unwrap()
-    if affinity && env.args().count() == 0 {
-        panic("process has no argument zero")
+    if affinity && native_process.observe() <= 0 {
+        panic("the native process identifier was invalid")
     }
     let words = if locality {
         UInt64(4096)

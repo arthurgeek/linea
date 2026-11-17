@@ -1,0 +1,7 @@
+// An ordinary foreign declaration deliberately has no audited migration
+// contract, even when its implementation happens to be thread-neutral.
+extern fn getpid() -> Int32
+
+pub fn observe() -> Int32 {
+    getpid()
+}

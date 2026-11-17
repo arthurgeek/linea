@@ -1,4 +1,4 @@
-import std.env
+import native_process
 import std.io
 import std.task
 import std.time
@@ -13,8 +13,8 @@ fn main() -> UInt8 {
     let body = sink [inout entries] |sink me: Chan[End]| {
         entries += 1
         let first = task.current_carrier().unwrap()
-        if env.args().count() == 0 {
-            panic("process has no argument zero")
+        if native_process.observe() <= 0 {
+            panic("the native process identifier was invalid")
         }
         time.sleep(time.Duration.from_nanoseconds(0))
         if first != task.current_carrier().unwrap() {

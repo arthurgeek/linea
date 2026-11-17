@@ -16,6 +16,17 @@ fn decimalProvider(b: *std.Build) std.Build.LazyPath {
     return root;
 }
 
+fn migrationFixture(b: *std.Build, files: *std.Build.Step.WriteFile, fixture_name: []const u8) std.Build.LazyPath {
+    for ([_][]const u8{ "stealing.lin", "pinned.lin", "unknown_pinned.lin", "scheduling_workload.lin" }) |foreign_source| {
+        if (std.mem.eql(u8, fixture_name, foreign_source)) {
+            _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/native_process/native_process.lin"), "native_process/native_process.lin");
+            _ = files.add("linea.json", "{ \"extern\": [\"native_process\"], \"headers\": [\"unistd.h\"] }\n");
+            break;
+        }
+    }
+    return files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture_name})), "main.lin");
+}
+
 /// What a test run's binaries are watched by.
 ///
 /// A sanitizer works by instrumenting code as it is compiled -- redzones
@@ -2365,7 +2376,7 @@ pub fn build(b: *std.Build) void {
         if (sanitize == .none) {
             native_task_step.dependOn(scheduling_proof);
             const files = b.addWriteFiles();
-            const scheduling_source = files.addCopyFile(b.path("runtime/tests/fiber_migration/scheduling_workload.lin"), "main.lin");
+            const scheduling_source = migrationFixture(b, files, "scheduling_workload.lin");
             var binaries: [4]std.Build.LazyPath = undefined;
             var diagnostics: [4]std.Build.LazyPath = undefined;
             var manifests: [6]std.Build.LazyPath = undefined;
@@ -2471,9 +2482,9 @@ pub fn build(b: *std.Build) void {
                 run_busy.expectExitCode(0);
                 (if (new_work) new_work_proof else busy_stealing_proof).dependOn(&run_busy.step);
             }
-            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "stdlib_values.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
+            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "stdlib_values.lin", "stdlib_io.lin", "stdlib_combinators.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
                 const files = b.addWriteFiles();
-                const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture})), "main.lin");
+                const main_source = migrationFixture(b, files, fixture);
                 if (std.mem.eql(u8, fixture, "stealing_owner.lin")) {
                     _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
                 }
@@ -2590,7 +2601,7 @@ pub fn build(b: *std.Build) void {
             if (proof_case.ring != .none and target.result.os.tag != .linux) continue;
             const completed_wait = proof_case.completed_wait;
             const files = b.addWriteFiles();
-            const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{proof_case.source})), "main.lin");
+            const main_source = migrationFixture(b, files, proof_case.source);
             if (std.mem.eql(u8, proof_case.source, "owner.lin")) {
                 _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
             }

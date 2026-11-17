@@ -2,6 +2,7 @@ import std.io
 import std.task
 import std.time
 import std.session
+import native_process
 
 use session.Chan
 use session.End
@@ -11,9 +12,9 @@ fn main() -> UInt8 {
     var stayed = false
     let body = sink [inout stayed] |sink me: Chan[End]| {
         let first = task.current_carrier().unwrap()
-        // This unaudited native query binds before its thread-local observation.
-        if io.current() == io.system() {
-            panic("the fiber lost its selected loop")
+        // An unclassified foreign call binds before it enters native code.
+        if native_process.observe() <= 0 || io.current() == io.system() {
+            panic("foreign execution lost its process or selected loop")
         }
         // A neutral timer must preserve an already-established restriction.
         time.sleep(time.Duration.from_nanoseconds(1))

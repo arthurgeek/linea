@@ -1,4 +1,4 @@
-import std.env
+import native_process
 import std.io
 import std.task
 import std.time
@@ -31,8 +31,8 @@ fn main() -> UInt8 {
         }
         let bound = task.current_carrier().unwrap()
         // This unknown native operation binds execution to its current carrier.
-        if env.args().count() == 0 {
-            panic("process has no argument zero")
+        if native_process.observe() <= 0 {
+            panic("the native process identifier was invalid")
         }
         for _index in 0..64 {
             time.sleep(time.Duration.from_nanoseconds(0))
