@@ -26,6 +26,34 @@ pub const Tool = enum {
             .cc => "cc",
         };
     }
+
+    /// The file a run of this tool by its bare name executes, read from
+    /// `search_path` as the spawn in `runTool` reads `PATH`: entries split at
+    /// `:` with empty ones skipped, the platform's default where no `PATH` is
+    /// set, and the first entry holding a regular file of this name that the
+    /// process may execute. A file it may not execute, or a directory of the
+    /// name, is passed over, as the spawn passes over the `EACCES` its
+    /// `execve` gets for one. Null where no entry holds one, which is where a
+    /// run reports the tool missing.
+    ///
+    /// The outcome cache stamps this file, so what a recorded outcome is keyed
+    /// by is the program that produced it rather than the first file of the
+    /// name on the path.
+    pub fn resolve(self: Tool, gpa: std.mem.Allocator, io: std.Io, search_path: ?[]const u8) !?[]u8 {
+        var it = std.mem.tokenizeScalar(u8, search_path orelse std.Io.Threaded.default_PATH, ':');
+        while (it.next()) |dir| {
+            const path = try std.fs.path.join(gpa, &.{ dir, self.command() });
+            const runnable = runnable: {
+                const stat = std.Io.Dir.cwd().statFile(io, path, .{}) catch break :runnable false;
+                if (stat.kind != .file) break :runnable false;
+                std.Io.Dir.cwd().access(io, path, .{ .execute = true }) catch break :runnable false;
+                break :runnable true;
+            };
+            if (runnable) return path;
+            gpa.free(path);
+        }
+        return null;
+    }
 };
 
 /// Why a build stopped. Held rather than printed so the driver decides how a
