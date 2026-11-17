@@ -952,6 +952,26 @@ jobs:
           nix develop --command zig build conformance -Drelease -- tests/ffi/thread_bound_owner
           nix develop --command zig build conformance -Drelease -- tests/cmd/foreign_owner
 
+      - name: Collect matched scheduler observations
+        run: |
+          mkdir -p zig-out
+          { git rev-parse HEAD; uname -srm; getconf _NPROCESSORS_ONLN; } > zig-out/fiber-measurement-host.txt
+          nix develop --command zig build measure-fiber-scheduling -Drelease
+          nix develop --command zig build measure-fiber-handoff -Drelease
+
+      - name: Keep scheduler observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fiber-observations-${{ runner.arch }}-${{ github.run_attempt }}
+          path: |
+            zig-out/fiber-measurement-host.txt
+            zig-out/fiber-scheduling-populations.tsv
+            zig-out/fiber-scheduling-measurements.tsv
+            zig-out/fiber-handoff-measurements.tsv
+          if-no-files-found: error
+          retention-days: 14
+
   # Every run and attempt of a lane saves its cache under a key of its own,
   # and a cache stays until the repository's 10 GB are spent and the least
   # recently used go: main's, the only ones a new pull request can restore.
