@@ -635,19 +635,20 @@ pub const Discard = struct {
 /// blocks, in the order written:
 ///
 /// - `catch {}` and any other `catch { … }` whose block does not end in
-///   `return error.…`;
+///   `return error.…` or `@panic(…)`;
 /// - `catch return`, `catch break` and `catch continue` with no error value;
 /// - `catch` followed by a value;
 /// - `catch unreachable`, which is undefined behaviour in a ReleaseFast
-///   build where the call can fail;
+///   build where the call can fail, and so is every other spelling that
+///   ends in `unreachable`;
 /// - `catch |e| …` and `else |e| …` whose body does not end by handing the
 ///   error on: its last statement, or the expression itself, is `return e`,
-///   `return error.…`, `unreachable` or `@panic(…)`, or it is a `switch` on
-///   `e` whose `error.OutOfMemory` prong, or `else` prong where it names
-///   none, returns the error.
+///   `return error.…` or `@panic(…)`, or it is a `switch` on `e` whose
+///   `error.OutOfMemory` prong, or `else` prong where it names none, does
+///   one of those.
 ///
-/// `catch return error.…`, `catch @panic(…)` and a capture that ends by
-/// handing the error on are not listed. Nothing is decided by the name
+/// `catch return error.…`, `catch @panic(…)` and a block or capture that
+/// ends by handing the error on or stopping the process are not listed. Nothing is decided by the name
 /// of what is called: the tokens do not say what a call returns, so every
 /// discard is listed and the caller says which are explained.
 ///
@@ -748,9 +749,10 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
             .l_brace => {
                 if (partner[i + 1] == i + 2) break :form "catch {}";
                 // With no capture there is no error to hand on but a new
-                // one, so only a block ending in `return error.…` passes.
+                // one, so a block passes where it ends returning one or
+                // stopping the process.
                 if (lastStatement(&tree, partner, i + 1)) |last| {
-                    if (tags[last] == .keyword_return and tags[last + 1] == .keyword_error) continue;
+                    if (statementHandsOn(&tree, partner, last, "")) continue;
                 }
                 break :form "catch { … } that does not return an error";
             },
@@ -822,15 +824,16 @@ fn lastStatement(tree: *const std.zig.Ast, partner: []const u32, start: u32) ?u3
 }
 
 /// Whether the statement or expression at `at` hands the error on:
-/// `return name`, `return error.…`, `unreachable`, `@panic(…)`, or a
-/// `switch` on `name` whose prong for a refused allocation returns it.
+/// `return name`, `return error.…`, `@panic(…)`, or a `switch` on `name`
+/// whose prong for a refused allocation does one of those. `unreachable`
+/// never does: after a call that can fail it is undefined behaviour in a
+/// ReleaseFast build.
 fn statementHandsOn(tree: *const std.zig.Ast, partner: []const u32, at: u32, name: []const u8) bool {
     const tags = tree.tokens.items(.tag);
     if (at + 1 >= tags.len) return false;
     switch (tags[at]) {
         .keyword_return => return tags[at + 1] == .keyword_error or
             (name.len != 0 and tags[at + 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(at + 1), name)),
-        .keyword_unreachable => return true,
         .builtin => return std.mem.eql(u8, tree.tokenSlice(at), "@panic"),
         .keyword_switch => {},
         else => return false,
@@ -848,8 +851,9 @@ fn statementHandsOn(tree: *const std.zig.Ast, partner: []const u32, at: u32, nam
             continue;
         }
         if (tags[i] != .equal_angle_bracket_right) continue;
-        const returns = tags[i + 1] == .keyword_return and (tags[i + 2] == .keyword_error or
-            (tags[i + 2] == .identifier and std.mem.eql(u8, tree.tokenSlice(i + 2), name)));
+        const returns = (tags[i + 1] == .keyword_return and (tags[i + 2] == .keyword_error or
+            (tags[i + 2] == .identifier and std.mem.eql(u8, tree.tokenSlice(i + 2), name)))) or
+            (tags[i + 1] == .builtin and std.mem.eql(u8, tree.tokenSlice(i + 1), "@panic"));
         const refusal = i >= 3 and tags[i - 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(i - 1), "OutOfMemory") and
             tags[i - 2] == .period and tags[i - 3] == .keyword_error;
         if (refusal) {

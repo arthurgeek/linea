@@ -4759,11 +4759,15 @@ test "a pass file hands every error on, whatever is called" {
         .{ .statement = "self.visit(d) catch |err| { if (self.strict) { return err; } };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch |err| { return err; self.undo(); };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch { if (self.strict) return error.OutOfMemory; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
-        // A block without a capture hands nothing on unless it returns an
-        // error: stopping the process inside one is written `catch @panic(…)`.
+        // `unreachable` after a call that can fail is undefined behaviour
+        // in a ReleaseFast build, in every spelling.
         .{ .statement = "self.visit(d) catch { unreachable; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch { self.undo(); unreachable; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
-        .{ .statement = "self.visit(d) catch { @panic(\"OOM\"); };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| unreachable;", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |_| unreachable;", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| { self.undo(); unreachable; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "if (self.find(d)) |found| use(found) else |_| unreachable;", .form = "else |…| that does not return the error", .callee = "else" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => unreachable, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => {}, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.Refused => return err, else => {} };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
     };
@@ -4789,7 +4793,13 @@ test "a pass file hands every error on, whatever is called" {
         "self.emit(d) catch @panic(\"OOM\");",
         "if (self.find(d)) |found| use(found) else |err| return err;",
         "self.emit(d) catch |err| { if (self.strict) self.undo(); return err; };",
-        "self.emit(d) catch |err| { self.undo(); unreachable; };",
+        // `@panic` stops the process, a defined end, in every spelling.
+        "self.emit(d) catch { @panic(\"OOM\"); };",
+        "self.emit(d) catch { self.undo(); @panic(\"OOM\"); };",
+        "self.emit(d) catch |err| @panic(@errorName(err));",
+        "self.emit(d) catch |err| { self.undo(); @panic(@errorName(err)); };",
+        "if (self.find(d)) |found| use(found) else |_| @panic(\"OOM\");",
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => @panic(\"OOM\"), else => return err };",
         "self.walk(d) catch |err| switch (err) { error.Refused => {}, else => return err };",
         "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return err, error.Refused => {} };",
         "const found = self.find(d) orelse return;",
