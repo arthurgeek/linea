@@ -7,7 +7,9 @@ struct Box[
     value: T,
 }
 
-@derive(Show[UInt8,])
+@derive(Show[
+    UInt8,
+])
 struct Pair[T] {
     first: T,
     second: T,

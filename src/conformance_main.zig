@@ -8834,7 +8834,7 @@ fn checkGeneratedProgram(
         const properties_zone = tracy.beginZone(@src(), "generated.properties");
         defer properties_zone.end();
         var formatted: ?[]const u8 = null;
-        const formatting = fmt.checkPropertiesReporting(scratch, text, &diagnostics.writer) catch |e| blk: {
+        const formatting = fmt.checkPropertiesReporting(scratch, display_path, text, &diagnostics.writer) catch |e| blk: {
             try failures.append(scratch, .{
                 .path = display_path,
                 .what = "formatting properties",
@@ -22175,12 +22175,13 @@ fn checkCase(
         // what the accounting at the end of the run is entitled to assume.
         var formatted: ?[]const u8 = null;
         var formatting_checked = false;
-        const formatting = fmt.checkProperties(gpa, f.text) catch |e| blk: {
+        var reasons: std.Io.Writer.Allocating = .init(gpa);
+        const formatting = fmt.checkPropertiesReporting(gpa, f.path, f.text, &reasons.writer) catch |e| blk: {
             try w.failures.append(gpa, .{
                 .path = display_path,
                 .what = "formatting properties",
                 .expected = "preserved, idempotent, re-parsing",
-                .actual = @errorName(e),
+                .actual = try std.fmt.allocPrint(gpa, "{s}: {s}", .{ @errorName(e), reasons.written() }),
             });
             formatted = try formattedText(gpa, f.text);
             break :blk null;

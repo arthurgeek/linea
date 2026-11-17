@@ -147,7 +147,7 @@ const SameTree = struct {
         const c: SameTree = .{ .before = before, .after = after };
         inline for (@typeInfo(Ast).@"struct".fields) |field| {
             // `parts` and `tokens` say where things sit. The side array holds
-            // token ids and counts beside expression ids, so its runs, and the
+            // counts and flags beside expression ids, so its runs, and the
             // argument names kept in step with it, are compared through the
             // accessor of the expression that owns each run.
             const skipped = comptime std.mem.eql(u8, field.name, "parts") or
@@ -2167,17 +2167,17 @@ const Printer = struct {
         try self.writeTypeList(refs, self.firstAt(after, .l_bracket), false);
     }
 
-    /// A bracketed list of written types opened at `open`. A trailing comma
-    /// the author wrote is kept: the list stays on one line either way, and
-    /// dropping a written token is a rewrite the formatter refuses to make.
+    /// A bracketed list of written types opened at `open`, laid out by its
+    /// trailing comma like any other list: one type per line where the author
+    /// wrote one.
     ///
     /// Before a call, where `comments_break` is set, a comment inside the
-    /// brackets breaks the list one type per line, as it breaks a call's
+    /// brackets breaks the list one type per line too, as it breaks a call's
     /// argument list, so the comment stays beside the type it was written by.
     /// A written type's arguments leave their comments to whatever follows.
     fn writeTypeList(self: *Printer, refs: []const node.TypeRef, open: TokenId, comments_break: bool) Error!void {
         const range = self.bracketRange(open);
-        if (comments_break and self.holdsComment(self.interiorOf(range))) {
+        if (self.hasTrailingComma(range) or (comments_break and self.holdsComment(self.interiorOf(range)))) {
             const l = try self.openList(range, refs.len, "[", "]", "", true);
             for (refs, 0..) |r, i| {
                 try self.flushCommentsBefore(r.at);
@@ -2186,13 +2186,11 @@ const Printer = struct {
             }
             return self.closeList(l, refs.len);
         }
-        const inside: token.TokenRange = .{ .start = TokenId.at(open.index() + 1), .end = TokenId.at(range.end.index() - 1) };
         try self.write("[");
         for (refs, 0..) |r, i| {
             if (i > 0) try self.write(", ");
             try self.writeWrittenType(r);
         }
-        if (self.whereHasTrailingComma(inside)) try self.write(",");
         try self.write("]");
     }
 
@@ -3436,15 +3434,17 @@ pub const PropertyResult = union(enum) {
 /// parse has no formatting to hold to them, and a run needs to tell that from a
 /// property that ran and agreed.
 pub fn checkProperties(gpa: std.mem.Allocator, text: []const u8) !PropertyResult {
-    return checkPropertiesReporting(gpa, text, null);
+    return checkPropertiesReporting(gpa, "fmt.lin", text, null);
 }
 
 pub fn checkPropertiesReporting(
     gpa: std.mem.Allocator,
+    /// The file `text` was read from, named in a refusal.
+    path: []const u8,
     text: []const u8,
     diagnostics: ?*std.Io.Writer,
 ) !PropertyResult {
-    const source: Source = .{ .path = "fmt.lin", .text = text };
+    const source: Source = .{ .path = path, .text = text };
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
@@ -3454,23 +3454,23 @@ pub fn checkPropertiesReporting(
     // 1. The result is what `linea fmt` would write: it re-parses as the
     //    same tree, keeps every comment, and keeps every token save the
     //    trailing commas and semicolons formatting adds and drops.
-    const once = try formatChecked(gpa, &ast, diagnostics);
+    const once = try formatChecked(gpa, path, &ast, diagnostics);
 
     // 2. Idempotent.
-    const again: Source = .{ .path = "fmt.lin", .text = once };
+    const again: Source = .{ .path = path, .text = once };
     var sink1 = Sink.init(gpa);
     var interner1: Interner = .empty;
     const tokens1 = try tokenize(gpa, &again, .from(0), &sink1, &interner1);
     var ast1 = try parse(gpa, &again, .from(0), tokens1, &sink1);
-    const twice = try formatChecked(gpa, &ast1, diagnostics);
+    const twice = try formatChecked(gpa, path, &ast1, diagnostics);
     try expectSameFormatting(once, twice, diagnostics);
     return .{ .checked = .{ .formatted = once } };
 }
 
 /// The text `formatParsed` gives a parsed file, or the error a refusal is.
-fn formatChecked(gpa: std.mem.Allocator, ast: *const Ast, diagnostics: ?*std.Io.Writer) ![]const u8 {
+fn formatChecked(gpa: std.mem.Allocator, path: []const u8, ast: *const Ast, diagnostics: ?*std.Io.Writer) ![]const u8 {
     var sink = Sink.init(gpa);
-    const formatting = try formatParsed(gpa, "fmt.lin", ast, &sink);
+    const formatting = try formatParsed(gpa, path, ast, &sink);
     if (formatting.text) |text| return text;
     for (sink.items()) |d| try printDiagnostic(diagnostics, "{s}\n", .{d.message});
     return error.FormattingRefused;
@@ -3762,6 +3762,7 @@ test "the formatting guard says why it refuses, and property diagnostics can be 
     var clean: std.Io.Writer.Allocating = .init(arena.allocator());
     const result = try checkPropertiesReporting(
         arena.allocator(),
+        "clean.lin",
         "fn main() -> UInt8 { 0 }\n",
         &clean.writer,
     );
@@ -4414,7 +4415,7 @@ test "a list without a trailing comma is flat" {
     );
 }
 
-test "a type argument list keeps a written trailing comma" {
+test "a type argument list breaks on a written trailing comma" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
@@ -4424,7 +4425,13 @@ test "a type argument list keeps a written trailing comma" {
         \\}
         \\
         \\fn main() -> UInt8 {
-        \\    let r: Result[UInt8, Bool,] = .Ok(pick[UInt8, Bool,](1, true))
+        \\    let r: Result[
+        \\        UInt8,
+        \\        Bool,
+        \\    ] = .Ok(pick[
+        \\        UInt8,
+        \\        Bool,
+        \\    ](1, true))
         \\    r.unwrap_or(0)
         \\}
         \\
