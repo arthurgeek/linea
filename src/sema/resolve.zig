@@ -7286,7 +7286,6 @@ const Resolver = struct {
     }
 
     /// A re-export being resolved, and the one whose resolution led to it.
-
     /// Resolves a re-export, resolving what it names first where that is
     /// itself one.
     ///
