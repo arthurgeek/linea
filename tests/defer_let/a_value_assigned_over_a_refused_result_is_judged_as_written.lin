@@ -1,0 +1,24 @@
+// `a` first holds what a refused call made, and is then given a `Box[Str]`
+// built directly. `defer let k = a` binds that second value, whose type
+// implements `Release` only for an owned item, so it is refused.
+struct Box[T] {
+    item: T,
+}
+
+impl[T: Owned + Discardable] Release for Box[T] {
+    fn release(sink self: Self) {
+        let Box { item: _ } = self
+    }
+}
+
+fn keep[T: Owned](sink value: T) -> Box[T] {
+    Box[T] { item = value }
+}
+
+fn main() -> UInt8 {
+    defer let s = "held".to_owned().unwrap()
+    var a = keep(s.view())
+    a = Box[Str] { item = s.view() }
+    defer let k = a
+    UInt8(k.item.length())
+}

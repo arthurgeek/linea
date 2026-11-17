@@ -25646,7 +25646,7 @@ const Checker = struct {
         // A call whose type arguments a bound refused still answers the type
         // its signature declares, and what is done with that value is
         // judged. What its type lacks only because of the refused bound is
-        // not: `fromRefusedCall` traces a value back to such a call.
+        // not, for the call itself or a `let` bound to it (`fromRefusedCall`).
         const bounds_refused = self.sink.error_count != errors_before_bounds;
         if (bounds_refused) try self.refused_calls.put(self.gpa, id, {});
         // One mistake, one report: a bound the declaration refused is not
@@ -26916,7 +26916,7 @@ const Checker = struct {
             if (unmet != node.DeclId.none) {
                 // Unless what it asks for is a demand a bound refusal reported
                 // unmet: then the missing implementation follows from that.
-                if (try self.refusalExplains(unmet, of, ExprId.none)) return try self.record(id, .poison);
+                if (try self.refusalExplains(unmet, of, base)) return try self.record(id, .poison);
                 try self.reportUnimplemented(
                     self.ast.fileOfExpr(id),
                     self.ast.exprSpan(id),
@@ -27015,7 +27015,7 @@ const Checker = struct {
         // A trait declaring the name whose implementation for this type
         // fails only on demands a bound refusal reported follows from that
         // refusal.
-        if (try self.refusalExplains(declaring, of, ExprId.none)) return try self.record(id, .poison);
+        if (try self.refusalExplains(declaring, of, self.ast.unaryOperand(id))) return try self.record(id, .poison);
         // An implementation refused for its alias head declares this name,
         // and that refusal was the report.
         if (self.res.refused_operations.contains(self.ast.tokenName(self.ast.exprMain(id)))) return try self.record(id, .poison);
@@ -27058,36 +27058,29 @@ const Checker = struct {
     /// restate that refusal. The trait is asked at no arguments: for a trait
     /// that takes some, no implementation is keyed that way, so the answer is
     /// that nothing explains the report, and it is made. A refused `Owned`,
-    /// `Shareable` or `Isolated` demand explains only `value`, and only
-    /// where `value` is the result of the call refused for it.
+    /// `Shareable` or `Isolated` demand explains only `value`, the
+    /// expression the report is about, and only where `fromRefusedCall`
+    /// says it is the refused call's own result.
     fn refusalExplains(self: *Checker, trait: node.DeclId, of: TypeId, value: ExprId) std.mem.Allocator.Error!bool {
         return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands, value != ExprId.none and self.fromRefusedCall(value));
     }
 
-    /// Whether `value` is the result of a call a bound refused, written
-    /// there or reached through the `let` bindings that hold it.
-    ///
-    /// **Bound:** one step per binding the value passed through, at most
-    /// `refused_call_hops`.
+    /// Whether `value` is a call a bound refused, or a name a `let` binds
+    /// to one. Nothing further is traced: a value reaching a check by any
+    /// other route is judged as it is, since dropping an independent
+    /// mistake is worse than repeating a consequence.
     fn fromRefusedCall(self: *const Checker, value: ExprId) bool {
-        var at = self.ast.withoutGroups(value);
-        var hops: usize = 0;
-        while (hops < refused_call_hops) : (hops += 1) {
-            if (self.refused_calls.contains(at)) return true;
-            if (self.ast.exprTag(at) != .name_ref) return false;
-            const b = self.res.targetOf(at);
-            if (b == BindingId.none) return false;
-            const stmt = self.res.stmtOf(b);
-            if (stmt == StmtId.none) return false;
-            const init = self.ast.stmtData(stmt).init;
-            if (init == ExprId.none) return false;
-            at = self.ast.withoutGroups(init);
-        }
-        return false;
+        const at = self.ast.withoutGroups(value);
+        if (self.refused_calls.contains(at)) return true;
+        if (self.ast.exprTag(at) != .name_ref) return false;
+        const b = self.res.targetOf(at);
+        if (b == BindingId.none or self.res.kindOf(b) != .local) return false;
+        const stmt = self.res.stmtOf(b);
+        if (stmt == StmtId.none or self.ast.stmtTag(stmt) != .let_decl or self.ast.stmtIsMutable(stmt)) return false;
+        const bound = self.ast.stmtData(stmt);
+        if (bound.name != self.res.declaringToken(b) or bound.init == ExprId.none) return false;
+        return self.refused_calls.contains(self.ast.withoutGroups(bound.init));
     }
-
-    /// How many bindings `fromRefusedCall` follows a value through.
-    const refused_call_hops = 8;
 
     test "a refusal explains a missing implementation that fails only on what it reported" {
         const shared =

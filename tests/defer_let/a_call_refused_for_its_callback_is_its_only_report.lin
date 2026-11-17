@@ -1,7 +1,7 @@
 // `lazy_map` takes a callback that owns what it holds. A closure lending
-// `label` is refused there, once: the iterator the call builds would be
-// released and walked through implementations that ask the same of the
-// callback, and those are not reported again.
+// `label` is refused at each call, once: the iterator a call builds, bound
+// by `let`, would be released or walked through implementations that ask
+// the same of the callback, and those are not reported again.
 @linear
 struct Lazy[F] {
     f: F,
@@ -32,10 +32,11 @@ fn lazy_map[F: Owned + fn(sink k: UInt64) -> UInt64](sink f: F) -> Lazy[F] {
 
 fn main() -> UInt8 {
     defer let label = "scale".to_owned().unwrap()
-    defer var results = lazy_map([read label] |sink k| k * label.view().length())
+    defer let results = lazy_map([read label] |sink k| k * label.view().length())
+    let walked = lazy_map([read label] |sink k| k + label.view().length())
     var total: UInt64 = 0
-    for r in &results {
+    for r in walked {
         total += r
     }
-    UInt8(total)
+    UInt8(total + results.at)
 }

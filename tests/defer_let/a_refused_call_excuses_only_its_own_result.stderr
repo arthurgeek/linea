@@ -1,10 +1,10 @@
 error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
-  --> tests/defer_let/a_refused_call_excuses_only_its_own_result.lin:22:17
+  --> tests/defer_let/a_refused_call_excuses_only_its_own_result.lin:21:17
    |
-22 |     let _kept = keep(s.view())
+21 |     let _kept = keep(s.view())
    |                 ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
 error[T-DeferLet]: `Box[Str]` implements no `Release`, so it has no single ending `defer let` may choose
-  --> tests/defer_let/a_refused_call_excuses_only_its_own_result.lin:23:5
+  --> tests/defer_let/a_refused_call_excuses_only_its_own_result.lin:22:5
    |
-23 |     defer let b2 = Box[Str] { item = s.view() }
+22 |     defer let b2 = Box[Str] { item = s.view() }
    |     ^^^^^^^^^^^^ write `let`, then `defer` the operation that ends it on every path

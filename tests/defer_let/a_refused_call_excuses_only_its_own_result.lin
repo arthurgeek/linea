@@ -6,10 +6,9 @@ struct Box[T] {
     item: T,
 }
 
-impl[T: Owned + Release] Release for Box[T] {
+impl[T: Owned + Discardable] Release for Box[T] {
     fn release(sink self: Self) {
-        let Box { item } = self
-        item.release()
+        let Box { item: _ } = self
     }
 }
 
