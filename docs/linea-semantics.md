@@ -2202,7 +2202,10 @@ An export must also be in a library's **root module**, the interface available
 to foreign callers; modules below it cannot be named externally. An export
 below the root is diagnosed where declared. The published symbol uses the
 declaration's name, matching the C header, and omits the prefix applied to
-other Linea-defined symbols, so it must not collide with a runtime symbol.
+other Linea-defined symbols, so it must not be a symbol the runtime owns:
+any name in the runtime's `linea_` namespace, its public functions and the
+version marker every program references included, or one it defines outside
+that namespace, such as `main`.
 
 A dependency's `export` is not exported. Only the root being built publishes C
 symbols, so an `export` in a library a program depends on gives that program's

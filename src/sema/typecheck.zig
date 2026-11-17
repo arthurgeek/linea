@@ -4,6 +4,7 @@ const module_route = @import("../support/module_route.zig");
 const builtin = @import("builtin");
 const tracy = @import("../support/tracy.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
+const symbol_names = @import("../support/symbol.zig");
 const testing = std.testing;
 
 const Source = @import("../support/source.zig").Source;
@@ -22509,28 +22510,32 @@ const Checker = struct {
         // so against the declaration a person wrote: left to the linker it is a
         // redefinition reported against generated code, and left to neither it
         // is a call that reaches the wrong body.
-        if (runtime_symbols.holds(self.ast.tokenText(self.ast.declName(d)))) {
-            // Accepted compiler primitives bypass the foreign ABI above.
-            // A remaining extern must not reach one under a different signature.
-            if (category == .t_extern) {
-                return self.sink.addErrorFmt(
-                    .t_extern,
-                    self.ast.fileOf(self.ast.declName(d)),
-                    self.ast.tokenSpan(self.ast.declName(d)),
-                    "use the checked standard-library operation",
-                    "`{s}` is a compiler-owned runtime symbol and cannot be declared with this foreign signature",
-                    .{self.ast.tokenText(self.ast.declName(d))},
-                );
-            }
-            try self.sink.addErrorFmt(
+        const declared_name = self.ast.tokenText(self.ast.declName(d));
+        // Accepted compiler primitives bypass the foreign ABI above. A
+        // remaining extern must not reach one under a different signature;
+        // the rest of the `linea_` namespace is [T-ExternRuntime]'s.
+        if (category == .t_extern and runtime_symbols.holds(declared_name)) {
+            return self.sink.addErrorFmt(
+                .t_extern,
+                self.ast.fileOf(self.ast.declName(d)),
+                self.ast.tokenSpan(self.ast.declName(d)),
+                "use the checked standard-library operation",
+                "`{s}` is a compiler-owned runtime symbol and cannot be declared with this foreign signature",
+                .{declared_name},
+            );
+        }
+        // An export defines its symbol, so it may take none the runtime or
+        // its `linea_` namespace holds: the runtime's public functions and
+        // the version marker every program references sit there too.
+        if (category == .t_export and symbol_names.reservedForeign(declared_name)) {
+            return self.sink.addErrorFmt(
                 .m_export,
                 self.ast.fileOf(self.ast.declName(d)),
                 self.ast.tokenSpan(self.ast.declName(d)),
                 "publish it under a name of your own",
-                "`{s}` is a symbol the runtime defines, so nothing may export it",
-                .{self.ast.tokenText(self.ast.declName(d))},
+                "`{s}` is a symbol the Linea runtime owns, so nothing may export it",
+                .{declared_name},
             );
-            return;
         }
 
         // A callback an `extern` takes, and the context it hands back, are

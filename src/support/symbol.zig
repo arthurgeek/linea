@@ -28,11 +28,12 @@ const hex_digits = "0123456789abcdef";
 /// that stops holding the day the prefix grows.
 pub const defined_prefix = "lin.";
 
-/// Whether a symbol C gives a function is one no `extern` may link against:
-/// one the runtime owns or its `linea_` namespace holds ([T-ExternRuntime]),
-/// one a Linea definition or callback entry is emitted under, or one LLVM
-/// spells for itself. A written name cannot reach these, since an identifier
-/// holds no `.`, but an `__asm__` label can.
+/// Whether a symbol is one no `extern` may link against through a C label and
+/// no `export` may define: one the runtime owns or its `linea_` namespace
+/// holds ([T-ExternRuntime]), one a Linea definition or callback entry is
+/// emitted under, or one LLVM spells for itself. A written name reaches only
+/// the first two, since an identifier holds no `.`; an `__asm__` label can
+/// reach any of them.
 pub fn reservedForeign(name: []const u8) bool {
     const runtime_symbols = @import("runtime_symbols.zig");
     if (std.mem.startsWith(u8, name, runtime_symbols.namespace) or runtime_symbols.holds(name)) return true;
