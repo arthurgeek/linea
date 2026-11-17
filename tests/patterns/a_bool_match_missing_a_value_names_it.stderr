@@ -1,0 +1,20 @@
+error[T-Cover]: this `match` does not cover `false`
+ --> tests/patterns/a_bool_match_missing_a_value_names_it.lin:5:5
+  |
+5 |     match flag {
+  |     ^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Cover]: this `match` does not cover `(true, false)`
+  --> tests/patterns/a_bool_match_missing_a_value_names_it.lin:11:5
+   |
+11 |     match read flags {
+   |     ^^^^^^^^^^^^^^^^^^ add the missing arms, or a `_`
+error[T-Unreachable]: no value reaches this arm
+  --> tests/patterns/a_bool_match_missing_a_value_names_it.lin:21:9
+   |
+21 |         true => 2,
+   |         ^^^^ the arms before it take every value it would
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/patterns/a_bool_match_missing_a_value_names_it.lin:27:9
+   |
+27 |         true => 1,
+   |         ^^^^ `true` and `false` compare only a `Bool`

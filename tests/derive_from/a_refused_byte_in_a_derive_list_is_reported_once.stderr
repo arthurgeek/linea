@@ -1,0 +1,5 @@
+error[S-Char]: unexpected character 'é'
+ --> tests/derive_from/a_refused_byte_in_a_derive_list_is_reported_once.lin:1:18
+  |
+1 | @derive(Equatableé, Debug)
+  |                  ^ not a valid token

@@ -1,0 +1,12 @@
+// A character no token begins ends its argument's line, and the line after
+// it continues the argument with a selection, as it would outside the list.
+// The selection's own arguments are read, so a mistake in them is reported,
+// and so is one in the argument after it.
+fn f(_a: UInt8, _b: UInt8) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    f(é
+        .bar(nope), absent)
+}

@@ -1017,6 +1017,7 @@ module.exports = grammar({
       $.integer_literal,
       $._negative_integer,
       $.string_literal,
+      $.boolean_literal,
       $.reflection_case_pattern,
       $.tuple_pattern,
       alias($.identifier, $.type_identifier),
@@ -1070,6 +1071,7 @@ module.exports = grammar({
       $.integer_literal,
       $._negative_integer,
       $.string_literal,
+      $.boolean_literal,
       $.tuple_pattern,
     ),
 

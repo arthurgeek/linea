@@ -1,0 +1,24 @@
+// A `Shelf` implements `Release` when what it holds does, and a `Crate` does
+// not, so `defer var` has no single ending to schedule for a `Shelf[Crate]`.
+// The report says `defer var`, as written, and names the part that lacks
+// `Release`.
+struct Crate {
+    weight: UInt64,
+}
+
+struct Shelf[T] {
+    item: T,
+}
+
+impl[T: Release] Release for Shelf[T] {
+    fn release(sink self: Self) {
+        let Shelf { item } = self
+        item.release()
+    }
+}
+
+fn main() -> UInt8 {
+    defer var shelf = Shelf[Crate] { item = Crate { weight = 3 } }
+    shelf.item.weight = 4
+    0
+}

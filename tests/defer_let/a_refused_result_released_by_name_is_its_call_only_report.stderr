@@ -1,0 +1,10 @@
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_result_released_by_name_is_its_call_only_report.lin:21:5
+   |
+21 |     keep(s.view()).release()
+   |     ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_result_released_by_name_is_its_call_only_report.lin:22:13
+   |
+22 |     let k = keep(s.view())
+   |             ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound

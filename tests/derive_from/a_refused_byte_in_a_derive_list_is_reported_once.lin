@@ -1,0 +1,9 @@
+@derive(Equatableé, Debug)
+struct P {
+    x: UInt8,
+}
+
+fn main() -> UInt8 {
+    let p = P { x = 1 }
+    p.x
+}

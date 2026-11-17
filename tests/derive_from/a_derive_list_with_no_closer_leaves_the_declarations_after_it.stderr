@@ -1,0 +1,10 @@
+error[S-Params]: expected `,` or `)`
+ --> tests/derive_from/a_derive_list_with_no_closer_leaves_the_declarations_after_it.lin:1:15
+  |
+1 | @derive(Debug x
+  |               ^ a grouped derive separates its traits with commas
+error[S-Entry]: a program is a list of declarations
+ --> tests/derive_from/a_derive_list_with_no_closer_leaves_the_declarations_after_it.lin:9:1
+  |
+9 | )
+  | ^ expected `fn` here

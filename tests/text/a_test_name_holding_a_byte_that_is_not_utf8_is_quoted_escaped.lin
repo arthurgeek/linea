@@ -1,0 +1,11 @@
+// A test named twice is one mistake, and its name is quoted as text even
+// where the file holds a byte that begins no UTF-8 sequence.
+test "sameÿ" {
+}
+
+test "sameÿ" {
+}
+
+fn main() -> UInt8 {
+    0
+}

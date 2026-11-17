@@ -1,0 +1,25 @@
+// `keep` takes a value that owns what it holds, and a view of `s` is refused
+// there. Its result implements `Release` only for an owned item, which is
+// what was refused, so releasing that result, written at the call or through
+// the name bound to it, is not reported again.
+struct Box[T] {
+    item: T,
+}
+
+impl[T: Owned + Discardable] Release for Box[T] {
+    fn release(sink self: Self) {
+        let Box { item: _ } = self
+    }
+}
+
+fn keep[T: Owned](sink value: T) -> Box[T] {
+    Box[T] { item = value }
+}
+
+fn main() -> UInt8 {
+    defer let s = "held".to_owned().unwrap()
+    keep(s.view()).release()
+    let k = keep(s.view())
+    k.release()
+    0
+}

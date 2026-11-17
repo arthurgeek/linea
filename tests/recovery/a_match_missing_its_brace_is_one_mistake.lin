@@ -1,0 +1,22 @@
+// A `match` with no `{` after its scrutinee is incomplete. It is reported
+// once; the scrutinee is still read, so a mistake of its own is reported, and
+// the statements after it are checked as written.
+fn missing_brace(value: UInt8) -> UInt8 {
+    let _ = match value
+    value
+}
+
+fn missing_brace_of_a_read(value: UInt8) -> UInt8 {
+    let _ = match read value
+    value
+}
+
+fn missing_brace_over_an_undefined_name() -> UInt8 {
+    let _ = match absent
+    let later: Bool = 1
+    0
+}
+
+fn main() -> UInt8 {
+    missing_brace(1) + missing_brace_of_a_read(2) + missing_brace_over_an_undefined_name()
+}

@@ -1,0 +1,31 @@
+error[S-Brace]: expected `{`
+ --> tests/recovery/a_match_missing_its_brace_is_one_mistake.lin:6:5
+  |
+6 |     value
+  |     ^^^^^ a match lists its arms
+error[S-Brace]: expected `{`
+  --> tests/recovery/a_match_missing_its_brace_is_one_mistake.lin:11:5
+   |
+11 |     value
+   |     ^^^^^ a match lists its arms
+error[S-Brace]: expected `{`
+  --> tests/recovery/a_match_missing_its_brace_is_one_mistake.lin:16:5
+   |
+16 |     let later: Bool = 1
+   |     ^^^ a match lists its arms
+error[N-Undefined]: undefined name `absent`
+  --> tests/recovery/a_match_missing_its_brace_is_one_mistake.lin:15:19
+   |
+15 |     let _ = match absent
+   |                   ^^^^^^ no binding with this name is in scope
+error[N-Unused]: `later` is never used
+  --> tests/recovery/a_match_missing_its_brace_is_one_mistake.lin:16:9
+   |
+16 |     let later: Bool = 1
+   |         ^^^^^ bind it as `_` if the value is not wanted
+error[T-Mismatch]: expected `Bool`, found `Int64`
+  --> tests/recovery/a_match_missing_its_brace_is_one_mistake.lin:16:23
+   |
+16 |     let later: Bool = 1
+   |                ---- expected because of this annotation
+   |                       ^ expected `Bool`, found `Int64`

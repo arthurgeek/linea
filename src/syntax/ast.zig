@@ -954,13 +954,6 @@ pub const Ast = struct {
         return self.type_refs[ref.base.index()];
     }
 
-    /// The whole of a written type, its arguments' brackets included:
-    /// `Option[B.D]` rather than `writtenSpan`'s `Option`.
-    pub fn wholeWrittenSpan(self: *const Ast, ref: node.TypeRef) Span {
-        if (ref.kind == .named and ref.name != TokenId.none and ref.args.len() > 0) return self.firstBracketsSpan(ref.name);
-        return self.writtenSpan(ref);
-    }
-
     /// From `start` through the bracket closing the first one opened at or
     /// after it. Bound: the written type's own tokens.
     fn firstBracketsSpan(self: *const Ast, start: TokenId) Span {
@@ -1478,7 +1471,8 @@ pub const Ast = struct {
         tuple,
         /// `S { f: p, ... }`.
         struct_,
-        /// An integer literal, a negated one, or a string literal.
+        /// An integer literal, a negated one, a string literal, `true` or
+        /// `false`.
         literal,
         /// `lo..hi` or `lo..=hi`.
         range,
@@ -1494,7 +1488,7 @@ pub const Ast = struct {
             .call => .call,
             .tuple_pattern => .tuple,
             .struct_pattern => .struct_,
-            .int_literal, .negate, .str_literal => .literal,
+            .int_literal, .negate, .str_literal, .bool_literal => .literal,
             .range => .range,
             .err => .malformed,
             else => .other,
@@ -1766,6 +1760,13 @@ pub const Ast = struct {
     /// arity says nothing.
     pub fn tuplePatternCutShort(self: *const Ast, id: ExprId) bool {
         std.debug.assert(self.exprTag(id) == .tuple_pattern);
+        return self.exprs.items(.call_flags)[id.index()].cut_short;
+    }
+
+    /// Whether a `match` has no `{` after its scrutinee, so it holds no arms
+    /// and nothing it would hold is known.
+    pub fn matchCutShort(self: *const Ast, id: ExprId) bool {
+        std.debug.assert(self.exprTag(id) == .match_ or self.exprTag(id) == .match_read);
         return self.exprs.items(.call_flags)[id.index()].cut_short;
     }
 
@@ -2611,9 +2612,13 @@ pub const Ast = struct {
         }
 
         /// Marks an already-built tuple pattern as one whose `)` was never
-        /// found, or a call as one an argument of which took its line.
+        /// found, a call as one an argument of which took its line, or a
+        /// `match` as one with no `{` after its scrutinee.
         pub fn markCutShort(self: *Builder, id: ExprId) void {
-            std.debug.assert(self.exprTag(id) == .tuple_pattern or self.exprTag(id) == .call);
+            std.debug.assert(switch (self.exprTag(id)) {
+                .tuple_pattern, .call, .match_, .match_read => true,
+                else => false,
+            });
             self.exprs.items(.call_flags)[id.index()].cut_short = true;
         }
 

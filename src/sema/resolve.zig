@@ -15676,7 +15676,7 @@ const Resolver = struct {
                 {
                     var listed: std.ArrayList(TokenId) = .empty;
                     defer listed.deinit(self.gpa);
-                    for (lambda.captures) |capture| try listed.append(self.gpa, capture.name);
+                    for (lambda.captures) |capture| if (self.ast.tokenTag(capture.name) == .identifier) try listed.append(self.gpa, capture.name);
                     for (lambda.params) |p| if (self.ast.paramLabel(p) != .none) try listed.append(self.gpa, self.ast.paramLabel(p));
                     try self.refuseNamesDeclaredTwice(listed.items, "a closure's captures and parameters are declared once");
                 }
@@ -15686,11 +15686,16 @@ const Resolver = struct {
                 // capture and named parameter, and the binders before them.
                 self.pattern_names.restart();
                 for (lambda.captures, 0..) |capture, i| {
-                    const named = try names.getOrPut(self.gpa, self.ast.tokenName(capture.name));
-                    if (!named.found_existing and !std.mem.eql(u8, self.ast.tokenText(capture.name), "_"))
+                    // A keyword the parser took in a capture's name was
+                    // reported there. The capture keeps its binding, so the
+                    // captures stay numbered as written, but no name reaches
+                    // it and it is not reported unused.
+                    const nameless = self.ast.tokenTag(capture.name) != .identifier;
+                    const hidden = nameless or (try names.getOrPut(self.gpa, self.ast.tokenName(capture.name))).found_existing;
+                    if (!hidden and !std.mem.eql(u8, self.ast.tokenText(capture.name), "_"))
                         try self.pattern_names.put(self.gpa, self.ast.tokenName(capture.name), capture.name);
                     const binding = BindingId.at(@intCast(self.bindings.items.len));
-                    if (!named.found_existing) try self.pushLocal(binding, self.ast.tokenName(capture.name));
+                    if (!hidden) try self.pushLocal(binding, self.ast.tokenName(capture.name));
                     try self.bindings.append(self.gpa, .{
                         .name = self.ast.tokenName(capture.name),
                         .kind = .capture,
@@ -15700,7 +15705,7 @@ const Resolver = struct {
                         .at = capture.name,
                         .used = false,
                         .mutable = captureIsMutable(capture.convention, lambda.invocation),
-                        .exempt = named.found_existing or std.mem.startsWith(u8, self.ast.tokenText(capture.name), "_"),
+                        .exempt = hidden or std.mem.startsWith(u8, self.ast.tokenText(capture.name), "_"),
                     });
                     try self.captures.append(self.gpa, .{ .binding = binding, .source = capture.source, .convention = capture.convention });
                     try self.capture_bindings.put(self.gpa, binding, .{ .closure = closure, .index = @intCast(i) });

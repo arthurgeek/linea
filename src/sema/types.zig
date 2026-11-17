@@ -3252,6 +3252,9 @@ pub const RefusedDemand = struct {
 
     pub const Lacks = union(enum) {
         capability: CapabilityRequirement,
+        /// `Owned`, `Shareable` or `Isolated`, which a lookup grants only
+        /// for a value a refused call made (`Decided.grant_containment`).
+        containment: Containment,
         trait: struct { decl: DeclId, args: []const TypeId },
         callable: TypeId,
     };
@@ -3266,6 +3269,10 @@ pub const RefusedDemand = struct {
             switch (demand.lacks) {
                 .capability => |requirement| {
                     const value: u8 = @intFromEnum(requirement);
+                    h.update(std.mem.asBytes(&value));
+                },
+                .containment => |which| {
+                    const value: u8 = @intFromEnum(which);
                     h.update(std.mem.asBytes(&value));
                 },
                 .trait => |trait| {
@@ -3285,6 +3292,7 @@ pub const RefusedDemand = struct {
             if (a.ty != b.ty or std.meta.activeTag(a.lacks) != std.meta.activeTag(b.lacks)) return false;
             return switch (a.lacks) {
                 .capability => |requirement| requirement == b.lacks.capability,
+                .containment => |which| which == b.lacks.containment,
                 .trait => |trait| trait.decl == b.lacks.trait.decl and std.mem.eql(TypeId, trait.args, b.lacks.trait.args),
                 .callable => |signature| signature == b.lacks.callable,
             };
@@ -4053,6 +4061,11 @@ pub const ImplIndex = struct {
         /// refusals, and such a lookup records no answer, since its answers
         /// hold only under the grants.
         granted: ?*const RefusedDemands = null,
+        /// Whether a refused `Owned`, `Shareable` or `Isolated` demand is
+        /// granted too. Such a refusal explains only the value the refused
+        /// call made, so the lookup asking about that value sets it, and a
+        /// lookup about any other value of the same type does not.
+        grant_containment: bool = false,
         /// What a granted lookup decided for each key, where the answer
         /// rests on no key still being decided and on no enclosing measure.
         /// It holds under these grants for the rest of the lookup, as a
@@ -4063,6 +4076,7 @@ pub const ImplIndex = struct {
 
         /// Whether `demand` is one this lookup takes as met.
         fn grants(self: *const Decided, demand: RefusedDemand) bool {
+            if (demand.lacks == .containment and !self.grant_containment) return false;
             const granted = self.granted orelse return false;
             return granted.contains(demand);
         }
@@ -4595,8 +4609,9 @@ pub const ImplIndex = struct {
         held: TypeId,
         scope: DeclId,
         granted: *const RefusedDemands,
+        grant_containment: bool,
     ) std.mem.Allocator.Error!bool {
-        var decided: Decided = .{ .gpa = gpa, .scope = scope, .granted = granted };
+        var decided: Decided = .{ .gpa = gpa, .scope = scope, .granted = granted, .grant_containment = grant_containment };
         defer decided.deinit();
         return try self.findOnce(impls, pool, &decided, trait, args, held) != null;
     }
@@ -4630,9 +4645,9 @@ pub const ImplIndex = struct {
         try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .capability = .copyable } }, {});
         try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = lookup, .args = &.{.u16} } } }, {});
         // The trait is granted at `UInt16` only, and the requirement asks for `UInt8`.
-        try testing.expect(!try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted));
+        try testing.expect(!try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted, false));
         try granted.put(gpa, .{ .ty = ticket, .lacks = .{ .trait = .{ .decl = lookup, .args = &.{.u8} } } }, {});
-        try testing.expect(try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted));
+        try testing.expect(try index.appliesGranted(gpa, &implementations, &builder, 1, &.{}, ticket, .none, &granted, false));
         // Selection is unchanged by what a granted lookup accepted.
         try testing.expect(try index.find(gpa, &implementations, &builder, 1, &.{}, ticket, .none) == null);
     }
@@ -5499,9 +5514,12 @@ pub const ImplIndex = struct {
         if (!try pool.meetsCapabilityWithin(within, given, demand.requirement) and
             !decided.grants(.{ .ty = given, .lacks = .{ .capability = demand.requirement } })) return false;
         if (demand.integer and !pool.isIntegerWithin(within, given)) return false;
-        if (demand.owned and try pool.mayCarryDependencies(given)) return false;
-        if (demand.shareable and !try pool.isShareable(given)) return false;
-        if (demand.isolated and !try pool.isIsolated(given)) return false;
+        if (demand.owned and try pool.mayCarryDependencies(given) and
+            !decided.grants(.{ .ty = given, .lacks = .{ .containment = .owned } })) return false;
+        if (demand.shareable and !try pool.isShareable(given) and
+            !decided.grants(.{ .ty = given, .lacks = .{ .containment = .shareable } })) return false;
+        if (demand.isolated and !try pool.isIsolated(given) and
+            !decided.grants(.{ .ty = given, .lacks = .{ .containment = .isolated } })) return false;
         for (demand.traits) |required| {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);
@@ -13449,11 +13467,12 @@ pub const Typing = struct {
             args: []const TypeId,
             receiver: TypeId,
             refused: *const RefusedDemands,
+            grant_containment: bool,
         ) std.mem.Allocator.Error!bool {
             if (trait == .none or receiver == .poison or refused.count() == 0) return false;
             if (try self.implementationChoiceWithin(owner, trait, args, receiver) != null) return false;
             const scope = self.contextual_constraints.lookupScope(owner);
-            return self.impl_index.appliesGranted(self.gpa, self.implementations, self, trait.index(), args, receiver, scope, refused);
+            return self.impl_index.appliesGranted(self.gpa, self.implementations, self, trait.index(), args, receiver, scope, refused, grant_containment);
         }
 
         test "a refusal explains a missing implementation only where it fails on what was refused" {
@@ -13492,14 +13511,14 @@ pub const Typing = struct {
 
             var refused: RefusedDemands = .empty;
             defer refused.deinit(gpa);
-            try testing.expect(!try builder.explainedByRefusal(owner, trait, &.{}, ticket, &refused));
+            try testing.expect(!try builder.explainedByRefusal(owner, trait, &.{}, ticket, &refused, false));
             try refused.put(gpa, .{ .ty = ticket, .lacks = .{ .capability = .discardable } }, {});
-            try testing.expect(!try builder.explainedByRefusal(owner, trait, &.{}, ticket, &refused));
+            try testing.expect(!try builder.explainedByRefusal(owner, trait, &.{}, ticket, &refused, false));
             try refused.put(gpa, .{ .ty = ticket, .lacks = .{ .capability = .copyable } }, {});
-            try testing.expect(try builder.explainedByRefusal(owner, trait, &.{}, ticket, &refused));
+            try testing.expect(try builder.explainedByRefusal(owner, trait, &.{}, ticket, &refused, false));
             // What implements the trait lacks nothing for a refusal to explain.
-            try testing.expect(!try builder.explainedByRefusal(owner, trait, &.{}, plain, &refused));
-            try testing.expect(!try builder.explainedByRefusal(owner, .none, &.{}, ticket, &refused));
+            try testing.expect(!try builder.explainedByRefusal(owner, trait, &.{}, plain, &refused, false));
+            try testing.expect(!try builder.explainedByRefusal(owner, .none, &.{}, ticket, &refused, false));
         }
 
         /// Says whether `inner` occurs within `outer`, `outer` itself included.

@@ -888,6 +888,7 @@ fn typecheckInternal(
     defer c.written.deinit(gpa);
     defer c.walk_helps.deinit(gpa);
     defer c.refused_demands.deinit(gpa);
+    defer c.refused_calls.deinit(gpa);
     defer {
         for (c.refused_demands_order.items) |demand| freeRefusedDemand(gpa, demand);
         c.refused_demands_order.deinit(gpa);
@@ -6704,6 +6705,9 @@ const Checker = struct {
     /// recorded, as it forgets its refusals, and owns each trait demand's
     /// arguments.
     refused_demands: types_mod.RefusedDemands = .empty,
+    /// The calls whose type arguments a bound refused. Sized by the calls
+    /// the program writes that were refused.
+    refused_calls: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     refused_demands_order: std.ArrayList(types_mod.RefusedDemand) = .empty,
     /// Whether the body being checked is a closure's written inside a loop,
     /// which a `break` or `continue` in it cannot leave.
@@ -9548,7 +9552,7 @@ const Checker = struct {
         try self.sink.addErrorFmt(
             .t_impl,
             self.ast.fileOf(written.at),
-            self.ast.wholeWrittenSpan(written),
+            self.ast.writtenWholeSpan(written),
             "define it as a type that does not read back to itself",
             "this associated type is defined through itself: {s}",
             .{chain.items},
@@ -9660,14 +9664,14 @@ const Checker = struct {
         const labels = try self.sink.arena.alloc(Label, if (peer_definition != null) 2 else 1);
         labels[0] = .{
             .file = self.ast.fileOf(written.at),
-            .span = self.ast.wholeWrittenSpan(written),
+            .span = self.ast.writtenWholeSpan(written),
             .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` names `{s}` as its peer", .{ own, peer_name }),
         };
         if (peer_definition) |defined| {
             const peer_written = self.ast.declReturnRef(defined);
             labels[1] = .{
                 .file = self.ast.fileOf(peer_written.at),
-                .span = self.ast.wholeWrittenSpan(peer_written),
+                .span = self.ast.writtenWholeSpan(peer_written),
                 .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` names `{s}`", .{ peer_name, try self.typeName(back) }),
                 .style = .secondary,
             };
@@ -9705,14 +9709,14 @@ const Checker = struct {
         const labels = try self.sink.arena.alloc(Label, if (peer_definition != null) 2 else 1);
         labels[0] = .{
             .file = self.ast.fileOf(written.at),
-            .span = self.ast.wholeWrittenSpan(written),
+            .span = self.ast.writtenWholeSpan(written),
             .message = try std.fmt.allocPrint(self.sink.arena, "the dual of `{s}` is `{s}`", .{ try self.typeName(own_step), try self.typeName(mirrored) }),
         };
         if (peer_definition) |defined| {
             const peer_written = self.ast.declReturnRef(defined);
             labels[1] = .{
                 .file = self.ast.fileOf(peer_written.at),
-                .span = self.ast.wholeWrittenSpan(peer_written),
+                .span = self.ast.writtenWholeSpan(peer_written),
                 .message = try std.fmt.allocPrint(self.sink.arena, "`{s}.Step` is `{s}`", .{ peer_name, try self.typeName(peer_step) }),
                 .style = .secondary,
             };
@@ -12880,6 +12884,7 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
+            try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .containment = .owned } });
             try self.reportNotOwned(subject, held, bound, at, span);
             return true;
         };
@@ -12887,6 +12892,7 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
+            try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .containment = .shareable } });
             try self.reportNotContained(.shareable, subject, held, bound, at, span);
             return true;
         };
@@ -12894,6 +12900,7 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
+            try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .containment = .isolated } });
             try self.reportNotContained(.isolated, subject, held, bound, at, span);
             return true;
         };
@@ -15917,6 +15924,12 @@ const Checker = struct {
             // `checkPattern` checks each of these with its own routine.
             .name, .call, .tuple, .struct_, .malformed => unreachable,
         }
+        // `true` and `false` compare a `Bool`, and nothing else.
+        if (self.ast.exprTag(pattern) == .bool_literal) {
+            if (settled == .bool_) return .matches;
+            _ = try self.report(.t_mismatch, pattern, "expected `{s}`, found `Bool`", .{shown}, "`true` and `false` compare only a `Bool`");
+            return .refused;
+        }
         const text = self.ast.exprTag(pattern) == .str_literal;
         if (settled.bounds() == null) {
             if (text and self.sealedHere(settled)) {
@@ -16453,6 +16466,9 @@ const Checker = struct {
         pub fn kind(self: PatternTypes, ty: TypeId) std.mem.Allocator.Error!usefulness.Kind {
             const t = try self.settled(ty);
             if (t.bounds()) |b| return .{ .integer = .{ .lo = b.min, .hi = b.max } };
+            // `false` and `true` are the two values a `Bool` holds, covered
+            // as the integers 0 and 1 (`boolValue`).
+            if (t == .bool_) return .{ .integer = .{ .lo = 0, .hi = 1 } };
             return switch (self.checker.builder.get(t)) {
                 .enum_ => |e| if (e.variant_count == 0) .uninhabited else .{ .variants = e.variant_count },
                 .never => .uninhabited,
@@ -16515,7 +16531,10 @@ const Checker = struct {
                 out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, 1) };
             },
             .tuple, .struct_ => out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, try types.arity(of, .product)) },
-            .literal, .range => out.* = .{ .integers = self.foldedInterval(pattern) orelse return &usefulness.wild },
+            .literal, .range => out.* = .{ .integers = if (self.ast.exprTag(pattern) == .bool_literal)
+                .{ .lo = boolValue(self.ast, pattern), .hi = boolValue(self.ast, pattern) }
+            else
+                self.foldedInterval(pattern) orelse return &usefulness.wild },
             // Neither is a sound pattern, so neither reaches here; taking
             // nothing in particular is the answer that claims nothing.
             .malformed, .other => return &usefulness.wild,
@@ -16537,6 +16556,11 @@ const Checker = struct {
             args[at] = try self.coveragePattern(arena, part.node, try types.part(of, c, at));
         }
         return args;
+    }
+
+    /// The integer coverage reads a `true` or `false` pattern as: 1 and 0.
+    fn boolValue(ast: *const Ast, pattern: ExprId) i128 {
+        return @intFromBool(ast.tokenTag(ast.exprMain(pattern)) == .keyword_true);
     }
 
     /// A checked literal or range pattern's interval, read from the fold
@@ -16562,6 +16586,7 @@ const Checker = struct {
         switch (w.shape) {
             .wild => try out.append(self.gpa, '_'),
             .integers => |iv| {
+                if (t == .bool_) return out.appendSlice(self.gpa, if (iv.lo != iv.hi) "_" else if (iv.lo == 1) "true" else "false");
                 // A refined newtype's integers are written inside its name.
                 const wrapped = self.builder.get(t) == .newtype;
                 if (wrapped) try out.print(self.gpa, "{s}(", .{self.ast.tokenText(self.ast.declName(self.declaringType(t).?))});
@@ -16659,24 +16684,43 @@ const Checker = struct {
             _ = try self.record(id, .poison);
             return;
         }
-        const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null);
+        const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null, .none);
         const wanted = self.ast.tokenName(self.ast.declName(release.member));
         switch (try self.postfixOperation(id, id, receiver, wanted, release.member, &.{}, null)) {
             .settled => |settled| _ = try self.checkCallOf(id, settled.sig, settled.args, .postfix, null, &.{}),
-            .absent => |held| try self.refuseDeferLet(id, receiver, held),
+            .absent => |held| {
+                // A `Release` the value lacks only because a bound was refused
+                // at the call that made it was reported at that call.
+                if (try self.refusalExplains(release.trait, held, receiver)) {
+                    _ = try self.record(receiver, .poison);
+                    _ = try self.record(id, .poison);
+                    return;
+                }
+                try self.refuseDeferLet(id, receiver, held, release.trait);
+            },
             .refused, .poisoned => _ = try self.record(id, .poison),
         }
     }
 
-    fn refuseDeferLet(self: *Checker, id: ExprId, receiver: ExprId, held: ?TypeId) !void {
+    /// Refuses the `defer let` or `defer var` scheduling `id`, naming the
+    /// keyword as written and, where `trait` is `Release` and `held` has an
+    /// implementation of it that does not apply, the part it needs `Release`
+    /// of.
+    fn refuseDeferLet(self: *Checker, id: ExprId, receiver: ExprId, held: ?TypeId, trait: node.DeclId) !void {
         _ = try self.record(receiver, held orelse .poison);
+        // `defer` is the call's main token, and `let` or `var` the token after.
+        var keyword = TokenId.at(self.ast.exprMain(id).index() + 1);
+        while (self.ast.tokenTag(keyword).isTrivia()) keyword = TokenId.at(keyword.index() + 1);
+        const written = self.ast.tokenText(keyword);
+        const before = self.sink.items().len;
         _ = try self.report(
             .t_defer_let,
             id,
-            "`{s}` implements no `Release`, so it has no single ending `defer let` may choose",
-            .{if (held) |ty| try self.typeName(ty) else "this type"},
-            "write `let`, then `defer` the operation that ends it on every path",
+            "`{s}` implements no `Release`, so it has no single ending `defer {s}` may choose",
+            .{ if (held) |ty| try self.typeName(ty) else "this type", written },
+            try std.fmt.allocPrint(self.sink.arena, "write `{s}`, then `defer` the operation that ends it on every path", .{written}),
         );
+        if (self.sink.items().len > before) if (held) |ty| if (trait != .none) try self.explainMissing(before, trait, ty);
     }
 
     fn checkDestructure(self: *Checker, s: StmtId) !void {
@@ -18900,7 +18944,7 @@ const Checker = struct {
         if (!try self.answersTrait(walked, self.sequence_decl)) {
             // A `Sequence` implementation that fails only on demands a bound
             // refusal reported follows from that refusal.
-            if (try self.refusalExplains(sequence, walked)) return .poison;
+            if (try self.refusalExplains(sequence, walked, at)) return .poison;
             const before = self.sink.items().len;
             const reported = try self.report(
                 .t_for,
@@ -19909,7 +19953,7 @@ const Checker = struct {
             if (self.iterator_decl == null or !try self.answersTrait(walked, self.iterator_decl)) {
                 // An `Iterator` implementation that fails only on demands a
                 // bound refusal reported follows from that refusal.
-                if (self.iterator_decl) |declared| if (try self.refusalExplains(declared, walked)) break :element .poison;
+                if (self.iterator_decl) |declared| if (try self.refusalExplains(declared, walked, iterator)) break :element .poison;
                 const before = self.sink.items().len;
                 const reported = try self.report(
                     .t_for,
@@ -25599,9 +25643,15 @@ const Checker = struct {
             try self.checkArgumentBounds(over, settled.head, null, named);
             implementation_at = try self.noteSettledHead(id, over, settled.head);
         }
+        // A call whose type arguments a bound refused still answers the type
+        // its signature declares, and what is done with that value is
+        // judged. What its type lacks only because of the refused bound is
+        // not, for the call itself or a `let` bound to it (`fromRefusedCall`).
+        const bounds_refused = self.sink.error_count != errors_before_bounds;
+        if (bounds_refused) try self.refused_calls.put(self.gpa, id, {});
         // One mistake, one report: a bound the declaration refused is not
         // reported again at the alias that heads the path.
-        if (self.sink.error_count != errors_before_bounds and self.calledThroughAlias(id) != null) {
+        if (bounds_refused and self.calledThroughAlias(id) != null) {
             const callee = self.ast.withoutGroups(self.ast.call(id).callee);
             try self.noteRefused(self.ast.exprMain(self.ast.unaryOperand(callee)));
         }
@@ -26866,7 +26916,7 @@ const Checker = struct {
             if (unmet != node.DeclId.none) {
                 // Unless what it asks for is a demand a bound refusal reported
                 // unmet: then the missing implementation follows from that.
-                if (try self.refusalExplains(unmet, of)) return try self.record(id, .poison);
+                if (try self.refusalExplains(unmet, of, base)) return try self.record(id, .poison);
                 try self.reportUnimplemented(
                     self.ast.fileOfExpr(id),
                     self.ast.exprSpan(id),
@@ -26965,7 +27015,7 @@ const Checker = struct {
         // A trait declaring the name whose implementation for this type
         // fails only on demands a bound refusal reported follows from that
         // refusal.
-        if (try self.refusalExplains(declaring, of)) return try self.record(id, .poison);
+        if (try self.refusalExplains(declaring, of, self.ast.unaryOperand(id))) return try self.record(id, .poison);
         // An implementation refused for its alias head declares this name,
         // and that refusal was the report.
         if (self.res.refused_operations.contains(self.ast.tokenName(self.ast.exprMain(id)))) return try self.record(id, .poison);
@@ -27007,9 +27057,29 @@ const Checker = struct {
     /// already reported, so a report of the missing implementation would
     /// restate that refusal. The trait is asked at no arguments: for a trait
     /// that takes some, no implementation is keyed that way, so the answer is
-    /// that nothing explains the report, and it is made.
-    fn refusalExplains(self: *Checker, trait: node.DeclId, of: TypeId) std.mem.Allocator.Error!bool {
-        return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands);
+    /// that nothing explains the report, and it is made. A refused `Owned`,
+    /// `Shareable` or `Isolated` demand explains only `value`, the
+    /// expression the report is about, and only where `fromRefusedCall`
+    /// says it is the refused call's own result.
+    fn refusalExplains(self: *Checker, trait: node.DeclId, of: TypeId, value: ExprId) std.mem.Allocator.Error!bool {
+        return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands, value != ExprId.none and self.fromRefusedCall(value));
+    }
+
+    /// Whether `value` is a call a bound refused, or a name a `let` binds
+    /// to one. Nothing further is traced: a value reaching a check by any
+    /// other route is judged as it is, since dropping an independent
+    /// mistake is worse than repeating a consequence.
+    fn fromRefusedCall(self: *const Checker, value: ExprId) bool {
+        const at = self.ast.withoutGroups(value);
+        if (self.refused_calls.contains(at)) return true;
+        if (self.ast.exprTag(at) != .name_ref) return false;
+        const b = self.res.targetOf(at);
+        if (b == BindingId.none or self.res.kindOf(b) != .local) return false;
+        const stmt = self.res.stmtOf(b);
+        if (stmt == StmtId.none or self.ast.stmtTag(stmt) != .let_decl or self.ast.stmtIsMutable(stmt)) return false;
+        const bound = self.ast.stmtData(stmt);
+        if (bound.name != self.res.declaringToken(b) or bound.init == ExprId.none) return false;
+        return self.refused_calls.contains(self.ast.withoutGroups(bound.init));
     }
 
     test "a refusal explains a missing implementation that fails only on what it reported" {
@@ -38576,6 +38646,10 @@ const Checker = struct {
         // comparing it, so the open type passes to the binders and settles by
         // their uses, as it does for a walk's binder and `let ... else`.
         const scrutinee = try self.receiverType(try self.check(m.callee, null), self.literalSite(m.callee));
+        // A `match` missing its `{` was reported by the parser and holds no
+        // arms; any judgement of its cover or its value would describe arms
+        // nobody wrote.
+        if (self.ast.matchCutShort(id)) return .poison;
 
         // On the scrutinee's type, not on what the arms name. A catch-all
         // names no variant and so needs nothing from a sealed type, which

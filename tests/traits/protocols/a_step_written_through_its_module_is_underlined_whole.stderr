@@ -1,0 +1,9 @@
+error[T-Dual]: `Client` and its dual `Server` disagree at their next step: one end has `Str` where the other has `UInt64`
+  --> tests/traits/protocols/a_step_written_through_its_module_is_underlined_whole.lin:11:17
+   |
+11 |     type Step = session.Send[Str, session.End]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the dual of `session.Send[Str, session.End]` is `session.Recv[Str, session.End]`
+16 |     type Step = session.Recv[UInt64, session.End]
+   |                 --------------------------------- `Server.Step` is `session.Recv[UInt64, session.End]`
+   |
+   = help: write each step as what the other end does at the same moment

@@ -1,0 +1,17 @@
+// A token the lexer refused ends at its line, so the line after it begins
+// the next statement whatever the line above was reading.
+fn after_a_missing_separator() -> UInt8 {
+    let label = 1 "unclosed
+    missing
+    0
+}
+
+fn after_an_initialiser() -> UInt8 {
+    let total = "unclosed
+    - absent
+    0
+}
+
+fn main() -> UInt8 {
+    after_a_missing_separator() + after_an_initialiser()
+}

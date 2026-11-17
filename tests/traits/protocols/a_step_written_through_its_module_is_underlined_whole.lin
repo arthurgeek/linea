@@ -1,0 +1,23 @@
+import std.session
+
+struct Client {}
+
+struct Server {}
+
+// Each step is written through the module that declares it, arguments and
+// all, and the report underlines each whole.
+impl Protocol for Client {
+    type Dual = Server
+    type Step = session.Send[Str, session.End]
+}
+
+impl Protocol for Server {
+    type Dual = Client
+    type Step = session.Recv[UInt64, session.End]
+}
+
+fn main() -> UInt8 {
+    let _client: Client = .{}
+    let _server: Server = .{}
+    0
+}

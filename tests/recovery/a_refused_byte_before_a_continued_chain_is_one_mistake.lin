@@ -1,0 +1,8 @@
+// A character no token begins is reported once. The line after it opens with
+// `.` and a lowercase name, so it continues the expression above, and the
+// selection it makes is read rather than skipped.
+fn main() -> UInt8 {
+    let a: UInt8 = 1 + é
+        .len()
+    a
+}

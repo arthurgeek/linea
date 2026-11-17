@@ -18,6 +18,7 @@ const program_mod = @import("../syntax/program.zig");
 const node = @import("../syntax/node.zig");
 const DeclId = node.DeclId;
 const TokenId = @import("../lexer/token.zig").TokenId;
+const Tag = @import("../lexer/token.zig").Tag;
 const FileId = @import("../support/source.zig").FileId;
 const Span = @import("../support/span.zig").Span;
 const resolve = @import("../sema/resolve.zig");
@@ -480,15 +481,27 @@ fn endedBefore(ast: *const Ast, statement: node.StmtId, file: FileId, offset: u3
 
     // The statement's last token says whether it can have ended, by the rule
     // the parser reads: a `;` ends it where it stands, and a line break ends
-    // it only after a token an expression can end with. One left at `=`, an
-    // operator, a comma or an open bracket goes on to the next line.
+    // it as `Tag.lineBreakEnds` says. One left at `=`, an operator, a comma
+    // or an open bracket goes on to the next line.
     const last = positions.tokenBefore(ast, file, extent.end);
     if (last == .none) return false;
     const tag = ast.tokenTag(last);
     if (tag == .semicolon) return true;
-    if (!tag.endsAStatement()) return false;
     const source = ast.partOfFile(file).?.source;
-    return std.mem.indexOfScalar(u8, source[extent.end..offset], '\n') != null;
+    if (std.mem.indexOfScalar(u8, source[extent.end..offset], '\n') == null) return false;
+    const first = significantAfter(ast, last);
+    const second = significantAfter(ast, first);
+    return Tag.lineBreakEnds(tag, ast.tokenTag(first), ast.tokenTag(second), ast.tokenText(second));
+}
+
+/// The first token after `t` that is not a comment. Every file's tokens end
+/// with its `eof`, which is answered for itself, so the walk stays in `t`'s
+/// file.
+fn significantAfter(ast: *const Ast, t: TokenId) TokenId {
+    if (ast.tokenTag(t) == .eof) return t;
+    var at = TokenId.at(t.index() + 1);
+    while (ast.tokenTag(at).isTrivia()) at = TokenId.at(at.index() + 1);
+    return at;
 }
 
 /// Where a cursor sits inside a declaration attribute. A derive entry takes no
@@ -2595,6 +2608,21 @@ test "a local is offered from the statement after the one that declares it" {
         var whole = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = ended }}, "main.lin");
         defer whole.deinit();
         const offered = try offeredReading(gpa, &whole, whole.fileNamed("main.lin").?, at, .unsupported);
+        defer free(gpa, offered);
+        try testing.expectEqualStrings("Bool", (try requireItem(offered, "x")).detail.?);
+    }
+
+    // A token the lexer refused ends at its line, so the line after it is
+    // the next statement's.
+    inline for (.{
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = \"open\n    |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true é\n    |\n    2\n}\n",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const ended = marked[0..at] ++ marked[at + 1 ..];
+        var refused = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = ended }}, "main.lin");
+        defer refused.deinit();
+        const offered = try offeredReading(gpa, &refused, refused.fileNamed("main.lin").?, at, .unsupported);
         defer free(gpa, offered);
         try testing.expectEqualStrings("Bool", (try requireItem(offered, "x")).detail.?);
     }
