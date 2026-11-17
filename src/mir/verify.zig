@@ -183,6 +183,22 @@ pub fn verify(
     defer z_fns.end();
     var enum_parts: Members.EnumParts = .{ .gpa = gpa };
     defer enum_parts.deinit();
+    // Every function's own description first, all of them before any body is
+    // walked: a call reads its callee's signature, slots and roles, and a
+    // callee later in the list, or one already refused, would otherwise be
+    // read before anything established them.
+    for (module.functions, 0..) |*f, i| {
+        var v: Function = .{
+            .gpa = gpa,
+            .module = module,
+            .sink = sink,
+            .mir = f,
+            .id = FunctionId.at(@intCast(i)),
+            .enum_parts = &enum_parts,
+        };
+        if (!try v.describes()) ok = false;
+    }
+    if (!ok) return false;
     for (module.functions, 0..) |*f, i| {
         var v: Function = .{
             .gpa = gpa,
@@ -797,17 +813,23 @@ const Function = struct {
         order: u32 = std.math.maxInt(u32),
     };
 
-    fn verify(self: *Function) std.mem.Allocator.Error!bool {
+    /// What other functions read of this one: the types it names, its slot
+    /// tables and its signature. Asked of every function before any body is
+    /// walked, since a call reads its callee's.
+    fn describes(self: *Function) std.mem.Allocator.Error!bool {
         // In this order, and each one gates the next. Type coverage is safe to
         // enumerate without following an operand, and it must precede the
-        // representation comparisons made while references are checked.
-        // Nothing below may index a table with a handle no earlier phase
-        // established: a verifier that reads past an array is a defect in the
-        // pass that reports defects.
+        // representation comparisons made after it. Nothing below may index a
+        // table with a handle no earlier phase established: a verifier that
+        // reads past an array is a defect in the pass that reports defects.
         if (!try self.cover()) return false;
+        if (!try self.slots()) return false;
+        return self.verifySignature();
+    }
+
+    fn verify(self: *Function) std.mem.Allocator.Error!bool {
         if (!try self.references()) return false;
         if (!try self.foreignEntriesReachOnlyC()) return false;
-        if (!try self.verifySignature()) return false;
 
         const locations = try self.gpa.alloc(Location, self.mir.insts.len);
         defer self.gpa.free(locations);
@@ -920,17 +942,9 @@ const Function = struct {
     /// This is what replaces the assertions the distributed build deletes.
     /// With them gone the emitter indexes an instruction array at the sentinel
     /// and prints whatever it finds.
-    fn references(self: *Function) std.mem.Allocator.Error!bool {
+    /// Whether the slot tables agree with each other and hold the parameters.
+    fn slots(self: *Function) std.mem.Allocator.Error!bool {
         const mir = self.mir;
-
-        if (mir.entry.index() >= mir.blocks.len) {
-            try self.reportFunction(
-                "control enters at block {d}, and the function has {d}",
-                .{ mir.entry.index(), mir.blocks.len },
-            );
-            return false;
-        }
-
         if (mir.param_count > mir.locals.len) {
             try self.reportFunction(
                 "there are {d} parameter(s) and {d} slot(s) to hold them",
@@ -943,6 +957,19 @@ const Function = struct {
             try self.reportFunction(
                 "there are {d} slot(s) and {d} slot role(s)",
                 .{ mir.locals.len, mir.slot_roles.len },
+            );
+            return false;
+        }
+        return true;
+    }
+
+    fn references(self: *Function) std.mem.Allocator.Error!bool {
+        const mir = self.mir;
+
+        if (mir.entry.index() >= mir.blocks.len) {
+            try self.reportFunction(
+                "control enters at block {d}, and the function has {d}",
+                .{ mir.entry.index(), mir.blocks.len },
             );
             return false;
         }
@@ -1187,10 +1214,6 @@ const Function = struct {
                     try self.report(span, "%{d} calls function {d}, and the module has {d}", .{
                         id.index(), c.func.index(), self.module.functions.len,
                     });
-                    return false;
-                }
-                if (!self.covers(self.module.functionOf(c.func).return_type)) {
-                    try self.report(span, "%{d} call target result type is out of range", .{id.index()});
                     return false;
                 }
                 for (mir.extra[at + 1 ..][0..n]) |a| {
@@ -1488,12 +1511,22 @@ const Function = struct {
         return true;
     }
 
-    fn isTypedPointerType(self: *const Function, ty: TypeId) bool {
-        return switch (self.module.representationOf(ty).computation) {
-            .code_pointer, .data_pointer => true,
-            else => false,
+    /// What a typed pointer of type `wants` loses by being carried as a value
+    /// of type `got`, or null where nothing is lost. Two code pointers share a
+    /// representation and differ in the signature they are called through;
+    /// two observations share one and differ in the referent they read. So a
+    /// pointer passed or returned keeps its exact type, while every other
+    /// value is held only to its computation representation.
+    fn pointerTransportLoss(self: *const Function, wants: TypeId, got: TypeId) ?PointerLoss {
+        if (got == wants) return null;
+        return switch (self.module.representationOf(wants).computation) {
+            .code_pointer => .{ .pointer = "code pointer", .a_pointer = "a code pointer", .identity = "signature" },
+            .data_pointer => .{ .pointer = "observation", .a_pointer = "an observation", .identity = "referent" },
+            else => null,
         };
     }
+
+    const PointerLoss = struct { pointer: []const u8, a_pointer: []const u8, identity: []const u8 };
 
     fn isCodePointerValue(self: *const Function, id: InstId) bool {
         return std.meta.eql(
@@ -2507,8 +2540,8 @@ const Function = struct {
         if (self.mir.return_type == .unit and
             self.mir.resultRoleOf(value) == .value and
             self.mir.typeOf(value) == .unit) return;
-        if (self.isCodePointerType(self.mir.return_type) and self.mir.typeOf(value) != self.mir.return_type) {
-            try self.report(self.mir.spanOf(id), "%{d} returns a code pointer with a different signature", .{id.index()});
+        if (self.pointerTransportLoss(self.mir.return_type, self.mir.typeOf(value))) |loss| {
+            try self.report(self.mir.spanOf(id), "%{d} returns {s} with a different {s}", .{ id.index(), loss.a_pointer, loss.identity });
             return;
         }
         if (!self.isValueFor(value, self.mir.return_type)) {
@@ -2574,11 +2607,12 @@ const Function = struct {
                 );
                 continue;
             }
-            if (!wants_address and self.isCodePointerType(wants) and self.mir.typeOf(a) != wants) {
+            const loss = if (wants_address) null else self.pointerTransportLoss(wants, self.mir.typeOf(a));
+            if (loss) |lost| {
                 try self.report(
                     self.mir.spanOf(id),
-                    "%{d} passes code pointer argument {d} with a different signature",
-                    .{ id.index(), i },
+                    "%{d} passes {s} argument {d} with a different {s}",
+                    .{ id.index(), lost.pointer, i, lost.identity },
                 );
                 continue;
             }
@@ -2614,11 +2648,12 @@ const Function = struct {
                 }
                 continue;
             }
+            const loss = if (wants_address) null else self.pointerTransportLoss(param.ty, self.mir.typeOf(arg));
             if (wants_address and self.mir.typeOf(arg) != self.module.types.erased(param.ty)) {
                 try self.report(self.mir.spanOf(id), "%{d} managed argument {d} has the wrong type", .{ id.index(), i });
-            } else if (!wants_address and self.isTypedPointerType(param.ty) and self.mir.typeOf(arg) != param.ty) {
-                try self.report(self.mir.spanOf(id), "%{d} passes code pointer argument {d} with a different signature", .{
-                    id.index(), i,
+            } else if (loss) |lost| {
+                try self.report(self.mir.spanOf(id), "%{d} passes {s} argument {d} with a different {s}", .{
+                    id.index(), lost.pointer, i, lost.identity,
                 });
             } else if (!wants_address and !self.isValueFor(arg, param.ty)) {
                 try self.report(self.mir.spanOf(id), "%{d} argument {d} has the wrong computation representation", .{
@@ -2735,6 +2770,9 @@ pub const Harness = struct {
     /// one.
     pub const plain: TypeId = @enumFromInt(TypeId.builtins.len + 17);
     pub const holder: TypeId = @enumFromInt(TypeId.builtins.len + 18);
+    /// A borrow of `Pair`: the same pointer representation as `borrow Big`,
+    /// observing a different referent.
+    pub const pair_borrow: TypeId = @enumFromInt(TypeId.builtins.len + 19);
 
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
@@ -2760,7 +2798,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 19;
+            const fixed_type_count = TypeId.builtins.len + 20;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2780,6 +2818,7 @@ pub const Harness = struct {
             pool[@intFromEnum(callback_array)] = .{ .array = .{ .name = "[CallbackPair; 2]", .element = callback_pair, .count = 2 } };
             pool[@intFromEnum(callable_array)] = .{ .array = .{ .name = "[fn() -> UInt8; 2]", .element = nullary_callable, .count = 2 } };
             pool[@intFromEnum(big_borrow)] = .{ .borrow = .{ .referent = big, .name = "borrow Big" } };
+            pool[@intFromEnum(pair_borrow)] = .{ .borrow = .{ .referent = pair, .name = "borrow Pair" } };
             pool[@intFromEnum(plain)] = .{ .struct_ = .{ .name = "Plain", .first_field = 17, .field_count = 2 } };
             pool[@intFromEnum(holder)] = .{ .struct_ = .{ .name = "Holder", .first_field = 19, .field_count = 2 } };
             pool[@intFromEnum(callback_enum)] = .{ .enum_ = .{ .name = "Callbacks", .first_variant = 2, .variant_count = 5 } };
@@ -2970,6 +3009,21 @@ fn indirectCaller(
     else
         try b.addInst(entry, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 0 } });
     _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = returned } });
+    return b.finish(entry, .from(0));
+}
+
+/// A function calling through the code pointer it is given, so the pointer's
+/// type is no function's signature and a test may corrupt it alone.
+fn indirectThroughParameter(gpa: std.mem.Allocator, pointer_ty: TypeId, args: []const InstId) !Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u8;
+    b.param_count = 1;
+    const pointer = try b.addLocal(pointer_ty, .value);
+    const entry = try b.addBlock();
+    const callee = try b.addInst(entry, .{ .tag = .load, .ty = pointer_ty, .span = Span.empty, .data = .{ .local = pointer } });
+    const result = try b.addIndirectCall(entry, .value, .u8, Span.empty, callee, args);
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
     return b.finish(entry, .from(0));
 }
 
@@ -3541,7 +3595,7 @@ test "a direct call cannot forge a code pointer result" {
     try expectSaid(checked.said, "call cannot produce a code pointer from its result");
 }
 
-test "a direct call checks its callee result range before code pointer representation" {
+test "a callee whose result type is out of range is refused before its call is checked" {
     const gpa = testing.allocator;
     var b = Builder.init(gpa);
     defer b.deinit();
@@ -3565,7 +3619,84 @@ test "a direct call checks its callee result range before code pointer represent
 
     const checked = try h.run();
     try testing.expect(!checked.ok);
-    try expectSaid(checked.said, "call target result type is out of range");
+    try expectSaid(checked.said, "what it returns is type");
+}
+
+test "a call reads its callee only once every function's slots are established" {
+    // The caller comes first and passes an argument to a callee that claims a
+    // parameter it has no slot for. The caller's argument checks read the
+    // callee's slots, so the callee is refused before any body is walked.
+    const gpa = testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.signature = Harness.nullary_callable;
+    b.return_type = .u8;
+    const entry = try b.addBlock();
+    const argument = try b.addInst(entry, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 1 } });
+    const result = try b.addCall(entry, .value, .u8, Span.empty, FunctionId.at(1), &.{argument});
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
+    var target = try pointerTarget(gpa, Harness.callable, null);
+    target.param_count = 1;
+    const functions = try gpa.dupe(Mir, &.{ try b.finish(entry, .from(0)), target });
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "there are 1 parameter(s) and 0 slot(s)");
+}
+
+/// A function lending the `Big` it is given to function 1 as an observation,
+/// or returning that observation where `returns` is set.
+fn observesBig(gpa: std.mem.Allocator, returns: ?TypeId) !Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = returns orelse .u8;
+    b.param_count = 1;
+    const param = try b.addLocal(Harness.big, .managed_address);
+    const entry = try b.addBlock();
+    const a = try b.addInst(entry, .{ .tag = .load, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .local = param } });
+    const pointer = try b.addInst(entry, .{ .tag = .borrow, .ty = Harness.big_borrow, .span = Span.empty, .data = .{ .unary = a } });
+    const result = if (returns != null) pointer else try b.addCall(entry, .value, .u8, Span.empty, FunctionId.at(1), &.{pointer});
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
+    return b.finish(entry, .from(0));
+}
+
+test "a direct call cannot pass an observation of a different referent" {
+    const gpa = testing.allocator;
+    const functions = try gpa.dupe(Mir, &.{
+        try observesBig(gpa, null),
+        try pointerTarget(gpa, .poison, .{ .ty = Harness.pair_borrow, .role = .value }),
+    });
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "passes observation argument 0 with a different referent");
+}
+
+test "a direct call passes an observation of its own referent" {
+    const gpa = testing.allocator;
+    const functions = try gpa.dupe(Mir, &.{
+        try observesBig(gpa, null),
+        try pointerTarget(gpa, .poison, .{ .ty = Harness.big_borrow, .role = .value }),
+    });
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(checked.ok);
+}
+
+test "a return cannot change an observation's referent" {
+    const gpa = testing.allocator;
+    var h = try Harness.init(gpa, try oneFunction(gpa, try observesBig(gpa, Harness.pair_borrow)));
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "returns an observation with a different referent");
 }
 
 test "a direct call result is its callee result type" {
@@ -3607,7 +3738,7 @@ test "a direct call preserves the exact code pointer signature" {
     );
     const result = try b.addIndirectCall(entry, .value, .u8, Span.empty, pointer, &.{});
     _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
-    var target = try pointerTarget(gpa, Harness.nullary_callable, null);
+    var target = try pointerTarget(gpa, Harness.returns_callable, null);
     target.return_type = Harness.callable;
     const functions = try gpa.dupe(Mir, &.{ try b.finish(entry, .from(0)), target });
     var h = try Harness.init(gpa, functions);
@@ -4151,8 +4282,8 @@ test "an indirect call keeps its argument metadata in range" {
 test "an indirect call keeps its signature parameter extent in range" {
     const gpa = testing.allocator;
     const functions = try gpa.dupe(Mir, &.{
-        try indirectCaller(gpa, Harness.callable, FunctionId.at(1), &.{}, .u8, .value),
-        try pointerTarget(gpa, Harness.callable, .{ .ty = .u8, .role = .value }),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+        try indirectThroughParameter(gpa, Harness.callable, &.{}),
     });
     var h = try Harness.init(gpa, functions);
     defer h.deinit();
@@ -4166,8 +4297,8 @@ test "an indirect call keeps its signature parameter extent in range" {
 test "an indirect call keeps its signature result type in range" {
     const gpa = testing.allocator;
     const functions = try gpa.dupe(Mir, &.{
-        try indirectCaller(gpa, Harness.callable, FunctionId.at(1), &.{}, .u8, .value),
-        try pointerTarget(gpa, Harness.callable, .{ .ty = .u8, .role = .value }),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+        try indirectThroughParameter(gpa, Harness.callable, &.{}),
     });
     var h = try Harness.init(gpa, functions);
     defer h.deinit();
@@ -4181,8 +4312,8 @@ test "an indirect call keeps its signature result type in range" {
 test "an indirect call keeps its signature parameter type in range" {
     const gpa = testing.allocator;
     const functions = try gpa.dupe(Mir, &.{
-        try indirectCaller(gpa, Harness.callable, FunctionId.at(1), &.{InstId.at(0)}, .u8, .value),
-        try pointerTarget(gpa, Harness.callable, .{ .ty = .u8, .role = .value }),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+        try indirectThroughParameter(gpa, Harness.callable, &.{InstId.at(0)}),
     });
     var h = try Harness.init(gpa, functions);
     defer h.deinit();
@@ -4196,8 +4327,8 @@ test "an indirect call keeps its signature parameter type in range" {
 test "an indirect call with the wrong arity does not traverse parameter types" {
     const gpa = testing.allocator;
     const functions = try gpa.dupe(Mir, &.{
-        try indirectCaller(gpa, Harness.callable, FunctionId.at(1), &.{}, .u8, .value),
-        try pointerTarget(gpa, Harness.callable, .{ .ty = .u8, .role = .value }),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+        try indirectThroughParameter(gpa, Harness.callable, &.{}),
     });
     var h = try Harness.init(gpa, functions);
     defer h.deinit();
@@ -5579,7 +5710,8 @@ test "a reachable value of no type is rejected even where a parameter holds none
     functions[0] = try caller.finish(eb, .from(0));
     functions[1] = try callee.finish(cb, .from(0));
 
-    var h = try Harness.init(gpa, functions);
+    // Taken by `sink`, so the slot holding nothing is a value slot.
+    var h = try Harness.initShaped(gpa, functions, &.{ .{}, .{ .conventions = &.{.sink} } });
     defer h.deinit();
 
     const got = try h.run();
