@@ -35847,7 +35847,7 @@ const Checker = struct {
         frames: std.AutoHashMapUnmanaged(DeclId, Frame) = .empty,
         queue: std.ArrayList(DeclId) = .empty,
         origins: std.AutoHashMapUnmanaged(DeclId, types_mod.ImplementationParameters) = .empty,
-        edges: std.AutoHashMapUnmanaged(Edge, i64) = .empty,
+        edges: std.AutoHashMapUnmanaged(Edge, Weight) = .empty,
         alternatives: std.AutoHashMapUnmanaged(AlternativeKey, u32) = .empty,
         vertices: u32 = 3,
         input_own: []const Slot = &.{},
@@ -35857,6 +35857,19 @@ const Checker = struct {
         const root_source: u32 = 0;
         const closed_source: u32 = 1;
         const unbounded_source: u32 = 2;
+        /// How far a height stands above a vertex: constructor steps in the
+        /// low 64 bits, and in the bits above them how many unresolved
+        /// projections it passed through. Adding and comparing two weights
+        /// then compares projections first, so no run of descents cancels a
+        /// projection: a path through one to a reentry reads as an increase,
+        /// and a cycle through one as unbounded growth. Steps along a path
+        /// stay below 2^63 in magnitude, since a path has fewer edges than a
+        /// query has vertices (a `u32`) and each edge moves by at most the
+        /// depth of one written type.
+        const Weight = i128;
+        /// The weight one unresolved projection adds over what it is selected
+        /// from.
+        const projection_rise: Weight = 1 << 64;
         const Edge = struct { from: u32, to: u32 };
         const Outer = union(enum) {
             unknown,
@@ -35893,7 +35906,7 @@ const Checker = struct {
                 };
             }
         };
-        const Term = struct { vertex: u32, outer: Outer, offset: i64 = 0 };
+        const Term = struct { vertex: u32, outer: Outer, offset: Weight = 0 };
         const TermKey = struct { vertex: u32, outer: Outer };
         const Alternative = struct { outer: Outer, vertex: u32 };
         const Slot = struct { alternatives: std.ArrayList(Alternative) = .empty };
@@ -35978,7 +35991,7 @@ const Checker = struct {
             return start;
         }
 
-        fn edge(self: *Reachability, from: u32, to: u32, weight: i64) !void {
+        fn edge(self: *Reachability, from: u32, to: u32, weight: Weight) !void {
             const entry = try self.edges.getOrPut(self.checker.gpa, .{ .from = from, .to = to });
             entry.value_ptr.* = if (entry.found_existing) @max(entry.value_ptr.*, weight) else weight;
         }
@@ -36223,13 +36236,13 @@ const Checker = struct {
                         if (c.builder.standinOf(value.ty) != null) break;
                         value.ty = path[at].child(&c.builder, value.ty) orelse break;
                     }
-                    const descent: i64 = @intCast(path.len - at);
+                    const descent: Weight = @intCast(path.len - at);
                     for (try scan.height(value.ty, value.substitute)) |term| {
                         if (descent != 0 and term.outer != .unknown and !term.outer.same(Outer.parent(path[at]))) continue;
                         try self.contributeTo(to, .{
                             .vertex = term.vertex,
                             .outer = if (descent == 0) term.outer else .unknown,
-                            .offset = std.math.sub(i64, term.offset, descent) catch return error.OutOfMemory,
+                            .offset = std.math.sub(Weight, term.offset, descent) catch return error.OutOfMemory,
                         });
                     }
                 } else try self.contributeTo(to, .{ .vertex = unbounded_source, .outer = .unknown });
@@ -36289,7 +36302,7 @@ const Checker = struct {
             fn height(self: *Scan, ty: TypeId, substitute: bool) std.mem.Allocator.Error![]const Term {
                 const key: Key = .{ .ty = ty, .substitute = substitute };
                 if (self.heights.get(key)) |answer| return answer;
-                var terms: std.AutoHashMapUnmanaged(TermKey, i64) = .empty;
+                var terms: std.AutoHashMapUnmanaged(TermKey, Weight) = .empty;
                 defer terms.deinit(self.checker.gpa);
                 try self.measure(key, &terms);
                 const answer = try self.checker.gpa.alloc(Term, terms.count());
@@ -36301,18 +36314,33 @@ const Checker = struct {
                 return answer;
             }
 
-            fn contribute(self: *Scan, terms: *std.AutoHashMapUnmanaged(TermKey, i64), vertex: u32, outer: Outer, offset: i64) !void {
+            fn contribute(self: *Scan, terms: *std.AutoHashMapUnmanaged(TermKey, Weight), vertex: u32, outer: Outer, offset: Weight) !void {
                 const entry = try terms.getOrPut(self.checker.gpa, .{ .vertex = vertex, .outer = outer });
                 entry.value_ptr.* = if (entry.found_existing) @max(entry.value_ptr.*, offset) else offset;
             }
 
-            fn childHeight(self: *Scan, terms: *std.AutoHashMapUnmanaged(TermKey, i64), ty: TypeId, substitute: bool, outer: Outer) std.mem.Allocator.Error!void {
-                for (try self.height(ty, substitute)) |term| try self.contribute(terms, term.vertex, outer, std.math.add(i64, term.offset, 1) catch return error.OutOfMemory);
+            fn childHeight(self: *Scan, terms: *std.AutoHashMapUnmanaged(TermKey, Weight), ty: TypeId, substitute: bool, outer: Outer) std.mem.Allocator.Error!void {
+                for (try self.height(ty, substitute)) |term| try self.contribute(terms, term.vertex, outer, std.math.add(Weight, term.offset, 1) catch return error.OutOfMemory);
             }
 
-            fn measure(self: *Scan, key: Key, terms: *std.AutoHashMapUnmanaged(TermKey, i64)) std.mem.Allocator.Error!void {
+            /// An unresolved projection is the type the implementation its
+            /// base and trait arguments select writes for it, so it is bounded
+            /// wherever they are, by an amount nothing in the projection
+            /// shows. It is measured one `projection_rise` above each of them,
+            /// with an unknown outer constructor.
+            fn projectionHeight(self: *Scan, terms: *std.AutoHashMapUnmanaged(TermKey, Weight), standin: types_mod.Standin, substitute: bool) std.mem.Allocator.Error!void {
+                try self.risenHeight(terms, standin.held, substitute);
+                for (self.checker.builder.standinArgsOf(standin)) |argument| try self.risenHeight(terms, argument, substitute);
+            }
+
+            fn risenHeight(self: *Scan, terms: *std.AutoHashMapUnmanaged(TermKey, Weight), ty: TypeId, substitute: bool) std.mem.Allocator.Error!void {
+                for (try self.height(ty, substitute)) |term| try self.contribute(terms, term.vertex, .unknown, std.math.add(Weight, term.offset, projection_rise) catch return error.OutOfMemory);
+            }
+
+            fn measure(self: *Scan, key: Key, terms: *std.AutoHashMapUnmanaged(TermKey, Weight)) std.mem.Allocator.Error!void {
                 const pool = &self.checker.builder;
-                if (key.ty == .poison or pool.standinOf(key.ty) != null) return self.contribute(terms, unbounded_source, .unknown, 0);
+                if (key.ty == .poison) return self.contribute(terms, unbounded_source, .unknown, 0);
+                if (pool.standinOf(key.ty)) |standin| return self.projectionHeight(terms, standin, key.substitute);
                 const replaced = self.replacement(key);
                 if (replaced.ty != key.ty or replaced.substitute != key.substitute) {
                     for (try self.height(replaced.ty, replaced.substitute)) |term| try self.contribute(terms, term.vertex, term.outer, term.offset);

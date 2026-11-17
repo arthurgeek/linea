@@ -3972,9 +3972,13 @@ introduce a wrapper when the returning arguments remove that structure.
 
 Each selected associated name is an opaque structural step when identifying
 growth. Thus `walk[S]` calling `walk[S.Iter]` grows, including projections from
-applied bases such as `Wrapper[S].Item`. An unresolved projection contributes
-unknown height, and a directly recurring projection remains rejected even when
-an implementation would settle it to a smaller type.
+applied bases such as `Wrapper[S].Item`. An unresolved projection stands an
+unknown height above what it is selected from: it is bounded wherever its base
+and trait arguments are. `S.Item` inside `drain[S]` reached only as
+`drain[Tap]` is selected from a fixed type and leaves a recursion it joins
+bounded, while a projection of a recurring argument is an increase that no
+later descent undoes. A directly recurring projection remains rejected even
+when an implementation would settle it to a smaller type.
 
 Generic type parts retain the structural non-growth rule: each argument on a
 recurring part must contain none of the declaration's parameters or be exactly
