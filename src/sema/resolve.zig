@@ -4157,6 +4157,10 @@ fn resolveInternal(
     defer r.shadowed.deinit(gpa);
     defer r.import_at.deinit(gpa);
     defer r.top_named.deinit(gpa);
+    defer r.reexport_scopes.deinit(gpa);
+    defer r.reexport_named.deinit(gpa);
+    defer r.reexport_uses.deinit(gpa);
+    defer r.reexport_path.deinit(gpa);
     defer r.exported_types.deinit(gpa);
     defer r.pattern_heads.deinit(gpa);
     defer r.internal_types.deinit(gpa);
@@ -6574,6 +6578,17 @@ const Resolver = struct {
     /// duplicate: an import another file of the module wrote is exempt, and
     /// deciding that needs the binding rather than its presence.
     top_named: Chain(.oldest_first) = .empty,
+    /// The scope of each module a re-export has read, indexed the first time
+    /// one reads it: its top-level positions by module and name, in scope
+    /// order, and the binding each `use` declaration made. Kept with the run
+    /// that was indexed, so a module declared again is indexed again and a
+    /// position outside its current run is passed over.
+    reexport_scopes: std.AutoHashMapUnmanaged(ModuleId, ModuleRun) = .empty,
+    reexport_named: Chain(.oldest_first) = .empty,
+    reexport_uses: std.AutoHashMapUnmanaged(DeclId, BindingId) = .empty,
+    /// The `use` declarations a re-export being resolved passes through,
+    /// which a ring returns to.
+    reexport_path: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
     /// The declarations the prelude publishes, once the library is resolved.
     /// Syntax that needs a prelude declaration finds it here by identity.
     prelude_decls: []const DeclId = &.{},
@@ -7223,6 +7238,28 @@ const Resolver = struct {
         }
     }
 
+    /// Indexes module `m`'s scope for re-exports, once per run it is
+    /// declared with.
+    ///
+    /// **Bound:** the bindings of the module's run.
+    fn indexReexportScope(self: *Resolver, m: ModuleId) std.mem.Allocator.Error!void {
+        const run = self.module_runs.items[m.index()];
+        const entry = try self.reexport_scopes.getOrPut(self.gpa, m);
+        if (entry.found_existing and entry.value_ptr.from == run.from and entry.value_ptr.to == run.to) return;
+        entry.value_ptr.* = run;
+        for (run.from..run.to) |at| {
+            const b = self.top.items[at];
+            const held = self.bindings.items[b.index()];
+            try self.reexport_named.note(self.gpa, reexportKey(m, held.name), @intCast(at));
+            // A primitive's binding declares nothing.
+            if (held.decl != DeclId.none and self.ast.declTag(held.decl) == .use_) try self.reexport_uses.put(self.gpa, held.decl, b);
+        }
+    }
+
+    fn reexportKey(m: ModuleId, name: StringId) u64 {
+        return (@as(u64, @intFromEnum(m)) << 32) | @intFromEnum(name);
+    }
+
     /// Binds what a `pub use` names, as the declaration itself.
     ///
     /// An alias rather than a fresh identity: the binding holds the source
@@ -7232,7 +7269,7 @@ const Resolver = struct {
     /// already bound to a real declaration, so following it once is following
     /// it all the way.
     fn reexport(self: *Resolver, d: DeclId) std.mem.Allocator.Error!void {
-        return self.reexportFollowing(d, null);
+        return self.reexportFollowing(d);
     }
 
     /// The module and the name a re-export's path spells, or null where it
@@ -7249,7 +7286,6 @@ const Resolver = struct {
     }
 
     /// A re-export being resolved, and the one whose resolution led to it.
-    const ReexportOnPath = struct { decl: DeclId, outer: ?*const ReexportOnPath };
 
     /// Resolves a re-export, resolving what it names first where that is
     /// itself one.
@@ -7268,15 +7304,9 @@ const Resolver = struct {
     /// a declaration and followed no further, and one found to reach nothing
     /// is marked and not resolved again. A chain of n compares each against
     /// those before it.
-    fn reexportFollowing(
-        self: *Resolver,
-        d: DeclId,
-        following: ?*const ReexportOnPath,
-    ) std.mem.Allocator.Error!void {
-        var here: ?*Binding = null;
-        for (self.scopeOf(self.current)) |b| {
-            if (self.bindings.items[b.index()].decl == d) here = &self.bindings.items[b.index()];
-        }
+    fn reexportFollowing(self: *Resolver, d: DeclId) std.mem.Allocator.Error!void {
+        try self.indexReexportScope(self.current);
+        const here: ?*Binding = if (self.reexport_uses.get(d)) |b| &self.bindings.items[b.index()] else null;
         // A re-export exists for another module to reach rather than for use
         // where it is written, so nothing here is a use of it.
         //
@@ -7338,7 +7368,12 @@ const Resolver = struct {
         }
 
         const wanted = self.ast.tokenName(elements[1]);
-        for (self.scopeOf(holding)) |b| {
+        try self.indexReexportScope(holding);
+        const run = self.module_runs.items[holding.index()];
+        var named = self.reexport_named.walk(reexportKey(holding, wanted));
+        while (named.next()) |at| {
+            if (at < run.from or at >= run.to) continue;
+            const b = self.top.items[at];
             const held = &self.bindings.items[b.index()];
             if (held.name != wanted or held.kind == .module) continue;
             if (held.ambient) continue;
@@ -7361,10 +7396,7 @@ const Resolver = struct {
                     if (here) |h| h.unresolved = true;
                     return;
                 }
-                var on_path: ?*const ReexportOnPath = following;
-                const closes_a_ring = held.decl == d or while (on_path) |earlier| : (on_path = earlier.outer) {
-                    if (earlier.decl == held.decl) break true;
-                } else false;
+                const closes_a_ring = held.decl == d or self.reexport_path.contains(held.decl);
                 if (closes_a_ring) {
                     held.used = true;
                     if (here) |h| h.unresolved = true;
@@ -7377,11 +7409,13 @@ const Resolver = struct {
                         .{self.ast.tokenText(elements[1])},
                     );
                 }
-                const next: ReexportOnPath = .{ .decl = d, .outer = following };
+                try self.reexport_path.put(self.gpa, d, {});
                 const was = self.current;
                 self.current = holding;
-                try self.reexportFollowing(held.decl, &next);
+                const followed = self.reexportFollowing(held.decl);
                 self.current = was;
+                _ = self.reexport_path.remove(d);
+                try followed;
                 // What it names reached nothing, which was reported there.
                 if (self.bindings.items[b.index()].unresolved) {
                     if (here) |h| h.unresolved = true;
@@ -13516,13 +13550,15 @@ const Resolver = struct {
     fn recordAliasHeads(self: *Resolver) std.mem.Allocator.Error!void {
         var chain: std.ArrayList(DeclId) = .empty;
         defer chain.deinit(self.gpa);
-        var on_chain: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
+        // Restarted per root by a stamp rather than cleared, so starting a
+        // chain costs nothing however long an earlier one was.
+        var on_chain: Stamped(DeclId, void) = .empty;
         defer on_chain.deinit(self.gpa);
         for (self.program.modules, 0..) |_, i| {
             for (self.expanded.?.declsOf(.from(i))) |root| {
                 if (self.ast.declTag(root) != .alias or self.alias_heads.contains(root)) continue;
                 chain.clearRetainingCapacity();
-                on_chain.clearRetainingCapacity();
+                on_chain.restart();
                 var at = root;
                 const head: BindingId = while (true) {
                     try chain.append(self.gpa, at);
