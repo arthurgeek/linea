@@ -36,9 +36,9 @@ pub const truncated = " ... (truncated)";
 /// Every text a diagnostic carries is cut to `max_text_bytes` on the way in,
 /// except a fix's edits, each fix kept whole or dropped. Every one is UTF-8
 /// too: the JSON form and the language server write each as a string, and a
-/// string is text. A pass builds its texts from text, so a byte that is not
-/// is the compiler's mistake; a build with safety checks stops on it, and
-/// any other build writes the byte as `\xNN` (`textOf`).
+/// string is text. A diagnostic quoting a token quotes the source's bytes,
+/// and a file that is not UTF-8 is reported ([S-Encoding]) and still checked,
+/// so a byte that begins no UTF-8 sequence is written as `\xNN` (`textOf`).
 /// The bound sits here rather than in a renderer because a renderer is not the
 /// only one: the human form and the JSON form are two writers of the same
 /// text, and a bound written into one of them says nothing about the other. A
@@ -174,9 +174,7 @@ pub const Sink = struct {
 /// `text` if it is UTF-8 and within the bound; otherwise a copy written as
 /// UTF-8 (`textOf`) and cut, saying that it was.
 fn cut(arena: std.mem.Allocator, written: []const u8) ![]const u8 {
-    const valid = std.unicode.utf8ValidateSlice(written);
-    if (std.debug.runtime_safety) std.debug.assert(valid);
-    const text = if (valid) written else try textOf(arena, written);
+    const text = if (std.unicode.utf8ValidateSlice(written)) written else try textOf(arena, written);
     if (text.len <= max_text_bytes) return text;
 
     // Cut on a scalar boundary. The text quotes the source, so the byte at the

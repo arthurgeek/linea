@@ -1542,7 +1542,7 @@ const Parser = struct {
         var name = first;
         var last = first;
         var qualified = false;
-        while (!self.pathEndsAtALineBreak() and self.cursor.eat(.dot) != null) {
+        while (!self.regionEndsAtALineBreak() and self.cursor.eat(.dot) != null) {
             qualified = true;
             last = self.cursor.previousToken();
             name = self.cursor.current();
@@ -2274,7 +2274,7 @@ const Parser = struct {
         var last = self.cursor.current();
         if (self.cursor.eat(.identifier)) |first| {
             last = first;
-            while (!self.pathEndsAtALineBreak() and self.cursor.eat(.dot) != null) {
+            while (!self.regionEndsAtALineBreak() and self.cursor.eat(.dot) != null) {
                 const seg = self.cursor.current();
                 if (self.cursor.eat(.identifier) == null) {
                     try self.reportAt(.s_name, seg, "expected a name after `.`", "a path element is a name");
@@ -3636,7 +3636,7 @@ const Parser = struct {
         measure.operand();
         var reported_split = false;
         while (self.cursor.at(.dot)) {
-            if (self.pathEndsAtALineBreak()) {
+            if (self.regionEndsAtALineBreak()) {
                 if (!may_split or self.cursor.peekAt(1) != .identifier) break;
                 if (!reported_split) {
                     reported_split = true;
@@ -4816,12 +4816,15 @@ const Parser = struct {
         return Tag.lineBreakEnds(self.cursor.previousTag(), self.cursor.peek(), second, second_text);
     }
 
-    /// Whether a line break ends the path of a declaration or a written type
-    /// here. A path is not an expression: a declaration's line holds its
-    /// whole path, so a line opening with `.` below one never continues it,
-    /// whatever case the name after the dot has, and a re-export does not
-    /// reach down a line for the name it exports.
-    fn pathEndsAtALineBreak(self: *const Parser) bool {
+    /// Whether a line break ends what the line above holds where no line
+    /// below can continue it: the path of a declaration or a written type,
+    /// or a skipped malformed region. A path is not an expression: a
+    /// declaration's line holds its whole path, so a line opening with `.`
+    /// below one never continues it, whatever case the name after the dot
+    /// has, and a re-export does not reach down a line for the name it
+    /// exports. A malformed region selects nothing; a selection on the next
+    /// line belongs to the expression the region stands in.
+    fn regionEndsAtALineBreak(self: *const Parser) bool {
         return self.cursor.precededByNewline() and self.cursor.previousTag().endsAStatement();
     }
 
@@ -6447,7 +6450,11 @@ const Parser = struct {
         // ends in a block does not: `while c { } (e)` is a loop and then an
         // expression, and reading the `(` as an argument list would make the
         // two one call -- which parses, and means something else entirely.
-        if (!canBePostfixed(self.builder.exprTag(base))) return self.finishArgumentMarker(base, pending_marker);
+        // A region no production could read takes a selection only from the
+        // line below, which continues the expression the region stands in:
+        // the region was reported, and the chain is still read as written.
+        const continued = self.builder.exprTag(base) == .err and self.cursor.precededByNewline() and !self.finishedAtALineBreak();
+        if (!canBePostfixed(self.builder.exprTag(base)) and !continued) return self.finishArgumentMarker(base, pending_marker);
 
         // Whether everything read so far is names and dots. A path is what a
         // head may be, and what a head may be is what decides the one form
@@ -7823,8 +7830,11 @@ const Parser = struct {
         if (self.lists != 0 and self.cursor.at(.invalid)) return self.skipRefusedElement(start);
         while (!inExprFollow(self.cursor.peek()) and !self.atStatementTokenBoundary()) {
             // A preceding statement's newline does not end this malformed
-            // production before it has consumed any of its own tokens.
-            if (self.cursor.current() != start and self.finishedAtALineBreak()) break;
+            // production before it has consumed any of its own tokens. A
+            // line break after a token a statement can end with ends the
+            // region even before a line that continues an expression: the
+            // expression around the region reads that selection itself.
+            if (self.cursor.current() != start and self.regionEndsAtALineBreak()) break;
             _ = self.cursor.advance();
         }
         return self.builder.addLiteral(.err, start, self.rangeFrom(start));

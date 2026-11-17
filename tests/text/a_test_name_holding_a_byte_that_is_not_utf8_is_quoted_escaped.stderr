@@ -1,0 +1,12 @@
+error[S-Encoding]: save the file as UTF-8
+ --> tests/text/a_test_name_holding_a_byte_that_is_not_utf8_is_quoted_escaped.lin:3:11
+  |
+3 | test "sameÿ" {
+  |           ^ this byte begins no UTF-8 sequence
+error[N-Duplicate]: "same\xFF" already names a test in this module
+ --> tests/text/a_test_name_holding_a_byte_that_is_not_utf8_is_quoted_escaped.lin:6:6
+  |
+3 | test "sameÿ" {
+  |      ------- the test of this name
+6 | test "sameÿ" {
+  |      ^^^^^^^ a module names each of its tests once

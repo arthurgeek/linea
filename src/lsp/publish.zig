@@ -13,6 +13,8 @@ const Severity = diagnostic.Severity;
 const positions = @import("positions.zig");
 const FileId = @import("../support/source.zig").FileId;
 const Program = @import("../syntax/program.zig").Program;
+const Documents = @import("documents.zig").Documents;
+const loader = @import("../driver/loader.zig");
 
 /// Iterates over non-library source files eligible for diagnostic publication.
 /// Scans the program's modules and files once, using two indexes and no list.
@@ -316,6 +318,7 @@ test "every text a published diagnostic carries is UTF-8, whatever bytes the sou
         "fn ma\xc3in() -> UInt8 {\n    0\n}\n",
         "fn main() -> UInt8 {\n    absent\xe2\x82\n}\n",
         "// \xff\nfn main() -> UInt\xff8 {\n    0\n}\n",
+        "test \"same\xff\" {\n}\n\ntest \"same\xff\" {\n}\n\nfn main() -> UInt8 {\n    0\n}\n",
     };
     for (sources) |text| {
         var messages = std.heap.ArenaAllocator.init(gpa);
@@ -330,6 +333,40 @@ test "every text a published diagnostic carries is UTF-8, whatever bytes the sou
             try testing.expect(std.unicode.utf8ValidateSlice(d.message));
             for (d.relatedInformation orelse &.{}) |related| try testing.expect(std.unicode.utf8ValidateSlice(related.message));
         }
+    }
+}
+
+test "a module read from disk whose bytes are not UTF-8 publishes text" {
+    const gpa = testing.allocator;
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "app/shapes");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/main.lin", .data = "import shapes\n\nfn main() -> UInt8 {\n    shapes.size()\n}\n" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/shapes/shapes.lin", .data = "test \"same\xff\" {\n}\n\ntest \"same\xff\" {\n}\n\npub fn size() -> UInt8 {\n    0\n}\n" });
+    const app = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/app", .{tmp.sub_path});
+    defer gpa.free(app);
+    const module = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/app/shapes/shapes.lin", .{tmp.sub_path});
+    defer gpa.free(module);
+
+    var docs: Documents = .{ .gpa = gpa };
+    defer docs.deinit();
+    const found = try loader.rootOf(gpa, testing.io, app, .its_program, "");
+    defer found.deinit(gpa);
+    const loaded = try docs.filesFor(gpa, testing.io, found, .every_file);
+    defer Documents.freeFiles(gpa, loaded);
+
+    var checked = try analysis_mod.onDisk(gpa, gpa, test_library.get(), loaded, found.entry, testing.io);
+    defer checked.deinit();
+    var messages = std.heap.ArenaAllocator.init(gpa);
+    defer messages.deinit();
+    const publication = try Publication.init(messages.allocator(), &checked);
+    const published = try publication.forFile(messages.allocator(), checked.fileNamed(module).?, .@"utf-16");
+    // The file is reported as not UTF-8, and the test it names twice as
+    // named twice, each in text.
+    try testing.expect(published.len >= 2);
+    for (published) |d| {
+        try testing.expect(std.unicode.utf8ValidateSlice(d.message));
+        for (d.relatedInformation orelse &.{}) |related| try testing.expect(std.unicode.utf8ValidateSlice(related.message));
     }
 }
 
