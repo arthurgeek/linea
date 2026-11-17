@@ -13,8 +13,8 @@ The separate name `task.map_results` in §2 is superseded by
 [0270](0270-a-fallible-map-is-task-map.md).
 The clause of §1 that `task.map` and `task.all` divide their items among at
 most `max` tasks is superseded by
-[0276](0276-independent-jobs-run-through-one-bounded-window.md), which runs
-every mapped job through one bounded window.
+[0276](0276-independent-jobs-run-through-one-bounded-window.md), which maps
+through at most `max` workers per call, each taking chunk after chunk.
 
 ## Context
 
