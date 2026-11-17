@@ -79,21 +79,28 @@ pub fn run(
         }
     } else |err| switch (err) {
         error.EndOfStream => {},
-        error.Timeout => {
-            if (options.partial) |out| out.* = try std.mem.concat(gpa, u8, &.{
-                reader.reader(0).buffered(),
-                reader.reader(1).buffered(),
-            });
-            return error.Timeout;
-        },
+        error.Timeout => return timedOut(gpa, &reader, options.partial),
         else => |e| return e,
     }
     try reader.checkAnyError();
-    const term = try waitUntil(io, &child, deadline, options.process_group);
+    const term = waitUntil(io, &child, deadline, options.process_group) catch |err| switch (err) {
+        error.Timeout => return timedOut(gpa, &reader, options.partial),
+        else => |e| return e,
+    };
     const stdout = try reader.toOwnedSlice(0);
     errdefer gpa.free(stdout);
     const stderr = try reader.toOwnedSlice(1);
     return .{ .term = term, .stdout = stdout, .stderr = stderr };
+}
+
+/// Hands what was read before the deadline to `partial`, where the caller
+/// asked for it, and answers `error.Timeout`.
+fn timedOut(gpa: std.mem.Allocator, reader: *std.Io.File.MultiReader, partial: ?*[]u8) std.process.RunError {
+    if (partial) |out| out.* = std.mem.concat(gpa, u8, &.{
+        reader.reader(0).buffered(),
+        reader.reader(1).buffered(),
+    }) catch |err| return err;
+    return error.Timeout;
 }
 
 /// Waits for `child` to exit, or kills it, and its process group where
@@ -179,10 +186,13 @@ test "the timeout bounds a child that keeps writing" {
 test "the timeout bounds a child that closes its streams and keeps running" {
     const testing = std.testing;
     const io = testing.io;
+    var partial: []u8 = &.{};
+    defer testing.allocator.free(partial);
     const started = std.Io.Clock.awake.now(io);
     const result = run(testing.allocator, io, .{
-        .argv = &.{ "/bin/sh", "-c", "exec >&- 2>&-; sleep 30" },
+        .argv = &.{ "/bin/sh", "-c", "echo started; exec >&- 2>&-; sleep 30" },
         .timeout = .{ .duration = .{ .raw = .fromSeconds(1), .clock = .awake } },
+        .partial = &partial,
     });
     if (result) |finished| {
         testing.allocator.free(finished.stdout);
@@ -190,4 +200,5 @@ test "the timeout bounds a child that closes its streams and keeps running" {
         return error.TestExpectedError;
     } else |err| try testing.expectEqual(error.Timeout, err);
     try testing.expect(started.durationTo(std.Io.Clock.awake.now(io)).toSeconds() < 20);
+    try testing.expectEqualStrings("started\n", partial);
 }
