@@ -25,6 +25,8 @@ examples/guest-book/
 │   └── book.lin
 ├── page/
 │   └── page.lin
+├── store/
+│   └── store.lin
 ├── sqlite/
 │   ├── linea.json
 │   ├── shim.c
@@ -34,7 +36,7 @@ examples/guest-book/
     └── page.html
 ```
 
-It is split into four layers:
+It is split into five layers:
 
 - `sqlite/` is a standalone library project that wraps SQLite's C API in linear
   `Database` and `Statement` handles and a value error `sqlite.Error`.
@@ -43,7 +45,8 @@ It is split into four layers:
 - `page/page.lin` embeds the HTML templates and streams `Page` through
   `Display`, escaping untrusted text while expanding the entry list in a single
   pass.
-- `main.lin` gives each serving task its own connection to the book, checks
+- `store/store.lin` confines database creation, queries and closure to a system-thread owner and lends restricted clients to HTTP fibers.
+- `main.lin` gives each serving fiber a client of that owner, checks
   and records signatures, and serves the router on a loopback TCP port.
 
 ## The library trusted with C
@@ -418,215 +421,229 @@ Every visitor string — the name, the message, the timestamp read from SQLite,
 and the remembered `name` cookie — reaches `fill` as `Text`, so `html.escape`
 escapes it.
 
-## A connection per serving task
+## One system-thread database owner
 
-`http.listen_and_serve` answers many connections at once, each on one of its
-serving tasks, and every task builds a handler of its own before it serves
-anything. A handler can therefore own what its task alone uses. The guest
-book gives each task its own SQLite connection: `Ctx`, the state the router
-lends `home` and `sign`, holds a `Book`, which is one connection, and nothing
-else reaches it:
+HTTP connections wait independently, so the server runs its serving tasks as
+fibers on two carriers. SQLite operations can block an OS thread. Running those
+operations directly in an HTTP fiber would occupy its carrier while the database
+waited for a lock or storage.
+
+The application keeps one database connection in a dedicated system-thread
+owner instead. `Store` owns that task; its restricted `Client` only exposes
+`sign` and `newest`. A client cannot extract the native connection or submit an
+arbitrary owner job:
+
+<!-- guide: excerpt examples/guest-book/store/store.lin -->
+```linea
+// One system task owns the database for the server's lifetime. Clients only
+// submit the operations below; none can extract a connection or submit SQL.
+@(opaque, linear)
+struct Store {
+    owner: task.Owner[Option[Book]],
+}
+
+@(opaque, copyable)
+struct Client {
+    raw: task.Client[Option[Book]],
+}
+```
+Every HTTP task holds a copy of this client. Copies borrow the same `Store`,
+so the program must finish their users before closing the owner. They do not
+inherit the database's thread affinity. `Ctx` also keeps the proxy policy the
+request handlers use:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// What each serving task lends `home` and `sign` on every request: the task's
-// own connection to the guest book, and which proxies to trust when telling
-// where a request came from. No other task uses the connection, so a request
-// reads and signs through it directly, while other tasks read through theirs
-// at the same time. Releasing the `Ctx` closes the connection.
+// Each serving task lends a restricted database client and its proxy policy
+// to handlers. The client borrows the Store, so serving must join before the
+// database owner can close. SQLite operations run on the owner's OS thread.
 @derive(Release)
 struct Ctx {
-    book: Book,
+    book: store.Client,
     proxy_trust: http.ProxyTrust,
 }
-
-impl Ctx {
-    // Open the serving task's connection to the guest book at `path`, which
-    // `Book.initialize` has prepared.
-    fn connect(path: Str) -> Result[Ctx, BookError] {
-        .Ok(Ctx { book = Book.connect(path)?, proxy_trust = proxy_trust() })
-    }
 ```
-
-A route reads the book through the connection its task lends it, with no
-call to another task in between:
+A route receives owned entry strings from the database task. It can render them
+or wait on a socket without holding the database connection:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
 fn home(inout ctx: Ctx, request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
-    defer let entries = match &ctx.book.newest(newest_shown) {
+    defer let entries = match ctx.book.newest(newest_shown) {
         Ok(entries) => entries,
         Err(error) => return .Err(unavailable(request, error)),
     }
 ```
+### Creating and closing on the owner thread
 
-SQLite lets many connections read one database at once and one write at a
-time. `examples/guest-book/book/book.lin` prepares the database for that
-once, with `Book.initialize`:
+Moving a connection into a task after opening it elsewhere does not establish
+thread confinement. `open_store` starts with `Option[Book].None` on `io.system()`
+and creates the actual connection in an owner job. Startup errors retain their
+SQLite detail or the task preparation error. An unsuccessful database open leaves
+an empty owner, which is closed before returning the error:
 
-<!-- guide: excerpt examples/guest-book/book/book.lin -->
+<!-- guide: excerpt examples/guest-book/store/store.lin -->
 ```linea
-    // Prepare the guest book at `path` for every connection a server will
-    // open: create its file and `entries` table if neither exists yet, and
-    // switch it to the write-ahead log. `journal_mode=WAL` writes changes to a
-    // log beside the file instead of into it, so readers keep reading the
-    // last committed entries while a signature is written, and no read waits
-    // for a write. Both are stored in the file, and changing the journal mode
-    // needs the file to itself, so a server calls this once, before it starts
-    // the tasks that each `connect`.
-    pub fn initialize(path: Str) -> Result[(), BookError] {
-        defer var database = Database.open(path)?
-        &database.wait_when_busy(2000)?
-        &database.execute("PRAGMA journal_mode=WAL")?
-        &database.execute(schema)?
-        .Ok(())
+fn open_store(name: Str, memory: Bool) -> Result[Store, OpenError] {
+    let owned_name = name.to_owned() else |_| {
+        return .Err(.Book(.OutOfMemory))
     }
-```
-
-and each serving task then opens its connection with `Book.connect`:
-
-<!-- guide: excerpt examples/guest-book/book/book.lin -->
-```linea
-    // Open a connection to the guest book at `path`, which `initialize` has
-    // prepared. SQLite lets one connection write at a time, so
-    // `wait_when_busy` makes a connection that finds another writing wait up
-    // to two seconds for it rather than fail with `SQLITE_BUSY`.
-    //
-    // A connection waits for the disk after every commit unless told
-    // otherwise, and holds the write lock while it waits, so with every
-    // serving task signing at once the lock is almost never free, and a
-    // connection that keeps retrying can still find it taken after two
-    // seconds. `synchronous=NORMAL` leaves the flush to the write-ahead
-    // log's checkpoint, so a commit ends as soon as the log holds it. A
-    // signature survives the server crashing; one signed just before the
-    // machine loses power or its operating system crashes may be lost, but
-    // the file stays whole. The setting belongs to the connection, not the
-    // file, so every connection sets it.
-    pub fn connect(path: Str) -> Result[Book, BookError] {
-        defer var database = Database.open(path)?
-        &database.wait_when_busy(2000)?
-        &database.execute("PRAGMA synchronous=NORMAL")?
-        .Ok(Book { database })
+    let initial: Option[Book] = .None
+    let owner = task.own(initial, on: io.system()) else |failure| {
+        let Unowned { state, reason } = failure
+        empty(state)
+        owned_name.release()
+        return .Err(.Task(reason))
     }
-```
-
-Without the write-ahead log, SQLite's default journal locks the whole file
-while a write commits, and a write waits until no connection is reading, so
-one slow page render would hold up every signature. In WAL mode a write goes
-to `guests.db-wal` beside the file, each read sees the entries as they were
-when it began, and the two never wait for each other. Signatures still go
-one at a time: `wait_when_busy(2000)` sets SQLite's busy timeout
-(`sqlite3_busy_timeout`), so a connection that finds another one writing
-retries for up to two seconds instead of failing at once with `SQLITE_BUSY`.
-Two tests in `book.lin` hold a query open on one connection while another
-signs, one on the same thread and one with the signing connection on a task
-of its own, and both fail without the `PRAGMA journal_mode=WAL` line.
-
-How long each signature holds the write lock decides how long the others
-wait. By default SQLite asks the disk to store every commit before the commit
-ends. On the Linux machine this was measured on that took most of a
-millisecond, so 128 tasks signing at once kept the lock almost always taken,
-some waited past their two seconds, and those visitors got the 500 page.
-macOS's `fsync` does not wait for the drive's own cache and finishes far
-sooner, which is why the failure shows on Linux. SQLite's busy timeout is not
-a queue: a waiting connection sleeps and tries again, and a newer one can
-take the lock first. `PRAGMA synchronous=NORMAL` ends a commit once the
-write-ahead log holds it and asks the disk only when the log is copied into
-the file, so a signature holds the lock for microseconds rather than a
-millisecond. It is a setting of each connection, not of the file, so
-`connect` runs it every time. The cost is in what a power cut or a system
-crash can undo: a signature always survives the server crashing, but one made
-just before the machine loses power or its operating system crashes may be
-gone after a restart, while the file itself stays intact. A guest book can
-lose its last few signatures that way; a ledger would keep the default.
-Signatures still take turns, so a load that keeps the lock taken for two
-seconds even at this speed still answers some visitors with 500; a server
-with far more writers than this would send every write through one task that
-holds the only writing connection. The test
-`every_serving_task_signs_at_once` signs 32 times from each of 128
-connections at once, and fails on that Linux machine without the line.
-
-A connection is safe on one thread at a time, as long as the SQLite library
-was built to allow threads at all. The wrapper checks that once per
-connection, in `examples/guest-book/sqlite/sqlite.lin`:
-
-<!-- guide: excerpt examples/guest-book/sqlite/sqlite.lin -->
-```linea
-// `sqlite3_threadsafe` returns the `SQLITE_THREADSAFE` the library was
-// compiled with: 0 when it takes no locks of its own, 1 or 2 when separate
-// connections may be used from separate threads at once.
-extern fn sqlite3_threadsafe() -> Int32
-```
-
-`Database.open` refuses with `sqlite.Error.SingleThreaded` when it answers 0.
-The SQLite that macOS and the common Linux distributions ship answers 1 or 2.
-
-Rust's `rusqlite` draws the same line with its types: a `Connection` is
-`Send` but not `Sync`, so it can move to another thread and never be shared
-by two. In Linea the serving task builds its handler on its own thread and
-nothing hands it to another, so no lock is involved.
-
-Keeping the database in an owning task, as
-[Tasks and sessions](13-tasks-and-sessions.md) does for a counter, would also
-be correct: `task.own` runs each call one at a time, which is what shared
-state that every request changes needs. For a database that is itself built
-for several connections, it would make every read wait for the one before
-it.
-
-### Starting in order
-
-A server whose tasks each hold a resource starts in three steps. First it
-prepares what every task shares; then each task makes its own resources; only
-then does it accept a connection. Creating the table and switching to the
-write-ahead log are the shared part: they change the file, and changing the
-journal mode needs the file to itself, so 128 tasks doing it at once would
-wait on one another. `main` does it once, before it serves:
-
-<!-- guide: excerpt examples/guest-book/main.lin -->
-```linea
-    let path = database_path()
-    // Creating the table and switching the file to the write-ahead log happen
-    // once, here, before any task opens a connection.
-    let _ = Book.initialize(path) else |error| {
-        io.eprintln("guest-book: {error}")
-        error.release()
-        return 1
+    let opened: Result[(), BookError] = owner.client().call(
+        [sink owned_name, sink memory] |inout state: Option[Book]| {
+            let connected = if memory {
+                Book.open_in_memory(owned_name.view())
+            } else {
+                Book.initialize(owned_name.view()).and_then([owned_name] |sink _initialized| Book.connect(owned_name.view()))
+            }
+            match connected {
+                Ok(book) => {
+                    restore(&state, book)
+                    .Ok(())
+                },
+                Err(error) => .Err(error),
+            }
+        },
+    )
+    match opened {
+        Ok(_) => .Ok(Store { owner }),
+        Err(error) => {
+            empty(owner.close())
+            .Err(.Book(error))
+        },
     }
+}
 ```
+The owner state is linear. `exchange` moves the old option out and installs its
+replacement while preserving both values' dependency contracts. Even an old
+`None` is explicitly matched because `Option[Book]` must be settled:
 
-A database that cannot be opened at all, for instance because the directory
-of `GUEST_BOOK_DATABASE` does not exist, stops the program here:
+<!-- guide: excerpt examples/guest-book/store/store.lin -->
+```linea
+// Preserve the previous value's dependencies while replacing the whole
+// linear option. Even an empty option must be matched and settled.
+fn exchange(inout slot: Option[Book], sink next: Option[Book]) -> Option[Book] where carries(slot), retains(slot: next) {
+    let previous = slot
+    slot = next
+    previous
+}
+```
+Shutdown requires the clients' users to have finished. The final owner job closes
+SQLite on that same system thread; only the empty state returns through
+`Owner.close`. Releasing `Store` follows this path too:
+
+<!-- guide: excerpt examples/guest-book/store/store.lin -->
+```linea
+impl Store {
+    pub fn open(path: Str) -> Result[Store, OpenError] {
+        open_store(path, memory: false)
+    }
+
+    pub fn in_memory(name: Str) -> Result[Store, OpenError] {
+        open_store(name, memory: true)
+    }
+
+    pub fn client(self: Self) -> Client where borrows(self) {
+        .{ raw = self.owner.client() }
+    }
+
+    // All client users must be joined before consuming the store. Closing
+    // the connection is a final owner job; Owner.close only returns None.
+    pub fn close(sink self: Self) {
+        let Store { owner } = self
+        owner.client().call(
+            |inout state: Option[Book]| {
+                match exchange(&state, .None) {
+                    Some(book) => book.close(),
+                    None => (),
+                }
+            },
+        )
+        empty(owner.close())
+    }
+}
+
+impl Release for Store {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+```
+### Sending owned requests
+
+The form's `Str` values borrow request storage. An owner job must own what it
+captures, so `Client.sign` copies the small name and message into its job. A failed
+copy returns `BookError.OutOfMemory`. The owner releases the copied fields after
+executing the job. Both operations restore the connection before returning their
+result, including when SQLite reports an error:
+
+<!-- guide: excerpt examples/guest-book/store/store.lin -->
+```linea
+impl Client {
+    pub fn newest(self: Self, limit: Int64) -> Result[Vec[Entry], BookError] {
+        self.raw.call(
+            [sink limit] |inout state: Option[Book]| {
+                var book = exchange(&state, .None).unwrap()
+                let result = &book.newest(limit)
+                restore(&state, book)
+                result
+            },
+        )
+    }
+
+    // Request views cannot cross the owner boundary. Copy the small form
+    // fields into the job; the owner releases those copies after the call.
+    pub fn sign(self: Self, name: Str, message: Str) -> Result[(), BookError] {
+        defer let owned_name = name.to_owned() else |_| {
+            return .Err(.OutOfMemory)
+        }
+        let owned_message = message.to_owned() else |_| {
+            return .Err(.OutOfMemory)
+        }
+        self.raw.call(
+            [sink owned_name, sink owned_message] |inout state: Option[Book]| {
+                var book = exchange(&state, .None).unwrap()
+                let result = &book.sign(owned_name.view(), owned_message.view())
+                restore(&state, book)
+                result
+            },
+        )
+    }
+}
+```
+Calls run serially on this connection. This bounds the database resources and
+avoids a native thread per HTTP worker; it does not promise parallel database
+queries. A slow database call delays later database jobs, while unrelated HTTP
+socket and timer fibers can continue. Applications needing parallel reads can
+choose a measured, bounded set of database owners instead.
+
+`Book.initialize` creates the table and enables write-ahead logging before the
+owner opens its serving connection. `Book.connect` retains the existing two-second
+busy timeout and `synchronous=NORMAL` setting. Other processes may still access
+the database. The lower-level `book` tests exercise concurrent connections, while
+`store` tests exercise restricted fiber clients and owner startup failure.
+
+### When startup fails
+
+Database startup happens before HTTP serving. An unavailable directory produces
+SQLite's owned error message, then the server stops without accepting a client:
 
 <!-- guide: unchecked output from tests/cmd/guest_book/refuses_what_it_should.cmd -->
 ```text
 guest-book: unable to open database file (SQLite code 14)
 ```
 
-The serving tasks' own step is the closure `http.listen_and_serve` calls on
-each of them, and the third step is `listen_and_serve`'s: it accepts nothing
-until every task has made its handler.
-
-### When a connection cannot be opened
-
-Opening a task's connection can still fail after the database is prepared,
-for instance when the process runs out of file descriptors. The closure that
-builds each task's handler therefore returns a `Result`: the `Ctx.connect`
-result, with `map` turning a connected `Ctx` into the logged router and
-keeping a `BookError` as it is. `http.listen_and_serve` accepts a closure
-that returns either a handler or a `Result` holding one. Nothing is accepted
-until every serving task has made its handler; when one cannot, serving
-stops before the first connection and `listen_and_serve` answers
-`ListenAndServeError.Serve(.Handler(error))`, which `main` writes to standard
-error as `guest-book: a serving task's handler could not be made:` followed
-by SQLite's sentence.
-
-The error a factory returns travels from the serving task that met it to the
-call of `listen_and_serve`, and when two tasks fail, the second error is
-released. So it must own everything it holds (`Owned`), may be sent to another
-task (`Shareable`), and implements `Release`. `BookError` is all three: its
-`sqlite.Error` copies SQLite's sentence into a `String`, and it derives
-`Release`. A `Str` is a view of text the factory does not own, and is
-refused:
+Each HTTP worker then builds its own router around a borrowed client. Registering
+a route can fail, so the factory returns a `Result`. The HTTP server accepts
+nothing until all its handlers are ready and releases the others if one fails.
+Factory errors cross task boundaries: they must be `Owned`, `Shareable` and
+`Release`. A borrowed `Str` error is refused:
 
 `routes_from_a_file.lin`:
 
@@ -660,69 +677,56 @@ error[T-Bound]: `R.Error` requires `Owned`, and `Str` can carry a borrow: it hol
 An enum of its own reasons, declared `@derive(Release)` (and `Display`, so
 `main` can print it), or an owned `String`, is accepted.
 
-### Room for serving tasks and kept-alive connections
+### Room for carriers and kept-alive connections
 
-Each serving task keeps two SQLite files open: the database and its write-ahead
-log. Active and idle clients share a separate budget of 128 connections,
-set by `limits().open_connections`. Every client owns a socket, and an idle
-client's readiness registration holds a duplicate descriptor. The serving
-policy uses the same `serving_tasks` constant as the file estimate.
-
-A process has a soft open-file limit, which it may raise up to its hard limit.
-A macOS shell starts a program with a soft limit of 256, so the guest book
-counts the worker files, connection descriptors and fixed runtime allowance
-before serving:
+The server uses 128 serving fibers and permits 128 active-or-idle client
+connections. They share two carriers and one database owner. A process still
+needs a descriptor budget: each client socket can have a readiness duplicate,
+and each carrier can hold its poller, wake descriptor and completion queue.
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// Each serving task keeps its own SQLite database and write-ahead log open.
+// HTTP fibers share one database connection on a dedicated system-thread owner.
 let serving_tasks: UInt64 = 128
+
+let serving_carriers: UInt64 = 2
 
 // Active and idle clients share this connection budget. An idle client's
 // readiness registration holds a duplicate of its socket descriptor.
 let connection_budget: UInt64 = 128
 
-let files_per_task: UInt64 = 2
+let database_files: UInt64 = 2
+
+// A Linux carrier can hold epoll, its wake event and an io_uring descriptor.
+// The same allowance covers macOS's kqueue backend.
+let files_per_carrier: UInt64 = 3
 
 let files_per_connection: UInt64 = 2
 
 // Standard streams take three descriptors; listener and watch take two;
-// SQLite's shared-memory index takes one; poller and signal wake each take
-// at most two. Rounding those ten up to 32 leaves 22 for inherited files,
+// SQLite's shared-memory index takes one; the dispatcher and signal wake
+// take a few more. Rounding up to 32 leaves room for inherited files,
 // SQLite temporary files and differences between supported platforms.
 let fixed_files: UInt64 = 32
 ```
-
-The allowance follows the runtime's descriptor ownership. The poller uses at
-most two descriptors: an epoll queue and user event on Linux, or one kqueue on
-macOS. The process-wide signal wake uses one eventfd on Linux or a two-ended
-pipe on macOS; the signal registrations share that wake. Standard input,
-output and error, the listener and its watch duplicate, and SQLite's shared
-memory index take six more. Counting the larger allowance for each platform
-component gives ten fixed descriptors, and the budget reserves another 22.
-
 | Use | Conservative allowance |
 | --- | --- |
-| 128 serving tasks, two SQLite files each | 256 |
+| One SQLite connection and its write-ahead log | 2 |
 | 128 client sockets, with one readiness duplicate each | 256 |
-| Fixed runtime descriptors and spare room | 32 |
-| Total | 544 |
+| Two carriers, up to three descriptors each | 6 |
+| Other runtime descriptors and spare room | 32 |
+| Total | 296 |
 
-In `main`, the program raises its own limit with `process.raise_open_file_limit`
-before it serves:
+`main` raises the process's soft limit toward its hard limit, then checks this
+estimate before opening the database or the loop:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-    // A macOS shell starts a program allowed 256 open files, too few for a
-    // connection on every serving task, so the guest book raises its own
-    // limit as far as the system allows. A library leaves the limit to the
-    // program, since it is the whole process's. `files_needed` is an
-    // estimate: SQLite may open a temporary file for a large query, so a
-    // request can still fail for want of a descriptor, and answers 500 like
-    // any other storage failure. Stopping here when even the estimate does
-    // not fit says why at once, rather than as one task's failure to open
-    // its connection.
-    let files_needed = serving_tasks * files_per_task + connection_budget * files_per_connection + fixed_files
+    // One database owner keeps its connection and write-ahead log open.
+    // Client sockets and readiness registrations need two descriptors each.
+    // SQLite can still need temporary files, so this is an admission estimate,
+    // not a guarantee that every later query will succeed.
+    let files_needed = database_files + connection_budget * files_per_connection + serving_carriers * files_per_carrier + fixed_files
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
         return 1
@@ -732,34 +736,17 @@ before it serves:
         return 1
     }
 ```
-
-`process.raise_open_file_limit` raises the soft limit to the hard one, or to
-`kern.maxfilesperproc` on macOS, and answers how many files the process may
-now open. When that is still too few, the guest book stops before it listens
-and says so, rather than serve on the tasks whose connections happened to
-open:
+A hard limit below the estimate stops startup:
 
 <!-- guide: unchecked output from tests/cmd/guest_book/serves_under_a_low_open_file_limit.cmd -->
 ```text
-guest-book: serving needs 544 open files, and this process may open 200; raise the hard limit with `ulimit -H -n`
+guest-book: serving needs 296 open files, and this process may open 200; raise the hard limit with `ulimit -H -n`
 ```
 
-Rust's standard library has no such call; a Rust server raises the limit
-through the `libc` crate's `setrlimit`, or asks its users to run `ulimit -n`.
-
-The limit belongs to the whole process, so only a program raises it; a
-library that did would change what every other part of the program may
-open. The 544-file estimate includes spare room, but inherited descriptors and
-SQLite temporary files can still exhaust that room while the server runs. The
-guest book answers that as it answers any storage failure, with a 500, and
-what guarantees that serving starts
-only once every task's connection is open is that nothing is accepted until
-each task has made its handler.
-
-The tests share a database between connections too.
-`Book.open_in_memory(name)` opens the in-memory database `name`, which every
-connection opened with the same name reaches until the last one closes, so a
-test can give two routers their own `Ctx` over one guest book.
+Only a program raises this process-wide limit; a library leaves the choice to
+its caller. The estimate includes spare room, but inherited descriptors and
+SQLite temporary files can still exhaust it. A later storage failure is logged
+and answers the visitor with the generic 500 response.
 
 ## Signing
 
@@ -847,7 +834,7 @@ fn sign(inout ctx: Ctx, form: http.Form[Signature], request: http.Request) -> Re
     if holds_disallowed_character(name, keeps_line_breaks: false) || holds_disallowed_character(message, keeps_line_breaks: true) {
         return .Err(http.error(request, .UnprocessableContent, "a name holds no control characters, and a message only line breaks and tabs"))
     }
-    let _ = &ctx.book.sign(name, message) else |error| {
+    let _ = ctx.book.sign(name, message) else |error| {
         return .Err(unavailable(request, error))
     }
     // `303 See Other` tells the browser to load the page with `GET /`, so
@@ -880,10 +867,9 @@ fn limits() -> http.Limits {
 }
 ```
 
-`main` in `examples/guest-book/main.lin` makes room for its open files and
-serves the loopback port with those limits through `http.listen_and_serve`.
-Each serving task builds its own router on `http.Router[Ctx]`, lent a `Ctx`
-that holds the connection the task opened:
+`main` budgets its descriptors, opens the system-thread database owner, and
+serves the loopback port through HTTP fibers. Each worker builds its own router
+and lends it a `Ctx` holding a restricted database client:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -894,53 +880,31 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
 }
 ```
 
-Opening a task's connection can fail, and so can registering a route, so
-`start` does both and answers with the connection and the router or with a
-`StartError` saying which failed. A route that is refused releases what was
-already built:
+Registering a route can fail. `start` returns the client and router together,
+with a dependency on the client it received. A refusal releases the router and
+client while leaving the server's store alive:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
-// Why a serving task could not start: its connection to the guest book did
-// not open, or one of its routes was refused.
-@derive(Debug, Release)
-enum StartError {
-    Book(BookError),
-    Route(http.RouteError),
-}
-
-impl Display for StartError {
-    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        match read self {
-            Book(error) => error.fmt(&w),
-            Route(error) => "cannot register a route: {error}".fmt(&w),
-        }
-    }
-}
-
-// Open a serving task's connection to the guest book at `path` and build its
-// router. A route that is refused releases the router and the connection
-// before the reason is returned.
-fn start(path: Str) -> Result[(Ctx, http.Router[Ctx]), StartError] where carries() {
-    let ctx = Ctx.connect(path) else |error| {
-        return .Err(.Book(error))
-    }
+// Build a serving task's router around a borrowed database client. A refused
+// route releases both router and client, leaving the server's Store intact.
+fn start(client: store.Client) -> Result[(Ctx, http.Router[Ctx]), http.RouteError] where carries(.Ok: client) {
+    let ctx = Ctx { book = copy(client), proxy_trust = proxy_trust() }
     var router: http.Router[Ctx] = http.Router.new()
     match routes(&router) {
         Ok(_) => .Ok((ctx, router)),
         Err(error) => {
             router.release()
             ctx.release()
-            .Err(.Route(error))
+            .Err(error)
         },
     }
 }
 ```
 
-The tests of the routes follow `routes` in the file, and `main` comes after
-`start`. Its `serving` closure hands each task's `start` to `map`, which wraps
-a connection and a router in the handler, and when one task's is `.Err`,
-serving ends before a connection is accepted:
+
+The serving factory carries its captured client's dependency into every handler.
+`listen_and_serve` joins the workers before `Store` is released:
 
 <!-- guide: excerpt examples/guest-book/main.lin -->
 ```linea
@@ -958,21 +922,11 @@ fn main() -> UInt8 {
         return 64
     }
     let logger = log.to_stderr(minimum: .Info)
-    // The guest book starts in three steps: it prepares what every task
-    // shares, the room for open files and the database file, then each
-    // serving task opens its own connection, and only then is a connection
-    // accepted.
-    //
-    // A macOS shell starts a program allowed 256 open files, too few for a
-    // connection on every serving task, so the guest book raises its own
-    // limit as far as the system allows. A library leaves the limit to the
-    // program, since it is the whole process's. `files_needed` is an
-    // estimate: SQLite may open a temporary file for a large query, so a
-    // request can still fail for want of a descriptor, and answers 500 like
-    // any other storage failure. Stopping here when even the estimate does
-    // not fit says why at once, rather than as one task's failure to open
-    // its connection.
-    let files_needed = serving_tasks * files_per_task + connection_budget * files_per_connection + fixed_files
+    // One database owner keeps its connection and write-ahead log open.
+    // Client sockets and readiness registrations need two descriptors each.
+    // SQLite can still need temporary files, so this is an admission estimate,
+    // not a guarantee that every later query will succeed.
+    let files_needed = database_files + connection_budget * files_per_connection + serving_carriers * files_per_carrier + fixed_files
     let open_files = process.raise_open_file_limit() else |error| {
         io.eprintln("guest-book: cannot raise the open-file limit: {error}")
         return 1
@@ -982,28 +936,30 @@ fn main() -> UInt8 {
         return 1
     }
     let path = database_path()
-    // Creating the table and switching the file to the write-ahead log happen
-    // once, here, before any task opens a connection.
-    let _ = Book.initialize(path) else |error| {
+    // Initialize, use and close SQLite on one system-thread task. Idle HTTP
+    // connections park on the fiber loop; a blocking database call occupies
+    // the database thread without stopping unrelated socket/timer fibers.
+    defer let database = Store.open(path) else |error| {
         io.eprintln("guest-book: {error}")
         error.release()
         return 1
     }
-    // Each serving task builds its own handler with this closure: a router
-    // lent the task's own `Ctx` by `http.with_state`, inside `http.logged`.
-    // Opening the task's connection and registering its routes can each
-    // fail, so the closure returns the `Result` of `start`, whose `map` turns
-    // an opened `Ctx` and a finished router into the handler and keeps a
-    // `StartError` as it is. When one task's is `.Err`, serving ends before
-    // accepting anything and reports it.
-    let serving = [sink logger, path] || {
-        start(path).map(
-            [sink logger = copy(logger)] |sink (ctx, router): (Ctx, http.Router[Ctx])| {
+    let client = database.client()
+    let execution = io.Loop.open(carriers: serving_carriers) else |error| {
+        io.eprintln("guest-book: {error}")
+        return 1
+    }
+    // The factory copies a restricted client for each serving task. The
+    // HTTP server joins those tasks before database's deferred close runs.
+    let serving = [sink logger, sink client] || -> where carries(client) {
+        start(client).map(
+            [sink logger = copy(logger)] |sink made: (Ctx, http.Router[Ctx])| -> where carries(made) {
+                let (ctx, router) = made
                 http.logged(copy(logger), http.with_state(ctx, router))
             },
         )
     }
-    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits(), policy: .Threads(serving_tasks)) else |error| {
+    let _ = http.listen_and_serve(net.loopback(port), serving, limits: limits(), policy: .Threads(serving_tasks), on: execution) else |error| {
         io.eprintln("guest-book: {error}")
         error.release()
         return 1
@@ -1011,6 +967,7 @@ fn main() -> UInt8 {
     0
 }
 ```
+
 
 You can build the binary and serve it on a port:
 
@@ -1102,10 +1059,9 @@ needs:
 - `limits` derives the body limit from the field limits, so every form the page
   sends fits, and `holds_disallowed_character` keeps control and bidirectional
   characters out of a signature.
-- `process.raise_open_file_limit` makes room for a connection on each of the
-  128 serving tasks.
-- Each serving task opens its own SQLite connection in WAL mode with a busy
-  timeout and `synchronous=NORMAL`, so reads run at once, signatures wait
-  only on each other, and each holds the write lock for microseconds, and
-  the closure that builds a task's handler returns a `Result`, so a database
-  that cannot be opened stops serving before anything is accepted.
+- `process.raise_open_file_limit` checks room for client sockets, carrier
+  descriptors and one database connection before serving starts.
+- HTTP fibers share two carriers. Restricted clients send owned requests to
+  a system-thread owner, keeping blocking SQLite work off those carriers.
+- The database owner creates and closes its native connection on its thread;
+  borrowed clients prevent closing it while serving tasks still use it.

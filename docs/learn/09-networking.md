@@ -2171,7 +2171,9 @@ fn count_down(seconds: UInt64, inout body: http.BodyWriter) -> Result[(), http.E
 ```
 
 `"T-{left}\n".fmt(&body)` is `Display.fmt("T-{left}\n", &body)` written as a
-dot call. `time.sleep` blocks for at least the duration it is given, and
+dot call. The application selects a shared fiber loop for its serving tasks,
+so `time.sleep` suspends this fiber for at least the duration it is given while
+other fibers use the carriers, and
 `flush` comes from the `io.ByteWriter` trait, so the example has
 `use io.ByteWriter`. Run it
 with `linea run examples/countdown-server -- --port 8080`, and ask for a

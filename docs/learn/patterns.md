@@ -189,11 +189,14 @@ let serving = [sink logger = copy(logger)] |app: task.Client[App]| -> where carr
 
 <!-- guide: excerpt examples/http-json-echo/main.lin -->
 ```linea
-let finished = http.listen_and_serve_with(net.loopback(options.port), serving, App { echoed = 0 }, limits: limits) else |error| {
+let finished = http.listen_and_serve_with(net.loopback(options.port), serving, App { echoed = 0 }, limits: limits, on: execution) else |error| {
     logger.error("serving stopped", log.field("error", error))
     return 1
 }
 ```
+
+The application opens `execution` as an `io.Loop` before serving. HTTP workers
+and the task owning `App` share its carriers; socket waits let other fibers run.
 
 [Networking](09-networking.md#shared-state) teaches the state and
 [Logging](09-networking.md#logging) the middleware.

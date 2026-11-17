@@ -46,10 +46,11 @@ fn main() -> Result[UInt8, io.IoError] {
         me.send(decide("Carol")).close()
     }
     // `task.start` prepares and starts each friend in one call, since a
-    // friend's body owns nothing that must be settled.
-    let from_alice = task.start(alice).unwrap()
-    let from_bob = task.start(bob).unwrap()
-    let from_carol = task.start(carol).unwrap()
+    // friend's body owns nothing that must be settled. `io.system()` gives
+    // each friend a separate OS thread.
+    let from_alice = task.start(alice, on: io.system()).unwrap()
+    let from_bob = task.start(bob, on: io.system()).unwrap()
+    let from_carol = task.start(carol, on: io.system()).unwrap()
 
     // `defer var` releases the guest list, and the names in it, whenever
     // `main` returns.
