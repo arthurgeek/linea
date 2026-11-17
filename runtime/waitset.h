@@ -100,10 +100,6 @@ long linea_waitset_withdraw(unsigned long set);
  * the set while it moves. */
 void linea_waitset_rehome(unsigned long set);
 
-#if defined(LINEA_WAITSET_PAUSES)
-void linea_waitset_test_age(unsigned long set, unsigned long slot);
-#endif
-
 /* Free an empty set. A set still holding a registration traps. */
 void linea_waitset_close(unsigned long set);
 

@@ -715,7 +715,7 @@ void linea_waitset_rehome(unsigned long set) {
 /* Give the free slot `slot` the last generation it may have, so the next
  * release retires it; the race tests reach a retirement without four
  * billion reuses. */
-void linea_waitset_test_age(unsigned long set, unsigned long slot) {
+void waitset_test_age(unsigned long set, unsigned long slot) {
     struct waitset *s = (struct waitset *)set;
     struct linea_registration *r = slot_at(s, (uint32_t)slot);
     r->generation = UINT32_MAX;

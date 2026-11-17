@@ -973,7 +973,7 @@ static void a_retired_slot_is_replaced_by_a_new_number(void) {
     const unsigned long first = linea_waitset_reserve(set);
     assert(slot_of(first) == 0);
     linea_waitset_unreserve(set, slot_of(first));
-    linea_waitset_test_age(set, 0);
+    waitset_test_age(set, 0);
     const unsigned long last = linea_waitset_reserve(set);
     assert(slot_of(last) == 0 && generation_of(last) == 0xffffffffUL);
     linea_waitset_unreserve(set, slot_of(last));

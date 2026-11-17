@@ -22,6 +22,9 @@ enum linea_pause_point {
 
 #if defined(LINEA_WAITSET_PAUSES)
 void waitset_test_pause(enum linea_pause_point point);
+/* Give a free slot of a set the last generation it may have, so its next
+ * release retires it. */
+void waitset_test_age(unsigned long set, unsigned long slot);
 #define linea_waitset_pause(point) waitset_test_pause(point)
 #else
 #define linea_waitset_pause(point) ((void)(point))
