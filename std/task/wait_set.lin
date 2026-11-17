@@ -42,6 +42,10 @@ extern fn linea_waitset_take(set: UInt64, slot: UInt64, generation: UInt64, only
 
 extern fn linea_waitset_withdraw(set: UInt64) -> Int64
 
+// Move a set whose registrations are all session endpoints to the calling
+// task's Io, as a lazy map does when it moves to a task on another loop.
+extern fn linea_waitset_rehome(set: UInt64)
+
 extern fn linea_waitset_close(set: UInt64)
 
 // A Registered[T] names one registration of a `T` in one wait set: the set's

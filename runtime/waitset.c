@@ -687,6 +687,27 @@ long linea_waitset_withdraw(unsigned long set) {
     return -1;
 }
 
+void linea_waitset_rehome(unsigned long set) {
+    struct waitset *s = (struct waitset *)set;
+    const unsigned long here = linea_io_current();
+    if (s->loop == here) return;
+    /* A timer, a descriptor or a signal is watched through the loop the set
+     * was opened on; only session endpoints are signalled by their peers
+     * wherever they run. */
+    if (s->kernel >= 0 || s->heap_len != 0 || s->watching_router) fail("linea: a wait set watching more than session endpoints was moved to another loop\n");
+    for (uint32_t i = 0; i < s->made; i += 1) {
+        struct linea_registration *r = slot_at(s, i);
+        const unsigned state = load_state(r);
+        if ((state == registered || state == signalled) && r->kind != endpoint_source && r->kind != returned_source) {
+            fail("linea: a wait set watching more than session endpoints was moved to another loop\n");
+        }
+    }
+    linea_park_lock(&s->park);
+    s->loop = here;
+    s->simulated = linea_io_is_simulated(here) != 0;
+    linea_park_unlock(&s->park);
+}
+
 void linea_waitset_close(unsigned long set) {
     struct waitset *s = set_of(set);
     if (s->held != 0) fail("linea: a wait set was closed holding a registration\n");

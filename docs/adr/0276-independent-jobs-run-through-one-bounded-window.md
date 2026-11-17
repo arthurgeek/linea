@@ -43,10 +43,13 @@ is free, so a call starts at most `max` tasks however many items it maps,
 and joins every one before it is settled. No worker outlives the call that
 started it, so [T-ThreadStart] and 0253's refusal of a retained pool stand.
 
-A worker's session is a named protocol: the map chooses to hand it a chunk
-of items, as a `Vec`, and receive their results, or to stop it. The map
-keeps a ring of places, one for each item it pulled and has not yet
-yielded; a place says the item is still being mapped or holds its result.
+A worker's session is a named protocol: after answering the results of the
+chunk it started with, the worker is offered another chunk, as a `Vec`, and
+answers its results, or is stopped. The map keeps a ring of places, one for
+each chunk it handed out and has not yet yielded; a place says the chunk is
+still being mapped or holds its results. Free busy entries are kept on a
+stack, so taking and returning one costs the same however many workers
+there are.
 It keeps two bounds:
 
 - at most `max` workers;
@@ -79,16 +82,22 @@ calls the function on the caller, one item at a time, so the same program
 yields the same results in the same order. A `max` of 0 stops the program,
 as 0253 decided.
 
-A lazy map waits for the first of several busy workers through a runtime
-wait set opened for that wait alone, which registers the busy workers'
-sessions and is closed before the wait returns; one busy worker is waited on
-directly. The map therefore holds nothing tied to one Io between calls, and a
-map moved into a task on another Io, after its first result or at any other
-point, keeps working there
-(`tests/tasks/a_lazy_map_moves_to_a_task_on_another_io.lin`). `map` and
-`all` collect every result within one call, which runs on one Io from start
-to end, so they keep one set for the whole call and register each worker
-once for each chunk it is handed.
+The map waits for the first of several busy workers through one runtime
+wait set, opened with the map's places, that watches every busy worker from
+when it takes a chunk until it answers; the set answers the slot the worker
+was registered in, and the map keeps which busy entry each slot watches.
+Handing out a chunk and waiting for an answer therefore cost the same
+however many workers there are. A map is a value and may move into a task on
+another Io; the set then follows it. The runtime gains one operation for
+this, `linea_waitset_rehome`, which moves a set whose registrations are all
+session endpoints to the calling task's Io and traps for any other set. A
+session endpoint is signalled by its peer wherever the peer runs, so nothing
+the set watches belongs to the Io it was opened on; a timer, a descriptor or
+a signal is watched through that Io's kernel queue and would not move. The
+map rehomes its set before each registration, wait and close, so a map moved
+after its first result keeps working on the new Io
+(`tests/tasks/a_lazy_map_moves_to_a_task_on_another_io.lin`). `task.WaitSet`
+does not move, as before.
 
 ### 2. A lazy map is linear and is settled explicitly
 
@@ -169,15 +178,20 @@ tried for this record, both compilers built `-Drelease` and the program with
 fastest of 200 runs (10 000 items), 100 runs (100 000 items) or five runs
 (16 items of 30 million steps), as a range over two or three runs of the
 program. Main was measured beside each design in the same session, since
-the machine's load moved between sessions; the trivial item is `n + 1`. The
+the machine's load moved between sessions; the trivial item is `n + 1`. The first
+two rows were measured at a load average of 7 to 10; an independent run of
+the same comparison measured 1.17–1.25× at 10 000 items and 1.12–1.28× at
+100 000. The
 last six rows were measured earlier with the fastest of five or forty runs,
 and the task-per-item row and its main in a separate run of the same
 program.
 
 | Design | 10 000 trivial | 100 000 trivial | 16 heavy |
 | --- | --- | --- | --- |
-| Main, in the session of the decided design | 332–358 µs | 1 026–1 109 µs | 260.4–264.8 ms |
-| **Decided:** each worker starts holding its share less an eighth; eighths handed out; one wait set per call | 395–512 µs | 1 216–1 230 µs | 260.4–264.1 ms |
+| Main, in the session of the decided design | 378–410 µs | 1 210–1 433 µs | 450.9–474.6 ms |
+| **Decided:** each worker starts holding its share less an eighth; eighths handed out; free entries on a stack; one wait set for the map's life | 455–473 µs | 1 304–1 633 µs | 457.0–458.0 ms |
+| Main, in an earlier session | 332–358 µs | 1 026–1 109 µs | 260.4–264.8 ms |
+| The decided design before free entries moved to a stack | 395–512 µs | 1 216–1 230 µs | 260.4–264.1 ms |
 | Main, in the session of the next row | 293–342 µs | 998–1 012 µs | 255.6–268.2 ms |
 | Each worker starts holding its whole share; nothing handed out after | 330–361 µs | 1 114–1 127 µs | 268.9–270.5 ms |
 | Main, in the session of the next row | 344–416 µs | 986–1 025 µs | 241.9–244.0 ms |
@@ -186,6 +200,32 @@ program.
 | Chunks shrinking as the input runs out; places kept per item | 949–2 098 µs | 2 843–3 634 µs | 243.2–248.8 ms |
 | Main, in the session of the next row | 482–597 µs | 1.81–1.94 ms | 435–519 ms |
 | A task per item | 338–429 ms | 3.44–3.64 s | 462–529 ms |
+
+How the cost follows `max`, over 20 000 trivial items (a lazy map walks
+`1..=20000`), fastest of five or fifty runs for `map` and `all`, one walk
+for a lazy map, two runs each:
+
+| `max` | 8 | 1 000 | 10 000 |
+| --- | --- | --- | --- |
+| `map`, main | 518–523 µs | 77.8–83.7 ms | stops the program (`called Result.unwrap on Err`) |
+| `map`, decided | 658–681 µs | 163–171 ms | 7.4 s |
+| `all`, main | stopped the program once (`Illegal instruction`), 778 ms once | 1.66 s | — |
+| `all`, decided | 585–624 µs | 155 ms | 7.6 s |
+| `lazy_map`, decided | 328–359 ms | 1.15–1.19 s | 6.8–7.3 s |
+| `lazy_map`, a wait set for each wait and entries found by scanning | 469 ms | about 5 s | 20.4 s |
+
+A lazy map of 100 000 trivial items at `max` 8 takes 1.52 s, and of 20 000
+at `max` 2, 8, 64 and 256 takes 204, 216, 254 and 362 ms. Handing out a chunk
+and waiting for an answer each visit one busy entry however many workers
+there are, which `a_map_visits_each_worker_entry_a_fixed_number_of_times_per_chunk`
+holds for `max` 2 and 64 by counting the entries visited. What still grows
+with `max` is the operating system's share: every worker is a thread with a
+2 MiB stack, starting ten thousand of them takes seconds on macOS, and a
+handoff wakes a thread more slowly when thousands of threads are parked. A
+lazy map hands out one item at a time, so each of its items pays a
+handoff of a few microseconds; it suits work that costs more than that.
+`task.all` over 100 000 trivial jobs, which stopped the program on main, is
+`tests/tasks/all_answers_a_hundred_thousand_jobs_on_eight_workers.lin`.
 
 What each step cost, from these rows and from timing the operations alone:
 
@@ -212,8 +252,8 @@ every call is a round trip like a handoff, so that design is not taken here.
 
 ## Consequences
 
-1. `task.map` and `task.all` over cheap uniform items cost about 1.2× of
-   fixed chunks at 10 000 items and 1.1–1.2× at 100 000 (see
+1. `task.map` and `task.all` over cheap uniform items cost 1.1–1.25× of
+   fixed chunks at 10 000 items and 1.1–1.3× at 100 000 (see
    Measurements), and costly items cost the same; a map whose items vary in
    cost no longer waits on a slow chunk while the other tasks sit idle.
 2. `task.all` keeps its workers busy until the last job is handed out,
@@ -271,10 +311,17 @@ every call is a round trip like a handoff, so that design is not taken here.
 - **An in-order window without waiting for the first worker to answer:**
   waiting on the head's worker alone keeps workers that finished idle behind
   it; that is the batch behaviour `all` had.
-- **A wait set kept for the map's lifetime:** it belongs to the Io it was
-  opened on, so a map moved to a task on another Io stopped the program at its
-  next wait. Opening one for each wait costs a runtime record per wait, which
-  a chunk's work repays.
+- **A wait set opened for each wait:** it moved with the map for free, but
+  each wait registered and withdrew every busy worker, so a lazy map's cost
+  per item grew with `max` (about 23 µs an item at `max` 8 and 1 ms at
+  `max` 1 000 on 20 000 items).
+- **A set kept for the map's lifetime that stays on its Io:** a map moved to
+  a task on another Io stopped the program at its next wait. Opening a new
+  set there was not possible either: the old one holds the workers'
+  registrations, and closing it from another Io traps.
+- **Scanning the busy entries for a free one, and for the one that
+  answered:** each handoff and each wait cost `max` steps, so a map of
+  20 000 items took 13 s at `max` 10 000.
 - **`task.WaitSet` for the waits:** each registration erases its value into
   a system-allocated closure, so `lazy_map_in` could not keep its promise
   about where it allocates.

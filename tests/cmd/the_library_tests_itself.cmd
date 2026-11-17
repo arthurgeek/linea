@@ -1440,6 +1440,7 @@ The library tests itself.
   ok    task.a_lazy_map_releases_results_that_own_storage
   ok    task.a_lazy_map_runs_no_more_jobs_at_once_than_its_bound
   ok    task.a_lazy_map_yields_every_result_in_input_order
+  ok    task.a_map_visits_each_worker_entry_a_fixed_number_of_times_per_chunk
   ok    task.a_map_with_results_to_yield_does_not_finish
   ok    task.a_minted_key_names_what_it_was_minted_for
   ok    task.a_prepared_body_runs_once_its_task_starts
@@ -1663,4 +1664,4 @@ The library tests itself.
   ok    uuid.the_version_is_read_from_its_four_bits
   ok    uuid.v7_identifiers_made_in_later_milliseconds_sort_later
   
-  1660 passed, 0 failed
+  1661 passed, 0 failed

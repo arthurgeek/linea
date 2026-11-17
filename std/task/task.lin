@@ -606,13 +606,16 @@ struct Busy[I: Iterator, R, A: Allocator] {
 // `places` keeps a place for every chunk handed out and not yet yielded, the
 // chunk handed out `n`th at `n % places.length()`, and `head` the results of
 // the chunk being yielded. `busy` holds a worker for each chunk being mapped
-// and `idle` the workers waiting for one; both have room for
-// `running_at_most`. The three are reserved before the first worker starts.
-// A lazy map waits for whichever worker answers first through a runtime wait
-// set opened for that wait alone, so nothing it holds between calls belongs
-// to one Io, and it may move to a task on another. `map` and `all` collect
-// in one call, so they keep one set, `set`, for the whole call, with
-// `waiting` naming the busy entry each of its slots watches. With
+// and `idle` the workers waiting for one, and `free` the busy entries not
+// in use, taken and given back from its end; each has room for
+// `running_at_most`. A runtime wait set, `set`, watches every busy worker
+// from when it takes a chunk until it answers, and `waiting` names the busy
+// entry each of the set's slots watches, so handing out a chunk and waiting
+// for an answer each cost the same however many workers there are. The set
+// watches only session endpoints, so when the map moves to a task on another
+// Io the set moves with it the next time it is used. All of these are
+// reserved before the first worker starts. `visits` counts the busy entries
+// handing out and waiting have looked at: one each per chunk. With
 // `running_at_most` 0 every item is mapped on the caller, when it is asked
 // for, and nothing is allocated.
 //
@@ -634,8 +637,10 @@ struct LazyMap[I: Iterator, R, F, A: Allocator = mem.SystemAllocator] {
     head: Option[mem.Drain[R, mem.SystemAllocator]],
     busy: mem.Vec[Option[Busy[I, R, A]], A],
     idle: mem.Vec[Chan[Assigning[I, R], A], A],
+    free: mem.Vec[UInt64, A],
     set: UInt64,
     waiting: mem.Vec[UInt64, A],
+    visits: UInt64,
     opened: Bool,
     workers: UInt64,
     running: UInt64,
@@ -779,8 +784,10 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
         head = .None,
         busy = mem.Vec.new_in(allocator),
         idle = mem.Vec.new_in(allocator),
+        free = mem.Vec.new_in(allocator),
         set = 0,
         waiting = mem.Vec.new_in(allocator),
+        visits = 0,
         opened = false,
         workers = 0,
         running = 0,
@@ -794,32 +801,35 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
 
 impl[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator] LazyMap[I, R, F, A]
 where I.Item: Owned {
-    // Reserve the places and the room for the workers before the first one
+    // Reserve the places, the room for the workers and the names of the
+    // wait set's slots, and open the wait set, before the first worker
     // starts. Where they cannot be had, every item is mapped on the caller
     // instead, so the map yields the same results.
     fn open(inout self: Self) {
         self.opened = true
-        let reserved = match &self.places.reserve(self.chunks_at_most) {
-            Ok(_) => match &self.busy.reserve(self.running_at_most) {
-                Ok(_) => &self.idle.reserve(self.running_at_most).is_ok(),
-                Err(_) => false,
-            },
-            Err(_) => false,
-        }
+        let reserved = &self.places.reserve(self.chunks_at_most).is_ok() && &self.busy.reserve(self.running_at_most).is_ok() && &self.idle.reserve(self.running_at_most).is_ok() && &self.free.reserve(self.running_at_most).is_ok() && &self.waiting.reserve(self.running_at_most).is_ok()
         if !reserved {
             self.running_at_most = 0
             return
         }
         // The reservations above hold every place, so these pushes allocate
-        // nothing and cannot fail.
+        // nothing and cannot fail. The free entries are taken from the end,
+        // so the first busy worker takes entry 0.
         for _ in 0..self.chunks_at_most {
             let empty: Option[Ahead[R]] = .None
             &self.places.push(empty).unwrap()
         }
-        for _ in 0..self.running_at_most {
+        for at in 0..self.running_at_most {
             let free: Option[Busy[I, R, A]] = .None
             &self.busy.push(free).unwrap()
+            &self.free.push(self.running_at_most - 1 - at).unwrap()
+            &self.waiting.push(0).unwrap()
         }
+        // The set keeps every busy worker registered from when it takes a
+        // chunk until it answers, so a wait costs the same however many
+        // workers there are. Where the system refuses it, the map waits for
+        // the worker mapping the next chunk instead.
+        self.set = linea_waitset_open()
     }
 
     // Pull chunks and hand them to workers while a worker may take one: a
@@ -921,18 +931,13 @@ where I.Item: Owned {
         }
         match busy {
             Some(waiting) => {
-                var spot = UInt64(0)
-                loop {
-                    let empty: Option[Busy[I, R, A]] = .None
-                    match mem.exchange(&me.busy[spot], empty) {
-                        None => break,
-                        Some(other) => {
-                            put_back(&me.busy[spot], other)
-                            spot += 1
-                        },
-                    }
+                let spot = match &me.free.pop() {
+                    Some(spot) => spot,
+                    None => panic("a lazy map started more workers than it has room for"),
                 }
+                me.visits += 1
                 if me.set != 0 {
+                    linea_waitset_rehome(me.set)
                     let watched = linea_waitset_reserve(me.set) / slot_shift
                     linea_waitset_received(me.set, watched, waiting.number())
                     let _free = mem.exchange(&me.waiting[watched], spot)
@@ -947,77 +952,46 @@ where I.Item: Owned {
         me
     }
 
-    // Which `busy` entry holds a worker the wait set answered as its slot
-    // `watched`: slots are numbered in the order the workers were
-    // registered, one for each busy entry from the first.
-    fn busy_at(self: Self, watched: UInt64) -> UInt64 {
-        var seen = UInt64(0)
-        var spot = UInt64(0)
-        for entry in self.busy.as_slice() {
-            match read *entry {
-                Some(_) => {
-                    if seen == watched {
-                        return spot
-                    }
-                    seen += 1
-                },
-                None => {},
-            }
-            spot += 1
-        }
-        panic("a lazy map's wait set answered a worker it does not hold")
-    }
-
     // Wait for whichever busy worker answers first, keep its results in
-    // their place, and keep the worker free for the next chunk. One busy
-    // worker is waited on directly; several through a wait set opened for
-    // this wait, which watches every busy worker's session and is closed
-    // before the call returns. Where the system refuses the set, the first
-    // busy worker is waited on alone.
+    // their place, and keep the worker free for the next chunk. The wait set
+    // answers the slot the worker was registered in, and `waiting` names its
+    // busy entry. Without a set, the map waits for the worker mapping the
+    // next chunk to be yielded.
     fn collected_one(sink self: Self) -> Self where carries(self) {
         var me = self
-        let set = if me.set == 0 && me.running > 1 {
-            linea_waitset_open()
-        } else {
-            UInt64(0)
-        }
         var spot = UInt64(0)
         if me.set != 0 {
+            // The map may have moved to a task on another Io since it last
+            // waited; the set follows it there.
+            linea_waitset_rehome(me.set)
             let watched = linea_waitset_next(me.set)
             if watched < 0 {
                 panic("a lazy map waited with no worker busy")
             }
             spot = mem.exchange(&me.waiting[UInt64(watched)], 0)
-        } else if set != 0 {
-            var registered = UInt64(0)
+            me.visits += 1
+        } else {
+            var found = false
             for at in 0..me.busy.length() {
+                me.visits += 1
                 let empty: Option[Busy[I, R, A]] = .None
                 match mem.exchange(&me.busy[at], empty) {
                     None => {},
                     Some(entry) => {
-                        let reserved = linea_waitset_reserve(set) / slot_shift
-                        if reserved != registered {
-                            panic("a fresh wait set numbered its slots out of order")
+                        if entry.chunk == me.taken {
+                            spot = at
+                            found = true
                         }
-                        linea_waitset_received(set, reserved, entry.worker.number())
-                        registered += 1
                         put_back(&me.busy[at], entry)
                     },
                 }
-            }
-            let watched = linea_waitset_next(set)
-            if watched < 0 {
-                panic("a lazy map waited with no worker busy")
-            }
-            loop {
-                if linea_waitset_withdraw(set) < 0 {
+                if found {
                     break
                 }
             }
-            linea_waitset_close(set)
-            spot = me.busy_at(UInt64(watched))
-        } else {
-            spot = me.busy_at(0)
+            if !found {
+                panic("a lazy map waited for a chunk no worker holds")
+            }
         }
         let empty: Option[Busy[I, R, A]] = .None
         let Busy { worker, chunk } = match mem.exchange(&me.busy[spot], empty) {
@@ -1026,6 +1000,7 @@ where I.Item: Owned {
         }
         let (results, free) = worker.recv()
         &me.idle.push(free).unwrap()
+        &me.free.push(spot).unwrap()
         me.running -= 1
         put_place(&me.places, chunk % me.chunks_at_most, .Done(results))
         me
@@ -1111,25 +1086,6 @@ where I.Item: Owned {
         }
     }
 
-    // Open a wait set that watches every busy worker for as long as one call
-    // collects every result, so a worker is registered once for each chunk
-    // it is handed. The call runs on one Io from start to end, so the set
-    // never crosses to another. Where the set or its names cannot be had,
-    // each wait opens a set of its own instead.
-    fn watch(inout self: Self) {
-        if self.running_at_most == 0 {
-            return
-        }
-        match &self.waiting.reserve(self.running_at_most) {
-            Ok(_) => {},
-            Err(_) => return,
-        }
-        for _ in 0..self.running_at_most {
-            &self.waiting.push(0).unwrap()
-        }
-        self.set = linea_waitset_open()
-    }
-
     // Move every result into `out` in the items' order, handing out chunks
     // and waiting for workers as needed, until the source has given every
     // item and every result has moved. `map` and `all` collect through this,
@@ -1138,7 +1094,6 @@ where I.Item: Owned {
         var me = self
         if me.running_at_most > 0 && !me.opened && me.pulling {
             &me.open()
-            &me.watch()
         }
         if me.running_at_most == 0 {
             loop {
@@ -1186,15 +1141,10 @@ where I.Item: Owned {
                 put_back(&holder, current.collected_one().filled())
             }
         }
-        var rest = match holder {
+        match holder {
             Some(rest) => rest,
             None => panic("a lazy map was lost while it collected"),
         }
-        if rest.set != 0 {
-            linea_waitset_close(rest.set)
-            rest.set = 0
-        }
-        rest
     }
 
     // Pull no more items. The chunks already handed out are still mapped,
@@ -1235,7 +1185,7 @@ where I.Item: Owned {
         testing.assert(in_order, "a stopped map yielded out of order")?
         testing.assert(rest <= 4, "a stopped map started more than its window holds")?
         testing.assert_eq(next_item, rest + 2, "the source did not resume after the items the map pulled")?
-        testing.assert(attempts <= 3 + 2, "a stopped map started more workers than its bound")?
+        testing.assert(attempts <= 5 + 2, "a stopped map started more workers than its bound")?
         testing.assert(settled, "a finished map kept an allocation")?
     }
 
@@ -1247,7 +1197,7 @@ where I.Item: Owned {
         if self.pulled != self.yielded {
             return .Err(self)
         }
-        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, places, head, busy, idle, set: _, waiting, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
+        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, places, head, busy, idle, free: free_spots, set, waiting, visits: _, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
         match head {
             None => {},
             Some(results) => match results.finish() {
@@ -1265,6 +1215,16 @@ where I.Item: Owned {
         match free.finish() {
             Ok(_) => {},
             Err(_) => panic("a lazy map kept a worker it stopped"),
+        }
+        if set != 0 {
+            linea_waitset_rehome(set)
+            linea_waitset_close(set)
+        }
+        var spots = free_spots
+        &spots.clear()
+        match spots.finish() {
+            Ok(_) => {},
+            Err(_) => panic("a lazy map's free entries were not empty"),
         }
         var names = waiting
         &names.clear()
@@ -1508,6 +1468,50 @@ fn lazy_test_slow_item(sink n: UInt64) -> UInt64 {
     n
 }
 
+// Walk a lazy map of `count` items on `max` workers, and answer how many
+// busy entries it visited and how many chunks it handed out.
+fn lazy_test_visits(count: UInt64, max: UInt64) -> (UInt64, UInt64) {
+    var mapped = lazy_map(Policy.Threads(max), UInt64(1)..=count, |sink n| n)
+    var total = UInt64(0)
+    for n in &mapped {
+        total += n
+    }
+    let counted = (mapped.visits, mapped.handed_out)
+    mapped.release()
+    if total != count * (count + 1) / 2 {
+        panic("a lazy map lost a result")
+    }
+    counted
+}
+
+// Collect a map of `count` items on `max` workers, and answer how many busy
+// entries it visited and how many chunks it handed out.
+fn map_test_visits(count: UInt64, max: UInt64) -> (UInt64, UInt64) {
+    var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+    for n in 1..=count {
+        &items.push(n).unwrap()
+    }
+    let running = if max > count {
+        count
+    } else {
+        max
+    }
+    let window = lazy_window(mem.system(), items.drain(), |sink n: UInt64| n, running, count, count)
+    var results: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+    let walked = window.drained_into(&results)
+    let counted = (walked.visits, walked.handed_out)
+    match walked.finish() {
+        Ok(drained) => drained.finish().unwrap(),
+        Err(_) => panic("a collected map still held results"),
+    }
+    let length = results.length()
+    results.release()
+    if length != count {
+        panic("a collected map lost a result")
+    }
+    counted
+}
+
 // Map lazily as `lazy_map` does, taking the bytes each worker is kept in,
 // the places of the pulled items and the room for the workers from
 // `allocator`. Nothing is allocated until the first `next`. Where the places
@@ -1530,6 +1534,18 @@ pub fn lazy_map_in[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(s
         },
     }
     lazy_window(allocator, items.iterate(), f, running_at_most, ahead_of(running_at_most), 0)
+}
+
+test fn a_map_visits_each_worker_entry_a_fixed_number_of_times_per_chunk() {
+    // Handing a chunk out takes a free entry and an answer finds its entry
+    // through the wait set, so the entries visited per chunk do not grow
+    // with the number of workers.
+    for max in [UInt64(2), 64] {
+        let (lazy_visits, lazy_chunks) = lazy_test_visits(2000, max)
+        testing.assert(lazy_visits <= 2 * lazy_chunks, "a lazy map's work per chunk grew with its workers")?
+        let (map_visits, map_chunks) = map_test_visits(2000, max)
+        testing.assert(map_visits <= 2 * map_chunks, "a collected map's work per chunk grew with its workers")?
+    }
 }
 
 test fn a_slow_item_fills_the_window_and_the_places_wrap() {
@@ -1571,16 +1587,16 @@ test fn a_lazy_map_released_early_settles_every_job_it_started() {
     let (none, none_attempts, none_settled) = lazy_test_take(0)
     testing.assert_eq((none, none_attempts), (UInt64(0), UInt64(0)), "a map released before its first result started work")?
     testing.assert(none_settled, "a map released at once kept an allocation")?
-    // Three allocations hold the places and the room for the workers; every
-    // other one is a started worker, at most three however many results
-    // were taken.
+    // Five allocations hold the places, the room for the workers and the
+    // names of the wait set's slots; every other one is a started worker,
+    // at most three however many results were taken.
     let (one, one_attempts, one_settled) = lazy_test_take(1)
     testing.assert_eq(one, UInt64(1), "the first result was wrong")?
-    testing.assert(one_attempts <= 3 + 3, "a map released after one result started more workers than its bound")?
+    testing.assert(one_attempts <= 5 + 3, "a map released after one result started more workers than its bound")?
     testing.assert(one_settled, "a map released after one result kept an allocation")?
     let (some, some_attempts, some_settled) = lazy_test_take(10)
     testing.assert_eq(some, UInt64(55), "the first ten results were wrong")?
-    testing.assert(some_attempts <= 3 + 3, "a map released after ten results started more workers than its bound")?
+    testing.assert(some_attempts <= 5 + 3, "a map released after ten results started more workers than its bound")?
     testing.assert(some_settled, "a map released after ten results kept an allocation")?
 }
 
@@ -1588,10 +1604,10 @@ test fn a_lazy_map_runs_no_more_jobs_at_once_than_its_bound() {
     let (peak, after_first, total, settled) = lazy_test_peak(12)
     let (two_items, _, _, _) = lazy_test_peak(2)
     testing.assert_eq(total, UInt64(78), "a result was lost")?
-    // Three allocations, then one for each worker: two workers map all
+    // Five allocations, then one for each worker: two workers map all
     // twelve items, so at most two jobs run at once, and a map of twelve
     // holds no more than a map of two.
-    testing.assert(after_first <= 3 + 2, "the map started more workers than its bound")?
+    testing.assert(after_first <= 5 + 2, "the map started more workers than its bound")?
     testing.assert(peak <= two_items, "a longer map held more workers than its bound")?
     testing.assert(settled, "a finished map kept an allocation")?
 }
@@ -1703,9 +1719,10 @@ test fn a_lazy_map_keeps_every_result_of_a_fallible_function() {
 }
 
 test fn a_refused_allocation_moves_work_to_the_caller_and_keeps_every_result() {
-    // The first three allocations are the places and the room for the
-    // workers; the rest are the workers, one each.
-    for refused in UInt64(1)..=7 {
+    // The first five allocations are the places, the room for the workers
+    // and the names of the wait set's slots; the rest are the workers, one
+    // each.
+    for refused in UInt64(1)..=8 {
         let (sum, settled) = lazy_test_refusing(refused)
         testing.assert_eq(sum, UInt64(55), "a refused allocation changed the results")?
         testing.assert(settled, "a refused allocation left another one undisposed")?
@@ -1724,6 +1741,7 @@ fn collected[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item:
         total
     }
     var results: mem.Vec[R, A] = mem.Vec.new_in(allocator)
+    &results.reserve(total).unwrap()
     let running = if running_at_most > total {
         total
     } else {
@@ -2018,14 +2036,13 @@ fn map_test_refusing(refused: UInt64, named: Bool) -> (Bool, Bool) {
 }
 
 test fn map_in_takes_its_results_and_tasks_from_its_allocator() {
-    // The first three allocations are the places and the room for the
-    // workers, and a refusal of one maps every item on the caller; the
-    // fourth names the workers a wait set watches, and a refusal of it waits
-    // through a set for each wait; the fifth and sixth are the workers'
-    // bytes, and a refusal of one maps that worker's chunk on the caller.
-    // The seventh is the results' vector, which stops the program when it
-    // is refused.
-    for refused in UInt64(0)..=6 {
+    // The first allocation is the results' vector, reserved whole, which
+    // stops the program when it is refused. The next five are the places,
+    // the room for the workers and the names of the wait set's slots, and a
+    // refusal of one maps every item on the caller; the seventh and eighth
+    // are the workers' bytes, and a refusal of one maps that worker's chunk
+    // on the caller.
+    for refused in [UInt64(0), 2, 3, 4, 5, 6, 7, 8] {
         let (same, settled) = map_test_refusing(refused, false)
         testing.assert(same, "a refused allocation changed the results")?
         testing.assert(settled, "map_in kept an allocation")?
