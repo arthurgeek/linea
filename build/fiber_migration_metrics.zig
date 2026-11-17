@@ -354,7 +354,11 @@ fn sampleRun(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, expected: C
     defer gpa.free(result.stderr);
     const duration = start.durationTo(finish).toNanoseconds();
     if (duration < 0) return error.ClockOrder;
-    return .{ .process_wall_ns = duration, .report = try validateRun(result, expected) };
+    const report = validateRun(result, expected) catch |err| {
+        std.debug.print("fiber fixture {s}: {s}, termination {any}\n{s}{s}", .{ binary, @errorName(err), result.term, result.stdout, result.stderr });
+        return err;
+    };
+    return .{ .process_wall_ns = duration, .report = report };
 }
 
 pub fn main(init: std.process.Init) !void {
