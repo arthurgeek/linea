@@ -1684,7 +1684,7 @@ static long perform_operation(struct linea_op *op, linea_fiber_attempt attempt, 
     if (op->deadline_ns != 0 && now() >= op->deadline_ns) return op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;
     struct pending_operation pending = { .operation = op, .attempt = attempt, .fiber = f, .owner = f->home, .audited_net = audited_net,
         .state = operation_idle, .slot = 0, .registered = 0, .result = 0 };
-#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+#if defined(LINEA_COMPLETION_CAPACITY_TEST) || defined(LINEA_COMPLETION_GENERATION_TEST)
     /* Exercise admission even if a producer wins the race to the first read.
      * The real backend still owns and performs every consuming operation. */
     const long immediate = audited_net && op->kind == LINEA_OP_READ ? -(long)EAGAIN : attempt_operation(&pending);

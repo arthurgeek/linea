@@ -102,6 +102,18 @@ static int probe_operations(struct linea_completion *queue) {
 }
 
 static struct linea_completion *completion_open(int eventfd) {
+#if defined(LINEA_COMPLETION_COUNTER_TEST)
+    volatile unsigned first = UINT_MAX - 2;
+    unsigned cursor = first;
+    for (unsigned expected = 0; expected < 7; expected += 1) {
+        if (distance(cursor, first) != expected) completion_fail();
+        cursor = advance(cursor);
+    }
+    if (cursor != 4 || distance(0, UINT_MAX) != 1 || distance(UINT_MAX, 0) != UINT_MAX)
+        completion_fail();
+    const char message[] = "native completion: ring counter wrap preserves distances\n";
+    report_bytes(message, sizeof message - 1);
+#endif
 #if defined(LINEA_COMPLETION_DENIED_TEST)
     errno = EPERM;
     return NULL;
@@ -120,6 +132,9 @@ static struct linea_completion *completion_open(int eventfd) {
     struct linea_completion *queue = calloc(1, sizeof *queue);
     if (queue == NULL) { close(fd); return NULL; }
     queue->fd = fd;
+#if defined(LINEA_COMPLETION_GENERATION_TEST)
+    queue->slots[0].generation = UINT32_MAX - 1;
+#endif
     if (!probe_operations(queue)) goto failed;
     queue->sq_bytes = parameters.sq_off.array + (size_t)parameters.sq_entries * sizeof(unsigned);
     queue->cq_bytes = parameters.cq_off.cqes + (size_t)parameters.cq_entries * sizeof(struct io_uring_cqe);
@@ -203,6 +218,13 @@ static uint64_t completion_submit(struct linea_completion *queue, struct linea_o
     for (index = 0; index < completion_slots; index += 1)
         if (queue->slots[index].pending == NULL && queue->slots[index].generation != UINT32_MAX) break;
     if (index == completion_slots) return 0;
+#if defined(LINEA_COMPLETION_GENERATION_TEST)
+    if (queue->slots[0].generation == UINT32_MAX) {
+        if (index == 0 || queue->slots[0].pending != NULL) completion_fail();
+        const char message[] = "native completion: exhausted generation refused slot reuse\n";
+        report_bytes(message, sizeof message - 1);
+    }
+#endif
     unsigned tail;
     struct io_uring_sqe *sqe = next_sqe(queue, &tail);
     if (sqe == NULL) return 0;

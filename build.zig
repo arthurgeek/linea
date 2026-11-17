@@ -2514,7 +2514,7 @@ pub fn build(b: *std.Build) void {
             sanitizer_fault: bool = false,
             normal_execution: bool = false,
             checked: bool = true,
-            ring: enum { none, ordinary, own_first, cancel_first, partial_submit, interrupted, shortage, unsupported, unavailable, cancel_retry, capacity, stale_reuse, accept_failure, accept_tie } = .none,
+            ring: enum { none, ordinary, own_first, cancel_first, partial_submit, interrupted, shortage, unsupported, unavailable, cancel_retry, capacity, stale_reuse, accept_failure, accept_tie, counter_wrap, generation_limit } = .none,
             completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
         };
         for ([_]ProofCase{
@@ -2548,6 +2548,8 @@ pub fn build(b: *std.Build) void {
             .{ .source = "io_stale_reuse.lin", .ring = .stale_reuse },
             .{ .source = "io_accept_failure.lin", .ring = .accept_failure },
             .{ .source = "io_accept.lin", .ring = .accept_tie },
+            .{ .source = "io.lin", .ring = .counter_wrap },
+            .{ .source = "io_stale_reuse.lin", .ring = .generation_limit },
             .{ .source = "io_normal.lin", .ring = .ordinary, .normal_execution = true },
             .{ .source = "io_normal.lin", .ring = .ordinary, .normal_execution = true, .checked = false },
             .{ .source = "io_timeout.lin", .ring = .own_first },
@@ -2614,6 +2616,8 @@ pub fn build(b: *std.Build) void {
             if (proof_case.ring == .stale_reuse) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_STALE_COOKIE_TEST=1", "-DLINEA_COMPLETION_STALE_COOKIE_TEST=1" }) catch @panic("OOM");
             if (proof_case.ring == .accept_failure) handoff_flags.append(b.allocator, "-DLINEA_NET_ACCEPT_CONFIGURE_TEST=1") catch @panic("OOM");
             if (proof_case.ring == .accept_tie) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_ACCEPT_TIE_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .counter_wrap) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_COUNTER_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .generation_limit) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_GENERATION_TEST=1") catch @panic("OOM");
             if (proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_ENTRY_PROVENANCE_TEST=1") catch @panic("OOM");
             if (std.mem.eql(u8, proof_case.source, "unproven.lin") and !proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
             switch (proof_case.completion) {
@@ -2699,6 +2703,8 @@ pub fn build(b: *std.Build) void {
                 run_proof.expectStdErrMatch("native completion: unconfigured accepted descriptor closed");
             }
             if (proof_case.ring == .accept_tie) run_proof.expectStdErrMatch("native completion: accepted descriptor won its expired deadline");
+            if (proof_case.ring == .counter_wrap) run_proof.expectStdErrMatch("native completion: ring counter wrap preserves distances");
+            if (proof_case.ring == .generation_limit) run_proof.expectStdErrMatch("native completion: exhausted generation refused slot reuse");
             if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_accept.lin")) run_proof.expectStdErrMatch("native completion: kernel accept retired");
             if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_connect.lin")) run_proof.expectStdErrMatch("native completion: kernel connect readiness completed");
             if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_connect_timeout.lin")) run_proof.expectStdErrMatch("native completion: kernel connect readiness canceled");
