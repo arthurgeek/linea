@@ -8890,9 +8890,7 @@ fn checkGeneratedProgram(
                 .typing = &selector.semantics.typing,
                 .file = selector.fileNamed(source.path).?,
             },
-            .answer = ran.text,
-            .output = ran.output,
-            .errors = ran.errors,
+            .ran = ran,
             .ir = ir.written(),
         }) catch |err| {
             result.err = err;
@@ -8914,9 +8912,7 @@ fn checkGeneratedProgram(
             .ran = .{ .env = env, .answered = .{
                 .display_path = display_path,
                 .name = name,
-                .answer = ran.text,
-                .output = ran.output,
-                .errors = ran.errors,
+                .ran = ran,
             } },
         }) catch |err| {
             result.err = err;
@@ -8938,8 +8934,7 @@ fn checkGeneratedProgram(
             .{
                 .display_path = display_path,
                 .name = name,
-                .answer = ran.text,
-                .errors = ran.errors,
+                .ran = ran,
             },
         ) catch |err| {
             result.err = err;
@@ -9116,23 +9111,68 @@ fn compileWithLibrary(
     return .{ .accepted = ir.written() };
 }
 
-/// Whether a sanitizer reported a fault on standard error.
+/// Whether a sanitizer reported a fault on standard error, read by the form
+/// each sanitizer's report line takes and nothing looser, so a program that
+/// says the same words is not taken for one.
 ///
-/// The address, leak and thread sanitizers each name themselves in the
-/// first line of a report, and the undefined-behaviour checks the runtime is
-/// built with say `runtime error:` when they report rather than trap.
+/// The address and leak sanitizers begin a report with a line
+/// `==PID==ERROR: NAMESanitizer: ...`, the thread sanitizer with
+/// `WARNING: ThreadSanitizer: ...`, and the undefined-behaviour checks with
+/// `FILE:LINE:COLUMN: runtime error: ...`, each at the start of a line.
 fn sanitizerReported(errors: []const u8) bool {
-    return std.mem.indexOf(u8, errors, "Sanitizer") != null or
-        std.mem.indexOf(u8, errors, "runtime error:") != null;
+    var lines = std.mem.splitScalar(u8, errors, '\n');
+    while (lines.next()) |line| {
+        if (addressReportLine(line)) return true;
+        if (std.mem.startsWith(u8, line, "WARNING: ThreadSanitizer: ")) return true;
+        if (undefinedBehaviourReportLine(line)) return true;
+    }
+    return false;
 }
 
-test "a sanitizer report is found wherever it sits on standard error" {
-    try testing.expect(sanitizerReported("==12==ERROR: AddressSanitizer: heap-use-after-free on address"));
-    try testing.expect(sanitizerReported("printed first\n==12==ERROR: LeakSanitizer: detected memory leaks"));
-    try testing.expect(sanitizerReported("WARNING: ThreadSanitizer: data race (pid=7)"));
-    try testing.expect(sanitizerReported("linea_rt.c:40:3: runtime error: signed integer overflow"));
+/// `==PID==ERROR: NAMESanitizer: `, where `NAME` is one word.
+fn addressReportLine(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, "==")) return false;
+    const pid_end = std.mem.indexOfPos(u8, line, 2, "==") orelse return false;
+    if (pid_end == 2) return false;
+    for (line[2..pid_end]) |digit| if (!std.ascii.isDigit(digit)) return false;
+    const rest = line[pid_end + 2 ..];
+    if (!std.mem.startsWith(u8, rest, "ERROR: ")) return false;
+    const named = rest["ERROR: ".len..];
+    const name_end = std.mem.indexOf(u8, named, "Sanitizer: ") orelse return false;
+    for (named[0..name_end]) |letter| if (!std.ascii.isAlphabetic(letter)) return false;
+    return true;
+}
+
+/// `FILE:LINE:COLUMN: runtime error: `, with a file and two numbers.
+fn undefinedBehaviourReportLine(line: []const u8) bool {
+    const marker = ": runtime error: ";
+    const at = std.mem.indexOf(u8, line, marker) orelse return false;
+    var fields = std.mem.splitBackwardsScalar(u8, line[0..at], ':');
+    const column = fields.next() orelse return false;
+    const row = fields.next() orelse return false;
+    if (fields.rest().len == 0) return false;
+    for ([_][]const u8{ column, row }) |number| {
+        if (number.len == 0) return false;
+        for (number) |digit| if (!std.ascii.isDigit(digit)) return false;
+    }
+    return true;
+}
+
+test "a sanitizer report is found by its own form, and a program's words are not one" {
+    // Report lines as each sanitizer writes them, alone and after other text.
+    try testing.expect(sanitizerReported("==12==ERROR: AddressSanitizer: heap-use-after-free on address 0x602000000010 at pc 0x1 bp 0x2 sp 0x3\n"));
+    try testing.expect(sanitizerReported("printed first\n==12==ERROR: LeakSanitizer: detected memory leaks\n"));
+    try testing.expect(sanitizerReported("==================\nWARNING: ThreadSanitizer: data race (pid=7)\n"));
+    try testing.expect(sanitizerReported("runtime/linea_rt.c:40:3: runtime error: signed integer overflow: 127 + 1 cannot be represented in type 'signed char'\n"));
     try testing.expect(!sanitizerReported("linea: index out of bounds at main.lin:4:9\n"));
     try testing.expect(!sanitizerReported(""));
+    // A program saying the words a report holds, anywhere but in that form.
+    try testing.expect(!sanitizerReported("runtime error: the input file is empty\n"));
+    try testing.expect(!sanitizerReported("the AddressSanitizer found nothing\n"));
+    try testing.expect(!sanitizerReported("note: runtime error: retrying\n"));
+    try testing.expect(!sanitizerReported("said ==12==ERROR: AddressSanitizer: quoted\n"));
+    try testing.expect(!sanitizerReported("==pid==ERROR: AddressSanitizer: not a pid\n"));
+    try testing.expect(!sanitizerReported("  WARNING: ThreadSanitizer: indented\n"));
 }
 
 /// Why a program that ran did not run clean, or null where it did.
@@ -9140,10 +9180,12 @@ test "a sanitizer report is found wherever it sits on standard error" {
 /// A defined trap is the runtime's own abort, which writes `linea: ` and what
 /// stopped the program; a program that stops on any other signal crashed. A
 /// sanitizer that finds a fault reports on standard error and ends the program
-/// with a status of its own, so its report is looked for rather than its status.
-fn uncleanRun(ran: Ran) ?[]const u8 {
+/// with a status of its own, so its report is looked for rather than its status
+/// -- and only where `sanitize` names one, since a program built without one
+/// may say anything on standard error, and nothing it says is a report.
+fn uncleanRun(ran: Ran, sanitize: ?[]const u8) ?[]const u8 {
     if (ran.timed_out) return "did not finish";
-    if (sanitizerReported(ran.errors)) return "a sanitizer reported a fault";
+    if (sanitize != null and sanitizerReported(ran.errors)) return "a sanitizer reported a fault";
     // A signal the runtime did not raise is a crash whatever the program had
     // said by then, a line beginning `linea: ` included.
     if (ran.signal != null) return "crashed";
@@ -9152,15 +9194,18 @@ fn uncleanRun(ran: Ran) ?[]const u8 {
 }
 
 test "a defined trap runs clean and a crash or a sanitizer report does not" {
-    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "exit 3\n", .tool_failed = false }));
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "exit 3\n", .tool_failed = false }, null));
     const trapped: Ran = .{ .text = "trap\nlinea: index out of bounds at main.lin:4:9\n", .errors = "linea: index out of bounds at main.lin:4:9\n", .tool_failed = false };
-    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(trapped));
-    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = "trap\n", .tool_failed = false }).?);
-    try testing.expectEqualStrings("a sanitizer reported a fault", uncleanRun(.{
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(trapped, null));
+    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = "trap\n", .tool_failed = false }, null).?);
+    const reported: Ran = .{
         .text = "exit 1\n",
         .errors = "==9==ERROR: AddressSanitizer: heap-use-after-free\n",
         .tool_failed = false,
-    }).?);
+    };
+    try testing.expectEqualStrings("a sanitizer reported a fault", uncleanRun(reported, "address").?);
+    // Without a sanitizer the same bytes are the program's own.
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(reported, null));
 }
 
 const SoundnessSettings = struct {
@@ -9265,7 +9310,7 @@ fn runAccepted(
         }
         return null;
     }
-    if (uncleanRun(ran)) |why| {
+    if (uncleanRun(ran, settings.env.sanitize)) |why| {
         try failures.append(scratch, .{
             .path = display_path,
             .what = why,
@@ -9550,7 +9595,8 @@ fn checkStorageProgram(
 const LevelVerdict = enum { agreed, disagreed, unbuilt };
 
 /// Whether a program answers at every other optimisation level what it
-/// answered at the default one: the same exit, the same output.
+/// answered at the default one -- the same ending, the same output and the
+/// same standard error -- and runs clean there.
 ///
 /// Linea has no undefined behaviour, so no level may give an optimiser a
 /// premise that changes what a program does. Each level is an outcome of its
@@ -9581,20 +9627,26 @@ fn levelsAgree(
         options.name = try std.fmt.allocPrint(scratch, "{s}O{s}", .{ at_corpus_options.name, level });
         const ran = try outcomeOf(scratch, io, cache, options);
         if (ran.tool_failed and ran.tool_missing) return .unbuilt;
-        if (std.mem.eql(u8, ran.text, at_corpus.text) and std.mem.eql(u8, ran.output, at_corpus.output)) continue;
-        verdict = .disagreed;
-        try failures.append(scratch, .{
-            .path = display_path,
-            .what = try std.fmt.allocPrint(scratch, "answers differently at -O{s}", .{level}),
-            .expected = try std.fmt.allocPrint(scratch, "at -O{s}:\n{s}--- output ---\n{s}", .{ at_corpus_options.opt, at_corpus.text, at_corpus.output }),
-            .actual = try std.fmt.allocPrint(scratch, "at -O{s}:\n{s}--- output ---\n{s}{s}{s}", .{
-                level,
-                ran.text,
-                ran.output,
-                if (program == null) "" else "\n--- program ---\n",
-                program orelse "",
-            }),
+        const what = try std.fmt.allocPrint(scratch, "answers differently at -O{s} than at -O{s}{s}{s}", .{
+            level,
+            at_corpus_options.opt,
+            if (program == null) "" else "\n--- program ---\n",
+            program orelse "",
         });
+        // The whole outcome, a trap's position included: one program at two
+        // levels is one source, so nothing it observes may move.
+        if (try recordOutcomeDifferences(scratch, failures, display_path, what, at_corpus, ran, .exact)) verdict = .disagreed;
+        // Run clean at this level too, which agreeing with the first run does
+        // not show where both were stopped alike.
+        if (uncleanRun(ran, options.sanitize)) |why| {
+            verdict = .disagreed;
+            try failures.append(scratch, .{
+                .path = display_path,
+                .what = try std.fmt.allocPrint(scratch, "{s} at -O{s}", .{ why, level }),
+                .expected = "a program the compiler accepted runs clean at every level",
+                .actual = try std.fmt.allocPrint(scratch, "{s}{s}", .{ ran.text, ran.errors }),
+            });
+        }
     }
     return verdict;
 }
@@ -13620,8 +13672,10 @@ const Held = enum {
     in_a_signature,
     /// Read through a bound the source does not resolve: a head no type
     /// parameter of the enclosing declaration names and no import binds, a
-    /// bound naming a trait no module the case reads declares, or a name two of
-    /// them declare -- so the oracle has no one trait to hold the key to.
+    /// bound naming a trait no module the case reads declares, a name two of
+    /// them declare, two bounds whose arguments the oracle could not read to
+    /// the end, or a selected bound whose arguments the source does not spell
+    /// -- so the oracle has no one whole key to hold the recorded one to.
     /// **Checked by nothing**, and counted apart from the refusals because it
     /// is a reference the compiler answered and this walk could not follow.
     no_bound_the_source_names,
@@ -13781,6 +13835,10 @@ fn namesWhatSettlesIt(
     // settled by this implementation alone, and a trait the source cannot
     // resolve would otherwise decline a reference nothing needed it for.
     var declared: ?node_mod.DeclId = null;
+    // Which arguments each bound gives its trait, which this walk does not
+    // compare: what it holds is the type an implementation settles.
+    var readings: std.heap.ArenaAllocator = .init(gpa);
+    defer readings.deinit();
 
     while (names.next()) |next| {
         const from = declared orelse reached: {
@@ -13795,6 +13853,8 @@ fn namesWhatSettlesIt(
             work.res,
             work.source_folds,
             work.traits,
+            readings.allocator(),
+            null,
             ast.declBounds(from),
             ast.tokenName(next),
         )) {
@@ -13881,14 +13941,17 @@ fn whichBoundDeclares(
     res: *const Resolution,
     memo: *constfold.Memo,
     traits: *const TraitsWritten,
+    readings: std.mem.Allocator,
+    context: ?*const TraitReading,
     bounds: []const node_mod.TraitBound,
     wanted: StringId,
 ) std.mem.Allocator.Error!Declares {
     var count: u32 = 0;
     var found: Declares = .{ .other = 0 };
-    // The supertrait walk of one bound, and the traits an inherited
-    // declaration was already counted in across the bounds.
-    var walk: std.ArrayList(node_mod.DeclId) = .empty;
+    // The supertrait walk of one bound, each trait beside the arguments its
+    // requirement chain gives it, and the traits an inherited declaration was
+    // already counted in across the bounds.
+    var walk: std.ArrayList(*const TraitReading) = .empty;
     defer walk.deinit(gpa);
     var reached: std.AutoHashMapUnmanaged(node_mod.DeclId, void) = .empty;
     defer reached.deinit(gpa);
@@ -13917,13 +13980,22 @@ fn whichBoundDeclares(
         // bounds this counts, however alike their trait, and only the same
         // trait at the same written arguments is the repetition a program
         // means as one declaration to reach.
-        if (try namedBefore(gpa, ast, res, memo, traits, bounds[0..k], b, named)) continue;
+        switch (try namedBefore(gpa, ast, res, memo, traits, bounds[0..k], b, named)) {
+            .same => continue,
+            .distinct => {},
+            // The oracle could not read the two argument lists to the end, so
+            // it cannot say whether this bound repeats an earlier one, and a
+            // count resting on that guess says nothing.
+            .unknown => return .unresolved,
+        }
+        const root = try readings.create(TraitReading);
+        root.* = .{ .trait = named, .args = ast.typeArgs(b.named.args), .outer = context };
         if (traits.declares(ast, named, wanted)) |member| {
             // Already counted where another bound inherits it.
             if (inherited.contains(named)) continue;
             try direct.put(gpa, named, {});
             count += 1;
-            if (count == 1) found = .{ .one = .{ .trait = named, .member = member } };
+            if (count == 1) found = .{ .one = .{ .trait = named, .member = member, .reading = root } };
             continue;
         }
         // A trait declaring no member of that name reads it from its
@@ -13932,21 +14004,25 @@ fn whichBoundDeclares(
         reached.clearRetainingCapacity();
         try reached.put(gpa, named, {});
         walk.clearRetainingCapacity();
-        try walk.append(gpa, named);
+        try walk.append(gpa, root);
         var at: usize = 0;
         while (at < walk.items.len) : (at += 1) {
-            for (ast.declBounds(walk.items[at])) |super_bound| {
+            for (ast.declBounds(walk.items[at].trait)) |super_bound| {
                 if (super_bound.kind == .callable) continue;
                 const super = traits.named(ast.tokenText(super_bound.named.name)) orelse continue;
                 if ((try reached.getOrPut(gpa, super)).found_existing) continue;
+                // The supertrait's arguments are written in terms of the
+                // parameters of the trait requiring it.
+                const reading = try readings.create(TraitReading);
+                reading.* = .{ .trait = super, .args = ast.typeArgs(super_bound.named.args), .outer = walk.items[at] };
                 const member = traits.declares(ast, super, wanted) orelse {
-                    try walk.append(gpa, super);
+                    try walk.append(gpa, reading);
                     continue;
                 };
                 if (direct.contains(super)) continue;
                 if ((try inherited.getOrPut(gpa, super)).found_existing) continue;
                 count += 1;
-                if (count == 1) found = .{ .one = .{ .trait = super, .member = member } };
+                if (count == 1) found = .{ .one = .{ .trait = super, .member = member, .reading = reading } };
             }
         }
     }
@@ -13956,8 +14032,9 @@ fn whichBoundDeclares(
 
 /// What the source says about a name written after a bounded one.
 const Declares = union(enum) {
-    /// Exactly one bound declares it, and this is what it declares.
-    one: struct { trait: node_mod.DeclId, member: node_mod.DeclId },
+    /// Exactly one bound declares it, and this is what it declares, with the
+    /// arguments the source gives that trait.
+    one: struct { trait: node_mod.DeclId, member: node_mod.DeclId, reading: *const TraitReading },
     /// How many do, where that is not one -- none, or the ambiguity that is
     /// refused.
     other: u32,
@@ -13965,6 +14042,66 @@ const Declares = union(enum) {
     /// says nothing about which bound the reference was read through.
     unresolved,
 };
+
+/// A trait as a bound reaches it, beside the arguments written for its
+/// parameters. `outer` is the reading in which those arguments' own parameter
+/// names are read: the trait requiring this one as a supertrait, or the trait
+/// whose declared type carries the bound. Null where the arguments are written
+/// in the declaration holding the bound.
+const TraitReading = struct {
+    trait: node_mod.DeclId,
+    args: []const node_mod.TypeRef,
+    outer: ?*const TraitReading,
+};
+
+/// One argument the source gives a trait, spelled as `Typing.nameOf` spells
+/// the type it stands for, with a parameter of a trait in the chain replaced
+/// by the argument the chain gives it.
+///
+/// Null where the source does not say the type by its spelling alone: an
+/// alias, a qualified name, `Self`, or any form but a named type. The caller
+/// then has no argument to hold the recorded one to, and passes the reference
+/// over rather than taking a partial key as the whole.
+fn spellReadArg(
+    gpa: std.mem.Allocator,
+    ast: *const Ast,
+    res: *const Resolution,
+    ref: node_mod.TypeRef,
+    reading: ?*const TraitReading,
+) std.mem.Allocator.Error!?[]const u8 {
+    const x = ast.withoutTypeGroups(ref);
+    if (x.kind != .named or x.name == TokenId.none) return null;
+    if (reading) |read| {
+        if (x.args.len() == 0 and ast.tokenTag(x.name) == .identifier) {
+            for (ast.declTypeParams(read.trait), 0..) |param, i| {
+                if (ast.tokenName(param.name) != ast.tokenName(x.name)) continue;
+                if (i >= read.args.len) return null;
+                return spellReadArg(gpa, ast, res, read.args[i], read.outer);
+            }
+        }
+    }
+    if (res.aliasReachedBy(x.name) != null) return null;
+    const head = ast.tokenText(x.name);
+    if (std.mem.eql(u8, head, "Self")) return null;
+    const args = ast.typeArgs(x.args);
+    if (args.len == 0) return try gpa.dupe(u8, head);
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try out.appendSlice(gpa, head);
+    try out.append(gpa, '[');
+    for (args, 0..) |a, i| {
+        if (i > 0) try out.appendSlice(gpa, ", ");
+        const name = try spellReadArg(gpa, ast, res, a, reading) orelse {
+            out.deinit(gpa);
+            return null;
+        };
+        defer gpa.free(name);
+        try out.appendSlice(gpa, name);
+    }
+    try out.append(gpa, ']');
+    return try out.toOwnedSlice(gpa);
+}
 
 /// A settled reference read through a bound, held to the bound the source says
 /// declares the name.
@@ -14052,6 +14189,11 @@ fn namesTheBoundThatDeclaresIt(
     var bounds: []const node_mod.TraitBound = head_bounds.items;
     var trait: node_mod.DeclId = node_mod.DeclId.none;
     var member: node_mod.DeclId = node_mod.DeclId.none;
+    // The trait the last step selected, with the arguments the source gives
+    // it; the bounds a trait writes on its declared type are read in it.
+    var readings: std.heap.ArenaAllocator = .init(gpa);
+    defer readings.deinit();
+    var reading: ?*const TraitReading = null;
 
     while (true) {
         switch (try whichBoundDeclares(
@@ -14060,12 +14202,15 @@ fn namesTheBoundThatDeclaresIt(
             work.res,
             work.source_folds,
             work.traits,
+            readings.allocator(),
+            reading,
             bounds,
             ast.tokenName(at),
         )) {
             .one => |found| {
                 trait = found.trait;
                 member = found.member;
+                reading = found.reading;
             },
             // One bound declares it or the reference names nothing: two is the
             // ambiguity that is refused, and none is a name no bound holds.
@@ -14121,21 +14266,55 @@ fn namesTheBoundThatDeclaresIt(
         return .through_a_bound;
     };
 
-    const reads = try std.fmt.allocPrint(gpa, "{s}.{s} off `{s}`", .{
+    // The whole key: the trait at its arguments, the member, and what it is
+    // read off. One trait may bound a parameter at several argument lists and
+    // each settles the member its own way, so a key naming the right trait at
+    // other arguments names another type.
+    const selected = reading.?;
+    const recorded_args = typing.standinArgsOf(key);
+    var source_args: std.ArrayList(u8) = .empty;
+    defer source_args.deinit(gpa);
+    // Whether the source spells every argument, so there is a whole key to
+    // hold the recorded one to.
+    const spelled_all = spelled: {
+        if (selected.args.len != ast.declTypeParams(trait).len) break :spelled false;
+        for (selected.args, 0..) |arg, i| {
+            const name = try spellReadArg(gpa, ast, work.res, arg, selected.outer) orelse break :spelled false;
+            defer gpa.free(name);
+            if (i > 0) try source_args.appendSlice(gpa, ", ");
+            try source_args.appendSlice(gpa, name);
+        }
+        break :spelled true;
+    };
+    var key_args: std.ArrayList(u8) = .empty;
+    defer key_args.deinit(gpa);
+    for (recorded_args, 0..) |arg, i| {
+        if (i > 0) try key_args.appendSlice(gpa, ", ");
+        try key_args.appendSlice(gpa, typing.nameOf(arg));
+    }
+
+    const reads = try std.fmt.allocPrint(gpa, "{s}[{s}].{s} off `{s}`", .{
         ast.tokenText(ast.declName(trait)),
+        if (spelled_all) source_args.items else key_args.items,
         ast.tokenText(ast.declName(member)),
         from.items,
     });
     defer gpa.free(reads);
 
-    const recorded = try std.fmt.allocPrint(gpa, "{s}.{s} off `{s}`", .{
+    const recorded = try std.fmt.allocPrint(gpa, "{s}[{s}].{s} off `{s}`", .{
         ast.tokenText(ast.declName(node_mod.DeclId.at(key.trait))),
+        key_args.items,
         ast.tokenText(ast.declName(key.member)),
         typing.nameOf(key.held),
     });
     defer gpa.free(recorded);
 
-    if (std.mem.eql(u8, reads, recorded)) return .through_a_bound;
+    if (std.mem.eql(u8, reads, recorded)) {
+        // The trait, member and head agree, and the arguments were compared
+        // only where the source spells them; where it does not, the key was
+        // not held whole and the reference is passed over, not passed.
+        return if (spelled_all) .through_a_bound else .no_bound_the_source_names;
+    }
 
     try work.failures.append(gpa, .{
         .path = work.display_path,
@@ -14167,7 +14346,8 @@ fn readAsHeadDefinition(ast: *const Ast, typing: *const Typing, last: TokenId) b
 }
 
 /// Whether one of the bounds already read names the same trait at the same
-/// written arguments as `current`.
+/// written arguments as `current`: `.same` when one does, `.unknown` when none
+/// does but one could not be compared to the end, `.distinct` otherwise.
 fn namedBefore(
     gpa: std.mem.Allocator,
     ast: *const Ast,
@@ -14177,15 +14357,26 @@ fn namedBefore(
     earlier: []const node_mod.TraitBound,
     current: node_mod.TraitBound,
     trait: node_mod.DeclId,
-) std.mem.Allocator.Error!bool {
+) std.mem.Allocator.Error!Sameness {
+    var answer: Sameness = .distinct;
     for (earlier) |b| {
         if (b.kind == .callable) continue;
         const named = traits.named(ast.tokenText(b.named.name)) orelse continue;
         if (named != trait) continue;
-        if (try sameSourceBoundArgs(gpa, ast, res, memo, b.named.args, current.named.args)) return true;
+        switch (try sameSourceBoundArgs(gpa, ast, res, memo, b.named.args, current.named.args)) {
+            .same => return .same,
+            .distinct => {},
+            .unknown => answer = .unknown,
+        }
     }
-    return false;
+    return answer;
 }
+
+/// What the oracle can say about two bound argument lists. `.unknown` is the
+/// answer where reading either list ran past `source_alias_depth`: the texts
+/// written up to there may agree while the types they stand for differ, so
+/// exhausted reading is never taken as equality.
+const Sameness = enum { same, distinct, unknown };
 
 /// Whether two source-derived bound argument lists denote the same exact
 /// written types, with every array length and callable default read as the
@@ -14204,17 +14395,23 @@ fn sameSourceBoundArgs(
     memo: *constfold.Memo,
     a: node_mod.TypeRefRange,
     b: node_mod.TypeRefRange,
-) std.mem.Allocator.Error!bool {
-    if (a.len() != b.len()) return false;
+) std.mem.Allocator.Error!Sameness {
+    if (a.len() != b.len()) return .distinct;
     var left: std.ArrayList(u8) = .empty;
     defer left.deinit(gpa);
     var right: std.ArrayList(u8) = .empty;
     defer right.deinit(gpa);
     for (ast.typeArgs(a), ast.typeArgs(b)) |x, y| {
-        try writeSourceType(gpa, ast, res, memo, &left, x, null, 0);
-        try writeSourceType(gpa, ast, res, memo, &right, y, null, 0);
+        writeSourceType(gpa, ast, res, memo, &left, x, null, 0) catch |e| switch (e) {
+            error.TooDeep => return .unknown,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        writeSourceType(gpa, ast, res, memo, &right, y, null, 0) catch |e| switch (e) {
+            error.TooDeep => return .unknown,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
     }
-    return std.mem.eql(u8, left.items, right.items);
+    return if (std.mem.eql(u8, left.items, right.items)) .same else .distinct;
 }
 
 /// The alias a type is being read through and what it was applied to.
@@ -14225,8 +14422,11 @@ const SourceReading = struct {
 };
 
 /// The deepest alias nesting the oracle reads; a program nesting more is one
-/// the oracle cannot canonicalise, and its text says so.
+/// the oracle cannot canonicalise, and `writeSourceType` fails with
+/// `error.TooDeep` rather than writing a text that two different types share.
 const source_alias_depth: u32 = 64;
+
+const SourceTypeError = std.mem.Allocator.Error || error{TooDeep};
 
 fn writeSourceType(
     gpa: std.mem.Allocator,
@@ -14237,9 +14437,9 @@ fn writeSourceType(
     ref: node_mod.TypeRef,
     reading: ?*const SourceReading,
     depth: u32,
-) std.mem.Allocator.Error!void {
+) SourceTypeError!void {
     const x = ast.withoutTypeGroups(ref);
-    if (depth > source_alias_depth) return out.appendSlice(gpa, "(too deep)");
+    if (depth > source_alias_depth) return error.TooDeep;
     if (reading) |read| {
         if (x.kind == .named and x.args.len() == 0 and ast.tokenTag(x.name) == .identifier) {
             for (ast.declTypeParams(read.alias), 0..) |param, i| {
@@ -14418,8 +14618,43 @@ test "source bound identity folds callable defaults" {
     var memo: constfold.Memo = .empty;
     defer memo.deinit(gpa);
 
-    try testing.expect(try sameSourceBoundArgs(gpa, &ast, &res.resolution, &memo, a, b));
-    try testing.expect(!try sameSourceBoundArgs(gpa, &ast, &res.resolution, &memo, a, c));
+    try testing.expectEqual(Sameness.same, try sameSourceBoundArgs(gpa, &ast, &res.resolution, &memo, a, b));
+    try testing.expectEqual(Sameness.distinct, try sameSourceBoundArgs(gpa, &ast, &res.resolution, &memo, a, c));
+}
+
+test "source bound identity answers unknown past its depth, never same" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // Two alias chains longer than the oracle reads, ending in different
+    // types: the texts written before the depth runs out agree, so only an
+    // `unknown` answer keeps the two bounds apart.
+    var text: std.ArrayList(u8) = .empty;
+    const links = source_alias_depth + 8;
+    try text.appendSlice(gpa, "trait Give[phantom T] {}\nalias U0 = UInt8\nalias B0 = Bool\n");
+    for (1..links) |i| try text.print(gpa, "alias U{d} = U{d}\nalias B{d} = B{d}\n", .{ i, i - 1, i, i - 1 });
+    try text.print(gpa, "fn main() -> UInt8 {{ 0 }}\nfn _probe[A: Give[U{d}], B: Give[B{d}], C: Give[U{d}]](_a: A, _b: B, _c: C) {{}}\n", .{ links - 1, links - 1, links - 1 });
+    const source: Source = .{ .path = "source-bound-depth.lin", .text = text.items };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    const res = try resolveTree(gpa, &ast, &sink);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+
+    const probe = node_mod.DeclId.at(@intCast(ast.declCount() - 1));
+    const params = ast.declTypeParams(probe);
+    try testing.expectEqual(@as(usize, 3), params.len);
+    const a = ast.boundsOf(params[0])[0].named.args;
+    const b = ast.boundsOf(params[1])[0].named.args;
+    const c = ast.boundsOf(params[2])[0].named.args;
+    var memo: constfold.Memo = .empty;
+    defer memo.deinit(gpa);
+
+    try testing.expectEqual(Sameness.unknown, try sameSourceBoundArgs(gpa, &ast, &res.resolution, &memo, a, b));
+    // A chain the oracle cannot read to the end is unknown against itself too:
+    // equal spellings past the depth are not evidence of one type.
+    try testing.expectEqual(Sameness.unknown, try sameSourceBoundArgs(gpa, &ast, &res.resolution, &memo, a, c));
 }
 
 /// `pct.Thing`: the reference whose head names a module, held to the type that
@@ -18260,7 +18495,7 @@ const OutcomeCache = struct {
             stamps.deinit(gpa);
         }
         for (std.enums.values(toolchain.Tool)) |tool| {
-            try stamps.append(gpa, try stampOf(gpa, io, search_path, tool.command()));
+            try stamps.append(gpa, try stampOf(gpa, io, search_path, tool));
         }
 
         const salt = saltOf(.{
@@ -18290,36 +18525,29 @@ const OutcomeCache = struct {
         return .{ .dir = dir, .salt = salt };
     }
 
-    /// Finds a program the way the build will find it, and describes it.
+    /// Finds the program a build runs for `tool`, through the resolution the
+    /// build's own spawn uses, and describes it.
     ///
-    /// Both tools are run by bare name, so what answers is whatever `PATH`
+    /// Every tool is run by bare name, so what answers is whatever `PATH`
     /// says here and now -- which is why an outcome recorded outside the
     /// development shell must not answer a question asked inside it.
     fn stampOf(
         gpa: std.mem.Allocator,
         io: std.Io,
         search_path: ?[]const u8,
-        name: []const u8,
+        tool: toolchain.Tool,
     ) !ToolStamp {
-        var it = std.mem.tokenizeScalar(u8, search_path orelse "", ':');
-        while (it.next()) |dir| {
-            const path = try std.fs.path.join(gpa, &.{ dir, name });
-            const stat = std.Io.Dir.cwd().statFile(io, path, .{}) catch {
-                gpa.free(path);
-                continue;
-            };
-            if (stat.kind != .file) {
-                gpa.free(path);
-                continue;
-            }
-            return .{
-                .name = name,
-                .path = path,
-                .size = stat.size,
-                .mtime = stat.mtime.nanoseconds,
-            };
-        }
-        return .{ .name = name, .path = null, .size = 0, .mtime = 0 };
+        const name = tool.command();
+        const path = try tool.resolve(gpa, io, search_path) orelse
+            return .{ .name = name, .path = null, .size = 0, .mtime = 0 };
+        errdefer gpa.free(path);
+        const stat = try std.Io.Dir.cwd().statFile(io, path, .{});
+        return .{
+            .name = name,
+            .path = path,
+            .size = stat.size,
+            .mtime = stat.mtime.nanoseconds,
+        };
     }
 
     fn hashCount(h: *std.hash.Wyhash, count: usize) void {
@@ -18511,14 +18739,14 @@ test "a tool is stamped from the file the search path leads to" {
 
     var holding = testing.tmpDir(.{});
     defer holding.cleanup();
-    try holding.dir.writeFile(testing.io, .{ .sub_path = "mlir-opt", .data = "a pretend lowering" });
+    try holding.dir.writeFile(testing.io, .{ .sub_path = "mlir-opt", .data = "a pretend lowering", .flags = .{ .permissions = .executable_file } });
     const dir = try std.fs.path.join(gpa, &.{ ".zig-cache", "tmp", &holding.sub_path });
     defer gpa.free(dir);
 
     // Found by the name the build runs, at the first directory on the path
     // holding it -- and described by the file rather than by the name, so two
     // toolchains cannot stamp alike.
-    const found = try OutcomeCache.stampOf(gpa, testing.io, dir, "mlir-opt");
+    const found = try OutcomeCache.stampOf(gpa, testing.io, dir, .mlir_opt);
     defer if (found.path) |p| gpa.free(p);
     try testing.expect(found.path != null);
     try testing.expectEqual(@as(u64, "a pretend lowering".len), found.size);
@@ -18526,15 +18754,51 @@ test "a tool is stamped from the file the search path leads to" {
     // A name no directory on the path holds. This is the shape a run outside
     // the development shell has, and it must not stamp the same as a run
     // inside it.
-    const missing = try OutcomeCache.stampOf(gpa, testing.io, dir, "cc");
+    const missing = try OutcomeCache.stampOf(gpa, testing.io, dir, .cc);
     defer if (missing.path) |p| gpa.free(p);
     try testing.expect(missing.path == null);
 
-    // An empty path is not the same as no path: both find nothing, and neither
-    // may reach past the search it was given to whatever the process inherited.
-    const nowhere = try OutcomeCache.stampOf(gpa, testing.io, null, "mlir-opt");
+    // An empty path finds nothing: it may not reach past the search it was
+    // given to whatever the process inherited.
+    const nowhere = try OutcomeCache.stampOf(gpa, testing.io, "", .mlir_opt);
     defer if (nowhere.path) |p| gpa.free(p);
     try testing.expect(nowhere.path == null);
+}
+
+test "a tool is stamped from the file a run of it executes, not the first of its name" {
+    const gpa = testing.allocator;
+
+    // The first directory holds a file of the tool's name that may not be
+    // executed and the second a directory of it; a spawn passes over both,
+    // and runs the executable file in the third.
+    var first = testing.tmpDir(.{});
+    defer first.cleanup();
+    try first.dir.writeFile(testing.io, .{ .sub_path = "mlir-opt", .data = "not executable" });
+    var second = testing.tmpDir(.{});
+    defer second.cleanup();
+    try second.dir.createDir(testing.io, "mlir-opt", .default_dir);
+    var third = testing.tmpDir(.{});
+    defer third.cleanup();
+    try third.dir.writeFile(testing.io, .{ .sub_path = "mlir-opt", .data = "the tool that runs", .flags = .{ .permissions = .executable_file } });
+
+    const search = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}::.zig-cache/tmp/{s}:.zig-cache/tmp/{s}", .{ &first.sub_path, &second.sub_path, &third.sub_path });
+    defer gpa.free(search);
+    const runs = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/mlir-opt", .{&third.sub_path});
+    defer gpa.free(runs);
+
+    const stamp = try OutcomeCache.stampOf(gpa, testing.io, search, .mlir_opt);
+    defer if (stamp.path) |p| gpa.free(p);
+    try testing.expectEqualStrings(runs, stamp.path.?);
+    try testing.expectEqual(@as(u64, "the tool that runs".len), stamp.size);
+
+    // No `PATH` at all is the platform's default search, which is what a
+    // spawn reads then, and not an empty one.
+    const default = try toolchain.Tool.cc.resolve(gpa, testing.io, std.Io.Threaded.default_PATH);
+    defer if (default) |p| gpa.free(p);
+    const unset = try toolchain.Tool.cc.resolve(gpa, testing.io, null);
+    defer if (unset) |p| gpa.free(p);
+    try testing.expectEqual(default == null, unset == null);
+    if (default) |p| try testing.expectEqualStrings(p, unset.?);
 }
 
 /// The salt a cache built over this search path carries.
@@ -18567,7 +18831,7 @@ test "the cache stamps every tool a build runs" {
 
     const bytes = "0123456789abcdef";
     for (std.enums.values(toolchain.Tool)) |tool| {
-        try bin.dir.writeFile(testing.io, .{ .sub_path = tool.command(), .data = bytes[0..2] });
+        try bin.dir.writeFile(testing.io, .{ .sub_path = tool.command(), .data = bytes[0..2], .flags = .{ .permissions = .executable_file } });
     }
 
     var was = try saltOver(gpa, path, where);
@@ -18580,7 +18844,7 @@ test "the cache stamps every tool a build runs" {
     // toolchain that is no longer there -- and a `Tool` added later and left
     // out of the stamps fails here rather than going quiet.
     for (std.enums.values(toolchain.Tool), 0..) |tool, i| {
-        try bin.dir.writeFile(testing.io, .{ .sub_path = tool.command(), .data = bytes[0 .. 4 + i] });
+        try bin.dir.writeFile(testing.io, .{ .sub_path = tool.command(), .data = bytes[0 .. 4 + i], .flags = .{ .permissions = .executable_file } });
         const now = try saltOver(gpa, path, where);
         try testing.expect(now != was);
         was = now;
@@ -18699,11 +18963,9 @@ const Checked = struct {
     /// did not pair with its declaration -- an argument naming its parameter.
     typing: *const Typing,
     semantics: TransformSemantics,
-    answer: []const u8,
-    /// What it printed, which a rewrite has to preserve exactly.
-    output: []const u8 = "",
-    /// What it said on standard error, on the same terms.
-    errors: []const u8 = "",
+    /// How the program ended and everything it printed and said, which a
+    /// rewrite has to preserve.
+    ran: Ran,
     /// The code this program generated, for a rewrite that claims to be the
     /// same program rather than merely to answer the same.
     ir: []const u8,
@@ -19052,10 +19314,9 @@ fn lineAt(text: []const u8, offset: u32) usize {
 const Built = struct {
     display_path: []const u8,
     name: []const u8,
-    answer: []const u8,
-    /// What it said on standard error, which a change below the source has as
-    /// much reason to preserve as what it printed.
-    errors: []const u8 = "",
+    /// How the program ended and everything it printed and said, which a
+    /// change below the source has to preserve.
+    ran: Ran,
     /// The C driver the case is reached through, where it has one.
     ///
     /// A damaged module is built and run the way the case was, and for a
@@ -19311,26 +19572,12 @@ fn checkDamage(
             continue;
         }
 
-        if (!sameEnding(program.answer, ran.text)) {
-            try failures.append(gpa, .{
-                .path = program.display_path,
-                .what = d.why(),
-                .expected = program.answer,
-                .actual = ran.text,
-            });
-        }
-
-        // What the program said, on the same terms: a damaged module that
-        // changed which bytes reach a programmer changed what the program does,
-        // whatever status it went on to answer with.
-        if (!sameSaid(program.answer, program.errors, ran.text, ran.errors)) {
-            try failures.append(gpa, .{
-                .path = program.display_path,
-                .what = d.why(),
-                .expected = program.errors,
-                .actual = ran.errors,
-            });
-        }
+        // How it ended, what it printed and what it said: a damaged module
+        // that changed which bytes reach a reader or a programmer changed
+        // what the program does, whatever status it went on to answer with.
+        // A change below the source moves no source position, so a trap is
+        // held to where it said it happened too.
+        _ = try recordOutcomeDifferences(scratch, failures, program.display_path, d.why(), program.ran, ran, .exact);
     }
 
     try retainFrom(gpa, failures, retained_upto);
@@ -19369,9 +19616,7 @@ fn checkMaterializedDerives(
     resolution: *const Resolution,
     typing: *const Typing,
     original_ir: []const u8,
-    original_answer: []const u8,
-    original_output: []const u8,
-    original_errors: []const u8,
+    original: Ran,
     /// The manifest and data files the case carries, as `besideOf` gives them.
     beside: []const loader.InMemoryFile,
     foreign: Foreign,
@@ -19433,30 +19678,7 @@ fn checkMaterializedDerives(
     }
 
     count.* += 1;
-    if (!sameEnding(original_answer, ran.text)) {
-        try failures.append(gpa, .{
-            .path = display_path,
-            .what = "derives replaced by ordinary source",
-            .expected = original_answer,
-            .actual = ran.text,
-        });
-    }
-    if (!std.mem.eql(u8, original_output, ran.output)) {
-        try failures.append(gpa, .{
-            .path = display_path,
-            .what = "derives replaced by ordinary source output",
-            .expected = original_output,
-            .actual = ran.output,
-        });
-    }
-    if (!sameSaid(original_answer, original_errors, ran.text, ran.errors)) {
-        try failures.append(gpa, .{
-            .path = display_path,
-            .what = "derives replaced by ordinary source stderr",
-            .expected = original_errors,
-            .actual = ran.errors,
-        });
-    }
+    _ = try recordOutcomeDifferences(gpa, failures, display_path, "derives replaced by ordinary source", original, ran, .moved);
 }
 
 /// Runs one case under every rewrite of its source that cannot change what it
@@ -19580,9 +19802,7 @@ fn checkRewrites(
         if (!try compareRewrittenRun(gpa, scratch, io, cache, env, failures, .{
             .display_path = program.display_path,
             .name = program.name,
-            .answer = program.answer,
-            .output = program.output,
-            .errors = program.errors,
+            .ran = program.ran,
             .foreign = program.foreign,
         }, @tagName(t), t.why(), ir.written())) continue;
         rewrites.put(t, (rewrites.get(t) orelse 0) + 1);
@@ -19599,9 +19819,7 @@ const RanAs = struct {
     /// What intermediates for this program are called; a rewrite's are this
     /// with its own suffix.
     name: []const u8,
-    answer: []const u8,
-    output: []const u8 = "",
-    errors: []const u8 = "",
+    ran: Ran,
     foreign: Foreign = .{},
 };
 
@@ -19655,43 +19873,14 @@ fn compareRewrittenRun(
         return false;
     }
 
-    // What the program answered, and not where a trap said it happened --
-    // the rewrite moves the lines, and the location is not the answer.
-    if (!sameEnding(program.answer, ran.text)) {
-        try failures.append(gpa, .{
-            .path = program.display_path,
-            .what = why,
-            .expected = program.answer,
-            .actual = ran.text,
-        });
-    }
-
-    // And what it said, in full: output carries no position, so unlike a
-    // trap there is nothing here a rewrite is allowed to move. A status is
-    // one byte and a render is the bytes that matter, so this is where a
-    // rewrite that reorders what a program prints would show up.
-    if (!std.mem.eql(u8, program.output, ran.output)) {
-        try failures.append(gpa, .{
-            .path = program.display_path,
-            .what = why,
-            .expected = program.output,
-            .actual = ran.output,
-        });
-    }
-
-    // And the other stream, which is the whole of what a program says when
-    // it says it to a programmer rather than to whatever reads its output.
-    // Left uncompared, a case whose only observation is what it said would
-    // be rewritten against nothing but its status -- which a program that
-    // says nothing at all answers with too.
-    if (!sameSaid(program.answer, program.errors, ran.text, ran.errors)) {
-        try failures.append(gpa, .{
-            .path = program.display_path,
-            .what = why,
-            .expected = program.errors,
-            .actual = ran.errors,
-        });
-    }
+    // How it ended, everything it printed and everything it said, and not
+    // where a trap said it happened -- the rewrite moves the lines, and the
+    // location is not the answer. Output carries no position, so unlike a
+    // trap there is nothing there a rewrite is allowed to move, and standard
+    // error is the whole of what a program says to a programmer: left
+    // uncompared, a case whose only observation is what it said would be
+    // rewritten against nothing but its status.
+    _ = try recordOutcomeDifferences(gpa, failures, program.display_path, why, program.ran, ran, .moved);
     return true;
 }
 
@@ -20159,9 +20348,10 @@ fn saidOf(answer: []const u8, errors: []const u8) []const u8 {
 const signal_note = "stopped by signal ";
 
 /// What a run that a signal stopped is recorded as: what it had answered and
-/// said, then the note on a line of its own. Standard error the program left
-/// unterminated would otherwise share the note's line and hide it from
-/// `signalOf`.
+/// said, then the note on a line of its own, so a reader of a failure sees
+/// which signal it was. The note is for that reader only: what compares runs
+/// reads `Ran.signal`, which the wait status set, and never this text, which
+/// a program can write too.
 fn withSignalNote(gpa: std.mem.Allocator, written: []const u8, signal: u32) ![]const u8 {
     const ended = written.len == 0 or written[written.len - 1] == '\n';
     return std.fmt.allocPrint(gpa, "{s}{s}{s}{d}\n", .{ written, if (ended) "" else "\n", signal_note, signal });
@@ -20174,37 +20364,89 @@ test "a signal's note is a line of its own after unterminated output, and such a
 
     const cut = try withSignalNote(testing.allocator, "trap\nlinea: said and stopped", 11);
     defer testing.allocator.free(cut);
-    try testing.expectEqualStrings("stopped by signal 11", signalOf(cut));
-    try testing.expect(!sameEnding(cut, "trap\nlinea: index out of bounds at a.lin:3:5\n"));
+    try testing.expectEqualStrings("trap\nlinea: said and stopped\nstopped by signal 11\n", cut);
     // The program had written the runtime's prefix, and a signal still
     // stopped it.
-    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false, .signal = 11 }).?);
+    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false, .signal = 11 }, null).?);
     // The same text from a run no signal stopped is the runtime's abort.
-    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "trap\nlinea: said and stopped\n", .errors = "linea: said and stopped\n", .tool_failed = false }));
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "trap\nlinea: said and stopped\n", .errors = "linea: said and stopped\n", .tool_failed = false }, null));
 }
 
-/// The line naming the signal that stopped a program the runtime did not
-/// abort, or nothing where the program exited or the runtime aborted it.
-fn signalOf(text: []const u8) []const u8 {
-    if (!std.mem.startsWith(u8, text, trap_answer)) return "";
-    const body = std.mem.trimEnd(u8, text, "\n");
-    const start = if (std.mem.lastIndexOfScalar(u8, body, '\n')) |nl| nl + 1 else 0;
-    const last = body[start..];
-    // The note and a number, and nothing after it: a line of the program's
-    // own that only begins like the note is the program's text.
-    if (!std.mem.startsWith(u8, last, signal_note)) return "";
-    const number = last[signal_note.len..];
-    if (number.len == 0) return "";
-    for (number) |digit| if (!std.ascii.isDigit(digit)) return "";
-    return last;
+/// What two runs of one program are compared by where something between them
+/// may move source lines: `exact` compares every byte of both streams, and
+/// `moved` sets aside the position the runtime's trap report ends with, which
+/// a rewrite of the source moves.
+const Positions = enum { exact, moved };
+
+/// A part of a run's outcome two runs can differ in.
+const OutcomePart = enum {
+    /// How it ended: the status it exited with, or that it trapped, and the
+    /// signal that stopped it.
+    ending,
+    /// Everything it wrote to standard output.
+    output,
+    /// Everything it wrote to standard error, which for a trap holds why the
+    /// runtime stopped it.
+    errors,
+
+    fn label(self: OutcomePart) []const u8 {
+        return switch (self) {
+            .ending => "how it ended",
+            .output => "standard output",
+            .errors => "standard error",
+        };
+    }
+
+    fn of(self: OutcomePart, ran: Ran) []const u8 {
+        return switch (self) {
+            .ending => ran.text,
+            .output => ran.output,
+            .errors => ran.errors,
+        };
+    }
+};
+
+/// The parts of two finished runs' outcomes that differ; empty where the two
+/// ended alike, printed the same bytes and said the same bytes.
+///
+/// The one comparison every property that holds a run to another run uses,
+/// so none of them compares less of an outcome than the others. The signal is
+/// read from `Ran.signal`, which the wait status set, never parsed from what
+/// the run wrote: a program can write the runner's note itself.
+fn outcomeDifferences(a: Ran, b: Ran, positions: Positions) std.EnumSet(OutcomePart) {
+    var differ: std.EnumSet(OutcomePart) = .initEmpty();
+    if (!std.mem.eql(u8, answerOf(a.text), answerOf(b.text)) or a.signal != b.signal) differ.insert(.ending);
+    if (!std.mem.eql(u8, a.output, b.output)) differ.insert(.output);
+    const said_alike = switch (positions) {
+        .exact => std.mem.eql(u8, a.errors, b.errors),
+        .moved => sameSaidMoved(a, b),
+    };
+    if (!said_alike) differ.insert(.errors);
+    return differ;
 }
 
-/// Whether two runs ended the same way: with the same status, or both
-/// aborted by the runtime, or both stopped by the same signal. Where a trap
-/// said it happened is not part of it, since a rewrite moves the lines; why
-/// it happened is `sameSaid`'s to compare.
-fn sameEnding(a: []const u8, b: []const u8) bool {
-    return std.mem.eql(u8, answerOf(a), answerOf(b)) and std.mem.eql(u8, signalOf(a), signalOf(b));
+/// Records one failure for each part of `actual`'s outcome that differs from
+/// `expected`'s, and answers whether any did.
+fn recordOutcomeDifferences(
+    gpa: std.mem.Allocator,
+    failures: *std.ArrayList(Failure),
+    path: []const u8,
+    what: []const u8,
+    expected: Ran,
+    actual: Ran,
+    positions: Positions,
+) !bool {
+    const differ = outcomeDifferences(expected, actual, positions);
+    var parts = differ.iterator();
+    while (parts.next()) |part| {
+        try failures.append(gpa, .{
+            .path = path,
+            .what = try std.fmt.allocPrint(gpa, "{s} ({s})", .{ what, part.label() }),
+            .expected = part.of(expected),
+            .actual = part.of(actual),
+        });
+    }
+    return differ.count() != 0;
 }
 
 /// A line without the source position a runtime trap report ends with:
@@ -20223,85 +20465,137 @@ fn withoutTrapPosition(line: []const u8) []const u8 {
     return line[0..at];
 }
 
+/// What the runtime writes before the reason it stopped a program.
+const runtime_report_prefix = "linea: ";
+
 /// Whether two runs said the same on standard error, as far as a rewrite of
 /// the source must keep it. Every byte counts, except that between two runs
-/// the runtime aborted the last line is compared without the source position
-/// it ends with, which the rewrite moves. The runtime writes its report last and
-/// ends it with the position, so that line is where the position is whatever
-/// the line begins with: a panic's message may hold a line break, and text
-/// the program left unterminated shares the report's line. The reason for
-/// the trap and everything said before that line are still compared.
-fn sameSaid(a_text: []const u8, a_errors: []const u8, b_text: []const u8, b_errors: []const u8) bool {
-    const trapped = std.mem.startsWith(u8, a_text, trap_answer) and std.mem.startsWith(u8, b_text, trap_answer);
-    if (!trapped) return std.mem.eql(u8, a_errors, b_errors);
-    // A run a signal stopped ends with no report of the runtime's, so its
-    // last line is the program's own and holds no position to set aside.
-    if (signalOf(a_text).len != 0 or signalOf(b_text).len != 0) return std.mem.eql(u8, a_errors, b_errors);
-    const a = lastLine(a_errors);
-    const b = lastLine(b_errors);
-    return std.mem.eql(u8, a.before, b.before) and
-        std.mem.eql(u8, a.after, b.after) and
-        std.mem.eql(u8, withoutTrapPosition(a.line), withoutTrapPosition(b.line));
+/// the runtime aborted, the runtime's report is compared without the source
+/// position it ends with, which the rewrite moves. The runtime writes its
+/// report last, beginning `linea: ` and ending with the position, so the
+/// report is what follows the last such prefix: a panic's message may hold a
+/// line break, and text the program left unterminated shares the report's
+/// line. The reason for the trap and everything said before the report are
+/// still compared, and standard error holding no report is compared whole.
+fn sameSaidMoved(a: Ran, b: Ran) bool {
+    const trapped = std.mem.startsWith(u8, a.text, trap_answer) and std.mem.startsWith(u8, b.text, trap_answer);
+    // A run a signal stopped ends with no report of the runtime's, so what it
+    // said last is the program's own and holds no position to set aside.
+    if (!trapped or a.signal != null or b.signal != null) return std.mem.eql(u8, a.errors, b.errors);
+    const x = runtimeReport(a.errors) orelse return std.mem.eql(u8, a.errors, b.errors);
+    const y = runtimeReport(b.errors) orelse return std.mem.eql(u8, a.errors, b.errors);
+    return std.mem.eql(u8, x.before, y.before) and
+        std.mem.eql(u8, x.after, y.after) and
+        std.mem.eql(u8, withoutTrapPosition(x.report), withoutTrapPosition(y.report));
 }
 
-/// `text` split around its last line: what precedes it, the line, and the
-/// line break that ends it where there is one.
-fn lastLine(text: []const u8) struct { before: []const u8, line: []const u8, after: []const u8 } {
-    const body = if (std.mem.endsWith(u8, text, "\n")) text[0 .. text.len - 1] else text;
-    const start = if (std.mem.lastIndexOfScalar(u8, body, '\n')) |nl| nl + 1 else 0;
-    return .{ .before = text[0..start], .line = body[start..], .after = text[body.len..] };
+/// Standard error split around the runtime's trap report: what precedes it,
+/// the report without its final line break, and that line break where there
+/// is one. Null where nothing it said begins like a report.
+fn runtimeReport(errors: []const u8) ?struct { before: []const u8, report: []const u8, after: []const u8 } {
+    const at = std.mem.lastIndexOf(u8, errors, runtime_report_prefix) orelse return null;
+    const body = if (std.mem.endsWith(u8, errors, "\n")) errors[0 .. errors.len - 1] else errors;
+    if (body.len < at) return null;
+    return .{ .before = errors[0..at], .report = body[at..], .after = errors[body.len..] };
+}
+
+/// A finished run for the comparison tests: `text` is what the runner
+/// recorded, and a trap's text carries its standard error after the answer.
+fn testRun(text: []const u8, output: []const u8, errors: []const u8, signal: ?u32) Ran {
+    return .{ .text = text, .output = output, .errors = errors, .signal = signal, .tool_failed = false };
 }
 
 test "two runs end alike only with one status, one abort or one signal" {
-    try testing.expect(sameEnding("exit 0\n", "exit 0\n"));
-    try testing.expect(!sameEnding("exit 0\n", "exit 1\n"));
-    try testing.expect(!sameEnding("exit 0\n", "trap\nlinea: integer overflow at a.lin:3:5\n"));
+    const parts = struct {
+        fn ending(a: Ran, b: Ran) bool {
+            return !outcomeDifferences(a, b, .moved).contains(.ending);
+        }
+    };
+    try testing.expect(parts.ending(testRun("exit 0\n", "", "", null), testRun("exit 0\n", "", "", null)));
+    try testing.expect(!parts.ending(testRun("exit 0\n", "", "", null), testRun("exit 1\n", "", "", null)));
+    try testing.expect(!parts.ending(testRun("exit 0\n", "", "", null), testRun("trap\nlinea: integer overflow at a.lin:3:5\n", "", "linea: integer overflow at a.lin:3:5\n", null)));
     // The runtime's abort at two positions is one ending.
-    try testing.expect(sameEnding("trap\nlinea: index out of bounds at a.lin:3:5\n", "trap\nlinea: index out of bounds at a.lin:9:1\n"));
+    try testing.expect(parts.ending(testRun("trap\nlinea: index out of bounds at a.lin:3:5\n", "", "", null), testRun("trap\nlinea: index out of bounds at a.lin:9:1\n", "", "", null)));
     // An abort and a signal the machine sent are not, and neither are two
     // different signals.
-    try testing.expect(!sameEnding("trap\nlinea: index out of bounds at a.lin:3:5\n", "trap\nstopped by signal 11\n"));
-    try testing.expect(!sameEnding("trap\nstopped by signal 11\n", "trap\nstopped by signal 7\n"));
-    try testing.expect(sameEnding("trap\nstopped by signal 11\n", "trap\nsaid first\nstopped by signal 11\n"));
-    try testing.expectEqualStrings("stopped by signal 11", signalOf("trap\nsaid first\nstopped by signal 11\n"));
-    try testing.expectEqualStrings("", signalOf("exit 3\n"));
-    // Text the program left unterminated before the runtime's own report
-    // begins like the note and is not one.
-    try testing.expectEqualStrings("", signalOf("trap\nstopped by signal 9linea: index out of bounds at a.lin:3:5\n"));
-    try testing.expect(sameEnding("trap\nstopped by signal 9linea: index out of bounds at a.lin:3:5\n", "trap\nstopped by signal 9linea: index out of bounds at a.lin:9:1\n"));
-    try testing.expectEqualStrings("", signalOf("trap\nlinea: not a number at a.lin:1:1\n"));
+    try testing.expect(!parts.ending(testRun("trap\nlinea: index out of bounds at a.lin:3:5\n", "", "", null), testRun("trap\nstopped by signal 11\n", "", "", 11)));
+    try testing.expect(!parts.ending(testRun("trap\nstopped by signal 11\n", "", "", 11), testRun("trap\nstopped by signal 7\n", "", "", 7)));
+    try testing.expect(parts.ending(testRun("trap\nstopped by signal 11\n", "", "", 11), testRun("trap\nsaid first\nstopped by signal 11\n", "", "said first\n", 11)));
+    // The signal is what the wait status said. A program the runtime aborted
+    // after writing the runner's note itself was not stopped by that signal,
+    // and a signal's run is not the abort whose text it shares.
+    const own_note = "stopped by signal 11\n";
+    try testing.expect(!parts.ending(testRun("trap\n" ++ own_note, "", own_note, null), testRun("trap\n" ++ own_note ++ own_note, "", own_note, 11)));
+    try testing.expect(outcomeDifferences(testRun("trap\n" ++ own_note, "", own_note, null), testRun("trap\n" ++ own_note ++ own_note, "", own_note, 11), .exact).contains(.ending));
+}
+
+test "two runs are compared by their whole outcome, at every part" {
+    const exited = testRun("exit 0\n", "printed\n", "said\n", null);
+    try testing.expectEqual(@as(usize, 0), outcomeDifferences(exited, exited, .exact).count());
+    // One status and one standard error, and another standard output.
+    const printed_else = testRun("exit 0\n", "printed else\n", "said\n", null);
+    try testing.expect(outcomeDifferences(exited, printed_else, .exact).eql(.initOne(.output)));
+    try testing.expect(outcomeDifferences(exited, printed_else, .moved).eql(.initOne(.output)));
+    // One status and one standard output, and another standard error.
+    const said_else = testRun("exit 0\n", "printed\n", "said else\n", null);
+    try testing.expect(outcomeDifferences(exited, said_else, .exact).eql(.initOne(.errors)));
+    try testing.expect(outcomeDifferences(exited, said_else, .moved).eql(.initOne(.errors)));
+    // A trap moved by a rewrite is one outcome; between two runs of one
+    // source it is two.
+    const at_three = testRun("trap\nlinea: index out of bounds at a.lin:3:5\n", "", "linea: index out of bounds at a.lin:3:5\n", null);
+    const at_nine = testRun("trap\nlinea: index out of bounds at a.lin:9:1\n", "", "linea: index out of bounds at a.lin:9:1\n", null);
+    try testing.expectEqual(@as(usize, 0), outcomeDifferences(at_three, at_nine, .moved).count());
+    try testing.expect(outcomeDifferences(at_three, at_nine, .exact).eql(.initOne(.errors)));
+    // Every part that differs is recorded, each once.
+    var failures: std.ArrayList(Failure) = .empty;
+    defer {
+        for (failures.items) |f| testing.allocator.free(f.what);
+        failures.deinit(testing.allocator);
+    }
+    try testing.expect(try recordOutcomeDifferences(testing.allocator, &failures, "a.lin", "rewritten", exited, testRun("exit 1\n", "", "", null), .moved));
+    try testing.expectEqual(@as(usize, 3), failures.items.len);
+    try testing.expect(!try recordOutcomeDifferences(testing.allocator, &failures, "a.lin", "rewritten", exited, exited, .moved));
+    try testing.expectEqual(@as(usize, 3), failures.items.len);
 }
 
 test "a trap report is compared by its reason, and everything else said is compared whole" {
     const at_three = "linea: index out of bounds at a.lin:3:5\n";
     const at_nine = "linea: index out of bounds at dir/b c.lin:9:12\n";
+    const said = struct {
+        fn alike(a_text: []const u8, a_errors: []const u8, b_text: []const u8, b_errors: []const u8) bool {
+            return sameSaidMoved(testRun(a_text, "", a_errors, null), testRun(b_text, "", b_errors, null));
+        }
+    };
     const trap = "trap\n";
     // The same reason at a moved position.
-    try testing.expect(sameSaid(trap, at_three, trap, at_nine));
+    try testing.expect(said.alike(trap, at_three, trap, at_nine));
     // Another reason.
-    try testing.expect(!sameSaid(trap, at_three, trap, "linea: integer overflow at a.lin:3:5\n"));
+    try testing.expect(!said.alike(trap, at_three, trap, "linea: integer overflow at a.lin:3:5\n"));
     // What the program said before it trapped.
-    try testing.expect(!sameSaid(trap, "before\n" ++ at_three, trap, at_three));
-    try testing.expect(sameSaid(trap, "before\n" ++ at_three, trap, "before\n" ++ at_nine));
+    try testing.expect(!said.alike(trap, "before\n" ++ at_three, trap, at_three));
+    try testing.expect(said.alike(trap, "before\n" ++ at_three, trap, "before\n" ++ at_nine));
     // A report beside none.
-    try testing.expect(!sameSaid(trap, at_three, trap, ""));
+    try testing.expect(!said.alike(trap, at_three, trap, ""));
     // Text that is no report, and a report in a run that did not trap.
-    try testing.expect(!sameSaid(trap, "linea: a stack overflowed\n", trap, "linea: a stack overflowed twice\n"));
+    try testing.expect(!said.alike(trap, "linea: a stack overflowed\n", trap, "linea: a stack overflowed twice\n"));
     // A position on a line before the last is the program's own text.
-    try testing.expect(!sameSaid(trap, "note at a.lin:3:5\n" ++ at_three, trap, "note at a.lin:9:1\n" ++ at_three));
+    try testing.expect(!said.alike(trap, "note at a.lin:3:5\n" ++ at_three, trap, "note at a.lin:9:1\n" ++ at_three));
+    // Text holding no report of the runtime's is the program's own, so a
+    // position in it is compared.
+    try testing.expect(!said.alike(trap, "moved at a.lin:3:5\n", trap, "moved at a.lin:9:1\n"));
     // A panic message of two lines puts the position on the second, and text
     // the program left unterminated shares the report's line.
-    try testing.expect(sameSaid(trap, "linea: panic: first\nsecond at a.lin:3:5\n", trap, "linea: panic: first\nsecond at a.lin:9:1\n"));
-    try testing.expect(sameSaid(trap, "said" ++ at_three, trap, "said" ++ at_nine));
-    try testing.expect(!sameSaid(trap, "said" ++ at_three, trap, "told" ++ at_nine));
-    try testing.expect(!sameSaid("exit 0\n", at_three, "exit 0\n", at_nine));
-    try testing.expect(sameSaid("exit 0\n", "warned\n", "exit 0\n", "warned\n"));
+    try testing.expect(said.alike(trap, "linea: panic: first\nsecond at a.lin:3:5\n", trap, "linea: panic: first\nsecond at a.lin:9:1\n"));
+    try testing.expect(said.alike(trap, "said" ++ at_three, trap, "said" ++ at_nine));
+    try testing.expect(!said.alike(trap, "said" ++ at_three, trap, "told" ++ at_nine));
+    try testing.expect(!said.alike("exit 0\n", at_three, "exit 0\n", at_nine));
+    try testing.expect(said.alike("exit 0\n", "warned\n", "exit 0\n", "warned\n"));
     // A signal stopped both, so the last line is the program's own text and
     // a position in it is compared.
-    const own_three = "moved at a.lin:3:5\n";
-    const own_nine = "moved at a.lin:9:1\n";
-    try testing.expect(!sameSaid("trap\n" ++ own_three ++ "stopped by signal 11\n", own_three, "trap\n" ++ own_nine ++ "stopped by signal 11\n", own_nine));
-    try testing.expect(sameSaid("trap\n" ++ own_three ++ "stopped by signal 11\n", own_three, "trap\n" ++ own_three ++ "stopped by signal 11\n", own_three));
+    const own_three = "linea: moved at a.lin:3:5\n";
+    const own_nine = "linea: moved at a.lin:9:1\n";
+    try testing.expect(!sameSaidMoved(testRun(trap ++ own_three, "", own_three, 11), testRun(trap ++ own_nine, "", own_nine, 11)));
+    try testing.expect(sameSaidMoved(testRun(trap ++ own_three, "", own_three, 11), testRun(trap ++ own_three, "", own_three, 11)));
 
     try testing.expectEqualStrings("linea: panic: stopped at once", withoutTrapPosition("linea: panic: stopped at once at a.lin:2:9"));
     try testing.expectEqualStrings("linea: stopped at once", withoutTrapPosition("linea: stopped at once"));
@@ -22576,9 +22870,7 @@ fn checkCase(
                             answered = .{
                                 .display_path = display_path,
                                 .name = case_name,
-                                .answer = ran.text,
-                                .output = ran.output,
-                                .errors = ran.errors,
+                                .ran = ran,
                                 .foreign = case.foreign(&program),
                             };
                             answered_env = .{
@@ -22619,6 +22911,17 @@ fn checkCase(
                         }
                         if (want_err == null) try showStderrOfMismatches(gpa, w.failures.items[failures_before..], ran.errors);
 
+                        // Clean whatever its goldens record: a sanitizer that
+                        // reports and lets the program go on, or a crash a
+                        // golden happens not to cover, is a fault in a program
+                        // the compiler accepted, and the goldens are selective.
+                        if (!ran.tool_failed) if (uncleanRun(ran, env.sanitize)) |why| try w.failures.append(gpa, .{
+                            .path = display_path,
+                            .what = why,
+                            .expected = "a program the compiler accepted runs clean",
+                            .actual = try std.fmt.allocPrint(gpa, "{s}{s}", .{ ran.text, ran.errors }),
+                        });
+
                         if (env.properties and !ran.tool_failed) {
                             try checkMaterializedDerives(
                                 gpa,
@@ -22640,9 +22943,7 @@ fn checkCase(
                                 &settled.res,
                                 &settled.typing,
                                 ir.written(),
-                                ran.text,
-                                ran.output,
-                                ran.errors,
+                                ran,
                                 try besideOf(gpa, case),
                                 case.foreign(&program),
                             );
@@ -22690,9 +22991,7 @@ fn checkCase(
                                     .typing = typing,
                                     .file = program.primaryFile(),
                                 },
-                                .answer = ran.text,
-                                .output = ran.output,
-                                .errors = ran.errors,
+                                .ran = ran,
                                 .ir = ir.written(),
                                 .beside = try besideOf(gpa, case),
                                 .foreign = case.foreign(&program),
@@ -22731,8 +23030,7 @@ fn checkCase(
                             }, &w.failures, &w.damages, &table, &settled.expanded, res, typing, disposals, .{
                                 .display_path = display_path,
                                 .name = case_name,
-                                .answer = ran.text,
-                                .errors = ran.errors,
+                                .ran = ran,
                                 .foreign = case.foreign(&program),
                             });
                             damage_zone.end();
@@ -22940,6 +23238,48 @@ test "body type annotations receive every settled-reference oracle visit" {
     try checkSettledRefs(gpa, &failures, &properties, &passed_over, &declined, "main.lin", &checked.program, &checked.semantics.res, &checked.semantics.typing, in_library);
     try testing.expectEqual(@as(usize, 0), failures.items.len);
     try testing.expectEqual(written, (properties.get(.settled_refs) orelse 0) + (passed_over.get(.settled_refs) orelse 0));
+}
+
+test "a reference read through a bound is held to the bound's trait arguments" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var checked = try lsp_analysis.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
+        \\trait Lookup[phantom I] { type Elem }
+        \\trait Fancy[T]: Lookup[T] {}
+        \\fn _direct[C: Lookup[UInt64]](sink v: C.Elem) -> C.Elem { v }
+        \\fn _inherited[C: Fancy[UInt64]](sink v: C.Elem) -> C.Elem { v }
+        \\fn main() -> UInt8 { 0 }
+    }}, "main.lin");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+    const in_library = try libraryFiles(gpa, &checked.program);
+    const typing = &checked.semantics.typing;
+
+    var failures: std.ArrayList(Failure) = .empty;
+    var properties: std.EnumMap(Property, u32) = .{};
+    var passed_over: std.EnumMap(Property, u32) = .{};
+    var declined: PassedSettledRefs = .{};
+    try checkSettledRefs(gpa, &failures, &properties, &passed_over, &declined, "main.lin", &checked.program, &checked.semantics.res, typing, in_library);
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+    try testing.expectEqual(@as(u32, 4), declined.through_a_bound);
+
+    // A key naming the right trait, member and parameter at another argument
+    // is another type, and the oracle reports every reference that records it.
+    const args = @constCast(typing.standin_args);
+    try testing.expect(args.len > 0);
+    for (args) |*arg| {
+        try testing.expectEqual(sema_types.TypeId.u64, arg.*);
+        arg.* = .bool_;
+    }
+    failures.clearRetainingCapacity();
+    declined = .{};
+    try checkSettledRefs(gpa, &failures, &properties, &passed_over, &declined, "main.lin", &checked.program, &checked.semantics.res, typing, in_library);
+    try testing.expectEqual(@as(usize, 4), failures.items.len);
+    for (failures.items) |failure| {
+        try testing.expect(std.mem.indexOf(u8, failure.expected, "Lookup[UInt64].Elem") != null);
+        try testing.expect(std.mem.indexOf(u8, failure.actual, "Lookup[Bool].Elem") != null);
+    }
 }
 
 test "derive arguments receive every selected reference oracle visit" {

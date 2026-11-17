@@ -537,16 +537,86 @@ fn expectJobKilled(io: Io, directory: std.Io.Dir) !void {
     var buffer: [64]u8 = undefined;
     const recorded = try directory.readFile(io, "job", &buffer);
     const job = try std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, recorded, " \n"), 10);
-    // A killed orphan is reaped by init, which may take a moment.
     var attempts: usize = 0;
-    while (true) : (attempts += 1) {
-        std.posix.kill(job, @enumFromInt(0)) catch |err| switch (err) {
-            error.ProcessNotFound => return,
-            else => return err,
-        };
+    while (!try processExited(io, job)) : (attempts += 1) {
         if (attempts == 200) return error.JobSurvived;
         try io.sleep(.fromMilliseconds(10), .awake);
     }
+}
+
+/// Whether the process `pid` has exited: it is gone, or it is a zombie whose
+/// parent has not reaped it yet. `kill(pid, 0)` alone cannot say, because it
+/// succeeds on a zombie, whose entry stays until it is reaped -- and a killed
+/// orphan waits for init to reap it, which may take longer than any deadline.
+fn processExited(io: Io, pid: std.posix.pid_t) !bool {
+    std.posix.kill(pid, @enumFromInt(0)) catch |err| switch (err) {
+        error.ProcessNotFound => return true,
+        else => return err,
+    };
+    return switch (@import("builtin").os.tag) {
+        .linux => linuxProcessIsZombie(io, pid),
+        .macos => darwinProcessIsZombie(pid),
+        else => false,
+    };
+}
+
+/// Whether `/proc/<pid>/stat` gives the process state `Z` (a zombie) or `X`
+/// (dead). The state is the field after the command name, which is written in
+/// parentheses and may itself hold `)`, so it is read after the last one.
+fn linuxProcessIsZombie(io: Io, pid: std.posix.pid_t) !bool {
+    var path_buffer: [32]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/proc/{d}/stat", .{pid});
+    var buffer: [512]u8 = undefined;
+    const stat = std.Io.Dir.cwd().readFile(io, path, &buffer) catch |err| switch (err) {
+        error.FileNotFound => return true,
+        else => return err,
+    };
+    const name_end = std.mem.lastIndexOf(u8, stat, ") ") orelse return error.UnreadableProcessState;
+    const state_at = name_end + ") ".len;
+    if (state_at >= stat.len) return error.UnreadableProcessState;
+    return stat[state_at] == 'Z' or stat[state_at] == 'X';
+}
+
+/// Whether `sysctl` reports the process in state `SZOMB`, read from
+/// `kp_proc.p_stat` of the `struct kinfo_proc` that `CTL_KERN`, `KERN_PROC`,
+/// `KERN_PROC_PID` answers with. `proc_pidinfo` cannot ask this: it refuses a
+/// zombie with `ESRCH`, as it refuses a process that is gone.
+fn darwinProcessIsZombie(pid: std.posix.pid_t) !bool {
+    const ctl_kern = 1;
+    const kern_proc = 14;
+    const kern_proc_pid = 1;
+    // `sizeof(struct kinfo_proc)`, and the offset of `kp_proc.p_stat` in it.
+    const kinfo_proc_size = 648;
+    const p_stat_offset = 36;
+    const szomb = 5;
+    var mib = [_]c_int{ ctl_kern, kern_proc, kern_proc_pid, pid };
+    var info: [kinfo_proc_size]u8 align(8) = undefined;
+    var len: usize = info.len;
+    if (std.c.sysctl(&mib, mib.len, &info, &len, null, 0) != 0) return error.UnreadableProcessState;
+    // An empty answer is a process the kernel no longer lists.
+    if (len == 0) return true;
+    if (len != kinfo_proc_size) return error.UnreadableProcessState;
+    return info[p_stat_offset] == szomb;
+}
+
+test "a process that exited and was not reaped has exited" {
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{ .argv = &.{ "sh", "-c", "exit 0" }, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
+    defer _ = child.wait(io) catch {};
+    const pid = child.id.?;
+    // Not waited for, so it stays a zombie until the deferred wait reaps it,
+    // and `kill(pid, 0)` keeps succeeding on it.
+    var attempts: usize = 0;
+    while (!try processExited(io, pid)) : (attempts += 1) {
+        if (attempts == 200) return error.ExitedProcessReadAsLive;
+        try io.sleep(.fromMilliseconds(10), .awake);
+    }
+    try std.posix.kill(pid, @enumFromInt(0));
+
+    // A process still running has not.
+    var running = try std.process.spawn(io, .{ .argv = &.{ "sleep", "30" }, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
+    defer running.kill(io);
+    try std.testing.expect(!try processExited(io, running.id.?));
 }
 
 test "a command past its deadline fails its case with what ran before it" {
