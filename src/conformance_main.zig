@@ -13028,13 +13028,15 @@ fn settledRefsWritten(ast: *const Ast, program: *const Program, in_library: []co
         }
     }
 
-    // Lambda parameter roots are held in the parameter table; their nested
-    // components and the result annotation already occur in type_refs.
+    // A lambda's parameter types and its result type are held in its header
+    // row, not in the argument table; their nested components are there.
     for (ast.exprs.items(.tag), 0..) |tag, i| {
         if (tag != .lambda) continue;
-        for (ast.lambda(ExprId.at(@intCast(i))).params) |param| {
+        const lambda = ast.lambda(ExprId.at(@intCast(i)));
+        for (lambda.params) |param| {
             if (ownSettledRef(ast, in_library, param.written)) n += 1;
         }
+        if (ownSettledRef(ast, in_library, lambda.result)) n += 1;
     }
 
     return n;
