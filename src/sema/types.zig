@@ -3554,9 +3554,12 @@ pub const ImplIndex = struct {
     ground_by_type: Chain(.newest_first) = .empty,
     open_by_head: Chain(.newest_first) = .empty,
     /// The open callable rows that write a ground type at the slot their
-    /// shape's heads are told apart by, under that type: by trait and head,
-    /// and by head alone. A row filed here is on neither `open` nor
-    /// `open_by_head`. `telling_slots` holds the slot chosen for each head.
+    /// shape's heads are told apart by, under that type: by trait and head
+    /// at the slot chosen for that trait's rows of the shape, and by head
+    /// alone at the slot chosen for every trait's. A row filed in the first
+    /// is not on `open`, and one filed in the second is not on
+    /// `open_by_head`. `telling_slots` holds the slot chosen for each trait
+    /// and shape, and under trait 0 for the shape across every trait.
     open_by_slot: Chain(.newest_first) = .empty,
     open_by_head_slot: Chain(.newest_first) = .empty,
     telling_slots: std.AutoHashMapUnmanaged(u64, u32) = .empty,
@@ -3636,12 +3639,13 @@ pub const ImplIndex = struct {
         return h.final();
     }
 
-    /// The ground type an open callable row writes at the slot its head's
-    /// rows are told apart by, or null where the row is not one, its head
-    /// has no such slot, or it leaves that slot open.
-    fn tellingRoot(self: *const ImplIndex, gpa: std.mem.Allocator, pool: anytype, row: Implementation) !?TypeId {
+    /// The ground type an open callable row writes at the slot the rows of
+    /// its head are told apart by, among `trait`'s rows or under trait 0
+    /// among every trait's, or null where the row is not one, that scope has
+    /// no such slot, or the row leaves it open.
+    fn tellingRoot(self: *const ImplIndex, gpa: std.mem.Allocator, pool: anytype, trait: u32, row: Implementation) !?TypeId {
         if (row.head != .callable_ or !row.valid_key or row.ty == .poison) return null;
-        const slot = self.telling_slots.get(key(0, row.head)) orelse return null;
+        const slot = self.telling_slots.get(key(trait, row.head)) orelse return null;
         if (slot >= callableSlots(pool, row.ty)) return null;
         const written = callableSlot(pool, row.ty, slot);
         return if (try groundKnown(gpa, pool, written)) written else null;
@@ -3714,25 +3718,30 @@ pub const ImplIndex = struct {
         self.telling_slots.clearRetainingCapacity();
 
         // The slot each callable head's open rows are told apart by: the
-        // first at which two of them write different ground types. A
-        // receiver writes a ground type there too, so it walks only the
-        // rows that write the same one or leave the slot open.
+        // first at which two of them write different ground types, chosen
+        // among one trait's rows for a lookup of that trait, and among every
+        // trait's for a reader of the rows under a head. A receiver writes a
+        // ground type there too, so it walks only the rows that write the
+        // same one or leave the slot open, and a trait's rows are told apart
+        // where they differ whatever another trait's rows of the shape write.
         {
             var first: std.AutoHashMapUnmanaged(u64, TypeId) = .empty;
             defer first.deinit(gpa);
             for (impls) |row| {
                 if (row.head != .callable_ or !row.valid_key or row.ty == .poison or try foundByType(gpa, pool, row)) continue;
-                const head_key = key(0, row.head);
-                const limit = self.telling_slots.get(head_key) orelse std.math.maxInt(u32);
-                for (0..@min(callableSlots(pool, row.ty), limit)) |slot| {
-                    const written = callableSlot(pool, row.ty, slot);
-                    if (!try groundKnown(gpa, pool, written)) continue;
-                    const seen = try first.getOrPut(gpa, slotKey(@intCast(slot), row.head, .poison));
-                    if (!seen.found_existing) {
-                        seen.value_ptr.* = written;
-                    } else if (seen.value_ptr.* != written) {
-                        try self.telling_slots.put(gpa, head_key, @intCast(slot));
-                        break;
+                for ([_]u32{ row.trait, 0 }) |scope| {
+                    const scope_key = key(scope, row.head);
+                    const limit = self.telling_slots.get(scope_key) orelse std.math.maxInt(u32);
+                    for (0..@min(callableSlots(pool, row.ty), limit)) |slot| {
+                        const written = callableSlot(pool, row.ty, slot);
+                        if (!try groundKnown(gpa, pool, written)) continue;
+                        const seen = try first.getOrPut(gpa, slotKey(scope, row.head, @enumFromInt(@as(u32, @intCast(slot)))));
+                        if (!seen.found_existing) {
+                            seen.value_ptr.* = written;
+                        } else if (seen.value_ptr.* != written) {
+                            try self.telling_slots.put(gpa, scope_key, @intCast(slot));
+                            break;
+                        }
                     }
                 }
             }
@@ -3746,12 +3755,15 @@ pub const ImplIndex = struct {
                 try self.ground_by_receiver.note(gpa, receiverKey(row.trait, row.ty), @intCast(at));
                 try self.ground_by_header.note(gpa, headerKey(row.trait, row.ty, row.args), @intCast(at));
                 try self.ground_by_type.note(gpa, @intFromEnum(row.ty), @intCast(at));
-            } else if (try self.tellingRoot(gpa, pool, row)) |root| {
-                try self.open_by_slot.note(gpa, slotKey(row.trait, row.head, root), @intCast(at));
-                try self.open_by_head_slot.note(gpa, slotKey(0, row.head, root), @intCast(at));
             } else {
-                try self.open.note(gpa, key(row.trait, row.head), @intCast(at));
-                try self.open_by_head.note(gpa, key(0, row.head), @intCast(at));
+                if (try self.tellingRoot(gpa, pool, row.trait, row)) |root|
+                    try self.open_by_slot.note(gpa, slotKey(row.trait, row.head, root), @intCast(at))
+                else
+                    try self.open.note(gpa, key(row.trait, row.head), @intCast(at));
+                if (try self.tellingRoot(gpa, pool, 0, row)) |root|
+                    try self.open_by_head_slot.note(gpa, slotKey(0, row.head, root), @intCast(at))
+                else
+                    try self.open_by_head.note(gpa, key(0, row.head), @intCast(at));
             }
         }
         self.ground_indexed = true;
@@ -3827,15 +3839,16 @@ pub const ImplIndex = struct {
         };
         all.chain = &self.open;
         all.run = self.open.walk(key(trait, head));
-        if (try self.receiverRoot(pool, head, held)) |root| all.told = self.open_by_slot.walk(slotKey(trait, head, root));
+        if (try self.receiverRoot(pool, trait, head, held)) |root| all.told = self.open_by_slot.walk(slotKey(trait, head, root));
         return all;
     }
 
     /// The type a ground callable receiver writes at the slot its head's
-    /// open rows are told apart by, or null where no row is filed by one.
-    fn receiverRoot(self: *const ImplIndex, pool: anytype, head: Head, held: TypeId) !?TypeId {
+    /// open rows are told apart by, among `trait`'s rows or under trait 0
+    /// among every trait's, or null where no row is filed by one.
+    fn receiverRoot(self: *const ImplIndex, pool: anytype, trait: u32, head: Head, held: TypeId) !?TypeId {
         if (head != .callable_) return null;
-        const slot = self.telling_slots.get(key(0, head)) orelse return null;
+        const slot = self.telling_slots.get(key(trait, head)) orelse return null;
         if (slot >= callableSlots(pool, held)) return null;
         return callableSlot(pool, held, slot);
     }
@@ -3931,7 +3944,7 @@ pub const ImplIndex = struct {
             .head = head,
             .receiver = held,
             .found = self.ground_by_type.walk(@intFromEnum(held)),
-            .told = if (try self.receiverRoot(pool, head, held)) |root| self.open_by_head_slot.walk(slotKey(0, head, root)) else null,
+            .told = if (try self.receiverRoot(pool, 0, head, held)) |root| self.open_by_head_slot.walk(slotKey(0, head, root)) else null,
             .open = self.open_by_head.walk(key(0, head)),
         };
     }
