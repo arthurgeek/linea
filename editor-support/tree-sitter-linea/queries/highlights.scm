@@ -8,6 +8,7 @@
 
 ; -- Declarations ----------------------------------------------------------
 "fn"     @keyword.function
+"test"   @keyword.function
 "enum"   @keyword.storage.type
 "struct" @keyword.storage.type
 "template" @keyword.storage.type
@@ -58,7 +59,6 @@
 "carrier" @keyword.storage.modifier
 "unshareable" @keyword.storage.modifier
 "shareable" @keyword.storage.modifier
-"test" @keyword.storage.modifier
 "trap" @keyword.storage.modifier
 "phantom" @keyword.storage.modifier
 

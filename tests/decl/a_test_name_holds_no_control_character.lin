@@ -1,0 +1,11 @@
+// A test's name is printed on one line of `linea test`'s report and passed to
+// the test binary as an argument, so it holds no control character.
+import std.testing
+
+test "a first line\na second line" {
+    testing.assert(true, "a name is one line")?
+}
+
+fn main() -> UInt8 {
+    0
+}

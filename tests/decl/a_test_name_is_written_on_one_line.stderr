@@ -1,0 +1,5 @@
+error[S-Test]: a test's name is written on one line
+ --> tests/decl/a_test_name_is_written_on_one_line.lin:6:5
+  |
+6 |     \\a name
+  |     ^^^^^^^^ write the name as one quoted string

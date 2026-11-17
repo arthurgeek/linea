@@ -132,7 +132,8 @@ fn isRuntimeTrap(detail: []const u8) bool {
     return line != 0 and column != 0;
 }
 
-/// Runs and reports every test, up to `jobs` at a time, and returns whether all passed.
+/// Runs and reports every test whose name holds `filter`, every test where it
+/// is empty, up to `jobs` at a time, and returns whether all passed.
 ///
 /// One child per test, because a test that traps takes its process with it and
 /// nothing else's result is lost. The parallelism is here rather than in the
@@ -147,15 +148,30 @@ pub fn run(
     gpa: std.mem.Allocator,
     io: std.Io,
     binary: []const u8,
-    tests: []const Test,
+    all: []const Test,
     jobs: usize,
     root: []const u8,
+    filter: []const u8,
     w: *std.Io.Writer,
 ) !bool {
     // Nothing failed, so the run succeeds, as `go test` does for a package
     // with no tests; the line says why nothing ran.
-    if (tests.len == 0) {
+    if (all.len == 0) {
         try w.print("no tests found in {s}\n", .{root});
+        try w.flush();
+        return true;
+    }
+
+    // Matched against the name the transcript prints, module path included,
+    // so a name copied out of a report selects the test it names.
+    var selected: std.ArrayList(Test) = .empty;
+    defer selected.deinit(gpa);
+    for (all) |t| {
+        if (std.mem.indexOf(u8, t.qualified_name, filter) != null) try selected.append(gpa, t);
+    }
+    const tests = selected.items;
+    if (tests.len == 0) {
+        try w.print("no test name in {s} holds \"{s}\"\n", .{ root, filter });
         try w.flush();
         return true;
     }

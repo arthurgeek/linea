@@ -1,0 +1,11 @@
+test "a withdrawal deducts its fee" {
+// <- keyword.function
+//   ^ string
+    check()
+}
+
+test trap "a seat past the last stops the program" {
+//   ^ keyword.storage.modifier
+//         ^ string
+    check()
+}

@@ -13,6 +13,8 @@ const Interner = @import("../support/interner.zig").Interner;
 const StringId = @import("../support/interner.zig").StringId;
 const Code = @import("../diagnostics/diagnostic.zig").Code;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const diagnostic_mod = @import("../diagnostics/diagnostic.zig");
+const text_mod = @import("../support/text.zig");
 const lexer_mod = @import("../lexer/lexer.zig");
 const tokenize = lexer_mod.tokenize;
 const tokenizeInto = lexer_mod.tokenizeInto;
@@ -876,10 +878,14 @@ const Parser = struct {
 
             // Whether what follows is the one form a test may be, read before
             // the dispatch consumes it.
+            const at_test_name = is_test and self.atTestName();
             const at_function = self.cursor.at(.keyword_fn);
+            if (is_test and at_function) try self.refuseTestFunction();
 
-            const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(if (is_test) .test_ else .top_level)
+            const declared: ?node.DeclId = if (at_test_name)
+                try self.parseTest()
+            else if (self.cursor.at(.keyword_fn))
+                try self.parseFunction(.top_level)
             else if (self.cursor.at(.keyword_extern))
                 try self.parseExtern()
             else if (self.cursor.at(.keyword_trait))
@@ -923,12 +929,12 @@ const Parser = struct {
                 } else {
                     self.builder.markVisibility(d, visibility, at);
                 }
-                if (is_test and !at_function) {
+                if (is_test and !at_test_name and !at_function) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "only a function is a test",
-                        "a test is a body the compiler runs, and this declares none",
+                        "a test is named by a string",
+                        "write `test \"what it checks\" { … }`; this declares no body to run",
                     );
                 } else if (is_test and visibility != .private) {
                     // Nothing in the language may name a test: the compiler
@@ -1396,12 +1402,14 @@ const Parser = struct {
                         "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
-                if (!self.cursor.at(.keyword_fn)) {
+                if (self.cursor.at(.keyword_fn)) {
+                    try self.refuseTestFunction();
+                } else if (!self.atTestName()) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "only a function is a test",
-                        "a test is a body the compiler runs, and this declares none",
+                        "a test is named by a string",
+                        "write `test \"what it checks\" { … }`; this declares no body to run",
                     );
                 }
             }
@@ -1409,8 +1417,10 @@ const Parser = struct {
             const settles_a_type = self.atAssociatedType();
             const declares_a_traversal = self.atTraversal();
 
-            const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try self.parseFunction(if (is_test) .test_ else .member)
+            const declared: ?node.DeclId = if (is_test and self.atTestName())
+                try self.parseTest()
+            else if (self.cursor.at(.keyword_fn))
+                try self.parseFunction(.member)
             else if (self.atProjection())
                 try self.parseProjection(.required)
             else if (self.atTraversal())
@@ -1907,22 +1917,29 @@ const Parser = struct {
                         "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
-                if (!self.cursor.at(.keyword_fn)) {
+                if (self.cursor.at(.keyword_fn)) {
+                    try self.refuseTestFunction();
+                } else if (!self.atTestName()) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "only a function is a test",
-                        "a test is a body the compiler runs, and this declares none",
+                        "a test is named by a string",
+                        "write `test \"what it checks\" { … }`; this declares no body to run",
                     );
                 }
             }
 
-            // Only a function is marked a test. A projection or a type written
-            // after `test` was refused above and stays the member it is, so
-            // nothing reports it again as a test or as a name nothing uses.
-            const tests_a_function = is_test and self.cursor.at(.keyword_fn);
-            const declared: ?node.DeclId = if (self.cursor.at(.keyword_fn))
-                try (if (is_test) self.parseFunction(.test_) else self.parseSignature())
+            // Only a test's name or a function is marked a test. A projection
+            // or a type written after `test` was refused above and stays the
+            // member it is, so nothing reports it again as a test or as a name
+            // nothing uses. A function written after `test` keeps its body, so
+            // it is read with one and checked as the test it was meant to be.
+            const at_test_name = is_test and self.atTestName();
+            const tests_a_function = is_test and (at_test_name or self.cursor.at(.keyword_fn));
+            const declared: ?node.DeclId = if (at_test_name)
+                try self.parseTest()
+            else if (self.cursor.at(.keyword_fn))
+                try (if (is_test) self.parseFunction(.member) else self.parseSignature())
             else if (self.atProjection())
                 try self.parseProjection(.signature)
             else if (self.atAssociatedType())
@@ -2862,11 +2879,10 @@ const Parser = struct {
     /// defined somewhere this compiler did not compile.
     const Body = enum { required, signature, external };
 
-    /// Where a callable is declared, which decides what an omitted result
-    /// means and so what a refused `-> ()` should become: a test answers its
-    /// default `Result`, and a top-level `main` may be the entry point, which
+    /// Where a callable is declared, which decides what a refused `-> ()`
+    /// should become: a top-level `main` may be the entry point, which
     /// answers its exit status.
-    const Site = enum { member, top_level, test_ };
+    const Site = enum { member, top_level };
 
     /// Which member form is being read, which decides the word it begins with
     /// and the tag it is recorded under. Not what it does about a body: a
@@ -2952,7 +2968,7 @@ const Parser = struct {
             "extern fn f(at: UInt64) -> ()\n",
             "fn f(_g: fn(x: UInt8) -> ()) {}\n",
             "fn f() { let _g = |x: UInt8| -> () { x } }\n",
-            "test fn f() -> () {}\n",
+            "test \"f\" -> () {}\n",
         };
         for (refused) |text| {
             try testing.expectEqualSlices(?Code, &.{.s_unit_result}, try codesOf(gpa, text));
@@ -3038,9 +3054,8 @@ const Parser = struct {
             // root is not known here.
             const main = site == .top_level and self.cursor.tags[name.index()] == .identifier and
                 std.mem.eql(u8, self.cursor.textOf(name), "main");
-            const label = if (site == .test_) "a test writing no result answers `Result[(), testing.Failure]`" else omitted_unit_label;
             const help = if (main) "remove `-> ()`, or write `-> UInt8` if this `main` is the program's entry point" else remove_written_unit;
-            if (kind == .function and try self.refuseWrittenUnit(arrow, label, help, null)) {
+            if (kind == .function and try self.refuseWrittenUnit(arrow, omitted_unit_label, help, null)) {
                 // Read as the omitted form it should have been, so the rest of
                 // the declaration is checked as a function returning `()`. A
                 // `main`'s is read as a refused result instead, so an entry
@@ -3133,6 +3148,207 @@ const Parser = struct {
             .contracts = contracts,
             .body = body,
             .variants = .{ .start = 0, .end = 0 },
+        });
+    }
+
+    /// `test "name" -> R where … { … }`, read once `test` and any `trap` are
+    /// behind the cursor.
+    ///
+    /// Recorded as a function, since everything after its name is a
+    /// function's: a result, a `where` the checker refuses, a body. Its name
+    /// is the string token, so the declaration binds no name, and its main
+    /// token is that string, as a function's is the `fn` that opens it.
+    ///
+    /// Brackets or parentheses after the name are read and refused here: no
+    /// call passes a test anything, and nothing settles a type parameter of
+    /// one.
+    fn parseTest(self: *Parser) !node.DeclId {
+        const name = self.cursor.current();
+        try self.readTestName();
+
+        // Kept on the declaration once refused, so a body naming one still
+        // resolves and the refusal is the one report.
+        var type_params: node.TypeParamRange = .{ .start = 0, .end = 0 };
+        if (self.cursor.at(.l_bracket)) {
+            try self.reportAt(.s_test, self.cursor.current(), "a test is not generic", "the compiler writes the only call to a test, so nothing settles this");
+            type_params = try self.parseTypeParams(.admitted);
+        }
+        var params: node.ParamRange = .{ .start = 0, .end = 0 };
+        if (self.cursor.at(.l_paren)) {
+            try self.reportAt(.s_test, self.cursor.current(), "a test takes no parameters", "the compiler writes the only call to a test, and has nothing to pass");
+            params = try self.parseParams(.declaration);
+        }
+
+        var returns: node.TypeRef = .{ .name = .none };
+        if (self.cursor.eat(.arrow)) |arrow| {
+            const return_type = self.cursor.current();
+            if (try self.refuseWrittenUnit(arrow, "a test writing no result answers `Result[(), testing.Failure]`", remove_written_unit, null)) {
+                // Read as the omitted result it should have been.
+            } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
+                self.cursor.at(.l_paren) or self.startsCallableType() or self.cursor.at(.keyword_borrow))
+            {
+                self.result_may_split = true;
+                returns = try self.parseWrittenType();
+            } else {
+                try self.reportAt(.s_type, return_type, "expected a type", "a `->` introduces the return type");
+                returns = .{ .at = return_type, .name = .none };
+            }
+        }
+
+        const where_clause = try self.parseFunctionWhere();
+
+        var body: ExprId = .none;
+        if (self.cursor.at(.l_brace)) {
+            body = try self.parseBraced("this body is never closed");
+        } else {
+            try self.reportAt(.s_brace, self.cursor.current(), "expected `{`", "a test needs a body");
+        }
+
+        return self.builder.addDecl(.{
+            .tag = if (body == ExprId.none) .err else .function,
+            .origin = .written,
+            .main_token = name,
+            .token_range = self.rangeFrom(name),
+            .name = name,
+            .params = params,
+            .type_params = type_params,
+            .where_predicates = where_clause.predicates,
+            .where_at = where_clause.at,
+            .returns = returns,
+            .contracts = where_clause.contracts,
+            .body = body,
+            .variants = .{ .start = 0, .end = 0 },
+        });
+    }
+
+    /// Whether the cursor is at what a test's name is written as: a string,
+    /// or the start of an interpolated or multi-line one, which are read as
+    /// the name they were meant to be and refused there.
+    fn atTestName(self: *const Parser) bool {
+        return switch (self.cursor.peek()) {
+            .string_literal, .str_open, .string_line => true,
+            else => false,
+        };
+    }
+
+    /// Reads a test's name and refuses one that cannot name a test. The name
+    /// is what `linea test` prints on one line of its report, what `--filter`
+    /// matches and what the test binary is handed as an argument, so it is
+    /// written once, as a string on one line that interpolates nothing, holds
+    /// at least one character and no control character.
+    fn readTestName(self: *Parser) !void {
+        const at = self.cursor.current();
+        switch (self.cursor.peek()) {
+            .string_literal => {
+                _ = self.cursor.advance();
+                var decoded: std.ArrayList(u8) = .empty;
+                defer decoded.deinit(self.gpa);
+                // An invalid escape was reported by the lexer, and what it
+                // decodes to is not a name anything should be judged by.
+                if (try text_mod.decode(self.gpa, &decoded, self.cursor.textOf(at)) != null) return;
+                if (decoded.items.len == 0) {
+                    try self.reportAt(.s_test, at, "a test's name is not empty", "say what the test checks; `linea test` prints this name and `--filter` matches it");
+                } else if (std.mem.indexOfAny(u8, decoded.items, &control_characters) != null) {
+                    try self.reportAt(.s_test, at, "a test's name holds no control character", "a name is printed on one line of the report and passed to the test as an argument");
+                }
+            },
+            .str_open => {
+                // The pieces and the expressions between them, up to the
+                // piece that closes the literal, which the report spans.
+                var depth: usize = 0;
+                while (!self.cursor.atEnd()) {
+                    const tag = self.cursor.peek();
+                    _ = self.cursor.advance();
+                    if (tag == .str_open) depth += 1;
+                    if (tag == .str_close) {
+                        depth -= 1;
+                        if (depth == 0) break;
+                    }
+                }
+                try self.sink.addError(.s_test, self.file, self.spanThrough(at), "a test's name interpolates nothing", "a test is named where it is written; write the name without `{…}`");
+            },
+            .string_line => {
+                while (self.cursor.at(.string_line)) _ = self.cursor.advance();
+                try self.sink.addError(.s_test, self.file, self.spanThrough(at), "a test's name is written on one line", "write the name as one quoted string");
+            },
+            else => unreachable,
+        }
+    }
+
+    /// The source from `first` to the end of the token before the cursor.
+    fn spanThrough(self: *const Parser, first: TokenId) Span {
+        return .{ .start = self.cursor.spanAt(first).start, .end = self.cursor.spanAt(self.cursor.previousToken()).end };
+    }
+
+    /// The bytes no test name holds: every ASCII control character.
+    const control_characters = blk: {
+        var all: [33]u8 = undefined;
+        for (0..32) |c| all[c] = c;
+        all[32] = 0x7f;
+        break :blk all;
+    };
+
+    /// Refuses `test fn name()`, read with the cursor at its `fn`: a test is
+    /// named by a string. The help writes the name that string would be,
+    /// the identifier's words apart, and the fix puts it in place of
+    /// everything from `fn` to the parameter list's `)`. The function is read
+    /// after this as it was written, so its body is still checked.
+    fn refuseTestFunction(self: *Parser) !void {
+        const fn_at = self.cursor.current();
+        const name = self.cursor.ahead(1) orelse return self.reportAt(.s_test, fn_at, "a test is named by a string", "write `test \"what it checks\" { … }`");
+        if (self.cursor.tags[name.index()] != .identifier) {
+            return self.reportAt(.s_test, fn_at, "a test is named by a string", "write `test \"what it checks\" { … }`");
+        }
+        const spelled = self.cursor.textOf(name);
+        const string = try std.fmt.allocPrint(self.sink.arena, "\"{s}\"", .{spelled});
+        for (string[1 .. string.len - 1]) |*c| {
+            if (c.* == '_') c.* = ' ';
+        }
+
+        // The `)` that closes the parameter list: past the name and any type
+        // parameters, the parenthesis that closes the first one opened. One
+        // walk over the header's tokens, which ends at the first brace.
+        const tags = self.cursor.tags;
+        var closes: ?TokenId = null;
+        var depth: usize = 0;
+        var i = name.index() + 1;
+        while (i < tags.len) : (i += 1) {
+            const tag = tags[i];
+            if (tag.isTrivia()) continue;
+            switch (tag) {
+                .l_paren, .l_bracket => depth += 1,
+                .r_paren, .r_bracket => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                    if (depth == 0 and tag == .r_paren) {
+                        closes = TokenId.at(i);
+                        break;
+                    }
+                },
+                .l_brace, .r_brace, .eof => break,
+                else => if (depth == 0) break,
+            }
+        }
+
+        const help = try std.fmt.allocPrint(self.sink.arena, "write `test {s}`", .{string});
+        const notes = try self.sink.arena.dupe([]const u8, &.{help});
+        const span = self.cursor.spanAt(fn_at);
+        const labels = try self.sink.arena.dupe(Label, &.{.{ .file = self.file, .span = span, .message = "a test is not declared as a function" }});
+        const fixes: []const diagnostic_mod.Fix = if (closes) |close| fixes: {
+            const edits = try self.sink.arena.dupe(diagnostic_mod.Edit, &.{.{
+                .file = self.file,
+                .span = .{ .start = span.start, .end = self.cursor.spanAt(close).end },
+                .text = string,
+            }});
+            break :fixes try self.sink.arena.dupe(diagnostic_mod.Fix, &.{.{ .kind = .test_name, .note = 0, .edits = edits }});
+        } else &.{};
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .s_test,
+            .message = "a test is named by a string",
+            .labels = labels,
+            .notes = notes,
+            .fixes = fixes,
         });
     }
 
@@ -9084,7 +9300,7 @@ test "`internal` is refused where a declaration has no independent visibility" {
     try testing.expect(derived.errors > 0);
 
     const tested = try parseProgramText(gpa,
-        \\internal test fn token_works() {}
+        \\internal test "token works" {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expect(tested.errors > 0);
@@ -10234,25 +10450,29 @@ test "a settled reference is a written type" {
     try testing.expect(std.mem.indexOf(u8, got.dump, "returns Self.Item") != null);
 }
 
-test "a test is a function carrying one modifier" {
+test "a test is named by a string and has a function's result and body" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
 
-    // Nothing but the prefix distinguishes it. What follows is parsed by the
-    // rule that parses every other function, which is the whole claim the
-    // modifier makes.
     const plain = try parseProgramText(gpa,
-        \\test fn a_thing_holds() -> Result[(), IoError] { return .Ok(()) }
+        \\test "a thing holds" -> Result[(), IoError] { return .Ok(()) }
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expectEqual(@as(u32, 0), plain.errors);
+
+    // A test is not declared as a function.
+    const declared = try parseProgramText(gpa,
+        \\test fn a_thing_holds() -> Result[(), IoError] { return .Ok(()) }
+        \\fn main() -> UInt8 { 0 }
+    );
+    try testing.expectEqual(@as(u32, 1), declared.errors);
 
     // The compiler writes the only call to a test, so `pub` exports a name no
     // import can reach -- a modifier saying nothing, which is what an `impl`
     // modifier already breaks.
     const exported = try parseProgramText(gpa,
-        \\pub test fn a_thing_holds() -> Result[(), IoError] { return .Ok(()) }
+        \\pub test "a thing holds" -> Result[(), IoError] { return .Ok(()) }
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expect(exported.errors > 0);
@@ -10620,10 +10840,10 @@ test "a test in an impl is written inside it and a member of nothing" {
         \\struct P { x: UInt8 }
         \\impl P {
         \\    fn get() -> UInt8 { 0 }
-        \\    test fn holds() {}
+        \\    test "holds" {}
         \\}
         \\impl Marker for P {
-        \\    test fn refused() {}
+        \\    test "refused" {}
         \\}
     };
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
@@ -10656,10 +10876,10 @@ test "a test in a trait is written inside it and a member of nothing" {
         \\trait Sized {
         \\    fn size(self: Self) -> UInt8
         \\    fn twice(self: Self) -> UInt8 { self.size() * 2 }
-        \\    test fn doubles() {}
-        \\    test trap fn overflows() {}
+        \\    test "doubles" {}
+        \\    test trap "overflows" {}
         \\    let unit = 1
-        \\    test fn recovers() {}
+        \\    test "recovers" {}
         \\}
     };
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);

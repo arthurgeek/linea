@@ -1,0 +1,5 @@
+error[S-Test]: a test's name holds no control character
+ --> tests/decl/a_test_name_holds_no_control_character.lin:5:6
+  |
+5 | test "a first line\na second line" {
+  |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a name is printed on one line of the report and passed to the test as an argument

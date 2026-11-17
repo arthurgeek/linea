@@ -5,7 +5,7 @@ import std.io
 use io.IoError
 use io.println
 
-test fn a_thing_holds[T: Copyable]() -> Result[(), IoError] {
+test "a thing holds"[T: Copyable] -> Result[(), IoError] {
     println("nothing settles T")?
     return .Ok({})
 }

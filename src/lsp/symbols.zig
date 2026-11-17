@@ -135,9 +135,16 @@ pub fn forFile(
         // A tuple, unit or callable head has no name token: it is named as
         // written.
         const headed = ast.declTag(d) == .impl_ or ast.declTag(d) == .derive_impl;
-        const name = if (headed) ast.implHeadText(d) else ast.tokenText(ast.declName(d));
+        // A test is named by its string, shown after `test` as it is written
+        // so the outline tells it from a function of the same words.
+        const name = if (headed)
+            try gpa.dupe(u8, ast.implHeadText(d))
+        else if (ast.declIsTest(d))
+            try std.fmt.allocPrint(gpa, "test {s}", .{ast.tokenText(ast.declName(d))})
+        else
+            try gpa.dupe(u8, ast.tokenText(ast.declName(d)));
         symbol.* = .{
-            .name = try gpa.dupe(u8, name),
+            .name = name,
             .kind = kindOf(ast.declTag(d)).?,
             .range = .{ .start = at[i * 4], .end = at[i * 4 + 1] },
             .selectionRange = .{ .start = at[i * 4 + 2], .end = at[i * 4 + 3] },
@@ -191,7 +198,7 @@ test "a symbol carries the kind the parser gave its declaration" {
         \\trait Measure {
         \\    fn of(x: Self) -> UInt8
         \\
-        \\    test fn an_account_measures_its_balance() {
+        \\    test "an account measures its balance" {
         \\        let a: Account = .{ balance = limit }
         \\        let _measured = Measure.of(a)
         \\    }
@@ -225,7 +232,7 @@ test "a symbol carries the kind the parser gave its declaration" {
         .{ .name = "Colour", .kind = .Enum },
         .{ .name = "Measure", .kind = .Interface },
         .{ .name = "of", .kind = .Function },
-        .{ .name = "an_account_measures_its_balance", .kind = .Function },
+        .{ .name = "test \"an account measures its balance\"", .kind = .Function },
         .{ .name = "Account", .kind = .Object },
         .{ .name = "of", .kind = .Function },
         .{ .name = "main", .kind = .Function },

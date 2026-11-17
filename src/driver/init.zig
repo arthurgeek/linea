@@ -218,7 +218,7 @@ const starting_program =
     \\    num * num
     \\}
     \\
-    \\test fn a_square_is_a_number_times_itself() -> Result[(), testing.Failure] {
+    \\test "a square is a number times itself" -> Result[(), testing.Failure] {
     \\    testing.assert_eq(square(3), 9, "three squared is nine")?
     \\
     \\    return .Ok(())
@@ -244,7 +244,7 @@ const starting_library =
     \\    num * num
     \\}
     \\
-    \\test fn a_square_is_a_number_times_itself() -> Result[(), testing.Failure] {
+    \\test "a square is a number times itself" -> Result[(), testing.Failure] {
     \\    testing.assert_eq(square(3), 9, "three squared is nine")?
     \\
     \\    return .Ok(())

@@ -1,0 +1,23 @@
+// A test is named by a string and binds no name in its module, so its name may
+// read like a function's, `main` included.
+import std.testing
+
+fn double(n: UInt32) -> UInt32 {
+    n * 2
+}
+
+test "double" {
+    testing.assert_eq(double(3), 6, "three doubled is six")?
+}
+
+test "main" {
+    testing.assert_eq(main(), 0, "the program succeeds")?
+}
+
+fn main() -> UInt8 {
+    if double(1) == 2 {
+        0
+    } else {
+        1
+    }
+}

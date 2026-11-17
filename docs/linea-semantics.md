@@ -97,12 +97,13 @@ import       ::= "import" path ("as" name)?
 path         ::= name ("." name)*
 
 declaration  ::= visibility? "export"? (external | trait | reexport | constant | alias)
-               | attribute* visibility? "export"? (function | typedecl) | impl | template_impl | derive_impl
+               | attribute* visibility? "export"? (function | typedecl) | test | impl | template_impl | derive_impl
 visibility   ::= "pub" | "internal"
 attribute    ::= "@" attribute_item | "@" "(" attribute_item ("," attribute_item)* ","? ")"
 attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "unshareable" | "shareable" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
 constant     ::= "let" name (":" type_name)? "=" expression unwrap?
-function     ::= ("test" "trap"?)? "fn" name generics? "(" parameters? ")" ("->" result)? function_where? block
+function     ::= "fn" name generics? "(" parameters? ")" ("->" result)? function_where? block
+test         ::= "test" "trap"? string ("->" result)? function_where? block
 signature    ::= "fn" name generics? "(" parameters? ")" ("->" result)? function_where?
 external     ::= "extern" signature
 projsig      ::= "proj" name generics? "(" parameters? ")" "->" result function_where?
@@ -125,12 +126,12 @@ typedecl     ::= "struct" name generics? where_clause? "{" fields? "}"
                | "type" name generics? "=" type_name refinement?
 refinement   ::= "where" "it" "in" litbound rangeop litbound
 litbound     ::= "-"? integer
-trait        ::= "trait" name generics? (":" type_bound ("+" type_bound)*)? where_clause? "{" (signature | function | projsig | declared)* "}"
+trait        ::= "trait" name generics? (":" type_bound ("+" type_bound)*)? where_clause? "{" (signature | function | projsig | declared | test)* "}"
 declared     ::= "type" name (":" type_bound ("+" type_bound)*)?
 settled      ::= "type" name "=" type_name
 reexport     ::= "use" path
 alias        ::= "alias" name generics? "=" type_name
-impl         ::= "impl" generics? impl_head where_clause? "{" ("pub"? (function | projection | constant) | traversal)* "}"
+impl         ::= "impl" generics? impl_head where_clause? "{" ("pub"? (function | projection | constant) | traversal | test)* "}"
               | "impl" generics? trait_ref "for" impl_head where_clause? "{" ("pub"? (function | projection | constant) | settled)* "}"
               | "impl" generics? trait_ref "for" impl_head where_clause? "via" name
               | "default" "impl" generics trait_ref "for" name where_clause? "{" (function | settled)* "}"
@@ -320,9 +321,8 @@ without parentheses.
 **[S-Entry]** A program is a list of declarations, exactly one of which is
 `main() -> UInt8` or `main() -> Result[UInt8, E]`. Its value is the process's
 exit status, and the runtime calls it
-([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)). A test is never
-the entry point, whatever it is named, so a program whose only `main` is a test
-declares none. A root module declaring several `main`s is refused once, at the
+([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)). A test is named
+by a string and declares no function, so it is never the entry point. A root module declaring several `main`s is refused once, at the
 first: the report reads "a module has one `main`, and `app/` declares 2". A
 directory is one module, so two programs kept side by side in one directory
 are this mistake, and the report notes it and names one file to build or test
@@ -390,25 +390,34 @@ visibility modifier, and writing one is refused because `pub` would add no
 meaning; like a trait signature it is reachable wherever the trait
 is.
 
-**[S-Test]** `test fn` declares a function called by the compiler and excluded
-from shipped artefacts. A test has **no visibility**: `pub` would export a name
-that imports cannot reach. The modifier applies only to a function. A test may
-sit at module scope, inside an inherent `impl` beside the members it tests, or
-inside a trait declaration beside the operation it tests. Inside an
-implementation for a trait it is refused, because a trait implementation
-declares only what its trait requires, and inside a template it is refused,
-because a template is instantiated for every type that satisfies it while the
-compiler writes a test's one call.
+**[S-Test]** `test "what it checks" { … }` declares a test: a body the
+compiler calls and excludes from shipped artefacts, named by the string after
+`test` ([ADR 0277](adr/0277-a-test-is-named-by-a-string.md)). A test with a
+written result is `test "what it checks" -> Result[(), E] { … }`. The name is a
+string literal on one line that interpolates nothing, holds at least one
+character and holds no control character: `linea test` prints it on one line
+of its report and hands it to the test binary as an argument. A test takes no
+parameters and no type parameters, since the compiler writes its one call and
+has nothing to pass or settle; brackets or parentheses after the name are
+refused. `test fn name()` does not declare a test, and is refused with a help
+that writes the string the name would be. A test has **no visibility**: `pub`
+would export something no import can name. A test may sit at module scope,
+inside an inherent `impl` beside the members it tests, or inside a trait
+declaration beside the operation it tests. Inside an implementation for a trait
+it is refused, because a trait implementation declares only what its trait
+requires, and inside a template it is refused, because a template is
+instantiated for every type that satisfies it while the compiler writes a
+test's one call.
 
-A test inside an `impl` or a trait is a member of nothing: it is named,
-resolved and run exactly as if it were written at module scope. No path through
-the type or the trait reaches it. Its name shares the module's one namespace
-with every other test and top-level name, so two implementations in one module
-do not each declare a test of one name, and neither do a trait and the module
-around it ([N-Duplicate]); the implementation or the trait adds nothing to its
-qualified name. A test named `main`, inside an `impl` or not, is never the
-entry point ([S-Entry]); in the root module beside the program's `main` it is a
-second declaration of that name ([N-Duplicate]). A test is not instantiated, so
+A test binds no name: nothing in the language can write a reference to a
+string, so no expression names a test, a test may read like the function it
+tests, and a test named `"main"` is an ordinary test. Two tests of one module
+may not share a name, wherever in the module each is written, because
+`linea test` reports and selects a test by it ([N-Duplicate]). A test inside an
+`impl` or a trait is a member of nothing: it is resolved and run exactly as if
+it were written at module scope, no path through the type or the trait reaches
+it, and the implementation or the trait adds nothing to its reported name. A
+test is not instantiated, so
 neither `Self` nor the implementation's type parameters name a type in it;
 writing either is refused, and the test names the concrete types it tests
 instead: `Boxed[UInt8]` in an annotation, `Boxed` before a call, whose
@@ -434,20 +443,17 @@ trait Doubling {
         self.value() * 2
     }
 
-    test fn doubling_a_meter_doubles_its_reading() {
+    test "doubling a meter doubles its reading" {
         let meter = Meter { reading = 4 }
         testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
     }
 }
 ```
 
-A test may instead be written `test trap fn`. It succeeds only when its child
+A test may instead be written `test trap "…"`. It succeeds only when its child
 process reaches a language trap; returning successfully, returning a failure,
 or ending for another reason fails the test. The trap's kind and message are
 not matched.
-
-No expression names a test, including an expression inside another test. Only
-the compiler may generate a call to it.
 
 A test may omit its return annotation. Its result is then
 `Result[(), testing.Failure]`, using the trusted library declaration without
@@ -460,14 +466,17 @@ ordinary meaning. A function that is not a test and writes no result returns
 
 A test is known outside the compiler by its qualified name: the path of its
 module's directory beneath the program root, each directory name followed by
-`.`, then the test's own name. A test in the root module is known by its bare
-name, and one in `text/str` as `text.str.a_thing_holds`. A directory name that
-is an identifier is written as it is. Within a directory name, a `.` is written
-`\.` and a `\` is written `\\`, so the one directory `a.b` names its test
-`a\.b.holds` and the two directories `a/b` name theirs `a.b.holds`. Every other
-byte is written as the directory name holds it, so `my-lib/ledger` names its
-test `my-lib.ledger.holds`. The test runner reports each test by this name,
-and a test binary runs the test whose name it is given.
+`.`, then the string the test is named by. A test in the root module is known
+by its string alone, and `test "a thing holds"` in `text/str` as
+`text.str.a thing holds`. A directory name that is an identifier is written as
+it is. Within a directory name or the test's string, a `.` is written `\.` and
+a `\` is written `\\`, so the one directory `a.b` names its test `a\.b.holds`,
+the two directories `a/b` name theirs `a.b.holds`, and `test "1.5 rounds up"` in
+`a` is `a.1\.5 rounds up`. Every other byte is written as the directory name or
+the string holds it, so `my-lib/ledger` names its test `my-lib.ledger.holds`.
+The test runner reports each test by this name, ordered by it;
+`linea test --filter TEXT` runs only the tests whose names hold `TEXT`; and a
+test binary runs the test whose name it is given.
 
 A failing test's exit status is fixed and does not encode the failure's
 contents; standard error carries the description.
@@ -730,7 +739,7 @@ read the same way: its `?`s answer to what its returns and body solve that
 parameter to.
 One that writes
 contracts without a result keeps the arrow, `|x| -> where carries() { ... }`.
-A `test fn` that writes no result answers `Result[(), testing.Failure]`
+A test that writes no result answers `Result[(), testing.Failure]`
 ([S-Test]). A projection names a place and always writes its type.
 
 **[S-Equals]** A binding's name is followed by `=`.
@@ -1179,6 +1188,11 @@ and functions accessed through a type share its namespace, so a constant and a
 function cannot have the same name. Associated constants have no separate
 namespace.
 
+A test binds no name, so it is never a duplicate of a declaration. Two tests
+of one module are named by different strings, compared as the strings they
+decode to, wherever in the module each is written ([S-Test]); a second is
+reported where it is written, beside the first.
+
 A prelude name is not declared by the module that sees it, so a module's own
 top-level declaration or `use` of that name shadows the prelude's in that
 module rather than duplicating it ([§3.7](#37-modules)). Two such declarations
@@ -1250,10 +1264,10 @@ where the closure was declared.
 
 **[N-NotAValue]** A local, a parameter, a constant and a pattern's binder name a
 value. So does a function, wherever an expression is written: its name is a
-value of a structural `fn` type whose calls are indirect. A test, an `extern`
-and a projection are not values: a test is run only by the compiler, an
-`extern`'s body is outside the program, and a projection names a place that a
-bracket reaches.
+value of a structural `fn` type whose calls are indirect. An `extern` and a
+projection are not values: an `extern`'s body is outside the program, and a
+projection names a place that a bracket reaches. A test is named by a string,
+so no expression names one.
 
 A function is a top-level function with a body and an ordinary result. A public
 function reached through a module and an `export` referenced within its own
@@ -1335,7 +1349,7 @@ callable representation and ordinary consuming-call rules. Nullary and
 multi-payload constructor values are not admitted. Direct enum construction
 keeps its ordinary rules.
 
-Tests, `extern`s, types, traits and modules are not values and cannot be used
+`extern`s, types, traits and modules are not values and cannot be used
 as standalone expressions, whether compiler-provided or user-declared: name
 resolution checks the declaration's kind, not its spelling. Such a name has no
 value type, so [T-Discard] does not apply to it; a function named alone as a

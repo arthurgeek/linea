@@ -74,7 +74,7 @@ struct Pass {
 ```
 
 That is the whole list: `opaque`, `linear`, `copyable` and `derive(...)`, all
-on types. A test that must stop the program is written `test trap fn`, as
+on types. A test that must stop the program is written `test trap "…"`, as
 [Linea in an hour](01-linea-in-an-hour.md#tests) showed. You cannot invent your
 own:
 

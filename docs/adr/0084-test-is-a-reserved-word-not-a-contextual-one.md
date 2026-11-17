@@ -1,6 +1,7 @@
 # 84. `test` is a reserved word, not a contextual one
 
-Status: Accepted — 2026-08-16
+Status: Accepted — 2026-08-16; its premise that `test` modifies a function superseded by
+[0277](0277-a-test-is-named-by-a-string.md)
 
 ## Context
 

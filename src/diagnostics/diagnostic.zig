@@ -634,6 +634,9 @@ pub const FixKind = enum {
     use_trait,
     /// `copy(value)` passed to a call that both lends and takes the value.
     copy_argument,
+    /// The string that names a test, in place of the function `test fn`
+    /// declared.
+    test_name,
 
     /// The name a tool reads, as JSON writes it.
     pub fn text(self: FixKind) []const u8 {

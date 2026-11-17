@@ -1,0 +1,11 @@
+// A test's name is what `linea test` prints and selects, so it holds at least
+// one character.
+import std.testing
+
+test "" {
+    testing.assert(true, "an empty name says nothing")?
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,23 @@
+// A module names each of its tests once, so `linea test` reports and selects
+// every test by a name that means one of them.
+import std.testing
+
+fn double(n: UInt32) -> UInt32 {
+    n * 2
+}
+
+test "doubling two gives four" {
+    testing.assert_eq(double(2), 4, "two doubled is four")?
+}
+
+test "doubling two gives four" {
+    testing.assert_eq(double(2) / 2, 2, "halving undoes doubling")?
+}
+
+fn main() -> UInt8 {
+    if double(1) == 2 {
+        0
+    } else {
+        1
+    }
+}

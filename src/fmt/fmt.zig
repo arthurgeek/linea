@@ -1765,10 +1765,18 @@ const Printer = struct {
         // reads it. Dropping it printed a declaration that no longer names a
         // symbol, and the formatted file stopped parsing.
         if (self.ast.declIsExtern(d)) try self.write("extern ");
-        try self.write(word);
-        try self.write(self.declName(d));
-        try self.writeTypeParams(d);
-        try self.writeParams(d);
+        // A test is named by the string after `test` and takes no parameter
+        // list. One the parser refused for any of that never reaches here,
+        // since a file it refused is not formatted.
+        const named_test = self.ast.declIsTest(d) and self.ast.tokenTag(self.ast.declName(d)) == .string_literal;
+        if (named_test) {
+            try self.write(self.ast.tokenText(self.ast.declName(d)));
+        } else {
+            try self.write(word);
+            try self.write(self.declName(d));
+            try self.writeTypeParams(d);
+            try self.writeParams(d);
+        }
         if (self.ast.declReturnRef(d).wasWritten()) {
             try self.write(" -> ");
             try self.writeReturnType(d);
@@ -5232,22 +5240,22 @@ test "omitted test signatures survive formatting twice" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const written =
-        \\test fn succeeds() {}
+        \\test "succeeds" {}
         \\
-        \\test fn returns() {
+        \\test "returns" {
         \\    return
         \\}
         \\
-        \\test fn custom() -> Result[(), Failure] {
+        \\test "custom" -> Result[(), Failure] {
         \\    return .Ok(())
         \\}
         \\
-        \\test trap fn traps() {
+        \\test trap "traps" {
         \\    panic("expected")
         \\}
         \\
     ;
-    try check(arena.allocator(), "test fn succeeds(){}\ntest fn returns(){return}\ntest fn custom()->Result[(),Failure]{return .Ok(())}\ntest trap fn traps(){panic(\"expected\")}\n", written);
+    try check(arena.allocator(), "test \"succeeds\"{}\ntest   \"returns\"{return}\ntest \"custom\"->Result[(),Failure]{return .Ok(())}\ntest trap \"traps\"{panic(\"expected\")}\n", written);
     try check(arena.allocator(), written, written);
 }
 
@@ -5265,17 +5273,17 @@ test "a test in a trait is formatted as a member of its braces" {
         \\    }
         \\
         \\    // Doubling is checked on a parcel.
-        \\    test fn doubles() {
+        \\    test "doubles" {
         \\        check()
         \\    }
         \\
-        \\    test trap fn overflows() {
+        \\    test trap "overflows" {
         \\        check()
         \\    }
         \\}
         \\
     ;
-    try check(arena.allocator(), "trait Sized{type Unit\nfn size(self:Self)->UInt8\nfn twice(self:Self)->UInt8{self.size()*2}\n// Doubling is checked on a parcel.\ntest fn doubles(){check()}\ntest   trap fn overflows(){check()}}\n", written);
+    try check(arena.allocator(), "trait Sized{type Unit\nfn size(self:Self)->UInt8\nfn twice(self:Self)->UInt8{self.size()*2}\n// Doubling is checked on a parcel.\ntest \"doubles\"{check()}\ntest   trap \"overflows\"{check()}}\n", written);
     try check(arena.allocator(), written, written);
 }
 

@@ -1,15 +1,8 @@
-import std.io
-
-use io.IoError
-
-test fn checked() -> Result[(), IoError] {
-    return .Ok({})
-}
-
+// An `extern` and a projection name no value: the first has its body outside
+// the program, and the second names a place a bracket reaches.
 extern fn foreign(value: UInt8) -> UInt8
 
 fn main() -> UInt8 {
-    let _test: fn() -> Result[(), IoError] = checked
     let _extern: fn(read value: UInt8) -> UInt8 = foreign
     let _projection = Index.at
     0

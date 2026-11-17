@@ -1,70 +1,70 @@
 error[S-Test]: `K` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:10:46
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:10:43
    |
-10 |     test fn a_parameter_of_the_trait() where K: Copyable {
-   |                                              ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type
+10 |     test "a parameter of the trait" where K: Copyable {
+   |                                           ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type
 error[S-Test]: `K` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:15:59
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:15:56
    |
-15 |     test fn a_parameter_inside_a_written_type() where Vec[K]: Copyable {
-   |                                                           ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type
+15 |     test "a parameter inside a written type" where Vec[K]: Copyable {
+   |                                                        ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type
 error[S-Test]: `Self` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:20:55
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:20:52
    |
-20 |     test fn self_inside_a_written_type() where Option[Self]: Copyable {
-   |                                                       ^^^^ a test inside a trait is resolved at module scope; write the type it tests
+20 |     test "self inside a written type" where Option[Self]: Copyable {
+   |                                                    ^^^^ a test inside a trait is resolved at module scope; write the type it tests
 error[S-Test]: `K` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:25:64
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:25:61
    |
-25 |     test fn a_parameter_inside_a_callable_type() where fn(key: K) -> Bool: Copyable {
-   |                                                                ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type
+25 |     test "a parameter inside a callable type" where fn(key: K) -> Bool: Copyable {
+   |                                                             ^ a test is not instantiated, so the parameters of its trait name no type in it; write a concrete type
 error[S-Test]: `Self` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:30:51
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:30:48
    |
-30 |     test fn self_under_a_selection() where Option[Self].Item: Copyable {
-   |                                                   ^^^^ a test inside a trait is resolved at module scope; write the type it tests
+30 |     test "self under a selection" where Option[Self].Item: Copyable {
+   |                                                ^^^^ a test inside a trait is resolved at module scope; write the type it tests
 error[S-Test]: `T` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:55:45
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:55:42
    |
-55 |     test fn a_parameter_of_the_impl() where T: Copyable {
-   |                                             ^ a test is not instantiated, so the parameters of its `impl` name no type in it; write a concrete type
+55 |     test "a parameter of the impl" where T: Copyable {
+   |                                          ^ a test is not instantiated, so the parameters of its `impl` name no type in it; write a concrete type
 error[S-Test]: `Self` names no type in a test
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:70:45
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:70:42
    |
-70 |     test fn self_of_a_concrete_impl() where Self: Copyable {
-   |                                             ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
+70 |     test "self of a concrete impl" where Self: Copyable {
+   |                                          ^^^^ a test inside an `impl` is resolved at module scope; write `Meter`
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:10:46
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:10:43
    |
-10 |     test fn a_parameter_of_the_trait() where K: Copyable {
-   |                                              ^ this subject depends on no type parameter in scope
+10 |     test "a parameter of the trait" where K: Copyable {
+   |                                           ^ this subject depends on no type parameter in scope
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:15:55
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:15:52
    |
-15 |     test fn a_parameter_inside_a_written_type() where Vec[K]: Copyable {
-   |                                                       ^^^ this subject depends on no type parameter in scope
+15 |     test "a parameter inside a written type" where Vec[K]: Copyable {
+   |                                                    ^^^ this subject depends on no type parameter in scope
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:20:48
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:20:45
    |
-20 |     test fn self_inside_a_written_type() where Option[Self]: Copyable {
-   |                                                ^^^^^^ this subject depends on no type parameter in scope
+20 |     test "self inside a written type" where Option[Self]: Copyable {
+   |                                             ^^^^^^ this subject depends on no type parameter in scope
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:25:56
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:25:53
    |
-25 |     test fn a_parameter_inside_a_callable_type() where fn(key: K) -> Bool: Copyable {
-   |                                                        ^^^^^^^^^^^^^^^^^^ this subject depends on no type parameter in scope
+25 |     test "a parameter inside a callable type" where fn(key: K) -> Bool: Copyable {
+   |                                                     ^^^^^^^^^^^^^^^^^^ this subject depends on no type parameter in scope
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:30:44
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:30:41
    |
-30 |     test fn self_under_a_selection() where Option[Self].Item: Copyable {
-   |                                            ^^^^^^^^^^^^^^^^^ this subject depends on no type parameter in scope
+30 |     test "self under a selection" where Option[Self].Item: Copyable {
+   |                                         ^^^^^^^^^^^^^^^^^ this subject depends on no type parameter in scope
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:55:45
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:55:42
    |
-55 |     test fn a_parameter_of_the_impl() where T: Copyable {
-   |                                             ^ this subject depends on no type parameter in scope
+55 |     test "a parameter of the impl" where T: Copyable {
+   |                                          ^ this subject depends on no type parameter in scope
 error[T-Where]: a `where` predicate constrains an open type
-  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:70:45
+  --> tests/decl/a_test_where_clause_names_no_parameter_of_its_container.lin:70:42
    |
-70 |     test fn self_of_a_concrete_impl() where Self: Copyable {
-   |                                             ^^^^ this subject depends on no type parameter in scope
+70 |     test "self of a concrete impl" where Self: Copyable {
+   |                                          ^^^^ this subject depends on no type parameter in scope

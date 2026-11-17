@@ -1066,7 +1066,7 @@ pub fn shout(word: Str) -> Result[String, mem.Oom] where carries() {
     fmt.render_owned_in(mem.system(), "{word}!")
 }
 
-test fn a_word_is_shouted() {
+test "a word is shouted" {
     defer let loud = shout("hi") else |_| {
         return .Err(testing.refused("the word fits"))
     }

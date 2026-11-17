@@ -27565,7 +27565,6 @@ const Checker = struct {
             .projection => return .{ .noun = "a projection", .hint = "reach the place it names through a bracket" },
             else => return notAValue(.function),
         }
-        if (self.ast.declIsTest(d)) return .{ .noun = "a test", .hint = "a test is run by `linea test`, never named" };
         if (self.ast.declIsExtern(d)) return .{ .noun = "an `extern`", .hint = "call it; its body is outside this program" };
         return null;
     }

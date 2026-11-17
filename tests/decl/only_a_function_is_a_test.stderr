@@ -1,8 +1,8 @@
-error[S-Test]: only a function is a test
+error[S-Test]: a test is named by a string
  --> tests/decl/only_a_function_is_a_test.lin:2:1
   |
 2 | test struct Box { x: UInt8 }
-  | ^^^^ a test is a body the compiler runs, and this declares none
+  | ^^^^ write `test "what it checks" { … }`; this declares no body to run
 error[N-Unused]: `Box` is never used
  --> tests/decl/only_a_function_is_a_test.lin:2:13
   |

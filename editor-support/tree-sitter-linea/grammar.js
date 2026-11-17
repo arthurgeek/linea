@@ -75,6 +75,7 @@ module.exports = grammar({
 
     _declaration: $ => choice(
       $.function_declaration,
+      $.test_declaration,
       $.extern_declaration,
       $.enum_declaration,
       $.struct_declaration,
@@ -149,22 +150,26 @@ module.exports = grammar({
     function_declaration: $ => seq(
       optional($.visibility),
       optional('export'),
-      choice(
-        seq(
-          'test', optional('trap'), 'fn',
-          field('name', $.identifier),
-          optional($.type_parameters),
-          $.parameter_list,
-          optional(seq('->', field('return_type', $._result_type))),
-        ),
-        seq(
-          'fn',
-          field('name', $.identifier),
-          optional($.type_parameters),
-          $.parameter_list,
-          optional(seq('->', field('return_type', $._result_type))),
-        ),
-      ),
+      'fn',
+      field('name', $.identifier),
+      optional($.type_parameters),
+      $.parameter_list,
+      optional(seq('->', field('return_type', $._result_type))),
+      optional($.where_clause),
+      field('body', $.block),
+    ),
+
+    // A test, named by the string after `test`: a body the compiler runs,
+    // with a function's result and no parameters. It sits at module scope,
+    // in an `impl` and in a trait alike. A visibility or `export` before it is
+    // read for editors, as the compiler reads it before refusing it.
+    test_declaration: $ => seq(
+      optional($.visibility),
+      optional('export'),
+      'test',
+      optional('trap'),
+      field('name', $.string_literal),
+      optional(seq('->', field('return_type', $._result_type))),
       optional($.where_clause),
       field('body', $.block),
     ),
@@ -349,7 +354,7 @@ module.exports = grammar({
       field('trait', $.trait_reference),
       optional($.template_requirements),
       '{',
-      repeat($.function_declaration),
+      repeat(choice($.function_declaration, $.test_declaration)),
       '}',
     ),
 
@@ -437,7 +442,7 @@ module.exports = grammar({
       optional(seq(':', sep1($.bound, '+'))),
       optional($.where_clause),
       '{',
-      repeat(choice($.signature, $.provided_operation, $.projection_signature, $.associated_type, alias($.trait_test, $.function_declaration))),
+      repeat(choice($.signature, $.provided_operation, $.projection_signature, $.associated_type, $.test_declaration)),
       '}',
     ),
 
@@ -524,18 +529,6 @@ module.exports = grammar({
     // every type implementing the trait runs.
     provided_operation: $ => seq(
       'fn',
-      field('name', $.identifier),
-      optional($.type_parameters),
-      $.parameter_list,
-      optional(seq('->', field('return_type', $._result_type))),
-      optional($.where_clause),
-      field('body', $.block),
-    ),
-
-    // A test written inside a trait: a function the compiler calls, with the
-    // shape a test has at module scope and no visibility to declare.
-    trait_test: $ => seq(
-      'test', optional('trap'), 'fn',
       field('name', $.identifier),
       optional($.type_parameters),
       $.parameter_list,
@@ -1245,7 +1238,7 @@ function rawString(n) {
 // Ordinary declaration prefixes stay permissive for incomplete editor input.
 // Closed type attributes have their own position before this prefix.
 function modifiers($) {
-  return [optional($.visibility), optional('export'), optional(seq('test', optional('trap')))];
+  return [optional($.visibility), optional('export')];
 }
 
 function commaSep(rule) {

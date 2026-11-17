@@ -1,6 +1,7 @@
 # 269. A test in a trait declaration is a member of nothing
 
-Status: Accepted — 2026-11-10; extends 0247
+Status: Accepted — 2026-11-10; extends 0247; namespace clause superseded by
+[0277](0277-a-test-is-named-by-a-string.md)
 
 ## Context
 
