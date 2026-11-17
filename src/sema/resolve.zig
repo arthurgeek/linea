@@ -11087,6 +11087,10 @@ const Resolver = struct {
                 continue;
             }
 
+            // Read the first time an entry renders, and shared by every entry.
+            var derive_spelled: ?reflection.Spelled = null;
+            defer if (derive_spelled) |*set| set.deinit(self.gpa);
+
             for (trait_range.start..trait_range.end) |trait_index| {
                 const derive_trait = node.DeriveTraitId.at(@intCast(trait_index));
                 const entry = self.program.ast.deriveTrait(derive_trait);
@@ -11593,11 +11597,13 @@ const Resolver = struct {
                         representable = false;
                         break;
                     };
+                    if (derive_spelled == null) derive_spelled = try reflection.spelledBy(self.gpa, &self.program.ast, target, derive);
                     var rendered = reflection.renderMember(
                         self.gpa,
                         &self.program.ast,
                         derive,
                         target,
+                        &derive_spelled.?,
                         reflection_plan,
                         rendered_references,
                         alias,

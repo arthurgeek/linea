@@ -3018,6 +3018,18 @@ fn genericSharedDagProgram(gpa: std.mem.Allocator, n: u32, weighted: bool) ![]u8
     return out.toOwnedSlice();
 }
 
+/// `n` structs that each hold themselves, so [T-InfiniteLayout] reports `n`
+/// independent cycles; none of them may start a walk of the whole pool.
+fn infiniteLayoutsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    for (0..n) |i| try w.print("struct Loop{d} {{ next: Loop{d}, v: UInt8 }}\n", .{ i, i });
+    try w.writeAll("fn main() -> UInt8 {\n    0\n}\n");
+    return out.toOwnedSlice();
+}
+
 /// One growing edge closes a cycle through n distinct receiver families.
 fn genericPositiveCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     std.debug.assert(n > 0);
@@ -4467,6 +4479,33 @@ fn reflectedOrdinalOperationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "    let value: Observed = .First\n" ++
             "    let _answer = ObserveOrdinals.observe(value)\n" ++
             "    0\n" ++
+            "}\n",
+    );
+    return out.toOwnedSlice();
+}
+
+/// One enum of `n` variants, each holding its own struct, with one `From`
+/// derive entry per variant. Each entry renders against the whole enum and
+/// selects its variant by payload type, so neither may read every variant
+/// per entry.
+fn wideFromDerivesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    std.debug.assert(n > 0);
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    for (0..n) |i| try w.print("struct Part{d} {{ v: UInt8 }}\n", .{i});
+    try w.writeAll("@derive(");
+    for (0..n) |i| try w.print("{s}From[Part{d}]", .{ if (i == 0) "" else ", ", i });
+    try w.writeAll(")\nenum Wide {\n");
+    for (0..n) |i| try w.print("    V{d}(Part{d}),\n", .{ i, i });
+    try w.writeAll(
+        "}\n\n" ++
+            "fn main() -> UInt8 {\n" ++
+            "    let w: Wide = Wide.from(Part0 { v = 1 })\n" ++
+            "    match w {\n" ++
+            "        V0(part) => part.v,\n" ++
+            "        _ => 0,\n" ++
+            "    }\n" ++
             "}\n",
     );
     return out.toOwnedSlice();
@@ -7228,6 +7267,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "generic shared DAG checking", .n = 8, .cost = throughTreeBatch(genericSharedDagModule, .check, 128) },
     .{ .name = "generic trait-selected shared DAG checking", .n = 8, .cost = throughTreeBatch(genericTraitSelectedSharedDagModule, .check, 128) },
     .{ .name = "generic positive cycle checking", .n = 500, .cost = throughTreeBatch(genericPositiveCycleModule, .{ .refused = .t_poly_rec }, 1) },
+    .{ .name = "independent infinite layouts", .n = 2000, .cost = throughTreeBatch(infiniteLayoutsModule, .{ .refused = .t_infinite_layout }, 1) },
     .{ .name = "growing trait bound cycles", .n = 1000, .cost = throughTreeBatch(growingTraitCyclesModule, .{ .refused = .t_bound }, 1) },
     .{ .name = "growing newtype base ring", .n = 1000, .cost = throughTreeBatch(growingNewtypeRingModule, .{ .refused = .t_poly_rec }, 1) },
     // The length's six hundred terms stand one level each, so the brackets
@@ -7278,6 +7318,7 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "construction product width", .n = 2000, .cost = throughTheTree(constructionProductModule) },
     .{ .name = "construction repeated derives", .n = 1000, .cost = throughTheTree(constructionDerivesModule) },
     .{ .name = "derive group entries", .n = 4000, .cost = throughTheTree(deriveGroupEntriesModule) },
+    .{ .name = "from derives on one enum", .n = 1000, .cost = throughTheLoader(wideFromDerivesModule) },
     .{ .name = "generic derive predicates", .n = 20000, .cost = throughTheTree(genericDerivePredicatesModule) },
     .{ .name = "derived implementations in one cycle", .n = 2000, .cost = throughTheTree(derivedCycleModule) },
     .{ .name = "component requirement components", .n = 8000, .cost = throughTheTree(componentRequirementComponentsModule) },

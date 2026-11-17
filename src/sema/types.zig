@@ -804,55 +804,69 @@ pub const Cycle = struct {
     path: []const TypeId,
 };
 
-/// The first cycle among inline parts, or null where the graph is acyclic.
+/// Every cycle among inline parts, one at a time.
 ///
 /// A walk that remembered every type it had ever seen would call a type held
 /// twice a cycle. What makes one is being reached again *from within its own
 /// traversal*, so the mark says which of the two a type is: on the path being
 /// walked now, or finished and known acyclic.
 ///
+/// The marks outlive one cycle. Between two calls of `next` the caller breaks
+/// an edge on the cycle it was handed, which only takes parts away, so a type
+/// finished before stays acyclic and is not walked again. Only the types on
+/// the path when the cycle was found are walked again, from the same root.
+///
 /// A part that is an alike instantiation is walked as its representative
 /// (`Typing.partsSource`): its parts would be the representative's renamed,
 /// so it holds itself exactly where the representative does, and where that
 /// is the template the path names the declarations a reader edits.
-fn firstCycleIn(gpa: std.mem.Allocator, typing: *const Typing) !?Cycle {
-    const marks = try gpa.alloc(CycleMark, typing.pool.len);
-    defer gpa.free(marks);
-    @memset(marks, .unseen);
+///
+/// **Bound:** every type and every inline part walked once over all calls,
+/// and the types on each found cycle's path once more for that cycle.
+pub const CycleWalk = struct {
+    marks: std.ArrayList(CycleMark) = .empty,
+    path: std.ArrayList(TypeId) = .empty,
+    root: usize = 0,
 
-    var path: std.ArrayList(TypeId) = .empty;
-    defer path.deinit(gpa);
-
-    for (0..typing.pool.len) |i| {
-        const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
-        if (typing.alikeSource(t) != null) continue;
-        if (try walkFrom(gpa, typing, t, marks, &path)) {
-            return .{ .path = try gpa.dupe(TypeId, path.items) };
-        }
+    pub fn deinit(self: *CycleWalk, gpa: std.mem.Allocator) void {
+        self.marks.deinit(gpa);
+        self.path.deinit(gpa);
     }
-    return null;
-}
+
+    /// The next cycle, owned by the caller, or null where none remains.
+    pub fn next(self: *CycleWalk, gpa: std.mem.Allocator, typing: *const Typing) !?Cycle {
+        while (self.marks.items.len < typing.pool.len) try self.marks.append(gpa, .unseen);
+        while (self.root < typing.pool.len) : (self.root += 1) {
+            const t: TypeId = @enumFromInt(@as(u32, @intCast(self.root)));
+            if (typing.alikeSource(t) != null) continue;
+            const at = try walkFrom(gpa, typing, t, self.marks.items, &self.path) orelse continue;
+            const cycle: Cycle = .{ .path = try gpa.dupe(TypeId, self.path.items[at..]) };
+            for (self.path.items) |on| self.marks.items[@intFromEnum(on)] = .unseen;
+            self.path.clearRetainingCapacity();
+            return cycle;
+        }
+        return null;
+    }
+};
 
 const CycleMark = enum { unseen, on_path, done };
 
+/// Where on `path` the cycle reached from `held` starts, leaving the path
+/// as it stood when the cycle closed, or null where `held` reaches none.
 fn walkFrom(
     gpa: std.mem.Allocator,
     typing: *const Typing,
     held: TypeId,
     marks: []CycleMark,
     path: *std.ArrayList(TypeId),
-) !bool {
+) !?usize {
     const t = typing.partsSource(held);
     const i = @intFromEnum(t);
     switch (marks[i]) {
-        .done => return false,
+        .done => return null,
         // Reached from within its own traversal, so the path from here back to
         // it is the cycle.
-        .on_path => {
-            const at = std.mem.indexOfScalar(TypeId, path.items, t).?;
-            path.replaceRangeAssumeCapacity(0, at, &.{});
-            return true;
-        },
+        .on_path => return std.mem.indexOfScalar(TypeId, path.items, t).?,
         .unseen => {},
     }
 
@@ -862,53 +876,37 @@ fn walkFrom(
     const field_types = typing.fields.items(.ty);
     const variant_first_fields = typing.variants.items(.first_field);
     const variant_field_counts = typing.variants.items(.field_count);
-    var reported = false;
     switch (typing.pool[i]) {
         .borrow => {},
         // An array reaches its element, so a type holding an array of itself
         // is as infinite as one holding itself, and is found the same way.
-        .array => |a| {
-            if (try walkFrom(gpa, typing, a.element, marks, path)) {
-                reported = true;
-            }
-        },
+        .array => |a| if (try walkFrom(gpa, typing, a.element, marks, path)) |at| return at,
         .struct_ => |x| for (field_types[x.first_field..][0..x.field_count]) |field_type| {
-            if (try walkFrom(gpa, typing, field_type, marks, path)) {
-                reported = true;
-                break;
-            }
+            if (try walkFrom(gpa, typing, field_type, marks, path)) |at| return at;
         },
-        .enum_ => |e| outer: for (e.first_variant..e.first_variant + e.variant_count) |variant_at| {
+        .enum_ => |e| for (e.first_variant..e.first_variant + e.variant_count) |variant_at| {
             const first_field = variant_first_fields[variant_at];
             const field_count = variant_field_counts[variant_at];
             for (field_types[first_field..][0..field_count]) |field_type| {
-                if (try walkFrom(gpa, typing, field_type, marks, path)) {
-                    reported = true;
-                    break :outer;
-                }
+                if (try walkFrom(gpa, typing, field_type, marks, path)) |at| return at;
             }
         },
         // A newtype reaches its base exactly as an array reaches its
         // element: a type declared over itself is as infinite as one holding
         // itself, and layout would recurse forever without this.
-        .newtype => |n| {
-            if (try walkFrom(gpa, typing, n.base, marks, path)) {
-                reported = true;
-            }
-        },
+        .newtype => |n| if (try walkFrom(gpa, typing, n.base, marks, path)) |at| return at,
         // Every kind that holds nothing, named rather than fallen through: a
         // kind added later holds something or it does not, and deciding that
         // is what this walk is. Left as a fall-through, a new kind would be
         // acyclic by default and laid out by whoever asked for its size
         // first.
-        .closure => |closure| reported = try walkFrom(gpa, typing, closure.environment, marks, path),
+        .closure => |closure| if (try walkFrom(gpa, typing, closure.environment, marks, path)) |at| return at,
         .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable => {},
     }
-    if (reported) return true;
 
     _ = path.pop();
     marks[i] = .done;
-    return false;
+    return null;
 }
 
 /// Whether a callable parameter supplies a folded value when omitted.
@@ -11946,10 +11944,13 @@ pub const Typing = struct {
         /// The first cycle among inline parts, or null. Asked once, after every
         /// type is entered and before any layout is, because asking for the
         /// layout of a type on a cycle does not return.
-        pub fn firstCycle(self: *Builder, gpa: std.mem.Allocator) !?Cycle {
-            try self.writeHeldParts();
+        /// The next cycle `walk` finds among inline parts, owned by the
+        /// caller. The parts of every type the pool holds are written first,
+        /// and again only where the pool grew since the last call.
+        pub fn nextCycle(self: *Builder, gpa: std.mem.Allocator, walk: *CycleWalk) !?Cycle {
+            if (walk.marks.items.len == 0 or walk.marks.items.len < self.pool.items.len) try self.writeHeldParts();
             const typing = self.view();
-            return firstCycleIn(gpa, &typing);
+            return walk.next(gpa, &typing);
         }
 
         /// The first type at or after `from` whose width crosses what [L-Size]
@@ -16435,7 +16436,8 @@ test "a type that holds itself is a cycle" {
     const list = try b.addEnum("List", .copyable, &.{ .{ .name = "Cons" }, .{ .name = "Nil" } });
     b.setVariantFields(list, 0, try b.addFields(&.{.{ .name = "head", .ty = list }}), 1);
 
-    const c = (try b.firstCycle(gpa)).?;
+    var walk: CycleWalk = .{};
+    const c = (try b.nextCycle(gpa, &walk)).?;
     try testing.expectEqual(@as(usize, 1), c.path.len);
     try testing.expectEqual(list, c.path[0]);
 }
@@ -16453,7 +16455,8 @@ test "a cycle through other types names every type on it" {
     try b.setFieldType(bb, 0, cc);
     try b.setFieldType(cc, 0, a);
 
-    const cycle = (try b.firstCycle(gpa)).?;
+    var walk: CycleWalk = .{};
+    const cycle = (try b.nextCycle(gpa, &walk)).?;
     try testing.expectEqual(@as(usize, 3), cycle.path.len);
     // A reader has to know which edge to break, so every type on the cycle is
     // named rather than only the one that closed it.
@@ -16481,7 +16484,8 @@ test "a type held twice but not cyclically is not a cycle" {
         .{ .name = "b", .ty = p },
     });
 
-    try testing.expect(try b.firstCycle(gpa) == null);
+    var walk: CycleWalk = .{};
+    try testing.expect(try b.nextCycle(gpa, &walk) == null);
 }
 
 test "a diamond is not a cycle either" {
@@ -16497,7 +16501,8 @@ test "a diamond is not a cycle either" {
     const r = try b.addStruct("R", .copyable, &.{.{ .name = "n", .ty = leaf }});
     _ = try b.addStruct("Top", .copyable, &.{ .{ .name = "l", .ty = l }, .{ .name = "r", .ty = r } });
 
-    try testing.expect(try b.firstCycle(gpa) == null);
+    var walk: CycleWalk = .{};
+    try testing.expect(try b.nextCycle(gpa, &walk) == null);
 }
 
 test "a variant's fields are placed past the tag, each at its own alignment" {

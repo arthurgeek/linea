@@ -933,6 +933,11 @@ fn typecheckInternal(
         c.variant_names.deinit(gpa);
     }
     defer c.wrap_choices.deinit(gpa);
+    defer {
+        var payloads = c.wrap_payloads.valueIterator();
+        while (payloads.next()) |index| index.holders.deinit(gpa);
+        c.wrap_payloads.deinit(gpa);
+    }
     defer c.unwrapped.deinit(gpa);
     defer gpa.free(c.binding_value_locs);
     errdefer c.builder.deinit();
@@ -1525,7 +1530,7 @@ fn typecheckInternal(
     // declaration alone does not -- settling `Iter` to `S[Box]` is what makes
     // an `S[Box]` hold an `S[Box]` -- so the question is asked of the minted
     // instantiations as well as of the written parts.
-    try c.reportLayoutCycles(type_of_decl);
+    try c.reportLayoutCycles();
     try c.reportCopyabilityDeclarations(type_of_decl);
 
     z_parts.end();
@@ -6515,6 +6520,10 @@ const Checker = struct {
     /// The variant each rendered wrap's placeholder names, keyed by the
     /// placeholder: chosen by `checkWrap` before the construction is checked.
     wrap_choices: std.AutoHashMapUnmanaged(ExprId, u32) = .empty,
+    /// Each enum a wrap built, with its one-field variants by payload type.
+    /// Sized by those enums' variants, so a derive of k `From` entries on an
+    /// enum of k variants reads the variants once rather than once per entry.
+    wrap_payloads: std.AutoHashMapUnmanaged(TypeId, WrapPayloads) = .empty,
     /// Each wrap that selected no single variant, reported at the end by
     /// `reportUnwrappedSources`.
     unwrapped: std.ArrayList(UnwrappedWrap) = .empty,
@@ -13939,14 +13948,15 @@ const Checker = struct {
     /// Breaking is not tidying. A diagnosed type is still in the pool, and
     /// every pass below here asks for a layout; one that cannot terminate does
     /// not stop being asked because it was reported.
-    fn reportLayoutCycles(self: *Checker, type_of_decl: types_mod.Returns) !void {
+    fn reportLayoutCycles(self: *Checker) !void {
         // Each recovery removes at least one inline edge and adds none, so
-        // the finite graph bounds the number of iterations.
-        while (true) {
-            const cycle = (try self.builder.firstCycle(self.gpa)) orelse return;
+        // the finite graph bounds the number of iterations, and one walk
+        // carries on past each cycle rather than starting over.
+        var walk: types_mod.CycleWalk = .{};
+        defer walk.deinit(self.gpa);
+        while (try self.builder.nextCycle(self.gpa, &walk)) |cycle| {
             defer self.gpa.free(cycle.path);
-
-            try self.reportCycle(cycle, type_of_decl);
+            try self.reportCycle(cycle);
             try self.breakCycle(cycle);
         }
     }
@@ -14001,7 +14011,7 @@ const Checker = struct {
         }
     }
 
-    fn reportCycle(self: *Checker, cycle: Cycle, type_of_decl: types_mod.Returns) !void {
+    fn reportCycle(self: *Checker, cycle: Cycle) !void {
         // The cycle rather than the category: a reader has to know which edge
         // to break, and "recursive type" does not say.
         var how: std.ArrayList(u8) = .empty;
@@ -14024,13 +14034,8 @@ const Checker = struct {
         // the text they can change.
         const declared: ?node.DeclId = if (self.builder.instanceOf(cycle.path[0])) |i|
             i.decl
-        else blk: {
-            var walking = type_of_decl.pairs();
-            while (walking.next()) |each| {
-                if (each.value == cycle.path[0]) break :blk each.id;
-            }
-            break :blk null;
-        };
+        else
+            self.decl_of_type.get(cycle.path[0]);
 
         const at: Loc = if (declared) |d|
             .{ .file = self.ast.fileOfDecl(d), .span = self.ast.declNameSpan(d) }
@@ -32309,21 +32314,14 @@ const Checker = struct {
         var first: ?u32 = null;
         var second: ?u32 = null;
         var unsettled = want == .poison or try self.builder.anyUnsettled(&.{source});
-        if (!unsettled) for (0..self.builder.variantCount(want)) |raw| {
-            const k: u32 = @intCast(raw);
-            if (try self.builder.variantFieldCount(want, k) != 1) continue;
-            const payload = try self.builder.variantFieldType(want, k, 0);
-            if (try self.builder.anyUnsettled(&.{payload})) {
-                unsettled = true;
-                continue;
+        if (!unsettled) {
+            const payloads = try self.wrapPayloads(want);
+            unsettled = payloads.unsettled;
+            if (payloads.holders.get(source)) |holders| {
+                first = holders[0];
+                second = holders[1];
             }
-            if (payload != source) continue;
-            if (first == null) {
-                first = k;
-            } else if (second == null) {
-                second = k;
-            }
-        };
+        }
         if (first != null and second == null) {
             try self.wrap_choices.put(self.gpa, callee, first.?);
             const built = try self.checkConstruct(id, .{
@@ -32342,6 +32340,45 @@ const Checker = struct {
             .holders = if (second) |later| .{ first.?, later } else null,
         });
         return try self.record(id, .poison);
+    }
+
+    /// An enum's one-field variants by the type of their field: the first two
+    /// variants holding each type, and whether any field's type is not yet
+    /// settled, in which case no variant is chosen by it.
+    const WrapPayloads = struct {
+        holders: std.AutoHashMapUnmanaged(TypeId, [2]?u32) = .empty,
+        unsettled: bool = false,
+    };
+
+    /// `want`'s one-field variants by payload type, read once per enum.
+    ///
+    /// **Bound:** the enum's variants, once per enum whose payloads are all
+    /// settled.
+    fn wrapPayloads(self: *Checker, want: TypeId) std.mem.Allocator.Error!*const WrapPayloads {
+        const entry = try self.wrap_payloads.getOrPut(self.gpa, want);
+        // An index read while a payload was unsettled is read again, since
+        // the payload may have settled since.
+        if (entry.found_existing) {
+            if (!entry.value_ptr.unsettled) return entry.value_ptr;
+            entry.value_ptr.holders.deinit(self.gpa);
+        }
+        entry.value_ptr.* = .{};
+        for (0..self.builder.variantCount(want)) |raw| {
+            const k: u32 = @intCast(raw);
+            if (try self.builder.variantFieldCount(want, k) != 1) continue;
+            const payload = try self.builder.variantFieldType(want, k, 0);
+            if (try self.builder.anyUnsettled(&.{payload})) {
+                entry.value_ptr.unsettled = true;
+                continue;
+            }
+            const holders = try entry.value_ptr.holders.getOrPut(self.gpa, payload);
+            if (!holders.found_existing) {
+                holders.value_ptr.* = .{ k, null };
+            } else if (holders.value_ptr[1] == null) {
+                holders.value_ptr[1] = k;
+            }
+        }
+        return entry.value_ptr;
     }
 
     /// Reports [T-Derive] for each wrap `checkWrap` found no single variant
