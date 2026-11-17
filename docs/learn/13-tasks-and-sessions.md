@@ -1430,7 +1430,7 @@ Linea provides four combinators for independent work:
 
 Each takes a `policy: task.Policy`:
 - `Policy.Sequential`: runs every job on the caller, one after another, starts no task and is completely deterministic.
-- `Policy.Threads(max)`: runs at most `max` jobs at once, each on a task of its own. `map`, `all` and `lazy_map` start the next job as soon as one finishes, so one slow job holds up no other; `join`, `join3` and `join4` run up to `max` jobs at once, on `max - 1` tasks of their own and the caller. `.Threads(1)` runs the jobs in turn on the caller, and a `max` of 0 stops the program.
+- `Policy.Threads(max)`: runs at most `max` jobs at once, on tasks of their own. `map`, `all` and `lazy_map` start at most `max` worker tasks, and a worker that finishes takes the next items at once, so a call starts no more tasks however many items it maps; `join`, `join3` and `join4` run up to `max` jobs at once, on `max - 1` tasks of their own and the caller. `.Threads(1)` runs the jobs in turn on the caller, and a `max` of 0 stops the program.
 
 `independent_work.lin`:
 
@@ -1602,7 +1602,7 @@ and `finish()` then hands back the source with the items it never pulled.
 
 Each combinator has an `_in` form that takes an allocator first, as every
 allocating function in the library does: `join_in`, `join3_in`, `join4_in`,
-`all_in`, `map_in` and `lazy_map_in`. The bytes each started job is kept in
+`all_in`, `map_in` and `lazy_map_in`. The bytes each started task is kept in
 come from it, and so do the results `map_in` and `all_in` collect:
 
 `arena_cubes.lin`:
@@ -1624,8 +1624,8 @@ fn main() -> Result[UInt8, io.IoError] {
     for n in 1..=5 {
         &items.push(n).unwrap()
     }
-    // Each started job's bytes, the map's places and the results all come
-    // from the arena, so the results go when the arena does.
+    // Each worker's bytes, the map's places and the results all come from
+    // the arena, so the results go when the arena does.
     let cubes = task.map_in(arena.handle(), .Threads(2), items, cube)
     for cubed in cubes.as_slice() {
         io.println("{*cubed}")?
