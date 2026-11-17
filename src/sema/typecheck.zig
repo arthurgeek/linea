@@ -13360,6 +13360,10 @@ const Checker = struct {
                 _ = try self.settle(param.ty, got, trait, out, &ignored);
             }
         }
+        if (!argument_poisoned and !try self.settleLiteralTraitArgs(id, trait, out)) {
+            @memset(out, .poison);
+            return out;
+        }
         for (params, 0..) |tp, k| {
             if (out[k] != .poison or argument_poisoned) continue;
 
@@ -13385,6 +13389,78 @@ const Checker = struct {
         return out;
     }
 
+    /// Settles the trait arguments a call left to its literals where `Self` is
+    /// a type parameter, from the bounds that parameter carries. The generic
+    /// body is checked where it is written, so the call must name one of
+    /// them there: `Scale.scale(s, 1)` under `S: Scale[UInt8] + Scale[Bool]`
+    /// is a call at `Scale[UInt8]`, and under `S: Scale[UInt8] +
+    /// Scale[UInt16]` the literal fits both and the call is refused. False
+    /// where it was refused.
+    ///
+    /// **Bound:** the bounds and implementations `keys` reads for the
+    /// parameter, each compared once against the trait's parameters.
+    fn settleLiteralTraitArgs(self: *Checker, id: ExprId, trait: node.DeclId, out: []TypeId) std.mem.Allocator.Error!bool {
+        const receiver = self.self_at_call orelse return true;
+        if (receiver == .poison or self.builder.get(receiver) != .parameter) return true;
+        for (out) |*slot| {
+            if (slot.* != .poison) slot.* = try self.builder.resolveOpen(slot.*, &self.open_types);
+        }
+        const waiting = for (out) |slot| {
+            if (slot != .poison and self.openVariable(slot) != null) break true;
+        } else false;
+        if (!waiting) return true;
+
+        try self.builder.prepareLookupWithin(self.generic, receiver);
+        const pool = try self.builder.capabilityView();
+        var keys: std.ArrayList([]const TypeId) = .empty;
+        defer keys.deinit(self.gpa);
+        if (try self.impl_index.keys(self.gpa, self.implementations, &pool, trait, receiver, self.generic, &keys)) return true;
+        var fitting: std.ArrayList([]const TypeId) = .empty;
+        defer fitting.deinit(self.gpa);
+        for (keys.items) |key| {
+            if (key.len != out.len) continue;
+            const fits = for (out, key) |slot, settled| {
+                if (slot == .poison) continue;
+                if (self.openVariable(slot)) |v| {
+                    if (!try self.fitsOpen(v, settled)) break false;
+                } else if (slot != settled) break false;
+            } else true;
+            if (fits) try fitting.append(self.gpa, key);
+        }
+        switch (fitting.items.len) {
+            // No bound fits, which the missing implementation reports once
+            // the literals take their default types.
+            0 => return true,
+            1 => {
+                for (out, fitting.items[0]) |*slot, settled| {
+                    const v = self.openVariable(slot.*) orelse continue;
+                    _ = try self.settleOpen(v, settled, null);
+                    slot.* = settled;
+                }
+                return true;
+            },
+            else => {
+                var said: std.ArrayList(u8) = .empty;
+                defer said.deinit(self.gpa);
+                for (fitting.items, 0..) |key, k| {
+                    if (k > 0) try said.appendSlice(self.gpa, if (k == fitting.items.len - 1) " and " else ", ");
+                    const written = try self.builder.spellInstance(self.ast.tokenText(self.ast.declName(trait)), key);
+                    defer self.gpa.free(written);
+                    try said.print(self.gpa, "`{s}`", .{written});
+                }
+                try self.sink.addErrorFmt(
+                    .n_ambiguous,
+                    self.ast.fileOfExpr(id),
+                    self.ast.exprSpan(id),
+                    "give an argument the type of the one it means",
+                    "`{s}` implements {s}, and this call fits each",
+                    .{ try self.typeName(receiver), said.items },
+                );
+                return false;
+            },
+        }
+    }
+
     /// Fills `out` with the arguments the call's receiver's bound gives `trait`.
     ///
     /// A receiver known only through a type parameter reaches the
@@ -13405,7 +13481,12 @@ const Checker = struct {
         var only: ?[]const TypeId = null;
         for (self.builder.boundsOn(receiver)) |bound| {
             if (bound.trait.index() != named) continue;
-            if (only != null) return;
+            // One list reached along two paths, as round a cycle of traits or
+            // through two traits that each require it, is still one list.
+            if (only) |seen| {
+                if (std.mem.eql(TypeId, seen, bound.args)) continue;
+                return;
+            }
             only = bound.args;
         }
         const args = only orelse return;
@@ -13463,9 +13544,12 @@ const Checker = struct {
     /// Reported here rather than left to lowering, which has no diagnostic to
     /// give and would emit a call to a body that does not exist.
     ///
-    /// Only where `Self` is a concrete type. Inside a generic body it is a
-    /// parameter, and which implementation that is is not known until the body
-    /// is instantiated.
+    /// Inside a generic body `Self` may be a type parameter, and its bounds
+    /// say which keys it answers where the body is written, so a call there
+    /// is checked against them as one at a concrete type is against its
+    /// implementations. A key holding a type parameter at a concrete `Self`,
+    /// or a type no use has settled, names no implementation until it is
+    /// known.
     fn checkImplementationExists(
         self: *Checker,
         id: ExprId,
@@ -13474,7 +13558,10 @@ const Checker = struct {
         if (rec.args.len == 0) return;
         if (rec.self_ty == .poison) return;
         for (rec.args) |a| if (a == .poison) return;
-        if (self.builder.awaitsTypes(rec.self_ty, rec.args)) return;
+        if (self.builder.awaitsTypes(rec.self_ty, rec.args)) {
+            if (self.builder.get(rec.self_ty) != .parameter) return;
+            for (rec.args) |a| if (self.builder.get(a) == .open_type) return;
+        }
 
         const trait = node.DeclId.at(rec.trait);
         if (self.rendersItself(rec.self_ty, trait)) return;
@@ -14408,16 +14495,19 @@ const Checker = struct {
     }
 
     fn settleOpen(self: *Checker, v: u32, to: TypeId, at: ?open_types_mod.Site) std.mem.Allocator.Error!bool {
-        switch (self.open_types.familyOf(v)) {
-            .integer => {
-                const is_integer = to.bounds() != null or self.builder.isIntegerWithin(self.generic, to);
-                if (!is_integer) return false;
-            },
-            .float => if (!to.isFloat()) return false,
-            // A type holding the variable it would settle is no type at all.
-            .any => if (to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))) return false,
-        }
+        if (!try self.fitsOpen(v, to)) return false;
         return self.open_types.settle(v, to, at) != .conflict;
+    }
+
+    /// Whether the open variable `v` may become `to`: an integer literal only
+    /// an integer type, a float literal only a float type.
+    fn fitsOpen(self: *Checker, v: u32, to: TypeId) std.mem.Allocator.Error!bool {
+        return switch (self.open_types.familyOf(v)) {
+            .integer => to.bounds() != null or self.builder.isIntegerWithin(self.generic, to),
+            .float => to.isFloat(),
+            // A type holding the variable it would settle is no type at all.
+            .any => !(to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))),
+        };
     }
 
     /// Whether `t` mentions the open variable whose root is `root`.
@@ -34690,11 +34780,6 @@ const Checker = struct {
         }
     }
 
-    /// One trait on the walk that refuses a bound cycle, and how many of its
-    /// own bounds have been stepped through. Named rather than local to the
-    /// walk, because the message reads the path out and so takes it.
-    const Descent = struct { trait: node.DeclId, at: usize };
-
     /// Fills `growing_trait_bounds`: the trait bounds on a cycle of
     /// requirements whose arguments grow at every turn.
     ///
@@ -34840,51 +34925,169 @@ const Checker = struct {
     /// type could have. Reported where the bound that closes the cycle is
     /// written, which is the token a reader has to change.
     ///
+    /// One report per trait that names itself among its bounds, and one per
+    /// group of traits that require each other, however many bounds close
+    /// cycles inside it. Which cycle a group's report names is decided by the
+    /// traits' names and the order each trait writes its bounds, never by the
+    /// order the traits are declared in: the walk starts from the group's
+    /// first trait by name, and the report names the shortest way round back
+    /// to it.
+    ///
     /// **Bound:** one visit per trait the program declares and one step per
-    /// bound each writes -- a single depth-first walk over the whole graph,
-    /// not one per trait. The path is a list rather than a stack of calls,
-    /// because how deep a chain of traits runs is what the source decides.
+    /// bound each writes to find the groups, and the same again within each
+    /// group to find its cycle. The walks keep their paths as lists rather
+    /// than as calls, because how deep a chain of traits runs is what the
+    /// source decides.
     fn reportTraitBoundCycles(self: *Checker) std.mem.Allocator.Error!void {
-        // Unvisited, on the walk's current path, or finished. A bound reaching
-        // one still on the path closes a cycle; one reaching a finished trait
-        // reaches a part of the graph already known to hold none.
-        const Colour = enum(u8) { unvisited, on_path, done };
-        const colour = try self.gpa.alloc(Colour, self.ast.declCount());
-        defer self.gpa.free(colour);
-        @memset(colour, .unvisited);
-
-        var path: std.ArrayList(Descent) = .empty;
-        defer path.deinit(self.gpa);
-
-        for (0..self.ast.declCount()) |i| {
-            const root = node.DeclId.at(@intCast(i));
-            if (self.ast.declTag(root) != .trait_) continue;
-            if (colour[i] != .unvisited) continue;
-
-            colour[i] = .on_path;
-            try path.append(self.gpa, .{ .trait = root, .at = 0 });
-            while (path.items.len > 0) {
-                const from = path.items[path.items.len - 1].trait;
-                const bounds = self.ast.declBounds(from);
-                const step = path.items[path.items.len - 1].at;
-                if (step == bounds.len) {
-                    colour[from.index()] = .done;
-                    _ = path.pop();
-                    continue;
-                }
-                path.items[path.items.len - 1].at = step + 1;
-
-                const required = traitAt(self.ast, self.res, bounds[step].named.name) orelse continue;
-                switch (colour[required.index()]) {
-                    .done => {},
-                    .unvisited => {
-                        colour[required.index()] = .on_path;
-                        try path.append(self.gpa, .{ .trait = required, .at = 0 });
-                    },
-                    .on_path => try self.refuseBoundCycle(path.items, from, required, bounds[step].named.name),
-                }
+        const decls = self.ast.declCount();
+        for (0..decls) |i| {
+            const trait = node.DeclId.at(@intCast(i));
+            if (self.ast.declTag(trait) != .trait_) continue;
+            for (self.ast.declBounds(trait)) |b| {
+                if (b.kind == .callable) continue;
+                if (traitAt(self.ast, self.res, b.named.name) != trait) continue;
+                try self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(b.named.name),
+                    self.ast.tokenSpan(b.named.name),
+                    "drop the bound",
+                    "`{s}` requires itself",
+                    .{self.ast.tokenText(self.ast.declName(trait))},
+                );
+                break;
             }
         }
+
+        // Strongly connected groups by Tarjan's walk, with its calls kept as
+        // a list.
+        const unvisited = std.math.maxInt(u32);
+        const index = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(index);
+        @memset(index, unvisited);
+        const low = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(low);
+        const group = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(group);
+        @memset(group, unvisited);
+        const on_stack = try self.gpa.alloc(bool, decls);
+        defer self.gpa.free(on_stack);
+        @memset(on_stack, false);
+        var stack: std.ArrayList(u32) = .empty;
+        defer stack.deinit(self.gpa);
+        const Frame = struct { n: u32, next: u32 };
+        var calls: std.ArrayList(Frame) = .empty;
+        defer calls.deinit(self.gpa);
+        // Each group of two or more traits, by the first of its members by
+        // name.
+        var groups: std.ArrayList(u32) = .empty;
+        defer groups.deinit(self.gpa);
+        var counter: u32 = 0;
+        for (0..decls) |root_index| {
+            const root: u32 = @intCast(root_index);
+            if (self.ast.declTag(node.DeclId.at(root)) != .trait_ or index[root] != unvisited) continue;
+            index[root] = counter;
+            low[root] = counter;
+            counter += 1;
+            try stack.append(self.gpa, root);
+            on_stack[root] = true;
+            try calls.append(self.gpa, .{ .n = root, .next = 0 });
+            while (calls.items.len > 0) {
+                const frame = &calls.items[calls.items.len - 1];
+                const n = frame.n;
+                const bounds = self.ast.declBounds(node.DeclId.at(n));
+                if (frame.next < bounds.len) {
+                    const b = bounds[frame.next];
+                    frame.next += 1;
+                    if (b.kind == .callable) continue;
+                    const required = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                    if (self.ast.declTag(required) != .trait_) continue;
+                    const to: u32 = @intCast(required.index());
+                    if (index[to] == unvisited) {
+                        index[to] = counter;
+                        low[to] = counter;
+                        counter += 1;
+                        try stack.append(self.gpa, to);
+                        on_stack[to] = true;
+                        try calls.append(self.gpa, .{ .n = to, .next = 0 });
+                    } else if (on_stack[to]) {
+                        low[n] = @min(low[n], index[to]);
+                    }
+                    continue;
+                }
+                _ = calls.pop();
+                if (calls.items.len > 0) {
+                    const parent = calls.items[calls.items.len - 1].n;
+                    low[parent] = @min(low[parent], low[n]);
+                }
+                if (low[n] != index[n]) continue;
+                var first = n;
+                var members: usize = 0;
+                while (stack.pop()) |member| {
+                    on_stack[member] = false;
+                    group[member] = n;
+                    members += 1;
+                    if (self.namedBefore(member, first)) first = member;
+                    if (member == n) break;
+                }
+                if (members > 1) try groups.append(self.gpa, first);
+            }
+        }
+
+        // The shortest way round each group from its first trait, by a walk
+        // over the group's own bounds in the order each trait writes them.
+        const came_from = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(came_from);
+        @memset(came_from, unvisited);
+        var frontier: std.ArrayList(u32) = .empty;
+        defer frontier.deinit(self.gpa);
+        var cycle: std.ArrayList(node.DeclId) = .empty;
+        defer cycle.deinit(self.gpa);
+        for (groups.items) |start| {
+            frontier.clearRetainingCapacity();
+            try frontier.append(self.gpa, start);
+            came_from[start] = start;
+            var reached: ?struct { last: u32, at: TokenId } = null;
+            var next: usize = 0;
+            walk: while (next < frontier.items.len) : (next += 1) {
+                const from = frontier.items[next];
+                for (self.ast.declBounds(node.DeclId.at(from))) |b| {
+                    if (b.kind == .callable) continue;
+                    const required = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                    const to: u32 = @intCast(required.index());
+                    if (to == from or group[to] != group[start]) continue;
+                    if (to == start) {
+                        reached = .{ .last = from, .at = b.named.name };
+                        break :walk;
+                    }
+                    if (came_from[to] != unvisited) continue;
+                    came_from[to] = from;
+                    try frontier.append(self.gpa, to);
+                }
+            }
+            const closing = reached orelse continue;
+            cycle.clearRetainingCapacity();
+            var at = closing.last;
+            while (true) {
+                try cycle.append(self.gpa, node.DeclId.at(at));
+                if (at == start) break;
+                at = came_from[at];
+            }
+            std.mem.reverse(node.DeclId, cycle.items);
+            try self.refuseBoundCycle(cycle.items, closing.at);
+            for (frontier.items) |member| came_from[member] = unvisited;
+        }
+    }
+
+    /// Whether `a`'s name orders before `b`'s, the declaration's place
+    /// deciding between two traits of one name in different modules.
+    fn namedBefore(self: *const Checker, a: u32, b: u32) bool {
+        const left = self.ast.tokenText(self.ast.declName(node.DeclId.at(a)));
+        const right = self.ast.tokenText(self.ast.declName(node.DeclId.at(b)));
+        return switch (std.mem.order(u8, left, right)) {
+            .lt => true,
+            .gt => false,
+            .eq => a < b,
+        };
     }
 
     /// Reports the bound that closes a cycle, naming every requirement on it.
@@ -34894,48 +35097,20 @@ const Checker = struct {
     /// them, so a message naming the pair alone states a requirement no
     /// declaration wrote and sends a reader to a bound that is not there.
     ///
-    /// Read from where `required` sits on the walk's path round to the end of
-    /// it, which is the cycle: everything before that point leads into the
-    /// cycle without being on it.
-    ///
-    /// **Bound:** the traits on the cycle, which is at most the path the walk
-    /// is already holding.
-    fn refuseBoundCycle(
-        self: *Checker,
-        path: []const Descent,
-        requiring: node.DeclId,
-        required: node.DeclId,
-        at: TokenId,
-    ) std.mem.Allocator.Error!void {
-        const one = self.ast.tokenText(self.ast.declName(requiring));
-        if (requiring == required) {
-            return self.sink.addErrorFmt(
-                .t_bound,
-                self.ast.fileOf(at),
-                self.ast.tokenSpan(at),
-                "drop the bound",
-                "`{s}` requires itself",
-                .{one},
-            );
-        }
-
-        // From the bound that closes the cycle, because that is the token
-        // underlined, and then forward along the path until it comes back
-        // round to here.
-        var start: usize = 0;
-        while (path[start].trait != required) start += 1;
-
+    /// `cycle` runs from the trait the closing bound `at` requires to the
+    /// trait that writes it, each requiring the next. The message starts at
+    /// the closing bound, because that is the token underlined, and then
+    /// goes forward round the cycle back to it.
+    fn refuseBoundCycle(self: *Checker, cycle: []const node.DeclId, at: TokenId) std.mem.Allocator.Error!void {
         var said: std.ArrayList(u8) = .empty;
         defer said.deinit(self.gpa);
-        const clauses = path.len - start;
-        for (0..clauses) |k| {
-            const from = if (k == 0) requiring else path[start + k - 1].trait;
-            const to = if (k == 0) required else path[start + k].trait;
+        for (0..cycle.len) |k| {
+            const from = if (k == 0) cycle[cycle.len - 1] else cycle[k - 1];
             if (k > 0) try said.appendSlice(self.gpa, ", ");
-            if (k == clauses - 1) try said.appendSlice(self.gpa, "and ");
+            if (k == cycle.len - 1) try said.appendSlice(self.gpa, "and ");
             try said.print(self.gpa, "`{s}` requires `{s}`", .{
                 self.ast.tokenText(self.ast.declName(from)),
-                self.ast.tokenText(self.ast.declName(to)),
+                self.ast.tokenText(self.ast.declName(cycle[k])),
             });
         }
 
@@ -34943,7 +35118,7 @@ const Checker = struct {
             .t_bound,
             self.ast.fileOf(at),
             self.ast.tokenSpan(at),
-            if (clauses == 2) "drop one of the two bounds" else "drop one of the bounds on the cycle",
+            if (cycle.len == 2) "drop one of the two bounds" else "drop one of the bounds on the cycle",
             "{s}",
             .{said.items},
         );

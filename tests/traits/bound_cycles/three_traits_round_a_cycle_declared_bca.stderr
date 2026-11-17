@@ -8,11 +8,11 @@ error[N-Unused]: `uc` is never used
    |
 21 | fn uc[S: C[UInt8]](s: S) -> UInt8 {
    |    ^^ call it, or name it with a leading `_`
-error[T-Bound]: `A` requires `B`, `B` requires `C`, and `C` requires `A`
-  --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bca.lin:13:13
-   |
-13 | trait A[T]: B[T] {
-   |             ^ drop one of the bounds on the cycle
+error[T-Bound]: `C` requires `A`, `A` requires `B`, and `B` requires `C`
+ --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bca.lin:9:13
+  |
+9 | trait C[T]: A[UInt8] {
+  |             ^ drop one of the bounds on the cycle
 error[T-Bound]: nothing here settles `B`'s `T`
   --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bca.lin:18:17
    |

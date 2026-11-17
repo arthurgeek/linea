@@ -1,0 +1,47 @@
+error[T-Bound]: `H` requires `G`, and `G` requires `H`
+ --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:5:13
+  |
+5 | trait H[T]: G[T] {
+  |             ^ drop one of the two bounds
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:14:12
+   |
+10 |     fn g(self: Self, by: T) -> UInt8
+   |                      -- expected because of this parameter
+14 |     G.g(s, true) + H.h(s, true) + s.g(true)
+   |            ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:14:27
+   |
+6  |     fn h(self: Self, by: T) -> UInt8
+   |                      -- expected because of this parameter
+14 |     G.g(s, true) + H.h(s, true) + s.g(true)
+   |                           ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:14:39
+   |
+10 |     fn g(self: Self, by: T) -> UInt8
+   |                      -- expected because of this parameter
+14 |     G.g(s, true) + H.h(s, true) + s.g(true)
+   |                                       ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:18:12
+   |
+10 |     fn g(self: Self, by: T) -> UInt8
+   |                      -- expected because of this parameter
+18 |     G.g(s, true) + H.h(s, true) + s.h(true)
+   |            ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:18:27
+   |
+6  |     fn h(self: Self, by: T) -> UInt8
+   |                      -- expected because of this parameter
+18 |     G.g(s, true) + H.h(s, true) + s.h(true)
+   |                           ^^^^ expected `UInt8`, found `Bool`
+error[T-Mismatch]: expected `UInt8`, found `Bool`
+  --> tests/traits/bound_cycles/a_qualified_call_round_a_cycle_is_still_checked.lin:18:39
+   |
+6  |     fn h(self: Self, by: T) -> UInt8
+   |                      -- expected because of this parameter
+18 |     G.g(s, true) + H.h(s, true) + s.h(true)
+   |                                       ^^^^ expected `UInt8`, found `Bool`

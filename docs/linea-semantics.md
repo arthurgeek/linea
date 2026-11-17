@@ -3796,8 +3796,15 @@ Where `H` carries exactly one bound on `Watch`, `H: Watch[P]`, a call
 `&watcher.observe(event)` on an `H` is a call at `Watch[P]` before any argument
 is read: a variant written without its enum, `.Retried(3)`, takes its type from
 the parameter, and an operation whose parameters never mention `P` is still
-settled. A parameter bounded on one trait at several argument lists leaves the
-call's arguments and result to settle which list it means.
+settled. One argument list reached along two paths, as round a cycle of
+traits, is one bound. A parameter bounded on one trait at several argument
+lists leaves the call's arguments and result to settle which list it means, and
+the call is checked where the generic body is written: a list its bounds do not
+carry is [T-Bound], so `Scale.scale(s, true)` under `S: Scale[UInt8] +
+Scale[UInt16]` is refused there rather than at an instantiation. A literal
+fitting exactly one of the lists takes that list's type; one fitting several,
+`Scale.scale(s, 1)` under the same bounds, does not say which implementation
+runs and is [N-Ambiguous].
 
 A bound may instead be a structural callable type. Its parameter and result
 types must match exactly; result dependencies must fit the promised upper bound,
@@ -3867,7 +3874,12 @@ the arguments written on each requirement: a parameter bounded by `Fancy`
 discharges `Lookup[UInt64]` and no other `Lookup` argument list. Arguments
 referring to the requiring trait's parameters are substituted from the bound
 that reaches it. Trait bounds may not cycle; a cycle is diagnosed at its
-declaration, on the bound that closes it, and only there. Every bound on the
+declaration, on the bound that closes it, and only there. A trait whose bounds
+name itself is reported once, and so is each group of traits that require each
+other, however many bounds close cycles inside it. The report names the
+shortest cycle back to the group's trait whose name sorts first, following each
+trait's bounds in the order it writes them, so it reads the same whichever
+order the traits are declared in. Every bound on the
 cycle is still read as written: an implementation of a trait on it owes what
 the trait requires, and a parameter bounded by one is granted what that trait
 requires, whichever bound the report fell on. A requirement reached again at
