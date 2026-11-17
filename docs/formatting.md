@@ -206,8 +206,18 @@ statement. Whatever follows the literal — a call's `)`, the next argument's `,
 a struct literal's `}` — starts the next line at the depth of the line the list
 opened on, since the last line of text runs to the end of its line.
 
-A match arm whose body is a multi-line literal is written as a block, so that
-the comma separating it from the next arm follows the block's `}`:
+A match arm whose body is a multi-line literal follows the same rule: the comma
+that separates it from the next arm starts the next line.
+
+```linea
+match kind { Short => \\brief
+, Long => \\at
+    \\length
+}
+```
+
+The formatter adds no braces of its own, so an arm reads one line per arm only
+where you write its body as a block:
 
 ```linea
 match kind {
