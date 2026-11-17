@@ -34716,6 +34716,9 @@ const Checker = struct {
         named: TokenId,
         containment: enum { here, where_promised },
     ) std.mem.Allocator.Error!void {
+        // A `where` clause the parser recovered may name no subject and no
+        // bound; a list of nothing repeats nothing and demands nothing.
+        if (bounds.len == 0) return;
         const through = try self.traitsBounding(null, bounds);
         defer types_mod.freeBoundTraits(self.gpa, through);
         const demand = capabilityDemand(self.ast, self.res, bounds, through);
