@@ -2064,8 +2064,10 @@ const Builder = struct {
             try self.expr(m.args[i + 1], position);
             try self.value(id, m.args[i + 1]);
             // A binder's scope is its arm, so this is where a value it still
-            // holds is one nothing disposed of.
+            // holds is one nothing disposed of, and the next arm's binders
+            // sit inside the match, not inside this arm.
             try self.endScopesTo(held, m.args[i + 1]);
+            self.live.shrinkRetainingCapacity(held);
             try self.link(after);
         }
 
@@ -2253,8 +2255,10 @@ const Builder = struct {
         try self.endStatement();
 
         // The binder's scope is one iteration, so what it still holds at the
-        // bottom of the body is a value nothing disposed of.
+        // bottom of the body is a value nothing disposed of, and what follows
+        // the loop sits outside it.
         try self.endScopesTo(held, f.args[1]);
+        self.live.shrinkRetainingCapacity(held);
 
         // The back edge, which is the reason this is a graph and not a tree.
         try self.link(head);
