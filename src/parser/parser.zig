@@ -274,6 +274,7 @@ pub const Modules = struct {
             .template_requirements = self.builder.template_requirements.items,
             .type_refs = self.builder.type_refs.items,
             .callable_types = self.builder.callable_types.items,
+            .lambda_headers = self.builder.lambda_headers.items,
             .variants = self.builder.variants.items,
             .fields = self.builder.fields.items,
             .extra = self.builder.extra.items,
@@ -9896,6 +9897,7 @@ fn expectSourcePrefix(expected: *const Ast, actual: *const Ast) !void {
     try testing.expect(expected.template_requirements.len <= actual.template_requirements.len);
     try testing.expect(expected.type_refs.len <= actual.type_refs.len);
     try testing.expect(expected.callable_types.len <= actual.callable_types.len);
+    try testing.expect(expected.lambda_headers.len <= actual.lambda_headers.len);
     try testing.expect(expected.variants.len <= actual.variants.len);
     try testing.expect(expected.fields.len <= actual.fields.len);
     try testing.expect(expected.extra.len <= actual.extra.len);
@@ -9945,6 +9947,7 @@ fn expectSourcePrefix(expected: *const Ast, actual: *const Ast) !void {
     try testing.expectEqualDeep(expected.template_requirements, actual.template_requirements[0..expected.template_requirements.len]);
     try testing.expectEqualDeep(expected.type_refs, actual.type_refs[0..expected.type_refs.len]);
     try testing.expectEqualDeep(expected.callable_types, actual.callable_types[0..expected.callable_types.len]);
+    try testing.expectEqualDeep(expected.lambda_headers, actual.lambda_headers[0..expected.lambda_headers.len]);
     try testing.expectEqualDeep(expected.variants, actual.variants[0..expected.variants.len]);
     try testing.expectEqualDeep(expected.fields, actual.fields[0..expected.fields.len]);
     try testing.expectEqualDeep(expected.extra, actual.extra[0..expected.extra.len]);
@@ -11277,7 +11280,7 @@ test "generated suffix relocation matches parsing after application source" {
         .path = "generated.lin",
         .text = "@copyable\nstruct GeneratedBox[T] { value: T }\n" ++
             "fn boxed(x: UInt8) -> GeneratedBox[UInt8] { GeneratedBox[UInt8] { value = x } }\n" ++
-            "fn generated(x: UInt8) -> UInt8 { let values = [x, 2]; let f = [x] |v: UInt8| -> UInt8 v + x; if x == 0 { f(values[0]) } else { 3 } }\n" ++
+            "fn generated(x: UInt8) -> UInt8 { let values = [x, 2]; let f = [x] |v: UInt8| -> UInt8 v + x; let g = inout [] |v: UInt8| v; let h = |v: UInt8| v; if x == 0 { f(values[0]) } else { 3 } }\n" ++
             "fn text(x: UInt8) -> Str { \"{x} {x:?}\" }\n" ++
             "fn range() -> UInt8 { let _r = 1..=3; 0 }\n" ++
             "impl Index[UInt64] for Board via scores\nimpl Board { trav positions via scores }\n" ++
@@ -11305,6 +11308,7 @@ test "generated suffix relocation matches parsing after application source" {
     try testing.expect(!sink.hasErrors());
     try expectSourcePrefix(&want, &actual);
     try testing.expectEqualDeep(want.captures, actual.captures);
+    try testing.expectEqualDeep(want.lambda_headers, actual.lambda_headers);
     try testing.expectEqualDeep(want.contracts, actual.contracts);
     try testing.expectEqualDeep(want.contract_steps, actual.contract_steps);
     try testing.expectEqualDeep(want.decl_attribute_groups, actual.decl_attribute_groups);
