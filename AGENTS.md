@@ -715,16 +715,19 @@ APIs.
   checks clean. `build.zig` reads the pass directories of `src/` (`lexer`,
   `parser`, `syntax`, `sema`, `ownership`, `mir`, `diagnostics`, `backend`)
   and refuses, outside `test` blocks and whatever is called: `catch {}`;
-  `catch { … }` with no `return error.…`; `catch return`, `catch break` and
-  `catch continue` without an error value; `catch` with a value;
-  `catch unreachable`, which is undefined behaviour in a ReleaseFast build
-  where the call can fail; and `catch |e| …` or `else |e| …` whose body does
-  not end by handing the error on. A body ends that way when its last
-  statement, or the expression itself, is `return e`, `return error.…`,
-  `unreachable` or `@panic(…)`, or is a `switch (e)` whose `error.OutOfMemory`
-  prong (its `else` prong where it names none) returns the error; a `return`
-  on one path of several does not count. `try`, `catch |e| return e`,
-  `catch return error.…` and `catch @panic(…)` pass. A discard that loses
+  `catch return`, `catch break` and `catch continue` without an error value;
+  `catch` with a value; and every `catch unreachable`, `catch { … }`,
+  `catch |e| …` or `else |e| …` that does not end by handing the error on or
+  stopping the process. A block or body ends that way when its last
+  statement, or the expression itself, is `return e`, `return error.…` or
+  `@panic(…)`, or is a `switch (e)` whose `error.OutOfMemory` prong (its
+  `else` prong where it names none) is one of those; a `return` on one path of
+  several does not count. `unreachable` never hands an error on: after a call
+  that can fail it is undefined behaviour in a ReleaseFast build, so
+  `catch unreachable`, `catch { unreachable; }` and a body or prong ending in
+  `unreachable` are refused alike. `try`, `catch |e| return e`,
+  `catch return error.…`, `catch @panic(…)` and a block ending in `@panic(…)`
+  pass. A discard that loses
   nothing, such as arithmetic overflow that is itself the answer or a call
   whose error set is empty, is named in `discards_allowed`
   (`build/source.zig`) by file, function, the call before `catch` (`else` for
