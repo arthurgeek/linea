@@ -964,7 +964,10 @@ static void a_set_watching_more_than_endpoints_does_not_move(void) {
 
 /* A slot whose generation would wrap is retired, and the set numbers a new
  * slot past every slot it made before, so a slot's number is not bounded by
- * how many registrations are held at once. */
+ * how many registrations are held at once. The hook that ages a slot exists
+ * only where the race tests supply the pauses, so the test is compiled there
+ * alone. */
+#if defined(LINEA_WAITSET_PAUSES)
 static void a_retired_slot_is_replaced_by_a_new_number(void) {
     const unsigned long set = linea_waitset_open();
     const unsigned long first = linea_waitset_reserve(set);
@@ -982,6 +985,7 @@ static void a_retired_slot_is_replaced_by_a_new_number(void) {
     finish_send_one(handle);
     linea_waitset_close(set);
 }
+#endif
 
 int main(void) {
     a_send_before_registration_is_found();
@@ -1014,7 +1018,9 @@ int main(void) {
     a_second_terminate_after_the_last_share_ends_the_process();
     a_set_of_endpoints_keeps_its_signals_when_it_moves();
     a_set_watching_more_than_endpoints_does_not_move();
+#if defined(LINEA_WAITSET_PAUSES)
     a_retired_slot_is_replaced_by_a_new_number();
+#endif
     puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
     return 0;
 }
