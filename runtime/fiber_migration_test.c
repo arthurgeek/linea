@@ -435,6 +435,68 @@ static void check_idle_wakeup(void) {
     assert(pthread_mutex_destroy(&waking.metadata) == 0);
 }
 
+struct sleeping_thief {
+    struct steal_gate gate;
+    struct carrier *carrier;
+    struct linea_fiber *selected;
+};
+
+static void *sleep_after_empty_scan(void *argument) {
+    struct sleeping_thief *call = argument;
+    struct carrier *c = call->carrier;
+    assert(pthread_setspecific(carrier_key, c) == 0);
+    assert(dequeue(c) == NULL && steal_for_dispatch(c) == NULL);
+    assert(pthread_mutex_lock(&call->gate.lock) == 0);
+    call->gate.waiting = 1;
+    assert(pthread_cond_signal(&call->gate.changed) == 0);
+    while (!call->gate.start) assert(pthread_cond_wait(&call->gate.changed, &call->gate.lock) == 0);
+    assert(pthread_mutex_unlock(&call->gate.lock) == 0);
+    /* Publication occurred after the last empty scan but before blocking.
+     * A retained kernel notification must make this wait return immediately. */
+    struct pollfd observed = { c->kernel, POLLIN, 0 };
+    assert(poll(&observed, 1, 1000) == 1 && (observed.revents & POLLIN));
+    poll_carrier(c, 1);
+    call->selected = steal_for_dispatch(c);
+    assert(pthread_setspecific(carrier_key, NULL) == 0);
+    return NULL;
+}
+
+static void check_publication_before_sleep(void) {
+    struct carrier peers[2];
+    memset(peers, 0, sizeof peers);
+    struct fiber_loop waking = { .count = 2, .carriers = peers };
+    assert(pthread_mutex_init(&waking.metadata, NULL) == 0);
+    for (size_t i = 0; i < 2; i += 1) {
+        peers[i].loop = &waking;
+        assert(pthread_mutex_init(&peers[i].queue_lock, NULL) == 0);
+        assert(make_poller(&peers[i]) == 0);
+    }
+    struct sleeping_thief call = { .carrier = &peers[1] };
+    assert(pthread_mutex_init(&call.gate.lock, NULL) == 0);
+    assert(pthread_cond_init(&call.gate.changed, NULL) == 0);
+    pthread_t thief;
+    assert(pthread_create(&thief, NULL, sleep_after_empty_scan, &call) == 0);
+    assert(pthread_mutex_lock(&call.gate.lock) == 0);
+    while (!call.gate.waiting) assert(pthread_cond_wait(&call.gate.changed, &call.gate.lock) == 0);
+    struct linea_fiber work = {
+        .home = &peers[0], .loop = &waking, .state = runnable, .saved = 1,
+        .proven = 1, .waiting = waiting_yield, .transfer_ready = 1, .timer_index = no_timer,
+    };
+    lock_fiber(&work);
+    enqueue_locked(&work);
+    unlock_fiber(&work);
+    wake_idle_peers(&peers[0]);
+    call.gate.start = 1;
+    assert(pthread_cond_signal(&call.gate.changed) == 0);
+    assert(pthread_mutex_unlock(&call.gate.lock) == 0);
+    assert(pthread_join(thief, NULL) == 0);
+    assert(call.selected == &work && work.home == &peers[1]);
+    assert(pthread_cond_destroy(&call.gate.changed) == 0);
+    assert(pthread_mutex_destroy(&call.gate.lock) == 0);
+    for (size_t i = 0; i < 2; i += 1) free_carrier(&peers[i]);
+    assert(pthread_mutex_destroy(&waking.metadata) == 0);
+}
+
 static void check_affinity(void) {
     /* A system task has no logical fiber to bind. */
     errno = EDOM;
@@ -518,6 +580,7 @@ int main(void) {
     check_idle_steal_claim(0);
     check_idle_steal_claim(1);
     check_idle_wakeup();
+    check_publication_before_sleep();
     check_affinity();
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
     prove_continuation(0, 1);

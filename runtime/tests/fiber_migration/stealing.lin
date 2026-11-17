@@ -1,0 +1,52 @@
+import std.env
+import std.io
+import std.task
+import std.time
+import std.session
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    var moved = false
+    var result = UInt64(0)
+    let body = sink [inout entries, inout moved, inout result] |sink me: Chan[End]| {
+        entries += 1
+        let original = task.current_carrier().unwrap()
+        var value = UInt64(91)
+        var suspensions = UInt64(0)
+        while suspensions < 65536 && !moved {
+            value += 3
+            time.sleep(time.Duration.from_nanoseconds(0))
+            suspensions += 1
+            moved = original != task.current_carrier().unwrap()
+        }
+        if !moved {
+            panic("idle carrier did not resume the started continuation")
+        }
+        if value != 91 + suspensions * 3 {
+            panic("stealing lost the continuation's saved local")
+        }
+        let bound = task.current_carrier().unwrap()
+        // This unknown native operation binds execution to its current carrier.
+        if env.args().count() == 0 {
+            panic("process has no argument zero")
+        }
+        for _index in 0..64 {
+            time.sleep(time.Duration.from_nanoseconds(0))
+            if bound != task.current_carrier().unwrap() {
+                panic("a stolen continuation lost its subsequent native affinity")
+            }
+        }
+        result = value
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    if entries == 1 && moved && result > 91 {
+        0
+    } else {
+        1
+    }
+}

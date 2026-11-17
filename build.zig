@@ -2332,7 +2332,26 @@ pub fn build(b: *std.Build) void {
     const handoff_measurement = b.step("measure-fiber-handoff", "Collect matched plain/traced forced-handoff observations on an idle host");
     const platform_proof = b.step("test-fiber-platform-state", "Check FP, signal and protected-frame state across actual Linea handoffs");
     const task_entry_proof = b.step("test-fiber-task-entry", "Migrate a Linea task through compiler-owned entry eligibility");
+    const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
+        native_task_step.dependOn(stealing_proof);
+        for ([_][]const u8{ "stealing.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
+            const files = b.addWriteFiles();
+            const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture})), "main.lin");
+            const compile = b.addSystemCommand(&.{"env"});
+            compile.addPrefixedFileArg("LINEA_RUNTIME=", checked_runtime_archive);
+            compile.addFileArg(exe.getEmittedBin());
+            compile.addArg("build");
+            compile.addFileArg(main_source);
+            compile.addArg("-o");
+            const binary = compile.addOutputFileArg("fiber-stealing");
+            const run = b.addRunArtifact(migration_metrics_tool);
+            run.addArg("--check-run");
+            run.addFileArg(binary);
+            run.has_side_effects = true;
+            run.expectExitCode(0);
+            stealing_proof.dependOn(&run.step);
+        }
         native_task_step.dependOn(handoff_proof);
         native_task_step.dependOn(completed_wait_proof);
         native_task_step.dependOn(completed_io_proof);
@@ -2529,6 +2548,7 @@ pub fn build(b: *std.Build) void {
         handoff_measurement.dependOn(&unavailable.step);
         platform_proof.dependOn(&unavailable.step);
         task_entry_proof.dependOn(&unavailable.step);
+        stealing_proof.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");

@@ -339,6 +339,10 @@ fn sampleRun(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, traced: boo
 pub fn main(init: std.process.Init) !void {
     const gpa = init.arena.allocator();
     const args = try init.minimal.args.toSlice(gpa);
+    if (args.len == 3 and std.mem.eql(u8, args[1], "--check-run")) {
+        _ = try sampleRun(gpa, init.io, args[2], false);
+        return;
+    }
     var buffer: [4096]u8 = undefined;
     var output = std.Io.File.stdout().writer(init.io, &buffer);
     if (args.len == 4 and std.mem.eql(u8, args[1], "--measure")) {

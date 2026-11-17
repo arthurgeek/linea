@@ -38,6 +38,14 @@
 #ifndef __has_feature
 #define __has_feature(x) 0
 #endif
+/* Cross-thread restoration is enabled only on the validated native ABI.
+ * Reference profiles keep their deterministic transfer policy. */
+#if defined(LINEA_FIBER_MIGRATION_TEST) || (defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer))
+#define LINEA_FIBER_CAN_MIGRATE 1
+#endif
+#if defined(LINEA_FIBER_CAN_MIGRATE) && !defined(LINEA_FIBER_MIGRATION_TEST)
+#define LINEA_FIBER_AUTO_STEAL 1
+#endif
 #if __has_feature(address_sanitizer)
 void __sanitizer_start_switch_fiber(void **save, const void *bottom, size_t size);
 void __sanitizer_finish_switch_fiber(void *save, const void **bottom, size_t *size);
@@ -108,7 +116,7 @@ struct linea_fiber {
     struct carrier *bound;
     int queued, started, saved, retired, proven;
     enum scheduling_claim claimed;
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     int transfer_ready;
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
     unsigned forced_transfers;
@@ -535,7 +543,7 @@ static void wake_carrier(struct carrier *c) {
 #endif
 }
 
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
 static int clean_runnable(struct linea_fiber *f, struct carrier *source);
 
 /* The hint never grants work. Empty-check and publication are ordered by M;
@@ -571,7 +579,7 @@ static void enqueue_locked(struct linea_fiber *f) {
     }
     f->next = NULL;
     struct linea_fiber **first = &c->first, **last = &c->last;
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     if (clean_runnable(f, c)) {
         f->queued = stealable_lane;
         first = &c->stealable_first;
@@ -613,17 +621,16 @@ static struct linea_fiber *dequeue(struct carrier *c) {
         f->claimed = dispatch_claim;
         f->claimant = c;
     }
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     if (c->loop != NULL) __atomic_store_n(&c->idle, f == NULL, __ATOMIC_RELEASE);
 #endif
     unlock_carrier(c);
     return f;
 }
 
-#if defined(LINEA_FIBER_MIGRATION_TEST)
-/* The bounded prototype has no production entry-provenance grant yet. These
- * claims are exercised by the internal forced-handoff configuration and the
- * native scheduler unit tests. Ordinary runtime archives remain pinned. */
+#if defined(LINEA_FIBER_CAN_MIGRATE)
+/* A detached saved continuation has one transfer claim until it is either
+ * restored to its queue or claimed directly by the receiving dispatcher. */
 struct transfer_claim {
     struct linea_fiber *fiber;
     struct carrier *source;
@@ -772,9 +779,11 @@ static int finish_transfer(struct transfer_claim *claim, struct carrier *target,
     return 1;
 }
 
+#if defined(LINEA_FIBER_MIGRATION_TEST)
 static int commit_transfer(struct transfer_claim *claim, struct carrier *target) {
     return finish_transfer(claim, target, 0);
 }
+#endif
 
 #if !defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
 static struct linea_fiber *steal_for_dispatch(struct carrier *target) {
@@ -1012,7 +1021,7 @@ static int timer_add(struct linea_fiber *f) {
     return error;
 }
 
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
 static int requeue_saved_dispatch(struct carrier *source, struct linea_fiber *f, int ready) {
     TRACE_BEGIN(ready_trace);
     lock_fiber(f);
@@ -1648,7 +1657,7 @@ static void poll_carrier(struct carrier *c, int poll_only) {
 }
 
 static void run_fiber(struct carrier *c, struct linea_fiber *f) {
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     if (normalize_completed_io(c, f)) return;
     if (normalize_completed_park(c, f)) return;
 #endif
@@ -1658,7 +1667,7 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     f->claimed = 0;
     f->claimant = NULL;
     f->saved = 0;
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     f->transfer_ready = 0;
 #endif
     f->state = running;
@@ -1700,7 +1709,7 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
         if (kind == waiting_yield) {
             f->state = runnable;
             TRACE_CAPTURE(runnable_trace, 'R', f, c);
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
             f->transfer_ready = f->proven && f->bound == NULL && f->timer_index == no_timer &&
                 f->source_claims == 0 && f->park == NULL && f->waiter == NULL && f->operation == NULL;
             if (f->transfer_ready) TRACE_CAPTURE(ready_trace, 'N', f, c);
@@ -1724,7 +1733,7 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
         ended = f->finished;
         argument = f->argument;
     } else fail("linea: a fiber switched in an invalid scheduling state\n");
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     const int wake_peers = f->queued == stealable_lane;
 #endif
     unlock_fiber(f);
@@ -1732,8 +1741,10 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     TRACE_END(ready_trace);
     if (became_parked && (kind == waiting_park || kind == waiting_io)) linea_fiber_pause(linea_fiber_parked);
     if (wake != NULL) wake_carrier(wake);
-#if defined(LINEA_FIBER_MIGRATION_TEST)
+#if defined(LINEA_FIBER_CAN_MIGRATE)
     if (wake_peers) wake_idle_peers(c);
+#endif
+#if defined(LINEA_FIBER_MIGRATION_TEST)
     if (kind == waiting_yield) linea_fiber_pause(linea_fiber_transfer_ready);
 #endif
     /* Publication may let the joiner immediately reclaim the fiber. */
@@ -1769,6 +1780,9 @@ static void *run_carrier(void *argument) {
     while (!__atomic_load_n(&c->loop->stop, __ATOMIC_ACQUIRE)) {
         expire_timers(c);
         struct linea_fiber *f = dequeue(c);
+#if defined(LINEA_FIBER_AUTO_STEAL)
+        if (f == NULL) f = steal_for_dispatch(c);
+#endif
         if (f == NULL) {
             poll_carrier(c, 0);
         } else {
