@@ -1,0 +1,9 @@
+@derive(Debug x
+struct P {
+    x: UInt8,
+}
+
+fn main() -> UInt8 {
+    0
+}
+)

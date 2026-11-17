@@ -1763,22 +1763,20 @@ const Parser = struct {
 
             if (open == .none) break;
             // What follows an entry before its `,` or `)` is not part of the
-            // list; it is reported once and stepped over to the next entry
-            // or the list's own closer, as a tuple pattern's parts are. A
-            // list with no closer ends at the line that begins the next
-            // declaration, which the attribute is written for.
+            // list. It is reported once, unless it is a token the lexer
+            // refused and reported already, and stepped over as any list's
+            // refused element is: to the next entry, the list's own closer,
+            // or the line that begins the next declaration, which the
+            // attribute is written for and which ends a list never closed.
             if (!self.cursor.atEnd() and !self.cursor.at(.comma) and !self.cursor.at(.r_paren) and !self.atDeclaration()) {
-                try self.reportAt(.s_params, self.cursor.current(), "expected `,` or `)`", "a grouped derive separates its traits with commas");
-                if (self.delimiterEnd(open)) |end| {
-                    _ = self.skipToNextPart(end);
-                } else {
-                    while (!self.cursor.atEnd() and !(self.cursor.precededByNewline() and self.atDeclaration())) _ = self.cursor.advance();
-                    return .{
-                        .range = .{ .start = start, .end = self.builder.deriveTraitMark() },
-                        .open = open,
-                        .close = .none,
-                    };
-                }
+                const at = self.cursor.current();
+                if (!self.cursor.at(.invalid)) try self.reportAt(.s_params, at, "expected `,` or `)`", "a grouped derive separates its traits with commas");
+                self.stepOverElement(at);
+                if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren)) return .{
+                    .range = .{ .start = start, .end = self.builder.deriveTraitMark() },
+                    .open = open,
+                    .close = .none,
+                };
             }
             if (self.cursor.eat(.comma) == null) break;
         }
@@ -7848,6 +7846,16 @@ const Parser = struct {
     ///
     /// **Bound:** the element's own tokens.
     fn skipRefusedElement(self: *Parser, start: TokenId) !ExprId {
+        self.stepOverElement(start);
+        return self.builder.addLiteral(.err, start, self.rangeFrom(start));
+    }
+
+    /// Steps over a list element that cannot be read, from `start` to the
+    /// comma or the closer that ends it at its own depth, or to where a
+    /// statement or a declaration begins.
+    ///
+    /// **Bound:** the element's own tokens.
+    fn stepOverElement(self: *Parser, start: TokenId) void {
         var depth: usize = 0;
         while (!self.cursor.atEnd()) {
             // A line that begins a statement or a declaration ends the
@@ -7867,7 +7875,6 @@ const Parser = struct {
             }
             _ = self.cursor.advance();
         }
-        return self.builder.addLiteral(.err, start, self.rangeFrom(start));
     }
 };
 
