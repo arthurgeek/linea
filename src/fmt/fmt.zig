@@ -7,7 +7,6 @@ const Sink = @import("../diagnostics/sink.zig").Sink;
 const Interner = @import("../support/interner.zig").Interner;
 const tokenize = @import("../lexer/lexer.zig").tokenize;
 const parse = @import("../parser/parser.zig").parse;
-const dumpAst = @import("../syntax/dump.zig").dumpAst;
 const max_nesting = @import("../parser/parser.zig").max_nesting;
 const Ast = @import("../syntax/ast.zig").Ast;
 const DeclIndex = @import("../syntax/ast.zig").DeclIndex;
@@ -129,125 +128,126 @@ fn formatIndexed(
 /// What a comment means as a hatch marker.
 pub const Marker = enum { off, on, none };
 
-/// Whether two parsed trees match, ignoring where the tokens sit.
-fn sameShape(gpa: std.mem.Allocator, before: *const Ast, after: *const Ast) !bool {
-    if (!sameAttributes(before, after)) return false;
-    if (!sameExpressions(before, after)) return false;
-    const a = try shapeOf(gpa, before);
-    defer gpa.free(a);
-    const b = try shapeOf(gpa, after);
-    defer gpa.free(b);
-    return std.mem.eql(u8, a, b);
-}
-
-/// Attribute ownership and grouping are retained syntax, independent of the
-/// normalized policies printed by the AST dump. Compare each declaration's
-/// groups directly so moving or losing a derive request changes its shape.
-fn sameAttributes(before: *const Ast, after: *const Ast) bool {
-    if (before.declCount() != after.declCount()) return false;
-    for (0..before.declCount()) |index| {
-        const declaration = DeclId.at(@intCast(index));
-        const left_groups = before.declAttributeGroups(declaration);
-        const right_groups = after.declAttributeGroups(declaration);
-        if (left_groups.len != right_groups.len) return false;
-        for (left_groups, right_groups) |left, right| {
-            var a = before.runOf(left.tokens);
-            var b = after.runOf(right.tokens);
-            while (nextAttributeShapeToken(&a)) |left_token| {
-                const right_token = nextAttributeShapeToken(&b) orelse return false;
-                if (before.tokenTag(left_token) != after.tokenTag(right_token) or
-                    !std.mem.eql(u8, before.tokenText(left_token), after.tokenText(right_token))) return false;
-            }
-            if (nextAttributeShapeToken(&b) != null) return false;
-        }
-    }
-    return true;
-}
-
-/// Whether the two trees hold the same expressions, in the order the parser
-/// made them: each of one kind with its counterpart, at a token of the same
-/// kind and text.
+/// Whether two parses of one file's text hold the same tree, wherever their
+/// tokens sit.
 ///
-/// The dump prints the expressions a declaration's body reaches. An
-/// expression written inside a type, an array's length, is printed there by
-/// one token's text, so a newline that splits it into two statements leaves
-/// the dump as it was. The parser makes one node per expression wherever it
-/// is written, and two parses of the same tokens make the same nodes in the
-/// same order exactly when they read the same structure.
-fn sameExpressions(before: *const Ast, after: *const Ast) bool {
-    if (before.exprCount() != after.exprCount()) return false;
-    for (0..before.exprCount()) |index| {
-        const expression = ExprId.at(@intCast(index));
-        if (before.exprTag(expression) != after.exprTag(expression)) return false;
-        const left = before.exprMain(expression);
-        const right = after.exprMain(expression);
-        if (left == TokenId.none or right == TokenId.none) {
-            if (left != right) return false;
-            continue;
+/// Every table the parser builds is compared row for row. The parser makes
+/// nodes in the order it reads them, so two parses of one structure hold the
+/// same rows under the same ids, and a reference to a node is compared as the
+/// id it is. A reference to a token is compared by the token's kind and text
+/// instead, because formatting moves tokens: an inserted trailing comma or a
+/// dropped semicolon shifts every index after it. A token range is compared by
+/// its first token and its last that formatting neither adds nor drops; the
+/// token sequence itself is compared after this.
+const SameTree = struct {
+    before: *const Ast,
+    after: *const Ast,
+
+    fn of(before: *const Ast, after: *const Ast) bool {
+        const c: SameTree = .{ .before = before, .after = after };
+        inline for (@typeInfo(Ast).@"struct".fields) |field| {
+            // `parts` and `tokens` say where things sit. The side array holds
+            // token ids and counts beside expression ids, so its runs, and the
+            // argument names kept in step with it, are compared through the
+            // accessor of the expression that owns each run.
+            const skipped = comptime std.mem.eql(u8, field.name, "parts") or
+                std.mem.eql(u8, field.name, "tokens") or
+                std.mem.eql(u8, field.name, "extra") or
+                std.mem.eql(u8, field.name, "call_names");
+            if (!skipped) {
+                const left = @field(before, field.name);
+                const right = @field(after, field.name);
+                if (left.len != right.len) return false;
+                if (comptime @typeInfo(@TypeOf(left)) == .pointer) {
+                    for (left, right) |x, y| if (!c.same(x, y)) return false;
+                } else for (0..left.len) |i| {
+                    const same_row = if (comptime std.mem.eql(u8, field.name, "exprs"))
+                        c.sameExpr(ExprId.at(@intCast(i)), left.get(i), right.get(i))
+                    else
+                        c.same(left.get(i), right.get(i));
+                    if (!same_row) return false;
+                }
+            }
         }
-        if (before.tokenTag(left) != after.tokenTag(right) or
-            !std.mem.eql(u8, before.tokenText(left), after.tokenText(right))) return false;
+        return true;
     }
-    return true;
-}
 
-fn nextAttributeShapeToken(run: *Ast.TokenRun) ?TokenId {
-    while (run.next()) |at| {
-        if (run.ast.tokenTag(at) != .comma) return at;
+    fn sameExpr(c: SameTree, id: ExprId, x: node.Expr, y: node.Expr) bool {
+        if (x.tag != y.tag or !c.same(x.main_token, y.main_token) or
+            !c.same(x.token_range, y.token_range) or !c.same(x.call_flags, y.call_flags)) return false;
+        const a = c.before;
+        const b = c.after;
+        return switch (x.tag.payload()) {
+            .none => true,
+            .unary => c.same(x.data.unary, y.data.unary),
+            .binary => c.same(x.data.binary, y.data.binary),
+            .block => c.same(x.data.block, y.data.block),
+            .conditional => c.same(a.conditional(id), b.conditional(id)),
+            .call => c.same(a.call(id), b.call(id)) and c.same(a.callNames(id), b.callNames(id)),
+            .interpolation => c.same(a.interpolation(id), b.interpolation(id)),
+            .range => c.same(a.rangeEnds(id), b.rangeEnds(id)) and a.rangeInclusive(id) == b.rangeInclusive(id),
+            .lambda => c.same(a.lambda(id), b.lambda(id)),
+        };
     }
-    return null;
-}
 
-fn shapeOf(gpa: std.mem.Allocator, ast: *const Ast) ![]const u8 {
-    var out: std.Io.Writer.Allocating = .init(gpa);
-    defer out.deinit();
-    // The whole tree: this text is one file parsed on its own, so every
-    // declaration in it is one the formatter is being asked about.
-    dumpAst(&out.writer, ast, DeclarationSelection.all(ast.declCount())) catch return error.OutOfMemory;
+    fn same(c: SameTree, x: anytype, y: @TypeOf(x)) bool {
+        const T = @TypeOf(x);
+        if (T == TokenId) return c.sameToken(x, y);
+        if (T == token.TokenRange) return c.sameRange(x, y);
+        return switch (@typeInfo(T)) {
+            .@"struct" => |info| {
+                if (info.layout == .@"packed") return std.meta.eql(x, y);
+                inline for (info.fields) |field| {
+                    if (!c.same(@field(x, field.name), @field(y, field.name))) return false;
+                }
+                return true;
+            },
+            .@"union" => {
+                if (std.meta.activeTag(x) != std.meta.activeTag(y)) return false;
+                return switch (x) {
+                    inline else => |payload, tag| c.same(payload, @field(y, @tagName(tag))),
+                };
+            },
+            .pointer => {
+                if (x.len != y.len) return false;
+                for (x, y) |left, right| if (!c.same(left, right)) return false;
+                return true;
+            },
+            .optional => if (x) |left| (if (y) |right| c.same(left, right) else false) else y == null,
+            .@"enum", .int, .bool => x == y,
+            else => @compileError("no tree comparison for " ++ @typeName(T)),
+        };
+    }
 
-    // `tokens N..M` says where a node sits, which formatting is allowed to
-    // change. Everything else the dump prints is what the node *is*, so only
-    // the note itself goes: `tokens ` followed by two numbers, and not the
-    // same word in a literal's text.
-    var stripped: std.ArrayList(u8) = .empty;
-    var rest = out.written();
-    while (std.mem.indexOf(u8, rest, "tokens ")) |at| {
-        const after_word = rest[at + "tokens ".len ..];
-        const note = positionNoteLength(after_word);
-        if (note == 0) {
-            try stripped.appendSlice(gpa, rest[0 .. at + "tokens ".len]);
-            rest = after_word;
-            continue;
+    fn sameToken(c: SameTree, x: TokenId, y: TokenId) bool {
+        if (x == .none or y == .none) return x == y;
+        return c.before.tokenTag(x) == c.after.tokenTag(y) and
+            std.mem.eql(u8, c.before.tokenText(x), c.after.tokenText(y));
+    }
+
+    fn sameRange(c: SameTree, x: token.TokenRange, y: token.TokenRange) bool {
+        const left = lastKept(c.before, x);
+        const right = lastKept(c.after, y);
+        if (left == null or right == null) return left == null and right == null;
+        return c.sameToken(x.start, y.start) and c.sameToken(left.?, right.?);
+    }
+
+    /// The last token of a range that is not a comment, a comma or a
+    /// semicolon, or null where it holds none. A range runs to the first token
+    /// its node did not consume, so a comment after the node sits inside it,
+    /// and so can the comma formatting inserts or the semicolon it drops.
+    fn lastKept(ast: *const Ast, range: token.TokenRange) ?TokenId {
+        const tags = ast.tokens.items(.tag);
+        var end = @min(range.end.index(), @as(u32, @intCast(tags.len)));
+        while (end > range.start.index()) : (end -= 1) {
+            switch (tags[end - 1]) {
+                .comment, .comma, .semicolon => {},
+                else => return TokenId.at(end - 1),
+            }
         }
-        try stripped.appendSlice(gpa, rest[0..at]);
-        rest = after_word[note..];
+        return null;
     }
-    try stripped.appendSlice(gpa, rest);
-    return stripped.toOwnedSlice(gpa);
-}
-
-/// How many bytes at the start of `text` are a token range, `N..M`, or zero
-/// where it does not begin with one.
-fn positionNoteLength(text: []const u8) usize {
-    var i: usize = 0;
-    while (i < text.len and std.ascii.isDigit(text[i])) i += 1;
-    const first = i;
-    if (first == 0 or !std.mem.startsWith(u8, text[i..], "..")) return 0;
-    i += 2;
-    while (i < text.len and std.ascii.isDigit(text[i])) i += 1;
-    return if (i == first + 2) 0 else i;
-}
-
-test positionNoteLength {
-    // A node's position, as the dump writes it after `tokens `.
-    try testing.expectEqual(@as(usize, 6), positionNoteLength("12..34 rest"));
-    try testing.expectEqual(@as(usize, 4), positionNoteLength("0..7\n"));
-    // The same word in a literal's text is followed by no range, and stays.
-    try testing.expectEqual(@as(usize, 0), positionNoteLength("alpha\""));
-    try testing.expectEqual(@as(usize, 0), positionNoteLength("12 more"));
-    try testing.expectEqual(@as(usize, 0), positionNoteLength("12.."));
-    try testing.expectEqual(@as(usize, 0), positionNoteLength("..34"));
-}
+};
 
 /// One past the end of the region opened at `from`.
 ///
@@ -357,9 +357,11 @@ pub const Extents = struct {
         return .{ .nodes = try nodes.toOwnedSlice(gpa), .closers = try closers.toOwnedSlice(gpa) };
     }
 
-    /// A node's own extent, with the comments trailing it left out -- which is
-    /// what `extendOver` trimmed, because a comment after a node is not part of
-    /// what would be lost by skipping it.
+    /// A node's own extent, from its first token to its last that is not a
+    /// comment. A node's range runs to the next token the parser had not
+    /// consumed, so a comment written after the node sits inside it. A region
+    /// reaching the node's last token covers everything the walk skips with
+    /// the node; the comment after it is written as any other comment is.
     fn note(
         gpa: std.mem.Allocator,
         nodes: *std.ArrayList(Node),
@@ -484,33 +486,6 @@ fn swallowedMarker(ast: *const Ast, extents: *const Extents) ?u32 {
     return null;
 }
 
-/// How far a region must reach to cover this node, or null where it need not.
-///
-/// A node beginning inside the region and ending past it is the shape that
-/// loses source, because the walk skips a node that begins inside one.
-fn extendOver(
-    ast: *const Ast,
-    text: []const u8,
-    range: token.TokenRange,
-    from: u32,
-    to: u32,
-) ?u32 {
-    const tags = ast.tokens.items(.tag);
-    const spans = ast.tokens.items(.span);
-    if (range.start.index() >= spans.len) return null;
-
-    var last = @min(range.end.index(), @as(u32, @intCast(tags.len)));
-    while (last > range.start.index() and tags[last - 1] == .comment) last -= 1;
-    if (last == range.start.index()) return null;
-
-    const opens = spans[range.start.index()].start;
-    const closes = spans[last - 1].end;
-    // Begins inside the region and ends past it. A node that began before the
-    // region contains it rather than being cut by it, and is left alone.
-    if (from <= opens and opens < to and to < closes) return Printer.lineEnd(text, closes);
-    return null;
-}
-
 /// A comment's text, without whatever trails it.
 ///
 /// A comment token runs to the end of its line, so on CRLF source its text
@@ -587,21 +562,25 @@ pub fn formatSource(
     const tokens = try tokenize(gpa, source, file, sink, &interner);
     var ast = try parse(gpa, source, file, tokens, sink);
     if (sink.hasErrors()) return .{ .text = null };
+    return formatParsed(gpa, source.path, &ast, sink);
+}
 
-    var indexes = try Indexes.build(gpa, &ast);
+/// Formats a file that parsed cleanly, or refuses it through the sink.
+fn formatParsed(gpa: std.mem.Allocator, path: []const u8, ast: *const Ast, sink: *Sink) !Formatting {
+    var indexes = try Indexes.build(gpa, ast);
     defer indexes.deinit(gpa);
     var out: std.Io.Writer.Allocating = .init(gpa);
-    try formatIndexed(gpa, &ast, &indexes, .none, DeclarationSelection.all(ast.declCount()), &out.writer);
+    try formatIndexed(gpa, ast, &indexes, .none, DeclarationSelection.all(ast.declCount()), &out.writer);
     const formatted = out.written();
     // Found before the refusal below, because a caller that reports it
     // reports it either way: a region that did not reopen is the author's
     // mistake whether or not the result was usable.
-    const marker = swallowedMarker(&ast, &indexes.extents);
+    const marker = swallowedMarker(ast, &indexes.extents);
 
-    if (try refusalReason(gpa, &ast, formatted)) |why| {
+    if (try refusalReason(gpa, ast, formatted)) |why| {
         try sink.add(.{
             .severity = .err,
-            .message = try std.fmt.allocPrint(gpa, "refusing to format {s}: {s}", .{ source.path, why }),
+            .message = try std.fmt.allocPrint(gpa, "refusing to format {s}: {s}", .{ path, why }),
         });
         return .{ .text = null, .swallowed_marker = marker };
     }
@@ -2044,8 +2023,7 @@ const Printer = struct {
         const declared = self.ast.declTypeParams(d);
         if (declared.len == 0) return;
 
-        const open = self.firstAt(self.ast.declTokens(d).start, .l_bracket);
-        const l = try self.openList(self.bracketRange(open), declared.len, "[", "]", "", false);
+        const l = try self.openList(self.bracketRange(self.typeParamsOpen(declared[0])), declared.len, "[", "]", "", false);
         for (declared, 0..) |p, i| {
             // A comment written above a parameter belongs to that parameter.
             // Left pending, it surfaced at the next element's boundary instead
@@ -2241,6 +2219,20 @@ const Printer = struct {
         return .{ .start = open, .end = TokenId.at(@intCast(tags.len)) };
     }
 
+    /// The `[` opening the type parameter list whose first parameter is
+    /// `first`. Only comments and `phantom` stand between the two. A search
+    /// forward from the declaration's first token would stop at a bracket in
+    /// an attribute written before it, `@derive(Show[UInt8])`.
+    fn typeParamsOpen(self: *const Printer, first: node.TypeParam) TokenId {
+        const tags = self.ast.tokens.items(.tag);
+        var i = first.name.index();
+        while (i > 0) {
+            i -= 1;
+            if (tags[i] != .comment and tags[i] != .keyword_phantom) break;
+        }
+        return TokenId.at(i);
+    }
+
     /// The first token with this tag at or after `from`.
     fn firstAt(self: *const Printer, from: TokenId, tag: token.Tag) TokenId {
         const tags = self.ast.tokens.items(.tag);
@@ -2254,7 +2246,14 @@ const Printer = struct {
         // A parameter list is comma-driven like any other: the trailing comma
         // the author wrote breaks it, and deleting one would be a rewrite
         // rather than a layout choice.
-        const open = self.firstAt(self.ast.declName(d), .l_paren);
+        // The list opens after the type parameters, whose bounds may hold
+        // parentheses of their own: `fn apply[F: fn(UInt8) -> UInt8](f: F)`.
+        const declared = self.ast.declTypeParams(d);
+        const after = if (declared.len == 0)
+            self.ast.declName(d)
+        else
+            self.bracketRange(self.typeParamsOpen(declared[0])).end;
+        const open = self.firstAt(after, .l_paren);
         const l = try self.openList(self.bracketRange(open), params.len, "(", ")", "", false);
         for (params, 0..) |p, i| {
             try self.flushCommentsBefore(p.name);
@@ -3403,10 +3402,7 @@ fn refusalReason(
     // two statements and `a - b` is one, and the token texts are identical. A
     // guard that compares only tokens is blind to every reflow that moves one
     // across a statement boundary, so it is the tree that has to match.
-    //
-    // Token ranges are stripped: dropping a `;` shifts every index after it
-    // without changing what the tree says.
-    if (!try sameShape(gpa, before, &ast)) return "the result would be a different program";
+    if (!SameTree.of(before, &ast)) return "the result would be a different program";
 
     // Comments are not nodes, so neither the tree nor the significant tokens
     // say anything about them -- and a comment dropped or reworded is source
@@ -3455,31 +3451,29 @@ pub fn checkPropertiesReporting(
     var ast = try parse(gpa, &source, .from(0), tokens, &sink);
     if (sink.hasErrors()) return .not_applicable;
 
-    const once = try formatAlloc(gpa, &ast);
+    // 1. The result is what `linea fmt` would write: it re-parses as the
+    //    same tree, keeps every comment, and keeps every token save the
+    //    trailing commas and semicolons formatting adds and drops.
+    const once = try formatChecked(gpa, &ast, diagnostics);
 
-    // 1. It re-parses. A formatter whose output the compiler rejects has
-    //    destroyed the file, whatever else it got right.
+    // 2. Idempotent.
     const again: Source = .{ .path = "fmt.lin", .text = once };
     var sink1 = Sink.init(gpa);
     var interner1: Interner = .empty;
     const tokens1 = try tokenize(gpa, &again, .from(0), &sink1, &interner1);
     var ast1 = try parse(gpa, &again, .from(0), tokens1, &sink1);
-    if (sink1.hasErrors()) {
-        try printDiagnostic(diagnostics, "formatted output does not parse:\n{s}\n", .{once});
-        return error.FormattedOutputDoesNotParse;
-    }
-
-    // 2. The non-trivia token sequence is preserved, modulo trailing commas
-    //    inserted into delimited lists.
-    try expectSameTokensOf(gpa, text, ast.tokens, once, ast1.tokens, diagnostics);
-
-    // 3. Idempotent.
-    const twice = try formatAlloc(gpa, &ast1);
+    const twice = try formatChecked(gpa, &ast1, diagnostics);
     try expectSameFormatting(once, twice, diagnostics);
-
-    // 4. No comment dropped, duplicated or reworded.
-    try expectSameCommentsOf(gpa, text, ast.tokens, once, ast1.tokens, diagnostics);
     return .{ .checked = .{ .formatted = once } };
+}
+
+/// The text `formatParsed` gives a parsed file, or the error a refusal is.
+fn formatChecked(gpa: std.mem.Allocator, ast: *const Ast, diagnostics: ?*std.Io.Writer) ![]const u8 {
+    var sink = Sink.init(gpa);
+    const formatting = try formatParsed(gpa, "fmt.lin", ast, &sink);
+    if (formatting.text) |text| return text;
+    for (sink.items()) |d| try printDiagnostic(diagnostics, "{s}\n", .{d.message});
+    return error.FormattingRefused;
 }
 
 /// Every significant token, as text and tag, in order.
@@ -3487,14 +3481,6 @@ const Tokens = struct {
     text: []const []const u8,
     tags: []const token.Tag,
 };
-
-fn significantTokens(gpa: std.mem.Allocator, text: []const u8) !Tokens {
-    const source: Source = .{ .path = "fmt.lin", .text = text };
-    var sink = Sink.init(gpa);
-    var interner: Interner = .empty;
-    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
-    return significantTokensOf(gpa, text, tokens.slice());
-}
 
 fn significantTokensOf(
     gpa: std.mem.Allocator,
@@ -3540,16 +3526,6 @@ pub const Difference = union(enum) {
 /// deliberately. Normalising both sides instead would forgive fmt deleting a
 /// comma the author wrote or inventing a semicolon they did not, and a rule
 /// that forgives either is not a preservation property.
-fn tokenDifference(
-    gpa: std.mem.Allocator,
-    before: []const u8,
-    after: []const u8,
-) !?Difference {
-    const a = try significantTokens(gpa, before);
-    const b = try significantTokens(gpa, after);
-    return differenceBetween(a, b);
-}
-
 fn tokenDifferenceOf(
     gpa: std.mem.Allocator,
     before_text: []const u8,
@@ -3599,47 +3575,6 @@ fn printDiagnostic(
     } else {
         std.debug.print(format_string, args);
     }
-}
-
-fn expectSameTokens(
-    gpa: std.mem.Allocator,
-    before: []const u8,
-    after: []const u8,
-    diagnostics: ?*std.Io.Writer,
-) !void {
-    const d = (try tokenDifference(gpa, before, after)) orelse return;
-    return reportTokenDifference(d, diagnostics);
-}
-
-fn expectSameTokensOf(
-    gpa: std.mem.Allocator,
-    before_text: []const u8,
-    before_tokens: token.TokenList.Slice,
-    after_text: []const u8,
-    after_tokens: token.TokenList.Slice,
-    diagnostics: ?*std.Io.Writer,
-) !void {
-    const d = (try tokenDifferenceOf(
-        gpa,
-        before_text,
-        before_tokens,
-        after_text,
-        after_tokens,
-    )) orelse return;
-    return reportTokenDifference(d, diagnostics);
-}
-
-fn reportTokenDifference(d: Difference, diagnostics: ?*std.Io.Writer) !void {
-    switch (d) {
-        .changed => |c| try printDiagnostic(
-            diagnostics,
-            "token {d} changed: '{s}' -> '{s}'\n",
-            .{ c.at, c.from, c.to },
-        ),
-        .dropped => |t| try printDiagnostic(diagnostics, "token dropped: '{s}'\n", .{t}),
-        .invented => |t| try printDiagnostic(diagnostics, "token invented: '{s}'\n", .{t}),
-    }
-    return error.TokenSequenceChanged;
 }
 
 fn expectSameFormatting(
@@ -3703,12 +3638,16 @@ fn writeDiagnosticLine(writer: *std.Io.Writer, line: []const u8) !void {
     try writer.print("{s}\n", .{line});
 }
 
-/// A comma sitting immediately before a closing delimiter -- the one token fmt
-/// is allowed to add.
+/// A comma sitting immediately before a token that closes a list -- the one
+/// token fmt is allowed to add. Every list the printer breaks ends in one:
+/// `)`, `}`, `]`, and the `|` after a lambda's parameters.
 fn isInsertedComma(t: Tokens, at: usize) bool {
     if (t.tags[at] != .comma) return false;
     if (at + 1 >= t.tags.len) return false;
-    return t.tags[at + 1] == .r_brace or t.tags[at + 1] == .r_paren;
+    return switch (t.tags[at + 1]) {
+        .r_brace, .r_paren, .r_bracket, .pipe => true,
+        else => false,
+    };
 }
 
 /// A semicolon -- the one token fmt is allowed to drop.
@@ -3722,14 +3661,6 @@ fn isInsertedComma(t: Tokens, at: usize) bool {
 /// only, so the output may still never invent one.
 fn isDroppedSemicolon(t: Tokens, at: usize) bool {
     return t.tags[at] == .semicolon;
-}
-
-fn commentText(gpa: std.mem.Allocator, text: []const u8) ![]const []const u8 {
-    const source: Source = .{ .path = "fmt.lin", .text = text };
-    var sink = Sink.init(gpa);
-    var interner: Interner = .empty;
-    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
-    return commentTextOf(gpa, text, tokens.slice());
 }
 
 fn commentTextOf(
@@ -3748,46 +3679,6 @@ fn commentTextOf(
         try out.append(gpa, writtenComment(text, span));
     }
     return out.toOwnedSlice(gpa);
-}
-
-fn expectSameComments(
-    gpa: std.mem.Allocator,
-    before: []const u8,
-    after: []const u8,
-    diagnostics: ?*std.Io.Writer,
-) !void {
-    const a = try commentText(gpa, before);
-    const b = try commentText(gpa, after);
-    return compareComments(a, b, diagnostics);
-}
-
-fn expectSameCommentsOf(
-    gpa: std.mem.Allocator,
-    before_text: []const u8,
-    before_tokens: token.TokenList.Slice,
-    after_text: []const u8,
-    after_tokens: token.TokenList.Slice,
-    diagnostics: ?*std.Io.Writer,
-) !void {
-    const a = try commentTextOf(gpa, before_text, before_tokens);
-    const b = try commentTextOf(gpa, after_text, after_tokens);
-    return compareComments(a, b, diagnostics);
-}
-
-fn compareComments(
-    a: []const []const u8,
-    b: []const []const u8,
-    diagnostics: ?*std.Io.Writer,
-) !void {
-    if (a.len != b.len) {
-        try printDiagnostic(diagnostics, "comment count changed: {d} -> {d}\n", .{ a.len, b.len });
-        return error.CommentsChanged;
-    }
-    for (a, b) |x, y| {
-        if (std.mem.eql(u8, x, y)) continue;
-        try printDiagnostic(diagnostics, "comment changed: '{s}' -> '{s}'\n", .{ x, y });
-        return error.CommentsChanged;
-    }
 }
 
 test "the properties hold on a program using every construct" {
@@ -3837,39 +3728,28 @@ test "formatter properties return applicability and canonical text" {
     }
 }
 
-test "formatter property diagnostics can be retained" {
+test "the formatting guard says why it refuses, and property diagnostics can be retained" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    var diagnostics: std.Io.Writer.Allocating = .init(arena.allocator());
-
-    try testing.expectError(
-        error.TokenSequenceChanged,
-        expectSameTokens(
-            arena.allocator(),
-            "fn one() -> UInt8 { 0 }\n",
-            "fn two() -> UInt8 { 0 }\n",
-            &diagnostics.writer,
-        ),
-    );
-    try testing.expectEqualStrings(
-        "token 1 changed: 'one' -> 'two'\n",
-        diagnostics.written(),
-    );
-
-    var comments: std.Io.Writer.Allocating = .init(arena.allocator());
-    try testing.expectError(
-        error.CommentsChanged,
-        expectSameComments(
-            arena.allocator(),
-            "// one\nfn main() -> UInt8 { 0 }\n",
-            "// two\nfn main() -> UInt8 { 0 }\n",
-            &comments.writer,
-        ),
-    );
-    try testing.expectEqualStrings(
-        "comment changed: '// one' -> '// two'\n",
-        comments.written(),
-    );
+    for ([_]struct { before: []const u8, after: []const u8, why: []const u8 }{
+        .{ .before = "fn one() -> UInt8 { 0 }\n", .after = "fn two() -> UInt8 { 0 }\n", .why = "the result would be a different program" },
+        // A trailing comma the author wrote is kept before every closer the
+        // printer may insert one before.
+        .{ .before = "fn main() -> UInt8 { f(1,) }\n", .after = "fn main() -> UInt8 { f(1) }\n", .why = "`,` would become `)`" },
+        .{ .before = "fn main() -> UInt8 { [1,][0] }\n", .after = "fn main() -> UInt8 { [1][0] }\n", .why = "`,` would become `]`" },
+        .{ .before = "fn main() -> UInt8 { (|x: UInt8,| x)(1) }\n", .after = "fn main() -> UInt8 { (|x: UInt8| x)(1) }\n", .why = "`,` would become `|`" },
+        .{ .before = "struct Box[T,] {}\n", .after = "struct Box[T] {}\n", .why = "`,` would become `]`" },
+        .{ .before = "// one\nfn main() -> UInt8 { 0 }\n", .after = "// two\nfn main() -> UInt8 { 0 }\n", .why = "a comment would be reworded" },
+        .{ .before = "// one\nfn main() -> UInt8 { 0 }\n", .after = "fn main() -> UInt8 { 0 }\n", .why = "a comment would be dropped or invented" },
+        .{ .before = "fn main() -> UInt8 { 0 }\n", .after = "fn main() -> UInt8 {\n", .why = "the result would not parse" },
+    }) |case| {
+        const source: Source = .{ .path = "fmt.lin", .text = case.before };
+        var sink = Sink.init(arena.allocator());
+        var interner: Interner = .empty;
+        const tokens = try tokenize(arena.allocator(), &source, .from(0), &sink, &interner);
+        var ast = try parse(arena.allocator(), &source, .from(0), tokens, &sink);
+        try testing.expectEqualStrings(case.why, (try refusalReason(arena.allocator(), &ast, case.after)).?);
+    }
 
     var idempotence: std.Io.Writer.Allocating = .init(arena.allocator());
     try testing.expectError(
@@ -3943,18 +3823,18 @@ test "a note is written where the source said nothing" {
     try testing.expectEqualStrings(source.text, plain.written());
 }
 
-/// Formats source text, asserting it parses cleanly first.
+/// Formats source text through `formatSource`, the routine `linea fmt` and
+/// the language server call, asserting it formats without a refusal.
 ///
 /// The whole printer is specified as text in and text out, so every test below
 /// reads as the rule it checks rather than as a walk over a tree.
 fn check(gpa: std.mem.Allocator, input: []const u8, want: []const u8) !void {
     const source: Source = .{ .path = "fmt.lin", .text = input };
     var sink = Sink.init(gpa);
-    var interner: Interner = .empty;
-    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
-    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    const formatting = try formatSource(gpa, &source, .from(0), &sink);
+    for (sink.items()) |d| std.debug.print("{s}\n", .{d.message});
     try testing.expect(!sink.hasErrors());
-    try testing.expectEqualStrings(want, try formatAlloc(gpa, &ast));
+    try testing.expectEqualStrings(want, formatting.text.?);
 }
 
 test "a defer let is one statement and keeps its comments, its separator and its else" {
@@ -5742,6 +5622,12 @@ test "the formatter structural guard compares attributes, expressions inside typ
         .{ .before = "fn f(a: [UInt8; { 1\n -2 }]) {}", .after = "fn f(a: [UInt8; { 1 -2 }]) {}", .equal = false },
         // Text that reads like the dump's own position note is compared.
         .{ .before = "fn f() -> Str { \"tokens alpha\" }", .after = "fn f() -> Str { \"tokens beta\" }", .equal = false },
+        // The spacing of an implementation's head is layout.
+        .{ .before = "impl Show for (UInt8,   UInt8) {}", .after = "impl Show for (UInt8, UInt8) {}", .equal = true },
+        .{ .before = "impl Show for fn(x: UInt8)   -> UInt8 {}", .after = "impl Show for fn(x: UInt8) -> UInt8 {}", .equal = true },
+        .{ .before = "impl Show for (UInt8, UInt8) {}", .after = "impl Show for (UInt8, UInt16) {}", .equal = false },
+        // A trailing comma the printer inserts changes no node.
+        .{ .before = "fn f() -> UInt8 { g(1, |x: UInt8| x) }", .after = "fn f() -> UInt8 {\n g(\n 1,\n |x: UInt8,| x,\n )\n}", .equal = true },
     };
     for (cases) |case| {
         const before_source: Source = .{ .path = "fmt.lin", .text = case.before };
@@ -5753,7 +5639,7 @@ test "the formatter structural guard compares attributes, expressions inside typ
         const after_tokens = try tokenize(gpa, &after_source, .from(0), &sink, &names);
         var after = try parse(gpa, &after_source, .from(0), after_tokens, &sink);
         try testing.expect(!sink.hasErrors());
-        try testing.expectEqual(case.equal, try sameShape(gpa, &before, &after));
+        try testing.expectEqual(case.equal, SameTree.of(&before, &after));
     }
 }
 
