@@ -5126,8 +5126,8 @@ value match nothing. What C defines without a declaration the
 compiler reads, a symbol a top-level `__asm__` defines included, is
 believed. A `read` parameter does not require a `const` pointee:
 what C does through the address remains the wrapper's promise
-([T-ExternHandle]). The check runs for `linea check`, `build`, `run`, `test`
-and `emit-mlir` once the program is otherwise accepted, and reads each
+([T-ExternHandle]). The check runs for `linea check`, `build`, `run`, `test`,
+`emit-mlir` and `dump-asm` once the program is otherwise accepted, and reads each
 prototype from the C compiler, which describes a pointer to each declared
 function after including each C declaration
 ([ADR 0262](adr/0262-a-hand-written-c-declaration-is-held-to-the-c-compilers-prototype.md)).
