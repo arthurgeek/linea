@@ -58,14 +58,16 @@ results in their places and hands the worker the next chunk at once. The
 head's result is yielded when it arrives, so results leave in input order
 while the other workers keep busy.
 
+A new worker is started holding its first chunk, so a worker's first chunk
+costs no handoff: in the uniform case a worker costs what one of the old
+fixed chunks did, one start, one answer and one join, and one handoff more.
 A chunk is one item when the source's length is unknown, as for any
-`lazy_map`. For `map` and `all`, which know their length `n`, a chunk is
-`n / (2 * max)` items, at least one: every worker maps about two chunks, so
-a long map of cheap items costs about two handoffs a worker, and a slow item
-holds up only the other items of its chunk while the free workers take the
-rest. A short map hands out single items. `map` and `all` start all their
-workers before handing out the first chunk, so the workers come up together
-rather than one after another.
+`lazy_map`. For `map` and `all`, which know their length `n`, each worker's
+first chunk is its share `n / max` less an eighth of a share, and the
+eighths left, about `n / 8` items, go out in chunks of an eighth of a share
+to whichever worker finishes first. A slow item therefore holds up at most
+the rest of its own first chunk, while the free workers take the eighths; a
+short map hands out single items.
 
 `lazy_map` keeps `ahead` at `2 * max`: `max` items being mapped and up to
 `max` more answered and waiting for an earlier item. `map` and `all` collect
@@ -77,12 +79,16 @@ calls the function on the caller, one item at a time, so the same program
 yields the same results in the same order. A `max` of 0 stops the program,
 as 0253 decided.
 
-Waiting for the first of several busy workers opens a runtime wait set for
-that wait alone, registers the busy workers' sessions, and closes it before
-the wait returns. One busy worker is waited on directly. The map therefore
-holds nothing tied to one Io between calls, and a map moved into a task on
-another Io, after its first result or at any other point, keeps working
-there (`tests/tasks/a_lazy_map_moves_to_a_task_on_another_io.lin`).
+A lazy map waits for the first of several busy workers through a runtime
+wait set opened for that wait alone, which registers the busy workers'
+sessions and is closed before the wait returns; one busy worker is waited on
+directly. The map therefore holds nothing tied to one Io between calls, and a
+map moved into a task on another Io, after its first result or at any other
+point, keeps working there
+(`tests/tasks/a_lazy_map_moves_to_a_task_on_another_io.lin`). `map` and
+`all` collect every result within one call, which runs on one Io from start
+to end, so they keep one set for the whole call and register each worker
+once for each chunk it is handed.
 
 ### 2. A lazy map is linear and is settled explicitly
 
@@ -157,26 +163,59 @@ fiber scheduled from the seed inside a simulation. The guide,
 
 ## Measurements
 
-`task.map(.Threads(8), items, f)` before this record (main at 2678ddc5, which
-chunks) and with it, both compilers built `-Drelease` and the program with
-`linea build -O 2`, on an 8-core Apple-silicon Mac; each figure is the
-fastest of forty runs (five for the costly items), from two runs of the
-program, at a load average of about 2.5:
+`task.map(.Threads(8), items, f)` on main (fixed chunks) and with each design
+tried for this record, both compilers built `-Drelease` and the program with
+`linea build -O 2`, on an 8-core Apple-silicon Mac. Each figure is the
+fastest of 200 runs (10 000 items), 100 runs (100 000 items) or five runs
+(16 items of 30 million steps), as a range over two or three runs of the
+program. Main was measured beside each design in the same session, since
+the machine's load moved between sessions; the trivial item is `n + 1`. The
+last six rows were measured earlier with the fastest of five or forty runs,
+and the task-per-item row and its main in a separate run of the same
+program.
 
-| Workload | Main (fixed chunks) | This record (workers pulling chunks) |
-| --- | --- | --- |
-| 10 000 trivial items | 344–416 µs | 545–666 µs |
-| 100 000 trivial items | 986–1 025 µs | 1 308–1 387 µs |
-| 16 items of 30 million steps each | 241.9–244.0 ms | 247.8–248.8 ms |
+| Design | 10 000 trivial | 100 000 trivial | 16 heavy |
+| --- | --- | --- | --- |
+| Main, in the session of the decided design | 332–358 µs | 1 026–1 109 µs | 260.4–264.8 ms |
+| **Decided:** each worker starts holding its share less an eighth; eighths handed out; one wait set per call | 395–512 µs | 1 216–1 230 µs | 260.4–264.1 ms |
+| Main, in the session of the next row | 293–342 µs | 998–1 012 µs | 255.6–268.2 ms |
+| Each worker starts holding its whole share; nothing handed out after | 330–361 µs | 1 114–1 127 µs | 268.9–270.5 ms |
+| Main, in the session of the next row | 344–416 µs | 986–1 025 µs | 241.9–244.0 ms |
+| Chunks of `n / (2 * max)` handed out over sessions; places kept per chunk | 545–666 µs | 1 308–1 387 µs | 247.8–248.8 ms |
+| Main, in the session of the next row | 334–515 µs | 1 018–1 204 µs | 242.1–299.7 ms |
+| Chunks shrinking as the input runs out; places kept per item | 949–2 098 µs | 2 843–3 634 µs | 243.2–248.8 ms |
+| Main, in the session of the next row | 482–597 µs | 1.81–1.94 ms | 435–519 ms |
+| A task per item | 338–429 ms | 3.44–3.64 s | 462–529 ms |
 
-A task per item, the first form of this record, took 338–429 ms for 10 000
-trivial items and 3.44–3.64 s for 100 000 on the same machine.
+What each step cost, from these rows and from timing the operations alone:
+
+- A task's start and join take 29–39 µs, and main spends almost all of a
+  map of cheap items on eight of them.
+- A handoff (choose, send, and the answer's receive) takes about 5 µs at
+  best: each send waits until the other task has woken and copied the
+  value. Handing every worker its first chunk over its session instead of in
+  its captures cost one handoff a worker and waited for each new thread to
+  come up.
+- Keeping a place for every item, rather than for every chunk, cost the
+  caller several moves per item, which doubled a map of 100 000 cheap items
+  on its own.
+- The decided design costs, beyond holding whole shares, one handoff a
+  worker for the eighths and one choice a worker to stop it, about 60 µs for
+  eight workers; holding whole shares costs, beyond main, the stop and the
+  wait set's registrations.
+
+Matching main within 10 % while keeping a slow item from holding up the
+items behind it would need the workers to take the eighths without the
+caller answering each one, from a queue that every worker updates. The only
+mutable state the language lets tasks share is an owning task's, whose
+every call is a round trip like a handoff, so that design is not taken here.
 
 ## Consequences
 
-1. `task.map` over cheap items stays within a small factor of fixed
-   chunking, and a map whose items vary in cost no longer waits on a slow
-   chunk while the other tasks sit idle.
+1. `task.map` and `task.all` over cheap uniform items cost about 1.2× of
+   fixed chunks at 10 000 items and 1.1–1.2× at 100 000 (see
+   Measurements), and costly items cost the same; a map whose items vary in
+   cost no longer waits on a slow chunk while the other tasks sit idle.
 2. `task.all` keeps its workers busy until the last job is handed out,
    instead of waiting for each batch.
 3. A loop over a stream that does costly work per item writes
@@ -208,15 +247,21 @@ trivial items and 3.44–3.64 s for 100 000 on the same machine.
   holds up its whole chunk while the other tasks are idle, and a stream of
   unknown length cannot be divided ahead.
 - **One item per handoff for `map` and `all`:** each handoff is three
-  session rendezvous between tasks, tens of microseconds on a loaded Mac,
-  which a cheap item does not repay.
-- **Chunks that shrink as the input runs out (guided scheduling):** the last
-  items go out one at a time, which suits uneven work best, but a long map
-  of cheap items made a hundred or more handoffs and stayed three to five
-  times slower than fixed chunks; two chunks a worker kept it within 2×.
-- **Places kept per item rather than per chunk:** every item then cost the
-  caller several more moves through the ring, which doubled the time of a
-  map of cheap items on its own.
+  session rendezvous between tasks, which a cheap item does not repay.
+- **Chunks that shrink as the input runs out (guided scheduling), places kept
+  per item:** the last items go out one at a time, which suits uneven work
+  best, but a long map of cheap items made a hundred or more handoffs and
+  moved every item through the ring, three to five times slower than fixed
+  chunks.
+- **Chunks of `n / (2 * max)` handed out over sessions:** two handoffs a
+  worker, the first waiting for its thread to come up, cost 1.3–1.9× of
+  fixed chunks.
+- **Whole shares held from the start, nothing handed out after:** within
+  about 1.1× of fixed chunks, but a slow item then holds up every item after
+  it in its share, as fixed chunks did.
+- **A shared queue the workers take from:** the only fast form needs a value
+  several tasks write, which only an owning task provides, at a round trip
+  per take.
 - **Eager `map` only, with callers chunking a stream themselves:** it cannot
   stop early, it holds every result, and a caller that wants the first match
   maps everything.

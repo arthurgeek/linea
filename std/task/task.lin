@@ -553,9 +553,10 @@ test fn join4_in_allocates_nothing_in_sequence() {
     testing.assert_eq(attempts, 0, "a sequential join allocated")?
 }
 
-// A worker's side of its session with the map that started it: it is offered
-// a chunk of the items `I` yields and answers their results, and again, until
-// it is told to stop. The protocol names the source rather than its item
+// A worker's side of its session with the map that started it, after it has
+// answered the results of the chunk it started with: it is offered a chunk of
+// the items `I` yields and answers their results, and again, until it is told
+// to stop. The protocol names the source rather than its item
 // type, so the map's own types name no item type through a projection.
 struct Assigned[phantom I, phantom R] {}
 
@@ -590,28 +591,30 @@ struct Busy[I: Iterator, R, A: Allocator] {
 // A LazyMap applies `transform` to the items of `source` on at most
 // `running_at_most` worker tasks and yields the results in the items' order.
 // A worker is started only when a chunk of items is ready for it and no
-// started worker is free, and it maps chunk after chunk until the map
+// started worker is free, and it holds that chunk from the start, so its
+// first chunk costs no handoff; it then maps chunk after chunk until the map
 // finishes, so a map starts at most `running_at_most` tasks however many
 // items it maps. Items are pulled only while fewer than `ahead_at_most`
 // pulled items wait to be yielded, and a free worker takes the next chunk at
 // once, so one slow item holds up only the chunk it is in.
 //
-// A chunk is `chunk` items: one when the source's length is unknown, and
-// the length divided by twice the number of workers, at least one, when it
-// is known, so a long map of cheap items costs a few handoffs per worker.
+// A chunk is one item when the source's length is unknown. When it is known,
+// each worker's first chunk is `first_chunk` items, its share less an
+// eighth, and the eighths left go out in chunks of `chunk` items, an eighth
+// of a share, to whichever worker finishes first.
 //
-// `known_length` says the source's length was given, which starts every
-// worker before the first chunk is handed out. `places` keeps a place for
-// every chunk handed out and not yet yielded, the
+// `places` keeps a place for every chunk handed out and not yet yielded, the
 // chunk handed out `n`th at `n % places.length()`, and `head` the results of
 // the chunk being yielded. `busy` holds a worker for each chunk being mapped
 // and `idle` the workers waiting for one; both have room for
 // `running_at_most`. The three are reserved before the first worker starts.
-// Waiting for whichever worker answers first opens a runtime wait set for
-// that wait alone, so nothing the map holds between calls belongs to one Io,
-// and the map may move to a task on another. With `running_at_most` 0 every
-// item is mapped on the caller, when it is asked for, and nothing is
-// allocated.
+// A lazy map waits for whichever worker answers first through a runtime wait
+// set opened for that wait alone, so nothing it holds between calls belongs
+// to one Io, and it may move to a task on another. `map` and `all` collect
+// in one call, so they keep one set, `set`, for the whole call, with
+// `waiting` naming the busy entry each of its slots watches. With
+// `running_at_most` 0 every item is mapped on the caller, when it is asked
+// for, and nothing is allocated.
 //
 // It holds tasks and results, and a drop neither joins a task nor settles a
 // result, so it is linear: `release()` joins every worker and releases what
@@ -624,13 +627,15 @@ struct LazyMap[I: Iterator, R, F, A: Allocator = mem.SystemAllocator] {
     allocator: A,
     running_at_most: UInt64,
     ahead_at_most: UInt64,
+    first_chunk: UInt64,
     chunk: UInt64,
     chunks_at_most: UInt64,
-    known_length: Bool,
     places: mem.Vec[Option[Ahead[R]], A],
     head: Option[mem.Drain[R, mem.SystemAllocator]],
     busy: mem.Vec[Option[Busy[I, R, A]], A],
     idle: mem.Vec[Chan[Assigning[I, R], A], A],
+    set: UInt64,
+    waiting: mem.Vec[UInt64, A],
     opened: Bool,
     workers: UInt64,
     running: UInt64,
@@ -639,6 +644,14 @@ struct LazyMap[I: Iterator, R, F, A: Allocator = mem.SystemAllocator] {
     pulled: UInt64,
     yielded: UInt64,
     pulling: Bool,
+}
+
+// What a new worker starts with: its first chunk and the function it maps
+// every chunk through. A worker captures this one value, and a worker that
+// cannot be prepared hands it back whole.
+struct Handout[T, F] {
+    chunk: mem.Vec[T, mem.SystemAllocator],
+    transform: F,
 }
 
 // Take the value `holder` holds and leave it empty. A loop that consumes a
@@ -721,15 +734,20 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
     } else {
         running_at_most
     }
-    let chunk = if left == 0 || running == 0 {
+    // A map of known length hands each worker a first chunk of its share
+    // less an eighth, and the eighths that are left in chunks of an eighth
+    // of a share, to whichever worker finishes first. Uniform items then cost
+    // one handoff more a worker than equal shares would, and a slow item
+    // holds up at most the rest of its own first chunk.
+    let tail = if left == 0 || running == 0 {
         UInt64(1)
     } else {
-        let share = left / (2 * running)
-        if share == 0 {
-            UInt64(1)
-        } else {
-            share
-        }
+        (left + 8 * running - 1) / (8 * running)
+    }
+    let first_chunk = if left == 0 || running == 0 || left / running <= tail {
+        UInt64(1)
+    } else {
+        left / running - tail
     }
     // Every chunk holds at least one pulled item, so the window never holds
     // more chunks than items; a source of known length never holds more
@@ -737,7 +755,12 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
     let chunks_at_most = if left == 0 {
         ahead_at_most
     } else {
-        (left + chunk - 1) / chunk
+        let first_items = if first_chunk * running > left {
+            left
+        } else {
+            first_chunk * running
+        }
+        (first_items + first_chunk - 1) / first_chunk + (left - first_items + tail - 1) / tail
     }
     .{
         source,
@@ -745,8 +768,8 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
         allocator = copy(allocator),
         running_at_most = running,
         ahead_at_most,
-        chunk,
-        known_length = left > 0,
+        first_chunk,
+        chunk = tail,
         chunks_at_most = if chunks_at_most == 0 {
             UInt64(1)
         } else {
@@ -756,6 +779,8 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
         head = .None,
         busy = mem.Vec.new_in(allocator),
         idle = mem.Vec.new_in(allocator),
+        set = 0,
+        waiting = mem.Vec.new_in(allocator),
         opened = false,
         workers = 0,
         running = 0,
@@ -797,45 +822,13 @@ where I.Item: Owned {
         }
     }
 
-    // Start every worker a map of known length may use, before handing any
-    // its first chunk. A worker takes its first chunk once its task runs, so
-    // starting them all first lets them come up together instead of one
-    // after another. Starting stops at the first worker that cannot be
-    // prepared; the chunks it would have taken go to the others, or to the
-    // caller.
-    fn started_workers(sink self: Self) -> Self where carries(self) {
-        if self.workers >= self.running_at_most {
-            return self
-        }
-        var me = self
-        let body = sink [sink transform = copy(me.transform)] |sink session: Chan[Assigned[I, R]]| {
-            work(session, transform)
-        }
-        match prepare_in(me.allocator, body, default_stack_bytes) {
-            Ok(slot) => {
-                me.workers += 1
-                &me.idle.push(slot.start().detach_body()).unwrap()
-                me.started_workers()
-            },
-            Err(failure) => {
-                let Unstarted { body: _, reason: _ } = failure
-                me
-            },
-        }
-    }
-
     // Pull chunks and hand them to workers while a worker may take one: a
     // free worker waits, or fewer than `running_at_most` have started, and
     // the window has room. Each helper below consumes the map and answers
     // it: a worker's session carries the map's allocator, so it is stored
     // into a map that is rebuilt rather than written through a borrowed one.
     fn filled(sink self: Self) -> Self where carries(self) {
-        let ready = if self.known_length && self.workers == 0 && self.running_at_most > 0 {
-            self.started_workers()
-        } else {
-            self
-        }
-        var holder: Option[Self] = .Some(ready)
+        var holder: Option[Self] = .Some(self)
         loop {
             var me = taken_out(&holder)
             let may_start = me.idle.length() > 0 || me.workers < me.running_at_most
@@ -845,10 +838,15 @@ where I.Item: Owned {
                 break
             }
             let space = me.ahead_at_most - (me.pulled - me.yielded)
-            let size = if me.chunk > space {
-                space
+            let wanted = if me.handed_out < me.running_at_most {
+                me.first_chunk
             } else {
                 me.chunk
+            }
+            let size = if wanted > space {
+                space
+            } else {
+                wanted
             }
             var chunk: mem.Vec[I.Item, mem.SystemAllocator] = mem.Vec.new()
             &chunk.reserve(size).unwrap()
@@ -883,21 +881,28 @@ where I.Item: Owned {
         }
     }
 
-    // Give `chunk` to a free worker, or to a new one. A worker that cannot be
-    // prepared, because its bytes or its stack are refused, leaves the chunk
-    // to the caller, which maps it at once and keeps the results in its
-    // place.
+    // Give `chunk` to a free worker, or start a new one that holds it from
+    // the start, so a worker's first chunk costs no handoff. A worker that
+    // cannot be prepared, because its bytes or its stack are refused, leaves
+    // the chunk to the caller, which maps it at once and keeps the results in
+    // its place.
     fn handed(sink self: Self, sink chunk: mem.Vec[I.Item, mem.SystemAllocator]) -> Self where carries(self, chunk) {
         var me = self
         let number = me.handed_out
         let place = number % me.chunks_at_most
         me.handed_out += 1
         me.pulled += chunk.length()
-        let free: Option[Chan[Assigning[I, R], A]] = if me.idle.length() > 0 {
-            &me.idle.pop()
+        let busy: Option[Chan[Recv[mem.Vec[R, mem.SystemAllocator], Assigning[I, R]], A]] = if me.idle.length() > 0 {
+            match &me.idle.pop() {
+                Some(worker) => .Some(worker.enter().choose_left().send(chunk)),
+                None => panic("a lazy map lost a free worker"),
+            }
         } else {
-            let body = sink [sink transform = copy(me.transform)] |sink session: Chan[Assigned[I, R]]| {
-                work(session, transform)
+            let handout: Handout[I.Item, F] = .{ chunk, transform = copy(me.transform) }
+            let body = sink [sink handout] |sink end: Chan[Send[mem.Vec[R, mem.SystemAllocator], Assigned[I, R]]]| {
+                let Handout { chunk: first, transform } = handout
+                let answered = end.send(mapped_chunk(first, transform))
+                work(answered, transform)
             }
             match prepare_in(me.allocator, body, default_stack_bytes) {
                 Ok(slot) => {
@@ -905,14 +910,17 @@ where I.Item: Owned {
                     .Some(slot.start().detach_body())
                 },
                 Err(failure) => {
-                    let Unstarted { body: _, reason: _ } = failure
+                    let Unstarted { body, reason: _ } = failure
+                    let { handout } = body.into_captures()
+                    let Handout { chunk: first, transform: _ } = handout
+                    let results = mapped_chunk(first, me.transform)
+                    put_place(&me.places, place, .Done(results))
                     .None
                 },
             }
         }
-        match free {
-            Some(worker) => {
-                let waiting = worker.enter().choose_left().send(chunk)
+        match busy {
+            Some(waiting) => {
                 var spot = UInt64(0)
                 loop {
                     let empty: Option[Busy[I, R, A]] = .None
@@ -924,15 +932,17 @@ where I.Item: Owned {
                         },
                     }
                 }
+                if me.set != 0 {
+                    let watched = linea_waitset_reserve(me.set) / slot_shift
+                    linea_waitset_received(me.set, watched, waiting.number())
+                    let _free = mem.exchange(&me.waiting[watched], spot)
+                }
                 let entry: Busy[I, R, A] = .{ worker = waiting, chunk = number }
                 put_back(&me.busy[spot], entry)
                 me.running += 1
                 put_place(&me.places, place, .Running)
             },
-            None => {
-                let results = mapped_chunk(chunk, me.transform)
-                put_place(&me.places, place, .Done(results))
-            },
+            None => {},
         }
         me
     }
@@ -966,13 +976,19 @@ where I.Item: Owned {
     // busy worker is waited on alone.
     fn collected_one(sink self: Self) -> Self where carries(self) {
         var me = self
-        let set = if me.running > 1 {
+        let set = if me.set == 0 && me.running > 1 {
             linea_waitset_open()
         } else {
             UInt64(0)
         }
         var spot = UInt64(0)
-        if set != 0 {
+        if me.set != 0 {
+            let watched = linea_waitset_next(me.set)
+            if watched < 0 {
+                panic("a lazy map waited with no worker busy")
+            }
+            spot = mem.exchange(&me.waiting[UInt64(watched)], 0)
+        } else if set != 0 {
             var registered = UInt64(0)
             for at in 0..me.busy.length() {
                 let empty: Option[Busy[I, R, A]] = .None
@@ -1095,6 +1111,25 @@ where I.Item: Owned {
         }
     }
 
+    // Open a wait set that watches every busy worker for as long as one call
+    // collects every result, so a worker is registered once for each chunk
+    // it is handed. The call runs on one Io from start to end, so the set
+    // never crosses to another. Where the set or its names cannot be had,
+    // each wait opens a set of its own instead.
+    fn watch(inout self: Self) {
+        if self.running_at_most == 0 {
+            return
+        }
+        match &self.waiting.reserve(self.running_at_most) {
+            Ok(_) => {},
+            Err(_) => return,
+        }
+        for _ in 0..self.running_at_most {
+            &self.waiting.push(0).unwrap()
+        }
+        self.set = linea_waitset_open()
+    }
+
     // Move every result into `out` in the items' order, handing out chunks
     // and waiting for workers as needed, until the source has given every
     // item and every result has moved. `map` and `all` collect through this,
@@ -1103,6 +1138,7 @@ where I.Item: Owned {
         var me = self
         if me.running_at_most > 0 && !me.opened && me.pulling {
             &me.open()
+            &me.watch()
         }
         if me.running_at_most == 0 {
             loop {
@@ -1150,10 +1186,15 @@ where I.Item: Owned {
                 put_back(&holder, current.collected_one().filled())
             }
         }
-        match holder {
+        var rest = match holder {
             Some(rest) => rest,
             None => panic("a lazy map was lost while it collected"),
         }
+        if rest.set != 0 {
+            linea_waitset_close(rest.set)
+            rest.set = 0
+        }
+        rest
     }
 
     // Pull no more items. The chunks already handed out are still mapped,
@@ -1206,7 +1247,7 @@ where I.Item: Owned {
         if self.pulled != self.yielded {
             return .Err(self)
         }
-        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, chunk: _, chunks_at_most: _, known_length: _, places, head, busy, idle, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
+        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, places, head, busy, idle, set: _, waiting, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
         match head {
             None => {},
             Some(results) => match results.finish() {
@@ -1224,6 +1265,12 @@ where I.Item: Owned {
         match free.finish() {
             Ok(_) => {},
             Err(_) => panic("a lazy map kept a worker it stopped"),
+        }
+        var names = waiting
+        &names.clear()
+        match names.finish() {
+            Ok(_) => {},
+            Err(_) => panic("a lazy map's wait set names were not empty"),
         }
         var held = busy
         loop {
@@ -1824,10 +1871,10 @@ test fn all_in_takes_its_results_and_tasks_from_its_allocator() {
 // Apply `f` to every item under `policy` and answer the results in the items'
 // order once all have finished. Under `.Threads(max)` at most `max` worker
 // tasks started on the current Io map the items, a chunk at a time, and a
-// worker that finishes its chunk takes the next at once. A chunk is the
-// number of items divided by twice the number of workers, at least one, so
-// cheap items cost two handoffs a worker and one slow item holds up only the
-// chunk it is in. `.Sequential` and `.Threads(1)` map
+// worker that finishes its chunk takes the next at once. Each worker starts
+// holding its share of the items less an eighth, and the eighths left go out
+// an eighth of a share at a time to whichever worker finishes first, so one
+// slow item holds up at most the rest of its first chunk. `.Sequential` and `.Threads(1)` map
 // the items in turn on the caller. A `max` of 0 stops the program. `f`
 // answering a `Result` gives every item's result, failures included. The
 // results and the workers' bytes come from the system allocator; `map_in`
@@ -1943,23 +1990,47 @@ pub fn map_in[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item
     collected(allocator, items, f, running_at_most)
 }
 
+// Add a hundred to `n`. A named function is passed as a code pointer, which
+// a worker that cannot be prepared hands back with its chunk.
+fn plus_hundred(sink n: UInt64) -> UInt64 {
+    n + 100
+}
+
+// Map 1, 2 and 3 through `map_in` over a log that refuses its allocation
+// numbered `refused`, and answer whether the results were right and every
+// allocation was disposed of.
+fn map_test_refusing(refused: UInt64, named: Bool) -> (Bool, Bool) {
+    let log = mem.AllocationLog.open(mem.system(), refused).unwrap()
+    var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+    for n in 1..=3 {
+        &items.push(n).unwrap()
+    }
+    let results = if named {
+        map_in(log.allocator(), Policy.Threads(2), items, plus_hundred)
+    } else {
+        map_in(log.allocator(), Policy.Threads(2), items, |sink n| n + 100)
+    }
+    let same = results.as_slice() == [UInt64(101), 102, 103].as_slice()
+    results.release()
+    let settled = log.all_disposed()
+    log.release()
+    (same, settled)
+}
+
 test fn map_in_takes_its_results_and_tasks_from_its_allocator() {
-    for refused in UInt64(0)..=5 {
-        let log = mem.AllocationLog.open(mem.system(), refused).unwrap()
-        var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
-        for n in 1..=3 {
-            &items.push(n).unwrap()
-        }
-        // A refusal at one of the first three allocations, the places and
-        // the room for the workers, maps every item on the caller, and one at
-        // the fourth or fifth, a worker's bytes, maps that worker's chunk
-        // there.
-        let results = map_in(log.allocator(), Policy.Threads(2), items, |sink n| n + 100)
-        let same = results.as_slice() == [UInt64(101), 102, 103].as_slice()
-        results.release()
-        let settled = log.all_disposed()
-        log.release()
+    // The first three allocations are the places and the room for the
+    // workers, and a refusal of one maps every item on the caller; the
+    // fourth names the workers a wait set watches, and a refusal of it waits
+    // through a set for each wait; the fifth and sixth are the workers'
+    // bytes, and a refusal of one maps that worker's chunk on the caller.
+    // The seventh is the results' vector, which stops the program when it
+    // is refused.
+    for refused in UInt64(0)..=6 {
+        let (same, settled) = map_test_refusing(refused, false)
         testing.assert(same, "a refused allocation changed the results")?
         testing.assert(settled, "map_in kept an allocation")?
+        let (named_same, named_settled) = map_test_refusing(refused, true)
+        testing.assert(named_same, "a refused allocation changed a named function's results")?
+        testing.assert(named_settled, "map_in kept an allocation for a named function")?
     }
 }
