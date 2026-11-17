@@ -888,6 +888,7 @@ fn typecheckInternal(
     defer c.written.deinit(gpa);
     defer c.walk_helps.deinit(gpa);
     defer c.refused_demands.deinit(gpa);
+    defer c.refused_calls.deinit(gpa);
     defer {
         for (c.refused_demands_order.items) |demand| freeRefusedDemand(gpa, demand);
         c.refused_demands_order.deinit(gpa);
@@ -6704,6 +6705,9 @@ const Checker = struct {
     /// recorded, as it forgets its refusals, and owns each trait demand's
     /// arguments.
     refused_demands: types_mod.RefusedDemands = .empty,
+    /// The calls whose type arguments a bound refused. Sized by the calls
+    /// the program writes that were refused.
+    refused_calls: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     refused_demands_order: std.ArrayList(types_mod.RefusedDemand) = .empty,
     /// Whether the body being checked is a closure's written inside a loop,
     /// which a `break` or `continue` in it cannot leave.
@@ -16685,9 +16689,9 @@ const Checker = struct {
         switch (try self.postfixOperation(id, id, receiver, wanted, release.member, &.{}, null)) {
             .settled => |settled| _ = try self.checkCallOf(id, settled.sig, settled.args, .postfix, null, &.{}),
             .absent => |held| {
-                // A `Release` the type lacks only because of a bound refused
-                // where the value was made was reported there.
-                if (try self.refusalExplains(release.trait, held)) {
+                // A `Release` the value lacks only because a bound was refused
+                // at the call that made it was reported at that call.
+                if (try self.refusalExplains(release.trait, held, receiver)) {
                     _ = try self.record(receiver, .poison);
                     _ = try self.record(id, .poison);
                     return;
@@ -18940,7 +18944,7 @@ const Checker = struct {
         if (!try self.answersTrait(walked, self.sequence_decl)) {
             // A `Sequence` implementation that fails only on demands a bound
             // refusal reported follows from that refusal.
-            if (try self.refusalExplains(sequence, walked)) return .poison;
+            if (try self.refusalExplains(sequence, walked, at)) return .poison;
             const before = self.sink.items().len;
             const reported = try self.report(
                 .t_for,
@@ -19949,7 +19953,7 @@ const Checker = struct {
             if (self.iterator_decl == null or !try self.answersTrait(walked, self.iterator_decl)) {
                 // An `Iterator` implementation that fails only on demands a
                 // bound refusal reported follows from that refusal.
-                if (self.iterator_decl) |declared| if (try self.refusalExplains(declared, walked)) break :element .poison;
+                if (self.iterator_decl) |declared| if (try self.refusalExplains(declared, walked, iterator)) break :element .poison;
                 const before = self.sink.items().len;
                 const reported = try self.report(
                     .t_for,
@@ -25639,9 +25643,15 @@ const Checker = struct {
             try self.checkArgumentBounds(over, settled.head, null, named);
             implementation_at = try self.noteSettledHead(id, over, settled.head);
         }
+        // A call whose type arguments a bound refused still answers the type
+        // its signature declares, and what is done with that value is
+        // judged. What its type lacks only because of the refused bound is
+        // not: `fromRefusedCall` traces a value back to such a call.
+        const bounds_refused = self.sink.error_count != errors_before_bounds;
+        if (bounds_refused) try self.refused_calls.put(self.gpa, id, {});
         // One mistake, one report: a bound the declaration refused is not
         // reported again at the alias that heads the path.
-        if (self.sink.error_count != errors_before_bounds and self.calledThroughAlias(id) != null) {
+        if (bounds_refused and self.calledThroughAlias(id) != null) {
             const callee = self.ast.withoutGroups(self.ast.call(id).callee);
             try self.noteRefused(self.ast.exprMain(self.ast.unaryOperand(callee)));
         }
@@ -26906,7 +26916,7 @@ const Checker = struct {
             if (unmet != node.DeclId.none) {
                 // Unless what it asks for is a demand a bound refusal reported
                 // unmet: then the missing implementation follows from that.
-                if (try self.refusalExplains(unmet, of)) return try self.record(id, .poison);
+                if (try self.refusalExplains(unmet, of, ExprId.none)) return try self.record(id, .poison);
                 try self.reportUnimplemented(
                     self.ast.fileOfExpr(id),
                     self.ast.exprSpan(id),
@@ -27005,7 +27015,7 @@ const Checker = struct {
         // A trait declaring the name whose implementation for this type
         // fails only on demands a bound refusal reported follows from that
         // refusal.
-        if (try self.refusalExplains(declaring, of)) return try self.record(id, .poison);
+        if (try self.refusalExplains(declaring, of, ExprId.none)) return try self.record(id, .poison);
         // An implementation refused for its alias head declares this name,
         // and that refusal was the report.
         if (self.res.refused_operations.contains(self.ast.tokenName(self.ast.exprMain(id)))) return try self.record(id, .poison);
@@ -27047,10 +27057,37 @@ const Checker = struct {
     /// already reported, so a report of the missing implementation would
     /// restate that refusal. The trait is asked at no arguments: for a trait
     /// that takes some, no implementation is keyed that way, so the answer is
-    /// that nothing explains the report, and it is made.
-    fn refusalExplains(self: *Checker, trait: node.DeclId, of: TypeId) std.mem.Allocator.Error!bool {
-        return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands);
+    /// that nothing explains the report, and it is made. A refused `Owned`,
+    /// `Shareable` or `Isolated` demand explains only `value`, and only
+    /// where `value` is the result of the call refused for it.
+    fn refusalExplains(self: *Checker, trait: node.DeclId, of: TypeId, value: ExprId) std.mem.Allocator.Error!bool {
+        return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands, value != ExprId.none and self.fromRefusedCall(value));
     }
+
+    /// Whether `value` is the result of a call a bound refused, written
+    /// there or reached through the `let` bindings that hold it.
+    ///
+    /// **Bound:** one step per binding the value passed through, at most
+    /// `refused_call_hops`.
+    fn fromRefusedCall(self: *const Checker, value: ExprId) bool {
+        var at = self.ast.withoutGroups(value);
+        var hops: usize = 0;
+        while (hops < refused_call_hops) : (hops += 1) {
+            if (self.refused_calls.contains(at)) return true;
+            if (self.ast.exprTag(at) != .name_ref) return false;
+            const b = self.res.targetOf(at);
+            if (b == BindingId.none) return false;
+            const stmt = self.res.stmtOf(b);
+            if (stmt == StmtId.none) return false;
+            const init = self.ast.stmtData(stmt).init;
+            if (init == ExprId.none) return false;
+            at = self.ast.withoutGroups(init);
+        }
+        return false;
+    }
+
+    /// How many bindings `fromRefusedCall` follows a value through.
+    const refused_call_hops = 8;
 
     test "a refusal explains a missing implementation that fails only on what it reported" {
         const shared =

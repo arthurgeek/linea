@@ -7870,8 +7870,11 @@ const Parser = struct {
                     depth -= 1;
                 },
                 .comma => if (depth == 0) break,
+                // A line break ends the element as it ends any malformed
+                // region; a selection on the next line belongs to the
+                // expression the element stands in.
                 else => if (depth == 0 and self.cursor.current() != start and
-                    (self.atStatementTokenBoundary() or self.finishedAtALineBreak())) break,
+                    (self.atStatementTokenBoundary() or self.regionEndsAtALineBreak())) break,
             }
             _ = self.cursor.advance();
         }

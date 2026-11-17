@@ -1,0 +1,15 @@
+error[S-Char]: unexpected character 'é'
+  --> tests/recovery/a_refused_byte_ending_an_argument_before_a_continued_chain_is_one_mistake.lin:10:7
+   |
+10 |     f(é
+   |       ^ not a valid token
+error[N-Undefined]: undefined name `nope`
+  --> tests/recovery/a_refused_byte_ending_an_argument_before_a_continued_chain_is_one_mistake.lin:11:14
+   |
+11 |         .bar(nope), absent)
+   |              ^^^^ no binding with this name is in scope
+error[N-Undefined]: undefined name `absent`
+  --> tests/recovery/a_refused_byte_ending_an_argument_before_a_continued_chain_is_one_mistake.lin:11:21
+   |
+11 |         .bar(nope), absent)
+   |                     ^^^^^^ no binding with this name is in scope
