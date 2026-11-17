@@ -1346,43 +1346,6 @@ const Dest = struct {
     used: bool = false,
 };
 
-/// One slot of a projection's path, and the expression the site fills it with.
-///
-/// A projection's body is written in its own parameters; a bracket says what
-/// stands in each of them. Held while the path is read and dropped after it,
-/// because what a slot means is a fact about one site.
-const Splice = struct {
-    /// The parameter the path names.
-    binding: BindingId,
-    /// What the site wrote in its place, or `.none` where what fills the slot
-    /// is a value rather than an expression: a lending walk fills both slots
-    /// with values it has -- the head it evaluated once before the loop, and
-    /// the position the traversal handed over -- and no line of the program
-    /// spells either a second time. Such a slot arrives with its `value`
-    /// already in it, which is also what keeps the head from being evaluated
-    /// once per position.
-    wrote: ExprId,
-    /// Expressions belong to the site's instantiation, even while a generic
-    /// projection's body is being read under its own instantiation.
-    instance: mir_mod.Origin,
-    /// What that lowered to, emitted the first time the path names the slot.
-    value: InstId = .none,
-    /// Whether reading the path asked for what the site wrote -- by lowering
-    /// it, or by folding it into an offset, which reads the expression as
-    /// surely and emits nothing.
-    read: bool = false,
-    /// How many slots were open at the site, before this bracket opened its
-    /// own. What the site wrote reaches only those: a projection that
-    /// forwards to itself through a generic layer (`self.next[i]` inside
-    /// `Mw[H]`, instantiated at `Mw[Mw[R]]`) opens slots for the same
-    /// parameters again, and the outer site's `self` names the outer slot,
-    /// never the inner one its own expression fills.
-    site: usize,
-    /// How many expressions written outside this slot's bracket are being
-    /// lowered; the slot is out of their reach while any is.
-    hidden: u32 = 0,
-};
-
 /// What a variant carries, as whoever builds it has it.
 ///
 /// A payload the program wrote is still an expression, so it is handed over
@@ -1458,7 +1421,7 @@ const Lowerer = struct {
     /// twice, and the site's own expression is ordinary code that may call --
     /// so re-lowering it would run the call once per mention, in a position
     /// nobody wrote.
-    splices: std.ArrayList(Splice) = .empty,
+    splices: instantiate_mod.ProjectionSlots(mir_mod.Origin, InstId) = .{},
     /// The address each lending binder stands for: a lending walk's binder
     /// for the body it was bound over, a `match read` binder for its arm, a
     /// `let read` binder for the rest of the function, and a read capture.
@@ -4054,11 +4017,11 @@ const Lowerer = struct {
         const saved = self.instance;
         self.instance = member_instance;
         defer self.instance = saved;
-        const mark = self.splices.items.len;
-        defer self.splices.shrinkRetainingCapacity(mark);
+        const mark = self.splices.mark();
+        defer self.splices.close(mark);
         for (self.res.parametersOf(d.decl)) |receiver| {
             std.debug.assert(self.res.paramIndexOf(receiver) == 0);
-            try self.splices.append(self.gpa, .{ .binding = receiver, .wrote = .none, .value = base, .instance = self.instance, .site = mark });
+            _ = try self.splices.open(self.gpa, mark, receiver, .none, self.instance, base);
         }
         return switch (d.source) {
             .expression => |expression| self.splicedExpr(expression, site),
@@ -4578,46 +4541,22 @@ const Lowerer = struct {
 
     /// Which slot of a projection's path a name reaches, or null where it
     /// reaches none.
-    ///
-    /// **Bound:** the slots the expansions being read through opened, which is
-    /// two per bracket nested at this point and nothing per program.
     fn slotAt(self: *const Lowerer, id: ExprId) ?usize {
-        if (self.splices.items.len == 0) return null;
-        const at = self.ast.withoutGroups(id);
-        if (self.ast.exprTag(at) != .name_ref) return null;
-        const target = self.res.targetOf(at);
-        if (target == BindingId.none) return null;
-
-        var i = self.splices.items.len;
-        while (i > 0) {
-            i -= 1;
-            const slot = self.splices.items[i];
-            if (slot.hidden == 0 and slot.binding == target) return i;
-        }
-        return null;
+        return self.splices.reached(self.ast, self.res, id);
     }
 
     /// What a slot holds, lowering the site's expression the first time it is
     /// asked for.
     fn slotValue(self: *Lowerer, at: usize) std.mem.Allocator.Error!InstId {
-        self.splices.items[at].read = true;
-        if (self.splices.items[at].value != InstId.none) return self.splices.items[at].value;
-        const saved = self.instance;
-        self.instance = self.splices.items[at].instance;
-        defer self.instance = saved;
-        // The expression was written where only the slots open before its
-        // bracket were in reach, so those opened since are hidden while it is
-        // lowered; slots its own brackets open stay visible. The slots touched
-        // are the ones open at this point: two per bracket nested here.
-        // Indices, not a slice: lowering may open slots and move the list.
-        const from = self.splices.items[at].site;
-        const until = self.splices.items.len;
-        for (self.splices.items[from..until]) |*slot| slot.hidden += 1;
-        defer for (self.splices.items[from..until]) |*slot| {
-            slot.hidden -= 1;
-        };
-        const v = try self.expr(self.splices.items[at].wrote);
-        self.splices.items[at].value = v;
+        const slot = self.splices.items.items[at];
+        if (slot.value != InstId.none) {
+            self.splices.items.items[at].read = true;
+            return slot.value;
+        }
+        const entered = self.splices.enter(at, &self.instance);
+        defer self.splices.leave(entered, &self.instance);
+        const v = try self.expr(slot.wrote);
+        self.splices.items.items[at].value = v;
         return v;
     }
 
@@ -4633,12 +4572,12 @@ const Lowerer = struct {
         // A slot filled with a value has no expression to fold, and the name
         // itself is the only thing left to read -- which folds to nothing, as
         // a position settled at run time should.
-        if (self.splices.items[at].wrote == ExprId.none) return id;
+        if (self.splices.items.items[at].wrote == ExprId.none) return id;
         // Folding is reading. The value reached the path and became an offset,
         // so emitting the expression afterwards would be a second reading of
         // one expression rather than the first reading of an unread one.
-        self.splices.items[at].read = true;
-        return self.splices.items[at].wrote;
+        self.splices.items.items[at].read = true;
+        return self.splices.items.items[at].wrote;
     }
 
     /// The address a routed bracket names: the implementation's own path, read
@@ -4702,30 +4641,16 @@ const Lowerer = struct {
         span: Span,
     ) std.mem.Allocator.Error!InstId {
         if (found.delegation) |delegation| return self.delegatedAddress(found, delegation, receiver, position, span);
-        const mark = self.splices.items.len;
-        defer self.splices.shrinkRetainingCapacity(mark);
+        const mark = self.splices.mark();
+        defer self.splices.close(mark);
 
-        const base = self.splices.items.len;
-        try self.splices.append(self.gpa, .{
-            .binding = BindingId.at(found.receiver),
-            .wrote = receiver.expression(),
-            .value = receiver.value(),
-            .instance = self.instance,
-            .site = mark,
-        });
+        const base = try self.splices.open(self.gpa, mark, BindingId.at(found.receiver), receiver.expression(), self.instance, receiver.value());
         // A projection declaring only a receiver names no index parameter, so
         // there is no slot for the site's position to fill.
-        const index: ?usize = if (found.index == types_mod.Expansion.no_binding) null else at: {
-            const slot = self.splices.items.len;
-            try self.splices.append(self.gpa, .{
-                .binding = BindingId.at(found.index),
-                .wrote = position.expression(),
-                .value = position.value(),
-                .instance = self.instance,
-                .site = mark,
-            });
-            break :at slot;
-        };
+        const index: ?usize = if (found.index == types_mod.Expansion.no_binding)
+            null
+        else
+            try self.splices.open(self.gpa, mark, BindingId.at(found.index), position.expression(), self.instance, position.value());
 
         // The path is the implementation's own text, checked once in terms of
         // the implementation's own parameters -- so a type it names, read
@@ -4774,7 +4699,7 @@ const Lowerer = struct {
 
     /// Emits a slot's expression where reading the path never asked for it.
     fn runUnread(self: *Lowerer, slot: usize) std.mem.Allocator.Error!void {
-        if (self.splices.items[slot].read) return;
+        if (self.splices.items.items[slot].read) return;
         _ = try self.slotValue(slot);
     }
 
@@ -4903,34 +4828,15 @@ const Lowerer = struct {
                 try self.expr(expression),
             .held => |held| held.value,
         };
-        const field_ty = if (delegation.field) |field| self.types().fieldType(receiver_ty, field) else receiver_ty;
-        const address = if (delegation.field) |field| try self.fieldAddr(base, field_ty, self.types().fieldOffset(receiver_ty, field), span) else base;
-        if (delegation.deferred_trait) |trait| {
-            const bound = try self.gpa.alloc(TypeId, found.impl_args.len);
-            defer self.gpa.free(bound);
-            for (found.impl_args, bound) |written, *settled| settled.* = try self.substituted(written);
-            const key = if (delegation.field == null) try self.substituted(delegation.key_type) else try self.mono.pool.substitute(delegation.key_type, found.member.index(), bound);
-            if (try self.mono.pool.projectionFor(self.typing, trait, key, field_ty)) |backing|
-                return self.splicedPath(backing, .{ .held = .{ .value = address, .ty = field_ty } }, position, span);
-            return self.arrayElementAddress(address, field_ty, position, key, span);
-        }
-        if (delegation.backing) |row| {
-            const bound = try self.gpa.alloc(TypeId, found.impl_args.len);
-            defer self.gpa.free(bound);
-            for (found.impl_args, bound) |written, *settled| settled.* = try self.substituted(written);
-            const args = try self.gpa.alloc(TypeId, delegation.backing_args.len);
-            defer self.gpa.free(args);
-            for (delegation.backing_args, args) |written, *settled|
-                settled.* = try self.mono.pool.substitute(written, found.member.index(), bound);
-            var backing = self.typing.expansions[row];
-            backing.impl_args = args;
-            return self.splicedPath(backing, .{ .held = .{ .value = address, .ty = field_ty } }, position, span);
-        }
-        const key = switch (position) {
+        const route = try instantiate_mod.delegatedRoute(self.gpa, &self.mono.pool, self.typing, self.instance, found, delegation, receiver_ty);
+        defer route.deinit(self.gpa);
+        const address = if (delegation.field) |field| try self.fieldAddr(base, route.field_ty, self.types().fieldOffset(receiver_ty, field), span) else base;
+        if (route.backing) |backing| return self.splicedPath(backing, .{ .held = .{ .value = address, .ty = route.field_ty } }, position, span);
+        const key = route.key orelse switch (position) {
             .wrote => |expression| try self.typeAt(expression),
             .held => |held| held.ty,
         };
-        return self.arrayElementAddress(address, field_ty, position, key, span);
+        return self.arrayElementAddress(address, route.field_ty, position, key, span);
     }
 
     /// The address `a[^k]` names: the length, less the count, guarded.
@@ -4991,7 +4897,7 @@ const Lowerer = struct {
             // A slot filled with a value has no site expression to read a type
             // off, so the parameter's own is what it is at -- which is the type
             // the position arrived as.
-            const wrote = self.splices.items[slot].wrote;
+            const wrote = self.splices.items.items[slot].wrote;
             const at = if (wrote == ExprId.none) index else wrote;
             return self.countIn(try self.slotValue(slot), try self.typeAt(at), span);
         }

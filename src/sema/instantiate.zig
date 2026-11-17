@@ -344,6 +344,166 @@ fn spellGenerated(
     }
 }
 
+/// The slots a routed bracket's path is read with: one per parameter of the
+/// projection, each filled by what the site wrote there. Discovery and
+/// lowering both read a path through these, so which slot a name in the path
+/// reaches, which slots the site's own expression may see, and under which
+/// instance it is read are answered once. `Under` is how the reader names
+/// the instance a body is read under, and `Value` what it keeps of a slot it
+/// has read: nothing for discovery, the lowered value for lowering.
+///
+/// **Bound:** two slots per bracket nested at the point being read; nothing
+/// per program.
+pub fn ProjectionSlots(comptime Under: type, comptime Value: type) type {
+    return struct {
+        const Self = @This();
+
+        items: std.ArrayList(Slot) = .empty,
+
+        pub const Slot = struct {
+            /// The parameter the path names.
+            binding: BindingId,
+            /// What the site wrote in its place, or `.none` where what fills
+            /// the slot is a value rather than an expression: a lending walk
+            /// fills both slots with values it has, the head it evaluated once
+            /// and the position the traversal handed over.
+            wrote: ExprId,
+            /// The instance of the function that wrote the expression. The
+            /// path is read under the projection member's instance, and a
+            /// generic call in what the site wrote is built for the site's.
+            instance: Under,
+            /// What the reader kept of the slot once it read it.
+            value: Value,
+            /// Whether reading the path asked for what the site wrote.
+            read: bool = false,
+            /// How many slots were open at the site, before this bracket
+            /// opened its own. What the site wrote reaches only those: a
+            /// projection that forwards to itself through a generic layer
+            /// (`self.next[i]` inside `Mw[H]`, instantiated at `Mw[Mw[R]]`)
+            /// opens slots for the same parameters again, and the outer
+            /// site's `self` names the outer slot, never the inner one.
+            site: usize,
+            /// How many expressions written outside this slot's bracket are
+            /// being read; the slot is out of their reach while any is.
+            hidden: u32 = 0,
+        };
+
+        pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+            self.items.deinit(gpa);
+        }
+
+        /// Where the next bracket's slots begin, and what `close` returns to.
+        pub fn mark(self: *const Self) usize {
+            return self.items.items.len;
+        }
+
+        pub fn close(self: *Self, at: usize) void {
+            self.items.shrinkRetainingCapacity(at);
+        }
+
+        /// Opens a slot for `binding`, filled at a site whose own slots begin
+        /// at `site`, and answers its index.
+        pub fn open(self: *Self, gpa: std.mem.Allocator, site: usize, binding: BindingId, wrote: ExprId, instance: Under, value: Value) std.mem.Allocator.Error!usize {
+            const at = self.items.items.len;
+            try self.items.append(gpa, .{ .binding = binding, .wrote = wrote, .instance = instance, .value = value, .site = site });
+            return at;
+        }
+
+        /// Which slot a name reaches, or null where it reaches none: the
+        /// innermost one open for the binding it names and in reach.
+        pub fn reached(self: *const Self, ast: *const Ast, resolution: *const Resolution, id: ExprId) ?usize {
+            if (self.items.items.len == 0) return null;
+            const at = ast.withoutGroups(id);
+            if (ast.exprTag(at) != .name_ref) return null;
+            const target = resolution.targetOf(at);
+            if (target == BindingId.none) return null;
+            var i = self.items.items.len;
+            while (i > 0) {
+                i -= 1;
+                const slot = self.items.items[i];
+                if (slot.hidden == 0 and slot.binding == target) return i;
+            }
+            return null;
+        }
+
+        /// What `enter` changed, for `leave` to put back.
+        pub const Entered = struct { from: usize, until: usize, instance: Under };
+
+        /// Prepares to read what the site wrote in slot `at`: under the
+        /// site's instance, with the slots opened since its bracket hidden,
+        /// since the expression was written where only the slots open before
+        /// it were in reach. Slots its own brackets open stay visible.
+        /// Indices, not a slice: reading may open slots and move the list.
+        pub fn enter(self: *Self, at: usize, instance: *Under) Entered {
+            const slot = &self.items.items[at];
+            slot.read = true;
+            const entered: Entered = .{ .from = slot.site, .until = self.items.items.len, .instance = instance.* };
+            instance.* = slot.instance;
+            for (self.items.items[entered.from..entered.until]) |*hidden| hidden.hidden += 1;
+            return entered;
+        }
+
+        pub fn leave(self: *Self, entered: Entered, instance: *Under) void {
+            for (self.items.items[entered.from..entered.until]) |*hidden| hidden.hidden -= 1;
+            instance.* = entered.instance;
+        }
+    };
+}
+
+/// Where a delegated projection's path leads at one concrete receiver: the
+/// field it forwards through, and then either the implementation that field's
+/// type answers the bracket with or, where none does, the element its key
+/// selects. Discovery follows the route to reach the bodies it needs and
+/// lowering to the address it emits, so the two choose it alike.
+pub const DelegatedRoute = struct {
+    /// The type the bracket is forwarded to: the field's, or the receiver's
+    /// where the projection forwards it whole.
+    field_ty: TypeId,
+    /// The implementation the forwarded bracket reads through, its arguments
+    /// settled at this receiver; null where the forwarded value is an array
+    /// the bracket indexes directly.
+    backing: ?types_mod.Expansion,
+    /// The key an array is indexed by, or null where it is the type of the
+    /// position the site wrote.
+    key: ?TypeId,
+    /// The arguments `backing` holds where the route settled them.
+    owned_args: []TypeId = &.{},
+
+    pub fn deinit(self: DelegatedRoute, gpa: std.mem.Allocator) void {
+        if (self.owned_args.len > 0) gpa.free(self.owned_args);
+    }
+};
+
+/// The route a delegated projection takes at `receiver_ty`, read under
+/// `instance`, which settles the types the projection was written with.
+pub fn delegatedRoute(
+    gpa: std.mem.Allocator,
+    pool: *Typing.Builder,
+    typing: *const Typing,
+    instance: anytype,
+    found: types_mod.Expansion,
+    delegation: types_mod.DelegatedProjection,
+    receiver_ty: TypeId,
+) std.mem.Allocator.Error!DelegatedRoute {
+    const field_ty = if (delegation.field) |field| pool.view().fieldType(receiver_ty, field) else receiver_ty;
+    if (delegation.deferred_trait == null and delegation.backing == null) return .{ .field_ty = field_ty, .backing = null, .key = null };
+    const bound = try gpa.alloc(TypeId, found.impl_args.len);
+    defer gpa.free(bound);
+    for (found.impl_args, bound) |written, *settled| settled.* = try instance.through(pool, written);
+    if (delegation.deferred_trait) |trait| {
+        const key = if (delegation.field == null) try instance.through(pool, delegation.key_type) else try pool.substitute(delegation.key_type, found.member.index(), bound);
+        return .{ .field_ty = field_ty, .backing = try pool.projectionFor(typing, trait, key, field_ty), .key = key };
+    }
+    const row = delegation.backing.?;
+    const args = try gpa.alloc(TypeId, delegation.backing_args.len);
+    errdefer gpa.free(args);
+    for (delegation.backing_args, args) |written, *settled|
+        settled.* = try pool.substitute(written, found.member.index(), bound);
+    var backing = typing.expansions[row];
+    backing.impl_args = args;
+    return .{ .field_ty = field_ty, .backing = backing, .key = null, .owned_args = args };
+}
+
 /// The identity of one instance, and the whole of it.
 ///
 /// The key is the tuple and nothing else: which declaration, at which nominal
@@ -1262,28 +1422,10 @@ const Discovery = struct {
     instance: types_mod.Instantiation,
     disposals: *const DisposalPlan,
     placing: bool = false,
-    splices: std.ArrayList(Splice) = .empty,
+    splices: ProjectionSlots(types_mod.Instantiation, void) = .{},
     projection_write: bool = false,
     projection_floor: usize = 0,
     active_projections: std.ArrayList(struct { member: DeclId, receiver: TypeId }) = .empty,
-
-    /// One slot of a projection's path and the expression the site fills it
-    /// with, as lowering holds it, so the two read a path alike.
-    const Splice = struct {
-        binding: BindingId,
-        wrote: ExprId,
-        /// The instance of the function that wrote the expression. The path
-        /// is read under the projection member's instance, and a generic call
-        /// in what the site wrote is built for the site's.
-        instance: types_mod.Instantiation,
-        read: bool = false,
-        /// How many slots were open at the site, before this bracket opened
-        /// its own. What the site wrote reaches only those.
-        site: usize,
-        /// How many expressions written outside this slot's bracket are being
-        /// walked; the slot is out of their reach while any is.
-        hidden: u32 = 0,
-    };
 
     fn through(self: *Discovery, ty: TypeId) !TypeId {
         return self.instance.through(self.pool, ty);
@@ -1314,7 +1456,7 @@ const Discovery = struct {
 
     fn expr(self: *Discovery, id: ExprId) std.mem.Allocator.Error!void {
         if (id == ExprId.none) return;
-        if (self.spliceAt(id)) |at| return self.readSplice(at);
+        if (self.splices.reached(self.ast, self.resolution, id)) |at| return self.readSplice(at);
 
         // Every reached expression is emitted at its concrete type. Settling
         // it is discovery work even where the expression contributes no call
@@ -1482,41 +1624,13 @@ const Discovery = struct {
         }
     }
 
-    fn spliceAt(self: *const Discovery, id: ExprId) ?usize {
-        if (self.splices.items.len == 0) return null;
-        const at = self.ast.withoutGroups(id);
-        if (self.ast.exprTag(at) != .name_ref) return null;
-        const target = self.resolution.targetOf(at);
-        if (target == BindingId.none) return null;
-
-        var i = self.splices.items.len;
-        while (i > 0) {
-            i -= 1;
-            const slot = self.splices.items[i];
-            if (slot.hidden == 0 and slot.binding == target) return i;
-        }
-        return null;
-    }
-
+    /// Walks what the site wrote in a slot, the first time the path names it.
     fn readSplice(self: *Discovery, at: usize) std.mem.Allocator.Error!void {
-        if (self.splices.items[at].read) return;
-        self.splices.items[at].read = true;
-        const wrote = self.splices.items[at].wrote;
-        if (wrote == ExprId.none) return;
-        const saved = self.instance;
-        self.instance = self.splices.items[at].instance;
-        defer self.instance = saved;
-        // The expression was written where only the slots open before its
-        // bracket were in reach, so those opened since are hidden while it is
-        // walked; slots its own brackets open stay visible. Indices, not a
-        // slice: the walk may open slots and move the list.
-        const from = self.splices.items[at].site;
-        const until = self.splices.items.len;
-        for (self.splices.items[from..until]) |*slot| slot.hidden += 1;
-        defer for (self.splices.items[from..until]) |*slot| {
-            slot.hidden -= 1;
-        };
-        try self.projectionOperand(wrote);
+        const slot = self.splices.items.items[at];
+        if (slot.read) return;
+        const entered = self.splices.enter(at, &self.instance);
+        defer self.splices.leave(entered, &self.instance);
+        if (slot.wrote != ExprId.none) try self.projectionOperand(slot.wrote);
     }
 
     /// Site operands are evaluated outside the projection path they fill.
@@ -1571,45 +1685,17 @@ const Discovery = struct {
         if (found.delegation) |delegation| {
             if (receiver != .none) try self.projectionOperand(receiver);
             if (index != .none) try self.projectionOperand(index);
-            if (delegation.deferred_trait) |trait| {
-                const bound = try self.gpa.alloc(TypeId, found.impl_args.len);
-                defer self.gpa.free(bound);
-                for (found.impl_args, bound) |written, *settled| settled.* = try self.through(written);
-                const key = if (delegation.field == null) try self.through(delegation.key_type) else try self.pool.substitute(delegation.key_type, found.member.index(), bound);
-                const field_ty = if (delegation.field) |field| self.pool.view().fieldType(receiver_ty, field) else receiver_ty;
-                if (try self.pool.projectionFor(self.typing, trait, key, field_ty)) |backing|
-                    try self.splicedPath(backing, .none, .none, field_ty);
-            } else if (delegation.backing) |row| {
-                const bound = try self.gpa.alloc(TypeId, found.impl_args.len);
-                defer self.gpa.free(bound);
-                for (found.impl_args, bound) |written, *settled| settled.* = try self.through(written);
-                const args = try self.gpa.alloc(TypeId, delegation.backing_args.len);
-                defer self.gpa.free(args);
-                for (delegation.backing_args, args) |written, *settled|
-                    settled.* = try self.pool.substitute(written, found.member.index(), bound);
-                var backing = self.typing.expansions[row];
-                backing.impl_args = args;
-                const field_ty = if (delegation.field) |field| self.pool.view().fieldType(receiver_ty, field) else receiver_ty;
-                try self.splicedPath(backing, .none, .none, field_ty);
-            }
+            const route = try delegatedRoute(self.gpa, self.pool, self.typing, self.instance, found, delegation, receiver_ty);
+            defer route.deinit(self.gpa);
+            if (route.backing) |backing| try self.splicedPath(backing, .none, .none, route.field_ty);
             return;
         }
-        const mark = self.splices.items.len;
-        defer self.splices.shrinkRetainingCapacity(mark);
+        const mark = self.splices.mark();
+        defer self.splices.close(mark);
 
-        try self.splices.append(self.gpa, .{
-            .binding = BindingId.at(found.receiver),
-            .wrote = receiver,
-            .instance = self.instance,
-            .site = mark,
-        });
+        _ = try self.splices.open(self.gpa, mark, BindingId.at(found.receiver), receiver, self.instance, {});
         if (found.index != types_mod.Expansion.no_binding) {
-            try self.splices.append(self.gpa, .{
-                .binding = BindingId.at(found.index),
-                .wrote = index,
-                .instance = self.instance,
-                .site = mark,
-            });
+            _ = try self.splices.open(self.gpa, mark, BindingId.at(found.index), index, self.instance, {});
         }
 
         const bound = try self.gpa.alloc(TypeId, found.impl_args.len);
@@ -1626,7 +1712,7 @@ const Discovery = struct {
         }
 
         var at = mark;
-        while (at < self.splices.items.len) : (at += 1) try self.readSplice(at);
+        while (at < self.splices.mark()) : (at += 1) try self.readSplice(at);
     }
 
     /// Interns the closure instance a value of `written` runs as, read at this

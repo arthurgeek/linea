@@ -1341,7 +1341,12 @@ Vecs and subspans after their explicit view construction.
 For a projection, the checker computes one canonical path per implementation
 and records its selection at each bracket site. Lowering substitutes that
 site's receiver and index into the recorded path. The path is not recomputed
-per use, and no projection operation survives into MIR.
+per use, and no projection operation survives into MIR. Discovery walks the
+same substitution to reach the bodies the site's expressions call. Both read
+the path through one slot environment, `instantiate.ProjectionSlots`, which
+answers which slot a name reaches, which slots the site's own expression may
+see and under which instance it is read, and both follow a delegated
+projection through one route rule, `instantiate.delegatedRoute`.
 
 Field delegation retains its contextual keyword and target token in the source
 AST. The type checker records the stored field in the existing source-reference
