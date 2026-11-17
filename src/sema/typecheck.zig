@@ -14072,7 +14072,7 @@ const Checker = struct {
             at.span,
             "a value of this type would have to hold one, so it has no size",
             "{s}",
-            .{try how.toOwnedSlice(self.gpa)},
+            .{how.items},
         );
     }
 
