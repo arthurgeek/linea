@@ -105,7 +105,7 @@ impl[P: Protocol, F: Owned, A] Chan[P, (F, A)] {
         .{ endpoint, body = .{} }
     }
 
-    test fn a_handle_keeps_its_allocator_without_its_body() {
+    test "a handle keeps its allocator without its body" {
         let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
             me.send(7).close()

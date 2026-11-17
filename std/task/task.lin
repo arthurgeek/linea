@@ -341,7 +341,7 @@ pub fn join_in[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, 
     }
 }
 
-test fn join_in_takes_each_task_from_its_allocator() {
+test "join_in takes each task from its allocator" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let results = join_in(log.allocator(), Policy.Threads(2), sink [] || UInt64(3), sink [] || UInt64(4))
     let attempts = log.attempts()
@@ -352,7 +352,7 @@ test fn join_in_takes_each_task_from_its_allocator() {
     testing.assert(settled, "joining kept a job's bytes")?
 }
 
-test fn join_in_allocates_nothing_in_sequence() {
+test "join_in allocates nothing in sequence" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let results = join_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4))
     let attempts = log.attempts()
@@ -434,7 +434,7 @@ pub fn join3_in[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink 
     }
 }
 
-test fn join3_in_takes_each_task_from_its_allocator() {
+test "join3_in takes each task from its allocator" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let results = join3_in(log.allocator(), Policy.Threads(3), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
     let attempts = log.attempts()
@@ -445,7 +445,7 @@ test fn join3_in_takes_each_task_from_its_allocator() {
     testing.assert(settled, "joining kept a job's bytes")?
 }
 
-test fn join3_in_allocates_nothing_in_sequence() {
+test "join3_in allocates nothing in sequence" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let results = join3_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
     let attempts = log.attempts()
@@ -533,7 +533,7 @@ pub fn join4_in[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discarda
     }
 }
 
-test fn join4_in_takes_each_task_from_its_allocator() {
+test "join4_in takes each task from its allocator" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let results = join4_in(log.allocator(), Policy.Threads(4), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
     let attempts = log.attempts()
@@ -544,7 +544,7 @@ test fn join4_in_takes_each_task_from_its_allocator() {
     testing.assert(settled, "joining kept a job's bytes")?
 }
 
-test fn join4_in_allocates_nothing_in_sequence() {
+test "join4_in allocates nothing in sequence" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let results = join4_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
     let attempts = log.attempts()
@@ -1163,7 +1163,7 @@ where I.Item: Owned {
         self.pulling = false
     }
 
-    test fn a_stopped_map_yields_only_what_it_started() {
+    test "a stopped map yields only what it started" {
         let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=100, |sink n| n * 10)
         let first = &mapped.next()
@@ -1272,7 +1272,7 @@ where I.Item: Owned {
         .Ok(source)
     }
 
-    test fn a_map_with_results_to_yield_does_not_finish() {
+    test "a map with results to yield does not finish" {
         var mapped = lazy_map(Policy.Threads(2), UInt64(1)..=6, |sink n| n + 1)
         let first = &mapped.next()
         let refused = match mapped.finish() {
@@ -1384,7 +1384,7 @@ pub fn lazy_map[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink
     lazy_map_in(mem.system(), policy, items, f)
 }
 
-test fn a_lazy_map_yields_every_result_in_input_order() {
+test "a lazy_map yields every result in input order" {
     defer var squares = lazy_map(Policy.Threads(3), UInt64(1)..=20, |sink n| n * n)
     var expected = UInt64(1)
     for square in &squares {
@@ -1545,7 +1545,7 @@ pub fn lazy_map_in[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(s
     lazy_window(allocator, items.iterate(), f, running_at_most, ahead_of(running_at_most), 0)
 }
 
-test fn a_map_visits_each_worker_entry_a_fixed_number_of_times_per_chunk() {
+test "a map visits each worker entry a fixed number of times per chunk" {
     // Handing a chunk out takes a free entry and an answer finds its entry
     // through the wait set, so the entries visited per chunk do not grow
     // with the number of workers.
@@ -1557,7 +1557,7 @@ test fn a_map_visits_each_worker_entry_a_fixed_number_of_times_per_chunk() {
     }
 }
 
-test fn a_slow_item_fills_the_window_and_the_places_wrap() {
+test "a slow item fills the window and the places wrap" {
     // Stop after the first result and count what had been pulled: while
     // item 1 is mapped, the other worker maps items 2, 3 and 4, and the
     // window stops pulling with four items waiting; item 5 is pulled once
@@ -1592,7 +1592,7 @@ test fn a_slow_item_fills_the_window_and_the_places_wrap() {
     testing.assert(in_order && expected == 11, "results came back out of order once the places wrapped")?
 }
 
-test fn a_lazy_map_released_early_settles_every_job_it_started() {
+test "a lazy_map released early settles every job it started" {
     let (none, none_attempts, none_settled) = lazy_test_take(0)
     testing.assert_eq((none, none_attempts), (UInt64(0), UInt64(0)), "a map released before its first result started work")?
     testing.assert(none_settled, "a map released at once kept an allocation")?
@@ -1609,7 +1609,7 @@ test fn a_lazy_map_released_early_settles_every_job_it_started() {
     testing.assert(some_settled, "a map released after ten results kept an allocation")?
 }
 
-test fn a_lazy_map_runs_no_more_jobs_at_once_than_its_bound() {
+test "a lazy_map runs no more jobs at once than its bound" {
     let (peak, after_first, total, settled) = lazy_test_peak(12)
     let (two_items, _, _, _) = lazy_test_peak(2)
     testing.assert_eq(total, UInt64(78), "a result was lost")?
@@ -1621,7 +1621,7 @@ test fn a_lazy_map_runs_no_more_jobs_at_once_than_its_bound() {
     testing.assert(settled, "a finished map kept an allocation")?
 }
 
-test fn a_sequential_lazy_map_starts_no_task_and_yields_the_same_results() {
+test "a sequential lazy_map starts no task and yields the same results" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     var sequential = lazy_map_in(log.allocator(), Policy.Sequential, UInt64(1)..=8, |sink n| n * 3)
     var threaded = lazy_map_in(log.allocator(), Policy.Threads(1), UInt64(1)..=8, |sink n| n * 3)
@@ -1653,7 +1653,7 @@ test fn a_sequential_lazy_map_starts_no_task_and_yields_the_same_results() {
     testing.assert_eq(attempts, 0, "a map that runs on the caller allocated")?
 }
 
-test fn a_lazy_map_hands_linear_results_to_their_owner() {
+test "a lazy_map hands linear results to their owner" {
     var receipts = lazy_map(Policy.Threads(2), UInt64(1)..=9, |sink n| LazyReceipt { number = n })
     var seen = UInt64(0)
     for receipt in &receipts {
@@ -1687,7 +1687,7 @@ test fn a_lazy_map_hands_linear_results_to_their_owner() {
     testing.assert(after <= 4, "a stopped map yielded receipts past its window")?
 }
 
-test fn a_lazy_map_releases_results_that_own_storage() {
+test "a lazy_map releases results that own storage" {
     var lists = lazy_map(
         Policy.Threads(2),
         UInt64(1)..=8,
@@ -1702,7 +1702,7 @@ test fn a_lazy_map_releases_results_that_own_storage() {
     testing.assert_eq(length, 1, "the first list was wrong")?
 }
 
-test fn a_lazy_map_keeps_every_result_of_a_fallible_function() {
+test "a lazy_map keeps every result of a fallible function" {
     defer var checked = lazy_map(
         Policy.Threads(3),
         UInt64(1)..=6,
@@ -1727,7 +1727,7 @@ test fn a_lazy_map_keeps_every_result_of_a_fallible_function() {
     testing.assert_eq(position, 6, "a failure ended the map early")?
 }
 
-test fn a_refused_allocation_moves_work_to_the_caller_and_keeps_every_result() {
+test "a refused allocation moves work to the caller and keeps every result" {
     // The first five allocations are the places, the room for the workers
     // and the names of the wait set's slots; the rest are the workers, one
     // each.
@@ -1832,7 +1832,7 @@ fn fast_job() -> time.Instant {
     time.Instant.now()
 }
 
-test fn all_starts_the_next_job_as_soon_as_one_finishes() {
+test "all starts the next job as soon as one finishes" {
     var jobs: mem.Vec[fn() -> time.Instant, mem.SystemAllocator] = mem.Vec.new()
     &jobs.push(slow_job).unwrap()
     for _ in 0..4 {
@@ -1876,7 +1876,7 @@ pub fn all_in[T: Owned, F: Owned + Discardable + fn() -> T, A: Allocator, B: All
     )
 }
 
-test fn all_in_takes_its_results_and_tasks_from_its_allocator() {
+test "all_in takes its results and tasks from its allocator" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     var jobs: mem.Vec[fn() -> UInt64, mem.SystemAllocator] = mem.Vec.new()
     &jobs.push(job10).unwrap()
@@ -1973,7 +1973,7 @@ test "map keeps every result of a fallible function" {
     testing.assert(results_match, "results mismatch")?
 }
 
-test fn map_starts_the_next_item_as_soon_as_one_finishes() {
+test "map starts the next item as soon as one finishes" {
     var pauses: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     &pauses.push(400).unwrap()
     for _ in 0..4 {
@@ -2044,7 +2044,7 @@ fn map_test_refusing(refused: UInt64, named: Bool) -> (Bool, Bool) {
     (same, settled)
 }
 
-test fn map_in_takes_its_results_and_tasks_from_its_allocator() {
+test "map_in takes its results and tasks from its allocator" {
     // The first allocation is the results' vector, reserved whole, which
     // stops the program when it is refused. The next five are the places,
     // the room for the workers and the names of the wait set's slots, and a
