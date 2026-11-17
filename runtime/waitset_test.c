@@ -20,6 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "loop.h"
 #include "signals.h"
 #include "task.h"
 #include "waitset.h"
@@ -851,6 +852,141 @@ static void a_delivered_share_keeps_the_handler_until_it_is_released(void) {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
 }
 
+/* Run `body` in a child process and check that it stops the program with
+ * `message`. */
+static void traps_with(void (*body)(void), const char *message) {
+    int pipe_ends[2];
+    assert(pipe(pipe_ends) == 0);
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        dup2(pipe_ends[1], 2);
+        close(pipe_ends[0]);
+        body();
+        _exit(0);
+    }
+    close(pipe_ends[1]);
+    char said[512];
+    size_t len = 0;
+    ssize_t got;
+    while ((got = read(pipe_ends[0], said + len, sizeof said - 1 - len)) > 0) len += (size_t)got;
+    said[len] = '\0';
+    close(pipe_ends[0]);
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+    assert(strncmp(said, message, strlen(message)) == 0);
+}
+
+/* The loop a moved set goes to: a loop of fibers this thread switches to. */
+static unsigned long another_loop;
+
+static void *rehome_on_the_other_loop(void *set) {
+    (void)linea_io_switch(another_loop);
+    linea_waitset_rehome((unsigned long)set);
+    (void)linea_io_switch(0);
+    return 0;
+}
+
+/* A set of session endpoints moves to another loop and back. A peer that
+ * sent before the move, one that sends while the move waits to take the
+ * set's lock, and one that sends after it are each delivered once, in the
+ * order they signalled. */
+static void a_set_of_endpoints_keeps_its_signals_when_it_moves(void) {
+    another_loop = linea_loop_claim_kind(0, LINEA_LOOP_FIBERS);
+    assert(another_loop != 0);
+    const unsigned long set = linea_waitset_open();
+    arm(linea_pause_send_filled);
+    const unsigned long before = started(send_one);
+    pass(linea_pause_send_filled);
+    const unsigned long a = linea_waitset_reserve(set);
+    linea_waitset_received(set, slot_of(a), before);
+    arm(linea_pause_rehome_before_lock);
+    pthread_t mover;
+    assert(pthread_create(&mover, 0, rehome_on_the_other_loop, (void *)set) == 0);
+    await_arrival(linea_pause_rehome_before_lock);
+    /* While the move waits to take the set's lock, a peer sends and is
+     * registered, so its signal is posted during the move. */
+    const unsigned long b = linea_waitset_reserve(set);
+    __atomic_store_n(&go_ahead, 0, __ATOMIC_SEQ_CST);
+    const unsigned long during = started(send_when_told);
+    linea_waitset_received(set, slot_of(b), during);
+    arm(linea_pause_send_filled);
+    __atomic_store_n(&go_ahead, 1, __ATOMIC_SEQ_CST);
+    /* The send signals the registration before it reaches this point. */
+    pass(linea_pause_send_filled);
+    release_pause(linea_pause_rehome_before_lock);
+    assert(pthread_join(mover, 0) == 0);
+    (void)linea_io_switch(another_loop);
+    assert(linea_waitset_next(set) == (long)slot_of(a));
+    finish_send_one(before);
+    const unsigned long c = linea_waitset_reserve(set);
+    const unsigned long after = started(send_one);
+    linea_waitset_received(set, slot_of(c), after);
+    assert(linea_waitset_next(set) == (long)slot_of(b));
+    finish_send_one(during);
+    (void)linea_io_switch(0);
+    linea_waitset_rehome(set);
+    assert(linea_waitset_next(set) == (long)slot_of(c));
+    finish_send_one(after);
+    assert(linea_waitset_next(set) == -1);
+    linea_waitset_close(set);
+    linea_loop_retire(another_loop);
+}
+
+static void move_a_set_holding_a_timer(void) {
+    const unsigned long loop = linea_loop_claim_kind(0, LINEA_LOOP_FIBERS);
+    const unsigned long set = linea_waitset_open();
+    const unsigned long timer = linea_waitset_reserve(set);
+    linea_waitset_timer(set, slot_of(timer), 1000000000UL);
+    (void)linea_io_switch(loop);
+    linea_waitset_rehome(set);
+}
+
+static void move_a_set_with_a_kernel_queue(void) {
+    int ends[2];
+    assert(pipe(ends) == 0);
+    const unsigned long loop = linea_loop_claim_kind(0, LINEA_LOOP_FIBERS);
+    const unsigned long set = linea_waitset_open();
+    const unsigned long idle = linea_waitset_reserve(set);
+    assert(linea_waitset_descriptor(set, slot_of(idle), ends[0], 0) == 0);
+    assert(linea_waitset_take(set, slot_of(idle), generation_of(idle), 1) == 1);
+    (void)linea_io_switch(loop);
+    linea_waitset_rehome(set);
+}
+
+/* A set watched through its loop's kernel queue, or holding a timer, stays
+ * on its loop: moving it traps. */
+static void a_set_watching_more_than_endpoints_does_not_move(void) {
+    traps_with(move_a_set_holding_a_timer, "linea: a wait set watching more than session endpoints was moved to another loop\n");
+    traps_with(move_a_set_with_a_kernel_queue, "linea: a wait set watching more than session endpoints was moved to another loop\n");
+}
+
+/* A slot whose generation would wrap is retired, and the set numbers a new
+ * slot past every slot it made before, so a slot's number is not bounded by
+ * how many registrations are held at once. The hook that ages a slot exists
+ * only where the race tests supply the pauses, so the test is compiled there
+ * alone. */
+#if defined(LINEA_WAITSET_PAUSES)
+static void a_retired_slot_is_replaced_by_a_new_number(void) {
+    const unsigned long set = linea_waitset_open();
+    const unsigned long first = linea_waitset_reserve(set);
+    assert(slot_of(first) == 0);
+    linea_waitset_unreserve(set, slot_of(first));
+    waitset_test_age(set, 0);
+    const unsigned long last = linea_waitset_reserve(set);
+    assert(slot_of(last) == 0 && generation_of(last) == 0xffffffffUL);
+    linea_waitset_unreserve(set, slot_of(last));
+    const unsigned long replaced = linea_waitset_reserve(set);
+    assert(slot_of(replaced) == 1);
+    const unsigned long handle = started(send_one);
+    linea_waitset_received(set, slot_of(replaced), handle);
+    assert(linea_waitset_next(set) == 1);
+    finish_send_one(handle);
+    linea_waitset_close(set);
+}
+#endif
+
 int main(void) {
     a_send_before_registration_is_found();
     a_send_during_registration_signals_once();
@@ -880,6 +1016,11 @@ int main(void) {
     a_signal_ignored_with_siginfo_set_is_refused();
     a_delivered_share_keeps_the_handler_until_it_is_released();
     a_second_terminate_after_the_last_share_ends_the_process();
-    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set");
+    a_set_of_endpoints_keeps_its_signals_when_it_moves();
+    a_set_watching_more_than_endpoints_does_not_move();
+#if defined(LINEA_WAITSET_PAUSES)
+    a_retired_slot_is_replaced_by_a_new_number();
+#endif
+    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
     return 0;
 }

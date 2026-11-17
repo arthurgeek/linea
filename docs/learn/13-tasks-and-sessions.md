@@ -425,6 +425,14 @@ task's result, and `close()` joins it. Writing `task.start(low)?` three times
 instead is refused: when the second start fails, `?` would leave with the
 first task still running and its handle unclosed.
 
+Three jobs that take nothing they must give back and talk to no one need none
+of this by hand: `task.join3(.Threads(3), f1, f2, f3)` starts and joins them in
+one call and answers the three results, though it stops the program where a
+task cannot be started, where the code above hands the reason on.
+[Independent work](#independent-work-taskall-taskmap-tasklazy_map-and-taskjoin)
+shows it with its siblings. A task that holds a session or a linear value is
+still written as above.
+
 ## A session and its protocol
 
 A task and its creator talk through a session. Each end is a `Chan[P]`, where
@@ -488,7 +496,7 @@ error[T-UnknownOperation]: `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, me
 20  |     let (square, done) = asking.recv()
     |                          ^^^^^^ this is `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, mem.SystemAllocator)]`, which `Chan[Recv[T, N], H]` does not match
    ::: std/session/chan.lin
-120 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
+147 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
     |                                ------------------- `recv` is declared for `Chan[Recv[T, N], H]`
 ```
 
@@ -1317,7 +1325,7 @@ error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End]
 21  |     let _key = &waiting.received(sending, |sink ready| Waited.Ready(ready))
     |                                  ^^^^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
    ::: std/task/wait_set.lin
-273 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
+277 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
     |                                                                 ---- expected because of this parameter
 ```
 
@@ -1408,20 +1416,21 @@ A wait set belongs to the task that opened it. It holds endpoints, so it is
 not sent over a session and is not an [owning task's](#the-owning-task-pattern)
 state.
 
-## Independent work: `task.all`, `task.map`, and `task.join`
+## Independent work: `task.all`, `task.map`, `task.lazy_map` and `task.join`
 
 Not all parallel workloads need a stateful conversation between tasks. Many tasks
 compute independent, value-producing jobs: they take inputs, run to completion
 without back-and-forth rendezvous, and return owned results.
 
-Linea provides three core combinators for independent work:
+Linea provides four combinators for independent work:
 - `task.all(policy, jobs)` runs a collection of homogeneous jobs (like `Promise.all` in JavaScript or `futures::future::join_all` in Rust) and returns a `Vec[T]` in job order.
-- `task.map(policy, items, f)` runs a data-parallel transformation over elements of a `Vec[T]`, bounding concurrency by worker threads while keeping deterministic input order.
+- `task.map(policy, items, f)` applies `f` to every element of a `Vec[T]`, a bounded number at a time, and returns the results in the items' order.
+- `task.lazy_map(policy, items, f)` does the same for any sequence, but hands the results back one at a time, as you ask for them (see [Results one at a time](#results-one-at-a-time-tasklazy_map)).
 - `task.join(policy, f1, f2)` (and `join3`, `join4`) gathers distinct computations of different types into a tuple `(T1, T2)` (like `tokio::join!` in Rust).
 
 Each takes a `policy: task.Policy`:
-- `Policy.Sequential`: runs synchronously inline on the caller's stack with zero thread overhead and complete determinism.
-- `Policy.Threads(max)`: runs the work on tasks of its own. `map` and `all` divide their items among at most `max` tasks; `join`, `join3` and `join4` run up to `max` jobs at once, on `max - 1` tasks of their own and the caller, and run the jobs in turn on the caller when `max` is 1. A `max` of 0 stops the program.
+- `Policy.Sequential`: runs every job on the caller, one after another, starts no task and is completely deterministic.
+- `Policy.Threads(max)`: runs at most `max` jobs at once, on tasks of their own. `map`, `all` and `lazy_map` start at most `max` worker tasks, and a worker that finishes takes the next items at once, so a call starts no more tasks however many items it maps; `join`, `join3` and `join4` run up to `max` jobs at once, on `max - 1` tasks of their own and the caller. `.Threads(1)` runs the jobs in turn on the caller, and a `max` of 0 stops the program.
 
 `independent_work.lin`:
 
@@ -1442,8 +1451,8 @@ fn main() -> Result[UInt8, io.IoError] {
     // `join` runs two jobs at once and answers both results, in order.
     let (sum, product) = task.join(.Threads(2), sink [] || UInt64(2 + 3), sink [] || UInt64(2 * 3))
     io.println("join: {sum} and {product}")?
-    // `map` applies `square` to every item on up to two threads, and keeps the
-    // items' order.
+    // `map` applies `square` to every item, at most two at once, and keeps
+    // the items' order.
     var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     for n in 1..=4 {
         &items.push(n).unwrap()
@@ -1474,9 +1483,164 @@ all: 3 results
 
 Each job is `Owned`: it takes what it needs with `sink` and holds no view of a
 value the caller keeps, so the jobs and the caller never touch one value at
-once. `map`'s function is also `Shareable` and `Copyable`, since every thread
-calls a copy of it. A job that panics, or a thread that cannot be made, stops
-the program; the combinators answer only the results.
+once. `map`'s function is also `Shareable` and `Copyable`, since every job
+calls a copy of it. A job that panics stops the program. Where `map`, `all`
+or `lazy_map` cannot start a task, because its stack or its bytes are
+refused, the caller runs that job itself, so the results are the same either
+way; `join`, `join3` and `join4` stop the program instead.
+
+### Where the jobs run
+
+`.Threads(max)` says how many jobs may run at once, not that each one gets an
+operating-system thread. Every job is a task started on the caller's Io, as
+`task.start` without `on:` is (see [Threads and fibers](#threads-and-fibers)):
+
+- under `io.system()`, the default, each job is a thread of its own, so up to
+  `max` run in parallel;
+- inside a task running on an `io.Loop`, each job is a fiber pinned to one of
+  that loop's carriers, so no more jobs run simultaneously than the loop has
+  carriers. `.Threads(2)` inside a one-carrier loop runs two fibers on one
+  thread, which overlap only where they wait;
+- inside a simulation, each job is a fiber of the simulation, scheduled from
+  its seed.
+
+### Results one at a time: `task.lazy_map`
+
+`task.map` needs every item in a `Vec` up front and hands back every result at
+the end. When the input is long, or never collected at all, or you may stop
+after the first few results, `task.lazy_map` works through it on demand. It
+returns an iterator: building it starts nothing, each step of a walk asks for
+the next result in the items' order, and it pulls an item only when a job may
+start for it, so it holds at most `max` running jobs and at most `2 * max`
+items it has pulled but not yet handed back. This program looks for the first
+number whose [Collatz](https://en.wikipedia.org/wiki/Collatz_conjecture) chain
+takes more than 200 steps, four numbers at a time:
+
+`first_long_chain.lin`:
+
+```linea
+import std.io
+import std.task
+
+// Count the steps the Collatz rule takes to bring `start` down to 1: halve an
+// even number, and triple an odd one and add one.
+fn collatz_steps(sink start: UInt64) -> UInt64 {
+    var n = start
+    var steps = UInt64(0)
+    while n != 1 {
+        n = if n % 2 == 0 {
+            n / 2
+        } else {
+            3 * n + 1
+        }
+        steps += 1
+    }
+    steps
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Nothing runs yet: each step of the walk asks for the next result, and
+    // at most four numbers are worked on at once.
+    defer var steps = task.lazy_map(.Threads(4), UInt64(1)..=1000000, collatz_steps)
+    var start = UInt64(0)
+    for count in &steps {
+        start += 1
+        if count > 200 {
+            io.println("{start} takes {count} steps, the first to take more than 200")?
+            break
+        }
+    }
+    .Ok(0)
+}
+```
+
+```
+2463 takes 208 steps, the first to take more than 200
+```
+
+The range runs to a million, but the walk stops at 2463, and only the
+handful of numbers past it that were already started are computed. Changing
+`.Threads(4)` to `.Sequential` prints the same line: each step then computes
+one number on the caller, and no task starts.
+
+The map holds running tasks and their results, and a value that is dropped
+never runs cleanup, so the map is linear. A walk that takes it would abandon
+it, and is refused:
+
+`abandoned_map.lin`:
+
+```linea
+import std.io
+import std.task
+
+fn main() -> Result[UInt8, io.IoError] {
+    for doubled in task.lazy_map(.Threads(4), UInt64(1)..=3, |sink n| n * 2) {
+        io.println("{doubled}")?
+    }
+    .Ok(0)
+}
+```
+
+```
+error[O-LinearWalk]: walking a `task.LazyMap[Range[UInt64], UInt64, <closure>, mem.SystemAllocator]` abandons it where the walk ends, and it is linear
+ --> abandoned_map.lin:5:20
+  |
+5 |     for doubled in task.lazy_map(.Threads(4), UInt64(1)..=3, |sink n| n * 2) {
+  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ it holds storage from `mem.SystemAllocator`, which must be released
+  |
+  = help: bind it, `var pending = task.lazy_map(.Threads(4), UInt64(1)..=3, |sink n| n * 2)`, walk it lent with `for doubled in &pending`, then settle `pending` with `release()`
+```
+
+Walk it lent, `for count in &steps`, and settle it after. `release()` stops
+pulling items, waits for the jobs already started, and releases their results
+and the source; `defer var` calls it on every path, the `break` above
+included. Results that have no `Release` are taken by their owner instead:
+`stop()` stops pulling, a walk after it yields only what was already started,
+and `finish()` then hands back the source with the items it never pulled.
+
+### Naming the allocator: the `_in` forms
+
+Each combinator has an `_in` form that takes an allocator first, as every
+allocating function in the library does: `join_in`, `join3_in`, `join4_in`,
+`all_in`, `map_in` and `lazy_map_in`. The bytes each started task is kept in
+come from it, and so do the results `map_in` and `all_in` collect:
+
+`arena_cubes.lin`:
+
+```linea
+import std.io
+import std.mem
+import std.task
+
+use mem.Lender
+
+fn cube(sink n: UInt64) -> UInt64 {
+    n * n * n
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let arena = mem.Arena.open(mem.system(), 65536)
+    var items: mem.Vec[UInt64] = mem.Vec.new()
+    for n in 1..=5 {
+        &items.push(n).unwrap()
+    }
+    // Each worker's bytes, the map's places and the results all come from
+    // the arena, so the results go when the arena does.
+    let cubes = task.map_in(arena.handle(), .Threads(2), items, cube)
+    for cubed in cubes.as_slice() {
+        io.println("{*cubed}")?
+    }
+    .Ok(0)
+}
+```
+
+```
+1
+8
+27
+64
+125
+```
 
 ## Moving a handler from sequential to concurrent
 

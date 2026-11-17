@@ -1,0 +1,180 @@
+// Plan the delivery vans' routes for a day. Each van's route is planned on
+// its own, so the planning runs in parallel: `task.map` plans the morning
+// fleet and collects every route, `task.lazy_map` plans vans one at a time
+// until it finds one that cannot finish within a shift, and `task.join` plans
+// the morning and the afternoon fleets side by side. Every call takes a
+// `task.Policy`, and changing `.Threads(4)` to `.Sequential` gives the same
+// plan without starting a task.
+import std.io
+import std.mem
+import std.task
+import std.testing
+
+use io.IoError
+use io.println
+
+// A stop is a place on the city's grid, in kilometres east and north of its
+// south-west corner.
+@(copyable, derive(Equatable, Debug, Release))
+struct Stop {
+    east: UInt64,
+    north: UInt64,
+}
+
+// The depot every van leaves from and returns to.
+let depot: Stop = Stop { east = 20, north = 20 }
+
+// A route is how far a van drives to visit all its stops and come back.
+@(copyable, derive(Equatable, Debug, Release))
+struct Route {
+    van: UInt64,
+    stops: UInt64,
+    kilometres: UInt64,
+}
+
+// The distance between two stops along the grid's streets.
+fn street_distance(from: Stop, to: Stop) -> UInt64 {
+    let east = if from.east > to.east {
+        from.east - to.east
+    } else {
+        to.east - from.east
+    }
+    let north = if from.north > to.north {
+        from.north - to.north
+    } else {
+        to.north - from.north
+    }
+    east + north
+}
+
+test "street_distance counts both directions" {
+    let corner = Stop { east = 0, north = 0 }
+    testing.assert_eq(street_distance(depot, corner), UInt64(40), "the distance to the corner was wrong")?
+    testing.assert_eq(street_distance(corner, depot), UInt64(40), "the distance back was wrong")?
+}
+
+// The orders of one van, the same every time it is asked for: between 6 and
+// 12 stops on a 40-kilometre grid, drawn from a generator seeded with the
+// van's number.
+fn orders_for(van: UInt64) -> mem.Vec[Stop] {
+    var seed = van * 7919 + 17
+    var stops: mem.Vec[Stop] = mem.Vec.new()
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    let count = 6 + seed % 7
+    for _ in 0..count {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        let east = seed % 41
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        let north = seed % 41
+        &stops.push(Stop { east, north }).unwrap()
+    }
+    stops
+}
+
+// Plan a van's route: from the depot, drive to the nearest stop not yet
+// visited until every stop is visited, then drive back. `remove` takes the
+// chosen stop out of the stops left to visit.
+fn plan(sink van: UInt64) -> Route {
+    var left = orders_for(van)
+    let stops = left.length()
+    var here = depot
+    var kilometres = UInt64(0)
+    while left.length() > 0 {
+        var nearest = UInt64(0)
+        var shortest = UInt64(0)
+        var index = UInt64(0)
+        for stop in left.as_slice() {
+            let distance = street_distance(here, *stop)
+            if index == 0 || distance < shortest {
+                nearest = index
+                shortest = distance
+            }
+            index += 1
+        }
+        here = &left.remove(nearest).unwrap()
+        kilometres += shortest
+    }
+    left.finish().unwrap()
+    Route { van, stops, kilometres = kilometres + street_distance(here, depot) }
+}
+
+test "a route visits every stop and returns" {
+    let route = plan(1)
+    defer let orders = orders_for(1)
+    testing.assert_eq(route.stops, orders.length(), "the route skipped a stop")?
+    testing.assert(route.kilometres > 0, "the route drove nowhere")?
+}
+
+// The vans numbered `first` to `last`, as the vector `task.map` takes.
+fn fleet(first: UInt64, last: UInt64) -> mem.Vec[UInt64] {
+    var vans: mem.Vec[UInt64] = mem.Vec.new()
+    for van in first..=last {
+        &vans.push(van).unwrap()
+    }
+    vans
+}
+
+// Plan every van of the fleet and add up their distances. `task.map` runs at
+// most as many plans at once as `policy` allows, starts the next van as soon
+// as one plan finishes, and answers the routes in the fleet's order.
+fn fleet_kilometres(sink policy: task.Policy, sink vans: mem.Vec[UInt64]) -> UInt64 {
+    let routes = task.map(policy, vans, plan)
+    var total = UInt64(0)
+    for route in routes.as_slice() {
+        total += route.kilometres
+    }
+    routes.release()
+    total
+}
+
+// Find the first van, counting from 1, whose route is longer than `shift`
+// kilometres. `task.lazy_map` plans vans only as they are needed, at most as
+// many at once as `policy` allows, so it stops soon after it finds one.
+// `defer var` releases the map on every path: it waits for the plans already
+// started and drops their routes.
+fn first_van_over(sink policy: task.Policy, shift: UInt64) -> Option[Route] {
+    defer var routes = task.lazy_map(policy, UInt64(1)..=1000, plan)
+    for route in &routes {
+        if route.kilometres > shift {
+            return .Some(route)
+        }
+    }
+    .None
+}
+
+test "the policies plan the same day" {
+    let sequential = fleet_kilometres(.Sequential, fleet(1, 6))
+    let parallel = fleet_kilometres(.Threads(4), fleet(1, 6))
+    testing.assert_eq(sequential, parallel, "the policies planned different fleets")?
+    testing.assert_eq(first_van_over(.Sequential, 150), first_van_over(.Threads(4), 150), "the policies found different vans")?
+}
+
+// Write the day's plan under `policy`.
+fn report(policy: task.Policy) -> Result[(), IoError] {
+    defer let morning = task.map(copy(policy), fleet(1, 6), plan)
+    for route in morning.as_slice() {
+        println("van {route.van}: {route.stops} stops, {route.kilometres} km")?
+    }
+    match first_van_over(copy(policy), 190) {
+        Some(route) => println("first van over a 190 km shift: van {route.van}, {route.kilometres} km")?,
+        None => println("every van finishes within a 190 km shift")?,
+    }
+    // `task.join` plans the two fleets at once, each closure taking what it
+    // needs with `sink`, and answers both totals in order.
+    let (am, pm) = task.join(
+        copy(policy),
+        sink [sink policy = copy(policy)] || fleet_kilometres(policy, fleet(1, 6)),
+        sink [sink policy = copy(policy)] || fleet_kilometres(policy, fleet(7, 12)),
+    )
+    println("morning fleet: {am} km, afternoon fleet: {pm} km")?
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, IoError] {
+    report(.Threads(4))?
+    // The same plan with `.Sequential` runs every van on this task, one
+    // after another, and arrives at the same distance.
+    let whole_day = fleet_kilometres(.Sequential, fleet(1, 12))
+    println("the whole day planned without tasks: {whole_day} km")?
+    .Ok(0)
+}

@@ -687,6 +687,41 @@ long linea_waitset_withdraw(unsigned long set) {
     return -1;
 }
 
+void linea_waitset_rehome(unsigned long set) {
+    struct waitset *s = (struct waitset *)set;
+    const unsigned long here = linea_io_current();
+    if (s->loop == here) return;
+    /* A simulation acquires no dependency on the real world or on another
+     * seed, so a set crosses its boundary as no session may. */
+    if (s->simulated || linea_io_is_simulated(here)) fail("linea: a session crosses a simulation's boundary\n");
+    /* A timer, a descriptor or a signal is watched through the loop the set
+     * was opened on; only session endpoints are signalled by their peers
+     * wherever they run. */
+    if (s->kernel >= 0 || s->heap_len != 0 || s->watching_router) fail("linea: a wait set watching more than session endpoints was moved to another loop\n");
+    for (uint32_t i = 0; i < s->made; i += 1) {
+        struct linea_registration *r = slot_at(s, i);
+        const unsigned state = load_state(r);
+        if ((state == registered || state == signalled) && r->kind != endpoint_source && r->kind != returned_source) {
+            fail("linea: a wait set watching more than session endpoints was moved to another loop\n");
+        }
+    }
+    linea_waitset_pause(linea_pause_rehome_before_lock);
+    linea_park_lock(&s->park);
+    s->loop = here;
+    linea_park_unlock(&s->park);
+}
+
+#if defined(LINEA_WAITSET_PAUSES)
+/* Give the free slot `slot` the last generation it may have, so the next
+ * release retires it; the race tests reach a retirement without four
+ * billion reuses. */
+void waitset_test_age(unsigned long set, unsigned long slot) {
+    struct waitset *s = (struct waitset *)set;
+    struct linea_registration *r = slot_at(s, (uint32_t)slot);
+    r->generation = UINT32_MAX;
+}
+#endif
+
 void linea_waitset_close(unsigned long set) {
     struct waitset *s = set_of(set);
     if (s->held != 0) fail("linea: a wait set was closed holding a registration\n");

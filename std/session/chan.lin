@@ -94,6 +94,33 @@ impl[P: Protocol, H: Owned] Chan[P, H] {
     }
 }
 
+impl[P: Protocol, F: Owned, A] Chan[P, (F, A)] {
+    // Stop naming the body's type in a task's handle and keep its allocator.
+    // An `Owned` body holds no view and no lend, so the handle loses nothing
+    // it carried, while the allocator its bytes came from stays carried until
+    // `close` joins the task. A handle whose allocator borrows an arena or a
+    // log can then be kept in a field whose type cannot name the body.
+    internal fn detach_body(sink self: Self) -> Chan[P, A] where carries(self) {
+        let Chan { endpoint, body: _ } = self
+        .{ endpoint, body = .{} }
+    }
+
+    test "a handle keeps its allocator without its body" {
+        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
+            me.send(7).close()
+        }
+        let handle = task.prepare_in(log.allocator(), body, stack: task.default_stack_bytes).unwrap().start()
+        let kept: Chan[Recv[UInt64, End], mem.RefusingAllocator[mem.SystemAllocator]] = handle.detach_body()
+        let (number, done) = kept.recv()
+        done.close()
+        let settled = log.all_disposed()
+        log.release()
+        testing.assert_eq(number, 7, "a handle without its body lost what the task sent")?
+        testing.assert(settled, "joining a handle without its body kept the body's bytes")?
+    }
+}
+
 impl[T: Owned, N: Protocol, H] Chan[Send[T, N], H] {
     // Send `value` to the peer and answer this end at `N`. The send returns
     // once the peer has taken the value. A payload is `Owned`, so it carries

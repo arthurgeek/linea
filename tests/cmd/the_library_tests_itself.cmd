@@ -1414,6 +1414,7 @@ The library tests itself.
   ok    scalar.sine uses radians and preserves special values
   ok    scalar.square roots preserve zero and infinite limits
   ok    scalar.trunc rounds toward zero and keeps the sign
+  ok    session.a handle keeps its allocator without its body
   ok    session.a receive answers what the peer sent
   ok    session.a receive until answers what a prompt peer sent
   ok    session.a receive until hands the endpoint back when the peer is late
@@ -1433,13 +1434,25 @@ The library tests itself.
   ok    task.a failed preparation settles to its reason
   ok    task.a handle is delivered once its body has returned
   ok    task.a key is refused by another set and after its slot is reused
+  ok    task.a lazy_map hands linear results to their owner
+  ok    task.a lazy_map keeps every result of a fallible function
+  ok    task.a lazy_map released early settles every job it started
+  ok    task.a lazy_map releases results that own storage
+  ok    task.a lazy_map runs no more jobs at once than its bound
+  ok    task.a lazy_map yields every result in input order
+  ok    task.a map visits each worker entry a fixed number of times per chunk
+  ok    task.a map with results to yield does not finish
   ok    task.a minted key names what it was minted for
   ok    task.a prepared body runs once its task starts
   ok    task.a refused allocation hands the body back
+  ok    task.a refused allocation moves work to the caller and keeps every result
   ok    task.a registered endpoint is delivered once its peer sends
+  ok    task.a sequential lazy_map starts no task and yields the same results
   ok    task.a set with nothing registered answers none without waiting
   ok    task.a signal is registered in a wait set and withdrawn
+  ok    task.a slow item fills the window and the places wrap
   ok    task.a started task answers its handle
+  ok    task.a stopped map yields only what it started
   ok    task.a taken endpoint comes back with its peer still waiting
   ok    task.a task started in one call runs its body
   ok    task.a task that cannot start answers the reason
@@ -1448,6 +1461,8 @@ The library tests itself.
   ok    task.a value that is ready now is delivered at once
   ok    task.a value that is writable at once is delivered
   ok    task.all runs sequentially and on threads
+  ok    task.all starts the next job as soon as one finishes
+  ok    task.all_in takes its results and tasks from its allocator
   ok    task.an offering endpoint is delivered once its peer chooses
   ok    task.an owning task hands its state back when closed
   ok    task.calls from two tasks run one at a time
@@ -1458,10 +1473,18 @@ The library tests itself.
   ok    task.join runs sequentially
   ok    task.join3 runs no more closures at once than its bound
   ok    task.join3 runs sequentially and on threads
+  ok    task.join3_in allocates nothing in sequence
+  ok    task.join3_in takes each task from its allocator
   ok    task.join4 runs no more closures at once than its bound
   ok    task.join4 runs sequentially and on threads
+  ok    task.join4_in allocates nothing in sequence
+  ok    task.join4_in takes each task from its allocator
+  ok    task.join_in allocates nothing in sequence
+  ok    task.join_in takes each task from its allocator
   ok    task.map keeps every result of a fallible function
   ok    task.map preserves deterministic order
+  ok    task.map starts the next item as soon as one finishes
+  ok    task.map_in takes its results and tasks from its allocator
   ok    task.releasing a client leaves its owner serving
   ok    task.releasing an owner joins its task
   ok    testing.a failure displays the caller's message
@@ -1641,4 +1664,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1638 passed, 0 failed
+  1661 passed, 0 failed

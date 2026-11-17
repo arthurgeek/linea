@@ -1,0 +1,25 @@
+import std.io
+import std.mem
+import std.task
+
+// One job of many, each answering one.
+fn one() -> UInt64 {
+    1
+}
+
+// A hundred thousand jobs run on at most eight workers, which take them a
+// chunk at a time, and every job's answer comes back.
+fn main() -> Result[UInt8, io.IoError] {
+    var jobs: mem.Vec[fn() -> UInt64] = mem.Vec.new()
+    for _ in 0..100000 {
+        &jobs.push(one).unwrap()
+    }
+    let results: mem.Vec[UInt64] = task.all(.Threads(8), jobs)
+    var total = UInt64(0)
+    for answer in results.as_slice() {
+        total += *answer
+    }
+    results.release()
+    io.println("{total} jobs answered")?
+    .Ok(0)
+}

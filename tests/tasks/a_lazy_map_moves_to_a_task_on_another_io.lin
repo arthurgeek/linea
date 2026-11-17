@@ -1,0 +1,36 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+// A lazy map holds nothing that belongs to the Io it was first walked on, so
+// after its first result it moves into a task on a loop, which walks the rest
+// and starts its remaining work there.
+fn main() -> Result[UInt8, io.IoError] {
+    let elsewhere = io.Loop.open(carriers: 1)?
+    var doubled = task.lazy_map(.Threads(2), UInt64(1)..=10, |sink n| n * 2)
+    let first = &doubled.next()
+    let body = sink [sink doubled] |sink me: Chan[Send[UInt64, End]]| {
+        var rest = doubled
+        var total = UInt64(0)
+        for n in &rest {
+            total += n
+        }
+        rest.release()
+        me.send(total).close()
+    }
+    let handle = match task.prepare(body, on: elsewhere) {
+        Ok(slot) => slot.start(),
+        Err(_) => panic("a task on the loop could not be prepared"),
+    }
+    let (rest_total, done) = handle.recv()
+    done.close()
+    match first {
+        Some(n) => io.println("first {n}, then {rest_total}")?,
+        None => io.println("no first result")?,
+    }
+    .Ok(0)
+}

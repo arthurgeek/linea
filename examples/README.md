@@ -76,10 +76,11 @@ Reading input that may be malformed or never ends, and recovering from bad recor
 
 ## Tasks
 
-Work on several threads at once, through sessions the compiler checks.
+Work on several tasks at once, through sessions the compiler checks or through combinators that start and join the tasks for you.
 
 - [party_guest_list.lin](party_guest_list.lin): collects a party's guest list from friends who each decide on a task of their own; `task.start`, gathering answers in invitation order over sessions before `close` joins each task, and a guest list owned by the party alone.
 - [reading_times.lin](reading_times.lin): estimates how long each article of a newsletter takes to read, measuring all three at once on tasks of their own; `task.prepare`, gathering each result over a session before `close` joins the task, and texts every task reads.
+- [delivery_routes.lin](delivery_routes.lin): plans each delivery van's route in parallel and finds the first van that cannot finish within a shift; `task.map`, `task.lazy_map` stopped early with `defer var`, `task.join`, and one `task.Policy` switching between `.Threads(4)` and `.Sequential`.
 
 ## TCP servers
 

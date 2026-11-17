@@ -520,6 +520,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_waitset_next", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_take", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u8) }, .result = .u8, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_withdraw", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = task_wait_set },
+    .{ .symbol = "linea_waitset_rehome", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = task_wait_set },
     .{ .symbol = "linea_waitset_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = task_wait_set },
     .{ .symbol = "linea_signal_acquire", .parameters = &.{p(.u8)}, .result = .i64, .declared_by = io_signal },
     .{ .symbol = "linea_signal_release", .parameters = &.{ p(.u8), p(.u64) }, .result = .unit, .declared_by = io_signal },
