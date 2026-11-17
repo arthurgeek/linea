@@ -566,7 +566,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
     }
 
-    test "invalid owned_text restores the complete raw record" {
+    test "invalid owned text restores the complete raw record" {
         defer var bytes = mem.system().acquire(6).unwrap()
         // FF is invalid UTF-8; the following line-ending bytes test record framing.
         &bytes.store_byte(0, 255)

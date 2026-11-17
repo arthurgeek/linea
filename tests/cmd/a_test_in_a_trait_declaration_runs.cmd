@@ -4,6 +4,6 @@ when its body traps.
 
   $ linea test "$LINEA_ROOT"/tests/decl/a_test_sits_in_a_trait_declaration.lin
   ok    doubling a meter doubles its reading
-  ok    doubling past the largest_reading traps
+  ok    doubling past the largest reading traps
   
   2 passed, 0 failed

@@ -7399,14 +7399,16 @@ const Resolver = struct {
     };
 
     /// Notes a test of the module being declared under the name its string
-    /// decodes to. A name the parser refused, interpolated, multi-line or not
-    /// a string at all, names no test and is not noted.
+    /// decodes to. A name the parser refused, interpolated, multi-line, not
+    /// a string at all or one `testNameFault` refuses, names no test and is
+    /// not noted.
     fn noteTest(self: *Resolver, d: DeclId) !void {
         if (self.ast.declTag(d) != .function) return;
         const name = self.ast.declName(d);
         if (self.ast.tokenTag(name) != .string_literal) return;
         const start: u32 = @intCast(self.module_test_names.items.len);
-        if (try text_mod.decode(self.gpa, &self.module_test_names, self.ast.tokenText(name)) != null) {
+        const invalid = try text_mod.decode(self.gpa, &self.module_test_names, self.ast.tokenText(name)) != null;
+        if (invalid or text_mod.testNameFault(self.module_test_names.items[start..]) != null) {
             self.module_test_names.shrinkRetainingCapacity(start);
             return;
         }

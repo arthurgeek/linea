@@ -15,6 +15,6 @@ A failing test is reported and the command says so.
   ok    an explicit panic is expected
   ok    an index out of bounds is expected
   ok    an integer overflow is expected
-  ok    division by runtime_zero is expected
+  ok    division by a runtime zero is expected
   
   7 passed, 3 failed

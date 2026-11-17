@@ -38,7 +38,7 @@ impl ArgCursor {
         .{ args = .None, slice = .Some(copy(slice)), count, index = 0 }
     }
 
-    test "from_slice creates cursor from_slice" {
+    test "from_slice creates a cursor from a slice" {
         let input = ["alpha", "beta"]
         let cursor = ArgCursor.from_slice(input.as_slice())
         testing.assert_eq(cursor.count, UInt64(2), "cursor count differed")?
@@ -1362,7 +1362,7 @@ impl[A: Allocator] Command[A] {
         }
     }
 
-    test "new in creates custom allocator command" {
+    test "new_in creates a custom allocator command" {
         defer let cmd = Command.new_in(mem.system(), "test_cmd", "testing")
         testing.assert_eq(cmd.name, "test_cmd", "command name differed")?
         .Ok(())
@@ -1997,7 +1997,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test "parse takes an attached long_option value" {
+    test "parse takes an attached long option value" {
         defer var cmd = Command.new("app")
         &cmd.option("format", "--format")
         &cmd.option("label", "--label")
@@ -2136,7 +2136,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test "parse names a missing required_option by its flag" {
+    test "parse names a missing required option by its flag" {
         defer var cmd = Command.new("app")
         &cmd.option("format", "--format", required: true)
         let input: [Str; 0] = []

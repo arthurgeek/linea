@@ -38,7 +38,7 @@ impl Str {
         self.slice(from, to).unwrap()
     }
 
-    test "trim_ascii removes only ascii_whitespace at the ends" {
+    test "trim_ascii removes only ascii whitespace at the ends" {
         testing.assert_eq(" \tá b\r\n".trim_ascii(), "á b", "ASCII trim changed content")?
         testing.assert_eq(" á ".trim_ascii(), " á ", "ASCII trim removed non-ASCII whitespace")?
         testing.assert_eq("\u{9}\u{a}\u{b}\u{c}\u{d} ".trim_ascii(), "", "ASCII whitespace table omitted a byte")?

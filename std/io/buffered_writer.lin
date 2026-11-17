@@ -431,7 +431,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         writer
     }
 
-    test "abort drops pending_bytes and returns the writer" {
+    test "abort drops pending bytes and returns the writer" {
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
         var writer = BufferedWriter.open(capacity: 4, writer: output) else |_| {
             return testing.assert(false, "buffer allocation failed")
@@ -592,7 +592,7 @@ impl[W: ByteWriter, A: Allocator] Writer for BufferedWriter[W, A] {
     }
 }
 
-test "a buffered text failure preserves accepted progress and pending_bytes" {
+test "a buffered text failure preserves accepted progress and pending bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 1, stop = 3 }
     var writer = BufferedWriter.open(capacity: 2, writer: output) else |_| {
         return testing.assert(false, "buffer allocation failed")
@@ -717,7 +717,7 @@ test "an empty buffered write does not drain a full buffer" {
     .Ok(())
 }
 
-test "nested buffered flush preserves delivery progress and pending_bytes" {
+test "nested buffered flush preserves delivery progress and pending bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
     let inner = BufferedWriter.open(capacity: 4, writer: output) else |_| {
         return testing.assert(false, "inner buffer allocation failed")

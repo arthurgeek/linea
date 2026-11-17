@@ -2741,6 +2741,8 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/decl/impl_takes_no_modifier.lin",
     "tests/decl/an_impl_is_not_a_test.lin",
     "tests/decl/a_test_is_not_generic.lin",
+    "tests/decl/a_test_is_named_by_a_string_and_nothing_else.lin",
+    "tests/decl/a_test_without_a_body_is_reported_at_the_test.lin",
     "tests/decl/a_test_takes_no_parameters.lin",
     "tests/decl/only_a_function_is_a_test.lin",
     "tests/diag/invalid_run.lin",

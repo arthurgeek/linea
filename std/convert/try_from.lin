@@ -38,7 +38,7 @@ impl TryFrom[UInt64] for Seat {
     }
 }
 
-test "try_into uses the destinations try_from" {
+test "try_into uses the destination's try_from" {
     let booked: Option[Seat] = UInt64(12).try_into()
     testing.assert(match read booked { Some(seat) => seat.number == 12, None => false }, "a seat on the ferry was refused")?
     let aft: Option[Seat] = UInt64(41).try_into()

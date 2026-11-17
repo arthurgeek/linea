@@ -39,9 +39,10 @@ no parameter list.
 - Two tests of one module may not share a name ([N-Duplicate]), wherever in the
   module each is written, since `linea test` reports and selects a test by it.
 - The name is a string on one line that interpolates nothing, holds at least
-  one character and no control character ([S-Test]): it is fixed where the test
-  is written, printed on one line of the report and handed to the test binary as
-  an argument.
+  one character, no control character and no line or paragraph separator, and
+  has no white space at either end ([S-Test]): it is fixed where the test is
+  written, printed on one line of the report and handed to the test binary as
+  an argument, and a space at an end would print as another name.
 - A test's reported name is its module's path and its string, each component
   writing `.` and `\` as `\.` and `\\`, so the name stays one spelling of one
   test. `linea test --filter TEXT` runs the tests whose reported names hold

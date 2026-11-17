@@ -1,0 +1,15 @@
+// A name refused for what it holds names no test, so two of them are each
+// refused once and are not a duplicate.
+import std.testing
+
+test "" {
+    testing.assert(true, "an empty name says nothing")?
+}
+
+test r"" {
+    testing.assert(true, "an empty raw name says nothing")?
+}
+
+fn main() -> UInt8 {
+    0
+}

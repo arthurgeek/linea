@@ -859,7 +859,7 @@ test "a streamed body follows the head" {
     .Ok(())
 }
 
-test "bodyless statuses emit no_content type and no body" {
+test "bodyless statuses emit no content type and no body" {
     let no_content_reply = Reply { target = "/no-content", body = "", produce = .None }
     let not_modified_reply = Reply { target = "/not-modified", body = "", produce = .None }
     let no_content_custom = Reply { target = "/no-content-with-headers", body = "", produce = .None }

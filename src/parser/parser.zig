@@ -965,6 +965,13 @@ const Parser = struct {
                 );
             } else if (attributes.first != .none and self.cursor.atEnd()) {
                 // The attribute already reported that it names nothing.
+            } else if (is_test) {
+                try self.reportAt(
+                    .s_test,
+                    at,
+                    "a test is named by a string",
+                    "write the test's name as a string after `test`",
+                );
             } else {
                 try self.reportAt(
                     .s_entry,
@@ -1488,12 +1495,29 @@ const Parser = struct {
                 self.builder.markTest(d, is_test);
                 self.builder.markExpectedTrap(d, expects_trap);
             } else {
-                try self.reportAt(.s_entry, at, "an impl holds functions, projections, traversals, constants and types", "expected `fn`, `proj`, `trav`, `let` or `type` here");
+                // A `test` that names no string was reported where it was
+                // read, and is one mistake.
+                if (!is_test) try self.reportAt(.s_entry, at, "an impl holds functions, projections, traversals, constants and types", "expected `fn`, `proj`, `trav`, `let` or `type` here");
                 while (!self.cursor.atEnd() and !self.cursor.at(.r_brace) and
                     !self.cursor.at(.keyword_fn) and !self.cursor.at(.keyword_let) and
-                    !self.atProjection() and !self.atTraversal() and !self.atAssociatedType())
+                    !self.atProjection() and !self.atTraversal() and !self.atAssociatedType() and
+                    !(is_test and self.cursor.at(.l_brace)))
                 {
                     _ = self.cursor.advance();
+                }
+                // The body of a test that names no string, skipped whole so
+                // its `}` does not close the impl.
+                if (is_test and self.cursor.at(.l_brace)) {
+                    var depth: usize = 0;
+                    while (!self.cursor.atEnd()) {
+                        const tag = self.cursor.peek();
+                        _ = self.cursor.advance();
+                        if (tag == .l_brace) depth += 1;
+                        if (tag == .r_brace) {
+                            depth -= 1;
+                            if (depth == 0) break;
+                        }
+                    }
                 }
             }
 
@@ -3191,7 +3215,8 @@ const Parser = struct {
         if (self.cursor.at(.l_brace)) {
             body = try self.parseBraced("this body is never closed");
         } else {
-            try self.reportAt(.s_brace, self.cursor.current(), "expected `{`", "a test needs a body");
+            // At the test, since what follows it is the next declaration.
+            try self.reportAt(.s_brace, self.cursor.previousToken(), "expected `{`", "a test needs a body");
         }
 
         return self.builder.addDecl(.{
@@ -3221,11 +3246,9 @@ const Parser = struct {
         };
     }
 
-    /// Reads a test's name and refuses one that cannot name a test. The name
-    /// is what `linea test` prints on one line of its report, what `--filter`
-    /// matches and what the test binary is handed as an argument, so it is
-    /// written once, as a string on one line that interpolates nothing, holds
-    /// at least one character and no control character.
+    /// Reads a test's name and refuses one that cannot name a test: a string
+    /// that interpolates nothing, written on one line, and one `testNameFault`
+    /// finds nothing wrong with once decoded.
     fn readTestName(self: *Parser) !void {
         const at = self.cursor.current();
         switch (self.cursor.peek()) {
@@ -3236,11 +3259,12 @@ const Parser = struct {
                 // An invalid escape was reported by the lexer, and what it
                 // decodes to is not a name anything should be judged by.
                 if (try text_mod.decode(self.gpa, &decoded, self.cursor.textOf(at)) != null) return;
-                if (decoded.items.len == 0) {
-                    try self.reportAt(.s_test, at, "a test's name is not empty", "say what the test checks; `linea test` prints this name and `--filter` matches it");
-                } else if (std.mem.indexOfAny(u8, decoded.items, &control_characters) != null) {
-                    try self.reportAt(.s_test, at, "a test's name holds no control character", "a name is printed on one line of the report and passed to the test as an argument");
-                }
+                const fault = text_mod.testNameFault(decoded.items) orelse return;
+                try switch (fault) {
+                    .empty => self.reportAt(.s_test, at, "a test's name is not empty", "say what the test checks; `linea test` prints this name and `--filter` matches it"),
+                    .control => self.reportAt(.s_test, at, "a test's name holds no control character", "a name is printed on one line of the report and passed to the test as an argument"),
+                    .edge_space => self.reportAt(.s_test, at, "a test's name has no space at either end", "a space there prints as a name it is not; remove it"),
+                };
             },
             .str_open => {
                 // The pieces and the expressions between them, up to the
@@ -3269,14 +3293,6 @@ const Parser = struct {
     fn spanThrough(self: *const Parser, first: TokenId) Span {
         return .{ .start = self.cursor.spanAt(first).start, .end = self.cursor.spanAt(self.cursor.previousToken()).end };
     }
-
-    /// The bytes no test name holds: every ASCII control character.
-    const control_characters = blk: {
-        var all: [33]u8 = undefined;
-        for (0..32) |c| all[c] = c;
-        all[32] = 0x7f;
-        break :blk all;
-    };
 
     fn parseContractPath(self: *Parser) !node.ContractPath {
         const start = self.cursor.current();

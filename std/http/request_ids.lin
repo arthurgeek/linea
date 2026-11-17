@@ -551,7 +551,7 @@ test "each request gets a time ordered uuid" {
     testing.assert(first_id != second_id, "two requests got the same id")?
 }
 
-test "a well_formed id the client sent is kept" {
+test "a well-formed id the client sent is kept" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var nothing = ()

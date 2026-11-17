@@ -395,8 +395,10 @@ compiler calls and excludes from shipped artefacts, named by the string after
 `test` ([ADR 0277](adr/0277-a-test-is-named-by-a-string.md)). A test with a
 written result is `test "what it checks" -> Result[(), E] { … }`. The name is a
 string literal on one line that interpolates nothing, holds at least one
-character and holds no control character: `linea test` prints it on one line
-of its report and hands it to the test binary as an argument. A test takes no
+character, holds no control character (C0, DEL or C1) and no line or paragraph
+separator, and has no white space at either end: `linea test` prints it on one
+line of its report and hands it to the test binary as an argument, and a space
+at an end would print it as a name it is not. A test takes no
 parameters and no type parameters, since the compiler writes its one call and
 has nothing to pass or settle; brackets or parentheses after the name are
 refused, and so is a `test` followed by anything but a string. A test has
@@ -1190,7 +1192,8 @@ namespace.
 A test binds no name, so it is never a duplicate of a declaration. Two tests
 of one module are named by different strings, compared as the strings they
 decode to, wherever in the module each is written ([S-Test]); a second is
-reported where it is written, beside the first.
+reported where it is written, beside the first. A name [S-Test] refuses names
+no test, so it takes no part in the comparison.
 
 A prelude name is not declared by the module that sees it, so a module's own
 top-level declaration or `use` of that name shadows the prelude's in that

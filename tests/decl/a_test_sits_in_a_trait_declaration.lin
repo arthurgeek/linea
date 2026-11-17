@@ -15,7 +15,7 @@ trait Doubling {
         testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
     }
 
-    test trap "doubling past the largest_reading traps" {
+    test trap "doubling past the largest reading traps" {
         let meter = Meter { reading = largest_reading() }
         let _doubled = meter.doubled()
     }

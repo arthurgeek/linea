@@ -77,10 +77,11 @@ ok    the port follows the colon
 The report lists the tests by name, in alphabetical order, not in the order
 the file declares them. A name is any sentence that says what the test checks,
 written once: two tests of one module may not share it, an empty name is
-refused, and the name holds no `{…}` interpolation, since it is fixed where the
-test is written. The third test checks the error's variant with a
-pattern inside a pattern, `Err(Syntax(_))`, which matches only an `Err`
-carrying a `Syntax` error ([Errors](03-errors.md#when-to-keep-match)).
+refused, a name neither begins nor ends with a space, and the name holds no
+`{…}` interpolation, since it is fixed where the test is written. The third
+test checks the error's variant with a pattern inside a pattern,
+`Err(Syntax(_))`, which matches only an `Err` carrying a `Syntax` error
+([Errors](03-errors.md#when-to-keep-match)).
 
 ## Tests inside an implementation
 
@@ -785,6 +786,37 @@ the one test whose name holds `refused`, `an address without a port is
 refused`, and reports `1 passed, 0 failed`. Quote a filter that holds spaces,
 as any shell argument: `--filter "the port"`. A filter that matches no test
 says so, and the command succeeds.
+
+A filter is matched against the name as the report spells it, and the report
+writes a `.` inside a test's name as `\.`, so that it is not read as the dot
+before a module's directory. Save this as `rounding.lin`:
+
+```linea
+import std.testing
+
+// Round a count of tenths to the nearest whole number, halves up.
+fn rounded(tenths: UInt32) -> UInt32 {
+    (tenths + 5) / 10
+}
+
+test "1.5 rounds up to 2" {
+    testing.assert_eq(rounded(15), 2, "fifteen tenths round to two")?
+}
+
+test "1.4 rounds down to 1" {
+    testing.assert_eq(rounded(14), 1, "fourteen tenths round to one")?
+}
+```
+
+```
+ok    1\.4 rounds down to 1
+ok    1\.5 rounds up to 2
+
+2 passed, 0 failed
+```
+
+`linea test --filter '1\.5' rounding.lin` runs the second test alone, while
+`--filter '1.5'` matches no name and says so.
 
 ## What you have seen
 

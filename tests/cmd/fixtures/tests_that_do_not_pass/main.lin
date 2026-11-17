@@ -52,7 +52,7 @@ test trap "an integer overflow is expected" -> Result[(), IoError] {
     return .Ok({})
 }
 
-test trap "division by runtime_zero is expected" -> Result[(), IoError] {
+test trap "division by a runtime zero is expected" -> Result[(), IoError] {
     let _quotient = UInt64(10) / runtime_zero()
     return .Ok({})
 }

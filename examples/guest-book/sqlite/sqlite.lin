@@ -694,7 +694,7 @@ impl Statement {
         }
     }
 
-    test "text in copies into an arena and refuses null" {
+    test "text_in copies into an arena and refuses null" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         defer var database = Database.open_in_memory("text_in_copies_into_an_arena_and_refuses_null").unwrap()
         &database.execute("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('Ada'), (NULL);").unwrap()
@@ -718,7 +718,7 @@ impl Statement {
         .Ok(())
     }
 
-    test "text in reads an empty value as empty text" {
+    test "text_in reads an empty value as empty text" {
         defer var database = Database.open_in_memory("text_in_reads_an_empty_value_as_empty_text").unwrap()
         defer var select = database.prepare("SELECT '', x''").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?

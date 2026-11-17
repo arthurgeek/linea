@@ -1,0 +1,18 @@
+// A test is named by a string, so a number or nothing at all after `test` or
+// `test trap` is refused as a test with no name.
+test 5 {}
+
+test trap {}
+
+struct Gauge {
+    reading: UInt8,
+}
+
+impl Gauge {
+    test 7 {}
+}
+
+fn main() -> UInt8 {
+    let gauge = Gauge { reading = 0 }
+    gauge.reading
+}

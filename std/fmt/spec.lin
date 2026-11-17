@@ -354,7 +354,7 @@ test "write_integer right aligns and pads after the sign" {
     .Ok(())
 }
 
-test "write_integer writes hexadecimal_digits in the case asked" {
+test "write_integer writes hexadecimal digits in the case asked" {
     let lower = Spec { hex = .Some(.Lower), ..Spec.default() }
     let upper = Spec { hex = .Some(.Upper), ..Spec.default() }
     expect_integer(UInt8(255), lower, "ff", "a byte did not write two lowercase digits")?

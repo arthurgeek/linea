@@ -10,7 +10,7 @@ The library tests itself.
   ok    cli.flag registers boolean switches
   ok    cli.flag reports presence of flags
   ok    cli.format_help returns subcommand or root help
-  ok    cli.from_slice creates cursor from_slice
+  ok    cli.from_slice creates a cursor from a slice
   ok    cli.get parses typed option values
   ok    cli.get_optional parses present and absent options
   ok    cli.get_positional parses typed positionals
@@ -25,7 +25,7 @@ The library tests itself.
   ok    cli.is_supplied distinguishes user options from defaults
   ok    cli.new creates cursor from args
   ok    cli.new creates system command
-  ok    cli.new in creates custom allocator command
+  ok    cli.new_in creates a custom allocator command
   ok    cli.next advances and returns tokens
   ok    cli.option registers valued options
   ok    cli.option retrieves matched option value
@@ -37,7 +37,7 @@ The library tests itself.
   ok    cli.parse handles optional and variadic positionals
   ok    cli.parse handles subcommand variadic positionals
   ok    cli.parse lets a declared short h name its own switch
-  ok    cli.parse names a missing required_option by its flag
+  ok    cli.parse names a missing required option by its flag
   ok    cli.parse parses cursor into matches
   ok    cli.parse reads help only where a help subcommand is registered
   ok    cli.parse records global switches where they are declared
@@ -45,7 +45,7 @@ The library tests itself.
   ok    cli.parse reports every refused allocation
   ok    cli.parse splits short clusters and attached short values
   ok    cli.parse takes a lone dash as a positional
-  ok    cli.parse takes an attached long_option value
+  ok    cli.parse takes an attached long option value
   ok    cli.parse_args parses process arguments
   ok    cli.peek inspects token without advancing
   ok    cli.positional registers positional arguments
@@ -145,7 +145,7 @@ The library tests itself.
   ok    convert.into preserves the external owner of a transferred view
   ok    convert.into transfers a linear source to the requested destination
   ok    convert.try_into narrows integers through their try_from
-  ok    convert.try_into uses the destinations try_from
+  ok    convert.try_into uses the destination's try_from
   ok    convert.uint16 identity conversion preserves its range
   ok    convert.uint16 to int16 preserves exact values and checks bounds
   ok    convert.uint16 to int32 preserves exact values and checks bounds
@@ -272,7 +272,7 @@ The library tests itself.
   ok    fmt.write_integer appends to what the writer holds
   ok    fmt.write_integer reaches both ends of every width
   ok    fmt.write_integer right aligns and pads after the sign
-  ok    fmt.write_integer writes hexadecimal_digits in the case asked
+  ok    fmt.write_integer writes hexadecimal digits in the case asked
   ok    fs.a direct file write reports scratch allocation failure
   ok    fs.a direct file write takes its path scratch from an arena
   ok    fs.a file close failure returns all successfully read bytes
@@ -377,7 +377,7 @@ The library tests itself.
   ok    http.a form body is read only when the content type names one
   ok    http.a form content type is named exactly
   ok    http.a form of one pair too many is refused with 413
-  ok    http.a form of the most pairs is answered in the smallest_arena
+  ok    http.a form of the most pairs is answered in the smallest arena
   ok    http.a generated id takes nothing from the request allocator
   ok    http.a get is answered_with a status header
   ok    http.a handler a sequential server cannot make closes the listener
@@ -451,7 +451,7 @@ The library tests itself.
   ok    http.a query decodes into its pairs
   ok    http.a query follows the first question mark
   ok    http.a query of one pair too many is refused with 414
-  ok    http.a query of the most pairs is answered in the smallest_arena
+  ok    http.a query of the most pairs is answered in the smallest arena
   ok    http.a query reads its fields by name
   ok    http.a query that is not percent encoded utf8 has no pairs
   ok    http.a read timeout answers 408
@@ -465,7 +465,7 @@ The library tests itself.
   ok    http.a refused header answers 500
   ok    http.a replacement refused for memory keeps the old value
   ok    http.a request allocates in its arena
-  ok    http.a request at every limit is answered in the smallest_arena
+  ok    http.a request at every limit is answered in the smallest arena
   ok    http.a request at the header and body limits is answered
   ok    http.a request error answers its status
   ok    http.a request error displays its reason
@@ -501,7 +501,7 @@ The library tests itself.
   ok    http.a segment is a literal a parameter or a remainder
   ok    http.a serve error displays its cause
   ok    http.a serving task refused its discard buffer ends serving with memory
-  ok    http.a short header after a long line is answered in the smallest_arena
+  ok    http.a short header after a long line is answered in the smallest arena
   ok    http.a silent client times out and the next is served
   ok    http.a silent close is closed not an error
   ok    http.a socket body preserves the next requests read ahead
@@ -529,7 +529,7 @@ The library tests itself.
   ok    http.a value may hold equals signs and quotes around it are dropped
   ok    http.a variable that is not utf8 is read as its bytes
   ok    http.a walk of the headers shows one id
-  ok    http.a well_formed id the client sent is kept
+  ok    http.a well-formed id the client sent is kept
   ok    http.a wrong method is 405 with allow
   ok    http.add_header keeps the values a name already has
   ok    http.adding a header keeps earlier values
@@ -569,7 +569,7 @@ The library tests itself.
   ok    http.any text is written percent encoded
   ok    http.arena arithmetic stops at the largest integer
   ok    http.bodyless statuses are recognised
-  ok    http.bodyless statuses emit no_content type and no body
+  ok    http.bodyless statuses emit no content type and no body
   ok    http.buffers in an arena last for any number of requests
   ok    http.cgi reserves full body storage while http streams it
   ok    http.content length alone frames the body
@@ -667,7 +667,7 @@ The library tests itself.
   ok    io.a borrowed raw line keeps its terminator and bytes that are not utf8
   ok    io.a borrowed raw line resumes with its retained prefix
   ok    io.a buffer refusal returns the supplied writer
-  ok    io.a buffered text failure preserves accepted progress and pending_bytes
+  ok    io.a buffered text failure preserves accepted progress and pending bytes
   ok    io.a buffered writer holds its bytes in an arena
   ok    io.a buffered writer renders a utf8 line across short writes
   ok    io.a closed simulation leaves the system current
@@ -694,7 +694,7 @@ The library tests itself.
   ok    io.a smaller line limit releases excess record capacity
   ok    io.a writer buffers from the system allocator
   ok    io.abandon returns the reader and drops its read ahead
-  ok    io.abort drops pending_bytes and returns the writer
+  ok    io.abort drops pending bytes and returns the writer
   ok    io.advancing the world moves the virtual clock by exactly that much
   ok    io.allocation failure preserves the prefix and unconsumed lookahead
   ok    io.allocation refusal returns an untouched writer
@@ -753,11 +753,11 @@ The library tests itself.
   ok    io.each allocation failure covers opening a reader
   ok    io.finishing after an underlying flush failure does not repeat bytes
   ok    io.inherited resolves in the task that uses it
-  ok    io.invalid owned_text restores the complete raw record
+  ok    io.invalid owned text restores the complete raw record
   ok    io.line errors display their reason
   ok    io.milliseconds too many to count saturate
   ok    io.nested buffered drain failure counts only delivered bytes
-  ok    io.nested buffered flush preserves delivery progress and pending_bytes
+  ok    io.nested buffered flush preserves delivery progress and pending bytes
   ok    io.open returns the reader when no buffer is made
   ok    io.owned lines are allocated from an arena
   ok    io.owned lines outlive the input and reader
@@ -1251,8 +1251,8 @@ The library tests itself.
   ok    mem.vec from_fn preserves state and constructs linear elements
   ok    mem.vec growth preserves floats booleans and unit elements
   ok    mem.vec length tracks insertions and removals
-  ok    mem.vec new in starts empty
   ok    mem.vec new starts empty in the system allocator
+  ok    mem.vec new_in starts empty
   ok    mem.vec pop hands over linear elements from an arena
   ok    mem.vec pop takes elements last first and keeps capacity
   ok    mem.vec push failure returns ownership without changing elements
@@ -1578,7 +1578,7 @@ The library tests itself.
   ok    text.text equality and order are total by bytes
   ok    text.text hashes preserve utf8 bytes and length
   ok    text.text queries compare contents
-  ok    text.trim_ascii removes only ascii_whitespace at the ends
+  ok    text.trim_ascii removes only ascii whitespace at the ends
   ok    text.trim_unicode removes white space at the ends
   ok    text.two hex digits spell one byte
   ok    text.uint16 parse checks limits
@@ -1596,7 +1596,7 @@ The library tests itself.
   ok    time.a duration is made from_seconds
   ok    time.a duration returns its nanoseconds
   ok    time.a sleep lasts at least its duration
-  ok    time.a timestamp displays_as rfc 3339
+  ok    time.a timestamp displays as rfc 3339
   ok    time.a timestamp is made only inside the years rfc 3339 writes
   ok    time.an http_date displays in the form header fields use
   ok    time.an instant measures the time since another

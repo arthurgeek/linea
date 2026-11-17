@@ -1198,7 +1198,7 @@ test "the default arena holds every request the default limits admit" {
 // for those limits: a request line and six header lines at the line limit,
 // two short headers that bring the count to the limit of eight, and a body at
 // the body limit.
-test "a request at every limit is answered in the smallest_arena" {
+test "a request at every limit is answered in the smallest arena" {
     let limits = Limits { max_line_bytes = 256, max_headers = 8, max_body_bytes = 1024, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 6, line_length: 256)
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a request at every limit was refused")?
@@ -1209,7 +1209,7 @@ test "a request at every limit is answered in the smallest_arena" {
 // pairs is decoded within the smallest arena, so a route that never reads it
 // still answers. Each pair is 81 letters and `&`, 82 bytes, and the query's
 // 8169 bytes hold 99 of them and a 100th of 51 letters.
-test "a query of the most pairs is answered in the smallest_arena" {
+test "a query of the most pairs is answered in the smallest arena" {
     let limits = Limits { max_body_bytes = 8, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 0, line_length: 8192, query_part: query_pair(81))
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a query of the most pairs was refused")?
@@ -1221,7 +1221,7 @@ test "a query of the most pairs is answered in the smallest_arena" {
 // each pair is 81 letters and `&`, 82 bytes, and the body's 8169 bytes hold
 // 99 of them and a 100th of 51 letters, exactly as a query's pairs are
 // counted.
-test "a form of the most pairs is answered in the smallest_arena" {
+test "a form of the most pairs is answered in the smallest arena" {
     let limits = Limits { max_body_bytes = 8169, ..serving(1) }
     defer let received = served_form_at_limits(limits, query_pair(81))
     testing.assert_eq(received.view(), health_answer, "a form of the most pairs was refused")?
@@ -1230,7 +1230,7 @@ test "a form of the most pairs is answered in the smallest_arena" {
 
 // A header after a line at the limit makes the head's text grow past it, and
 // the request is still answered in the smallest arena.
-test "a short header after a long line is answered in the smallest_arena" {
+test "a short header after a long line is answered in the smallest arena" {
     let limits = Limits { max_body_bytes = 8192, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 1, line_length: 8192)
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a short header after a long line was refused")?

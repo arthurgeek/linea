@@ -357,7 +357,7 @@ impl[T, A: Allocator] Vec[T, A] {
         .{ storage = .{ buffer = .None, allocator = copy(allocator), at = address.nowhere(), len = 0 }, len = 0 }
     }
 
-    test "vec new in starts empty" {
+    test "vec new_in starts empty" {
         // The annotation selects the element type for an empty vector.
         let values: Vec[UInt8] = Vec.new_in(system())
         let length = values.length()

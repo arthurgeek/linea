@@ -261,3 +261,52 @@ test "a byte's line and column count from one" {
     try std.testing.expectEqual(@as(usize, 1), first.line);
     try std.testing.expectEqual(@as(usize, 1), first.column);
 }
+
+/// Why a decoded string cannot name a test, or null where it can. A test's
+/// name is printed on one line of `linea test`'s report, matched by
+/// `--filter` and handed to the test binary as an argument, so it holds at
+/// least one character, nothing that ends or splits a line, and no white
+/// space at either end, which would print as a name it is not. The parser
+/// refuses by this answer, and the resolver leaves a refused name out of the
+/// duplicate check by the same answer.
+pub const TestNameFault = enum { empty, control, edge_space };
+
+pub fn testNameFault(name: []const u8) ?TestNameFault {
+    if (name.len == 0) return .empty;
+    var i: usize = 0;
+    var first = true;
+    var last_space = false;
+    while (i < name.len) {
+        const width = std.unicode.utf8ByteSequenceLength(name[i]) catch 1;
+        const end = @min(name.len, i + width);
+        const scalar: u21 = if (width == 1) name[i] else std.unicode.utf8Decode(name[i..end]) catch 0xFFFD;
+        // C0 and C1 controls, DEL, and the line and paragraph separators.
+        if (scalar < 0x20 or (scalar >= 0x7f and scalar <= 0x9f) or scalar == 0x2028 or scalar == 0x2029) return .control;
+        const space = isWhiteSpace(scalar);
+        if (first and space) return .edge_space;
+        first = false;
+        last_space = space;
+        i = end;
+    }
+    return if (last_space) .edge_space else null;
+}
+
+/// Unicode's White_Space scalars outside the controls `testNameFault`
+/// already refuses.
+fn isWhiteSpace(c: u21) bool {
+    return switch (c) {
+        0x20, 0xA0, 0x1680, 0x2000...0x200A, 0x202F, 0x205F, 0x3000 => true,
+        else => false,
+    };
+}
+
+test "a test's name is refused for what would print it as another" {
+    try std.testing.expectEqual(@as(?TestNameFault, .empty), testNameFault(""));
+    try std.testing.expectEqual(@as(?TestNameFault, .control), testNameFault("a\nb"));
+    try std.testing.expectEqual(@as(?TestNameFault, .control), testNameFault("a\u{85}b"));
+    try std.testing.expectEqual(@as(?TestNameFault, .control), testNameFault("a\u{2028}b"));
+    try std.testing.expectEqual(@as(?TestNameFault, .edge_space), testNameFault(" keeps"));
+    try std.testing.expectEqual(@as(?TestNameFault, .edge_space), testNameFault("keeps\u{a0}"));
+    try std.testing.expectEqual(@as(?TestNameFault, null), testNameFault("keeps  its first"));
+    try std.testing.expectEqual(@as(?TestNameFault, null), testNameFault("ünïcode keeps"));
+}

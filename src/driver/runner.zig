@@ -171,7 +171,7 @@ pub fn run(
     }
     const tests = selected.items;
     if (tests.len == 0) {
-        try w.print("no test name in {s} holds \"{s}\"\n", .{ root, filter });
+        try w.print("no test name in {s} holds \"{f}\"\n", .{ root, std.zig.fmtString(filter) });
         try w.flush();
         return true;
     }
