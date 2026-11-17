@@ -1027,7 +1027,8 @@ with the same value name the same default.
 comma-separated list of arms. Each arm is a pattern, `=>`, and an expression.
 A pattern is a variant name with an optional parenthesised list of patterns, a
 type name with a braced list of `field: pattern`, a tuple pattern `(a, b)`
-([S-Tuple]), a literal or range, or `_`. The patterns inside one -- in a
+([S-Tuple]), a literal (an integer, a string, `true` or `false`) or range, or
+`_`. The patterns inside one -- in a
 variant's or newtype's parentheses, a tuple's components, or after a field's
 `:` -- are patterns of the same grammar, so `Some((name, port))`,
 `(Some(a), None)`, `Ok(Point { x, y })` and `Err(Read(Limit))` are patterns
@@ -4421,7 +4422,8 @@ every pattern, so a pair of options is covered by its four shapes and an arm
 `Some(0)` covers only the `Some` that carries zero. A struct, a tuple and a
 newtype have one shape, so a pattern taking one apart with a binder or `_` at
 every part covers it; an integer's arms cover the values their literals and
-ranges name. The diagnostic names the values no arm takes, each written as a
+ranges name, and a `Bool`'s arms the values `true` and `false` name, so arms
+for both cover it. The diagnostic names the values no arm takes, each written as a
 pattern: `(None, Some)`, `Some(10..=255)`, `Wood`. It names at most nine of
 them, then says "and more", in declaration order compared column by column.
 Where arms leave several variants of one column to `_`, as `(_, One(0))` leaves

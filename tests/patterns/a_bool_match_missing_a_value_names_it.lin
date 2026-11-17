@@ -1,0 +1,34 @@
+// A `match` over a `Bool` that leaves a value untaken names it; an arm after
+// both values is unreachable; and a `Bool` pattern over another type is a
+// mismatch.
+fn only_true(flag: Bool) -> UInt8 {
+    match flag {
+        true => 1,
+    }
+}
+
+fn only_false(flags: (Bool, Bool)) -> UInt8 {
+    match read flags {
+        (false, _) => 0,
+        (true, true) => 1,
+    }
+}
+
+fn twice(flag: Bool) -> UInt8 {
+    match flag {
+        true => 1,
+        false => 0,
+        true => 2,
+    }
+}
+
+fn over_a_number(count: UInt8) -> UInt8 {
+    match count {
+        true => 1,
+        _ => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    only_true(true) + only_false((true, true)) + twice(false) + over_a_number(1)
+}

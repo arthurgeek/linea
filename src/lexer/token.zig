@@ -271,13 +271,15 @@ pub const Tag = enum(u8) {
     ///
     /// Every token an expression can end with is here: a name, `reflect`, a
     /// literal of each kind (an interpolated string ends at its closing
-    /// quote), a closing `)`, `}` or `]`, a postfix `?`, and a bare jump.
+    /// quote), a closing `)`, `}` or `]`, a postfix `?`, and a bare jump. So
+    /// is a token the lexer refused: the lexer ends every one at its line or
+    /// before, an unclosed literal at the line's end, so nothing the line
+    /// after it holds was written inside it.
     ///
-    /// The parser reads this to decide where a statement ends, and the
-    /// language server to say whether the statement before a cursor has
-    /// ended; the two must agree, so the rule is here.
+    /// Read through `lineBreakEnds`.
     pub fn endsAStatement(self: Tag) bool {
         return switch (self) {
+            .invalid,
             .identifier,
             .keyword_reflect,
             .int_literal,
@@ -314,6 +316,32 @@ pub const Tag = enum(u8) {
     /// must agree, so the rule is here rather than in either of them.
     pub fn continuesTheLine(self: Tag, next: Tag, next_text: []const u8) bool {
         return self == .dot and next == .identifier and name_case.of(next_text) == .lower;
+    }
+
+    /// Whether a line break between a line whose last token is `last` and a
+    /// line opening with `first`, followed by `second` spelled
+    /// `second_text`, ends what the line above was reading.
+    ///
+    /// It does after a token a statement can end with (`endsAStatement`),
+    /// unless the line below continues the one above (`continuesTheLine`).
+    /// Anywhere else the line above is unfinished, and an expression written
+    /// across lines ends each line with the operator that carries it on.
+    ///
+    /// The parser reads this to decide where an expression, a statement and
+    /// a skipped malformed region end, and the language server to say
+    /// whether the statement before a cursor has ended; they must agree, so
+    /// the rule is here.
+    pub fn lineBreakEnds(last: Tag, first: Tag, second: Tag, second_text: []const u8) bool {
+        return last.endsAStatement() and !first.continuesTheLine(second, second_text);
+    }
+
+    test lineBreakEnds {
+        try std.testing.expect(lineBreakEnds(.identifier, .identifier, .equal, "="));
+        try std.testing.expect(lineBreakEnds(.invalid, .identifier, .eof, ""));
+        try std.testing.expect(lineBreakEnds(.invalid, .minus, .identifier, "x"));
+        try std.testing.expect(!lineBreakEnds(.identifier, .dot, .identifier, "map"));
+        try std.testing.expect(!lineBreakEnds(.plus, .identifier, .eof, ""));
+        try std.testing.expect(!lineBreakEnds(.equal, .identifier, .eof, ""));
     }
 
     test continuesTheLine {

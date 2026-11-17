@@ -3252,6 +3252,7 @@ pub const RefusedDemand = struct {
 
     pub const Lacks = union(enum) {
         capability: CapabilityRequirement,
+        containment: Containment,
         trait: struct { decl: DeclId, args: []const TypeId },
         callable: TypeId,
     };
@@ -3266,6 +3267,10 @@ pub const RefusedDemand = struct {
             switch (demand.lacks) {
                 .capability => |requirement| {
                     const value: u8 = @intFromEnum(requirement);
+                    h.update(std.mem.asBytes(&value));
+                },
+                .containment => |which| {
+                    const value: u8 = @intFromEnum(which);
                     h.update(std.mem.asBytes(&value));
                 },
                 .trait => |trait| {
@@ -3285,6 +3290,7 @@ pub const RefusedDemand = struct {
             if (a.ty != b.ty or std.meta.activeTag(a.lacks) != std.meta.activeTag(b.lacks)) return false;
             return switch (a.lacks) {
                 .capability => |requirement| requirement == b.lacks.capability,
+                .containment => |which| which == b.lacks.containment,
                 .trait => |trait| trait.decl == b.lacks.trait.decl and std.mem.eql(TypeId, trait.args, b.lacks.trait.args),
                 .callable => |signature| signature == b.lacks.callable,
             };
@@ -3312,6 +3318,9 @@ test "a refused demand is keyed by its contents" {
     try testing.expect(!context.eql(copyable, .{ .ty = @enumFromInt(8), .lacks = .{ .capability = .copyable } }));
     try testing.expect(!context.eql(copyable, .{ .ty = held, .lacks = .{ .callable = @enumFromInt(9) } }));
     try testing.expect(context.eql(.{ .ty = held, .lacks = .{ .callable = @enumFromInt(9) } }, .{ .ty = held, .lacks = .{ .callable = @enumFromInt(9) } }));
+    const owned: RefusedDemand = .{ .ty = held, .lacks = .{ .containment = .owned } };
+    try testing.expect(context.eql(owned, .{ .ty = held, .lacks = .{ .containment = .owned } }));
+    try testing.expect(!context.eql(owned, .{ .ty = held, .lacks = .{ .containment = .shareable } }));
 }
 
 /// The demands the bound refusals of one check reported, keyed by contents.
@@ -5499,9 +5508,12 @@ pub const ImplIndex = struct {
         if (!try pool.meetsCapabilityWithin(within, given, demand.requirement) and
             !decided.grants(.{ .ty = given, .lacks = .{ .capability = demand.requirement } })) return false;
         if (demand.integer and !pool.isIntegerWithin(within, given)) return false;
-        if (demand.owned and try pool.mayCarryDependencies(given)) return false;
-        if (demand.shareable and !try pool.isShareable(given)) return false;
-        if (demand.isolated and !try pool.isIsolated(given)) return false;
+        if (demand.owned and try pool.mayCarryDependencies(given) and
+            !decided.grants(.{ .ty = given, .lacks = .{ .containment = .owned } })) return false;
+        if (demand.shareable and !try pool.isShareable(given) and
+            !decided.grants(.{ .ty = given, .lacks = .{ .containment = .shareable } })) return false;
+        if (demand.isolated and !try pool.isIsolated(given) and
+            !decided.grants(.{ .ty = given, .lacks = .{ .containment = .isolated } })) return false;
         for (demand.traits) |required| {
             const args = try decided.gpa.alloc(TypeId, required.args.len);
             defer decided.gpa.free(args);

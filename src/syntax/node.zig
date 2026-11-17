@@ -1210,11 +1210,11 @@ pub const Expr = struct {
         marked: bool = false,
         /// A tuple pattern whose `)` was never found, or one of whose parts
         /// ended in a token the lexer refused that took the rest of its
-        /// line, so the parts it holds need not be those written; or a call
-        /// one of whose
-        /// arguments ended in a token the lexer refused that took the rest
-        /// of its line, so the arguments it holds may be fewer than were
-        /// meant.
+        /// line, so the parts it holds need not be those written; a call
+        /// one of whose arguments ended in a token the lexer refused that
+        /// took the rest of its line, so the arguments it holds may be fewer
+        /// than were meant; or a `match` with no `{` after its scrutinee,
+        /// which holds no arms because none were read.
         cut_short: bool = false,
         _: u5 = 0,
     };

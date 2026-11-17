@@ -1,0 +1,5 @@
+error[S-Params]: expected `,` or `)`
+ --> tests/derive_from/a_derive_list_with_garbage_and_no_closer_stops_at_the_declaration.lin:1:21
+  |
+1 | @derive(From[UInt8] 7
+  |                     ^ a grouped derive separates its traits with commas

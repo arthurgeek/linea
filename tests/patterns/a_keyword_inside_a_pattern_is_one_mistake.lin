@@ -2,8 +2,8 @@
 // once: no arm after it is held unreachable on its account.
 fn class(sink choice: Option[Bool]) -> UInt8 {
     match choice {
-        Some(true) => 1,
-        Some(false) => 2,
+        Some(loop) => 1,
+        Some(while) => 2,
         None => 3,
     }
 }

@@ -2,7 +2,7 @@
 // the binder after it is still declared, so the arm's body reads it.
 fn first_or_zero(sink pair: (Bool, UInt8)) -> UInt8 {
     match pair {
-        (true, count) => count,
+        (loop, count) => count,
         _ => 0,
     }
 }

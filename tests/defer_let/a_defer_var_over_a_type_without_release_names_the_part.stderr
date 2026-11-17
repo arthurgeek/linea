@@ -1,0 +1,7 @@
+error[T-DeferLet]: `Shelf[Crate]` implements no `Release`, so it has no single ending `defer var` may choose
+  --> tests/defer_let/a_defer_var_over_a_type_without_release_names_the_part.lin:21:5
+   |
+21 |     defer var shelf = Shelf[Crate] { item = Crate { weight = 3 } }
+   |     ^^^^^^^^^^^^^^^ write `var`, then `defer` the operation that ends it on every path
+   |
+   = help: `Shelf[T]` implements `Release` when `T` implements `Release`, and `Crate` does not

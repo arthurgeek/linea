@@ -9548,7 +9548,7 @@ const Checker = struct {
         try self.sink.addErrorFmt(
             .t_impl,
             self.ast.fileOf(written.at),
-            self.ast.wholeWrittenSpan(written),
+            self.ast.writtenWholeSpan(written),
             "define it as a type that does not read back to itself",
             "this associated type is defined through itself: {s}",
             .{chain.items},
@@ -9660,14 +9660,14 @@ const Checker = struct {
         const labels = try self.sink.arena.alloc(Label, if (peer_definition != null) 2 else 1);
         labels[0] = .{
             .file = self.ast.fileOf(written.at),
-            .span = self.ast.wholeWrittenSpan(written),
+            .span = self.ast.writtenWholeSpan(written),
             .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` names `{s}` as its peer", .{ own, peer_name }),
         };
         if (peer_definition) |defined| {
             const peer_written = self.ast.declReturnRef(defined);
             labels[1] = .{
                 .file = self.ast.fileOf(peer_written.at),
-                .span = self.ast.wholeWrittenSpan(peer_written),
+                .span = self.ast.writtenWholeSpan(peer_written),
                 .message = try std.fmt.allocPrint(self.sink.arena, "`{s}` names `{s}`", .{ peer_name, try self.typeName(back) }),
                 .style = .secondary,
             };
@@ -9705,14 +9705,14 @@ const Checker = struct {
         const labels = try self.sink.arena.alloc(Label, if (peer_definition != null) 2 else 1);
         labels[0] = .{
             .file = self.ast.fileOf(written.at),
-            .span = self.ast.wholeWrittenSpan(written),
+            .span = self.ast.writtenWholeSpan(written),
             .message = try std.fmt.allocPrint(self.sink.arena, "the dual of `{s}` is `{s}`", .{ try self.typeName(own_step), try self.typeName(mirrored) }),
         };
         if (peer_definition) |defined| {
             const peer_written = self.ast.declReturnRef(defined);
             labels[1] = .{
                 .file = self.ast.fileOf(peer_written.at),
-                .span = self.ast.wholeWrittenSpan(peer_written),
+                .span = self.ast.writtenWholeSpan(peer_written),
                 .message = try std.fmt.allocPrint(self.sink.arena, "`{s}.Step` is `{s}`", .{ peer_name, try self.typeName(peer_step) }),
                 .style = .secondary,
             };
@@ -12880,6 +12880,7 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
+            try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .containment = .owned } });
             try self.reportNotOwned(subject, held, bound, at, span);
             return true;
         };
@@ -12887,6 +12888,7 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
+            try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .containment = .shareable } });
             try self.reportNotContained(.shareable, subject, held, bound, at, span);
             return true;
         };
@@ -12894,6 +12896,7 @@ const Checker = struct {
             if (mode == .ask) return true;
             if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
+            try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .containment = .isolated } });
             try self.reportNotContained(.isolated, subject, held, bound, at, span);
             return true;
         };
@@ -15917,6 +15920,12 @@ const Checker = struct {
             // `checkPattern` checks each of these with its own routine.
             .name, .call, .tuple, .struct_, .malformed => unreachable,
         }
+        // `true` and `false` compare a `Bool`, and nothing else.
+        if (self.ast.exprTag(pattern) == .bool_literal) {
+            if (settled == .bool_) return .matches;
+            _ = try self.report(.t_mismatch, pattern, "expected `{s}`, found `Bool`", .{shown}, "`true` and `false` compare only a `Bool`");
+            return .refused;
+        }
         const text = self.ast.exprTag(pattern) == .str_literal;
         if (settled.bounds() == null) {
             if (text and self.sealedHere(settled)) {
@@ -16453,6 +16462,9 @@ const Checker = struct {
         pub fn kind(self: PatternTypes, ty: TypeId) std.mem.Allocator.Error!usefulness.Kind {
             const t = try self.settled(ty);
             if (t.bounds()) |b| return .{ .integer = .{ .lo = b.min, .hi = b.max } };
+            // `false` and `true` are the two values a `Bool` holds, covered
+            // as the integers 0 and 1 (`boolValue`).
+            if (t == .bool_) return .{ .integer = .{ .lo = 0, .hi = 1 } };
             return switch (self.checker.builder.get(t)) {
                 .enum_ => |e| if (e.variant_count == 0) .uninhabited else .{ .variants = e.variant_count },
                 .never => .uninhabited,
@@ -16515,7 +16527,10 @@ const Checker = struct {
                 out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, 1) };
             },
             .tuple, .struct_ => out.* = .{ .product = try self.coverageParts(arena, pattern, of, .product, try types.arity(of, .product)) },
-            .literal, .range => out.* = .{ .integers = self.foldedInterval(pattern) orelse return &usefulness.wild },
+            .literal, .range => out.* = .{ .integers = if (self.ast.exprTag(pattern) == .bool_literal)
+                .{ .lo = boolValue(self.ast, pattern), .hi = boolValue(self.ast, pattern) }
+            else
+                self.foldedInterval(pattern) orelse return &usefulness.wild },
             // Neither is a sound pattern, so neither reaches here; taking
             // nothing in particular is the answer that claims nothing.
             .malformed, .other => return &usefulness.wild,
@@ -16537,6 +16552,11 @@ const Checker = struct {
             args[at] = try self.coveragePattern(arena, part.node, try types.part(of, c, at));
         }
         return args;
+    }
+
+    /// The integer coverage reads a `true` or `false` pattern as: 1 and 0.
+    fn boolValue(ast: *const Ast, pattern: ExprId) i128 {
+        return @intFromBool(ast.tokenTag(ast.exprMain(pattern)) == .keyword_true);
     }
 
     /// A checked literal or range pattern's interval, read from the fold
@@ -16562,6 +16582,7 @@ const Checker = struct {
         switch (w.shape) {
             .wild => try out.append(self.gpa, '_'),
             .integers => |iv| {
+                if (t == .bool_) return out.appendSlice(self.gpa, if (iv.lo != iv.hi) "_" else if (iv.lo == 1) "true" else "false");
                 // A refined newtype's integers are written inside its name.
                 const wrapped = self.builder.get(t) == .newtype;
                 if (wrapped) try out.print(self.gpa, "{s}(", .{self.ast.tokenText(self.ast.declName(self.declaringType(t).?))});
@@ -16659,24 +16680,43 @@ const Checker = struct {
             _ = try self.record(id, .poison);
             return;
         }
-        const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null);
+        const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null, .none);
         const wanted = self.ast.tokenName(self.ast.declName(release.member));
         switch (try self.postfixOperation(id, id, receiver, wanted, release.member, &.{}, null)) {
             .settled => |settled| _ = try self.checkCallOf(id, settled.sig, settled.args, .postfix, null, &.{}),
-            .absent => |held| try self.refuseDeferLet(id, receiver, held),
+            .absent => |held| {
+                // A `Release` the type lacks only because of a bound refused
+                // where the value was made was reported there.
+                if (try self.refusalExplains(release.trait, held)) {
+                    _ = try self.record(receiver, .poison);
+                    _ = try self.record(id, .poison);
+                    return;
+                }
+                try self.refuseDeferLet(id, receiver, held, release.trait);
+            },
             .refused, .poisoned => _ = try self.record(id, .poison),
         }
     }
 
-    fn refuseDeferLet(self: *Checker, id: ExprId, receiver: ExprId, held: ?TypeId) !void {
+    /// Refuses the `defer let` or `defer var` scheduling `id`, naming the
+    /// keyword as written and, where `trait` is `Release` and `held` has an
+    /// implementation of it that does not apply, the part it needs `Release`
+    /// of.
+    fn refuseDeferLet(self: *Checker, id: ExprId, receiver: ExprId, held: ?TypeId, trait: node.DeclId) !void {
         _ = try self.record(receiver, held orelse .poison);
+        // `defer` is the call's main token, and `let` or `var` the token after.
+        var keyword = TokenId.at(self.ast.exprMain(id).index() + 1);
+        while (self.ast.tokenTag(keyword).isTrivia()) keyword = TokenId.at(keyword.index() + 1);
+        const written = self.ast.tokenText(keyword);
+        const before = self.sink.items().len;
         _ = try self.report(
             .t_defer_let,
             id,
-            "`{s}` implements no `Release`, so it has no single ending `defer let` may choose",
-            .{if (held) |ty| try self.typeName(ty) else "this type"},
-            "write `let`, then `defer` the operation that ends it on every path",
+            "`{s}` implements no `Release`, so it has no single ending `defer {s}` may choose",
+            .{ if (held) |ty| try self.typeName(ty) else "this type", written },
+            try std.fmt.allocPrint(self.sink.arena, "write `{s}`, then `defer` the operation that ends it on every path", .{written}),
         );
+        if (self.sink.items().len > before) if (held) |ty| if (trait != .none) try self.explainMissing(before, trait, ty);
     }
 
     fn checkDestructure(self: *Checker, s: StmtId) !void {
@@ -38576,6 +38616,10 @@ const Checker = struct {
         // comparing it, so the open type passes to the binders and settles by
         // their uses, as it does for a walk's binder and `let ... else`.
         const scrutinee = try self.receiverType(try self.check(m.callee, null), self.literalSite(m.callee));
+        // A `match` missing its `{` was reported by the parser and holds no
+        // arms; any judgement of its cover or its value would describe arms
+        // nobody wrote.
+        if (self.ast.matchCutShort(id)) return .poison;
 
         // On the scrutinee's type, not on what the arms name. A catch-all
         // names no variant and so needs nothing from a sealed type, which

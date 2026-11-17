@@ -1,0 +1,22 @@
+// A keyword cannot name a capture. The capture list is reported once where
+// the keyword stands; a source written after `=` is still read, so a mistake
+// of its own is reported too.
+fn shorthand() -> UInt8 {
+    let f = read [true] || 1
+    f()
+}
+
+fn aliased() -> UInt8 {
+    let f = read [false = absent] || 1
+    f()
+}
+
+fn beside_a_good_capture() -> UInt8 {
+    let n: UInt8 = 2
+    let f = read [n, match] || n
+    f()
+}
+
+fn main() -> UInt8 {
+    shorthand() + aliased() + beside_a_good_capture()
+}

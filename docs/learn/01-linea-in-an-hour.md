@@ -1391,6 +1391,38 @@ error[O-Move]: `floor` is lent, and this takes it
 This is the first ownership error most people meet, and it reads the way it
 sounds: `describe` was lent the floor, and a plain `match` would keep it.
 
+A literal is a pattern too: a number, a range such as `1..=9`, `true` or
+`false`. A `match` over a `Bool` that has an arm for `true` and one for
+`false` covers every value, so it needs no `_`:
+
+```linea
+import std.io
+
+// The delivery fee: express or not, and how many parcels.
+fn fee(express: Bool, parcels: UInt64) -> UInt64 {
+    let base = match express {
+        true => 12,
+        false => 4,
+    }
+    match parcels {
+        0 => 0,
+        1..=3 => base,
+        _ => base * 2,
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("Two parcels by express cost {fee(true, 2)}.")?
+    io.println("Five standard parcels cost {fee(false, 5)}.")?
+    .Ok(0)
+}
+```
+
+```
+Two parcels by express cost 12.
+Five standard parcels cost 8.
+```
+
 ### Patterns inside patterns
 
 A pattern can stand wherever a name does: inside a variant's parentheses, as a

@@ -1,0 +1,26 @@
+import std.session
+
+// `A.D` is written `session.Send[Str, B.D]` and `B.D` the same over `A.D`, so
+// each definition reads the other inside a type selected from its module. The
+// report underlines the whole type, its arguments included.
+trait Paired {
+    type D
+}
+
+struct A {}
+
+struct B {}
+
+impl Paired for A {
+    type D = session.Send[Str, B.D]
+}
+
+impl Paired for B {
+    type D = session.Send[Str, A.D]
+}
+
+fn main() -> UInt8 {
+    let _a: A = .{}
+    let _b: B = .{}
+    0
+}

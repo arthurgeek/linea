@@ -1761,7 +1761,26 @@ const Parser = struct {
                 .tokens = .{ .start = if (ref.path.len() == 0) ref.name else ref.path.start, .end = self.cursor.current() },
             });
 
-            if (open == .none or self.cursor.eat(.comma) == null) break;
+            if (open == .none) break;
+            // What follows an entry before its `,` or `)` is not part of the
+            // list; it is reported once and stepped over to the next entry
+            // or the list's own closer, as a tuple pattern's parts are. A
+            // list with no closer ends at the line that begins the next
+            // declaration, which the attribute is written for.
+            if (!self.cursor.atEnd() and !self.cursor.at(.comma) and !self.cursor.at(.r_paren) and !self.atDeclaration()) {
+                try self.reportAt(.s_params, self.cursor.current(), "expected `,` or `)`", "a grouped derive separates its traits with commas");
+                if (self.delimiterEnd(open)) |end| {
+                    _ = self.skipToNextPart(end);
+                } else {
+                    while (!self.cursor.atEnd() and !(self.cursor.precededByNewline() and self.atDeclaration())) _ = self.cursor.advance();
+                    return .{
+                        .range = .{ .start = start, .end = self.builder.deriveTraitMark() },
+                        .open = open,
+                        .close = .none,
+                    };
+                }
+            }
+            if (self.cursor.eat(.comma) == null) break;
         }
 
         var close = TokenId.none;
@@ -4595,7 +4614,16 @@ const Parser = struct {
                 const name = try self.expectName(.s_lambda, "expected a capture name", "a capture declares an alias for its source");
                 if (name == .none) break;
                 const equals = self.cursor.eat(.equal) orelse TokenId.none;
-                const source = if (equals != .none) try self.parseFull() else try self.builder.addLiteral(.name_ref, name, self.rangeFrom(name));
+                // A shorthand capture names its source by its own name. A
+                // keyword taken in a name's place names nothing, so its
+                // source is an error node rather than a reference to a
+                // binding no program can declare.
+                const source = if (equals != .none)
+                    try self.parseFull()
+                else if (self.cursor.tags[name.index()] == .identifier)
+                    try self.builder.addLiteral(.name_ref, name, self.rangeFrom(name))
+                else
+                    try self.builder.addLiteral(.err, name, self.rangeFrom(name));
                 try captures.append(self.gpa, .{ .name = name, .source = source, .convention = convention, .convention_token = convention_token, .equals = equals });
                 if (self.cursor.eat(.comma) == null) break;
             }
@@ -4773,17 +4801,19 @@ const Parser = struct {
 
     /// Whether what has been parsed is complete and a newline follows it.
     ///
-    /// This is the whole of the rule that a newline ends a statement. It
-    /// looks at the token before the break, and at the line after it only to
-    /// ask whether it opens with a `.` and a lowercase name: such a line
+    /// This is the whole of the rule that a newline ends a statement, an
+    /// expression or a skipped malformed region, stated by `Tag.lineBreakEnds`.
+    /// It looks at the token before the break, and at the line after it only
+    /// to ask whether it opens with a `.` and a lowercase name: such a line
     /// selects an operation or a field of the value above, and no statement
     /// begins that way, so it continues the expression -- `numbers` /
-    /// `.filter(p)` / `.fold(0, add)` is one chain. Every other line after a
-    /// token that can end an expression begins a statement, and an expression
-    /// otherwise written across lines ends each line with the operator that
-    /// carries it on.
+    /// `.filter(p)` / `.fold(0, add)` is one chain.
     fn finishedAtALineBreak(self: *const Parser) bool {
-        return self.cursor.precededByNewline() and self.cursor.previousTag().endsAStatement() and !self.atLeadingSelection();
+        if (!self.cursor.precededByNewline()) return false;
+        const next = self.cursor.ahead(1);
+        const second: Tag = if (next) |n| self.cursor.tags[n.index()] else .eof;
+        const second_text = if (next) |n| self.cursor.textOf(n) else "";
+        return Tag.lineBreakEnds(self.cursor.previousTag(), self.cursor.peek(), second, second_text);
     }
 
     /// Whether a line break ends the path of a declaration or a written type
@@ -4793,14 +4823,6 @@ const Parser = struct {
     /// reach down a line for the name it exports.
     fn pathEndsAtALineBreak(self: *const Parser) bool {
         return self.cursor.precededByNewline() and self.cursor.previousTag().endsAStatement();
-    }
-
-    /// Whether the current token opens a line that continues the one above,
-    /// by the rule `Tag.continuesTheLine` states for the parser and the
-    /// formatter alike.
-    fn atLeadingSelection(self: *const Parser) bool {
-        const next = self.cursor.ahead(1) orelse return false;
-        return self.cursor.peek().continuesTheLine(self.cursor.tags[next.index()], self.cursor.textOf(next));
     }
 
     /// Whether the token before the cursor is one the lexer refused and the
@@ -4815,7 +4837,7 @@ const Parser = struct {
     /// neither as missing: it reads on where the next line can continue the
     /// list, and ends where it cannot.
     fn afterARefusedTokenEndingItsLine(self: *const Parser) bool {
-        return self.cursor.previousTag() == .invalid and (self.cursor.precededByNewline() or self.cursor.atEnd());
+        return self.cursor.previousTag() == .invalid and (self.finishedAtALineBreak() or self.cursor.atEnd());
     }
 
     /// Whether a list goes on after an element with no comma behind it: the
@@ -4868,11 +4890,18 @@ const Parser = struct {
         };
     }
 
+    /// Whether the cursor is at `true` or `false`, which are keywords and
+    /// literals both: a pattern compares them as it compares a number.
+    fn atBoolLiteral(self: *const Parser) bool {
+        return self.cursor.at(.keyword_true) or self.cursor.at(.keyword_false);
+    }
+
     /// Whether a token can begin a match arm's pattern. One list, because two
     /// gates read it and a copy each is how the lists drift.
     fn startsArmPattern(tag: Tag) bool {
         return switch (tag) {
             .identifier, .keyword_reflect, .int_literal, .string_literal, .minus, .l_paren => true,
+            .keyword_true, .keyword_false => true,
             else => false,
         };
     }
@@ -4968,8 +4997,9 @@ const Parser = struct {
         // A keyword written where a binder belongs is a name that cannot be
         // one, which is the mistake to name rather than a missing pattern.
         // The part is an error node, so what checks the pattern takes it for
-        // nothing rather than for a binder that matches everything.
-        if (self.atKeywordName()) {
+        // nothing rather than for a binder that matches everything. `true`
+        // and `false` are literals, and patterns of their own.
+        if (self.atKeywordName() and !self.atBoolLiteral()) {
             _ = try self.expectName(.s_match, "expected a name", "a pattern binds what its variant carries");
             return self.builder.addLiteral(.err, at, self.rangeFrom(at));
         }
@@ -5103,6 +5133,9 @@ const Parser = struct {
     /// it.
     fn noteContinuation(self: *Parser) !void {
         if (!self.cursor.precededByNewline()) return;
+        // A line ending in a token the lexer refused holds no expression the
+        // next line could have continued: the refusal is the line's report.
+        if (self.cursor.previousTag() == .invalid) return;
         const opening = self.cursor.peek();
         const next = self.cursor.ahead(1);
         const next_tag: token.Tag = if (next) |t| self.cursor.tags[t.index()] else .eof;
@@ -5233,7 +5266,7 @@ const Parser = struct {
         var took_a_line = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_paren)) {
-            const keyword = self.atKeywordName();
+            const keyword = self.atKeywordName() and !self.atBoolLiteral();
             const component = try self.parseSubPattern();
             try binders.append(self.gpa, component);
             if (!self.cursor.at(.comma) and !self.cursor.at(.r_paren) and self.afterARefusedTokenEndingItsLine()) {
@@ -5374,7 +5407,7 @@ const Parser = struct {
         }
         // A token the lexer refused was reported where it is written.
         if (self.cursor.at(.invalid)) return;
-        return self.reportAt(.s_match, at, "expected a pattern", "an arm begins with a variant, `_`, a number or a string");
+        return self.reportAt(.s_match, at, "expected a pattern", "an arm begins with a variant, `_`, a number, a string, `true` or `false`");
     }
 
     /// One arm's pattern: a variant, a variant with binders, a struct, a
@@ -5388,6 +5421,12 @@ const Parser = struct {
         }
 
         if (self.cursor.at(.l_paren)) return self.parseTuplePattern();
+
+        // `true` and `false` are literals, which a pattern compares.
+        if (self.atBoolLiteral()) {
+            _ = self.cursor.advance();
+            return self.builder.addLiteral(.bool_literal, at, self.rangeFrom(at));
+        }
 
         if (self.cursor.at(.int_literal) or self.cursor.at(.string_literal) or self.cursor.at(.minus)) {
             return self.parsePatternBoundOrRange(at);
@@ -7189,7 +7228,12 @@ const Parser = struct {
 
         if (self.cursor.eat(.l_brace) == null) {
             try self.reportAt(.s_brace, self.cursor.current(), "expected `{`", "a match lists its arms");
-            return self.builder.addCall(start, self.rangeFrom(start), scrutinee, items.items, &.{});
+            // Still a `match`, holding the scrutinee as written, and marked
+            // as missing its arms: nothing is judged of arms never written.
+            const cut = try self.builder.addCall(start, self.rangeFrom(start), scrutinee, items.items, &.{});
+            self.builder.retag(cut, if (lends) .match_read else .match_);
+            self.builder.markCutShort(cut);
+            return cut;
         }
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_brace)) {
@@ -7781,10 +7825,6 @@ const Parser = struct {
             // A preceding statement's newline does not end this malformed
             // production before it has consumed any of its own tokens.
             if (self.cursor.current() != start and self.finishedAtALineBreak()) break;
-            // An invalid token stands where the lexer could not read the
-            // text, and the lexer ends every such token at its line or
-            // before. The line after it is the next statement.
-            if (self.cursor.current() != start and self.cursor.previousTag() == .invalid and self.cursor.precededByNewline()) break;
             _ = self.cursor.advance();
         }
         return self.builder.addLiteral(.err, start, self.rangeFrom(start));
@@ -7813,7 +7853,7 @@ const Parser = struct {
                 },
                 .comma => if (depth == 0) break,
                 else => if (depth == 0 and self.cursor.current() != start and
-                    (self.atStatementTokenBoundary() or self.finishedAtALineBreak() or self.afterARefusedTokenEndingItsLine())) break,
+                    (self.atStatementTokenBoundary() or self.finishedAtALineBreak())) break,
             }
             _ = self.cursor.advance();
         }
@@ -7832,6 +7872,48 @@ fn parseToDump(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
 }
 
 const Parsed = struct { dump: []u8, errors: u32 };
+
+test "a written type's whole span runs from its first token to its last" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // Each is written as a function's result, and its whole span is all of
+    // it; `short` is the head `writtenSpan` underlines instead.
+    const cases = [_]struct { written: []const u8, short: []const u8 }{
+        .{ .written = "Option[UInt8]", .short = "Option" },
+        .{ .written = "session.Send[Str, session.End]", .short = "session.Send" },
+        .{ .written = "borrow Option[UInt8]", .short = "borrow Option" },
+        .{ .written = "fn(UInt8) -> Option[UInt8]", .short = "fn(UInt8) -> Option" },
+        .{ .written = "fn(UInt8) -> borrow Option[fn() -> Option[UInt8]]", .short = "fn(UInt8) -> borrow Option" },
+        .{ .written = "(UInt8, Option[Bool])", .short = "(UInt8, Option[Bool])" },
+        .{ .written = "[Option[UInt8]; 3]", .short = "[Option[UInt8]; 3]" },
+        .{ .written = "Option[()]", .short = "Option" },
+        .{ .written = "(Option[UInt8])", .short = "(Option[UInt8])" },
+    };
+    for (cases) |case| {
+        const text = try std.fmt.allocPrint(gpa, "fn f() -> {s} {{\n}}\n", .{case.written});
+        const source: Source = .{ .path = "t.lin", .text = text };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        const returned = ast.declReturnRef(node.DeclId.at(0));
+        const whole = ast.writtenWholeSpan(returned);
+        try testing.expectEqualStrings(case.written, text[whole.start..whole.end]);
+        const short = ast.writtenSpan(returned);
+        try testing.expectEqualStrings(case.short, text[short.start..short.end]);
+    }
+
+    // Brackets never closed end the whole span at the last argument written.
+    const text = "fn f() -> Option[UInt8\n";
+    const source: Source = .{ .path = "t.lin", .text = text };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    const whole = ast.writtenWholeSpan(ast.declReturnRef(node.DeclId.at(0)));
+    try testing.expectEqualStrings("Option[UInt8", text[whole.start..whole.end]);
+}
 
 /// Parses exactly the text given, for tests about what a program is.
 fn parseProgramText(gpa: std.mem.Allocator, text: []const u8) !Parsed {

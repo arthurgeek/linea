@@ -52,7 +52,7 @@ error[S-Match]: expected a pattern
   --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:40:5
    |
 40 |     let _z = true + 1
-   |     ^^^ an arm begins with a variant, `_`, a number or a string
+   |     ^^^ an arm begins with a variant, `_`, a number, a string, `true` or `false`
 error[S-Brace]: unclosed `{`
   --> tests/text/a_refused_byte_before_an_unclosed_bracket_leaves_the_next_statements.lin:37:25
    |

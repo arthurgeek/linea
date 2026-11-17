@@ -3,7 +3,7 @@
 // declared and the tuple keeps its arity.
 fn after_a_keyword(sink triple: (Bool, UInt8, UInt8)) -> UInt8 {
     match triple {
-        (true, +, count) => count,
+        (loop, +, count) => count,
         (_, low, high) => low + high,
     }
 }
@@ -22,7 +22,7 @@ fn without_a_comma(sink triple: (Bool, UInt8, UInt8)) -> UInt8 {
 }
 
 fn in_a_let(sink triple: (Bool, UInt8, UInt8)) -> UInt8 {
-    let (true, +, count) = triple
+    let (loop, +, count) = triple
     count
 }
 

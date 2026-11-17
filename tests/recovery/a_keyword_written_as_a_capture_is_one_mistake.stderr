@@ -1,0 +1,20 @@
+error[S-Lambda]: `true` is a keyword, and a keyword cannot be a name
+ --> tests/recovery/a_keyword_written_as_a_capture_is_one_mistake.lin:5:19
+  |
+5 |     let f = read [true] || 1
+  |                   ^^^^ choose another name
+error[S-Lambda]: `false` is a keyword, and a keyword cannot be a name
+  --> tests/recovery/a_keyword_written_as_a_capture_is_one_mistake.lin:10:19
+   |
+10 |     let f = read [false = absent] || 1
+   |                   ^^^^^ choose another name
+error[S-Lambda]: `match` is a keyword, and a keyword cannot be a name
+  --> tests/recovery/a_keyword_written_as_a_capture_is_one_mistake.lin:16:22
+   |
+16 |     let f = read [n, match] || n
+   |                      ^^^^^ choose another name
+error[N-Undefined]: undefined name `absent`
+  --> tests/recovery/a_keyword_written_as_a_capture_is_one_mistake.lin:10:27
+   |
+10 |     let f = read [false = absent] || 1
+   |                           ^^^^^^ no binding with this name is in scope

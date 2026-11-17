@@ -1,0 +1,30 @@
+// `true` and `false` are patterns, and a `match` over a `Bool` that names
+// both covers it. A `_` after `true` takes the other value, and either may
+// stand inside a payload or a tuple.
+fn fee(express: Bool) -> UInt8 {
+    match express {
+        true => 12,
+        false => 4,
+    }
+}
+
+fn discount(member: Bool) -> UInt8 {
+    match member {
+        true => 3,
+        _ => 0,
+    }
+}
+
+fn surcharge(order: (Bool, Option[Bool])) -> UInt8 {
+    match read order {
+        (true, Some(true)) => 5,
+        (true, Some(false)) => 2,
+        (false, Some(_)) => 1,
+        (_, None) => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let total = fee(true) + fee(false) - discount(true) - discount(false)
+    total + surcharge((true, .Some(true))) + surcharge((false, .None)) - 18
+}
