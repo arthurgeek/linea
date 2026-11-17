@@ -460,6 +460,12 @@ fn main() -> UInt8 {
     let options = parse_options(env.args()) else |status| {
         return status
     }
+    // Request fibers and the task owning App share this loop. Its clients
+    // serialize counter updates without binding the callers to one carrier.
+    let execution = io.Loop.open(carriers: env.available_parallelism()) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
     // The logger writes lines at `Info` and above to standard error, building
     // each line in memory from `mem.system()` before writing it whole.
     let logger = log.to_stderr(minimum: .Info)
@@ -492,7 +498,7 @@ fn main() -> UInt8 {
     // task while serving, joins every serving task and closes the listener
     // when it stops. It returns the `App`, so `main` reads what the routes
     // changed and releases it.
-    let finished = http.listen_and_serve_with(net.loopback(options.port), serving, App { echoed = 0 }, limits: limits) else |error| {
+    let finished = http.listen_and_serve_with(net.loopback(options.port), serving, App { echoed = 0 }, limits: limits, on: execution) else |error| {
         logger.error("serving stopped", log.field("error", error))
         return 1
     }

@@ -84,7 +84,7 @@ test "the faster service wins" {
     testing.assert_eq(late, UInt64(500), "the late quote was lost")?
 }
 
-fn main() -> Result[UInt8, io.IoError] {
+fn quote_report() -> Result[UInt8, io.IoError] {
     match race(service(1250, time.Duration.from_milliseconds(300)), service(1190, time.Duration.from_milliseconds(10)), time.Duration.from_seconds(5)) {
         Won(name, cents, loser) => {
             let later = collect(loser)
@@ -108,4 +108,16 @@ fn main() -> Result[UInt8, io.IoError] {
         },
     }
     .Ok(0)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Child tasks inherit this loop, so waiting sessions and timers share
+    // two carriers instead of reserving one OS thread for each participant.
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[Send[Result[UInt8, io.IoError], End]]| {
+        me.send(quote_report()).close()
+    }
+    let (result, done) = task.start(body, on: execution).unwrap().recv()
+    done.close()
+    result
 }

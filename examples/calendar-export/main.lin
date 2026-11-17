@@ -207,6 +207,10 @@ fn main() -> UInt8 {
     let options = parse_options(env.args()) else |status| {
         return status
     }
+    let execution = io.Loop.open(carriers: env.available_parallelism()) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
     let logger = log.to_stderr(minimum: .Info)
     // `..http.Limits.default()` takes every limit not written here from the
     // standard limits, so only the connection count changes.
@@ -232,7 +236,7 @@ fn main() -> UInt8 {
     // reports a failure to listen or to serve through `error`. Port 0 asks the
     // operating system for any free port, and `http.logged` logs the one it
     // chose.
-    let _ = http.listen_and_serve(net.loopback(options.port), serving, limits: limits) else |error| {
+    let _ = http.listen_and_serve(net.loopback(options.port), serving, limits: limits, on: execution) else |error| {
         logger.error("serving stopped", log.field("error", error))
         return 1
     }

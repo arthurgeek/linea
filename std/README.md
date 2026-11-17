@@ -23,6 +23,29 @@ declare its own type or trait under a prelude name; its declaration shadows the
 prelude's there. The [prelude tables](../docs/linea-semantics.md#37-modules) are
 authoritative.
 
+Task combinators and owners inherit the caller's execution context. Start a
+coordinator with `task.prepare(body, on: execution)` or pass `on: execution` to
+HTTP serving to use an `io.Loop`. `task.Policy` limits concurrent jobs;
+the loop's carrier count limits their OS threads. Idle carriers can steal
+eligible runnable fibers, including continuations that have already started.
+Ordinary collection and iterator operations remain sequential and preserve
+their callback order and laziness; use `task.map` or `task.lazy_map` for
+independent jobs.
+
+Socket waits use kqueue on macOS and io_uring on supported Linux kernels, with
+epoll as Linux's readiness fallback. Timers and sessions also release a carrier
+while waiting. Execution is cooperative: uninterrupted computation, regular-file
+operations and blocking foreign calls can occupy their carrier. Run blocking
+work explicitly on `io.system()`. A thread-bound native resource must be
+created, used and settled inside its system-thread owner; other fibers can
+communicate through restricted clients without acquiring that resource's affinity.
+
+Standard-library allocation, text, JSON, numeric and process-query operations
+do not bind their calling fiber to an OS thread. Unknown foreign calls do bind
+it before native execution, and entering `Simulation.run` preserves the
+caller's thread context across the run. Neither ownership nor shareability
+alone establishes a foreign operation's migration safety.
+
 For scheduler diagnostics, `task.current_carrier()` answers `Option[task.Carrier]`:
 an opaque, equality-comparable identity for the carrier currently executing a
 real fiber. System tasks and simulated tasks answer `None`. Identities are local
