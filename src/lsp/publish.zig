@@ -303,6 +303,36 @@ test "a position counts UTF-16 code units, not bytes" {
     try testing.expectEqual(@as(u32, 4), published[0].range.start.character);
 }
 
+test "every text a published diagnostic carries is UTF-8, whatever bytes the source holds" {
+    const gpa = testing.allocator;
+    // A character no token begins, a byte that begins no character, and
+    // either inside a name, a literal, a comment or a type, where a pass may
+    // quote what it read.
+    const sources = [_][]const u8{
+        "fn main() -> UInt8 {\n    é\n    0\n}\n",
+        "fn main() -> UInt8 {\n    \xff\n    0\n}\n",
+        "fn main() -> UInt8 {\n    let s = \"\xff\"\n    s\n}\n",
+        "fn main() -> UInt8 {\n    let s: Str = 'é\xe2'\n    0\n}\n",
+        "fn ma\xc3in() -> UInt8 {\n    0\n}\n",
+        "fn main() -> UInt8 {\n    absent\xe2\x82\n}\n",
+        "// \xff\nfn main() -> UInt\xff8 {\n    0\n}\n",
+    };
+    for (sources) |text| {
+        var messages = std.heap.ArenaAllocator.init(gpa);
+        defer messages.deinit();
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+        defer checked.deinit();
+
+        const publication = try Publication.init(messages.allocator(), &checked);
+        const published = try publication.forFile(messages.allocator(), checked.fileNamed("main.lin").?, .@"utf-16");
+        try testing.expect(published.len > 0);
+        for (published) |d| {
+            try testing.expect(std.unicode.utf8ValidateSlice(d.message));
+            for (d.relatedInformation orelse &.{}) |related| try testing.expect(std.unicode.utf8ValidateSlice(related.message));
+        }
+    }
+}
+
 test "a file with nothing wrong publishes an empty list" {
     const gpa = testing.allocator;
     var messages = std.heap.ArenaAllocator.init(gpa);

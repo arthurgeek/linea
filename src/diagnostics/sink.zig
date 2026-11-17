@@ -34,7 +34,11 @@ pub const truncated = " ... (truncated)";
 /// between passes.
 ///
 /// Every text a diagnostic carries is cut to `max_text_bytes` on the way in,
-/// except a fix's edits, each fix kept whole or dropped.
+/// except a fix's edits, each fix kept whole or dropped. Every one is UTF-8
+/// too: the JSON form and the language server write each as a string, and a
+/// string is text. A pass builds its texts from text, so a byte that is not
+/// is the compiler's mistake; a build with safety checks stops on it, and
+/// any other build writes the byte as `\xNN` (`textOf`).
 /// The bound sits here rather than in a renderer because a renderer is not the
 /// only one: the human form and the JSON form are two writers of the same
 /// text, and a bound written into one of them says nothing about the other. A
@@ -71,7 +75,7 @@ pub const Sink = struct {
         }
     }
 
-    /// `d` with every text it carries within the bound.
+    /// `d` with every text it carries UTF-8 and within the bound.
     fn bounded(self: *Sink, d: Diagnostic) !Diagnostic {
         var within = d;
         within.message = try cut(self.arena, d.message);
@@ -167,8 +171,12 @@ pub const Sink = struct {
     }
 };
 
-/// `text` if it is within the bound, and a cut copy of it saying so if not.
-fn cut(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
+/// `text` if it is UTF-8 and within the bound; otherwise a copy written as
+/// UTF-8 (`textOf`) and cut, saying that it was.
+fn cut(arena: std.mem.Allocator, written: []const u8) ![]const u8 {
+    const valid = std.unicode.utf8ValidateSlice(written);
+    if (std.debug.runtime_safety) std.debug.assert(valid);
+    const text = if (valid) written else try textOf(arena, written);
     if (text.len <= max_text_bytes) return text;
 
     // Cut on a scalar boundary. The text quotes the source, so the byte at the
@@ -179,6 +187,43 @@ fn cut(arena: std.mem.Allocator, text: []const u8) ![]const u8 {
     while (end > 0 and text[end] & 0xC0 == 0x80) end -= 1;
 
     return std.mem.concat(arena, u8, &.{ text[0..end], truncated });
+}
+
+/// `bytes` as UTF-8: every sequence that is one kept, and every byte that
+/// begins none written as `\xNN`, its value in hexadecimal.
+fn textOf(arena: std.mem.Allocator, bytes: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < bytes.len) {
+        // The length the leading byte announces; a continuation byte, or a
+        // byte no UTF-8 sequence begins with, announces none.
+        const width: usize = switch (bytes[i]) {
+            0x00...0x7f => 1,
+            0xc0...0xdf => 2,
+            0xe0...0xef => 3,
+            0xf0...0xf7 => 4,
+            else => 0,
+        };
+        if (width != 0 and i + width <= bytes.len and std.unicode.utf8ValidateSlice(bytes[i .. i + width])) {
+            try out.appendSlice(arena, bytes[i .. i + width]);
+            i += width;
+            continue;
+        }
+        try out.print(arena, "\\x{X:0>2}", .{bytes[i]});
+        i += 1;
+    }
+    return out.items;
+}
+
+test textOf {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try testing.expectEqualStrings("caf\\xC3", try textOf(gpa, "caf\xc3"));
+    try testing.expectEqualStrings("\\xFFé\\x80", try textOf(gpa, "\xffé\x80"));
+    try testing.expectEqualStrings("\\xED\\xA0\\x80", try textOf(gpa, "\xed\xa0\x80"));
+    try testing.expectEqualStrings("plain", try textOf(gpa, "plain"));
+    try testing.expect(std.unicode.utf8ValidateSlice(try textOf(gpa, "\xc3\x28\xe2\x82")));
 }
 
 /// The fixes, without each one an edit of which is over the bound.
