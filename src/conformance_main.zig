@@ -9111,23 +9111,68 @@ fn compileWithLibrary(
     return .{ .accepted = ir.written() };
 }
 
-/// Whether a sanitizer reported a fault on standard error.
+/// Whether a sanitizer reported a fault on standard error, read by the form
+/// each sanitizer's report line takes and nothing looser, so a program that
+/// says the same words is not taken for one.
 ///
-/// The address, leak and thread sanitizers each name themselves in the
-/// first line of a report, and the undefined-behaviour checks the runtime is
-/// built with say `runtime error:` when they report rather than trap.
+/// The address and leak sanitizers begin a report with a line
+/// `==PID==ERROR: NAMESanitizer: ...`, the thread sanitizer with
+/// `WARNING: ThreadSanitizer: ...`, and the undefined-behaviour checks with
+/// `FILE:LINE:COLUMN: runtime error: ...`, each at the start of a line.
 fn sanitizerReported(errors: []const u8) bool {
-    return std.mem.indexOf(u8, errors, "Sanitizer") != null or
-        std.mem.indexOf(u8, errors, "runtime error:") != null;
+    var lines = std.mem.splitScalar(u8, errors, '\n');
+    while (lines.next()) |line| {
+        if (addressReportLine(line)) return true;
+        if (std.mem.startsWith(u8, line, "WARNING: ThreadSanitizer: ")) return true;
+        if (undefinedBehaviourReportLine(line)) return true;
+    }
+    return false;
 }
 
-test "a sanitizer report is found wherever it sits on standard error" {
-    try testing.expect(sanitizerReported("==12==ERROR: AddressSanitizer: heap-use-after-free on address"));
-    try testing.expect(sanitizerReported("printed first\n==12==ERROR: LeakSanitizer: detected memory leaks"));
-    try testing.expect(sanitizerReported("WARNING: ThreadSanitizer: data race (pid=7)"));
-    try testing.expect(sanitizerReported("linea_rt.c:40:3: runtime error: signed integer overflow"));
+/// `==PID==ERROR: NAMESanitizer: `, where `NAME` is one word.
+fn addressReportLine(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, "==")) return false;
+    const pid_end = std.mem.indexOfPos(u8, line, 2, "==") orelse return false;
+    if (pid_end == 2) return false;
+    for (line[2..pid_end]) |digit| if (!std.ascii.isDigit(digit)) return false;
+    const rest = line[pid_end + 2 ..];
+    if (!std.mem.startsWith(u8, rest, "ERROR: ")) return false;
+    const named = rest["ERROR: ".len..];
+    const name_end = std.mem.indexOf(u8, named, "Sanitizer: ") orelse return false;
+    for (named[0..name_end]) |letter| if (!std.ascii.isAlphabetic(letter)) return false;
+    return true;
+}
+
+/// `FILE:LINE:COLUMN: runtime error: `, with a file and two numbers.
+fn undefinedBehaviourReportLine(line: []const u8) bool {
+    const marker = ": runtime error: ";
+    const at = std.mem.indexOf(u8, line, marker) orelse return false;
+    var fields = std.mem.splitBackwardsScalar(u8, line[0..at], ':');
+    const column = fields.next() orelse return false;
+    const row = fields.next() orelse return false;
+    if (fields.rest().len == 0) return false;
+    for ([_][]const u8{ column, row }) |number| {
+        if (number.len == 0) return false;
+        for (number) |digit| if (!std.ascii.isDigit(digit)) return false;
+    }
+    return true;
+}
+
+test "a sanitizer report is found by its own form, and a program's words are not one" {
+    // Report lines as each sanitizer writes them, alone and after other text.
+    try testing.expect(sanitizerReported("==12==ERROR: AddressSanitizer: heap-use-after-free on address 0x602000000010 at pc 0x1 bp 0x2 sp 0x3\n"));
+    try testing.expect(sanitizerReported("printed first\n==12==ERROR: LeakSanitizer: detected memory leaks\n"));
+    try testing.expect(sanitizerReported("==================\nWARNING: ThreadSanitizer: data race (pid=7)\n"));
+    try testing.expect(sanitizerReported("runtime/linea_rt.c:40:3: runtime error: signed integer overflow: 127 + 1 cannot be represented in type 'signed char'\n"));
     try testing.expect(!sanitizerReported("linea: index out of bounds at main.lin:4:9\n"));
     try testing.expect(!sanitizerReported(""));
+    // A program saying the words a report holds, anywhere but in that form.
+    try testing.expect(!sanitizerReported("runtime error: the input file is empty\n"));
+    try testing.expect(!sanitizerReported("the AddressSanitizer found nothing\n"));
+    try testing.expect(!sanitizerReported("note: runtime error: retrying\n"));
+    try testing.expect(!sanitizerReported("said ==12==ERROR: AddressSanitizer: quoted\n"));
+    try testing.expect(!sanitizerReported("==pid==ERROR: AddressSanitizer: not a pid\n"));
+    try testing.expect(!sanitizerReported("  WARNING: ThreadSanitizer: indented\n"));
 }
 
 /// Why a program that ran did not run clean, or null where it did.
@@ -9135,10 +9180,12 @@ test "a sanitizer report is found wherever it sits on standard error" {
 /// A defined trap is the runtime's own abort, which writes `linea: ` and what
 /// stopped the program; a program that stops on any other signal crashed. A
 /// sanitizer that finds a fault reports on standard error and ends the program
-/// with a status of its own, so its report is looked for rather than its status.
-fn uncleanRun(ran: Ran) ?[]const u8 {
+/// with a status of its own, so its report is looked for rather than its status
+/// -- and only where `sanitize` names one, since a program built without one
+/// may say anything on standard error, and nothing it says is a report.
+fn uncleanRun(ran: Ran, sanitize: ?[]const u8) ?[]const u8 {
     if (ran.timed_out) return "did not finish";
-    if (sanitizerReported(ran.errors)) return "a sanitizer reported a fault";
+    if (sanitize != null and sanitizerReported(ran.errors)) return "a sanitizer reported a fault";
     // A signal the runtime did not raise is a crash whatever the program had
     // said by then, a line beginning `linea: ` included.
     if (ran.signal != null) return "crashed";
@@ -9147,15 +9194,18 @@ fn uncleanRun(ran: Ran) ?[]const u8 {
 }
 
 test "a defined trap runs clean and a crash or a sanitizer report does not" {
-    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "exit 3\n", .tool_failed = false }));
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "exit 3\n", .tool_failed = false }, null));
     const trapped: Ran = .{ .text = "trap\nlinea: index out of bounds at main.lin:4:9\n", .errors = "linea: index out of bounds at main.lin:4:9\n", .tool_failed = false };
-    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(trapped));
-    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = "trap\n", .tool_failed = false }).?);
-    try testing.expectEqualStrings("a sanitizer reported a fault", uncleanRun(.{
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(trapped, null));
+    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = "trap\n", .tool_failed = false }, null).?);
+    const reported: Ran = .{
         .text = "exit 1\n",
         .errors = "==9==ERROR: AddressSanitizer: heap-use-after-free\n",
         .tool_failed = false,
-    }).?);
+    };
+    try testing.expectEqualStrings("a sanitizer reported a fault", uncleanRun(reported, "address").?);
+    // Without a sanitizer the same bytes are the program's own.
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(reported, null));
 }
 
 const SoundnessSettings = struct {
@@ -9260,7 +9310,7 @@ fn runAccepted(
         }
         return null;
     }
-    if (uncleanRun(ran)) |why| {
+    if (uncleanRun(ran, settings.env.sanitize)) |why| {
         try failures.append(scratch, .{
             .path = display_path,
             .what = why,
@@ -9588,7 +9638,7 @@ fn levelsAgree(
         if (try recordOutcomeDifferences(scratch, failures, display_path, what, at_corpus, ran, .exact)) verdict = .disagreed;
         // Run clean at this level too, which agreeing with the first run does
         // not show where both were stopped alike.
-        if (uncleanRun(ran)) |why| {
+        if (uncleanRun(ran, options.sanitize)) |why| {
             verdict = .disagreed;
             try failures.append(scratch, .{
                 .path = display_path,
@@ -20317,9 +20367,9 @@ test "a signal's note is a line of its own after unterminated output, and such a
     try testing.expectEqualStrings("trap\nlinea: said and stopped\nstopped by signal 11\n", cut);
     // The program had written the runtime's prefix, and a signal still
     // stopped it.
-    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false, .signal = 11 }).?);
+    try testing.expectEqualStrings("crashed", uncleanRun(.{ .text = cut, .errors = "linea: said and stopped", .tool_failed = false, .signal = 11 }, null).?);
     // The same text from a run no signal stopped is the runtime's abort.
-    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "trap\nlinea: said and stopped\n", .errors = "linea: said and stopped\n", .tool_failed = false }));
+    try testing.expectEqual(@as(?[]const u8, null), uncleanRun(.{ .text = "trap\nlinea: said and stopped\n", .errors = "linea: said and stopped\n", .tool_failed = false }, null));
 }
 
 /// What two runs of one program are compared by where something between them
@@ -22865,7 +22915,7 @@ fn checkCase(
                         // reports and lets the program go on, or a crash a
                         // golden happens not to cover, is a fault in a program
                         // the compiler accepted, and the goldens are selective.
-                        if (!ran.tool_failed) if (uncleanRun(ran)) |why| try w.failures.append(gpa, .{
+                        if (!ran.tool_failed) if (uncleanRun(ran, env.sanitize)) |why| try w.failures.append(gpa, .{
                             .path = display_path,
                             .what = why,
                             .expected = "a program the compiler accepted runs clean",

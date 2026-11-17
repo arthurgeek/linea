@@ -1,0 +1,18 @@
+// A program may say anything on standard error, including the words a
+// sanitizer's report begins with. Built without a sanitizer, these lines are
+// what the program says and the status it answers is its own.
+import std.io
+
+use io.eprint
+
+fn complain(reason: Str) {
+    eprint("runtime error: ")
+    eprint(reason)
+    eprint("\n")
+}
+
+fn main() -> UInt8 {
+    complain("the input file is empty")
+    eprint("the AddressSanitizer build was not used\n")
+    2
+}
