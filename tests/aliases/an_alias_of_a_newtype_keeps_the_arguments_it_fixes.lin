@@ -1,0 +1,34 @@
+// An alias of an applied newtype is that application wherever it is written.
+// `CustomerId` takes apart only an `Id[Customer]`, `ForCustomer` only a
+// `Tagged` whose first argument is `Customer`, and a value `CustomerId`
+// builds is an `Id[Customer]`, which is not the `Id[Order]` a call expects,
+// as a `ForCustomer` is no `Tagged[Order, UInt8]`.
+type Id[phantom T] = UInt64
+
+type Tagged[phantom T, phantom U] = UInt64
+
+struct Customer {
+    name: UInt8,
+}
+
+struct Order {
+    name: UInt8,
+}
+
+alias CustomerId = Id[Customer]
+alias ForCustomer[U] = Tagged[Customer, U]
+
+fn order_number(sink id: Id[Order]) -> UInt64 {
+    let CustomerId(n) = id
+    n
+}
+
+fn tagged_number(sink id: Tagged[Order, UInt8]) -> UInt64 {
+    let ForCustomer(n) = id
+    n
+}
+
+fn main() -> UInt8 {
+    let tagged: Tagged[Order, UInt8] = ForCustomer(4)
+    UInt8(order_number(CustomerId(3)) + tagged_number(tagged))
+}

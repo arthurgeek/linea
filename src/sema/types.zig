@@ -804,55 +804,69 @@ pub const Cycle = struct {
     path: []const TypeId,
 };
 
-/// The first cycle among inline parts, or null where the graph is acyclic.
+/// Every cycle among inline parts, one at a time.
 ///
 /// A walk that remembered every type it had ever seen would call a type held
 /// twice a cycle. What makes one is being reached again *from within its own
 /// traversal*, so the mark says which of the two a type is: on the path being
 /// walked now, or finished and known acyclic.
 ///
+/// The marks outlive one cycle. Between two calls of `next` the caller breaks
+/// an edge on the cycle it was handed, which only takes parts away, so a type
+/// finished before stays acyclic and is not walked again. Only the types on
+/// the path when the cycle was found are walked again, from the same root.
+///
 /// A part that is an alike instantiation is walked as its representative
 /// (`Typing.partsSource`): its parts would be the representative's renamed,
 /// so it holds itself exactly where the representative does, and where that
 /// is the template the path names the declarations a reader edits.
-fn firstCycleIn(gpa: std.mem.Allocator, typing: *const Typing) !?Cycle {
-    const marks = try gpa.alloc(CycleMark, typing.pool.len);
-    defer gpa.free(marks);
-    @memset(marks, .unseen);
+///
+/// **Bound:** every type and every inline part walked once over all calls,
+/// and the types on each found cycle's path once more for that cycle.
+pub const CycleWalk = struct {
+    marks: std.ArrayList(CycleMark) = .empty,
+    path: std.ArrayList(TypeId) = .empty,
+    root: usize = 0,
 
-    var path: std.ArrayList(TypeId) = .empty;
-    defer path.deinit(gpa);
-
-    for (0..typing.pool.len) |i| {
-        const t: TypeId = @enumFromInt(@as(u32, @intCast(i)));
-        if (typing.alikeSource(t) != null) continue;
-        if (try walkFrom(gpa, typing, t, marks, &path)) {
-            return .{ .path = try gpa.dupe(TypeId, path.items) };
-        }
+    pub fn deinit(self: *CycleWalk, gpa: std.mem.Allocator) void {
+        self.marks.deinit(gpa);
+        self.path.deinit(gpa);
     }
-    return null;
-}
+
+    /// The next cycle, owned by the caller, or null where none remains.
+    pub fn next(self: *CycleWalk, gpa: std.mem.Allocator, typing: *const Typing) !?Cycle {
+        while (self.marks.items.len < typing.pool.len) try self.marks.append(gpa, .unseen);
+        while (self.root < typing.pool.len) : (self.root += 1) {
+            const t: TypeId = @enumFromInt(@as(u32, @intCast(self.root)));
+            if (typing.alikeSource(t) != null) continue;
+            const at = try walkFrom(gpa, typing, t, self.marks.items, &self.path) orelse continue;
+            const cycle: Cycle = .{ .path = try gpa.dupe(TypeId, self.path.items[at..]) };
+            for (self.path.items) |on| self.marks.items[@intFromEnum(on)] = .unseen;
+            self.path.clearRetainingCapacity();
+            return cycle;
+        }
+        return null;
+    }
+};
 
 const CycleMark = enum { unseen, on_path, done };
 
+/// Where on `path` the cycle reached from `held` starts, leaving the path
+/// as it stood when the cycle closed, or null where `held` reaches none.
 fn walkFrom(
     gpa: std.mem.Allocator,
     typing: *const Typing,
     held: TypeId,
     marks: []CycleMark,
     path: *std.ArrayList(TypeId),
-) !bool {
+) !?usize {
     const t = typing.partsSource(held);
     const i = @intFromEnum(t);
     switch (marks[i]) {
-        .done => return false,
+        .done => return null,
         // Reached from within its own traversal, so the path from here back to
         // it is the cycle.
-        .on_path => {
-            const at = std.mem.indexOfScalar(TypeId, path.items, t).?;
-            path.replaceRangeAssumeCapacity(0, at, &.{});
-            return true;
-        },
+        .on_path => return std.mem.indexOfScalar(TypeId, path.items, t).?,
         .unseen => {},
     }
 
@@ -862,53 +876,37 @@ fn walkFrom(
     const field_types = typing.fields.items(.ty);
     const variant_first_fields = typing.variants.items(.first_field);
     const variant_field_counts = typing.variants.items(.field_count);
-    var reported = false;
     switch (typing.pool[i]) {
         .borrow => {},
         // An array reaches its element, so a type holding an array of itself
         // is as infinite as one holding itself, and is found the same way.
-        .array => |a| {
-            if (try walkFrom(gpa, typing, a.element, marks, path)) {
-                reported = true;
-            }
-        },
+        .array => |a| if (try walkFrom(gpa, typing, a.element, marks, path)) |at| return at,
         .struct_ => |x| for (field_types[x.first_field..][0..x.field_count]) |field_type| {
-            if (try walkFrom(gpa, typing, field_type, marks, path)) {
-                reported = true;
-                break;
-            }
+            if (try walkFrom(gpa, typing, field_type, marks, path)) |at| return at;
         },
-        .enum_ => |e| outer: for (e.first_variant..e.first_variant + e.variant_count) |variant_at| {
+        .enum_ => |e| for (e.first_variant..e.first_variant + e.variant_count) |variant_at| {
             const first_field = variant_first_fields[variant_at];
             const field_count = variant_field_counts[variant_at];
             for (field_types[first_field..][0..field_count]) |field_type| {
-                if (try walkFrom(gpa, typing, field_type, marks, path)) {
-                    reported = true;
-                    break :outer;
-                }
+                if (try walkFrom(gpa, typing, field_type, marks, path)) |at| return at;
             }
         },
         // A newtype reaches its base exactly as an array reaches its
         // element: a type declared over itself is as infinite as one holding
         // itself, and layout would recurse forever without this.
-        .newtype => |n| {
-            if (try walkFrom(gpa, typing, n.base, marks, path)) {
-                reported = true;
-            }
-        },
+        .newtype => |n| if (try walkFrom(gpa, typing, n.base, marks, path)) |at| return at,
         // Every kind that holds nothing, named rather than fallen through: a
         // kind added later holds something or it does not, and deciding that
         // is what this walk is. Left as a fall-through, a new kind would be
         // acyclic by default and laid out by whoever asked for its size
         // first.
-        .closure => |closure| reported = try walkFrom(gpa, typing, closure.environment, marks, path),
+        .closure => |closure| if (try walkFrom(gpa, typing, closure.environment, marks, path)) |at| return at,
         .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable => {},
     }
-    if (reported) return true;
 
     _ = path.pop();
     marks[i] = .done;
-    return false;
+    return null;
 }
 
 /// Whether a callable parameter supplies a folded value when omitted.
@@ -3556,9 +3554,12 @@ pub const ImplIndex = struct {
     ground_by_type: Chain(.newest_first) = .empty,
     open_by_head: Chain(.newest_first) = .empty,
     /// The open callable rows that write a ground type at the slot their
-    /// shape's heads are told apart by, under that type: by trait and head,
-    /// and by head alone. A row filed here is on neither `open` nor
-    /// `open_by_head`. `telling_slots` holds the slot chosen for each head.
+    /// shape's heads are told apart by, under that type: by trait and head
+    /// at the slot chosen for that trait's rows of the shape, and by head
+    /// alone at the slot chosen for every trait's. A row filed in the first
+    /// is not on `open`, and one filed in the second is not on
+    /// `open_by_head`. `telling_slots` holds the slot chosen for each trait
+    /// and shape, and under trait 0 for the shape across every trait.
     open_by_slot: Chain(.newest_first) = .empty,
     open_by_head_slot: Chain(.newest_first) = .empty,
     telling_slots: std.AutoHashMapUnmanaged(u64, u32) = .empty,
@@ -3638,12 +3639,13 @@ pub const ImplIndex = struct {
         return h.final();
     }
 
-    /// The ground type an open callable row writes at the slot its head's
-    /// rows are told apart by, or null where the row is not one, its head
-    /// has no such slot, or it leaves that slot open.
-    fn tellingRoot(self: *const ImplIndex, gpa: std.mem.Allocator, pool: anytype, row: Implementation) !?TypeId {
+    /// The ground type an open callable row writes at the slot the rows of
+    /// its head are told apart by, among `trait`'s rows or under trait 0
+    /// among every trait's, or null where the row is not one, that scope has
+    /// no such slot, or the row leaves it open.
+    fn tellingRoot(self: *const ImplIndex, gpa: std.mem.Allocator, pool: anytype, trait: u32, row: Implementation) !?TypeId {
         if (row.head != .callable_ or !row.valid_key or row.ty == .poison) return null;
-        const slot = self.telling_slots.get(key(0, row.head)) orelse return null;
+        const slot = self.telling_slots.get(key(trait, row.head)) orelse return null;
         if (slot >= callableSlots(pool, row.ty)) return null;
         const written = callableSlot(pool, row.ty, slot);
         return if (try groundKnown(gpa, pool, written)) written else null;
@@ -3716,25 +3718,30 @@ pub const ImplIndex = struct {
         self.telling_slots.clearRetainingCapacity();
 
         // The slot each callable head's open rows are told apart by: the
-        // first at which two of them write different ground types. A
-        // receiver writes a ground type there too, so it walks only the
-        // rows that write the same one or leave the slot open.
+        // first at which two of them write different ground types, chosen
+        // among one trait's rows for a lookup of that trait, and among every
+        // trait's for a reader of the rows under a head. A receiver writes a
+        // ground type there too, so it walks only the rows that write the
+        // same one or leave the slot open, and a trait's rows are told apart
+        // where they differ whatever another trait's rows of the shape write.
         {
             var first: std.AutoHashMapUnmanaged(u64, TypeId) = .empty;
             defer first.deinit(gpa);
             for (impls) |row| {
                 if (row.head != .callable_ or !row.valid_key or row.ty == .poison or try foundByType(gpa, pool, row)) continue;
-                const head_key = key(0, row.head);
-                const limit = self.telling_slots.get(head_key) orelse std.math.maxInt(u32);
-                for (0..@min(callableSlots(pool, row.ty), limit)) |slot| {
-                    const written = callableSlot(pool, row.ty, slot);
-                    if (!try groundKnown(gpa, pool, written)) continue;
-                    const seen = try first.getOrPut(gpa, slotKey(@intCast(slot), row.head, .poison));
-                    if (!seen.found_existing) {
-                        seen.value_ptr.* = written;
-                    } else if (seen.value_ptr.* != written) {
-                        try self.telling_slots.put(gpa, head_key, @intCast(slot));
-                        break;
+                for ([_]u32{ row.trait, 0 }) |scope| {
+                    const scope_key = key(scope, row.head);
+                    const limit = self.telling_slots.get(scope_key) orelse std.math.maxInt(u32);
+                    for (0..@min(callableSlots(pool, row.ty), limit)) |slot| {
+                        const written = callableSlot(pool, row.ty, slot);
+                        if (!try groundKnown(gpa, pool, written)) continue;
+                        const seen = try first.getOrPut(gpa, slotKey(scope, row.head, @enumFromInt(@as(u32, @intCast(slot)))));
+                        if (!seen.found_existing) {
+                            seen.value_ptr.* = written;
+                        } else if (seen.value_ptr.* != written) {
+                            try self.telling_slots.put(gpa, scope_key, @intCast(slot));
+                            break;
+                        }
                     }
                 }
             }
@@ -3748,12 +3755,15 @@ pub const ImplIndex = struct {
                 try self.ground_by_receiver.note(gpa, receiverKey(row.trait, row.ty), @intCast(at));
                 try self.ground_by_header.note(gpa, headerKey(row.trait, row.ty, row.args), @intCast(at));
                 try self.ground_by_type.note(gpa, @intFromEnum(row.ty), @intCast(at));
-            } else if (try self.tellingRoot(gpa, pool, row)) |root| {
-                try self.open_by_slot.note(gpa, slotKey(row.trait, row.head, root), @intCast(at));
-                try self.open_by_head_slot.note(gpa, slotKey(0, row.head, root), @intCast(at));
             } else {
-                try self.open.note(gpa, key(row.trait, row.head), @intCast(at));
-                try self.open_by_head.note(gpa, key(0, row.head), @intCast(at));
+                if (try self.tellingRoot(gpa, pool, row.trait, row)) |root|
+                    try self.open_by_slot.note(gpa, slotKey(row.trait, row.head, root), @intCast(at))
+                else
+                    try self.open.note(gpa, key(row.trait, row.head), @intCast(at));
+                if (try self.tellingRoot(gpa, pool, 0, row)) |root|
+                    try self.open_by_head_slot.note(gpa, slotKey(0, row.head, root), @intCast(at))
+                else
+                    try self.open_by_head.note(gpa, key(0, row.head), @intCast(at));
             }
         }
         self.ground_indexed = true;
@@ -3829,15 +3839,16 @@ pub const ImplIndex = struct {
         };
         all.chain = &self.open;
         all.run = self.open.walk(key(trait, head));
-        if (try self.receiverRoot(pool, head, held)) |root| all.told = self.open_by_slot.walk(slotKey(trait, head, root));
+        if (try self.receiverRoot(pool, trait, head, held)) |root| all.told = self.open_by_slot.walk(slotKey(trait, head, root));
         return all;
     }
 
     /// The type a ground callable receiver writes at the slot its head's
-    /// open rows are told apart by, or null where no row is filed by one.
-    fn receiverRoot(self: *const ImplIndex, pool: anytype, head: Head, held: TypeId) !?TypeId {
+    /// open rows are told apart by, among `trait`'s rows or under trait 0
+    /// among every trait's, or null where no row is filed by one.
+    fn receiverRoot(self: *const ImplIndex, pool: anytype, trait: u32, head: Head, held: TypeId) !?TypeId {
         if (head != .callable_) return null;
-        const slot = self.telling_slots.get(key(0, head)) orelse return null;
+        const slot = self.telling_slots.get(key(trait, head)) orelse return null;
         if (slot >= callableSlots(pool, held)) return null;
         return callableSlot(pool, held, slot);
     }
@@ -3933,7 +3944,7 @@ pub const ImplIndex = struct {
             .head = head,
             .receiver = held,
             .found = self.ground_by_type.walk(@intFromEnum(held)),
-            .told = if (try self.receiverRoot(pool, head, held)) |root| self.open_by_head_slot.walk(slotKey(0, head, root)) else null,
+            .told = if (try self.receiverRoot(pool, 0, head, held)) |root| self.open_by_head_slot.walk(slotKey(0, head, root)) else null,
             .open = self.open_by_head.walk(key(0, head)),
         };
     }
@@ -5483,8 +5494,15 @@ pub const ImplIndex = struct {
                     _ = decided.prerequisite_sizes.remove(@enumFromInt(at));
             };
             for (im.predicates) |predicate| {
+                // What `directlySubstituted` changed is already the subject at
+                // the bindings, and substituting it again would read a binding
+                // that holds this implementation's own parameter, as one does
+                // inside the implementation's own body, a second time.
                 const direct = try self.directlySubstituted(impls, pool, decided, predicate.subject, im.decl.index(), bindings);
-                const subject = try pool.substitute(direct orelse predicate.subject, im.decl.index(), bindings);
+                const subject = if (direct != null and direct.? != predicate.subject)
+                    direct.?
+                else
+                    try pool.substitute(predicate.subject, im.decl.index(), bindings);
                 if (!try self.meetsDemand(impls, pool, decided, im, bindings, subject, predicate.demand)) break :blk false;
             }
             // A viewed array row applies exactly where the view's own
@@ -11939,10 +11957,13 @@ pub const Typing = struct {
         /// The first cycle among inline parts, or null. Asked once, after every
         /// type is entered and before any layout is, because asking for the
         /// layout of a type on a cycle does not return.
-        pub fn firstCycle(self: *Builder, gpa: std.mem.Allocator) !?Cycle {
-            try self.writeHeldParts();
+        /// The next cycle `walk` finds among inline parts, owned by the
+        /// caller. The parts of every type the pool holds are written first,
+        /// and again only where the pool grew since the last call.
+        pub fn nextCycle(self: *Builder, gpa: std.mem.Allocator, walk: *CycleWalk) !?Cycle {
+            if (walk.marks.items.len == 0 or walk.marks.items.len < self.pool.items.len) try self.writeHeldParts();
             const typing = self.view();
-            return firstCycleIn(gpa, &typing);
+            return walk.next(gpa, &typing);
         }
 
         /// The first type at or after `from` whose width crosses what [L-Size]
@@ -13631,6 +13652,7 @@ pub const Typing = struct {
                 if (self.dualOfDual(held, member)) |protocol| return .{ .ty = protocol, .head_definition = true };
                 if (try self.stepOfDual(owner, trait, args, held, member, named)) |mirrored| return .{ .ty = mirrored, .head_definition = true };
                 if (try self.settledThroughParameterHead(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
+                if (try self.settledThroughParameterArguments(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
                 return .{ .ty = try self.addSettledStandin(trait, args, held, member, named) };
             }
             const choice = try self.implementationChoiceWithin(owner, DeclId.at(trait), args, held) orelse return .{ .ty = .poison };
@@ -13705,6 +13727,26 @@ pub const Typing = struct {
                 return try self.settledBy(row, member, bound);
             }
             return null;
+        }
+
+        /// What `member` settles to for a key whose type is known and whose
+        /// trait arguments hold a type parameter, where an implementation
+        /// generic over those arguments answers it: `Tap.Item` at
+        /// `Source[X]` with `impl[X] Source[X] for Tap`. That implementation
+        /// matches every type that can settle the parameter, and coherence
+        /// refuses another that matches any of them, so the member is its
+        /// definition at the key's arguments rather than a key awaiting an
+        /// instantiation. Null where the type is itself a parameter or not yet
+        /// known, or where no declared implementation answers the key as it
+        /// stands.
+        ///
+        /// **Bound:** one implementation selection for the key.
+        fn settledThroughParameterArguments(self: *Builder, owner: DeclId, trait: u32, args: []const TypeId, held: TypeId, member: DeclId) std.mem.Allocator.Error!?TypeId {
+            if (self.awaits(held)) return null;
+            for (args) |a| if (self.get(a) == .open_type) return null;
+            const choice = try self.implementationChoiceWithin(owner, DeclId.at(trait), args, held) orelse return null;
+            const implementation = choice.declaredImplementation() orelse return null;
+            return try self.settledBy(self.implementations[implementation.index()], member, choice.impl_args);
         }
 
         /// The descriptor a handle stands for, so a caller can ask what kind
@@ -16407,7 +16449,8 @@ test "a type that holds itself is a cycle" {
     const list = try b.addEnum("List", .copyable, &.{ .{ .name = "Cons" }, .{ .name = "Nil" } });
     b.setVariantFields(list, 0, try b.addFields(&.{.{ .name = "head", .ty = list }}), 1);
 
-    const c = (try b.firstCycle(gpa)).?;
+    var walk: CycleWalk = .{};
+    const c = (try b.nextCycle(gpa, &walk)).?;
     try testing.expectEqual(@as(usize, 1), c.path.len);
     try testing.expectEqual(list, c.path[0]);
 }
@@ -16425,7 +16468,8 @@ test "a cycle through other types names every type on it" {
     try b.setFieldType(bb, 0, cc);
     try b.setFieldType(cc, 0, a);
 
-    const cycle = (try b.firstCycle(gpa)).?;
+    var walk: CycleWalk = .{};
+    const cycle = (try b.nextCycle(gpa, &walk)).?;
     try testing.expectEqual(@as(usize, 3), cycle.path.len);
     // A reader has to know which edge to break, so every type on the cycle is
     // named rather than only the one that closed it.
@@ -16453,7 +16497,8 @@ test "a type held twice but not cyclically is not a cycle" {
         .{ .name = "b", .ty = p },
     });
 
-    try testing.expect(try b.firstCycle(gpa) == null);
+    var walk: CycleWalk = .{};
+    try testing.expect(try b.nextCycle(gpa, &walk) == null);
 }
 
 test "a diamond is not a cycle either" {
@@ -16469,7 +16514,8 @@ test "a diamond is not a cycle either" {
     const r = try b.addStruct("R", .copyable, &.{.{ .name = "n", .ty = leaf }});
     _ = try b.addStruct("Top", .copyable, &.{ .{ .name = "l", .ty = l }, .{ .name = "r", .ty = r } });
 
-    try testing.expect(try b.firstCycle(gpa) == null);
+    var walk: CycleWalk = .{};
+    try testing.expect(try b.nextCycle(gpa, &walk) == null);
 }
 
 test "a variant's fields are placed past the tag, each at its own alignment" {

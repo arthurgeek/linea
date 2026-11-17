@@ -1,0 +1,15 @@
+error[T-Mismatch]: `Bytes` writes `Pair[UInt8, UInt8]` here, and this is a `Pair[UInt16, UInt16]`
+  --> tests/aliases/an_alias_pattern_keeps_the_arguments_it_fixes.lin:27:24
+   |
+27 | fn parameter(sink pair Bytes { a, b: _ }: Pair[UInt16, UInt16]) -> UInt16 {
+   |                        ^^^^^^^^^^^^^^^^^ the alias fixes this type
+error[T-Mismatch]: `Bytes` writes `Pair[UInt8, UInt8]` here, and this is a `Pair[UInt16, UInt16]`
+  --> tests/aliases/an_alias_pattern_keeps_the_arguments_it_fixes.lin:17:9
+   |
+17 |         Bytes { a, b: _ } => a,
+   |         ^^^^^^^^^^^^^^^^^ the alias fixes this type
+error[T-Mismatch]: `Bytes` writes `Pair[UInt8, UInt8]` here, and this is a `Pair[UInt16, UInt16]`
+  --> tests/aliases/an_alias_pattern_keeps_the_arguments_it_fixes.lin:23:24
+   |
+23 |         Outer { inner: Bytes { a, b: _ } } => a,
+   |                        ^^^^^^^^^^^^^^^^^ the alias fixes this type

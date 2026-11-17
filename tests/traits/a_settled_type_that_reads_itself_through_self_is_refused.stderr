@@ -1,0 +1,10 @@
+error[T-Impl]: this associated type is defined through itself: `Counter.Item` is `Self.Item`
+  --> tests/traits/a_settled_type_that_reads_itself_through_self_is_refused.lin:17:17
+   |
+17 |     type Item = Self.Item
+   |                 ^^^^^^^^^ define it as a type that does not read back to itself
+error[T-Impl]: this associated type is defined through itself: `Gauge.First` is `Self.Second`, `Gauge.Second` is `Option[Self.First]`
+  --> tests/traits/a_settled_type_that_reads_itself_through_self_is_refused.lin:35:18
+   |
+35 |     type First = Self.Second
+   |                  ^^^^^^^^^^^ define it as a type that does not read back to itself

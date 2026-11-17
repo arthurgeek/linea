@@ -1,0 +1,22 @@
+error[T-Mismatch]: `CustomerId` writes `Id[Customer]` here, and this is an `Id[Order]`
+  --> tests/aliases/an_alias_of_a_newtype_keeps_the_arguments_it_fixes.lin:22:9
+   |
+22 |     let CustomerId(n) = id
+   |         ^^^^^^^^^^^^^ the alias fixes this type
+error[T-Mismatch]: `ForCustomer` writes `Tagged[Customer, U]` here, and this is a `Tagged[Order, UInt8]`
+  --> tests/aliases/an_alias_of_a_newtype_keeps_the_arguments_it_fixes.lin:27:9
+   |
+27 |     let ForCustomer(n) = id
+   |         ^^^^^^^^^^^^^^ the alias fixes this type
+error[T-Mismatch]: `ForCustomer` writes `Tagged[Customer, U]` here, and this is a `Tagged[Order, UInt8]`
+  --> tests/aliases/an_alias_of_a_newtype_keeps_the_arguments_it_fixes.lin:32:40
+   |
+32 |     let tagged: Tagged[Order, UInt8] = ForCustomer(4)
+   |                                        ^^^^^^^^^^^^^^ the alias fixes this type
+error[T-Mismatch]: expected `Id[Order]`, found `Id[Customer]`
+  --> tests/aliases/an_alias_of_a_newtype_keeps_the_arguments_it_fixes.lin:33:24
+   |
+21 | fn order_number(sink id: Id[Order]) -> UInt64 {
+   |                      -- expected because of this parameter
+33 |     UInt8(order_number(CustomerId(3)) + tagged_number(tagged))
+   |                        ^^^^^^^^^^^^^ expected `Id[Order]`, found `Id[Customer]`

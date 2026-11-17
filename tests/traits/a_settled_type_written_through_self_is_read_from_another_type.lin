@@ -1,5 +1,5 @@
-// `Item` is written as `Self.Other`, which the implementation does not allow;
-// `Holder` reading `Desk.Item` adds no second report.
+// `Item` is written as `Self.Other`, the `UInt8` this implementation settles
+// `Other` to, so `Holder` reading `Desk.Item` holds a `UInt8`.
 trait Counter {
     type Item
     type Other

@@ -138,7 +138,8 @@ true of a different implementation.
 | [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229; boolean grant superseded by 0228; direct runtime call clause superseded by 0255 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
 | [0087](0087-an-associated-type-is-a-function-of-the-coherence-key.md) | An associated type is a function of the coherence key | Accepted; extends 0081; extended by 0088, 0142 and 0241 |
-| [0241](0241-declared-answers-are-settled-when-first-needed.md) | Declared answers are settled when first needed | Accepted; extends 0087 and 0165; extended by 0251 |
+| [0241](0241-declared-answers-are-settled-when-first-needed.md) | Declared answers are settled when first needed | Accepted; extends 0087 and 0165; extended by 0251 and 0278 |
+| [0278](0278-a-settled-type-may-read-another-of-its-own-implementation.md) | A settled type may read another of its own implementation | Accepted; extends 0241 |
 | [0088](0088-a-projecting-member-is-a-place-not-a-function.md) | A projecting member is a place, not a function | Accepted; extends 0087; extended by 0089, 0121 and 0126; partially superseded by 0135 |
 | [0135](0135-field-delegation-uses-checked-projection-plans.md) | Field delegation and bound indexing share checked projection plans; traversal is explicit | Accepted; partially supersedes 0088; extends 0122 |
 | [0089](0089-a-from-end-index-is-a-value-the-container-interprets.md) | A from-end index is a value the container interprets | Accepted; extends 0088 |

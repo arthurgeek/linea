@@ -933,6 +933,11 @@ fn typecheckInternal(
         c.variant_names.deinit(gpa);
     }
     defer c.wrap_choices.deinit(gpa);
+    defer {
+        var payloads = c.wrap_payloads.valueIterator();
+        while (payloads.next()) |index| index.holders.deinit(gpa);
+        c.wrap_payloads.deinit(gpa);
+    }
     defer c.unwrapped.deinit(gpa);
     defer gpa.free(c.binding_value_locs);
     errdefer c.builder.deinit();
@@ -1525,7 +1530,7 @@ fn typecheckInternal(
     // declaration alone does not -- settling `Iter` to `S[Box]` is what makes
     // an `S[Box]` hold an `S[Box]` -- so the question is asked of the minted
     // instantiations as well as of the written parts.
-    try c.reportLayoutCycles(type_of_decl);
+    try c.reportLayoutCycles();
     try c.reportCopyabilityDeclarations(type_of_decl);
 
     z_parts.end();
@@ -3325,6 +3330,12 @@ pub const Reach = struct {
         var bounds: std.ArrayList(types_mod.BoundTrait) = .empty;
         defer bounds.deinit(gpa);
         try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
+        // Every key already in `out` and every one added here, so a key
+        // reached along two routes is appended once without comparing it with
+        // each key before it.
+        var present: AssociatedSet = .empty;
+        defer present.deinit(gpa);
+        for (out.items) |entry| try present.put(gpa, entry, {});
         const first = out.items.len;
         for (bounds.items) |bound| {
             const trait = bound.trait;
@@ -3332,38 +3343,45 @@ pub const Reach = struct {
             while (members.next()) |sig| {
                 if (!settlesAType(self.ast, sig)) continue;
                 if (wanted) |name| if (self.ast.tokenName(self.ast.declName(sig)) != name) continue;
-                try appendAssociated(gpa, out, .{ .sig = sig, .trait = trait, .args = bound.args });
+                try appendAssociated(gpa, out, &present, .{ .sig = sig, .trait = trait, .args = bound.args });
             }
         }
         if (wanted != null and out.items.len != first) return;
-        const bound_end = out.items.len;
         // Bare parameters and projections expose only promised members.
         if (self.typing.get(held) == .parameter) return;
+        var promised: std.AutoHashMapUnmanaged(StringId, void) = .empty;
+        defer promised.deinit(gpa);
+        for (out.items[first..]) |bound| try promised.put(gpa, self.ast.tokenName(self.ast.declName(bound.sig)), {});
         var candidates: std.ArrayList(Applicable) = .empty;
         defer candidates.deinit(gpa);
         try self.eachDirectKind(gpa, held, &candidates, wanted, .associated, false);
         var keys: std.ArrayList([]const TypeId) = .empty;
         defer keys.deinit(gpa);
         for (candidates.items) |candidate| {
-            const name = self.ast.tokenName(self.ast.declName(candidate.sig));
-            var promised = false;
-            for (out.items[first..bound_end]) |bound| {
-                if (self.ast.tokenName(self.ast.declName(bound.sig)) == name) {
-                    promised = true;
-                    break;
-                }
-            }
-            if (promised) continue;
+            if (promised.contains(self.ast.tokenName(self.ast.declName(candidate.sig)))) continue;
             keys.clearRetainingCapacity();
             _ = try self.index.keys(gpa, self.impls, self.typing, candidate.trait, held, self.scope, &keys);
-            for (keys.items) |args| try appendAssociated(gpa, out, .{ .sig = candidate.sig, .trait = candidate.trait, .args = args });
+            for (keys.items) |args| try appendAssociated(gpa, out, &present, .{ .sig = candidate.sig, .trait = candidate.trait, .args = args });
         }
     }
 
-    fn appendAssociated(gpa: std.mem.Allocator, out: *std.ArrayList(Associated), candidate: Associated) !void {
-        for (out.items) |present| {
-            if (present.sig == candidate.sig and present.trait == candidate.trait and std.mem.eql(TypeId, present.args, candidate.args)) return;
+    /// Associated keys compared whole: the member, its trait and the trait's
+    /// arguments.
+    const AssociatedSet = std.HashMapUnmanaged(Associated, void, struct {
+        pub fn hash(_: @This(), key: Associated) u64 {
+            var h: std.hash.Wyhash = .init(@intFromEnum(key.sig));
+            h.update(std.mem.asBytes(&key.trait));
+            h.update(std.mem.sliceAsBytes(key.args));
+            return h.final();
         }
+        pub fn eql(_: @This(), a: Associated, b: Associated) bool {
+            return a.sig == b.sig and a.trait == b.trait and std.mem.eql(TypeId, a.args, b.args);
+        }
+    }, std.hash_map.default_max_load_percentage);
+
+    fn appendAssociated(gpa: std.mem.Allocator, out: *std.ArrayList(Associated), present: *AssociatedSet, candidate: Associated) !void {
+        const entry = try present.getOrPut(gpa, candidate);
+        if (entry.found_existing) return;
         try out.append(gpa, candidate);
     }
 
@@ -3532,13 +3550,15 @@ pub const Reach = struct {
         const first = out.items.len;
         const observed = self.typing.observedReceiver(held).receiver;
 
+        // A lookup that knows the name walks the members of that name alone;
+        // completion, which asks for every name, walks them all.
         if (self.typing.declOfType(observed)) |origin| {
-            var rows = self.res.membersOfType(origin);
+            var rows = if (wanted) |name| self.res.membersOfTypeNamed(origin, name) else self.res.membersOfType(origin);
             while (rows.next()) |b| try self.appendOwn(gpa, held, b, out, wanted, kind, dropped);
         } else {
             for (self.res.builtin_namespaces) |n| {
                 if (n.of != observed) continue;
-                var rows = self.res.membersUnder(n.module, n.owner);
+                var rows = if (wanted) |name| self.res.membersUnderNamed(n.module, n.owner, name) else self.res.membersUnder(n.module, n.owner);
                 while (rows.next()) |b| try self.appendOwn(gpa, held, b, out, wanted, kind, dropped);
             }
         }
@@ -5594,37 +5614,12 @@ fn refNamesSelf(ast: *const Ast, written: node.TypeRef) bool {
     return ref.kind == .named and namesSelf(ast, ref.name);
 }
 
-/// The first settled reference headed by `Self` anywhere inside a written
-/// type, or null where it holds none.
-///
-/// Asked of the whole thing rather than of its head: `Option[Self.Item]` is a
-/// settled reference one level in, and a reader that looked only at the head
-/// would find the constructor and stop.
-///
-/// **Bound:** the written type's own arguments, which are the tokens it
-/// occupies.
+/// Whether a written selection is headed by `Self`, through any number of
+/// selections: `Self.Item` and `Self.Item.Inner` are.
 fn selectionStartsWithSelf(ast: *const Ast, written: node.TypeRef) bool {
     var ref = ast.withoutTypeGroups(written);
     while (ref.kind == .selection) ref = ast.withoutTypeGroups(ast.selectionBase(ref));
     return refNamesSelf(ast, ref);
-}
-
-fn firstSelfSettledRef(ast: *const Ast, ref: node.TypeRef) ?node.TypeRef {
-    if (ref.kind == .selection) {
-        if (selectionStartsWithSelf(ast, ref)) return ref;
-        if (firstSelfSettledRef(ast, ast.selectionBase(ref))) |found| return found;
-    }
-    if (ref.kind == .callable) {
-        const callable = ast.callableType(ref);
-        for (ast.params[callable.params.start..callable.params.end]) |param| {
-            if (firstSelfSettledRef(ast, param.written)) |found| return found;
-        }
-        if (firstSelfSettledRef(ast, callable.result)) |found| return found;
-    }
-    for (ast.typeArgs(ref.args)) |a| {
-        if (firstSelfSettledRef(ast, a)) |found| return found;
-    }
-    return null;
 }
 
 /// Whether a parameter declares a value for the calls that leave it out.
@@ -6540,6 +6535,10 @@ const Checker = struct {
     /// The variant each rendered wrap's placeholder names, keyed by the
     /// placeholder: chosen by `checkWrap` before the construction is checked.
     wrap_choices: std.AutoHashMapUnmanaged(ExprId, u32) = .empty,
+    /// Each enum a wrap built, with its one-field variants by payload type.
+    /// Sized by those enums' variants, so a derive of k `From` entries on an
+    /// enum of k variants reads the variants once rather than once per entry.
+    wrap_payloads: std.AutoHashMapUnmanaged(TypeId, WrapPayloads) = .empty,
     /// Each wrap that selected no single variant, reported at the end by
     /// `reportUnwrappedSources`.
     unwrapped: std.ArrayList(UnwrappedWrap) = .empty,
@@ -11563,9 +11562,10 @@ const Checker = struct {
     /// alias writes differently, and holds the settled arguments to the
     /// alias's bounds. False where the path was refused.
     ///
-    /// A position the alias writes without its parameters was settled before
-    /// the call was read; the others are matched here, so a parameter that
+    /// A parameter is matched at every position that writes one, so one that
     /// appears twice, or inside another type, is one type at every position.
+    /// A position written without the alias's parameters must be what the
+    /// alias wrote there, which is the whole question for an alias with none.
     fn settleAliasHeading(self: *Checker, at: ExprId, head: TokenId, heading: AliasHeading, got: []const TypeId) std.mem.Allocator.Error!bool {
         const generics = self.ast.declTypeParams(heading.alias);
         // The call's arguments are final here, with integers defaulted, so the
@@ -11579,12 +11579,13 @@ const Checker = struct {
             return false;
         }
         for (heading.written, got) |pattern, actual| {
-            if (!self.writesParameter(heading, pattern)) continue;
-            const read = if (std.mem.indexOfScalar(TypeId, heading.found, .poison) != null)
+            const read = if (!self.writesParameter(heading, pattern))
+                pattern
+            else if (std.mem.indexOfScalar(TypeId, heading.found, .poison) != null)
                 TypeId.poison
             else
                 try self.builder.substitute(pattern, @intCast(heading.alias.index()), heading.found);
-            if (read == actual) continue;
+            if (read == actual or actual == .poison) continue;
             const wrote = try self.typeName(pattern);
             const got_name = try self.typeName(actual);
             _ = try self.report(
@@ -11596,7 +11597,7 @@ const Checker = struct {
             );
             return false;
         }
-        if (self.callable_effects_ready) {
+        if (self.callable_effects_ready and heading.found.len != 0) {
             const args_start: u32 = @intCast(self.alias_site_args.items.len);
             try self.alias_site_args.appendSlice(self.gpa, heading.found);
             try self.bound_sites.append(self.gpa, .{
@@ -13325,6 +13326,8 @@ const Checker = struct {
         errdefer self.gpa.free(out);
         @memset(out, .poison);
         self.seedTraitArgsFromBound(trait, out);
+        // The values this call's own literals fold to are queued from here.
+        const values_from: u32 = @intCast(self.open_types.pending.items.len);
 
         const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
             .callable => |callable| callable,
@@ -13358,6 +13361,10 @@ const Checker = struct {
                 _ = try self.settle(param.ty, got, trait, out, &ignored);
             }
         }
+        if (!argument_poisoned and !try self.settleLiteralTraitArgs(id, trait, out, values_from)) {
+            @memset(out, .poison);
+            return out;
+        }
         for (params, 0..) |tp, k| {
             if (out[k] != .poison or argument_poisoned) continue;
 
@@ -13383,6 +13390,78 @@ const Checker = struct {
         return out;
     }
 
+    /// Settles the trait arguments a call left to its literals where `Self` is
+    /// a type parameter, from the bounds that parameter carries. The generic
+    /// body is checked where it is written, so the call must name one of
+    /// them there: `Scale.scale(s, 1)` under `S: Scale[UInt8] + Scale[Bool]`
+    /// is a call at `Scale[UInt8]`, and under `S: Scale[UInt8] +
+    /// Scale[UInt16]` the literal fits both and the call is refused. False
+    /// where it was refused.
+    ///
+    /// **Bound:** the bounds and implementations `keys` reads for the
+    /// parameter, each compared once against the trait's parameters.
+    fn settleLiteralTraitArgs(self: *Checker, id: ExprId, trait: node.DeclId, out: []TypeId, values_from: u32) std.mem.Allocator.Error!bool {
+        const receiver = self.self_at_call orelse return true;
+        if (receiver == .poison or self.builder.get(receiver) != .parameter) return true;
+        for (out) |*slot| {
+            if (slot.* != .poison) slot.* = try self.builder.resolveOpen(slot.*, &self.open_types);
+        }
+        const waiting = for (out) |slot| {
+            if (slot != .poison and self.openVariable(slot) != null) break true;
+        } else false;
+        if (!waiting) return true;
+
+        try self.builder.prepareLookupWithin(self.generic, receiver);
+        const pool = try self.builder.capabilityView();
+        var keys: std.ArrayList([]const TypeId) = .empty;
+        defer keys.deinit(self.gpa);
+        if (try self.impl_index.keys(self.gpa, self.implementations, &pool, trait, receiver, self.generic, &keys)) return true;
+        var fitting: std.ArrayList([]const TypeId) = .empty;
+        defer fitting.deinit(self.gpa);
+        for (keys.items) |key| {
+            if (key.len != out.len) continue;
+            const fits = for (out, key) |slot, settled| {
+                if (slot == .poison) continue;
+                if (self.openVariable(slot)) |v| {
+                    if (!try self.fitsOpen(v, settled) or !self.valuesFit(v, settled, values_from)) break false;
+                } else if (slot != settled) break false;
+            } else true;
+            if (fits) try fitting.append(self.gpa, key);
+        }
+        switch (fitting.items.len) {
+            // No bound fits, so the literals take their default types and
+            // the call is refused for the list the bounds do not carry.
+            0 => return true,
+            1 => {
+                for (out, fitting.items[0]) |*slot, settled| {
+                    const v = self.openVariable(slot.*) orelse continue;
+                    _ = try self.settleOpen(v, settled, null);
+                    slot.* = settled;
+                }
+                return true;
+            },
+            else => {
+                var said: std.ArrayList(u8) = .empty;
+                defer said.deinit(self.gpa);
+                for (fitting.items, 0..) |key, k| {
+                    if (k > 0) try said.appendSlice(self.gpa, if (k == fitting.items.len - 1) " and " else ", ");
+                    const written = try self.builder.spellInstance(self.ast.tokenText(self.ast.declName(trait)), key);
+                    defer self.gpa.free(written);
+                    try said.print(self.gpa, "`{s}`", .{written});
+                }
+                try self.sink.addErrorFmt(
+                    .n_ambiguous,
+                    self.ast.fileOfExpr(id),
+                    self.ast.exprSpan(id),
+                    "give an argument the type of the one it means",
+                    "`{s}` implements {s}, and this call fits each",
+                    .{ try self.typeName(receiver), said.items },
+                );
+                return false;
+            },
+        }
+    }
+
     /// Fills `out` with the arguments the call's receiver's bound gives `trait`.
     ///
     /// A receiver known only through a type parameter reaches the
@@ -13403,7 +13482,12 @@ const Checker = struct {
         var only: ?[]const TypeId = null;
         for (self.builder.boundsOn(receiver)) |bound| {
             if (bound.trait.index() != named) continue;
-            if (only != null) return;
+            // One list reached along two paths, as round a cycle of traits or
+            // through two traits that each require it, is still one list.
+            if (only) |seen| {
+                if (std.mem.eql(TypeId, seen, bound.args)) continue;
+                return;
+            }
             only = bound.args;
         }
         const args = only orelse return;
@@ -13461,9 +13545,12 @@ const Checker = struct {
     /// Reported here rather than left to lowering, which has no diagnostic to
     /// give and would emit a call to a body that does not exist.
     ///
-    /// Only where `Self` is a concrete type. Inside a generic body it is a
-    /// parameter, and which implementation that is is not known until the body
-    /// is instantiated.
+    /// Inside a generic body `Self` may be a type parameter, and its bounds
+    /// say which keys it answers where the body is written, so a call there
+    /// is checked against them as one at a concrete type is against its
+    /// implementations. A key holding a type parameter at a concrete `Self`,
+    /// or a type no use has settled, names no implementation until it is
+    /// known.
     fn checkImplementationExists(
         self: *Checker,
         id: ExprId,
@@ -13472,7 +13559,17 @@ const Checker = struct {
         if (rec.args.len == 0) return;
         if (rec.self_ty == .poison) return;
         for (rec.args) |a| if (a == .poison) return;
-        if (self.builder.awaitsTypes(rec.self_ty, rec.args)) return;
+        if (self.builder.awaitsTypes(rec.self_ty, rec.args)) {
+            if (self.builder.get(rec.self_ty) != .parameter) return;
+            for (rec.args) |a| if (self.builder.get(a) == .open_type) return;
+            // A bound on the trait written with the wrong number of arguments
+            // was refused where it is written, and what it would have
+            // carried is unknown: a call missing it is that mistake again.
+            const declared = self.ast.declTypeParams(node.DeclId.at(rec.trait)).len;
+            for (self.builder.boundsOn(rec.self_ty)) |bound| {
+                if (bound.trait.index() == rec.trait and bound.args.len != declared) return;
+            }
+        }
 
         const trait = node.DeclId.at(rec.trait);
         if (self.rendersItself(rec.self_ty, trait)) return;
@@ -13875,14 +13972,15 @@ const Checker = struct {
     /// Breaking is not tidying. A diagnosed type is still in the pool, and
     /// every pass below here asks for a layout; one that cannot terminate does
     /// not stop being asked because it was reported.
-    fn reportLayoutCycles(self: *Checker, type_of_decl: types_mod.Returns) !void {
+    fn reportLayoutCycles(self: *Checker) !void {
         // Each recovery removes at least one inline edge and adds none, so
-        // the finite graph bounds the number of iterations.
-        while (true) {
-            const cycle = (try self.builder.firstCycle(self.gpa)) orelse return;
+        // the finite graph bounds the number of iterations, and one walk
+        // carries on past each cycle rather than starting over.
+        var walk: types_mod.CycleWalk = .{};
+        defer walk.deinit(self.gpa);
+        while (try self.builder.nextCycle(self.gpa, &walk)) |cycle| {
             defer self.gpa.free(cycle.path);
-
-            try self.reportCycle(cycle, type_of_decl);
+            try self.reportCycle(cycle);
             try self.breakCycle(cycle);
         }
     }
@@ -13937,7 +14035,7 @@ const Checker = struct {
         }
     }
 
-    fn reportCycle(self: *Checker, cycle: Cycle, type_of_decl: types_mod.Returns) !void {
+    fn reportCycle(self: *Checker, cycle: Cycle) !void {
         // The cycle rather than the category: a reader has to know which edge
         // to break, and "recursive type" does not say.
         var how: std.ArrayList(u8) = .empty;
@@ -13960,13 +14058,8 @@ const Checker = struct {
         // the text they can change.
         const declared: ?node.DeclId = if (self.builder.instanceOf(cycle.path[0])) |i|
             i.decl
-        else blk: {
-            var walking = type_of_decl.pairs();
-            while (walking.next()) |each| {
-                if (each.value == cycle.path[0]) break :blk each.id;
-            }
-            break :blk null;
-        };
+        else
+            self.decl_of_type.get(cycle.path[0]);
 
         const at: Loc = if (declared) |d|
             .{ .file = self.ast.fileOfDecl(d), .span = self.ast.declNameSpan(d) }
@@ -13979,7 +14072,7 @@ const Checker = struct {
             at.span,
             "a value of this type would have to hold one, so it has no size",
             "{s}",
-            .{try how.toOwnedSlice(self.gpa)},
+            .{how.items},
         );
     }
 
@@ -14260,7 +14353,7 @@ const Checker = struct {
                 } else try self.literal_values.put(self.gpa, literal, .{ .float = rounded.value });
                 continue;
             }
-            if (self.integerLiteralFits(t, waiting.value)) continue;
+            if (self.waitingFits(waiting, t)) continue;
             if ((try reported.getOrPut(self.gpa, waiting.expr)).found_existing) continue;
             self.folds.set(waiting.expr, .absent);
             switch (waiting.rule) {
@@ -14406,16 +14499,46 @@ const Checker = struct {
     }
 
     fn settleOpen(self: *Checker, v: u32, to: TypeId, at: ?open_types_mod.Site) std.mem.Allocator.Error!bool {
-        switch (self.open_types.familyOf(v)) {
-            .integer => {
-                const is_integer = to.bounds() != null or self.builder.isIntegerWithin(self.generic, to);
-                if (!is_integer) return false;
-            },
-            .float => if (!to.isFloat()) return false,
-            // A type holding the variable it would settle is no type at all.
-            .any => if (to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))) return false,
-        }
+        if (!try self.fitsOpen(v, to)) return false;
         return self.open_types.settle(v, to, at) != .conflict;
+    }
+
+    /// Whether the open variable `v` may become `to`: an integer literal only
+    /// an integer type, a float literal only a float type.
+    fn fitsOpen(self: *Checker, v: u32, to: TypeId) std.mem.Allocator.Error!bool {
+        return switch (self.open_types.familyOf(v)) {
+            .integer => to.bounds() != null or self.builder.isIntegerWithin(self.generic, to),
+            .float => to.isFloat(),
+            // A type holding the variable it would settle is no type at all.
+            .any => !(to == .poison or to == .never or try self.mentionsVariable(to, self.open_types.find(v))),
+        };
+    }
+
+    /// Whether every value queued from `from` on for the open variable `v`
+    /// fits `t`, by the rule that refuses one at the type it settles to:
+    /// `300` does not fit a `UInt8`, though the literal's family does.
+    ///
+    /// **Bound:** the values queued from `from`, which a caller takes as its
+    /// own arguments' start.
+    fn valuesFit(self: *Checker, v: u32, t: TypeId, from: u32) bool {
+        const root = self.open_types.find(v);
+        for (self.open_types.pending.items[from..]) |waiting| {
+            if (self.open_types.find(waiting.v) != root) continue;
+            if (!self.waitingFits(waiting, t)) return false;
+        }
+        return true;
+    }
+
+    /// Whether a value folded while its type was open fits `t`: an integer
+    /// within its range, a float literal that rounds to one of its values.
+    fn waitingFits(self: *const Checker, waiting: open_types_mod.Pending, t: TypeId) bool {
+        if (waiting.rule == .float_literal) {
+            const bits = t.floatBits() orelse return false;
+            const literal = self.literalSpelling(waiting.expr, .float_literal).?.literal;
+            const rounded = roundFloatLiteral(self.ast.tokenText(self.ast.exprMain(literal)), bits).?;
+            return rounded.refusal == null;
+        }
+        return self.integerLiteralFits(t, waiting.value);
     }
 
     /// Whether `t` mentions the open variable whose root is `root`.
@@ -15654,6 +15777,24 @@ const Checker = struct {
         );
     }
 
+    /// Whether the type an alias heading a pattern writes is `of`, reporting
+    /// where it is not. Only the declaration is compared before this, so an
+    /// alias of `Pair[UInt8, UInt8]` is held here to its arguments too: a
+    /// closed alias is that one type, and a generic one settles its own
+    /// parameters from `of` and must then write `of` whole. True for a head
+    /// that is no alias.
+    fn aliasHeadWrites(self: *Checker, pattern: ExprId, head: TokenId, of: TypeId) std.mem.Allocator.Error!bool {
+        const alias = self.aliasWritten(self.generic, head) orelse return true;
+        const written = self.settledAlias(alias) orelse return true;
+        if (written == .poison) return true;
+        const heading: AliasHeading = .{
+            .alias = alias,
+            .written = &.{written},
+            .found = try self.openAliasArguments(alias),
+        };
+        return self.settleAliasHeading(pattern, head, heading, &.{of});
+    }
+
     /// A pattern, against the type of what it takes apart.
     ///
     /// The one routine every construct checks a pattern with -- a `match`
@@ -16010,20 +16151,7 @@ const Checker = struct {
             return try self.refuseParts(pattern);
         }
 
-        // A generic alias heading the pattern writes the type it takes apart,
-        // as it does for a path: the value must be that type at the alias's
-        // arguments.
-        if (head_tok != TokenId.none) if (self.aliasWritten(self.generic, head_tok)) |alias| {
-            const written = self.settledAlias(alias) orelse .poison;
-            if (written != .poison and self.ast.declTypeParams(alias).len != 0) {
-                const heading: AliasHeading = .{
-                    .alias = alias,
-                    .written = &.{written},
-                    .found = try self.openAliasArguments(alias),
-                };
-                if (!try self.settleAliasHeading(pattern, head_tok, heading, &.{of})) return try self.refuseParts(pattern);
-            }
-        };
+        if (head_tok != TokenId.none and !try self.aliasHeadWrites(pattern, head_tok, of)) return try self.refuseParts(pattern);
 
         // Taking a sealed type apart is reaching its representation, which is
         // the same rule a literal breaks by building one.
@@ -16225,6 +16353,7 @@ const Checker = struct {
             );
             return try self.refuseParts(pattern);
         }
+        if (!try self.aliasHeadWrites(pattern, head_tok, of)) return try self.refuseParts(pattern);
 
         // Taking a sealed type apart is reaching its representation, the
         // same rule a literal breaks by building one.
@@ -18651,6 +18780,16 @@ const Checker = struct {
         return .{ .excluded = v };
     }
 
+    /// A construction whose head was refused: its operands are still read
+    /// for their own mistakes, and it builds nothing.
+    fn refusedConstruction(self: *Checker, id: ExprId) std.mem.Allocator.Error!TypeId {
+        const c = self.ast.call(id);
+        try self.noteQualifier(c.callee);
+        _ = try self.record(c.callee, .poison);
+        for (c.args) |a| _ = try self.check(a, null);
+        return try self.record(id, .poison);
+    }
+
     /// `Name(e)` or `Name?(e)`, where `Name` names a newtype: construction,
     /// which the parser reads rather than a call reaching a function.
     ///
@@ -18668,19 +18807,37 @@ const Checker = struct {
     ) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
         const template = self.type_of_decl.get(decl);
+        // An alias heading the call names the application it builds: a closed
+        // one all of it, and a generic one all but its own parameters, which
+        // the expected application settles and is held to.
+        const named_by = self.res.targetOf(c.callee);
+        const aliased = self.aliasPathType(named_by);
+        const alias = self.genericAliasHead(named_by);
+        if (aliased == .poison) return self.refusedConstruction(id);
         // A generic newtype's arguments come from what the construction is
         // expected to be, or for `Name?(e)` from the `Option` it is expected
         // to answer: a phantom parameter appears in no operand, so the value
         // alone cannot say which instantiation it builds.
-        const newtype = if (self.ast.declTypeParams(decl).len == 0) template else expected_instance: {
+        const newtype = if (self.ast.declTypeParams(decl).len == 0) template else if (aliased != null and alias == null) aliased.? else expected_instance: {
             const pool = self.builder.view();
             if (Expected.typeOf(expected)) |written| {
                 var want = written;
                 if (self.ast.callFallible(id) and self.option_decl != null and want != .poison and
                     pool.declOfType(want) == self.option_decl and pool.instanceOf(want) != null)
                     want = self.builder.appliedTo(want)[0];
-                if (want != .poison and pool.declOfType(want) == decl and pool.instanceOf(want) != null)
+                if (want != .poison and pool.declOfType(want) == decl and pool.instanceOf(want) != null) {
+                    if (alias) |generic_alias| {
+                        const heading: AliasHeading = .{
+                            .alias = generic_alias,
+                            .written = &.{aliased.?},
+                            .found = try self.openAliasArguments(generic_alias),
+                        };
+                        if (!try self.settleAliasHeading(id, self.ast.exprMain(c.callee), heading, &.{want})) {
+                            return self.refusedConstruction(id);
+                        }
+                    }
                     break :expected_instance want;
+                }
                 // Another type is expected: the construction builds none of
                 // it, whatever its arguments, and is a mismatch.
                 if (want != .poison and self.builder.get(want) != .open_type and self.builder.get(want) != .parameter) {
@@ -31325,25 +31482,6 @@ const Checker = struct {
         }
 
         const written = self.ast.declReturnRef(member);
-
-        // A definition reads what another implementation settled, never
-        // another definition of its own implementation: `type Item =
-        // Self.Other` is refused rather than read.
-        if (firstSelfSettledRef(self.ast, written)) |found| {
-            self.decl_returns.set(member, .poison);
-            if (self.refusedBefore(found.name)) return;
-            try self.noteRefused(found.name);
-            try self.sink.addErrorFmt(
-                .t_impl,
-                self.ast.fileOf(found.at),
-                self.ast.writtenSpan(found),
-                "write the type itself",
-                "a settled type is not written as a settled reference",
-                .{},
-            );
-            return;
-        }
-
         self.current = self.program.moduleOf(member);
         self.generic = member;
         self.decl_returns.set(member, try self.typeOfRefOf(self.current, member, written));
@@ -32227,21 +32365,14 @@ const Checker = struct {
         var first: ?u32 = null;
         var second: ?u32 = null;
         var unsettled = want == .poison or try self.builder.anyUnsettled(&.{source});
-        if (!unsettled) for (0..self.builder.variantCount(want)) |raw| {
-            const k: u32 = @intCast(raw);
-            if (try self.builder.variantFieldCount(want, k) != 1) continue;
-            const payload = try self.builder.variantFieldType(want, k, 0);
-            if (try self.builder.anyUnsettled(&.{payload})) {
-                unsettled = true;
-                continue;
+        if (!unsettled) {
+            const payloads = try self.wrapPayloads(want);
+            unsettled = payloads.unsettled;
+            if (payloads.holders.get(source)) |holders| {
+                first = holders[0];
+                second = holders[1];
             }
-            if (payload != source) continue;
-            if (first == null) {
-                first = k;
-            } else if (second == null) {
-                second = k;
-            }
-        };
+        }
         if (first != null and second == null) {
             try self.wrap_choices.put(self.gpa, callee, first.?);
             const built = try self.checkConstruct(id, .{
@@ -32260,6 +32391,45 @@ const Checker = struct {
             .holders = if (second) |later| .{ first.?, later } else null,
         });
         return try self.record(id, .poison);
+    }
+
+    /// An enum's one-field variants by the type of their field: the first two
+    /// variants holding each type, and whether any field's type is not yet
+    /// settled, in which case no variant is chosen by it.
+    const WrapPayloads = struct {
+        holders: std.AutoHashMapUnmanaged(TypeId, [2]?u32) = .empty,
+        unsettled: bool = false,
+    };
+
+    /// `want`'s one-field variants by payload type, read once per enum.
+    ///
+    /// **Bound:** the enum's variants, once per enum whose payloads are all
+    /// settled.
+    fn wrapPayloads(self: *Checker, want: TypeId) std.mem.Allocator.Error!*const WrapPayloads {
+        const entry = try self.wrap_payloads.getOrPut(self.gpa, want);
+        // An index read while a payload was unsettled is read again, since
+        // the payload may have settled since.
+        if (entry.found_existing) {
+            if (!entry.value_ptr.unsettled) return entry.value_ptr;
+            entry.value_ptr.holders.deinit(self.gpa);
+        }
+        entry.value_ptr.* = .{};
+        for (0..self.builder.variantCount(want)) |raw| {
+            const k: u32 = @intCast(raw);
+            if (try self.builder.variantFieldCount(want, k) != 1) continue;
+            const payload = try self.builder.variantFieldType(want, k, 0);
+            if (try self.builder.anyUnsettled(&.{payload})) {
+                entry.value_ptr.unsettled = true;
+                continue;
+            }
+            const holders = try entry.value_ptr.holders.getOrPut(self.gpa, payload);
+            if (!holders.found_existing) {
+                holders.value_ptr.* = .{ k, null };
+            } else if (holders.value_ptr[1] == null) {
+                holders.value_ptr[1] = k;
+            }
+        }
+        return entry.value_ptr;
     }
 
     /// Reports [T-Derive] for each wrap `checkWrap` found no single variant
@@ -34654,11 +34824,6 @@ const Checker = struct {
         }
     }
 
-    /// One trait on the walk that refuses a bound cycle, and how many of its
-    /// own bounds have been stepped through. Named rather than local to the
-    /// walk, because the message reads the path out and so takes it.
-    const Descent = struct { trait: node.DeclId, at: usize };
-
     /// Fills `growing_trait_bounds`: the trait bounds on a cycle of
     /// requirements whose arguments grow at every turn.
     ///
@@ -34804,51 +34969,169 @@ const Checker = struct {
     /// type could have. Reported where the bound that closes the cycle is
     /// written, which is the token a reader has to change.
     ///
+    /// One report per trait that names itself among its bounds, and one per
+    /// group of traits that require each other, however many bounds close
+    /// cycles inside it. Which cycle a group's report names is decided by the
+    /// traits' names and the order each trait writes its bounds, never by the
+    /// order the traits are declared in: the walk starts from the group's
+    /// first trait by name, and the report names the shortest way round back
+    /// to it.
+    ///
     /// **Bound:** one visit per trait the program declares and one step per
-    /// bound each writes -- a single depth-first walk over the whole graph,
-    /// not one per trait. The path is a list rather than a stack of calls,
-    /// because how deep a chain of traits runs is what the source decides.
+    /// bound each writes to find the groups, and the same again within each
+    /// group to find its cycle. The walks keep their paths as lists rather
+    /// than as calls, because how deep a chain of traits runs is what the
+    /// source decides.
     fn reportTraitBoundCycles(self: *Checker) std.mem.Allocator.Error!void {
-        // Unvisited, on the walk's current path, or finished. A bound reaching
-        // one still on the path closes a cycle; one reaching a finished trait
-        // reaches a part of the graph already known to hold none.
-        const Colour = enum(u8) { unvisited, on_path, done };
-        const colour = try self.gpa.alloc(Colour, self.ast.declCount());
-        defer self.gpa.free(colour);
-        @memset(colour, .unvisited);
-
-        var path: std.ArrayList(Descent) = .empty;
-        defer path.deinit(self.gpa);
-
-        for (0..self.ast.declCount()) |i| {
-            const root = node.DeclId.at(@intCast(i));
-            if (self.ast.declTag(root) != .trait_) continue;
-            if (colour[i] != .unvisited) continue;
-
-            colour[i] = .on_path;
-            try path.append(self.gpa, .{ .trait = root, .at = 0 });
-            while (path.items.len > 0) {
-                const from = path.items[path.items.len - 1].trait;
-                const bounds = self.ast.declBounds(from);
-                const step = path.items[path.items.len - 1].at;
-                if (step == bounds.len) {
-                    colour[from.index()] = .done;
-                    _ = path.pop();
-                    continue;
-                }
-                path.items[path.items.len - 1].at = step + 1;
-
-                const required = traitAt(self.ast, self.res, bounds[step].named.name) orelse continue;
-                switch (colour[required.index()]) {
-                    .done => {},
-                    .unvisited => {
-                        colour[required.index()] = .on_path;
-                        try path.append(self.gpa, .{ .trait = required, .at = 0 });
-                    },
-                    .on_path => try self.refuseBoundCycle(path.items, from, required, bounds[step].named.name),
-                }
+        const decls = self.ast.declCount();
+        for (0..decls) |i| {
+            const trait = node.DeclId.at(@intCast(i));
+            if (self.ast.declTag(trait) != .trait_) continue;
+            for (self.ast.declBounds(trait)) |b| {
+                if (b.kind == .callable) continue;
+                if (traitAt(self.ast, self.res, b.named.name) != trait) continue;
+                try self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(b.named.name),
+                    self.ast.tokenSpan(b.named.name),
+                    "drop the bound",
+                    "`{s}` requires itself",
+                    .{self.ast.tokenText(self.ast.declName(trait))},
+                );
+                break;
             }
         }
+
+        // Strongly connected groups by Tarjan's walk, with its calls kept as
+        // a list.
+        const unvisited = std.math.maxInt(u32);
+        const index = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(index);
+        @memset(index, unvisited);
+        const low = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(low);
+        const group = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(group);
+        @memset(group, unvisited);
+        const on_stack = try self.gpa.alloc(bool, decls);
+        defer self.gpa.free(on_stack);
+        @memset(on_stack, false);
+        var stack: std.ArrayList(u32) = .empty;
+        defer stack.deinit(self.gpa);
+        const Frame = struct { n: u32, next: u32 };
+        var calls: std.ArrayList(Frame) = .empty;
+        defer calls.deinit(self.gpa);
+        // Each group of two or more traits, by the first of its members by
+        // name.
+        var groups: std.ArrayList(u32) = .empty;
+        defer groups.deinit(self.gpa);
+        var counter: u32 = 0;
+        for (0..decls) |root_index| {
+            const root: u32 = @intCast(root_index);
+            if (self.ast.declTag(node.DeclId.at(root)) != .trait_ or index[root] != unvisited) continue;
+            index[root] = counter;
+            low[root] = counter;
+            counter += 1;
+            try stack.append(self.gpa, root);
+            on_stack[root] = true;
+            try calls.append(self.gpa, .{ .n = root, .next = 0 });
+            while (calls.items.len > 0) {
+                const frame = &calls.items[calls.items.len - 1];
+                const n = frame.n;
+                const bounds = self.ast.declBounds(node.DeclId.at(n));
+                if (frame.next < bounds.len) {
+                    const b = bounds[frame.next];
+                    frame.next += 1;
+                    if (b.kind == .callable) continue;
+                    const required = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                    if (self.ast.declTag(required) != .trait_) continue;
+                    const to: u32 = @intCast(required.index());
+                    if (index[to] == unvisited) {
+                        index[to] = counter;
+                        low[to] = counter;
+                        counter += 1;
+                        try stack.append(self.gpa, to);
+                        on_stack[to] = true;
+                        try calls.append(self.gpa, .{ .n = to, .next = 0 });
+                    } else if (on_stack[to]) {
+                        low[n] = @min(low[n], index[to]);
+                    }
+                    continue;
+                }
+                _ = calls.pop();
+                if (calls.items.len > 0) {
+                    const parent = calls.items[calls.items.len - 1].n;
+                    low[parent] = @min(low[parent], low[n]);
+                }
+                if (low[n] != index[n]) continue;
+                var first = n;
+                var members: usize = 0;
+                while (stack.pop()) |member| {
+                    on_stack[member] = false;
+                    group[member] = n;
+                    members += 1;
+                    if (self.namedBefore(member, first)) first = member;
+                    if (member == n) break;
+                }
+                if (members > 1) try groups.append(self.gpa, first);
+            }
+        }
+
+        // The shortest way round each group from its first trait, by a walk
+        // over the group's own bounds in the order each trait writes them.
+        const came_from = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(came_from);
+        @memset(came_from, unvisited);
+        var frontier: std.ArrayList(u32) = .empty;
+        defer frontier.deinit(self.gpa);
+        var cycle: std.ArrayList(node.DeclId) = .empty;
+        defer cycle.deinit(self.gpa);
+        for (groups.items) |start| {
+            frontier.clearRetainingCapacity();
+            try frontier.append(self.gpa, start);
+            came_from[start] = start;
+            var reached: ?struct { last: u32, at: TokenId } = null;
+            var next: usize = 0;
+            walk: while (next < frontier.items.len) : (next += 1) {
+                const from = frontier.items[next];
+                for (self.ast.declBounds(node.DeclId.at(from))) |b| {
+                    if (b.kind == .callable) continue;
+                    const required = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                    const to: u32 = @intCast(required.index());
+                    if (to == from or group[to] != group[start]) continue;
+                    if (to == start) {
+                        reached = .{ .last = from, .at = b.named.name };
+                        break :walk;
+                    }
+                    if (came_from[to] != unvisited) continue;
+                    came_from[to] = from;
+                    try frontier.append(self.gpa, to);
+                }
+            }
+            const closing = reached orelse continue;
+            cycle.clearRetainingCapacity();
+            var at = closing.last;
+            while (true) {
+                try cycle.append(self.gpa, node.DeclId.at(at));
+                if (at == start) break;
+                at = came_from[at];
+            }
+            std.mem.reverse(node.DeclId, cycle.items);
+            try self.refuseBoundCycle(cycle.items, closing.at);
+            for (frontier.items) |member| came_from[member] = unvisited;
+        }
+    }
+
+    /// Whether `a`'s name orders before `b`'s, the declaration's place
+    /// deciding between two traits of one name in different modules.
+    fn namedBefore(self: *const Checker, a: u32, b: u32) bool {
+        const left = self.ast.tokenText(self.ast.declName(node.DeclId.at(a)));
+        const right = self.ast.tokenText(self.ast.declName(node.DeclId.at(b)));
+        return switch (std.mem.order(u8, left, right)) {
+            .lt => true,
+            .gt => false,
+            .eq => a < b,
+        };
     }
 
     /// Reports the bound that closes a cycle, naming every requirement on it.
@@ -34858,48 +35141,20 @@ const Checker = struct {
     /// them, so a message naming the pair alone states a requirement no
     /// declaration wrote and sends a reader to a bound that is not there.
     ///
-    /// Read from where `required` sits on the walk's path round to the end of
-    /// it, which is the cycle: everything before that point leads into the
-    /// cycle without being on it.
-    ///
-    /// **Bound:** the traits on the cycle, which is at most the path the walk
-    /// is already holding.
-    fn refuseBoundCycle(
-        self: *Checker,
-        path: []const Descent,
-        requiring: node.DeclId,
-        required: node.DeclId,
-        at: TokenId,
-    ) std.mem.Allocator.Error!void {
-        const one = self.ast.tokenText(self.ast.declName(requiring));
-        if (requiring == required) {
-            return self.sink.addErrorFmt(
-                .t_bound,
-                self.ast.fileOf(at),
-                self.ast.tokenSpan(at),
-                "drop the bound",
-                "`{s}` requires itself",
-                .{one},
-            );
-        }
-
-        // From the bound that closes the cycle, because that is the token
-        // underlined, and then forward along the path until it comes back
-        // round to here.
-        var start: usize = 0;
-        while (path[start].trait != required) start += 1;
-
+    /// `cycle` runs from the trait the closing bound `at` requires to the
+    /// trait that writes it, each requiring the next. The message starts at
+    /// the closing bound, because that is the token underlined, and then
+    /// goes forward round the cycle back to it.
+    fn refuseBoundCycle(self: *Checker, cycle: []const node.DeclId, at: TokenId) std.mem.Allocator.Error!void {
         var said: std.ArrayList(u8) = .empty;
         defer said.deinit(self.gpa);
-        const clauses = path.len - start;
-        for (0..clauses) |k| {
-            const from = if (k == 0) requiring else path[start + k - 1].trait;
-            const to = if (k == 0) required else path[start + k].trait;
+        for (0..cycle.len) |k| {
+            const from = if (k == 0) cycle[cycle.len - 1] else cycle[k - 1];
             if (k > 0) try said.appendSlice(self.gpa, ", ");
-            if (k == clauses - 1) try said.appendSlice(self.gpa, "and ");
+            if (k == cycle.len - 1) try said.appendSlice(self.gpa, "and ");
             try said.print(self.gpa, "`{s}` requires `{s}`", .{
                 self.ast.tokenText(self.ast.declName(from)),
-                self.ast.tokenText(self.ast.declName(to)),
+                self.ast.tokenText(self.ast.declName(cycle[k])),
             });
         }
 
@@ -34907,7 +35162,7 @@ const Checker = struct {
             .t_bound,
             self.ast.fileOf(at),
             self.ast.tokenSpan(at),
-            if (clauses == 2) "drop one of the two bounds" else "drop one of the bounds on the cycle",
+            if (cycle.len == 2) "drop one of the two bounds" else "drop one of the bounds on the cycle",
             "{s}",
             .{said.items},
         );

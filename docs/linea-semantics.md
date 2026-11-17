@@ -1406,12 +1406,18 @@ parameter must appear in `T` ([N-Unused]), and `phantom` is refused
 
 The alias is the same type in every other position a type's name is written. A
 named literal's head and a pattern's head may be an alias, so
-`Spot { x = 1, y = 2 }` builds a `Point` where `alias Spot = Point`. A generic
-alias heading a pattern takes apart only the type it writes: `let Fixed { a, b }
-= pair` with `alias Fixed[T] = Pair[T, UInt8]` refuses a `Pair[UInt16, UInt16]`
-([T-Mismatch]). A call on an alias is the call on its type: `Points(3)`
-constructs a `Score` where `alias Points = Score` names a newtype, and
-`Cents(x)` converts where `alias Cents = UInt64`. A path through an alias
+`Spot { x = 1, y = 2 }` builds a `Point` where `alias Spot = Point`. An alias
+heading a pattern takes apart only the type it writes, its arguments included:
+`Bytes { a, b }` with `alias Bytes = Pair[UInt8, UInt8]` refuses a
+`Pair[UInt16, UInt16]`, and `let Fixed { a, b } = pair` with
+`alias Fixed[T] = Pair[T, UInt8]` settles `T` from the value and refuses one
+whose second argument is not `UInt8` ([T-Mismatch]). A call on an alias is the
+call on its type: `Points(3)` constructs a `Score` where `alias Points = Score`
+names a newtype, and `Cents(x)` converts where `alias Cents = UInt64`. An alias
+of a generic newtype constructs the application it writes, so `CustomerId(3)` is
+an `Id[Customer]` with no annotation where `alias CustomerId = Id[Customer]`; a
+generic alias takes its own parameters from the expected type and refuses one
+that writes a fixed argument differently ([T-Mismatch]). A path through an alias
 reaches what its type holds, at the alias's arguments: `Maybe.Some(3)` is an
 `Option[UInt8]` where `alias Maybe = Option[UInt8]`, and
 `Bytes.new_in(allocator)` opens the `Vec[UInt8, A]` an alias names. A generic
@@ -2815,10 +2821,16 @@ lists are distinct bounds with independently defined associated types:
 `[C: Lookup[UInt64] + Lookup[Bool]]` cannot resolve `C.Elem` through either.
 Source order never selects a bound.
 
-An associated type definition cannot use a settled reference: `type Item =
-Self.Other` would define one associated type through another in the same
-implementation; reading another implementation's is described below. An
-implementation defines each associated type exactly once; duplicate definitions are [N-Duplicate].
+An associated type definition may read another type its own implementation
+settles through `Self`: `type Item = Self.Other`, `type Held =
+Option[Self.Item]` or `type Second = fn(value: Self.First) -> UInt8`. There
+`Self.Name` is what the enclosing implementation settles `Name` to, read through
+that implementation's own trait and arguments, so it names that
+implementation's definition even where another trait implemented for the type
+declares the same name. It is decided as a definition reading another
+implementation's is, below, and a definition that reads back to itself through
+`Self`, `type Item = Self.Item`, is the same cycle. An implementation defines
+each associated type exactly once; duplicate definitions are [N-Duplicate].
 
 What a part, a settled type, a delegated element or an alias names never
 depends on the order declarations are written in: each is decided once, after
@@ -2867,7 +2879,7 @@ A definition may read another implementation's settled type, `type Dual =
 Pong.Dual`, and means what that definition means, whichever implementation is
 written first. A definition that reads back to itself through such references,
 `Ping.Dual` reading `Pong.Dual` reading `Ping.Dual`, or `type Dual = Echo.Dual`
-inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
+or `type Dual = Self.Dual` inside `Echo`'s own implementation, defines no type and is [T-Impl], reported
 once per cycle at the definition on it written first, naming each definition
 and the type it is written as. The reference may sit inside an argument:
 `type D = Option[B.D]` with `type D = Option[A.D]` is the same cycle. A
@@ -3790,8 +3802,18 @@ Where `H` carries exactly one bound on `Watch`, `H: Watch[P]`, a call
 `&watcher.observe(event)` on an `H` is a call at `Watch[P]` before any argument
 is read: a variant written without its enum, `.Retried(3)`, takes its type from
 the parameter, and an operation whose parameters never mention `P` is still
-settled. A parameter bounded on one trait at several argument lists leaves the
-call's arguments and result to settle which list it means.
+settled. One argument list reached along two paths, as round a cycle of
+traits, is one bound. A parameter bounded on one trait at several argument
+lists leaves the call's arguments and result to settle which list it means, and
+the call is checked where the generic body is written: a list its bounds do not
+carry is [T-Bound], so `Scale.scale(s, true)` under `S: Scale[UInt8] +
+Scale[UInt16]` is refused there rather than at an instantiation. A literal
+fits a list where the list's type can hold its value, as [T-Literal] decides:
+one fitting exactly one of the lists takes that list's type, so `s.scale(300)`
+under those bounds is a call at `Scale[UInt16]`; one fitting several,
+`Scale.scale(s, 1)`, does not say which implementation runs and is
+[N-Ambiguous]; and one fitting none, `s.scale(70000)`, takes its default type
+and is [T-Bound] for the list that names it.
 
 A bound may instead be a structural callable type. Its parameter and result
 types must match exactly; result dependencies must fit the promised upper bound,
@@ -3861,7 +3883,12 @@ the arguments written on each requirement: a parameter bounded by `Fancy`
 discharges `Lookup[UInt64]` and no other `Lookup` argument list. Arguments
 referring to the requiring trait's parameters are substituted from the bound
 that reaches it. Trait bounds may not cycle; a cycle is diagnosed at its
-declaration, on the bound that closes it, and only there. Every bound on the
+declaration, on the bound that closes it, and only there. A trait whose bounds
+name itself is reported once, and so is each group of traits that require each
+other, however many bounds close cycles inside it. The report names the
+shortest cycle back to the group's trait whose name sorts first, following each
+trait's bounds in the order it writes them, so it reads the same whichever
+order the traits are declared in. Every bound on the
 cycle is still read as written: an implementation of a trait on it owes what
 the trait requires, and a parameter bounded by one is granted what that trait
 requires, whichever bound the report fell on. A requirement reached again at

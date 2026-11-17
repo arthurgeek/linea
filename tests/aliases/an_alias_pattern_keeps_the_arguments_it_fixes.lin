@@ -1,0 +1,34 @@
+// An alias heading a pattern names the whole type it writes, its arguments
+// included: `Bytes` takes apart a `Pair[UInt8, UInt8]` and no other pair,
+// whether it heads a `match` arm, a part of another pattern or a parameter.
+struct Pair[A, B] {
+    a: A,
+    b: B,
+}
+
+struct Outer {
+    inner: Pair[UInt16, UInt16],
+}
+
+alias Bytes = Pair[UInt8, UInt8]
+
+fn matched(sink pair: Pair[UInt16, UInt16]) -> UInt16 {
+    match pair {
+        Bytes { a, b: _ } => a,
+    }
+}
+
+fn nested(sink outer: Outer) -> UInt16 {
+    match outer {
+        Outer { inner: Bytes { a, b: _ } } => a,
+    }
+}
+
+fn parameter(sink pair Bytes { a, b: _ }: Pair[UInt16, UInt16]) -> UInt16 {
+    a
+}
+
+fn main() -> UInt8 {
+    let total = matched(.{ a = 1, b = 2 }) + nested(Outer { inner = .{ a = 1, b = 2 } }) + parameter(pair: .{ a = 1, b = 2 })
+    UInt8(total)
+}

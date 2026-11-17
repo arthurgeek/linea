@@ -1,0 +1,14 @@
+// `B` requires `A` at two argument lists and `A` requires `B`, so two bounds
+// close one cycle. It is reported once, and in the same words whichever
+// trait is declared first.
+trait A[T]: B {
+    fn a(self: Self, by: T) -> UInt8
+}
+
+trait B: A[UInt8] + A[Bool] {
+    fn b(self: Self) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -361,6 +361,10 @@ const Renderer = struct {
     operations: []Operation,
     bindings: std.ArrayList([]const u8) = .empty,
     binding_index: std.AutoHashMapUnmanaged(BindingKey, u32) = .empty,
+    /// The identifiers the target and the derive spell, shared by every
+    /// member rendered for one derive.
+    spelled: *const Spelled,
+    /// The identifiers the member spells and the names this rendering made.
     occupied: std.StringHashMapUnmanaged(void) = .empty,
     parameter_used: []bool,
     parameter_positions: std.ArrayList(struct { parameter: u32, offset: u32 }) = .empty,
@@ -409,14 +413,18 @@ const Renderer = struct {
         return self.bindings.items[index];
     }
 
+    /// Whether a generated name is one the member, the target or the derive
+    /// spells, or one this rendering already made.
+    fn taken(self: *const Renderer, name: []const u8) bool {
+        return self.spelled.contains(name) or self.occupied.contains(name);
+    }
+
     fn buildBindings(self: *Renderer, derive: DeclId) RenderError!void {
-        for ([_]DeclId{ self.plan.member, self.target, derive }) |declaration| {
-            const tokens = self.ast.declTokens(declaration);
-            for (tokens.start.index()..tokens.end.index()) |i| {
-                const at = token.TokenId.at(@intCast(i));
-                if (self.ast.tokenTag(at) == .identifier) {
-                    try self.occupied.put(self.gpa, self.ast.tokenText(at), {});
-                }
+        const tokens = self.ast.declTokens(self.plan.member);
+        for (tokens.start.index()..tokens.end.index()) |i| {
+            const at = token.TokenId.at(@intCast(i));
+            if (self.ast.tokenTag(at) == .identifier) {
+                try self.occupied.put(self.gpa, self.ast.tokenText(at), {});
             }
         }
 
@@ -464,7 +472,7 @@ const Renderer = struct {
                             "_linea_derive_{d}_{d}_{d}_{d}",
                             .{ derive.index(), case_index, component_index, local },
                         );
-                        if (self.occupied.contains(candidate)) {
+                        if (self.taken(candidate)) {
                             self.gpa.free(candidate);
                             continue;
                         }
@@ -1008,7 +1016,7 @@ const Renderer = struct {
             if (candidate.items.len == std.math.maxInt(u32)) return error.GeneratedSourceTooLarge;
             try candidate.insert(self.gpa, 0, '_');
             prefix += 1;
-            if (!self.occupied.contains(candidate.items)) return prefix;
+            if (!self.taken(candidate.items)) return prefix;
         }
     }
 
@@ -1091,11 +1099,33 @@ const Renderer = struct {
 /// No copy of an erasable local is in scope.
 const no_copy = std.math.maxInt(u32);
 
+/// The identifiers a derive and its target spell, which no name a rendering
+/// makes may be. Read once per derive rather than once per member rendered,
+/// since a derive of k entries on a target of k variants spells O(k) of them.
+pub const Spelled = std.StringHashMapUnmanaged(void);
+
+/// The identifiers `target` and `derive` spell. The caller owns the set.
+pub fn spelledBy(gpa: std.mem.Allocator, ast: *const Ast, target: DeclId, derive: DeclId) std.mem.Allocator.Error!Spelled {
+    var spelled: Spelled = .empty;
+    errdefer spelled.deinit(gpa);
+    // An attached derive is its own target, and is read once.
+    const declarations = [_]DeclId{ target, derive };
+    for (declarations[0..if (derive == target) 1 else 2]) |declaration| {
+        const tokens = ast.declTokens(declaration);
+        for (tokens.start.index()..tokens.end.index()) |i| {
+            const at = token.TokenId.at(@intCast(i));
+            if (ast.tokenTag(at) == .identifier) try spelled.put(gpa, ast.tokenText(at), {});
+        }
+    }
+    return spelled;
+}
+
 pub fn renderMember(
     gpa: std.mem.Allocator,
     ast: *const Ast,
     derive: DeclId,
     target: DeclId,
+    spelled: *const Spelled,
     plan: *const ReflectionMemberPlan,
     free_references: []const FreeReference,
     qualifier: ?[]const u8,
@@ -1239,6 +1269,7 @@ pub fn renderMember(
         .template_arguments = template_arguments,
         .source = source,
         .target = target,
+        .spelled = spelled,
         .component_types = component_types,
         .operations = operations,
         .parameter_used = parameter_used,

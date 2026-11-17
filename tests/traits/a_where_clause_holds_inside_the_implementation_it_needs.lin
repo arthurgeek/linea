@@ -1,0 +1,45 @@
+// Inside `impl[T: Walk] Walk for Wrap[T]`, `Wrap[Wrap[T]]` implements `Walk`
+// through the same implementation twice, so `deeper`'s `where` clause holds
+// for `self` as it would anywhere else `T` implements `Walk`.
+trait Walk {
+    fn walk(self: Self) -> UInt8
+}
+
+trait Source {
+    type Item
+
+    fn size(self: Self) -> UInt8
+}
+
+struct Wrap[T] {
+    v: T,
+}
+
+fn deeper[R: Source](r: R) -> UInt8 where R.Item: Walk {
+    r.size()
+}
+
+impl[T: Walk] Source for Wrap[T] {
+    type Item = Wrap[Wrap[T]]
+
+    fn size(self: Self) -> UInt8 {
+        self.v.walk()
+    }
+}
+
+impl[T: Walk] Walk for Wrap[T] {
+    fn walk(self: Self) -> UInt8 {
+        deeper(self) + 1
+    }
+}
+
+impl Walk for UInt8 {
+    fn walk(self: Self) -> UInt8 {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    let w: Wrap[UInt8] = .{ v = 3 }
+    w.walk()
+}

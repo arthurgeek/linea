@@ -1,0 +1,5 @@
+error[T-Bound]: `B` requires `A`, and `A` requires `B`
+ --> tests/traits/bound_cycles/a_cycle_closed_by_two_bounds_is_refused_once_declared_last.lin:4:10
+  |
+4 | trait B: A[UInt8] + A[Bool] {
+  |          ^ drop one of the two bounds

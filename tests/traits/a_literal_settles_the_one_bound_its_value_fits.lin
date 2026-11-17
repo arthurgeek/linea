@@ -1,0 +1,39 @@
+// `S` implements `Scale` at two integer types. A literal that only one of
+// them can hold says which implementation the call runs: `300` is too large
+// for a `UInt8`, so `widen` calls `Scale[UInt16]`, and `-1` is below a
+// `UInt8`, so `lower` calls `Scale[Int8]`.
+trait Scale[T] {
+    fn scale(self: Self, by: T) -> UInt8
+}
+
+struct Ruler {}
+
+impl Scale[UInt8] for Ruler {
+    fn scale(_self: Self, _by: UInt8) -> UInt8 {
+        1
+    }
+}
+
+impl Scale[UInt16] for Ruler {
+    fn scale(_self: Self, _by: UInt16) -> UInt8 {
+        2
+    }
+}
+
+impl Scale[Int8] for Ruler {
+    fn scale(_self: Self, _by: Int8) -> UInt8 {
+        4
+    }
+}
+
+fn widen[S: Scale[UInt8] + Scale[UInt16]](s: S) -> UInt8 {
+    s.scale(300)
+}
+
+fn lower[S: Scale[UInt8] + Scale[Int8]](s: S) -> UInt8 {
+    Scale.scale(s, -1)
+}
+
+fn main() -> UInt8 {
+    widen(Ruler {}) + lower(Ruler {})
+}

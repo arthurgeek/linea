@@ -1,0 +1,20 @@
+error[N-Ambiguous]: `S` implements `Scale[UInt8]` and `Scale[UInt16]`, and this call fits each
+  --> tests/traits/a_call_two_bounds_could_answer_is_refused_where_it_is_written.lin:11:5
+   |
+11 |     Scale.scale(s, 1)
+   |     ^^^^^^^^^^^^^^^^^ give an argument the type of the one it means
+error[T-Bound]: `S` does not implement `Scale[Bool]`
+  --> tests/traits/a_call_two_bounds_could_answer_is_refused_where_it_is_written.lin:15:5
+   |
+15 |     Scale.scale(s, true) + s.scale(false)
+   |     ^^^^^^^^^^^^^^^^^^^^ add `Scale[Bool]` to `S`'s bounds
+error[T-Bound]: `S` does not implement `Scale[Bool]`
+  --> tests/traits/a_call_two_bounds_could_answer_is_refused_where_it_is_written.lin:15:28
+   |
+15 |     Scale.scale(s, true) + s.scale(false)
+   |                            ^^^^^^^^^^^^^^ add `Scale[Bool]` to `S`'s bounds
+error[T-Bound]: `S` does not implement `Scale[Int64]`
+  --> tests/traits/a_call_two_bounds_could_answer_is_refused_where_it_is_written.lin:19:5
+   |
+19 |     s.scale(70000)
+   |     ^^^^^^^^^^^^^^ add `Scale[Int64]` to `S`'s bounds

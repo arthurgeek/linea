@@ -5,7 +5,10 @@ Status: Accepted — 2026-10-18. Extends
 [0165](0165-an-attached-derive-requires-each-field-type.md). Extended by
 [0251](0251-an-alike-instantiation-is-answered-from-one-representative.md),
 under which the walk over what types own steps from an alike instantiation
-to its representative.
+to its representative, and by
+[0278](0278-a-settled-type-may-read-another-of-its-own-implementation.md),
+under which a definition reads another of its own implementation through
+`Self` as this scheduler decides it.
 
 ## Context
 

@@ -1,0 +1,43 @@
+// `Self.Item` written for `Item` itself asks the question this line answers,
+// and `Item` and `Other` written off each other do the same round two lines.
+// Each is a cycle, refused where it closes; `Held` written off a refused type
+// adds no report of its own.
+struct Counter {
+    at: UInt8,
+}
+
+trait Measure {
+    type Item
+    type Held
+
+    fn of(x: Self) -> Self.Item
+}
+
+impl Measure for Counter {
+    type Item = Self.Item
+    type Held = Option[Self.Item]
+
+    fn of(x: Self) -> Self.Item {
+        x.at
+    }
+}
+
+struct Gauge {
+    at: UInt8,
+}
+
+trait Pair {
+    type First
+    type Second
+}
+
+impl Pair for Gauge {
+    type First = Self.Second
+    type Second = Option[Self.First]
+}
+
+fn main() -> UInt8 {
+    let c: Counter = .{ at = 7 }
+    let _g: Gauge = .{ at = 1 }
+    Measure.of(c)
+}

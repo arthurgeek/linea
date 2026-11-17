@@ -1,0 +1,23 @@
+// `G` and `H` require each other, and the cycle is reported. A call through
+// either trait is still checked against the bound that settles its argument:
+// under `S: G[UInt8]` and `S: H[UInt8]` each `by` is a `UInt8`, and `true`
+// is not one.
+trait H[T]: G[T] {
+    fn h(self: Self, by: T) -> UInt8
+}
+
+trait G[T]: H[T] {
+    fn g(self: Self, by: T) -> UInt8
+}
+
+fn _through_g[S: G[UInt8]](s: S) -> UInt8 {
+    G.g(s, true) + H.h(s, true) + s.g(true)
+}
+
+fn _through_h[S: H[UInt8]](s: S) -> UInt8 {
+    G.g(s, true) + H.h(s, true) + s.h(true)
+}
+
+fn main() -> UInt8 {
+    0
+}

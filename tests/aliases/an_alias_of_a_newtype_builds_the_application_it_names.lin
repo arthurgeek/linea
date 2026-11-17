@@ -1,0 +1,29 @@
+// An alias of an applied newtype builds that application: `CustomerId(3)`
+// is an `Id[Customer]` with no annotation, and a generic alias settles the
+// arguments it leaves open from where the value goes.
+type Id[phantom T] = UInt64
+
+type Tagged[phantom T, phantom U] = UInt64
+
+struct Customer {
+    name: UInt8,
+}
+
+alias CustomerId = Id[Customer]
+alias ForCustomer[U] = Tagged[Customer, U]
+
+fn customer_number(sink id: Id[Customer]) -> UInt64 {
+    let CustomerId(n) = id
+    n
+}
+
+fn tagged_number(sink id: Tagged[Customer, UInt8]) -> UInt64 {
+    let ForCustomer(n) = id
+    n
+}
+
+fn main() -> UInt8 {
+    let id = CustomerId(3)
+    let tagged: Tagged[Customer, UInt8] = ForCustomer(4)
+    UInt8(customer_number(id) + tagged_number(tagged))
+}

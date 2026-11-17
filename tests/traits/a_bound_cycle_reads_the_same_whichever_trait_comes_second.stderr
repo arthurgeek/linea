@@ -1,8 +1,8 @@
-error[T-Bound]: `A` requires `B`, and `B` requires `A`
-  --> tests/traits/a_bound_cycle_reads_the_same_whichever_trait_comes_second.lin:10:10
-   |
-10 | trait A: B {
-   |          ^ drop one of the two bounds
+error[T-Bound]: `B` requires `A`, and `A` requires `B`
+ --> tests/traits/a_bound_cycle_reads_the_same_whichever_trait_comes_second.lin:6:10
+  |
+6 | trait B: A {
+  |          ^ drop one of the two bounds
 error[T-Bound]: `A` requires `B`, and `Seed` does not implement it
   --> tests/traits/a_bound_cycle_reads_the_same_whichever_trait_comes_second.lin:18:6
    |

@@ -925,7 +925,7 @@ pub const discards_allowed = [_]DiscardAllowed{
     .{ .path = "sema/resolve.zig", .function = "expand", .callee = "std.math.add", .sites = 3, .reason = "an origin or a wrap placeholder whose offset overflows is not representable, which the entry is then refused for" },
     .{ .path = "sema/typecheck.zig", .function = "roundFloatLiteral", .callee = "std.fmt.parseFloat", .sites = 2, .reason = "text that is no float rounds to nothing, which is the answer" },
     .{ .path = "sema/typecheck.zig", .function = "hashArgs", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
-    .{ .path = "sema/typecheck.zig", .function = "hash#2", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
+    .{ .path = "sema/typecheck.zig", .function = "hash#3", .callee = "resolve_mod.hashBoundArgs", .reason = "reading settled tables has an empty error set" },
     .{ .path = "sema/typecheck.zig", .function = "sameBoundArgs", .callee = "resolve_mod.sameBoundArgs", .reason = "reading settled tables has an empty error set" },
     .{ .path = "sema/typecheck.zig", .function = "mentionsParameterAt", .callee = "search.visit", .reason = "the search is given no cache, and only caching allocates" },
     .{ .path = "sema/types.zig", .function = "internInterpolation", .callee = "w.print", .reason = "a specification packed into 64 bits spells at most 21 bytes, which fit the 32-byte buffer" },

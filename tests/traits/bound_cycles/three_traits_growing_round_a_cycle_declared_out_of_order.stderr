@@ -1,7 +1,7 @@
-error[T-Bound]: `H` requires `K`, `K` requires `G`, and `G` requires `H`
- --> tests/traits/bound_cycles/three_traits_growing_round_a_cycle_declared_out_of_order.lin:9:13
+error[T-Bound]: `K` requires `G`, `G` requires `H`, and `H` requires `K`
+ --> tests/traits/bound_cycles/three_traits_growing_round_a_cycle_declared_out_of_order.lin:5:13
   |
-9 | trait H[T]: K[Vec[T]] {
+5 | trait K[T]: G[Option[T]] {
   |             ^ drop one of the bounds on the cycle
 error[T-Bound]: `G` requires `H[[UInt8; 2]]`, and `Seed` does not implement it
   --> tests/traits/bound_cycles/three_traits_growing_round_a_cycle_declared_out_of_order.lin:19:6

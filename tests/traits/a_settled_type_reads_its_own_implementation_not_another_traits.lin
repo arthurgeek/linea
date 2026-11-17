@@ -1,0 +1,61 @@
+// `Count` and `Weigh` both declare `Unit`, so `Crate.Unit` names neither.
+// Inside an implementation `Self.Unit` is the one that implementation
+// settles: `Total` is a `UInt16` in `Count` and an `Option[UInt8]` in
+// `Weigh`, in a generic implementation as in any other.
+trait Count {
+    type Total
+    type Unit
+
+    fn count(x: Self) -> Self.Total
+}
+
+trait Weigh {
+    type Unit
+    type Total
+
+    fn weigh(x: Self) -> Self.Total
+}
+
+struct Crate {
+    items: UInt8,
+}
+
+impl Count for Crate {
+    type Total = Self.Unit
+    type Unit = UInt16
+
+    fn count(x: Self) -> Self.Total {
+        UInt16(x.items)
+    }
+}
+
+impl Weigh for Crate {
+    type Total = Option[Self.Unit]
+    type Unit = UInt8
+
+    fn weigh(x: Self) -> Self.Total {
+        .Some(x.items)
+    }
+}
+
+struct Shelf[T] {
+    held: T,
+    size: UInt8,
+}
+
+impl[T] Count for Shelf[T] {
+    type Total = Self.Unit
+    type Unit = UInt8
+
+    fn count(x: Self) -> Self.Total {
+        x.size
+    }
+}
+
+fn main() -> UInt8 {
+    let c: Crate = .{ items = 3 }
+    let weighed = Weigh.weigh(c)
+    let counted = UInt8(Count.count(c))
+    let shelf: Shelf[Option[UInt8]] = .{ held = weighed, size = 2 }
+    counted + Count.count(shelf)
+}
