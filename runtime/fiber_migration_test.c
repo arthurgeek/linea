@@ -400,6 +400,41 @@ static void check_idle_steal_claim(int concurrent) {
     assert(pthread_mutex_destroy(&stealing.metadata) == 0);
 }
 
+static void check_idle_wakeup(void) {
+    struct carrier peers[3];
+    memset(peers, 0, sizeof peers);
+    struct fiber_loop waking = { .count = 3, .carriers = peers };
+    assert(pthread_mutex_init(&waking.metadata, NULL) == 0);
+    for (size_t i = 0; i < 3; i += 1) {
+        peers[i].loop = &waking;
+        assert(pthread_mutex_init(&peers[i].queue_lock, NULL) == 0);
+        assert(make_poller(&peers[i]) == 0);
+    }
+    struct linea_fiber work = {
+        .home = &peers[0], .loop = &waking, .state = runnable, .saved = 1,
+        .proven = 1, .waiting = waiting_yield, .transfer_ready = 1, .timer_index = no_timer,
+    };
+    lock_fiber(&work);
+    __atomic_store_n(&peers[1].idle, 1, __ATOMIC_RELEASE);
+    enqueue_locked(&work);
+    unlock_fiber(&work);
+    wake_idle_peers(&peers[0]);
+    struct pollfd observed[3];
+    for (size_t i = 0; i < 3; i += 1) observed[i] = (struct pollfd){ peers[i].kernel, POLLIN, 0 };
+    assert(poll(observed, 3, 0) == 1);
+    assert(observed[0].revents == 0 && observed[2].revents == 0 && (observed[1].revents & POLLIN));
+    poll_carrier(&peers[1], 1);
+    assert(poll(observed, 3, 0) == 0);
+    assert(dequeue(&peers[2]) == NULL);
+    assert(__atomic_load_n(&peers[2].idle, __ATOMIC_ACQUIRE) == 1);
+    assert(pthread_setspecific(carrier_key, &peers[2]) == 0);
+    assert(steal_for_dispatch(&peers[2]) == &work);
+    assert(__atomic_load_n(&peers[2].idle, __ATOMIC_ACQUIRE) == 0);
+    assert(pthread_setspecific(carrier_key, NULL) == 0);
+    for (size_t i = 0; i < 3; i += 1) free_carrier(&peers[i]);
+    assert(pthread_mutex_destroy(&waking.metadata) == 0);
+}
+
 static void check_affinity(void) {
     /* A system task has no logical fiber to bind. */
     errno = EDOM;
@@ -482,6 +517,7 @@ int main(void) {
     check_queue_lane_progress();
     check_idle_steal_claim(0);
     check_idle_steal_claim(1);
+    check_idle_wakeup();
     check_affinity();
 #if defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer)
     prove_continuation(0, 1);

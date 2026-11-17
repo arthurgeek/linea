@@ -154,6 +154,7 @@ struct carrier {
     struct linea_fiber *first, *last;
     struct linea_fiber *stealable_first, *stealable_last;
     int prefer_stealable;
+    int idle;
     unsigned long next_victim;
     struct linea_fiber **timers;
     size_t timer_count, timer_capacity;
@@ -536,6 +537,18 @@ static void wake_carrier(struct carrier *c) {
 
 #if defined(LINEA_FIBER_MIGRATION_TEST)
 static int clean_runnable(struct linea_fiber *f, struct carrier *source);
+
+/* The hint never grants work. Empty-check and publication are ordered by M;
+ * a peer becoming idle later searches the queues before blocking. */
+static void wake_idle_peers(struct carrier *source) {
+    if (linea_fiber_metadata_held()) fail("linea: peer wakeup retained scheduler metadata\n");
+    struct fiber_loop *loop = source->loop;
+    if (loop == NULL) return;
+    for (unsigned long i = 0; i < loop->count; i += 1) {
+        struct carrier *peer = &loop->carriers[i];
+        if (peer != source && __atomic_load_n(&peer->idle, __ATOMIC_ACQUIRE)) wake_carrier(peer);
+    }
+}
 #endif
 
 /* Called with the loop metadata lock, or the simulation's existing queue
@@ -600,6 +613,9 @@ static struct linea_fiber *dequeue(struct carrier *c) {
         f->claimed = dispatch_claim;
         f->claimant = c;
     }
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    if (c->loop != NULL) __atomic_store_n(&c->idle, f == NULL, __ATOMIC_RELEASE);
+#endif
     unlock_carrier(c);
     return f;
 }
@@ -702,6 +718,7 @@ static void abort_transfer(struct transfer_claim *claim) {
     f->claimed = no_claim;
     f->claimant = NULL;
     enqueue_locked(f);
+    const int wake_peers = f->queued == stealable_lane;
     claim->fiber = NULL;
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
     if (claim->source->loop->trace_counts.active_claims == 0) fail("linea: a trace claim underflowed\n");
@@ -709,6 +726,7 @@ static void abort_transfer(struct transfer_claim *claim) {
 #endif
     unlock_carrier(claim->source);
     wake_carrier(claim->source);
+    if (wake_peers) wake_idle_peers(claim->source);
 }
 
 static int finish_transfer(struct transfer_claim *claim, struct carrier *target, int dispatch) {
@@ -745,9 +763,12 @@ static int finish_transfer(struct transfer_claim *claim, struct carrier *target,
     f->claimed = dispatch ? dispatch_claim : no_claim;
     f->claimant = dispatch ? target : NULL;
     if (!dispatch) enqueue_locked(f);
+    const int wake_peers = !dispatch && f->queued == stealable_lane;
+    if (dispatch) __atomic_store_n(&target->idle, 0, __ATOMIC_RELEASE);
     claim->fiber = NULL;
     unlock_carrier(source);
     if (!dispatch) wake_carrier(target);
+    if (wake_peers) wake_idle_peers(target);
     return 1;
 }
 
@@ -1007,9 +1028,11 @@ static int requeue_saved_dispatch(struct carrier *source, struct linea_fiber *f,
     f->claimed = no_claim;
     f->claimant = NULL;
     enqueue_locked(f);
+    const int wake_peers = f->queued == stealable_lane;
     unlock_fiber(f);
     TRACE_END(ready_trace);
     wake_carrier(source);
+    if (wake_peers) wake_idle_peers(source);
     return 1;
 }
 
@@ -1701,12 +1724,16 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
         ended = f->finished;
         argument = f->argument;
     } else fail("linea: a fiber switched in an invalid scheduling state\n");
+#if defined(LINEA_FIBER_MIGRATION_TEST)
+    const int wake_peers = f->queued == stealable_lane;
+#endif
     unlock_fiber(f);
     TRACE_END(runnable_trace);
     TRACE_END(ready_trace);
     if (became_parked && (kind == waiting_park || kind == waiting_io)) linea_fiber_pause(linea_fiber_parked);
     if (wake != NULL) wake_carrier(wake);
 #if defined(LINEA_FIBER_MIGRATION_TEST)
+    if (wake_peers) wake_idle_peers(c);
     if (kind == waiting_yield) linea_fiber_pause(linea_fiber_transfer_ready);
 #endif
     /* Publication may let the joiner immediately reclaim the fiber. */
