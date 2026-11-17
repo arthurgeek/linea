@@ -1,0 +1,79 @@
+import std.io
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.time
+
+use io.Reader
+use net.Acceptor
+use net.Accepted
+use session.Chan
+use session.End
+
+fn pair(inout listener: net.Listener) -> (net.Connection, net.Connection) where carries() {
+    let peer = net.connect(listener.local_address().unwrap()).unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    (peer, connection)
+}
+
+fn receive(sink connection: net.Connection, inout passed: Bool, sink me: Chan[End]) {
+    var stream = connection
+    var buffer = mem.system().acquire(1).unwrap()
+    let count = &stream.read_some(&buffer, offset: 0, count: 1).unwrap()
+    if count != 1 || buffer.as_slice()[0] != 120 {
+        panic("bounded kernel admission lost a socket operation")
+    }
+    time.sleep(time.Duration.from_nanoseconds(0))
+    buffer.release()
+    stream.release()
+    passed = true
+    me.close()
+}
+
+fn main() -> UInt8 {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let (first_peer, first_connection) = pair(&listener)
+    let (second_peer, second_connection) = pair(&listener)
+    let (third_peer, third_connection) = pair(&listener)
+    listener.release()
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var first_passed = false
+    var second_passed = false
+    var third_passed = false
+    let first = task.prepare(
+        sink [sink first_connection, inout first_passed] |sink me: Chan[End]| {
+            receive(first_connection, &first_passed, me)
+        },
+        on: execution,
+    ).unwrap().start()
+    let second = task.prepare(
+        sink [sink second_connection, inout second_passed] |sink me: Chan[End]| {
+            receive(second_connection, &second_passed, me)
+        },
+        on: execution,
+    ).unwrap().start()
+    let third = task.prepare(
+        sink [sink third_connection, inout third_passed] |sink me: Chan[End]| {
+            receive(third_connection, &third_passed, me)
+        },
+        on: execution,
+    ).unwrap().start()
+    var first_writer = first_peer
+    let _first_sent = io.write_all(&first_writer, "x".as_bytes()).unwrap()
+    first_writer.release()
+    var second_writer = second_peer
+    let _second_sent = io.write_all(&second_writer, "x".as_bytes()).unwrap()
+    second_writer.release()
+    var third_writer = third_peer
+    let _third_sent = io.write_all(&third_writer, "x".as_bytes()).unwrap()
+    third_writer.release()
+    first.close()
+    second.close()
+    third.close()
+    if first_passed && second_passed && third_passed {
+        0
+    } else {
+        1
+    }
+}

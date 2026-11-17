@@ -2454,7 +2454,7 @@ pub fn build(b: *std.Build) void {
             keep: bool = true,
             guard_fault: bool = false,
             sanitizer_fault: bool = false,
-            ring: enum { none, ordinary, own_first, cancel_first, partial_submit, interrupted, shortage, unsupported, unavailable, cancel_retry } = .none,
+            ring: enum { none, ordinary, own_first, cancel_first, partial_submit, interrupted, shortage, unsupported, unavailable, cancel_retry, capacity, stale_reuse, accept_failure } = .none,
             completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
         };
         for ([_]ProofCase{
@@ -2480,6 +2480,13 @@ pub fn build(b: *std.Build) void {
             .{ .source = "io_buffer_reuse.lin", .ring = .ordinary },
             .{ .source = "io_failure.lin", .ring = .ordinary },
             .{ .source = "io_eof.lin", .ring = .ordinary },
+            .{ .source = "io_accept.lin", .ring = .ordinary },
+            .{ .source = "io_connect.lin", .ring = .ordinary },
+            .{ .source = "io_connect_timeout.lin", .ring = .ordinary },
+            .{ .source = "io_write.lin", .ring = .ordinary },
+            .{ .source = "io_capacity.lin", .ring = .capacity },
+            .{ .source = "io_stale_reuse.lin", .ring = .stale_reuse },
+            .{ .source = "io_accept_failure.lin", .ring = .accept_failure },
             .{ .source = "io_timeout.lin", .ring = .own_first },
             .{ .source = "io_timeout.lin", .ring = .cancel_first },
             .{ .source = "io_timeout.lin", .ring = .partial_submit },
@@ -2539,6 +2546,9 @@ pub fn build(b: *std.Build) void {
             if (proof_case.ring == .unsupported) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_UNSUPPORTED_TEST=1") catch @panic("OOM");
             if (proof_case.ring == .unavailable) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_COMPLETION_DENIED_TEST=1", "-DLINEA_FIBER_RING_FALLBACK_TEST=1" }) catch @panic("OOM");
             if (proof_case.ring == .cancel_retry) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_CANCEL_RETRY_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .capacity) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_CAPACITY_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .stale_reuse) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_STALE_COOKIE_TEST=1", "-DLINEA_COMPLETION_STALE_COOKIE_TEST=1" }) catch @panic("OOM");
+            if (proof_case.ring == .accept_failure) handoff_flags.append(b.allocator, "-DLINEA_NET_ACCEPT_CONFIGURE_TEST=1") catch @panic("OOM");
             if (proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_ENTRY_PROVENANCE_TEST=1") catch @panic("OOM");
             if (std.mem.eql(u8, proof_case.source, "unproven.lin") and !proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
             switch (proof_case.completion) {
@@ -2552,6 +2562,8 @@ pub fn build(b: *std.Build) void {
             for (checked_nonfiber_objects.items) |object| {
                 if (proof_case.ring != .none and std.mem.eql(u8, object.name, "completion")) {
                     handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "completion_order", b.path("runtime/completion.c"), handoff_flags.items));
+                } else if (proof_case.ring == .accept_failure and std.mem.eql(u8, object.name, "net")) {
+                    handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "net_accept_failure", b.path("runtime/net.c"), handoff_flags.items));
                 } else if (proof_case.pinned_start and std.mem.eql(u8, object.name, "task")) {
                     var pinned_flags: std.ArrayList([]const u8) = .empty;
                     pinned_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
@@ -2610,6 +2622,22 @@ pub fn build(b: *std.Build) void {
             if (proof_case.ring == .unsupported) run_proof.expectStdErrMatch("native completion: unsupported operation retired before readiness fallback");
             if (proof_case.ring == .unavailable) run_proof.expectStdErrMatch("native completion: unavailable kernel used readiness fallback");
             if (proof_case.ring == .cancel_retry) run_proof.expectStdErrMatch("native completion: transient cancellation failure retained its original");
+            if (proof_case.ring == .capacity) {
+                run_proof.expectStdErrMatch("native completion: admission preserved its live original");
+                run_proof.expectStdErrMatch("native completion: both rings drained after overflow");
+            }
+            if (proof_case.ring == .stale_reuse) run_proof.expectStdErrMatch("native completion: reclaimed cookie rejected during slot reuse");
+            if (proof_case.ring == .accept_failure) {
+                run_proof.expectStdErrMatch("native completion: kernel accept retired");
+                run_proof.expectStdErrMatch("native completion: unconfigured accepted descriptor closed");
+            }
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_accept.lin")) run_proof.expectStdErrMatch("native completion: kernel accept retired");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_connect.lin")) run_proof.expectStdErrMatch("native completion: kernel connect readiness completed");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_connect_timeout.lin")) run_proof.expectStdErrMatch("native completion: kernel connect readiness canceled");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_write.lin")) run_proof.expectStdErrMatch("native completion: kernel send retired");
+            if ((proof_case.ring == .ordinary or proof_case.ring == .interrupted or proof_case.ring == .shortage) and std.mem.eql(u8, proof_case.source, "io.lin")) run_proof.expectStdErrMatch("native completion: kernel receive completed");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_eof.lin")) run_proof.expectStdErrMatch("native completion: kernel receive completed");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_failure.lin")) run_proof.expectStdErrMatch("native completion: kernel receive reported reset");
             switch (proof_case.completion) {
                 .ordinary => {},
                 .rearm => run_proof.expectStdErrEqual("native migration: spurious readiness rearmed with a new cookie\n"),

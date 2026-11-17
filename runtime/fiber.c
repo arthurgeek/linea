@@ -103,8 +103,8 @@ struct pending_operation {
     /* Kernel registrations remain with the poller that armed them, even if
      * the saved continuation later resumes on another carrier. */
     struct carrier *owner;
-    /* Immutable evidence from the sole audited net.c READ producer. */
-    int audited_read;
+    /* Immutable evidence from the canonical net.c producer. */
+    int audited_net;
     unsigned state;
     uint32_t slot;
     int registered;
@@ -765,6 +765,10 @@ static struct linea_fiber *dequeue(struct carrier *c) {
     return f;
 }
 
+static int canonical_net_kind(enum linea_op_kind kind) {
+    return kind == LINEA_OP_READ || kind == LINEA_OP_WRITE || kind == LINEA_OP_ACCEPT || kind == LINEA_OP_CONNECT;
+}
+
 #if defined(LINEA_FIBER_CAN_MIGRATE)
 /* A detached saved continuation has one transfer claim until it is either
  * restored to its queue or claimed directly by the receiving dispatcher. */
@@ -782,7 +786,7 @@ static int completed_io_retired(struct linea_fiber *f) {
         op != NULL && op->owner != NULL && op->owner->loop == f->loop &&
         __atomic_load_n(&op->state, __ATOMIC_ACQUIRE) == operation_complete &&
         !op->registered && op->completion_cookie == 0 &&
-        ((op->audited_read && op->operation->kind == LINEA_OP_READ) ||
+        ((op->audited_net && canonical_net_kind(op->operation->kind)) ||
          (op->attempt == NULL && op->operation->kind == LINEA_OP_READABLE));
 }
 
@@ -977,6 +981,10 @@ void fiber_test_pause(enum linea_fiber_pause_point point) {
     if (point == linea_fiber_reclaimed) {
         if (source != NULL) fail("linea: the reclamation probe requires a system-thread joiner\n");
         must(pthread_mutex_lock(&handoff_lock));
+        if (replay_finished) {
+            must(pthread_mutex_unlock(&handoff_lock));
+            return;
+        }
         struct carrier *owner = stale_owner;
         if (owner == NULL) fail("linea: the reclamation probe captured no I/O event\n");
         replay_requested = 1;
@@ -987,7 +995,11 @@ void fiber_test_pause(enum linea_fiber_pause_point point) {
         const int rejected = replay_rejected;
         must(pthread_mutex_unlock(&handoff_lock));
         if (!rejected) fail("linea: a reclaimed fiber's stale poll event was accepted\n");
+#if defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
+        const char message[] = "native completion: reclaimed cookie rejected during slot reuse\n";
+#else
         const char message[] = "native migration: stale poll cookie rejected after reclamation\n";
+#endif
         report_bytes(message, sizeof message - 1);
         return;
     }
@@ -1511,7 +1523,7 @@ static int arm_operation(struct pending_operation *pending) {
         return 0;
     }
     if (pending->operation->kind == LINEA_OP_SLEEP) return 0;
-    if (pending->audited_read && !pending->readiness_only && c->completion != NULL) {
+    if (pending->audited_net && !pending->readiness_only && c->completion != NULL) {
         pending->completion_cookie = linea_completion_submit(c->completion, pending->operation, pending);
         if (pending->completion_cookie != 0) return 0;
     }
@@ -1597,7 +1609,7 @@ static void complete_operation(struct pending_operation *pending, int readable) 
     /* Bounded fault policy: readiness can be stale without consuming bytes.
      * The next real attempt still reads the actual socket and its real result. */
     static int forced_rearm;
-    const int injected = readable && pending->audited_read && !forced_rearm;
+    const int injected = readable && pending->audited_net && pending->operation->kind == LINEA_OP_READ && !forced_rearm;
     long result;
     if (injected) {
         forced_rearm = 1;
@@ -1656,21 +1668,27 @@ static void complete_operation(struct pending_operation *pending, int readable) 
     notify(f);
 }
 
-static long perform_operation(struct linea_op *op, linea_fiber_attempt attempt, int audited_read) {
+static long perform_operation(struct linea_op *op, linea_fiber_attempt attempt, int audited_net) {
     struct linea_fiber *f = current_fiber();
     if (f == NULL) fail("linea: an operation has no executing fiber\n");
-    /* Scheduler callbacks have no current fiber to restrict. The audited read
-     * and callback-free readiness poll leave no persistent thread state. Bind
-     * every other invocation, including sleep and unknown callbacks, first. */
-    audited_read = audited_read && op->kind == LINEA_OP_READ && attempt != NULL;
-    const int neutral = audited_read ||
+    /* Scheduler callbacks have no current fiber to restrict. Audited socket
+     * paths and callback-free readiness leave no persistent thread state.
+     * Bind every other invocation, including unknown callbacks, first. */
+    audited_net = audited_net && canonical_net_kind(op->kind) && attempt != NULL;
+    const int neutral = audited_net ||
         (attempt == NULL && op->kind == LINEA_OP_READABLE);
     if (!neutral)
         linea_fiber_restrict_current();
     if (op->deadline_ns != 0 && now() >= op->deadline_ns) return op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;
-    struct pending_operation pending = { .operation = op, .attempt = attempt, .fiber = f, .owner = f->home, .audited_read = audited_read,
+    struct pending_operation pending = { .operation = op, .attempt = attempt, .fiber = f, .owner = f->home, .audited_net = audited_net,
         .state = operation_idle, .slot = 0, .registered = 0, .result = 0 };
+#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+    /* Exercise admission even if a producer wins the race to the first read.
+     * The real backend still owns and performs every consuming operation. */
+    const long immediate = audited_net && op->kind == LINEA_OP_READ ? -(long)EAGAIN : attempt_operation(&pending);
+#else
     const long immediate = attempt_operation(&pending);
+#endif
     if (immediate != -(long)EAGAIN) return immediate;
     lock_fiber(f);
     f->waiting = waiting_io;
@@ -1706,7 +1724,7 @@ long linea_fiber_perform(struct linea_op *op, linea_fiber_attempt attempt) {
     return perform_operation(op, attempt, 0);
 }
 
-long linea_fiber_perform_read(struct linea_op *op, linea_fiber_attempt attempt) {
+long linea_fiber_perform_net(struct linea_op *op, linea_fiber_attempt attempt) {
     return perform_operation(op, attempt, 1);
 }
 
@@ -1733,7 +1751,7 @@ static int dispatch_io_cookie(struct carrier *c, uint64_t cookie) {
 #if defined(LINEA_FIBER_FORCE_TIMER_TIE_TEST)
     static int forced_tie;
     struct pending_operation *pending = slot->operation;
-    if (!forced_tie && pending->audited_read) {
+    if (!forced_tie && pending->audited_net && pending->operation->kind == LINEA_OP_READ) {
         forced_tie = 1;
         /* Actual descriptor readiness is already present. Schedule an expired
          * timer and let the real timer claimant attempt that same read first. */
@@ -1776,7 +1794,20 @@ static void replay_stale_cookie(struct carrier *c) {
     const uint64_t cookie = stale_cookie;
     replay_requested = 0;
     must(pthread_mutex_unlock(&handoff_lock));
+#if defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
+    const int rejected = linea_completion_replay_stale(c->completion, cookie);
+    if (rejected < 0) {
+        must(pthread_mutex_lock(&handoff_lock));
+        replay_requested = 1;
+        must(pthread_mutex_unlock(&handoff_lock));
+        /* The next reader may already be dequeued but not yet submitted.
+         * Leave a wake for the scheduler turn after it parks. */
+        wake_carrier(c);
+        return;
+    }
+#else
     const int rejected = !dispatch_io_cookie(c, cookie);
+#endif
     must(pthread_mutex_lock(&handoff_lock));
     replay_rejected = rejected;
     replay_finished = 1;
@@ -1796,18 +1827,31 @@ static void drain_completions(struct carrier *c) {
         unsigned expected = operation_armed;
         if (!__atomic_compare_exchange_n(&pending->state, &expected, operation_claimed, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) && expected != operation_claimed)
             fail("linea: a kernel completion lost finalization authority\n");
+#if defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
+        must(pthread_mutex_lock(&handoff_lock));
+        if (stale_owner == NULL) {
+            stale_owner = c;
+            stale_cookie = pending->completion_cookie;
+        }
+        must(pthread_mutex_unlock(&handoff_lock));
+#endif
         pending->completion_cookie = 0;
         long answer = result.result;
         if (answer == -(long)ECANCELED && result.expired) answer = -(long)ETIMEDOUT;
 #if defined(LINEA_FIBER_RING_TEST)
         if (result.expired && !result.cancel_submitted)
-            fail("linea: the timed-out read bypassed cancellation\n");
+            fail("linea: the timed-out kernel operation bypassed cancellation\n");
         const char message[] = "native completion: own and control requests retired before migration\n";
         report_bytes(message, sizeof message - 1);
 #endif
-        if (answer == -(long)EAGAIN || answer == -(long)EINTR || answer == -(long)EINVAL || answer == -(long)EOPNOTSUPP) {
-            /* A CQE error permits fallback only now: the original and every
-             * submitted control have relinquished their kernel references. */
+        const int connect_ready = pending->operation->kind == LINEA_OP_CONNECT &&
+            (result.result >= 0 || (result.result == -(long)ECANCELED && result.expired));
+        const int retry_native = result.result == -(long)EAGAIN || result.result == -(long)EINTR ||
+            result.result == -(long)EINVAL || result.result == -(long)EOPNOTSUPP;
+        if (connect_ready || retry_native) {
+            /* Connect readiness needs the canonical SO_ERROR check. A CQE
+             * error permits native fallback only after every submitted
+             * kernel request has relinquished its references. */
             pending->readiness_only = 1;
 #if defined(LINEA_COMPLETION_UNSUPPORTED_TEST)
             const char fallback[] = "native completion: unsupported operation retired before readiness fallback\n";
@@ -2183,6 +2227,9 @@ void linea_fiber_destroy(struct linea_fiber *f) {
         !((!f->started && f->state == parked) || (f->state == finished && f->retired))) fail("linea: a fiber was reclaimed before scheduler retirement\n");
     f->claimed = dispatch_claim;
     struct carrier *home = f->home;
+#if defined(LINEA_FIBER_STALE_COOKIE_TEST)
+    const int was_started = f->started;
+#endif
 #if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
     const int report_busy = f == busy_test.body;
     if (report_busy && (!busy_test.claimed || !busy_test.observed))
@@ -2222,7 +2269,7 @@ void linea_fiber_destroy(struct linea_fiber *f) {
      * alive until stack and sanitizer cleanup no longer need it. */
     if (simulated) __atomic_fetch_sub(&home->live, 1UL, __ATOMIC_ACQ_REL);
 #if defined(LINEA_FIBER_STALE_COOKIE_TEST)
-    if (!simulated) linea_fiber_pause(linea_fiber_reclaimed);
+    if (!simulated && was_started) linea_fiber_pause(linea_fiber_reclaimed);
 #endif
 }
 

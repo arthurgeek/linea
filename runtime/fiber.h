@@ -38,9 +38,9 @@ void linea_fiber_yield(void);
 /* Complete one operation on the executing fiber's carrier. The callback
  * attempts a nonblocking call and answers -EAGAIN when it would wait. */
 long linea_fiber_perform(struct linea_op *operation, linea_fiber_attempt attempt);
-/* Compiler-confined audited entry: only net.c's canonical READ path supplies
- * its static attempt. It never removes an existing affinity restriction. */
-long linea_fiber_perform_read(struct linea_op *operation, linea_fiber_attempt attempt);
+/* Compiler-confined producer: net.c supplies its canonical socket attempt.
+ * Only audited operation paths are neutral; no existing binding is removed. */
+long linea_fiber_perform_net(struct linea_op *operation, linea_fiber_attempt attempt);
 long linea_fiber_wait_descriptor(int fd, uint8_t writable, unsigned long deadline);
 long linea_fiber_sleep(unsigned long nanoseconds);
 

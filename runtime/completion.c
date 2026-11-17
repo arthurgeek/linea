@@ -11,17 +11,27 @@
 
 #if defined(__linux__)
 #include <linux/io_uring.h>
+#include <poll.h>
+#include <sys/socket.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+enum { completion_slots = 1, submission_entries = completion_slots * 2 };
+static unsigned capacity_refused, capacity_retired;
+#else
 enum { completion_slots = 64, submission_entries = completion_slots * 2 };
+#endif
 
 struct completion_slot {
     void *pending;
     uint32_t generation;
     int original_live, cancel_live, cancel_wanted, cancel_submitted, expired;
     long result;
+#if defined(LINEA_FIBER_RING_TEST)
+    uint8_t opcode;
+#endif
 #if defined(LINEA_COMPLETION_CANCEL_RETRY_TEST)
     unsigned cancel_attempts;
 #endif
@@ -40,6 +50,11 @@ struct linea_completion {
     struct io_uring_cqe *cqes;
     struct completion_slot slots[completion_slots];
     unsigned active;
+    uint8_t supported[256];
+#if defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
+    struct { uint64_t user_data; int32_t res; uint32_t flags; } retired;
+    int recorded;
+#endif
 #if defined(LINEA_COMPLETION_PARTIAL_TEST) || defined(LINEA_COMPLETION_INTERRUPTED_TEST) || defined(LINEA_COMPLETION_SHORTAGE_TEST)
     unsigned submission_probes;
 #endif
@@ -73,19 +88,17 @@ static unsigned distance(unsigned end, unsigned begin) {
     return end >= begin ? end - begin : (UINT_MAX - begin) + end + 1;
 }
 
-static int supported(int fd) {
+static int probe_operations(struct linea_completion *queue) {
     const size_t bytes = sizeof(struct io_uring_probe) + 256 * sizeof(struct io_uring_probe_op);
     struct io_uring_probe *probe = calloc(1, bytes);
     if (probe == NULL) return 0;
-    const long answer = syscall(SYS_io_uring_register, fd, IORING_REGISTER_PROBE, probe, 256U);
-    int read_supported = 0, cancel_supported = 0;
+    const long answer = syscall(SYS_io_uring_register, queue->fd, IORING_REGISTER_PROBE, probe, 256U);
     if (answer == 0) for (unsigned i = 0; i < probe->ops_len; i += 1) {
         if (!(probe->ops[i].flags & IO_URING_OP_SUPPORTED)) continue;
-        if (probe->ops[i].op == IORING_OP_RECV) read_supported = 1;
-        if (probe->ops[i].op == IORING_OP_ASYNC_CANCEL) cancel_supported = 1;
+        queue->supported[probe->ops[i].op] = 1;
     }
     free(probe);
-    return read_supported && cancel_supported;
+    return queue->supported[IORING_OP_ASYNC_CANCEL];
 }
 
 static struct linea_completion *completion_open(int eventfd) {
@@ -100,13 +113,14 @@ static struct linea_completion *completion_open(int eventfd) {
     const int fd = (int)opened;
     if (!(parameters.features & IORING_FEAT_NODROP) || parameters.sq_entries < submission_entries ||
         parameters.sq_entries > 4096 || parameters.cq_entries < submission_entries * 2 ||
-        parameters.cq_entries > 8192 || !supported(fd)) {
+        parameters.cq_entries > 8192) {
         close(fd);
         return NULL;
     }
     struct linea_completion *queue = calloc(1, sizeof *queue);
     if (queue == NULL) { close(fd); return NULL; }
     queue->fd = fd;
+    if (!probe_operations(queue)) goto failed;
     queue->sq_bytes = parameters.sq_off.array + (size_t)parameters.sq_entries * sizeof(unsigned);
     queue->cq_bytes = parameters.cq_off.cqes + (size_t)parameters.cq_entries * sizeof(struct io_uring_cqe);
     queue->sqe_bytes = (size_t)parameters.sq_entries * sizeof(struct io_uring_sqe);
@@ -167,7 +181,24 @@ static void publish_sqe(struct linea_completion *queue, unsigned tail) {
 }
 
 static uint64_t completion_submit(struct linea_completion *queue, struct linea_op *operation, void *pending) {
-    if (queue == NULL || operation->kind != LINEA_OP_READ || queue->active >= completion_slots) return 0;
+    if (queue == NULL) return 0;
+    if (queue->active >= completion_slots) {
+#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+        if (queue->active != 1 || queue->slots[0].pending == NULL || queue->slots[0].pending == pending)
+            completion_fail();
+        __atomic_store_n(&capacity_refused, 1U, __ATOMIC_RELEASE);
+        const char message[] = "native completion: admission preserved its live original\n";
+        report_bytes(message, sizeof message - 1);
+#endif
+        return 0;
+    }
+    unsigned opcode;
+    if (operation->kind == LINEA_OP_READ) opcode = IORING_OP_RECV;
+    else if (operation->kind == LINEA_OP_WRITE) opcode = IORING_OP_SEND;
+    else if (operation->kind == LINEA_OP_ACCEPT) opcode = IORING_OP_ACCEPT;
+    else if (operation->kind == LINEA_OP_CONNECT && operation->fd >= 0) opcode = IORING_OP_POLL_ADD;
+    else return 0;
+    if (!queue->supported[opcode]) return 0;
     unsigned index;
     for (index = 0; index < completion_slots; index += 1)
         if (queue->slots[index].pending == NULL && queue->slots[index].generation != UINT32_MAX) break;
@@ -183,14 +214,21 @@ static uint64_t completion_submit(struct linea_completion *queue, struct linea_o
     slot->original_live = 1;
     queue->active += 1;
     const uint64_t cookie = slot_cookie(index, generation, 0);
-    sqe->opcode = IORING_OP_RECV;
+    sqe->opcode = (uint8_t)opcode;
 #if defined(LINEA_COMPLETION_UNSUPPORTED_TEST)
     sqe->opcode = UINT8_MAX;
 #endif
     sqe->fd = operation->fd;
-    sqe->addr = operation->at;
-    sqe->len = (uint32_t)(operation->len > INT_MAX ? INT_MAX : operation->len);
+    if (operation->kind == LINEA_OP_READ || operation->kind == LINEA_OP_WRITE) {
+        sqe->addr = operation->at;
+        sqe->len = (uint32_t)(operation->len > INT_MAX ? INT_MAX : operation->len);
+        if (operation->kind == LINEA_OP_WRITE) sqe->msg_flags = MSG_NOSIGNAL;
+    } else if (operation->kind == LINEA_OP_ACCEPT) sqe->accept_flags = SOCK_NONBLOCK | SOCK_CLOEXEC;
+    else sqe->poll32_events = POLLOUT | POLLERR | POLLHUP;
     sqe->user_data = cookie;
+#if defined(LINEA_FIBER_RING_TEST)
+    slot->opcode = sqe->opcode;
+#endif
     publish_sqe(queue, tail);
     linea_completion_flush(queue);
     return cookie;
@@ -285,14 +323,131 @@ static void completion_flush(struct linea_completion *queue) {
 
 static int completion_retry(struct linea_completion *queue) {
     if (queue == NULL) return 0;
+#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+    if (queue->active != 0 && !__atomic_load_n(&capacity_refused, __ATOMIC_ACQUIRE)) return 1;
+#endif
     if (load_acquire(queue->sq_tail) != load_acquire(queue->sq_head)) return 1;
     for (unsigned i = 0; i < completion_slots; i += 1)
         if (queue->slots[i].pending != NULL && queue->slots[i].cancel_wanted) return 1;
     return 0;
 }
 
+static int retire_event(struct linea_completion *queue, struct io_uring_cqe event,
+                    struct linea_completion_result *result) {
+    const uint32_t index = (uint32_t)event.user_data >> 1;
+    const uint32_t generation = (uint32_t)(event.user_data >> 32);
+    if (index >= completion_slots) return 0;
+    struct completion_slot *slot = &queue->slots[index];
+    if (slot->pending == NULL || slot->generation != generation) return 0;
+    if (event.flags & IORING_CQE_F_MORE) completion_fail();
+#if defined(LINEA_COMPLETION_OWN_FIRST_TEST) || defined(LINEA_COMPLETION_CANCEL_FIRST_TEST)
+    const int cancellation = (event.user_data & 1U) != 0;
+    if (slot->original_live && slot->cancel_live) {
+#if defined(LINEA_COMPLETION_OWN_FIRST_TEST)
+        const int defer = cancellation;
+#else
+        const int defer = !cancellation;
+#endif
+        if (defer) {
+            if (queue->holding) completion_fail();
+            queue->held.user_data = event.user_data;
+            queue->held.res = event.res;
+            queue->held.flags = event.flags;
+            queue->holding = 1;
+            return 0;
+        }
+        slot->first_retirement = cancellation ? 2 : 1;
+    }
+#endif
+    if (event.user_data & 1U) {
+        if (!slot->cancel_live) return 0;
+#if defined(LINEA_COMPLETION_CANCEL_RETRY_TEST)
+        if (slot->cancel_attempts == 1) {
+            if (event.res != 0 || !slot->original_live) completion_fail();
+            event.res = -ENOMEM;
+        }
+#endif
+        slot->cancel_live = 0;
+        if (slot->original_live && event.res < 0 && event.res != -ENOENT && event.res != -EALREADY) {
+            if (event.res != -EINTR && event.res != -EAGAIN && event.res != -ENOMEM && event.res != -EBUSY)
+                completion_fail();
+            slot->cancel_wanted = 1;
+#if defined(LINEA_COMPLETION_CANCEL_RETRY_TEST)
+            const char message[] = "native completion: transient cancellation failure retained its original\n";
+            report_bytes(message, sizeof message - 1);
+#endif
+        }
+    } else {
+        if (!slot->original_live) return 0;
+        slot->original_live = 0;
+        slot->cancel_wanted = 0;
+        slot->result = event.res;
+    }
+    if (slot->original_live || slot->cancel_live) return 0;
+#if defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
+    if (!queue->recorded && !(event.user_data & 1U)) {
+        queue->retired.user_data = event.user_data;
+        queue->retired.res = event.res;
+        queue->retired.flags = event.flags;
+        queue->recorded = 1;
+    }
+#endif
+#if defined(LINEA_FIBER_RING_TEST)
+    if (slot->opcode == IORING_OP_RECV && slot->result >= 0) {
+        const char received[] = "native completion: kernel receive completed\n";
+        report_bytes(received, sizeof received - 1);
+    }
+    if (slot->opcode == IORING_OP_RECV && slot->result == -(long)ECONNRESET) {
+        const char reset[] = "native completion: kernel receive reported reset\n";
+        report_bytes(reset, sizeof reset - 1);
+    }
+    if (slot->opcode == IORING_OP_ACCEPT && slot->result >= 0) {
+        const char accepted[] = "native completion: kernel accept retired\n";
+        report_bytes(accepted, sizeof accepted - 1);
+    }
+    if (slot->opcode == IORING_OP_POLL_ADD && slot->result >= 0) {
+        const char connected[] = "native completion: kernel connect readiness completed\n";
+        report_bytes(connected, sizeof connected - 1);
+    }
+    if (slot->opcode == IORING_OP_POLL_ADD && slot->result == -(long)ECANCELED) {
+        const char expired[] = "native completion: kernel connect readiness canceled\n";
+        report_bytes(expired, sizeof expired - 1);
+    }
+    if (slot->opcode == IORING_OP_SEND && slot->result >= 0) {
+        const char sent[] = "native completion: kernel send retired\n";
+        report_bytes(sent, sizeof sent - 1);
+    }
+#endif
+#if defined(LINEA_COMPLETION_OWN_FIRST_TEST) || defined(LINEA_COMPLETION_CANCEL_FIRST_TEST)
+#if defined(LINEA_COMPLETION_OWN_FIRST_TEST)
+    if (slot->first_retirement != 1 || !slot->cancel_submitted) completion_fail();
+    const char message[] = "native completion: own CQE retired before cancel CQE\n";
+#else
+    if (slot->first_retirement != 2 || !slot->cancel_submitted) completion_fail();
+    const char message[] = "native completion: cancel CQE retired before own CQE\n";
+#endif
+    report_bytes(message, sizeof message - 1);
+#endif
+    *result = (struct linea_completion_result){ slot->pending, slot->result, slot->expired, slot->cancel_submitted };
+    slot->pending = NULL;
+    if (slot->generation != UINT32_MAX) slot->generation += 1;
+    queue->active -= 1;
+#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+    if (__atomic_fetch_add(&capacity_retired, 1U, __ATOMIC_ACQ_REL) == 1) {
+        const char drained[] = "native completion: both rings drained after overflow\n";
+        report_bytes(drained, sizeof drained - 1);
+    }
+#endif
+    return 1;
+}
+
 static int completion_next(struct linea_completion *queue, struct linea_completion_result *result) {
     if (queue == NULL) return 0;
+#if defined(LINEA_COMPLETION_CAPACITY_TEST)
+    /* Keep genuine request records live until the third Linea reader has
+     * attempted admission. Nothing is fabricated or released during the hold. */
+    if (!__atomic_load_n(&capacity_refused, __ATOMIC_ACQUIRE)) return 0;
+#endif
     for (;;) {
         struct io_uring_cqe event;
         int use_held = 0;
@@ -315,75 +470,39 @@ static int completion_next(struct linea_completion *queue, struct linea_completi
             store_release(queue->cq_head, advance(head));
         }
         (void)use_held;
-        const uint32_t index = (uint32_t)event.user_data >> 1;
-        const uint32_t generation = (uint32_t)(event.user_data >> 32);
-        if (index >= completion_slots) continue;
-        struct completion_slot *slot = &queue->slots[index];
-        if (slot->pending == NULL || slot->generation != generation) continue;
-        if (event.flags & IORING_CQE_F_MORE) completion_fail();
-#if defined(LINEA_COMPLETION_OWN_FIRST_TEST) || defined(LINEA_COMPLETION_CANCEL_FIRST_TEST)
-        const int cancellation = (event.user_data & 1U) != 0;
-        if (slot->original_live && slot->cancel_live) {
-#if defined(LINEA_COMPLETION_OWN_FIRST_TEST)
-            const int defer = cancellation;
-#else
-            const int defer = !cancellation;
-#endif
-            if (defer) {
-                if (queue->holding) completion_fail();
-                queue->held.user_data = event.user_data;
-                queue->held.res = event.res;
-                queue->held.flags = event.flags;
-                queue->holding = 1;
-                continue;
-            }
-            slot->first_retirement = cancellation ? 2 : 1;
-        }
-#endif
-        if (event.user_data & 1U) {
-            if (!slot->cancel_live) continue;
-#if defined(LINEA_COMPLETION_CANCEL_RETRY_TEST)
-            if (slot->cancel_attempts == 1) {
-                if (event.res != 0 || !slot->original_live) completion_fail();
-                event.res = -ENOMEM;
-            }
-#endif
-            slot->cancel_live = 0;
-            if (slot->original_live && event.res < 0 && event.res != -ENOENT && event.res != -EALREADY) {
-                if (event.res != -EINTR && event.res != -EAGAIN && event.res != -ENOMEM && event.res != -EBUSY)
-                    completion_fail();
-                slot->cancel_wanted = 1;
-#if defined(LINEA_COMPLETION_CANCEL_RETRY_TEST)
-                const char message[] = "native completion: transient cancellation failure retained its original\n";
-                report_bytes(message, sizeof message - 1);
-#endif
-            }
-        } else {
-            if (!slot->original_live) continue;
-            slot->original_live = 0;
-            slot->cancel_wanted = 0;
-            slot->result = event.res;
-        }
-        if (slot->original_live || slot->cancel_live) continue;
-#if defined(LINEA_COMPLETION_OWN_FIRST_TEST) || defined(LINEA_COMPLETION_CANCEL_FIRST_TEST)
-#if defined(LINEA_COMPLETION_OWN_FIRST_TEST)
-        if (slot->first_retirement != 1 || !slot->cancel_submitted) completion_fail();
-        const char message[] = "native completion: own CQE retired before cancel CQE\n";
-#else
-        if (slot->first_retirement != 2 || !slot->cancel_submitted) completion_fail();
-        const char message[] = "native completion: cancel CQE retired before own CQE\n";
-#endif
-        report_bytes(message, sizeof message - 1);
-#endif
-        *result = (struct linea_completion_result){ slot->pending, slot->result, slot->expired, slot->cancel_submitted };
-        slot->pending = NULL;
-        if (slot->generation != UINT32_MAX) slot->generation += 1;
-        queue->active -= 1;
-        return 1;
+        if (retire_event(queue, event, result)) return 1;
     }
 }
 
 #endif
+
+int linea_completion_replay_stale(struct linea_completion *queue, unsigned long cookie) {
+#if defined(__linux__) && defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
+    if (queue == NULL || !queue->recorded || queue->retired.user_data != cookie) return 0;
+    const uint32_t index = (uint32_t)cookie >> 1;
+    if (index >= completion_slots) return 0;
+    struct completion_slot *slot = &queue->slots[index];
+    if (slot->pending == NULL) return -1;
+    const struct completion_slot before = *slot;
+    const unsigned active = queue->active;
+    struct io_uring_cqe event = {
+        .user_data = queue->retired.user_data,
+        .res = queue->retired.res,
+        .flags = queue->retired.flags,
+    };
+    struct linea_completion_result result;
+    if (retire_event(queue, event, &result)) return 0;
+    return queue->active == active && slot->pending == before.pending &&
+        slot->generation == before.generation && slot->original_live == before.original_live &&
+        slot->cancel_live == before.cancel_live && slot->cancel_wanted == before.cancel_wanted &&
+        slot->cancel_submitted == before.cancel_submitted && slot->expired == before.expired &&
+        slot->result == before.result;
+#else
+    (void)queue;
+    (void)cookie;
+    return 0;
+#endif
+}
 
 /* These declarations have one platform-independent ABI. Only implementation
  * bodies select the kernel backend; unavailable targets keep readiness. */
