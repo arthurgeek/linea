@@ -112,7 +112,7 @@ pub const Finished = struct {
 };
 
 /// Runs `argv`, with its standard error folded into its standard output, and
-/// kills it after `timeout_seconds`.
+/// kills it and every process it started after `timeout_seconds`.
 pub fn runMerged(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -127,6 +127,7 @@ pub fn runMerged(
     const result = process.run(gpa, io, .{
         .argv = shell_argv.items,
         .cwd = cwd,
+        .process_group = true,
         .timeout = .{ .duration = .{ .raw = .fromSeconds(timeout_seconds), .clock = .awake } },
         .partial = &partial,
     }) catch |err| switch (err) {
