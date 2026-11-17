@@ -178,12 +178,19 @@ static void connect_past_its_deadline_makes_no_socket(void) {
 
 /* 192.0.2.0/24 is reserved for documentation and is not routed, so a handshake
  * there stays in progress and answers -ETIMEDOUT at its deadline with the
- * socket closed. A host with no route answers unreachable at once. */
+ * socket closed. A host with no route answers unreachable at once, and one
+ * whose firewall rejects the route answers it refused or forbidden at once. */
 static void connect_deadline_ends_a_pending_handshake(void) {
     const unsigned long documentation_address = (0xc0000201UL << 16) | 9;
     const unsigned long started = now_ns();
     const long client = linea_net_connect(documentation_address, in_ms(100));
-    assert(client == -ETIMEDOUT || client == -ENETUNREACH || client == -EHOSTUNREACH);
+    const int unreachable = client == -ENETUNREACH || client == -EHOSTUNREACH ||
+        client == -ECONNREFUSED || client == -EPERM || client == -EACCES;
+    if (client != -ETIMEDOUT && !unreachable) {
+        fprintf(stderr, "connect to 192.0.2.1:9 answered %ld (%s), neither a timeout nor an unreachable route\n",
+                client, client < 0 ? strerror((int)-client) : "a socket");
+    }
+    assert(client == -ETIMEDOUT || unreachable);
     if (client == -ETIMEDOUT) assert(now_ns() - started >= 100 * 1000000UL);
     assert(now_ns() - started < 10UL * 1000000000UL);
 }
