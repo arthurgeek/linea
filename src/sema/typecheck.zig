@@ -11563,9 +11563,10 @@ const Checker = struct {
     /// alias writes differently, and holds the settled arguments to the
     /// alias's bounds. False where the path was refused.
     ///
-    /// A position the alias writes without its parameters was settled before
-    /// the call was read; the others are matched here, so a parameter that
+    /// A parameter is matched at every position that writes one, so one that
     /// appears twice, or inside another type, is one type at every position.
+    /// A position written without the alias's parameters must be what the
+    /// alias wrote there, which is the whole question for an alias with none.
     fn settleAliasHeading(self: *Checker, at: ExprId, head: TokenId, heading: AliasHeading, got: []const TypeId) std.mem.Allocator.Error!bool {
         const generics = self.ast.declTypeParams(heading.alias);
         // The call's arguments are final here, with integers defaulted, so the
@@ -11579,12 +11580,13 @@ const Checker = struct {
             return false;
         }
         for (heading.written, got) |pattern, actual| {
-            if (!self.writesParameter(heading, pattern)) continue;
-            const read = if (std.mem.indexOfScalar(TypeId, heading.found, .poison) != null)
+            const read = if (!self.writesParameter(heading, pattern))
+                pattern
+            else if (std.mem.indexOfScalar(TypeId, heading.found, .poison) != null)
                 TypeId.poison
             else
                 try self.builder.substitute(pattern, @intCast(heading.alias.index()), heading.found);
-            if (read == actual) continue;
+            if (read == actual or actual == .poison) continue;
             const wrote = try self.typeName(pattern);
             const got_name = try self.typeName(actual);
             _ = try self.report(
@@ -11596,7 +11598,7 @@ const Checker = struct {
             );
             return false;
         }
-        if (self.callable_effects_ready) {
+        if (self.callable_effects_ready and heading.found.len != 0) {
             const args_start: u32 = @intCast(self.alias_site_args.items.len);
             try self.alias_site_args.appendSlice(self.gpa, heading.found);
             try self.bound_sites.append(self.gpa, .{
@@ -15654,6 +15656,24 @@ const Checker = struct {
         );
     }
 
+    /// Whether the type an alias heading a pattern writes is `of`, reporting
+    /// where it is not. Only the declaration is compared before this, so an
+    /// alias of `Pair[UInt8, UInt8]` is held here to its arguments too: a
+    /// closed alias is that one type, and a generic one settles its own
+    /// parameters from `of` and must then write `of` whole. True for a head
+    /// that is no alias.
+    fn aliasHeadWrites(self: *Checker, pattern: ExprId, head: TokenId, of: TypeId) std.mem.Allocator.Error!bool {
+        const alias = self.aliasWritten(self.generic, head) orelse return true;
+        const written = self.settledAlias(alias) orelse return true;
+        if (written == .poison) return true;
+        const heading: AliasHeading = .{
+            .alias = alias,
+            .written = &.{written},
+            .found = try self.openAliasArguments(alias),
+        };
+        return self.settleAliasHeading(pattern, head, heading, &.{of});
+    }
+
     /// A pattern, against the type of what it takes apart.
     ///
     /// The one routine every construct checks a pattern with -- a `match`
@@ -16010,20 +16030,7 @@ const Checker = struct {
             return try self.refuseParts(pattern);
         }
 
-        // A generic alias heading the pattern writes the type it takes apart,
-        // as it does for a path: the value must be that type at the alias's
-        // arguments.
-        if (head_tok != TokenId.none) if (self.aliasWritten(self.generic, head_tok)) |alias| {
-            const written = self.settledAlias(alias) orelse .poison;
-            if (written != .poison and self.ast.declTypeParams(alias).len != 0) {
-                const heading: AliasHeading = .{
-                    .alias = alias,
-                    .written = &.{written},
-                    .found = try self.openAliasArguments(alias),
-                };
-                if (!try self.settleAliasHeading(pattern, head_tok, heading, &.{of})) return try self.refuseParts(pattern);
-            }
-        };
+        if (head_tok != TokenId.none and !try self.aliasHeadWrites(pattern, head_tok, of)) return try self.refuseParts(pattern);
 
         // Taking a sealed type apart is reaching its representation, which is
         // the same rule a literal breaks by building one.
@@ -16225,6 +16232,7 @@ const Checker = struct {
             );
             return try self.refuseParts(pattern);
         }
+        if (!try self.aliasHeadWrites(pattern, head_tok, of)) return try self.refuseParts(pattern);
 
         // Taking a sealed type apart is reaching its representation, the
         // same rule a literal breaks by building one.
@@ -18651,6 +18659,16 @@ const Checker = struct {
         return .{ .excluded = v };
     }
 
+    /// A construction whose head was refused: its operands are still read
+    /// for their own mistakes, and it builds nothing.
+    fn refusedConstruction(self: *Checker, id: ExprId) std.mem.Allocator.Error!TypeId {
+        const c = self.ast.call(id);
+        try self.noteQualifier(c.callee);
+        _ = try self.record(c.callee, .poison);
+        for (c.args) |a| _ = try self.check(a, null);
+        return try self.record(id, .poison);
+    }
+
     /// `Name(e)` or `Name?(e)`, where `Name` names a newtype: construction,
     /// which the parser reads rather than a call reaching a function.
     ///
@@ -18668,19 +18686,37 @@ const Checker = struct {
     ) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
         const template = self.type_of_decl.get(decl);
+        // An alias heading the call names the application it builds: a closed
+        // one all of it, and a generic one all but its own parameters, which
+        // the expected application settles and is held to.
+        const named_by = self.res.targetOf(c.callee);
+        const aliased = self.aliasPathType(named_by);
+        const alias = self.genericAliasHead(named_by);
+        if (aliased == .poison) return self.refusedConstruction(id);
         // A generic newtype's arguments come from what the construction is
         // expected to be, or for `Name?(e)` from the `Option` it is expected
         // to answer: a phantom parameter appears in no operand, so the value
         // alone cannot say which instantiation it builds.
-        const newtype = if (self.ast.declTypeParams(decl).len == 0) template else expected_instance: {
+        const newtype = if (self.ast.declTypeParams(decl).len == 0) template else if (aliased != null and alias == null) aliased.? else expected_instance: {
             const pool = self.builder.view();
             if (Expected.typeOf(expected)) |written| {
                 var want = written;
                 if (self.ast.callFallible(id) and self.option_decl != null and want != .poison and
                     pool.declOfType(want) == self.option_decl and pool.instanceOf(want) != null)
                     want = self.builder.appliedTo(want)[0];
-                if (want != .poison and pool.declOfType(want) == decl and pool.instanceOf(want) != null)
+                if (want != .poison and pool.declOfType(want) == decl and pool.instanceOf(want) != null) {
+                    if (alias) |generic_alias| {
+                        const heading: AliasHeading = .{
+                            .alias = generic_alias,
+                            .written = &.{aliased.?},
+                            .found = try self.openAliasArguments(generic_alias),
+                        };
+                        if (!try self.settleAliasHeading(id, self.ast.exprMain(c.callee), heading, &.{want})) {
+                            return self.refusedConstruction(id);
+                        }
+                    }
                     break :expected_instance want;
+                }
                 // Another type is expected: the construction builds none of
                 // it, whatever its arguments, and is a mismatch.
                 if (want != .poison and self.builder.get(want) != .open_type and self.builder.get(want) != .parameter) {

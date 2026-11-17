@@ -1406,12 +1406,18 @@ parameter must appear in `T` ([N-Unused]), and `phantom` is refused
 
 The alias is the same type in every other position a type's name is written. A
 named literal's head and a pattern's head may be an alias, so
-`Spot { x = 1, y = 2 }` builds a `Point` where `alias Spot = Point`. A generic
-alias heading a pattern takes apart only the type it writes: `let Fixed { a, b }
-= pair` with `alias Fixed[T] = Pair[T, UInt8]` refuses a `Pair[UInt16, UInt16]`
-([T-Mismatch]). A call on an alias is the call on its type: `Points(3)`
-constructs a `Score` where `alias Points = Score` names a newtype, and
-`Cents(x)` converts where `alias Cents = UInt64`. A path through an alias
+`Spot { x = 1, y = 2 }` builds a `Point` where `alias Spot = Point`. An alias
+heading a pattern takes apart only the type it writes, its arguments included:
+`Bytes { a, b }` with `alias Bytes = Pair[UInt8, UInt8]` refuses a
+`Pair[UInt16, UInt16]`, and `let Fixed { a, b } = pair` with
+`alias Fixed[T] = Pair[T, UInt8]` settles `T` from the value and refuses one
+whose second argument is not `UInt8` ([T-Mismatch]). A call on an alias is the
+call on its type: `Points(3)` constructs a `Score` where `alias Points = Score`
+names a newtype, and `Cents(x)` converts where `alias Cents = UInt64`. An alias
+of a generic newtype constructs the application it writes, so `CustomerId(3)` is
+an `Id[Customer]` with no annotation where `alias CustomerId = Id[Customer]`; a
+generic alias takes its own parameters from the expected type and refuses one
+that writes a fixed argument differently ([T-Mismatch]). A path through an alias
 reaches what its type holds, at the alias's arguments: `Maybe.Some(3)` is an
 `Option[UInt8]` where `alias Maybe = Option[UInt8]`, and
 `Bytes.new_in(allocator)` opens the `Vec[UInt8, A]` an alias names. A generic
