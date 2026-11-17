@@ -88,7 +88,7 @@ impl IoError {
         .{ operation = operation, category = category, code = .Some(code), progress = progress }
     }
 
-    test fn io_errors_preserve_operation_category_and_progress() {
+    test "io errors preserve operation category and progress" {
         let error = IoError.from_os(.Read, 9, progress: 3)
         testing.assert(match read error.operation { Read => true, _ => false }, "read failure lost its operation")?
         testing.assert(match read error.category { InvalidDescriptor => true, _ => false }, "errno lost its stable category")?
@@ -122,7 +122,7 @@ fn io_error_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
     true
 }
 
-test fn derived_io_error_equality_compares_the_code() {
+test "derived io error equality compares the code" {
     let error = IoError.from_os(.Write, 5)
     let same = IoError.from_os(.Write, 5)
     let other = IoError.from_os(.Write, 6)
@@ -132,7 +132,7 @@ test fn derived_io_error_equality_compares_the_code() {
     .Ok(())
 }
 
-test fn derived_io_error_debug_renders_the_code() {
+test "derived io error debug renders the code" {
     let error = IoError.from_os(.Write, 5)
     var writer = testing.Recorder.of(128).unwrap()
     let wrote = "{error:?}".fmt(&writer).is_ok()
@@ -143,7 +143,7 @@ test fn derived_io_error_debug_renders_the_code() {
     .Ok(())
 }
 
-test fn derived_io_error_release_consumes_the_code() {
+test "derived io error release consumes the code" {
     let error = IoError.from_os(.Write, 5)
     error.release()
     .Ok(())
@@ -159,7 +159,7 @@ impl Display for IoError {
     }
 }
 
-test fn an_io_error_displays_its_numeric_reason() {
+test "an io error displays its numeric reason" {
     let error = IoError.from_os(.Write, 9)
     var writer = testing.Recorder.of(256) else |_| {
         return testing.assert(false, "the display recorder was refused")
@@ -172,7 +172,7 @@ test fn an_io_error_displays_its_numeric_reason() {
     .Ok(())
 }
 
-test fn io_operations_and_categories_display_their_names() {
+test "io operations and categories display their names" {
     let operation: IoOperation = .Publish
     let category: IoCategory = .PermissionDenied
     // The 64-byte recorder holds both names and their separator.

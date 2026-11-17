@@ -50,7 +50,7 @@ fn write_receipt[W: Writer](inout w: W, purchases: mem.Slice[Purchase]) -> Resul
 
 // A `\\` line holds its text exactly, so the expected receipt reads as it
 // prints, spaces and all.
-test fn the_receipt_lines_up_its_columns() {
+test "the receipt lines up its columns" {
     let purchases: [Purchase; _] = [
         .{ name = "tea", amount = 0.25, unit = "kg", cents = 350 },
         .{ name = "milk", amount = 2.0, unit = "pc", cents = 178 },

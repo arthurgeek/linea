@@ -41,7 +41,7 @@ pub fn field[T: Display](sink key: Str, value: T) -> Field[T] where carries(.key
     .{ key, value = borrow value }
 }
 
-test fn a_field_is_written_as_its_key_and_value() {
+test "a field is written as its key and value" {
     defer let text = fields_text(field("port", 8080))
     testing.assert_eq(text.view(), " port=8080", "the field changed")?
     .Ok(())
@@ -49,7 +49,7 @@ test fn a_field_is_written_as_its_key_and_value() {
 
 // A field borrows its value, so the caller keeps a value it logs, even one
 // that owns memory, and may log it twice.
-test fn a_field_observes_a_value_its_caller_keeps() {
+test "a field observes a value its caller keeps" {
     let path = "/items/7".to_owned().unwrap()
     defer let text = fields_text(field("path", path).and("again", path))
     let kept = path.view() == "/items/7"
@@ -85,7 +85,7 @@ impl[T: Display] Field[T] {
         .{ first = self, key, value = borrow value }
     }
 
-    test fn and_adds_a_second_field_after_the_first() {
+    test "and adds a second field after the first" {
         defer let two = fields_text(field("method", "GET").and("status", 200))
         testing.assert_eq(two.view(), " method=GET status=200", "two fields changed")?
         .Ok(())
@@ -98,7 +98,7 @@ impl[F: Fields, T: Display] And[F, T] {
         .{ first = self, key, value = borrow value }
     }
 
-    test fn added_fields_are_written_in_order() {
+    test "added fields are written in order" {
         defer let three = fields_text(field("method", "GET").and("status", 200).and("path", "/health"))
         testing.assert_eq(three.view(), " method=GET status=200 path=/health", "three fields changed")?
         .Ok(())
@@ -110,7 +110,7 @@ impl[F: Fields, T: Display] And[F, T] {
 // quotes, `"` and `\` are escaped with a backslash, a line feed, carriage
 // return and tab as `\n`, `\r` and `\t`, and any other control character as
 // `\u` and four hexadecimal digits.
-test fn a_value_is_quoted_when_it_could_not_be_read_back_otherwise() {
+test "a value is quoted when it could not be read back otherwise" {
     defer let text = fields_text(field("empty", "").and("spaced", "not found").and("equals", "a=b").and("plain", "/items/7"))
     testing.assert_eq(text.view(), r#" empty="" spaced="not found" equals="a=b" plain=/items/7"#, "quoting changed")?
     defer let escaped = fields_text(field("text", "say \"hi\"\n\ttab\\ \u{1}\u{1f}\u{7f}"))
@@ -119,7 +119,7 @@ test fn a_value_is_quoted_when_it_could_not_be_read_back_otherwise() {
 }
 
 // A value without a space or a quote is written as it is, whatever its type.
-test fn a_value_is_written_through_display() {
+test "a value is written through display" {
     defer let text = fields_text(field("ratio", 0.5).and("ok", true).and("café", "crème"))
     testing.assert_eq(text.view(), " ratio=0.5 ok=true café=crème", "a value changed")?
     .Ok(())
@@ -177,7 +177,7 @@ fn write_message[A: Allocator](inout line: Line[A], message: Str) -> Result[(), 
     append_quoted_if(&line.text, message, scanned.special || scanned.empty)
 }
 
-test fn a_message_is_quoted_only_when_it_could_be_read_as_a_field() {
+test "a message is quoted only when it could be read as a field" {
     defer let plain = message_text("accepting a connection failed")
     defer let equals = message_text("a=b")
     defer let empty = message_text("")
@@ -228,7 +228,7 @@ impl Display for Changing {
     }
 }
 
-test fn a_value_is_rendered_once_and_written_as_rendered() {
+test "a value is rendered once and written as rendered" {
     defer let asked = testing.AllocationLog.open(mem.system(), 0).unwrap()
     defer let text = fields_text(field("value", Changing { asked = borrow asked }))
     testing.assert_eq(text.view(), " value=plain", "a value was written from another rendering than the one checked")?

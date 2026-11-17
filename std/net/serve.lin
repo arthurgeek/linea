@@ -39,7 +39,7 @@ impl Display for ServeError {
     }
 }
 
-test fn a_serve_error_displays_its_cause() {
+test "a serve error displays its cause" {
     let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
     let invalid = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     var writer = testing.Recorder.of(256).unwrap()
@@ -115,7 +115,7 @@ pub fn accept_attempt[L: Acceptor](inout listener: L, inout pause_ms: UInt64) ->
     }
 }
 
-test fn an_accept_attempt_retries_failures_with_a_growing_pause_that_a_connection_resets() {
+test "an accept_attempt retries failures with a growing pause that a connection resets" {
     let listener = listen(loopback(0)).unwrap()
     let client = connect(listener.local_address().unwrap()).unwrap()
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
@@ -152,7 +152,7 @@ pub fn finish[L: io.Close](sink listener: L, sink stopped: Option[NetError]) -> 
     }
 }
 
-test fn finish_closes_the_listener_and_reports_the_accept_failure_before_the_close_failure() {
+test "finish closes the listener and reports the accept failure before the close failure" {
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
     let broken = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     let healthy = listen(loopback(0)).unwrap()
@@ -207,7 +207,7 @@ pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, pe
     finish(accepting, stopped)
 }
 
-test fn serve_runs_the_handler_once_for_each_connection_and_returns() {
+test "serve runs the handler once for each connection and returns" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let first = connect(bound).unwrap()
@@ -225,7 +225,7 @@ test fn serve_runs_the_handler_once_for_each_connection_and_returns() {
     .Ok(())
 }
 
-test fn the_handler_reads_from_each_connection_and_names_its_peer() {
+test "the handler reads from each connection and names its peer" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     var client = connect(bound).unwrap()
@@ -252,7 +252,7 @@ test fn the_handler_reads_from_each_connection_and_names_its_peer() {
     .Ok(())
 }
 
-test fn serving_no_connections_returns_at_once_and_closes_the_listener() {
+test "serving no connections returns at once and closes the listener" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     var handler = inout [sink served = UInt64(0)] |sink connection: Connection, _peer: Address| {
@@ -274,7 +274,7 @@ test fn serving_no_connections_returns_at_once_and_closes_the_listener() {
     .Ok(())
 }
 
-test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
+test "transient accept failures are retried until a connection is served" {
     let listener = listen(loopback(0)).unwrap()
     let client = connect(listener.local_address().unwrap()).unwrap()
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
@@ -292,7 +292,7 @@ test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
     .Ok(())
 }
 
-test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
+test "a fatal accept failure ends serving and closes the listener" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
@@ -313,7 +313,7 @@ test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
     .Ok(())
 }
 
-test fn a_failed_listener_close_ends_serving_with_close() {
+test "a failed listener close ends serving with close" {
     let listener = listen(loopback(0)).unwrap()
     let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     let scripted = scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
@@ -356,7 +356,7 @@ pub fn serve_workers[L: Acceptor + io.Close + Owned + Shareable + Isolated, H: O
     owner.close().finish()
 }
 
-test fn serve_workers_handles_connections_concurrently() {
+test "serve_workers handles connections concurrently" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = connect(bound).unwrap()
@@ -396,7 +396,7 @@ test fn serve_workers_handles_connections_concurrently() {
 // The first client sends its line only after the third is answered. Two
 // tasks serve: one holds the first client, so the other must serve both the
 // second and the third.
-test fn a_client_that_holds_its_task_holds_up_no_other() {
+test "a client that holds its task holds up no other" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let clients = task.prepare(
@@ -417,7 +417,7 @@ test fn a_client_that_holds_its_task_holds_up_no_other() {
     testing.assert(answered, "a client waited behind one that held its task")?
 }
 
-test fn zero_workers_closes_the_listener_and_returns() {
+test "zero workers closes the listener and returns" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let handler = |sink connection: Connection, _peer: Address| {
@@ -430,7 +430,7 @@ test fn zero_workers_closes_the_listener_and_returns() {
     .Ok(())
 }
 
-test fn serve_workers_sequential_policy() {
+test "serve_workers sequential policy" {
     let listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = connect(bound).unwrap()
@@ -563,7 +563,7 @@ impl[L: Acceptor] Accepting[L] {
 
     // Two clients wait, so a listener asked too early accepts one and the
     // test fails at `early` instead of blocking at `later`.
-    test fn next_asks_the_listener_nothing_until_a_retry_has_waited_its_pause() {
+    test "next asks the listener nothing until a retry has waited its pause" {
         let listener = listen(loopback(0)).unwrap()
         let client = connect(listener.local_address().unwrap()).unwrap()
         let other = connect(listener.local_address().unwrap()).unwrap()
@@ -648,7 +648,7 @@ fn add_tickets(sink first: UInt64, sink second: UInt64) -> UInt64 {
 
 // Each of four tasks takes a ticket and answers it, so the answers summed are
 // 1 + 2 + 3 + 4 whichever task took which.
-test fn on_tasks_answers_what_every_task_answered() {
+test "on_tasks answers what every task answered" {
     let listener = listen(loopback(0)).unwrap()
     let owner = match task.own(Accepting.open(listener, limit: .None)) {
         Ok(owner) => owner,
@@ -684,7 +684,7 @@ fn either_served(sink first: Bool, sink second: Bool) -> Bool {
 
 // No task can be made with a stack of 2^62 bytes, so of the four tasks asked
 // for only the calling thread's runs, and it is handed the waiting client.
-test fn tasks_that_cannot_be_made_do_not_hold_up_the_one_that_runs() {
+test "tasks that cannot be made do not hold up the one that runs" {
     let listener = listen(loopback(0)).unwrap()
     let client = connect(listener.local_address().unwrap()).unwrap()
     let owner = match task.own(Accepting.open(listener, limit: .Some(1))) {
@@ -750,7 +750,7 @@ pub fn reached(connections: Option[UInt64], served: UInt64) -> Bool {
     }
 }
 
-test fn a_limit_is_reached_at_its_count_and_none_is_never_reached() {
+test "a limit is reached at its count and none is never reached" {
     testing.assert_eq(reached(.Some(2), 1), false, "a limit was reached early")?
     testing.assert_eq(reached(.Some(2), 2), true, "a limit was not reached at its count")?
     testing.assert_eq(reached(.None, 1000), false, "no limit was reached")?
@@ -772,7 +772,7 @@ pub fn retryable(error: NetError) -> Bool {
     }
 }
 
-test fn a_reset_or_exhausted_accept_is_retried() {
+test "a reset or exhausted accept is retried" {
     let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
@@ -795,7 +795,7 @@ pub fn accept_pause(previous: UInt64) -> UInt64 {
     previous * 2
 }
 
-test fn the_accept_pause_doubles_to_one_second() {
+test "the accept_pause doubles to one second" {
     testing.assert_eq(accept_pause(0), 5, "the first pause changed")?
     testing.assert_eq(accept_pause(5), 10, "the pause did not double")?
     testing.assert_eq(accept_pause(640), 1000, "the pause passed one second")?

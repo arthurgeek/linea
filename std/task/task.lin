@@ -68,7 +68,7 @@ impl[F: Discardable] release.Settle for Unstarted[F] {
     }
 }
 
-test fn a_failed_preparation_settles_to_its_reason() {
+test "a failed preparation settles to its reason" {
     let body = sink [] |sink me: Chan[End]| {
         me.close()
     }
@@ -111,7 +111,7 @@ pub fn prepare[P: Protocol, F: sink fn(sink me: Chan[P])](sink body: F, on: core
     prepare_in(mem.system(), body, default_stack_bytes, on)
 }
 
-test fn a_prepared_body_runs_once_its_task_starts() {
+test "a prepared body runs once its task starts" {
     var runs = UInt64(0)
     let body = sink [inout runs] |sink me: Chan[End]| {
         runs += 1
@@ -138,7 +138,7 @@ pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](alloc
     .Ok(.{ task = UInt64(task), storage, body })
 }
 
-test fn a_refused_allocation_hands_the_body_back() {
+test "a refused allocation hands the body back" {
     let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
     log.refuse_attempt(1)
     var runs = UInt64(0)
@@ -164,7 +164,7 @@ test fn a_refused_allocation_hands_the_body_back() {
     testing.assert_eq(runs, 0, "a refused body ran")?
 }
 
-test fn a_thread_that_cannot_be_made_hands_the_body_back() {
+test "a thread that cannot be made hands the body back" {
     var runs = UInt64(0)
     let body = sink [inout runs] |sink me: Chan[End]| {
         runs += 1
@@ -190,7 +190,7 @@ pub fn start[P: Protocol, F: Discardable + sink fn(sink me: Chan[P])](sink body:
     start_in(mem.system(), body, default_stack_bytes, on)
 }
 
-test fn a_task_started_in_one_call_runs_its_body() {
+test "a task started in one call runs its body" {
     let base = UInt64(4)
     let body = sink [read base] |sink me: Chan[Send[UInt64, End]]| {
         me.send(base * 10).close()
@@ -210,7 +210,7 @@ pub fn start_in[P: Protocol, F: Discardable + sink fn(sink me: Chan[P]), A: Allo
     .Ok(slot.start())
 }
 
-test fn a_task_that_cannot_start_answers_the_reason() {
+test "a task that cannot start answers the reason" {
     let body = sink [] |sink me: Chan[End]| {
         me.close()
     }
@@ -240,7 +240,7 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
         Chan.opened(linea_task_start(task, run_body[P, F], mem.release_kept_bytes[A], address.raw(kept.body), len, address.raw(kept.buffer)))
     }
 
-    test fn a_started_task_answers_its_handle() {
+    test "a started task answers its handle" {
         let base = UInt64(20)
         let body = sink [read base] |sink me: Chan[Send[UInt64, End]]| {
             me.send(base + 1).close()
@@ -260,7 +260,7 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
         body
     }
 
-    test fn a_cancelled_slot_runs_nothing_and_gives_the_body_back() {
+    test "a cancelled slot runs nothing and gives the body back" {
         let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         var runs = UInt64(0)
         let body = sink [inout runs] |sink me: Chan[End]| {
@@ -319,13 +319,13 @@ pub fn join[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, F2:
     }
 }
 
-test fn join_runs_sequentially() {
+test "join runs sequentially" {
     let (a, b) = join(Policy.Sequential, sink [] || UInt64(10), sink [] || UInt64(20))
     testing.assert_eq(a, 10, "first sequential join result was wrong")?
     testing.assert_eq(b, 20, "second sequential join result was wrong")?
 }
 
-test fn join_runs_on_threads() {
+test "join runs on threads" {
     let (a, b) = join(Policy.Threads(2), sink [] || UInt64(100), sink [] || UInt64(200))
     testing.assert_eq(a, 100, "first threaded join result was wrong")?
     testing.assert_eq(b, 200, "second threaded join result was wrong")?
@@ -370,7 +370,7 @@ pub fn join3[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink fn(
     }
 }
 
-test fn join3_runs_sequentially_and_on_threads() {
+test "join3 runs sequentially and on threads" {
     let (s1, s2, s3) = join3(Policy.Sequential, sink [] || UInt64(1), sink [] || UInt64(2), sink [] || UInt64(3))
     testing.assert_eq(s1, 1, "s1 wrong")?
     testing.assert_eq(s2, 2, "s2 wrong")?
@@ -390,7 +390,7 @@ fn napping(value: UInt64) -> UInt64 {
     value
 }
 
-test fn join3_runs_no_more_closures_at_once_than_its_bound() {
+test "join3 runs no more closures at once than its bound" {
     let started = time.Instant.now()
     let (a, b, c) = join3(Policy.Threads(2), sink [] || napping(1), sink [] || napping(2), sink [] || napping(3))
     let took = started.elapsed().nanoseconds()
@@ -453,7 +453,7 @@ pub fn join4[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discardable
     }
 }
 
-test fn join4_runs_sequentially_and_on_threads() {
+test "join4 runs sequentially and on threads" {
     let (s1, _, _, s4) = join4(Policy.Sequential, sink [] || UInt64(1), sink [] || UInt64(2), sink [] || UInt64(3), sink [] || UInt64(4))
     testing.assert_eq(s1, 1, "s1 wrong")?
     testing.assert_eq(s4, 4, "s4 wrong")?
@@ -463,7 +463,7 @@ test fn join4_runs_sequentially_and_on_threads() {
     testing.assert_eq(t4, 40, "t4 wrong")?
 }
 
-test fn join4_runs_no_more_closures_at_once_than_its_bound() {
+test "join4 runs no more closures at once than its bound" {
     let started = time.Instant.now()
     let (a, _, _, d) = join4(Policy.Threads(3), sink [] || napping(1), sink [] || napping(2), sink [] || napping(3), sink [] || napping(4))
     let took = started.elapsed().nanoseconds()
@@ -560,7 +560,7 @@ fn job30() -> UInt64 {
     30
 }
 
-test fn all_runs_sequentially_and_on_threads() {
+test "all runs sequentially and on threads" {
     var jobs_seq: mem.Vec[fn() -> UInt64, mem.SystemAllocator] = mem.Vec.new()
     &jobs_seq.push(job1).unwrap()
     &jobs_seq.push(job2).unwrap()
@@ -666,7 +666,7 @@ pub fn map[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: T
     }
 }
 
-test fn map_preserves_deterministic_order() {
+test "map preserves deterministic order" {
     var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     for i in 1..=10 {
         &items.push(i).unwrap()
@@ -687,7 +687,7 @@ test fn map_preserves_deterministic_order() {
     testing.assert(order_matches, "deterministic order violated")?
 }
 
-test fn map_keeps_every_result_of_a_fallible_function() {
+test "map keeps every result of a fallible function" {
     var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     for i in 1..=6 {
         &items.push(i).unwrap()

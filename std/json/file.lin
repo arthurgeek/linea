@@ -31,7 +31,7 @@ pub fn read_file_in[A: Allocator](allocator: A, path: fs.Path, limits: ParseLimi
     .Ok(parse_bytes_in(allocator, bytes.as_slice(), limits: limits)?)
 }
 
-test fn a_file_is_read_into_an_arena() {
+test "a file is read into an arena" {
     defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -48,7 +48,7 @@ pub fn read_file(path: fs.Path, limits: ParseLimits = standard_limits) -> Result
     read_file_in(mem.system(), path, limits: limits)
 }
 
-test fn a_file_is_read_and_parsed_into_a_document() {
+test "a file is read and parsed into a document" {
     defer let owned = scratch_file_with(r#"{"name":"tea","ports":[1,2]}"#)
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -56,7 +56,7 @@ test fn a_file_is_read_and_parsed_into_a_document() {
     testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "the parsed document changed")?
 }
 
-test fn a_file_that_is_missing_or_malformed_names_the_step_that_failed() {
+test "a file that is missing or malformed names the step that failed" {
     defer let owned = scratch_file_with(r"{")
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -65,7 +65,7 @@ test fn a_file_that_is_missing_or_malformed_names_the_step_that_failed() {
     testing.assert(failed_at_read(read_file(path)), "a missing file was not a read failure")?
 }
 
-test fn a_file_larger_than_the_parse_limits_is_refused_at_the_read() {
+test "a file larger than the parse limits is refused at the read" {
     defer let owned = scratch_file_with(r#"{"name":"tea"}"#)
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -73,7 +73,7 @@ test fn a_file_larger_than_the_parse_limits_is_refused_at_the_read() {
     testing.assert(failed_at_read(read_file(path, limits: limits)), "a file past the input limit was read")?
 }
 
-test fn a_file_that_is_not_utf8_fails_to_parse_as_invalid_utf8() {
+test "a file that is not utf8 fails to parse as invalid utf8" {
     // `[`, a byte no UTF-8 text holds, and `]`.
     let bytes: [UInt8; _] = [91, 255, 93]
     defer let owned = scratch_file_holding(bytes.as_slice())
@@ -93,7 +93,7 @@ test fn a_file_that_is_not_utf8_fails_to_parse_as_invalid_utf8() {
     testing.assert(invalid_utf8, "a file that is not UTF-8 was not an invalid-UTF-8 parse failure")?
 }
 
-test fn an_empty_file_fails_to_parse_and_a_directory_fails_to_read() {
+test "an empty file fails to parse and a directory fails to read" {
     defer let owned = scratch_file_with("")
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -132,7 +132,7 @@ pub fn decode_file_in[A: Allocator, T: Decode[A]](allocator: A, path: fs.Path, l
     .Ok(T.decode(document, allocator)?)
 }
 
-test fn a_file_is_decoded_into_an_arena() {
+test "a file is decoded into an arena" {
     defer let owned = scratch_file_with(r#"{"name":"tea","port":8080}"#)
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -149,7 +149,7 @@ pub fn decode_file[T: Decode[mem.SystemAllocator]](path: fs.Path, limits: ParseL
     decode_file_in(mem.system(), path, limits: limits)
 }
 
-test fn a_file_is_decoded_into_a_typed_value() {
+test "a file is decoded into a typed value" {
     defer let owned = scratch_file_with(r#"{"name":"tea","port":8080}"#)
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -158,7 +158,7 @@ test fn a_file_is_decoded_into_a_typed_value() {
     testing.assert_eq(settings.port, 8080, "the decoded port changed")?
 }
 
-test fn decoding_a_file_keeps_read_and_decode_failures_distinct() {
+test "decoding a file keeps read and decode failures distinct" {
     defer let owned = scratch_file_with(r#"{"name":"tea","port":"high"}"#)
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
@@ -195,7 +195,7 @@ test fn decoding_a_file_keeps_read_and_decode_failures_distinct() {
     testing.assert(read_failed, "a missing file was not a read failure")?
 }
 
-test fn decoding_a_file_that_is_not_utf8_fails_to_parse() {
+test "decoding a file that is not utf8 fails to parse" {
     let bytes: [UInt8; _] = [123, 255, 125]
     defer let owned = scratch_file_holding(bytes.as_slice())
     let path = fs.Path.from_str(owned.view()).unwrap()
@@ -220,7 +220,7 @@ test fn decoding_a_file_that_is_not_utf8_fails_to_parse() {
     testing.assert(invalid_utf8, "a file that is not UTF-8 was not an invalid-UTF-8 decode failure")?
 }
 
-test fn a_decode_file_error_shows_its_variant_and_converts_through_question_mark() {
+test "a decode_file error shows its variant and converts through question mark" {
     let missing = fs.Path.from_str("/no/such/settings.json").unwrap()
     let loaded: Result[FileSettings[mem.SystemAllocator], DecodeFileError] = decode_file(missing)
     let shown = match loaded {

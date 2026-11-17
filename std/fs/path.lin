@@ -39,7 +39,7 @@ impl Path {
     }
 
     // Path validation preserves bytes independently of text encoding.
-    test fn paths_preserve_non_utf8_bytes_and_reject_nul_at_its_offset() {
+    test "paths preserve non utf8 bytes and reject nul at its offset" {
         let allocator = mem.system()
         defer var bytes = allocator.acquire(3).unwrap()
         &bytes.store_byte(0, 255)
@@ -56,7 +56,7 @@ impl Path {
         .Ok(())
     }
 
-    test fn path_errors_are_independent_of_released_input_bytes() {
+    test "path errors are independent of released input bytes" {
         let allocator = mem.system()
         let bytes = allocator.acquire(2).unwrap()
         let error = match Path.from_bytes(bytes.as_slice()) {
@@ -76,7 +76,7 @@ impl Path {
         Path.from_bytes(source.as_bytes())
     }
 
-    test fn from_str_accepts_text_and_refuses_an_embedded_nul() {
+    test "from_str accepts text and refuses an embedded nul" {
         let path = Path.from_str("logs/today.txt").unwrap()
         testing.assert_eq(path.as_bytes().length(), UInt64(14), "a text path changed its extent")?
         match Path.from_str("a\0b") {
@@ -94,7 +94,7 @@ impl Path {
         .Some(.{ bytes = args.bytes_at(i)? })
     }
 
-    test fn from_arg_takes_an_argument_as_a_path_and_refuses_a_missing_one() {
+    test "from_arg takes an argument as a path and refuses a missing one" {
         let args = env.args()
         let program = Path.from_arg(args, 0).unwrap()
         testing.assert_eq(program.as_bytes(), args.bytes_at(0).unwrap(), "an argument path changed its bytes")?
@@ -107,7 +107,7 @@ impl Path {
         copy(self.bytes)
     }
 
-    test fn as_bytes_returns_the_bytes_the_path_was_made_from() {
+    test "as_bytes returns the bytes the path was made from" {
         let text = "notes/a.txt"
         let path = Path.from_str(text).unwrap()
         testing.assert_eq(path.as_bytes(), text.as_bytes(), "a path changed its bytes")?
@@ -140,7 +140,7 @@ impl Path {
         .Ok(.{ parent = parent, name = name })
     }
 
-    test fn path_components_preserve_a_root_parent_and_reject_special_final_names() {
+    test "path components preserve a root parent and reject special final names" {
         let path = Path.from_str("/a").unwrap()
         let parts = path.components().unwrap()
         testing.assert_eq(parts.parent.length(), UInt64(1), "root parent was removed")?
@@ -191,7 +191,7 @@ impl Debug for Path {
     }
 }
 
-test fn path_display_escapes_undecodable_bytes_without_losing_them() {
+test "path display escapes undecodable bytes without losing them" {
     let allocator = mem.system()
     defer var bytes = allocator.acquire(3).unwrap()
     &bytes.store_byte(0, 97)

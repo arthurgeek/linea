@@ -10,7 +10,7 @@ internal fn exchange[T](inout slot: T, sink next: T) -> T where carries(slot), r
     previous
 }
 
-test fn an_exchange_returns_the_value_it_replaces() {
+test "an exchange returns the value it replaces" {
     var slot: UInt64 = 1
     let previous = exchange(&slot, 2)
     testing.assert_eq(previous, UInt64(1), "the previous value changed")?
@@ -25,7 +25,7 @@ internal fn take[T: Default](inout slot: T) -> T where carries(slot) {
     exchange(&slot, empty)
 }
 
-test fn take_leaves_the_default_behind() {
+test "take leaves the default behind" {
     var pending: Option[UInt64] = .Some(5)
     let taken = take(&pending)
     testing.assert_eq(taken, Option.Some(UInt64(5)), "the taken value changed")?

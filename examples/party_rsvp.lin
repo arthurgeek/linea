@@ -96,7 +96,7 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 
 // Each test builds a request in an arena, as `serve_cgi` does, and hands it
 // to the router.
-test fn the_invitation_is_an_html_form() {
+test "the invitation is an html form" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -110,7 +110,7 @@ test fn the_invitation_is_an_html_form() {
     testing.assert(page.text().unwrap().find(r#"action="/reply""#).is_some(), "the form posts elsewhere")?
 }
 
-test fn a_reply_is_confirmed_as_json() {
+test "a reply is confirmed as json" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -122,7 +122,7 @@ test fn a_reply_is_confirmed_as_json() {
     testing.assert(body.starts_with(r#"{"name":"Ada","guests":2,"message":"see you "#), "the confirmation changed")?
 }
 
-test fn a_reply_without_a_name_or_with_too_many_guests_is_refused() {
+test "a reply without a name or with too many guests is refused" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)

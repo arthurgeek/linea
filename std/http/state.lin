@@ -22,7 +22,7 @@ pub fn with_state[S, H](sink state: S, sink handler: H) -> Stated[S, H] where ca
     .{ state, handler }
 }
 
-test fn with_state_lends_its_state_to_every_request() {
+test "with_state lends its state to every request" {
     var router: Router[Visits] = Router.new()
     &router.route_raw("GET /visit", visit).unwrap()
     defer var server = with_state(Visits { count = 0 }, router)
@@ -46,7 +46,7 @@ impl[S, H] Stated[S, H] {
         borrow self.state
     }
 
-    test fn a_stated_handler_reads_its_state() {
+    test "a stated handler reads its state" {
         var router: Router[Visits] = Router.new()
         &router.route_raw("GET /visit", visit).unwrap()
         defer var server = with_state(Visits { count = 0 }, router)
@@ -71,7 +71,7 @@ impl[S, H: Release] Stated[S, H] {
         state
     }
 
-    test fn into_state_returns_the_state_and_releases_the_handler() {
+    test "into_state returns the state and releases the handler" {
         let router: Router[Visits] = Router.new()
         var server = with_state(Visits { count = 3 }, router)
         defer let arena = mem.Arena.open(mem.system(), size: 65536)

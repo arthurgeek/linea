@@ -29,7 +29,7 @@ internal fn read_fd[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset: UI
     linea_read_some(fd, address.raw(bytes_in(buffer, offset)), count)
 }
 
-test trap fn fd_reads_reject_an_offset_past_the_buffer() -> Result[(), testing.Failure] {
+test trap "fd reads reject an offset past the buffer" -> Result[(), testing.Failure] {
     // Offset two exceeds a one-byte extent, even for an empty request.
     // The invalid descriptor -1 must never reach the runtime.
     let allocator = system()
@@ -41,7 +41,7 @@ test trap fn fd_reads_reject_an_offset_past_the_buffer() -> Result[(), testing.F
     .Ok(())
 }
 
-test trap fn fd_reads_reject_a_count_past_the_remaining_buffer() -> Result[(), testing.Failure] {
+test trap "fd reads reject a count past the remaining buffer" -> Result[(), testing.Failure] {
     // Offset one leaves no bytes; UInt64.max also exposes unchecked offset+count.
     // The invalid descriptor -1 must never reach the runtime.
     let allocator = system()
@@ -72,7 +72,7 @@ internal fn read_socket[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset
     linea_net_read(fd, address.raw(bytes_in(buffer, offset)), count, deadline_ns)
 }
 
-test trap fn socket_reads_reject_a_range_past_the_buffer() -> Result[(), testing.Failure] {
+test trap "socket reads reject a range past the buffer" -> Result[(), testing.Failure] {
     // The invalid descriptor -1 must never reach the runtime.
     let allocator = system()
     var bytes = allocator.acquire(1) else |_| {
@@ -103,7 +103,7 @@ internal fn write_slice_fd_at(bytes: Slice[UInt8], fd: Int32, file_offset: UInt6
     linea_write_at(fd, address.raw(slice_address(bytes)), bytes.length(), file_offset)
 }
 
-test fn empty_fd_requests_do_not_access_a_descriptor() {
+test "empty fd requests do not access a descriptor" {
     // -1 is invalid, so success proves that a zero-byte request bypasses I/O.
     let allocator = system()
     defer var bytes = allocator.acquire(1) else |_| {
@@ -152,7 +152,7 @@ internal fn random_words(inout high: UInt64, inout low: UInt64) -> Int64 {
     linea_random_words(&high, &low)
 }
 
-test fn random_words_differ_between_reads() {
+test "random_words differ between reads" {
     var first_high: UInt64 = 0
     var first_low: UInt64 = 0
     var second_high: UInt64 = 0
@@ -187,7 +187,7 @@ fn open_policy_code(policy: OpenPolicy) -> UInt8 {
     }
 }
 
-test fn open_policies_have_the_runtimes_codes() {
+test "open policies have the runtime's codes" {
     testing.assert_eq(open_policy_code(.ReadExisting), UInt8(0), "reading an existing file changed its code")?
     testing.assert_eq(open_policy_code(.CreateNew), UInt8(1), "exclusive creation changed its code")?
     testing.assert_eq(open_policy_code(.CreateOrTruncate), UInt8(2), "truncating creation changed its code")?
@@ -223,7 +223,7 @@ internal fn _close_fd(fd: Int32) -> Int64 {
     linea_close(fd)
 }
 
-test fn closing_a_descriptor_the_process_lacks_reports_an_error() {
+test "closing a descriptor the process lacks reports an error" {
     // -1 is never an open descriptor.
     testing.assert(_close_fd(-1) < 0, "closing an invalid descriptor succeeded")?
 }
@@ -242,7 +242,7 @@ internal fn _terminated[A: Allocator](allocator: A, bytes: Slice[UInt8]) -> Resu
     .Ok(buffer)
 }
 
-test fn a_terminated_copy_ends_with_one_zero_byte() {
+test "a terminated copy ends with one zero byte" {
     defer let copied = _terminated(system(), "tea".as_bytes()).unwrap()
     testing.assert_eq(copied.length(), UInt64(4), "the copy did not add one byte")?
     testing.assert_eq(copied.load_byte(0), UInt8(116), "the copy changed the first byte, ASCII t")?

@@ -43,7 +43,7 @@ impl TryFrom[Celsius] for ThermostatSetting {
     }
 }
 
-test fn freezing_and_boiling_have_the_expected_celsius_values() {
+test "freezing and boiling have the expected celsius values" {
     let freezing = Fahrenheit { value = 32.0 }
     let boiling = Fahrenheit { value = 212.0 }
     let cold = Celsius.from(freezing)
@@ -52,7 +52,7 @@ test fn freezing_and_boiling_have_the_expected_celsius_values() {
     testing.assert_eq(hot.value, 100.0, "water boils at one hundred Celsius")?
 }
 
-test fn thermostat_conversion_accepts_only_its_supported_range() {
+test "thermostat conversion accepts only its supported range" {
     let below_source = Celsius { value = 4.9 }
     let minimum_source = Celsius { value = minimum_setpoint() }
     let maximum_source = Celsius { value = maximum_setpoint() }
@@ -67,14 +67,14 @@ test fn thermostat_conversion_accepts_only_its_supported_range() {
     testing.assert(above.is_none(), "thermostat accepted a setpoint above its operating range")?
 }
 
-test fn thermostat_conversion_observes_its_source() {
+test "thermostat conversion observes its source" {
     let source = Celsius { value = 20.0 }
     let accepted = ThermostatSetting.try_from(source)
     testing.assert_eq(source.value, 20.0, "TryFrom consumed its observed Celsius source")?
     testing.assert(accepted.is_some(), "thermostat rejected a supported setpoint")?
 }
 
-test fn thermostat_conversion_rejects_nonfinite_values() {
+test "thermostat conversion rejects nonfinite values" {
     let zero = 0.0
     let one = 1.0
     let nan_source = Celsius { value = zero / zero }

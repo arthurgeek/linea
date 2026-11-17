@@ -52,7 +52,7 @@ impl Spec {
         Spec { width, ..Spec.default() }
     }
 
-    test fn a_default_spec_adds_no_padding() {
+    test "a default spec adds no padding" {
         let plain = Spec.default()
         testing.assert_eq(plain.width, UInt64(0), "a default spec has a width")?
         testing.assert_eq(plain.align, .None, "a default spec chose an alignment")?
@@ -60,7 +60,7 @@ impl Spec {
         .Ok(())
     }
 
-    test fn a_padded_spec_sets_only_the_width() {
+    test "a padded spec sets only the width" {
         let spec = Spec.padded(6)
         let expected = Spec { width = 6, ..Spec.default() }
         testing.assert_eq(spec, expected, "a padded spec changed more than its width")?
@@ -109,7 +109,7 @@ fn padding_for(spec: Spec, usual: Align, used: UInt64) -> Padding {
     }
 }
 
-test fn padding_splits_the_spare_columns_by_alignment() {
+test "padding splits the spare columns by alignment" {
     var spec = Spec.padded(7)
     let left = padding_for(spec, .Left, 2)
     testing.assert(left.before == 0 && left.after == 5, "left alignment padded before the value")?
@@ -172,7 +172,7 @@ fn leading_scalars(text: Str, count: UInt64) -> Str where carries(text) {
     copy(text)
 }
 
-test fn a_fill_of_several_scalars_stays_within_the_width() {
+test "a fill of several scalars stays within the width" {
     var spec = Spec { align = .Some(.Right), fill = "-=", ..Spec.padded(7) }
     expect_display("ab", spec, "-=-=-ab", "a two-scalar fill overran the width")?
     spec.fill = "·→"
@@ -201,7 +201,7 @@ pub fn write_display[T: Display, W: Writer](value: T, spec: Spec, inout w: W) ->
     write_fill(spec.fill, padding.after, &w)
 }
 
-test fn write_display_pads_text_by_its_alignment() {
+test "write_display pads text by its alignment" {
     var spec = Spec.padded(6)
     expect_display("ab", spec, "ab    ", "text is not left-aligned by default")?
     spec.align = .Some(.Right)
@@ -214,13 +214,13 @@ test fn write_display_pads_text_by_its_alignment() {
     .Ok(())
 }
 
-test fn write_display_ignores_number_parts_on_other_values() {
+test "write_display ignores number parts on other values" {
     let spec = Spec { plus = true, zero = true, precision = .Some(1), ..Spec.padded(5) }
     expect_display(true, spec, "true ", "a number part changed a Bool")?
     .Ok(())
 }
 
-test fn write_display_appends_to_what_the_writer_holds() {
+test "write_display appends to what the writer holds" {
     defer var out = String.new()
     &out.write_str(">").unwrap()
     write_display("ab", Spec { align = .Some(.Right), ..Spec.padded(4) }, &out).unwrap()
@@ -246,7 +246,7 @@ pub fn write_debug[T: Debug, W: Writer](value: T, spec: Spec, inout w: W) -> Res
     write_fill(spec.fill, padding.after, &w)
 }
 
-test fn write_debug_pads_quoted_text() {
+test "write_debug pads quoted text" {
     let spec = Spec { align = .Some(.Right), ..Spec.padded(6) }
     expect_debug("ab", spec, r#"  "ab""#, "Debug text was not padded with its quotes")?
     let one: Option[UInt8] = .Some(1)
@@ -254,7 +254,7 @@ test fn write_debug_pads_quoted_text() {
     .Ok(())
 }
 
-test fn write_debug_appends_to_what_the_writer_holds() {
+test "write_debug appends to what the writer holds" {
     defer var out = String.new()
     &out.write_str(">").unwrap()
     write_debug("ab", Spec.padded(6), &out).unwrap()
@@ -339,7 +339,7 @@ pub fn write_integer[T: Integer, W: Writer](value: T, spec: Spec, inout w: W) ->
     }
 }
 
-test fn write_integer_right_aligns_and_pads_after_the_sign() {
+test "write_integer right aligns and pads after the sign" {
     expect_integer(42, Spec.padded(5), "   42", "numbers are not right-aligned by default")?
     let zeros = Spec { zero = true, ..Spec.padded(4) }
     expect_integer(7, zeros, "0007", "zero padding changed")?
@@ -354,7 +354,7 @@ test fn write_integer_right_aligns_and_pads_after_the_sign() {
     .Ok(())
 }
 
-test fn write_integer_writes_hexadecimal_digits_in_the_case_asked() {
+test "write_integer writes hexadecimal_digits in the case asked" {
     let lower = Spec { hex = .Some(.Lower), ..Spec.default() }
     let upper = Spec { hex = .Some(.Upper), ..Spec.default() }
     expect_integer(UInt8(255), lower, "ff", "a byte did not write two lowercase digits")?
@@ -374,7 +374,7 @@ test fn write_integer_writes_hexadecimal_digits_in_the_case_asked() {
     .Ok(())
 }
 
-test fn write_integer_reaches_both_ends_of_every_width() {
+test "write_integer reaches both ends of every width" {
     let least: Int8 = -128
     let most: UInt64 = 18446744073709551615
     let lowest: Int64 = -9223372036854775808
@@ -384,7 +384,7 @@ test fn write_integer_reaches_both_ends_of_every_width() {
     .Ok(())
 }
 
-test fn write_integer_appends_to_what_the_writer_holds() {
+test "write_integer appends to what the writer holds" {
     defer var out = String.new()
     &out.write_str(">").unwrap()
     write_integer(-7, Spec { zero = true, ..Spec.padded(4) }, &out).unwrap()
@@ -406,7 +406,7 @@ fn hexadecimal_digits(n: UInt64) -> UInt64 {
     count
 }
 
-test fn hexadecimal_digits_count_every_place() {
+test "hexadecimal_digits count every place" {
     testing.assert_eq(hexadecimal_digits(0), UInt64(1), "zero has one digit")?
     testing.assert_eq(hexadecimal_digits(15), UInt64(1), "fifteen has one digit")?
     testing.assert_eq(hexadecimal_digits(16), UInt64(2), "sixteen has two digits")?
@@ -468,7 +468,7 @@ pub fn write_float[W: Writer](value: Float64, spec: Spec, inout w: W) -> Result[
     write_float_digits(value, .Binary64, spec, &w)
 }
 
-test fn write_float_rounds_to_its_precision() {
+test "write_float rounds to its precision" {
     let cents = Spec { precision = .Some(2), ..Spec.default() }
     expect_float(3.5, cents, "3.50", "precision did not add zeros")?
     expect_float(2.675, cents, "2.68", "precision did not round the shown digits half away from zero")?
@@ -487,7 +487,7 @@ test fn write_float_rounds_to_its_precision() {
     .Ok(())
 }
 
-test fn write_float_pads_signs_and_names_non_finite_values() {
+test "write_float pads signs and names non finite values" {
     var spec = Spec { precision = .Some(1), ..Spec.padded(8) }
     expect_float(21.5, spec, "    21.5", "floats are not right-aligned by default")?
     spec.zero = true
@@ -503,7 +503,7 @@ test fn write_float_pads_signs_and_names_non_finite_values() {
     .Ok(())
 }
 
-test fn write_float_appends_to_what_the_writer_holds() {
+test "write_float appends to what the writer holds" {
     defer var out = String.new()
     &out.write_str(">").unwrap()
     write_float(2.5, Spec { precision = .Some(2), ..Spec.padded(7) }, &out).unwrap()
@@ -520,7 +520,7 @@ pub fn write_float32[W: Writer](value: Float32, spec: Spec, inout w: W) -> Resul
     write_float_digits(Float64(value), .Binary32, spec, &w)
 }
 
-test fn write_float32_rounds_the_binary32_digits() {
+test "write_float32 rounds the binary32 digits" {
     let cents = Spec { precision = .Some(2), ..Spec.default() }
     expect_float32(0.125, cents, "0.13", "a half did not round away from zero")?
     expect_float32(16777216.0, Spec { plus = true, ..Spec.padded(12) }, " +16777216.0", "padding or sign changed")?
@@ -558,7 +558,7 @@ fn spec_of(fill: Str, align: UInt8, plus: Bool, zero: Bool, width: UInt64, fract
     Spec { fill = copy(fill), align = side, plus, zero, width, precision, hex = digits }
 }
 
-test fn a_spec_of_the_written_parts_names_each_one() {
+test "a spec_of the written parts names each one" {
     let spec = spec_of("*", 3, true, false, 9, true, 2, 0)
     let expected = Spec { fill = "*", align = .Some(.Center), plus = true, zero = false, width = 9, precision = .Some(2), hex = .None }
     testing.assert_eq(spec, expected, "a written part was lost")?

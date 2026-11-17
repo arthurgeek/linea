@@ -80,7 +80,7 @@ fn header_value(head: Str, fields: mem.Slice[Field], name: Str) -> Option[Str] w
     .None
 }
 
-test fn a_header_value_is_found_by_its_folded_name() {
+test "a header_value is found by its folded name" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var head = String.new_in(arena.handle())
     let name = store_part(&head, "Content-Type").unwrap()
@@ -102,7 +102,7 @@ fn media_type(content_type: Option[Str]) -> Option[Str] {
     .Some(media.trim_ascii())
 }
 
-test fn a_media_type_is_the_value_without_its_parameters() {
+test "a media_type is the value without its parameters" {
     testing.assert_eq(media_type(.Some("text/html")), Option.Some("text/html"), "a bare type changed")?
     testing.assert_eq(media_type(.Some(" text/html ; charset=utf-8")), Option.Some("text/html"), "a type with a parameter kept its parameter or its spaces")?
     testing.assert_eq(media_type(.Some("")), Option.Some(""), "an empty value changed")?
@@ -120,7 +120,7 @@ fn is_form_content_type(content_type: Option[Str]) -> Bool {
     media.equals_ascii_folded("application/x-www-form-urlencoded")
 }
 
-test fn a_form_content_type_is_named_exactly() {
+test "a form content type is named exactly" {
     testing.assert(is_form_content_type(.Some("application/x-www-form-urlencoded")), "the form type was not named")?
     testing.assert(is_form_content_type(.Some("Application/X-WWW-Form-URLEncoded; charset=utf-8")), "a folded type with a parameter was not named")?
     testing.assert(!is_form_content_type(.Some("application/json")), "JSON was a form")?
@@ -159,7 +159,7 @@ pub fn new_request[P: Allocator](memory: mem.Handle[P], method: Str, target: Str
     assembled(memory, head, line, header_fields, payload.into_bytes(), standard_limits)
 }
 
-test fn a_new_request_holds_its_method_target_and_body() {
+test "a new_request holds its method target and body" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "POST", "/echo?x=1", body: "hello").unwrap()
     let request = sent.request()
@@ -222,7 +222,7 @@ fn form_of[P: Allocator](inout stored: Vec[UInt8, mem.Handle[P]], is_form: Bool,
     }
 }
 
-test fn a_form_body_is_read_only_when_the_content_type_names_one() {
+test "a form body is read only when the content type names one" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var not_form: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
     let skipped = form_of(&not_form, false, "name=Ada".as_bytes(), arena.handle(), 100).unwrap()
@@ -283,7 +283,7 @@ fn decode_encoded_pairs[A: Allocator](inout stored: Vec[UInt8, A], source: Str, 
     }
 }
 
-test fn a_query_that_is_not_percent_encoded_utf8_has_no_pairs() {
+test "a query that is not percent encoded utf8 has no pairs" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var stored: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
     let short = decode_encoded_pairs(&stored, "a=%4", arena.handle()).unwrap()
@@ -315,7 +315,7 @@ fn decode_pair[A: Allocator](inout stored: Vec[UInt8, A], inout fields: Vec[Fiel
     }
 }
 
-test fn a_query_decodes_into_its_pairs() {
+test "a query decodes into its pairs" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var stored: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
     let fields = decode_encoded_pairs(&stored, "a=1&&name=Ada+L%C3%B3pez&flag&=x&b=", arena.handle()).unwrap().unwrap()
@@ -363,7 +363,7 @@ impl[P: Allocator] Message[P] {
         }
     }
 
-    test fn a_message_is_read_through_its_request() {
+    test "a message is read through its request" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = read_in_steps(arena.handle(), "GET /a HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
         let request = sent.request()
@@ -396,7 +396,7 @@ impl[P: Allocator] Message[P] {
         add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
     }
 
-    test fn a_test_request_carries_the_headers_added_to_it() {
+    test "a test request carries the headers added to it" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         var sent = new_request(arena.handle(), "POST", "/orders", body: r"{}").unwrap()
         &sent.add_header("Content-Type", " application/json ").unwrap()
@@ -412,7 +412,7 @@ impl[P: Allocator] Message[P] {
 
     // The headers added one call at a time are held to what a request's header
     // lines are held to together.
-    test fn headers_added_one_at_a_time_are_checked_together() {
+    test "headers added one at a time are checked together" {
         defer let arena = mem.Arena.open(mem.system(), size: 65536)
         var sent = new_request(arena.handle(), "POST", "/orders", body: "abc").unwrap()
         &sent.add_header("Content-Length", "3").unwrap()
@@ -603,7 +603,7 @@ impl[P: Allocator] Request[P] {
         copy(self.memory)
     }
 
-    test fn a_request_allocates_in_its_arena() {
+    test "a request allocates in its arena" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
         // The arena can hold 4088 bytes; the message already holds some.
@@ -623,7 +623,7 @@ impl[P: Allocator] Request[P] {
         self.known_method
     }
 
-    test fn a_request_names_its_method() {
+    test "a request names its method" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let request = read_in_steps(arena.handle(), "PATCH /x HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
         let method = request.request().method()
@@ -732,7 +732,7 @@ impl[P: Allocator] Request[P] {
         false
     }
 
-    test fn request_is_https_checks_forwarded_headers_and_env() {
+    test "request is_https checks forwarded headers and env" {
         defer let arena = mem.Arena.open(mem.system(), size: 8192)
 
         // Untrusted by default: client-supplied headers do not make request HTTPS.
@@ -794,7 +794,7 @@ impl[P: Allocator] Request[P] {
         stored_part(self.head, self.method_token)
     }
 
-    test fn a_request_keeps_its_method_token_as_sent() {
+    test "a request keeps its method token as sent" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = read_in_steps(arena.handle(), "BREW /pot HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
         testing.assert_eq(sent.request().method_text(), "BREW", "the method token changed")?
@@ -810,7 +810,7 @@ impl[P: Allocator] Request[P] {
         path
     }
 
-    test fn a_path_ends_at_the_query() {
+    test "a path ends at the query" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = read_in_steps(arena.handle(), "GET /a/b%20c?x=1 HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
         testing.assert_eq(sent.request().path(), "/a/b%20c", "the path changed")?
@@ -826,7 +826,7 @@ impl[P: Allocator] Request[P] {
         .Some(query)
     }
 
-    test fn a_query_follows_the_first_question_mark() {
+    test "a query follows the first question mark" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = read_in_steps(arena.handle(), "GET /a?x=1?y HTTP/1.1\r\nHost: b\r\n\r\n".as_bytes(), 16, Limits.default()).unwrap()
         testing.assert_eq(sent.request().query(), Option.Some("x=1?y"), "the query changed")?
@@ -844,7 +844,7 @@ impl[P: Allocator] Request[P] {
         header_value(self.head, self.header_fields, name)
     }
 
-    test fn a_header_is_found_by_its_folded_name() {
+    test "a header is found by its folded name" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let input = "GET / HTTP/1.1\r\nHost: b\r\nAccept: text/plain\r\naccept: text/html\r\nX-Empty:\r\n\r\n"
         let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
@@ -860,7 +860,7 @@ impl[P: Allocator] Request[P] {
         .{ stored = copy(self.head), fields = copy(self.header_fields), index = 0 }
     }
 
-    test fn headers_walk_in_arrival_order() {
+    test "headers walk in arrival order" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let input = "GET / HTTP/1.1\r\nHost:  example.com \r\nAccept: */*\r\nAccept: text/plain\r\n\r\n"
         let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
@@ -882,7 +882,7 @@ impl[P: Allocator] Request[P] {
         copy(self.payload)
     }
 
-    test fn a_body_holds_exactly_its_length() {
+    test "a body holds exactly its length" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Length: 3\r\n\r\nabcdef"
         let source = Fragments { bytes = input.as_bytes(), position = 0, step = 4, failure = .None }
@@ -906,7 +906,7 @@ impl[P: Allocator] Request[P] {
         Str.from_bytes(self.payload)
     }
 
-    test fn a_body_is_text_only_when_it_is_utf8() {
+    test "a body is text only when it is utf8" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let whole = read_in_steps(arena.handle(), "POST / HTTP/1.1\r\nHost: b\r\nContent-Length: 3\r\n\r\nhé".as_bytes(), 16, Limits.default()).unwrap()
         testing.assert_ok_eq(whole.request().text(), "hé", "UTF-8 text changed")?
@@ -940,7 +940,7 @@ impl[P: Allocator] Request[P] {
         .None
     }
 
-    test fn a_path_value_is_found_by_its_exact_name() {
+    test "a path_value is found by its exact name" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
         var matched = String.new_in(arena.handle())
@@ -969,7 +969,7 @@ impl[P: Allocator] Request[P] {
         }
     }
 
-    test fn a_request_gives_its_path_params_once_a_router_matched_it() {
+    test "a request gives its path_params once a router matched it" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/items/42", body: "").unwrap()
         var matched = String.new_in(arena.handle())
@@ -992,7 +992,7 @@ impl[P: Allocator] Request[P] {
         }
     }
 
-    test fn a_request_gives_its_query_params_decoded() {
+    test "a request gives its query_params decoded" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/items?sort=new+first", body: "").unwrap()
         let broken = new_request(arena.handle(), "GET", "/items?sort=%zz", body: "").unwrap()
@@ -1017,7 +1017,7 @@ impl[P: Allocator] Request[P] {
         }
     }
 
-    test fn a_request_gives_its_form_params_only_when_the_body_is_one() {
+    test "a request gives its form_params only when the body is one" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
         let untyped = new_request(arena.handle(), "POST", "/signup", body: "name=Ada").unwrap()
@@ -1039,7 +1039,7 @@ impl[P: Allocator] Request[P] {
         Origin.from_authority(host.trim_ascii(), is_https)
     }
 
-    test fn a_request_gives_its_origin_from_the_host_header() {
+    test "a request gives its origin from the host header" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         var req = new_request(arena.handle(), "GET", "/", body: "").unwrap()
         &req.add_header("Host", "example.test:8080").unwrap()
@@ -1054,7 +1054,7 @@ impl[P: Allocator] Request[P] {
     }
 }
 
-test fn every_connection_header_can_request_close() {
+test "every connection header can request close" {
     defer let arena = mem.Arena.open(mem.system(), 4096)
     var message = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     &message.add_header("Connection", "keep-alive").unwrap()

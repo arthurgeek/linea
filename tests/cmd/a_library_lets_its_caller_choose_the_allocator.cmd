@@ -17,7 +17,7 @@ on the library chooses one per call.
   >     fmt.render_owned_in(allocator, "{word}!")
   > }
   > 
-  > test fn a_word_is_shouted_into_an_arena() {
+  > test "a word is shouted into an arena" {
   >     let arena = mem.Arena.open(mem.system(), size: 256)
   >     defer arena.release()
   >     let loud = shout_in(arena.handle(), "hi") else |_| {
@@ -31,7 +31,7 @@ on the library chooses one per call.
   >     shout_in(mem.system(), word)
   > }
   > 
-  > test fn a_word_is_shouted_from_the_system_allocator() {
+  > test "a word is shouted from the system allocator" {
   >     defer let loud = shout("hi") else |_| {
   >         return .Err(testing.refused("the system allocator holds the word"))
   >     }
@@ -39,8 +39,8 @@ on the library chooses one per call.
   > }
   > LIN
   $ linea test shout
-  ok    a_word_is_shouted_from_the_system_allocator
-  ok    a_word_is_shouted_into_an_arena
+  ok    a word is shouted from the system allocator
+  ok    a word is shouted into an arena
   
   2 passed, 0 failed
   $ cat > greeter/linea.json <<'JSON'

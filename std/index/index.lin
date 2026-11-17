@@ -29,7 +29,7 @@ fn from_end_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
     true
 }
 
-test fn derived_from_end_equality_compares_the_offset() {
+test "derived from end equality compares the offset" {
     let one = FromEnd { k = 1 }
     let same = FromEnd { k = 1 }
     let two = FromEnd { k = 2 }
@@ -39,7 +39,7 @@ test fn derived_from_end_equality_compares_the_offset() {
     .Ok(())
 }
 
-test fn derived_from_end_debug_renders_the_offset() {
+test "derived from end debug renders the offset" {
     let two = FromEnd { k = 2 }
     // Sixty-four bytes leave room for the complete debug text checked below.
     var writer = testing.Recorder.of(64).unwrap()
@@ -51,7 +51,7 @@ test fn derived_from_end_debug_renders_the_offset() {
     .Ok(())
 }
 
-test fn a_from_end_index_displays_its_source_notation() {
+test "a from end index displays its source notation" {
     let last = FromEnd { k = 1 }
     let past_end = FromEnd { k = 0 }
     // The 16-byte recorder holds both indexes and their separator.
@@ -63,7 +63,7 @@ test fn a_from_end_index_displays_its_source_notation() {
     .Ok(())
 }
 
-test fn derived_from_end_release_consumes_the_offset() {
+test "derived from end release consumes the offset" {
     let index = FromEnd { k = 3 }
     index.release()
     .Ok(())

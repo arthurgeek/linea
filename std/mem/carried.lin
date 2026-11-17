@@ -29,7 +29,7 @@ fn carried_test_issue[F: sink fn()](sink body: F) -> CarriedTestReceipt[F] where
     .{ number = 1, held = .{} }
 }
 
-test fn a_carried_field_keeps_a_lend_until_its_holders_last_use() {
+test "a carried field keeps a lend until its holders last use" {
     var count = UInt64(0)
     let receipt = carried_test_issue(
         sink [inout count] || {
@@ -46,7 +46,7 @@ fn carried_test_owns_everything[T: Owned](_value: T) -> Bool {
     true
 }
 
-test fn a_carried_type_that_can_carry_nothing_is_owned() {
+test "a carried type that can carry nothing is owned" {
     let held: Carried[UInt64] = .{}
     testing.assert(carried_test_owns_everything(held), "Carried[UInt64] was not Owned")?
     .Ok(())

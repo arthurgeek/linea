@@ -152,7 +152,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         }
     }
 
-    test fn a_shared_log_refuses_the_acquisition_open_names() {
+    test "a shared log refuses the acquisition open names" {
         defer let log = SharedAllocationLog.open(system(), 2).unwrap()
         let first = log.allocator().acquire(16)
         let accepted = first.is_ok()
@@ -171,7 +171,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         .{ log = self.owner.client(), backing = copy(self.backing) }
     }
 
-    test fn a_shared_log_allocator_is_shared_by_tasks_that_allocate_at_once() {
+    test "a shared log allocator is shared by tasks that allocate at once" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         allocate_on_two_tasks(log.allocator(), 200)
         testing.assert_eq(log.attempts(), UInt64(400), "an attempt from one of the tasks was lost")?
@@ -184,7 +184,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call(|inout state: SharedLogState| state.attempts)
     }
 
-    test fn a_shared_log_counts_refused_attempts_too() {
+    test "a shared log counts refused attempts too" {
         defer let log = SharedAllocationLog.open(system(), 1).unwrap()
         let refused = log.allocator().acquire(8)
         refused.release()
@@ -198,7 +198,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call(|inout state: SharedLogState| state.acquired)
     }
 
-    test fn a_shared_log_counts_only_successful_acquisitions() {
+    test "a shared log counts only successful acquisitions" {
         defer let log = SharedAllocationLog.open(system(), 2).unwrap()
         let first = log.allocator().acquire(16).unwrap()
         let second = log.allocator().acquire(8)
@@ -212,7 +212,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call(|inout state: SharedLogState| state.peak_bytes)
     }
 
-    test fn a_shared_log_remembers_the_most_bytes_live_at_once() {
+    test "a shared log remembers the most bytes live at once" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         let first = log.allocator().acquire(16).unwrap()
         let second = log.allocator().acquire(8).unwrap()
@@ -229,7 +229,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call(|inout state: SharedLogState| state.live_bytes)
     }
 
-    test fn a_shared_log_counts_what_is_acquired_and_not_disposed() {
+    test "a shared log counts what is acquired and not disposed" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         let first = log.allocator().acquire(16).unwrap()
         let second = log.allocator().acquire(8).unwrap()
@@ -249,7 +249,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call([sink attempt] |inout state: SharedLogState| state.refuse_at = attempt)
     }
 
-    test fn a_shared_log_refuses_a_later_attempt_through_live_handles() {
+    test "a shared log refuses a later attempt through live handles" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         let allocator = log.allocator()
         allocator.acquire(8).unwrap().release()
@@ -270,7 +270,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call([sink attempt] |inout state: SharedLogState| state.refuse_from = attempt)
     }
 
-    test fn a_shared_log_refuses_every_attempt_from_the_one_named() {
+    test "a shared log refuses every attempt from the one named" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         log.refuse_from(2)
         let first = log.allocator().acquire(8)
@@ -297,7 +297,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call([sink size, sink attempt] |inout state: SharedLogState| &state.refuse_size(size, at: attempt, from: 0))
     }
 
-    test fn a_shared_log_refuses_one_acquisition_of_the_named_size() {
+    test "a shared log refuses one acquisition of the named size" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         log.refuse_size_attempt(4096, 2)
         let small = log.allocator().acquire(16)
@@ -327,7 +327,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call([sink size, sink attempt] |inout state: SharedLogState| &state.refuse_size(size, at: 0, from: attempt))
     }
 
-    test fn a_shared_log_refuses_every_acquisition_of_the_named_size_from_one_on() {
+    test "a shared log refuses every acquisition of the named size from one on" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         log.refuse_size_from(4096, 2)
         let first = log.allocator().acquire(4096)
@@ -356,7 +356,7 @@ impl[H: Allocator] SharedAllocationLog[H] {
         self.owner.client().call(|inout state: SharedLogState| state.all_disposed())
     }
 
-    test fn a_shared_log_is_not_all_disposed_while_an_allocation_is_live() {
+    test "a shared log is not all_disposed while an allocation is live" {
         defer let log = SharedAllocationLog.open(system(), 0).unwrap()
         let buffer = log.allocator().acquire(16).unwrap()
         let settled_while_live = log.all_disposed()

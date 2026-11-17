@@ -30,7 +30,7 @@ impl[T, U: From[T]] Into[U] for T {
     }
 }
 
-test fn into_transfers_a_linear_source_to_the_requested_destination() {
+test "into transfers a linear source to the requested destination" {
     let ticket = Ticket { number = 42 }
     let receipt: Receipt = ticket.into()
     let Receipt { number } = receipt
@@ -40,7 +40,7 @@ test fn into_transfers_a_linear_source_to_the_requested_destination() {
     testing.assert_eq(numeric, UInt64(7), "result context selected the wrong destination")?
 }
 
-test fn into_preserves_the_external_owner_of_a_transferred_view() {
+test "into preserves the external owner of a transferred view" {
     defer let owner = "shipment".to_owned().unwrap()
     let label = Label { text = owner.view() }
     let view: Str = label.into()
@@ -73,7 +73,7 @@ fn convert_to[T, S: Into[T]](sink source: S) -> T where carries(source) {
     source.into()
 }
 
-test fn a_generic_into_call_uses_its_declared_target() {
+test "a generic into call uses its declared target" {
     let ticket = Ticket { number = 19 }
     let receipt: Receipt = convert_to(ticket)
     let Receipt { number } = receipt

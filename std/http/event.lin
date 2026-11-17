@@ -96,7 +96,7 @@ impl Display for Failure {
     }
 }
 
-test fn a_failure_displays_what_went_wrong() {
+test "a failure displays what went wrong" {
     let broken = io.IoError { operation = .Write, category = .BrokenPipe, code = .None, progress = 0 }
     failure_displays_as(.Refused(.Some("the body is not JSON")), "the handler refused the request: the body is not JSON", "a refusal changed")?
     failure_displays_as(.Refused(.None), "the handler refused the request", "a refusal without a message changed")?

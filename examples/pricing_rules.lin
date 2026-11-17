@@ -68,13 +68,13 @@ fn checkout_rules() -> Result[Rules, mem.Oom] {
     }
 }
 
-test fn a_large_cart_is_discounted_then_shipped() {
+test "a large cart is discounted then shipped" {
     defer let rules = checkout_rules().unwrap()
     // 6000 less ten percent is 5400; shipping makes 5899, rounded down to 5800.
     testing.assert_eq(price(rules, 6000), 5800, "the large cart's price changed")?
 }
 
-test fn a_small_cart_pays_full_price_and_shipping() {
+test "a small cart pays full price and shipping" {
     defer let rules = checkout_rules().unwrap()
     // 2000 is under the threshold; shipping makes 2499, rounded down to 2400.
     testing.assert_eq(price(rules, 2000), 2400, "the small cart's price changed")?

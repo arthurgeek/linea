@@ -99,7 +99,7 @@ pub fn save_atomic_in[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[U
     finish_atomic(target, temporary, .None, false, FsFailure.new(.Io(last_error)))
 }
 
-test fn an_atomic_save_takes_its_scratch_names_from_an_arena() {
+test "an atomic save takes its scratch names from an arena" {
     // The arena holds the path scratch and anything the operation returns.
     defer let arena = mem.Arena.open(mem.system(), size: 1024)
     let allocator = arena.handle()
@@ -112,7 +112,7 @@ test fn an_atomic_save_takes_its_scratch_names_from_an_arena() {
     .Ok(())
 }
 
-test fn each_allocation_failure_covers_both_scratch_names_of_an_atomic_save() -> Result[(), testing.Failure] {
+test "each allocation failure covers both scratch names of an atomic save" -> Result[(), testing.Failure] {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), FsFailure] {
@@ -130,7 +130,7 @@ test fn each_allocation_failure_covers_both_scratch_names_of_an_atomic_save() ->
     .Ok(())
 }
 
-test fn an_atomic_save_reports_scratch_allocation_failure() {
+test "an atomic save reports scratch allocation failure" {
     // An empty arena refuses every acquisition, so the call fails only if its
     // scratch comes from the allocator it was given.
     defer let arena = mem.Arena.open(mem.system(), 0)
@@ -151,7 +151,7 @@ pub fn save_atomic(path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy, per
     save_atomic_in(mem.system(), path, bytes, policy, permissions: permissions)
 }
 
-test fn saving_atomically_publishes_the_new_contents() {
+test "saving atomically publishes the new contents" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -161,7 +161,7 @@ test fn saving_atomically_publishes_the_new_contents() {
 }
 
 // Reject permission mistakes before allocating scratch or touching a path.
-test fn atomic_save_rejects_special_permission_bits_before_io() {
+test "atomic save rejects special permission bits before io" {
     let path = Path.from_str("/tmp/linea-atomic-must-not-create").unwrap()
     let contents = "data"
     // 512 is octal 01000, the sticky bit just above the allowed rwx bits.
@@ -175,7 +175,7 @@ test fn atomic_save_rejects_special_permission_bits_before_io() {
     .Ok(())
 }
 
-test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permissions() {
+test "atomic save preserves old contents on create conflict and replaces permissions" {
     let allocator = mem.system()
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
@@ -220,7 +220,7 @@ test fn atomic_save_preserves_old_contents_on_create_conflict_and_replaces_permi
     .Ok(())
 }
 
-test fn atomic_save_rejects_an_observed_nonregular_destination_before_writing() {
+test "atomic save rejects an observed nonregular destination before writing" {
     let path = Path.from_str("/dev").unwrap()
     let contents = "must not be written"
     match save_atomic(path, contents.as_bytes(), policy: .Replace) {
@@ -278,7 +278,7 @@ fn random_name[A: Allocator](inout buffer: mem.Buffer[A]) -> Result[(), io.IoErr
     .Ok(())
 }
 
-test fn temporary_names_have_a_fixed_ascii_extent_and_a_single_terminator() {
+test "temporary names have a fixed ascii extent and a single terminator" {
     let allocator = mem.system()
     defer var bytes = allocator.acquire(temporary_name_size).unwrap()
     random_name(&bytes).unwrap()
@@ -333,7 +333,7 @@ fn finish_atomic[A: Allocator](sink target: Target[A], sink temporary: mem.Buffe
     complete(target, result)
 }
 
-test fn atomic_cleanup_retains_primary_close_remove_and_parent_errors() {
+test "atomic cleanup retains primary close remove and parent errors" {
     let allocator = mem.system()
     let name = "missing"
     let target = Target[mem.SystemAllocator] { parent = -1, name = mem._terminated(allocator, name.as_bytes()).unwrap() }
@@ -353,7 +353,7 @@ test fn atomic_cleanup_retains_primary_close_remove_and_parent_errors() {
     .Ok(())
 }
 
-test fn atomic_parent_close_failure_preserves_publication_and_skips_removal() {
+test "atomic parent close failure preserves publication and skips removal" {
     let allocator = mem.system()
     let name = "missing"
     let target = Target[mem.SystemAllocator] { parent = -1, name = mem._terminated(allocator, name.as_bytes()).unwrap() }

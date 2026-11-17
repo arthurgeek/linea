@@ -60,7 +60,7 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
 
 // A request built in an arena goes through the router, which records the
 // path value the handler reads.
-test fn a_count_out_of_range_is_refused_before_streaming() {
+test "a count out of range is refused before streaming" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
@@ -77,7 +77,7 @@ test fn a_count_out_of_range_is_refused_before_streaming() {
 
 // `recorded_body` runs the streamed body into the request's arena, so a test
 // reads what a client would receive. A countdown from 1 pauses once.
-test fn a_countdown_ends_with_liftoff() {
+test "a countdown ends with liftoff" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()

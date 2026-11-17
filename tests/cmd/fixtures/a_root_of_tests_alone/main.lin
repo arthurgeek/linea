@@ -7,6 +7,6 @@ import std.io
 
 use io.IoError
 
-test fn a_thing_holds() -> Result[(), IoError] {
+test "a thing holds" -> Result[(), IoError] {
     return .Ok({})
 }

@@ -37,12 +37,12 @@ impl Number[mem.SystemAllocator] {
         Number.parse_in(mem.system(), input)
     }
 
-    test fn number_parse_keeps_the_token_in_the_system_allocator() {
+    test "number parse keeps the token in the system allocator" {
         defer let number = Number.parse("-1.5e3").unwrap()
         testing.assert_eq(number.text(), "-1.5e3", "number spelling changed")?
     }
 
-    test fn number_preserves_validated_decimal_spelling() {
+    test "number preserves validated decimal spelling" {
         let cases = ["0", "-0", "-9223372036854775808", "18446744073709551615", "9007199254740993", "1.00", "1e400", "-12.34E+56"]
         for input in cases {
             defer let number = Number.parse(input).unwrap()
@@ -51,7 +51,7 @@ impl Number[mem.SystemAllocator] {
         .Ok(())
     }
 
-    test fn number_requires_one_complete_json_token() {
+    test "number requires one complete json token" {
         let cases = ["", "+1", "01", "-01", "1.", "1e", "1e+", "NaN", "Infinity", " 1", "1 ", "1,2", "--1"]
         for input in cases {
             match Number.parse(input) {
@@ -72,7 +72,7 @@ impl Number[mem.SystemAllocator] {
         .Ok(())
     }
 
-    test fn number_owns_its_token_independently_of_input() {
+    test "number owns its token independently of input" {
         defer let number = {
             let input = "9007199254740993".to_owned().unwrap()
             let parsed = Number.parse(input.view()).unwrap()
@@ -83,7 +83,7 @@ impl Number[mem.SystemAllocator] {
         .Ok(())
     }
 
-    test fn number_constructor_enforces_the_hard_token_limit() {
+    test "number constructor enforces the hard token limit" {
         let bytes = Vec.filled(count: hard_number_bytes, value: UInt8(49)).unwrap()
         defer var input = String.from_bytes(bytes).unwrap()
         let number = Number.parse(input.view()).unwrap()
@@ -107,7 +107,7 @@ impl Number[mem.SystemAllocator] {
         Number.from_int_in(mem.system(), value)
     }
 
-    test fn from_int_keeps_the_token_in_the_system_allocator() {
+    test "from_int keeps the token in the system allocator" {
         defer let number = Number.from_int(-42).unwrap()
         testing.assert_eq(number.text(), "-42", "signed constructor changed decimal text")?
     }
@@ -118,7 +118,7 @@ impl Number[mem.SystemAllocator] {
         Number.from_uint_in(mem.system(), value)
     }
 
-    test fn from_uint_keeps_the_token_in_the_system_allocator() {
+    test "from_uint keeps the token in the system allocator" {
         defer let number = Number.from_uint(42).unwrap()
         testing.assert_eq(number.text(), "42", "unsigned constructor changed decimal text")?
     }
@@ -142,7 +142,7 @@ impl[A: Allocator] Number[A] {
         }
     }
 
-    test fn number_allocation_failure_is_a_value() {
+    test "number allocation failure is a value" {
         defer let arena = mem.Arena.open(mem.system(), 8)
         match Number.parse_in(arena.handle(), "12") {
             Ok(number) => {
@@ -154,7 +154,7 @@ impl[A: Allocator] Number[A] {
         .Ok(())
     }
 
-    test fn a_parsed_number_keeps_its_token_in_an_arena() {
+    test "a parsed number keeps its token in an arena" {
         defer let arena = mem.Arena.open(mem.system(), 64)
         defer let number = Number.parse_in(arena.handle(), "-1.50E+3").unwrap()
         testing.assert_eq(number.text(), "-1.50E+3", "a number parsed into an arena changed its token")?
@@ -166,7 +166,7 @@ impl[A: Allocator] Number[A] {
         self.token.view()
     }
 
-    test fn text_returns_the_token_as_it_was_written() {
+    test "text returns the token as it was written" {
         defer let number = Number.parse("-1.50E+3").unwrap()
         testing.assert_eq(number.text(), "-1.50E+3", "the token was rewritten")?
         .Ok(())
@@ -177,7 +177,7 @@ impl[A: Allocator] Number[A] {
         .Ok(.{ token = fmt.render_owned_in(allocator, value)? })
     }
 
-    test fn from_int_uses_the_exact_decimal_text() {
+    test "from_int uses the exact decimal text" {
         defer let signed = Number.from_int(Int64.min).unwrap()
         testing.assert_eq(signed.text(), "-9223372036854775808", "signed constructor changed decimal text")?
         defer let arena = mem.Arena.open(mem.system(), 8)
@@ -191,7 +191,7 @@ impl[A: Allocator] Number[A] {
         .Ok(())
     }
 
-    test fn an_integer_number_keeps_its_token_in_an_arena() {
+    test "an integer number keeps its token in an arena" {
         defer let arena = mem.Arena.open(mem.system(), 64)
         defer let number = Number.from_int_in(arena.handle(), -42).unwrap()
         testing.assert_eq(number.text(), "-42", "an integer formatted into an arena changed its token")?
@@ -203,7 +203,7 @@ impl[A: Allocator] Number[A] {
         .Ok(.{ token = fmt.render_owned_in(allocator, value)? })
     }
 
-    test fn from_uint_uses_the_exact_decimal_text() {
+    test "from_uint uses the exact decimal text" {
         defer let unsigned = Number.from_uint(UInt64.max).unwrap()
         testing.assert_eq(unsigned.text(), "18446744073709551615", "unsigned constructor changed decimal text")?
         defer let arena = mem.Arena.open(mem.system(), 8)
@@ -231,7 +231,7 @@ impl[A: Allocator] Number[A] {
         }
     }
 
-    test fn as_int64_checks_kind_and_range() {
+    test "as_int64 checks kind and range" {
         defer let signed = Number.parse("-9223372036854775808").unwrap()
         defer let positive = Number.parse("9223372036854775807").unwrap()
         defer let negative_zero = Number.parse("-0").unwrap()
@@ -258,7 +258,7 @@ impl[A: Allocator] Number[A] {
         }
     }
 
-    test fn number_float_access_rounds_without_changing_the_token() {
+    test "number float access rounds without changing the token" {
         let number = Number.parse("9007199254740993.0").unwrap()
         let rounded = number.as_float64().unwrap()
         let token_unchanged = number.text() == "9007199254740993.0"
@@ -293,7 +293,7 @@ impl[A: Allocator] Number[A] {
         }
     }
 
-    test fn as_uint64_checks_kind_sign_and_range() {
+    test "as_uint64 checks kind sign and range" {
         defer let unsigned = Number.parse("18446744073709551615").unwrap()
         defer let signed = Number.parse("-9223372036854775808").unwrap()
         defer let negative_zero = Number.parse("-0").unwrap()

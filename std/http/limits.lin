@@ -94,7 +94,7 @@ impl Default for Limits {
     }
 }
 
-test fn the_default_limits_bound_lines_headers_and_bodies() {
+test "the default limits bound lines headers and bodies" {
     let limits = Limits.default()
     testing.assert_eq(limits.max_line_bytes, UInt64(8192), "the line bound changed")?
     testing.assert_eq(limits.max_headers, UInt64(100), "the header bound changed")?

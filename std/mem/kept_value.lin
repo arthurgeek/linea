@@ -25,7 +25,7 @@ internal fn take_value[T](sink bytes: Buffer[SystemAllocator]) -> T where carrie
     value
 }
 
-test fn a_kept_value_comes_back_as_it_went_in() {
+test "a kept value comes back as it went in" {
     let bytes = keep_value(SlotTestPair { first = 3, second = 400 })
     let SlotTestPair { first, second } = take_value(bytes)
     testing.assert_eq((first, second), (UInt8(3), UInt64(400)), "the kept value changed")?

@@ -11,12 +11,12 @@ impl[T] Boxed[T] {
         Self { value = value }
     }
 
-    test fn a_parameter_of_the_impl() {
+    test "a parameter of the impl" {
         let none: Option[T] = .None
         testing.assert(none.is_none(), "nothing is held")?
     }
 
-    test fn self_of_a_generic_impl() {
+    test "self of a generic impl" {
         let boxed: Self = Boxed.new(3)
         testing.assert_eq(boxed.value, 3, "the box holds three")?
     }

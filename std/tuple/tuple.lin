@@ -45,7 +45,7 @@ fn tuple_test_accepts_ordered[T: Ordered](_value: T) -> Bool {
     true
 }
 
-test fn a_pair_derives_its_traits_from_its_components() {
+test "a pair derives its traits from its components" {
     let a = Tuple2[UInt8, Int8] { _0 = 1, _1 = 5 }
     let b = Tuple2[UInt8, Int8] { _0 = 1, _1 = 5 }
     let c = Tuple2[UInt8, Int8] { _0 = 2, _1 = -1 }
@@ -60,7 +60,7 @@ test fn a_pair_derives_its_traits_from_its_components() {
     .Ok(())
 }
 
-test fn a_pair_releases_its_components_last_first() {
+test "a pair releases its components last first" {
     let log = mem.ReleaseLog.open(2)
     let pair = Tuple2[mem.ReleaseTag, mem.ReleaseTag] { _0 = log.tag(40), _1 = log.tag(50) }
     pair.release()
@@ -92,7 +92,7 @@ impl[A: Debug, B: Debug] Debug for Tuple2[A, B] {
     }
 }
 
-test fn a_pair_prints_its_components_in_parentheses() {
+test "a pair prints its components in parentheses" {
     let pair = Tuple2[UInt8, Str] { _0 = 1, _1 = "a" }
     var writer = testing.Recorder.of(32).unwrap()
     let wrote = pair.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && pair.debug(&writer).is_ok()
@@ -102,7 +102,7 @@ test fn a_pair_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn pair_compares_and_hashes_by_every_component() {
+test "pair compares and hashes by every component" {
     let base = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 2 }
     let same = Tuple2[UInt8, UInt8] { _0 = 1, _1 = 2 }
     testing.assert(base == same, "a pair compared unequal to its copy")?
@@ -167,7 +167,7 @@ impl[A: Debug, B: Debug, C: Debug] Debug for Tuple3[A, B, C] {
     }
 }
 
-test fn a_three_tuple_prints_its_components_in_parentheses() {
+test "a three tuple prints its components in parentheses" {
     let tuple = Tuple3[UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = "a" }
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
@@ -177,7 +177,7 @@ test fn a_three_tuple_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn three_tuple_compares_and_hashes_by_every_component() {
+test "three tuple compares and hashes by every component" {
     let base = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3 }
     let same = Tuple3[UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3 }
     testing.assert(base == same, "a three-tuple compared unequal to its copy")?
@@ -253,7 +253,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug] Debug for Tuple4[A, B, C, D] {
     }
 }
 
-test fn a_four_tuple_prints_its_components_in_parentheses() {
+test "a four tuple prints its components in parentheses" {
     let tuple = Tuple4[UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = "a" }
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
@@ -263,7 +263,7 @@ test fn a_four_tuple_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn four_tuple_compares_and_hashes_by_every_component() {
+test "four tuple compares and hashes by every component" {
     let base = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4 }
     let same = Tuple4[UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4 }
     testing.assert(base == same, "a four-tuple compared unequal to its copy")?
@@ -350,7 +350,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug] Debug for Tuple5[A, B, C,
     }
 }
 
-test fn a_five_tuple_prints_its_components_in_parentheses() {
+test "a five tuple prints its components in parentheses" {
     let tuple = Tuple5[UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = "a" }
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
@@ -360,7 +360,7 @@ test fn a_five_tuple_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn five_tuple_compares_and_hashes_by_every_component() {
+test "five tuple compares and hashes by every component" {
     let base = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5 }
     let same = Tuple5[UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5 }
     testing.assert(base == same, "a five-tuple compared unequal to its copy")?
@@ -458,7 +458,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug] Debug for Tuple
     }
 }
 
-test fn a_six_tuple_prints_its_components_in_parentheses() {
+test "a six tuple prints its components in parentheses" {
     let tuple = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = "a" }
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
@@ -468,7 +468,7 @@ test fn a_six_tuple_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn six_tuple_compares_and_hashes_by_every_component() {
+test "six tuple compares and hashes by every component" {
     let base = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6 }
     let same = Tuple6[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6 }
     testing.assert(base == same, "a six-tuple compared unequal to its copy")?
@@ -577,7 +577,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug, G: Debug] Debug
     }
 }
 
-test fn a_seven_tuple_prints_its_components_in_parentheses() {
+test "a seven tuple prints its components in parentheses" {
     let tuple = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = "a" }
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
@@ -587,7 +587,7 @@ test fn a_seven_tuple_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn seven_tuple_compares_and_hashes_by_every_component() {
+test "seven tuple compares and hashes by every component" {
     let base = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
     let same = Tuple7[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7 }
     testing.assert(base == same, "a seven-tuple compared unequal to its copy")?
@@ -661,7 +661,7 @@ derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default, G
 
 derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release, G: Release, H: Release] Release for Tuple8[A, B, C, D, E, F, G, H]
 
-test fn an_eight_tuple_compares_by_position() {
+test "an eight tuple compares by position" {
     let first = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] {
         _0 = 0,
         _1 = 0,
@@ -732,7 +732,7 @@ impl[A: Debug, B: Debug, C: Debug, D: Debug, E: Debug, F: Debug, G: Debug, H: De
     }
 }
 
-test fn an_eight_tuple_prints_its_components_in_parentheses() {
+test "an eight tuple prints its components in parentheses" {
     let tuple = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, Str] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = "a" }
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = tuple.fmt(&writer).is_ok() && &writer.write_str(" ").is_ok() && tuple.debug(&writer).is_ok()
@@ -742,7 +742,7 @@ test fn an_eight_tuple_prints_its_components_in_parentheses() {
     .Ok(())
 }
 
-test fn eight_tuple_compares_and_hashes_by_every_component() {
+test "eight tuple compares and hashes by every component" {
     let base = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
     let same = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] { _0 = 1, _1 = 2, _2 = 3, _3 = 4, _4 = 5, _5 = 6, _6 = 7, _7 = 8 }
     testing.assert(base == same, "an eight-tuple compared unequal to its copy")?

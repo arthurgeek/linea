@@ -10,12 +10,12 @@ trait Doubling {
         self.value() * 2
     }
 
-    test fn doubling_a_meter_doubles_its_reading() {
+    test "doubling a meter doubles its reading" {
         let meter = Meter { reading = 4 }
         testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
     }
 
-    test trap fn doubling_past_the_largest_reading_traps() {
+    test trap "doubling past the largest_reading traps" {
         let meter = Meter { reading = largest_reading() }
         let _doubled = meter.doubled()
     }

@@ -48,7 +48,7 @@ derive[A: Allocator] Release for DecodedProfile[A]
 
 derive[A: Allocator] Decode[A] for DecodedProfile[A]
 
-test fn derived_records_own_text_and_apply_optional_field_policy() {
+test "derived records own text and apply optional field policy" {
     let input = r#"{"name":"tea"}"#.to_owned().unwrap()
     let parsed: Result[DecodedProfile[mem.SystemAllocator], DecodeError] = decode(input.view())
     input.release()
@@ -78,12 +78,12 @@ pub fn decode[T: Decode[mem.SystemAllocator]](input: Str, limits: ParseLimits = 
     decode_in(mem.system(), input, limits: limits)
 }
 
-test fn decode_allocates_from_the_system_allocator() {
+test "decode allocates from the system allocator" {
     let decoded: Result[UInt8, DecodeError] = decode("9")
     testing.assert_eq(decoded.unwrap(), UInt8(9), "a number did not decode")?
 }
 
-test fn decode_parses_then_decodes_and_reports_a_parse_error() {
+test "decode parses then decodes and reports a parse error" {
     let decoded: Result[UInt8, DecodeError] = decode(" 7 ")
     testing.assert_eq(decoded.unwrap(), UInt8(7), "a number did not decode")?
     let malformed: Result[UInt8, DecodeError] = decode("[")
@@ -98,7 +98,7 @@ test fn decode_parses_then_decodes_and_reports_a_parse_error() {
     testing.assert(parse_error, "text that is not JSON was not a parse error")?
 }
 
-test fn decode_allocates_the_record_from_an_arena() {
+test "decode allocates the record from an arena" {
     // The arena holds the parsed document, which decode releases, and the record.
     defer let arena = mem.Arena.open(mem.system(), 4096)
     let decoded: Result[DecodedProfile[mem.Handle], DecodeError[mem.Handle]] = decode_in(arena.handle(), r#"{"name":"tea","enabled":true}"#)
@@ -118,14 +118,14 @@ pub fn from_value[T: Decode[mem.SystemAllocator]](value: Value[mem.SystemAllocat
     from_value_in(mem.system(), value)
 }
 
-test fn from_value_decodes_into_the_system_allocator() {
+test "from_value decodes into the system allocator" {
     defer let document = parse("[1,2]").unwrap()
     let decoded: Result[Vec[UInt8], DecodeError] = from_value(document)
     defer let items = decoded.unwrap()
     testing.assert_eq(items.length(), UInt64(2), "an array did not decode")?
 }
 
-test fn from_value_decodes_a_parsed_value_and_leaves_it_with_the_caller() {
+test "from_value decodes a parsed value and leaves it with the caller" {
     defer let document = parse(r#"{"tea":2}"#).unwrap()
     let decoded: Result[Map[String, UInt8], DecodeError] = from_value(document)
     defer let counts = decoded.unwrap()
@@ -133,7 +133,7 @@ test fn from_value_decodes_a_parsed_value_and_leaves_it_with_the_caller() {
     testing.assert_eq(document.get("tea").unwrap().as_uint64().unwrap(), UInt64(2), "decoding changed the document")?
 }
 
-test fn from_value_decodes_a_value_into_an_arena() {
+test "from_value decodes a value into an arena" {
     defer let arena = mem.Arena.open(mem.system(), 4096)
     let allocator = arena.handle()
     defer let document = parse_in(allocator, r#"{"tea":2,"coffee":1}"#).unwrap()
@@ -214,7 +214,7 @@ impl[A: Allocator] Decode[A] for String[A] {
     }
 }
 
-test fn typed_scalars_check_every_integer_width_and_numeric_kind() {
+test "typed scalars check every integer width and numeric kind" {
     let i8_result: Result[Int8, DecodeError] = decode("-128")
     let i8 = i8_result.unwrap()
     let i16_result: Result[Int16, DecodeError] = decode("-32768")
@@ -351,7 +351,7 @@ impl[A: Allocator] DecodeKey[A] for FoldedDecodeKey {
     }
 }
 
-test fn typed_maps_refuse_names_that_decode_to_the_same_key() {
+test "typed maps refuse names that decode to the same key" {
     let result: Result[Map[FoldedDecodeKey, String], DecodeError] = decode(r#"{"tea":"first","TEA":"second"}"#)
     defer let error = match result {
         Err(error) => error,
@@ -363,7 +363,7 @@ test fn typed_maps_refuse_names_that_decode_to_the_same_key() {
     testing.assert(match read error { Value(failure) => failure.reason() == .DuplicateKey && failure.path_length() == 1, _ => false }, "converted duplicate lost its field path")?
 }
 
-test fn typed_collections_keep_owned_values_and_nested_error_paths() {
+test "typed collections keep owned values and nested error paths" {
     let input = r#"{"teas":["green","black"]}"#.to_owned().unwrap()
     let result: Result[Map[String, Vec[String]], DecodeError] = decode(input.view())
     let values = result.unwrap()
@@ -406,7 +406,7 @@ impl ObjectDecoder[mem.SystemAllocator] {
         ObjectDecoder.open_in(mem.system(), value)
     }
 
-    test fn open_reads_an_object_with_the_system_allocator() {
+    test "open reads an object with the system allocator" {
         defer let object = parse(r#"{"tea":2}"#).unwrap()
         defer var fields = ObjectDecoder.open(object).unwrap()
         let tea: UInt8 = ObjectDecoder.required(&fields, "tea").unwrap()
@@ -414,7 +414,7 @@ impl ObjectDecoder[mem.SystemAllocator] {
         testing.assert_eq(tea, UInt8(2), "the member did not decode")?
     }
 
-    test fn open_accepts_only_an_object() {
+    test "open accepts only an object" {
         defer let array = parse("[]").unwrap()
         let refused = match ObjectDecoder.open(array) {
             Ok(fields) => {
@@ -475,7 +475,7 @@ impl[A: Allocator] ObjectDecoder[A] {
         }
     }
 
-    test fn field_takes_the_missing_value_of_an_absent_member() {
+    test "field takes the missing value of an absent member" {
         defer let document = parse(r#"{"present":null}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
         let missing_result: Result[Option[String], DecodeError] = &fields.field("missing")
@@ -490,7 +490,7 @@ impl[A: Allocator] ObjectDecoder[A] {
         fields.finish().unwrap()
     }
 
-    test fn object_decoder_copies_queries_and_decoded_results_outlive_document() {
+    test "object decoder copies queries and decoded results outlive document" {
         let document = parse(r#"{"name":"tea"}"#).unwrap()
         var fields = ObjectDecoder.open(document).unwrap()
         let query = "name".to_owned().unwrap()
@@ -517,7 +517,7 @@ impl[A: Allocator] ObjectDecoder[A] {
         }
     }
 
-    test fn required_refuses_an_absent_member_even_for_an_option() {
+    test "required refuses an absent member even for an option" {
         defer let document = parse(r#"{"present":null}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
         let required: Result[Option[String], DecodeError] = &fields.required("required")
@@ -536,7 +536,7 @@ impl[A: Allocator] ObjectDecoder[A] {
         &self.present(name)
     }
 
-    test fn optional_decodes_a_present_member_and_answers_none_for_an_absent_one() {
+    test "optional decodes a present member and answers none for an absent one" {
         defer let document = parse(r#"{"retries":5}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
         let present: Result[Option[UInt8], DecodeError] = &fields.optional("retries")
@@ -547,7 +547,7 @@ impl[A: Allocator] ObjectDecoder[A] {
         testing.assert(delay.is_none(), "an absent member was not None")?
     }
 
-    test fn an_object_decoder_records_its_fields_in_an_arena() {
+    test "an object decoder records its fields in an arena" {
         defer let arena = mem.Arena.open(mem.system(), 4096)
         let allocator = arena.handle()
         defer let document = parse_in(allocator, r#"{"name":"tea","size":2}"#).unwrap()
@@ -573,7 +573,7 @@ impl[A: Allocator] ObjectDecoder[A] {
         .Ok(())
     }
 
-    test fn finish_refuses_a_member_no_field_read() {
+    test "finish refuses a member no field read" {
         defer let document = parse(r#"{"name":"tea","extra":true}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
         let name: Result[String, DecodeError] = &fields.field("name")
@@ -620,7 +620,7 @@ impl[A: Allocator] Decode[A] for DecodeSettings[A] {
     }
 }
 
-test fn typed_records_apply_missing_policy_and_settle_early_owners() {
+test "typed records apply missing policy and settle early owners" {
     let input = r#"{"name":"tea","labels":["green","leaf"]}"#.to_owned().unwrap()
     let settings_result: Result[DecodeSettings[mem.SystemAllocator], DecodeError] = decode(input.view())
     let settings = settings_result.unwrap()
@@ -671,7 +671,7 @@ derive Decode[mem.RefusingAllocator[mem.SystemAllocator]] for JsonDecodedRecord
 // `testing.each_allocation_failure`, which accepts a refused run that
 // completes: here every refusal must be reported as an allocation error, and
 // nothing may be allocated after it.
-test fn json_typed_decode_disposes_records_and_error_paths_on_each_refusal() {
+test "json typed decode disposes records and error paths on each refusal" {
     let inputs = [
         r#"{"name":"tea","labels":["green","leaf"],"retries":3}"#,
         r#"{"name":"tea","labels":["green","leaf"],"retries":false}"#,
@@ -797,7 +797,7 @@ impl DecodeKey[mem.RefusingAllocator[mem.SystemAllocator]] for JsonOwnedDecodeKe
 // `testing.each_allocation_failure`, which accepts a refused run that
 // completes: here every refusal must be reported as an allocation error, and
 // nothing may be allocated after it.
-test fn json_typed_map_settles_owned_keys_values_and_collisions_on_each_refusal() {
+test "json typed map settles owned keys values and collisions on each refusal" {
     let inputs = [
         r#"{"tea":"green","leaf":"fresh","stem":"long","bud":"small","root":"deep","seed":"new","branch":"wide","flower":"white"}"#,
         r#"{"tea":"green","leaf":false}"#,

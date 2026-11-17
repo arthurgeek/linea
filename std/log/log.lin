@@ -33,7 +33,7 @@ impl Display for Level {
     }
 }
 
-test fn a_level_displays_in_capitals() {
+test "a level displays in capitals" {
     defer let named = fmt.render_owned("{Level.Debug} {Level.Info} {Level.Warn} {Level.Error}").unwrap()
     testing.assert_eq(named.view(), "DEBUG INFO WARN ERROR", "a level's name changed")?
     .Ok(())
@@ -62,7 +62,7 @@ impl Sink for Descriptor {
     }
 }
 
-test fn a_descriptor_sink_reports_a_refused_line() {
+test "a descriptor sink reports a refused line" {
     let refused = match io.descriptor(-1).write_line("lost\n") {
         Ok(_) => false,
         Err(_) => true,
@@ -118,7 +118,7 @@ impl[S: Sink] Logger[S, mem.SystemAllocator] {
         Logger.open_in(mem.system(), output, minimum)
     }
 
-    test fn a_logger_writes_to_the_sink_it_was_given() {
+    test "a logger writes to the sink it was given" {
         let file = capture()
         let logger = file.logger(minimum: .Info)
         logger.info("listening", field("port", 8080))
@@ -136,7 +136,7 @@ pub fn to_stderr_in[A: Allocator](allocator: A, minimum: Level) -> Logger[io.Des
     Logger.open_in(allocator, io.stderr(), minimum)
 }
 
-test fn a_logger_to_standard_error_builds_lines_in_the_allocator_it_was_given() {
+test "a logger to standard error builds lines in the allocator it was given" {
     defer let arena = mem.Arena.open(mem.system(), 256)
     let logger = to_stderr_in(arena.handle(), minimum: .Error)
     testing.assert(logger.enabled(.Error), "the logger dropped its minimum level")?
@@ -148,12 +148,12 @@ pub fn to_stderr(minimum: Level) -> Logger[io.Descriptor, mem.SystemAllocator] {
     to_stderr_in(mem.system(), minimum)
 }
 
-test fn a_logger_to_standard_error_uses_the_system_allocator() {
+test "a logger to standard error uses the system allocator" {
     let logger: Logger[io.Descriptor, mem.SystemAllocator] = to_stderr(minimum: .Info)
     testing.assert(logger.enabled(.Info), "the logger dropped its minimum level")?
 }
 
-test fn a_logger_to_standard_error_copies_freely() {
+test "a logger to standard error copies freely" {
     let logger = to_stderr(minimum: .Error)
     let kept = copy(logger)
     logger.debug("not written", ())
@@ -168,7 +168,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         .{ output, allocator = copy(allocator), minimum }
     }
 
-    test fn a_logger_builds_its_lines_in_the_allocator_it_was_given() {
+    test "a logger builds its lines in the allocator it was given" {
         defer let arena = mem.Arena.open(mem.system(), 256)
         let logger = Logger.open_in(arena.handle(), io.stderr(), minimum: .Warn)
         testing.assert(logger.enabled(.Warn), "the logger dropped its minimum level")?
@@ -180,7 +180,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         level >= self.minimum
     }
 
-    test fn a_logger_is_enabled_at_its_minimum_level_and_above() {
+    test "a logger is enabled at its minimum level and above" {
         let logger = to_stderr(minimum: .Warn)
         let enabled = [logger.enabled(.Debug), logger.enabled(.Info), logger.enabled(.Warn), logger.enabled(.Error)]
         testing.assert_eq(enabled, [false, false, true, true], "the enabled levels changed")?
@@ -211,7 +211,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
 
     // A line below the minimum is not written, and building it asks the
     // allocator for nothing.
-    test fn a_line_below_the_minimum_level_is_not_written() {
+    test "a line below the minimum level is not written" {
         let file = capture()
         let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Warn)
@@ -229,7 +229,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
 
     // A line the allocator cannot hold is reported and nothing of it is written;
     // the next line is written whole, and every line's buffer is released.
-    test fn a_line_the_allocator_refuses_is_reported_and_not_written() {
+    test "a line the allocator refuses is reported and not written" {
         let file = capture()
         let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Info)
@@ -251,7 +251,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
     }
 
     // A line the sink refuses is reported by `log` and dropped by `error`.
-    test fn a_line_the_sink_refuses_is_reported() {
+    test "a line the sink refuses is reported" {
         let logger = Logger.open(io.descriptor(-1), minimum: .Info)
         let reported = match logger.log(.Error, "lost", ()) {
             Err(Sink(_)) => true,
@@ -263,7 +263,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         .Ok(())
     }
 
-    test fn a_line_is_built_in_an_arena() {
+    test "a line is built in an arena" {
         // Each line's buffer comes from the arena, which reclaims it only when
         // the arena is released.
         defer let arena = mem.Arena.open(mem.system(), 4096)
@@ -278,7 +278,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LogError[io.IoError]] {
@@ -301,7 +301,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         let _dropped = self.log(.Debug, message, fields)
     }
 
-    test fn debug_writes_a_debug_line() {
+    test "debug writes a debug line" {
         defer let line = logged_at(.Debug)
         testing.assert_eq(line.view(), "DEBUG checked count=3\n", "the debug line changed")?
         .Ok(())
@@ -312,7 +312,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         let _dropped = self.log(.Info, message, fields)
     }
 
-    test fn info_writes_an_info_line() {
+    test "info writes an info line" {
         defer let line = logged_at(.Info)
         testing.assert_eq(line.view(), "INFO checked count=3\n", "the info line changed")?
         .Ok(())
@@ -323,7 +323,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         let _dropped = self.log(.Warn, message, fields)
     }
 
-    test fn warn_writes_a_warn_line() {
+    test "warn writes a warn line" {
         defer let line = logged_at(.Warn)
         testing.assert_eq(line.view(), "WARN checked count=3\n", "the warn line changed")?
         .Ok(())
@@ -334,7 +334,7 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
         let _dropped = self.log(.Error, message, fields)
     }
 
-    test fn error_writes_an_error_line() {
+    test "error writes an error line" {
         defer let line = logged_at(.Error)
         testing.assert_eq(line.view(), "ERROR checked count=3\n", "the error line changed")?
         .Ok(())
@@ -357,7 +357,7 @@ fn logged_at(level: Level) -> String {
 }
 
 // A line starts with the time the event was logged, in RFC 3339 to the second.
-test fn a_line_starts_with_the_time_it_was_written() {
+test "a line starts with the time it was written" {
     let file = capture()
     let logger = file.logger(minimum: .Info)
     let before = time.now()

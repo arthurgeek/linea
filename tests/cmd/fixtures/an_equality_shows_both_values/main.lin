@@ -26,36 +26,36 @@ fn main() -> UInt8 {
     0
 }
 
-test fn a_number_that_differs_shows_both() -> Result[(), testing.Failure] {
+test "a number that differs shows both" -> Result[(), testing.Failure] {
     testing.assert_eq(UInt8(7), UInt8(6), "seven is not six")?
     return .Ok({})
 }
 
-test fn text_that_differs_shows_both() -> Result[(), testing.Failure] {
+test "text that differs shows both" -> Result[(), testing.Failure] {
     testing.assert_eq("olá", "ola", "an accent is a byte of its own")?
     return .Ok({})
 }
 
-test fn an_equality_that_holds_says_nothing() -> Result[(), testing.Failure] {
+test "an equality that holds says nothing" -> Result[(), testing.Failure] {
     testing.assert_eq(UInt8(6), UInt8(6), "six is six")?
     return .Ok({})
 }
 
-test fn option_variants_and_payloads_are_visible() -> Result[(), testing.Failure] {
+test "option variants and payloads are visible" -> Result[(), testing.Failure] {
     let got: Option[UInt8] = .Some(7)
     let want: Option[UInt8] = .None
     testing.assert_eq(got, want, "a present value is not absent")?
     return .Ok({})
 }
 
-test fn custom_enum_payloads_are_visible() -> Result[(), testing.Failure] {
+test "custom enum payloads are visible" -> Result[(), testing.Failure] {
     let got: Delivery = .Sent("Ada")
     let want: Delivery = .Sent("Lin")
     testing.assert_eq(got, want, "different recipients")?
     return .Ok({})
 }
 
-test fn assertions_borrow_linear_values_on_both_outcomes() -> Result[(), testing.Failure] {
+test "assertions borrow linear values on both outcomes" -> Result[(), testing.Failure] {
     let one: Ticket = .{ number = 1 }
     let same: Ticket = .{ number = 1 }
     let two: Ticket = .{ number = 2 }

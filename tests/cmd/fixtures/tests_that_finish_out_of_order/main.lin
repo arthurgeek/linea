@@ -21,11 +21,11 @@ fn main() -> UInt8 {
     0
 }
 
-test fn z_quick_one() -> Result[(), IoError] {
+test "z quick one" -> Result[(), IoError] {
     return .Ok({})
 }
 
-test fn a_slow_one() -> Result[(), IoError] {
+test "a slow one" -> Result[(), IoError] {
     let a: Args = args()
     var seen: UInt64 = 0
     var i: UInt64 = 0

@@ -19,7 +19,7 @@ pub fn bytes(text: Str) -> Bytes where carries(text) {
     bytes_of(text.as_bytes())
 }
 
-test fn text_is_lent_at_its_first_byte() {
+test "text is lent at its first byte" {
     let text = "guest"
     let Bytes(at) = bytes(text)
     let Bytes(viewed) = bytes_of(text.as_bytes())
@@ -40,7 +40,7 @@ pub fn bytes_of(view: mem.Slice[UInt8]) -> Bytes where carries(view) {
     Bytes(address.raw(mem.foreign_address("\0".as_bytes())))
 }
 
-test fn a_view_of_nothing_is_lent_at_an_address() {
+test "a view of nothing is lent at an address" {
     defer let empty: mem.Vec[UInt8] = mem.Vec.new()
     let Bytes(at) = bytes_of(empty.as_slice())
     testing.assert(at != 0, "an empty view was lent as a null pointer")?

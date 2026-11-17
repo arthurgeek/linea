@@ -33,7 +33,7 @@ fn build_manifest(sink arrivals: mem.Slice[UInt64], limit: UInt64) -> Result[Man
     .Ok(.{ weights = values, inspected })
 }
 
-test fn manifest_filters_and_transforms_in_arrival_order() {
+test "manifest filters and transforms in arrival order" {
     let arrivals = [UInt64(1200), 3500, 6400, 5000, 900]
     let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
     defer weights.release()
@@ -42,7 +42,7 @@ test fn manifest_filters_and_transforms_in_arrival_order() {
     testing.assert_eq(inspected, 5, "not every arrival was inspected")?
 }
 
-test fn an_empty_batch_builds_an_empty_manifest() {
+test "an empty batch builds an empty manifest" {
     let arrivals: [UInt64; 0] = []
     let { weights, inspected } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
     defer weights.release()
@@ -63,7 +63,7 @@ fn append_late(inout manifest: Vec[UInt64], late: [UInt64; 2]) -> Result[(), Oom
     iter.extend(&manifest, &arrivals).settled()
 }
 
-test fn late_parcels_follow_the_existing_manifest() {
+test "late parcels follow the existing manifest" {
     let arrivals = [UInt64(1200)]
     let { weights, inspected: _ } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
     defer var manifest = weights

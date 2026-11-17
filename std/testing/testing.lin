@@ -29,7 +29,7 @@ impl Display for Failure {
     }
 }
 
-test fn a_failure_displays_the_callers_message() -> Result[(), Failure] {
+test "a failure displays the caller's message" -> Result[(), Failure] {
     let failure = Failure { said = "the expected message", refusal = false }
     // This capacity leaves spare bytes beyond the complete failure message.
     var writer = Recorder.of(256) else |_| {
@@ -56,7 +56,7 @@ impl Failure {
         self.refusal
     }
 
-    test fn a_refused_failure_is_a_refusal_and_an_assertion_is_not() -> Result[(), Failure] {
+    test "a refused failure is a refusal and an assertion is not" -> Result[(), Failure] {
         let refusal = refused("the arena was refused")
         let assertion = match assert(false, "a wrong answer") {
             Err(failure) => failure,
@@ -80,7 +80,7 @@ pub fn assert(held: Bool, said: Str) -> Result[(), Failure] where carries(.Err: 
 }
 
 // Construct failures directly here so this test can detect a broken assert.
-test fn an_assertion_checks_its_condition_and_preserves_the_message() -> Result[(), Failure] {
+test "an assertion checks its condition and preserves the message" -> Result[(), Failure] {
     match assert(true, "held") {
         Ok(_) => {},
         Err(_) => return .Err(.{ said = "a true condition failed", refusal = false }),
@@ -105,7 +105,7 @@ pub fn assert_eq[T: Equatable + Debug](got: T, want: T, said: Str) -> Result[(),
 }
 
 // Check the result and message; command tests check the printed values.
-test fn an_equality_answers_and_carries_what_it_was_given() -> Result[(), Failure] {
+test "an equality answers and carries what it was given" -> Result[(), Failure] {
     match assert_eq(UInt8(2), 2, "two is two") {
         Ok(_) => {},
         Err(_) => assert(false, "two values that are the same were reported as differing")?,
@@ -126,7 +126,7 @@ test fn an_equality_answers_and_carries_what_it_was_given() -> Result[(), Failur
     .Ok(())
 }
 
-test fn equality_accepts_values_with_debug_without_display() -> Result[(), Failure] {
+test "equality accepts values with debug without display" -> Result[(), Failure] {
     let got: Option[FromEnd] = .Some(.{ k = 2 })
     let wanted: Option[FromEnd] = .Some(.{ k = 2 })
     match assert_eq(got, wanted, "same position from the end") {
@@ -136,7 +136,7 @@ test fn equality_accepts_values_with_debug_without_display() -> Result[(), Failu
     .Ok(())
 }
 
-test fn equality_checks_option_variants_and_payloads() -> Result[(), Failure] {
+test "equality checks option variants and payloads" -> Result[(), Failure] {
     let present: Option[UInt8] = .Some(7)
     let absent: Option[UInt8] = .None
     let different: Option[UInt8] = .Some(8)
@@ -163,7 +163,7 @@ test fn equality_checks_option_variants_and_payloads() -> Result[(), Failure] {
     .Ok(())
 }
 
-test fn equality_checks_result_variants_and_payloads() -> Result[(), Failure] {
+test "equality checks result variants and payloads" -> Result[(), Failure] {
     let success: Result[UInt8, Str] = .Ok(7)
     let error: Result[UInt8, Str] = .Err("unavailable")
     let different: Result[UInt8, Str] = .Err("missing")
@@ -199,7 +199,7 @@ pub fn assert_ok_eq[T: Equatable + Debug, E: Debug](got: Result[T, E], want: T, 
     }
 }
 
-test fn a_success_matches_its_value_and_an_error_never_does() -> Result[(), Failure] {
+test "a success matches its value and an error never does" -> Result[(), Failure] {
     let succeeded: Result[UInt8, Str] = .Ok(2)
     let failed: Result[UInt8, Str] = .Err("refused")
     match assert_ok_eq(succeeded, 2, "success holds two") {
@@ -229,7 +229,7 @@ pub fn assert_err[T: Debug, E](got: Result[T, E], said: Str) -> Result[(), Failu
     }
 }
 
-test fn an_error_is_accepted_and_a_success_is_reported() -> Result[(), Failure] {
+test "an error is accepted and a success is reported" -> Result[(), Failure] {
     let failed: Result[UInt8, Str] = .Err("refused")
     let succeeded: Result[UInt8, Str] = .Ok(2)
     match assert_err(failed, "refusal is an error") {
@@ -301,7 +301,7 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
     .Ok(attempts)
 }
 
-test fn each_allocation_failure_takes_callbacks_that_change_lent_counts() -> Result[(), Failure] {
+test "each_allocation_failure takes callbacks that change lent counts" -> Result[(), Failure] {
     var runs = UInt64(0)
     var refusals = UInt64(0)
     let checked = each_allocation_failure(
@@ -322,7 +322,7 @@ test fn each_allocation_failure_takes_callbacks_that_change_lent_counts() -> Res
     .Ok(())
 }
 
-test fn each_allocation_failure_walks_every_attempt_and_settles() -> Result[(), Failure] {
+test "each_allocation_failure walks every attempt and settles" -> Result[(), Failure] {
     let checked = each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), Oom] {
@@ -336,7 +336,7 @@ test fn each_allocation_failure_walks_every_attempt_and_settles() -> Result[(), 
     .Ok(())
 }
 
-test fn each_allocation_failure_returns_the_attempts_it_walked() -> Result[(), Failure] {
+test "each_allocation_failure returns the attempts it walked" -> Result[(), Failure] {
     let checked = each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), Oom] {
@@ -352,7 +352,7 @@ test fn each_allocation_failure_returns_the_attempts_it_walked() -> Result[(), F
 
 // A refused run that fails for a reason other than the refusal, such as an
 // assertion about its answer, fails the walk.
-test fn each_allocation_failure_reports_a_refused_run_that_fails_for_another_reason() -> Result[(), Failure] {
+test "each_allocation_failure reports a refused run that fails for another reason" -> Result[(), Failure] {
     let checked = each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), Failure] {
@@ -370,7 +370,7 @@ test fn each_allocation_failure_reports_a_refused_run_that_fails_for_another_rea
     .Ok(())
 }
 
-test fn each_allocation_failure_walks_an_arena_backing() -> Result[(), Failure] {
+test "each_allocation_failure walks an arena backing" -> Result[(), Failure] {
     // Three runs each take an 8240-byte log and two eight-byte buffers from the
     // arena, which reclaims nothing until it is released.
     defer let arena = mem.Arena.open(mem.system(), 32768)
@@ -389,7 +389,7 @@ test fn each_allocation_failure_walks_an_arena_backing() -> Result[(), Failure] 
 
 // An optional allocation, such as a size hint, may be refused without
 // failing the operation it speeds up.
-test fn each_allocation_failure_accepts_a_run_that_completes_despite_the_refusal() -> Result[(), Failure] {
+test "each_allocation_failure accepts a run that completes despite the refusal" -> Result[(), Failure] {
     let checked = each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), Oom] {
@@ -405,7 +405,7 @@ test fn each_allocation_failure_accepts_a_run_that_completes_despite_the_refusal
     .Ok(())
 }
 
-test fn each_allocation_failure_reports_a_run_with_nothing_refused_that_failed() -> Result[(), Failure] {
+test "each_allocation_failure reports a run with nothing refused that failed" -> Result[(), Failure] {
     let checked = each_allocation_failure(
         mem.system(),
         |_allocator| -> Result[(), Oom] {
@@ -419,7 +419,7 @@ test fn each_allocation_failure_reports_a_run_with_nothing_refused_that_failed()
 
 // A body that allocates nothing refuses nothing, so the walk proves nothing
 // about it and is reported.
-test fn each_allocation_failure_reports_a_body_that_allocates_nothing() -> Result[(), Failure] {
+test "each_allocation_failure reports a body that allocates nothing" -> Result[(), Failure] {
     let checked = each_allocation_failure(
         mem.system(),
         |_allocator| -> Result[(), Oom] {
@@ -440,7 +440,7 @@ pub fn oom_is_a_refusal(error: Oom) -> Bool {
     error.is_refusal()
 }
 
-test fn oom_is_a_refusal_accepts_each_refused_allocation() -> Result[(), Failure] {
+test "oom_is_a_refusal accepts each refused allocation" -> Result[(), Failure] {
     assert(oom_is_a_refusal(Oom.Exhausted), "an exhausted allocator was not a refusal")?
     let checked = each_allocation_failure(
         mem.system(),
@@ -495,7 +495,7 @@ impl Recorder[mem.SystemAllocator] {
         Recorder.of_in(mem.system(), bytes)
     }
 
-    test fn a_recorder_records_into_the_system_allocator() -> Result[(), Failure] {
+    test "a recorder records into the system allocator" -> Result[(), Failure] {
         var recorder = Recorder.of(16) else |_| {
             return assert(false, "a recorder of sixteen bytes was refused")
         }
@@ -505,7 +505,7 @@ impl Recorder[mem.SystemAllocator] {
         assert(wrote && kept, "a system recorder lost what was written into it")
     }
 
-    test fn a_new_recorder_holds_nothing() -> Result[(), Failure] {
+    test "a new recorder holds nothing" -> Result[(), Failure] {
         var recorder = Recorder.of(8) else |_| {
             return assert(false, "a recorder of eight bytes was refused")
         }
@@ -524,7 +524,7 @@ impl[A: Allocator] Recorder[A] {
         .Ok(.{ held = held, len = 0 })
     }
 
-    test fn a_recorder_records_into_an_arena() -> Result[(), Failure] {
+    test "a recorder records into an arena" -> Result[(), Failure] {
         defer let arena = mem.Arena.open(mem.system(), 64)
         var recorder = Recorder.of_in(arena.handle(), 16) else |_| {
             return assert(false, "an arena recorder of sixteen bytes was refused")
@@ -541,7 +541,7 @@ impl[A: Allocator] Recorder[A] {
         self.len
     }
 
-    test fn length_counts_the_bytes_written() -> Result[(), Failure] {
+    test "length counts the bytes written" -> Result[(), Failure] {
         var recorder = Recorder.of(8) else |_| {
             return assert(false, "a recorder of eight bytes was refused")
         }
@@ -562,7 +562,7 @@ impl[A: Allocator] Recorder[A] {
         }
     }
 
-    test fn byte_reads_a_written_byte_and_nothing_past_the_end() -> Result[(), Failure] {
+    test "byte reads a written byte and nothing past the end" -> Result[(), Failure] {
         var recorder = Recorder.of(8) else |_| {
             return assert(false, "a recorder of eight bytes was refused")
         }
@@ -596,7 +596,7 @@ impl[A: Allocator] Recorder[A] {
 
     // Recorded output can be checked as complete text, a byte count, or a byte
     // at a particular index.
-    test fn a_recorder_keeps_what_was_rendered_into_it() -> Result[(), Failure] {
+    test "a recorder keeps what was rendered into it" -> Result[(), Failure] {
         // Sixty-four bytes leave spare capacity beyond the five-byte word.
         var w = Recorder.of(64) else |_| {
             return assert(false, "a recorder of sixty-four bytes was refused")
@@ -644,7 +644,7 @@ impl[A: Allocator] Writer for Recorder[A] {
     }
 }
 
-test trap fn a_recorder_traps_when_a_write_exceeds_its_storage() -> Result[(), Failure] {
+test trap "a recorder traps when a write exceeds its storage" -> Result[(), Failure] {
     // One byte cannot hold the two-byte write below; its second store traps.
     var writer = Recorder.of(1) else |_| {
         return assert(false, "the recorder was refused")

@@ -43,7 +43,7 @@ fn count_lines_in[A: Allocator](allocator: A, input: Str) -> Result[LineCounts[A
     .Ok(counts)
 }
 
-test fn arena_frequencies_outlive_the_separate_input_owner() {
+test "arena frequencies outlive the separate input owner" {
     // `arena.handle()` lends the arena as the map's allocator, so each key is
     // carved from the arena's 4096-byte block rather than from the input.
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
@@ -58,21 +58,21 @@ fn count_lines(input: Str) -> Result[LineCounts[mem.SystemAllocator], mem.Oom] w
     count_lines_in(mem.system(), input)
 }
 
-test fn frequencies_count_trimmed_lines_and_repeated_text() {
+test "frequencies count trimmed lines and repeated text" {
     defer let counts = count_lines(" tea \ncoffee\ntea\n\tcoffee\r\ntea\n").unwrap()
     testing.assert_eq(counts.length(), 2, "whitespace created another key")?
     testing.assert_eq(*counts.get("tea").unwrap(), 3, "repeated tea lines were lost")?
     testing.assert_eq(*counts.get("coffee").unwrap(), 2, "repeated coffee lines were lost")?
 }
 
-test fn empty_and_whitespace_only_inputs_have_no_frequencies() {
+test "empty and whitespace only inputs have no frequencies" {
     defer let empty = count_lines("").unwrap()
     defer let blanks = count_lines(" \n\t\r\n　\n").unwrap()
     testing.assert_eq(empty.length(), 0, "empty input created a key")?
     testing.assert_eq(blanks.length(), 0, "blank lines created a key")?
 }
 
-test fn frequency_keys_own_unicode_text_after_input_is_released() {
+test "frequency keys own unicode text after input is released" {
     let input = "　café　\n東京\ncafé\n".to_owned().unwrap()
     defer let counts = count_lines(input.view()).unwrap()
     input.release()
@@ -98,7 +98,7 @@ fn ranked[A: Allocator](counts: LineCounts[A]) -> Result[RankedLines[A], mem.Oom
     .Ok(rows)
 }
 
-test fn ranked_lines_put_the_most_frequent_first_and_break_ties_by_text() {
+test "ranked lines put the most frequent first and break ties by text" {
     defer let counts = count_lines("jam\ntea\nbread\ntea\njam\ntea\nbread\ncoffee\n").unwrap()
     defer let rows = ranked(counts).unwrap()
     testing.assert_eq(rows.length(), UInt64(4), "a counted line was not ranked")?

@@ -8,6 +8,6 @@ impl Equatable for () {
 
 impl Equivalent for () {}
 
-test fn unit_values_are_equivalent() {
+test "unit values are equivalent" {
     testing.assert(Equatable.equals((), ()), "unit values compared unequal")?
 }

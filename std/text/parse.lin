@@ -13,7 +13,7 @@ pub enum ParseError {
     TokenLimit,
 }
 
-test fn parse_errors_can_be_released_explicitly() {
+test "parse errors can be released explicitly" {
     let error: ParseError = .Syntax(2)
     error.release()
     .Ok(())
@@ -77,7 +77,7 @@ fn decimal(s: Str, signed: Bool, positive_limit: UInt64, negative_limit: UInt64)
     .Ok(.{ magnitude = magnitude, negative = negative })
 }
 
-test fn integer_parsing_rejects_non_decimal_input() {
+test "integer parsing rejects non decimal input" {
     let invalid = ["", "+", "-", " 1", "1 ", "1_0", "0x10", "１", "1.0"]
     for read input in invalid {
         let result = input.parse[Int64]()
@@ -90,7 +90,7 @@ test fn integer_parsing_rejects_non_decimal_input() {
     .Ok(())
 }
 
-test fn integer_parsing_accepts_zeroes_and_reports_missing_digit_offsets() {
+test "integer parsing accepts zeroes and reports missing digit offsets" {
     let negative_zero = "-0".parse[Int64]()
     testing.assert_eq(negative_zero.unwrap(), Int64(0), "negative zero changed value")?
     let padded = "+00042".parse[Int64]()
@@ -108,7 +108,7 @@ test fn integer_parsing_accepts_zeroes_and_reports_missing_digit_offsets() {
     .Ok(())
 }
 
-test fn parsed_values_and_errors_outlive_their_input_text() {
+test "parsed values and errors outlive their input text" {
     let digits = "42".to_owned().unwrap()
     let number = digits.view().parse[UInt64]()
     digits.release()
@@ -128,13 +128,13 @@ impl Str {
         T.parse(self)
     }
 
-    test fn parse_selects_its_implementation_from_a_result_annotation() {
+    test "parse selects its implementation from a result annotation" {
         let value: UInt16 = "150".parse().unwrap()
         testing.assert_eq(value, UInt16(150), "the annotation did not select UInt16's implementation")?
         .Ok(())
     }
 
-    test fn parse_selects_its_implementation_from_a_named_type_argument() {
+    test "parse selects its implementation from a named type argument" {
         testing.assert_eq("150".parse[UInt16](), .Ok(150), "the brackets did not select UInt16's implementation")?
         testing.assert_eq("-150".parse[Int16](), .Ok(-150), "the brackets did not select Int16's implementation")?
         .Ok(())
@@ -157,7 +157,7 @@ impl Parse for Int8 {
     }
 }
 
-test fn int8_parse_checks_limits() {
+test "int8 parse checks limits" {
     let minimum = "-128".parse[Int8]()
     match minimum { Ok(value) => testing.assert_eq(value, Int8.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+127".parse[Int8]()
@@ -185,7 +185,7 @@ impl Parse for Int16 {
     }
 }
 
-test fn int16_parse_checks_limits() {
+test "int16 parse checks limits" {
     let minimum = "-32768".parse[Int16]()
     match minimum { Ok(value) => testing.assert_eq(value, Int16.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+32767".parse[Int16]()
@@ -213,7 +213,7 @@ impl Parse for Int32 {
     }
 }
 
-test fn int32_parse_checks_limits() {
+test "int32 parse checks limits" {
     let minimum = "-2147483648".parse[Int32]()
     match minimum { Ok(value) => testing.assert_eq(value, Int32.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+2147483647".parse[Int32]()
@@ -241,7 +241,7 @@ impl Parse for Int64 {
     }
 }
 
-test fn int64_parse_checks_limits() {
+test "int64 parse checks limits" {
     let minimum = "-9223372036854775808".parse[Int64]()
     match minimum { Ok(value) => testing.assert_eq(value, Int64.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+9223372036854775807".parse[Int64]()
@@ -260,7 +260,7 @@ impl Parse for UInt8 {
     }
 }
 
-test fn uint8_parse_checks_limits() {
+test "uint8 parse checks limits" {
     let minimum = "0".parse[UInt8]()
     match minimum { Ok(value) => testing.assert_eq(value, UInt8.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+255".parse[UInt8]()
@@ -277,7 +277,7 @@ impl Parse for UInt16 {
     }
 }
 
-test fn uint16_parse_checks_limits() {
+test "uint16 parse checks limits" {
     let minimum = "0".parse[UInt16]()
     match minimum { Ok(value) => testing.assert_eq(value, UInt16.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+65535".parse[UInt16]()
@@ -294,7 +294,7 @@ impl Parse for UInt32 {
     }
 }
 
-test fn uint32_parse_checks_limits() {
+test "uint32 parse checks limits" {
     let minimum = "0".parse[UInt32]()
     match minimum { Ok(value) => testing.assert_eq(value, UInt32.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+4294967295".parse[UInt32]()
@@ -311,7 +311,7 @@ impl Parse for UInt64 {
     }
 }
 
-test fn uint64_parse_checks_limits() {
+test "uint64 parse checks limits" {
     let minimum = "0".parse[UInt64]()
     match minimum { Ok(value) => testing.assert_eq(value, UInt64.min, "minimum changed")?, Err(_) => testing.assert(false, "minimum was rejected")? }
     let maximum = "+18446744073709551615".parse[UInt64]()
@@ -341,7 +341,7 @@ impl Parse for Point {
     }
 }
 
-test fn a_user_type_implements_parse_by_splitting_once() {
+test "a user type implements parse by splitting once" {
     let origin: Point = "0,0".parse().unwrap()
     testing.assert_eq(origin, Point { x = 0, y = 0 }, "the coordinate's own Parse implementation lost its fields")?
     let east: Point = "12,-7".parse().unwrap()

@@ -33,7 +33,7 @@ impl Display for RouteError {
     }
 }
 
-test fn a_route_error_displays_its_reason() {
+test "a route error displays its reason" {
     defer let invalid = fmt.render_owned(RouteError.InvalidPattern).unwrap()
     defer let duplicate = fmt.render_owned(RouteError.Duplicate).unwrap()
     defer let allocation = fmt.render_owned(RouteError.Allocation(.Exhausted)).unwrap()
@@ -87,7 +87,7 @@ fn parse_pattern[A: Allocator](pattern: Str, allocator: A) -> Result[Pattern, Ro
     .Ok(.{ method = copy(parts.method), path })
 }
 
-test fn a_pattern_splits_into_its_method_and_path() {
+test "a pattern splits into its method and path" {
     let plain = parse_pattern(r"/items/{id}", mem.system())
     let method = parse_pattern("POST /items", mem.system())
     let slashed = parse_pattern("GET /static/", mem.system())
@@ -101,7 +101,7 @@ test fn a_pattern_splits_into_its_method_and_path() {
     .Ok(())
 }
 
-test fn a_malformed_pattern_is_refused() {
+test "a malformed pattern is refused" {
     for pattern in ["", "items", "BREW /x", "get /x", "/a//b", "//", r"/{}", r"/{...}", r"/a{b}", r"/{a}}", r"/{rest...}/b", r"/{rest...}/", r"/{a}/{a}", r"/{a}/{a...}"] {
         testing.assert_eq(parse_pattern(pattern, mem.system()), .Err(.InvalidPattern), pattern)?
     }
@@ -161,7 +161,7 @@ fn segment_end(path: Str, start: UInt64) -> UInt64 {
     path.find("/", start).unwrap_or(path.length())
 }
 
-test fn a_segment_ends_at_the_next_slash() {
+test "a segment ends at the next slash" {
     testing.assert_eq(segment_end("a/bc/d", 0), UInt64(1), "the first segment changed")?
     testing.assert_eq(segment_end("a/bc/d", 2), UInt64(4), "a middle segment changed")?
     testing.assert_eq(segment_end("a/bc/d", 5), UInt64(6), "the last segment changed")?
@@ -195,7 +195,7 @@ fn segment_of(segment: Str) -> Option[Segment] where carries(.Some: segment) {
     .Some(.Parameter(name))
 }
 
-test fn a_segment_is_a_literal_a_parameter_or_a_remainder() {
+test "a segment is a literal a parameter or a remainder" {
     testing.assert_eq(segment_of("items"), Option.Some(Segment.Literal("items")), "a literal changed")?
     testing.assert_eq(segment_of(r"{id}"), Option.Some(Segment.Parameter("id")), "a parameter changed")?
     testing.assert_eq(segment_of(r"{path...}"), Option.Some(Segment.Remainder("path")), "a remainder changed")?

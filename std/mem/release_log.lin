@@ -32,7 +32,7 @@ impl ReleaseLog {
         ReleaseLog { buffer = system().acquire((capacity + 1) * release_word_bytes).unwrap() }
     }
 
-    test fn a_new_release_log_holds_no_releases() {
+    test "a new release log holds no releases" {
         let log = ReleaseLog.open(2)
         let nothing: [UInt64; 0] = []
         let empty = log.holds([UInt64(0)].as_slice())
@@ -47,7 +47,7 @@ impl ReleaseLog {
         .{ log = borrow self, code }
     }
 
-    test fn a_tag_records_its_code_when_it_is_released() {
+    test "a tag records its code when it is released" {
         let log = ReleaseLog.open(1)
         let tag = log.tag(42)
         let nothing: [UInt64; 0] = []
@@ -80,7 +80,7 @@ impl ReleaseLog {
         true
     }
 
-    test fn a_release_log_holds_its_codes_in_release_order() {
+    test "a release log holds its codes in release order" {
         let log = ReleaseLog.open(2)
         let first = log.tag(7)
         let second = log.tag(9)

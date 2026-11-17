@@ -33,7 +33,7 @@ fn tally(text: Str) -> Counts {
     counts
 }
 
-test fn message_bytes_are_counted_in_their_categories() {
+test "message bytes are counted in their categories" {
     let mixed = Counts { letters = 4, digits = 2, whitespace = 3, other = 2 }
     let empty = Counts { letters = 0, digits = 0, whitespace = 0, other = 0 }
     testing.assert_eq(
@@ -48,7 +48,7 @@ test fn message_bytes_are_counted_in_their_categories() {
     )?
 }
 
-test fn non_ascii_text_counts_its_utf8_bytes_as_other() {
+test "non ascii text counts its utf8 bytes as other" {
     let counted = Counts { letters = 2, digits = 0, whitespace = 0, other = 2 }
     testing.assert_eq(
         tally("olá"),

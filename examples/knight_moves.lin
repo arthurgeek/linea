@@ -144,21 +144,21 @@ fn reach_from_a_corner(side: UInt64 = standard_side) -> Result[Reach, Oom] {
 }
 
 // All 64 squares are reachable. Only the opposite corner takes six moves.
-test fn a_corner_reaches_every_square_of_a_full_board() {
+test "a corner reaches every square of a full board" {
     let expected: Result[Reach, Oom] = .Ok(.{ reached = 64, farthest = 6, at_farthest = 1 })
     testing.assert_eq(reach_from_a_corner(8), expected, "a full board must have one square six moves from the corner")?
 }
 
 // On a three-by-three board, the centre is unreachable. The other eight
 // squares are reachable; only the opposite corner takes four moves.
-test fn a_square_no_move_reaches_is_left_out_of_the_count() {
+test "a square no move reaches is left out of the count" {
     let expected: Result[Reach, Oom] = .Ok(.{ reached = 8, farthest = 4, at_farthest = 1 })
     testing.assert_eq(reach_from_a_corner(3), expected, "a three-by-three board must reach eight squares with one four moves away")?
 }
 
 // On one-by-one and two-by-two boards, only the starting corner is reachable.
 // An empty board has no reachable squares.
-test fn a_board_with_no_move_on_it_reaches_only_the_corner() {
+test "a board with no move on it reaches only the corner" {
     let stationary: Result[Reach, Oom] = .Ok(.{ reached = 1, farthest = 0, at_farthest = 1 })
     let empty: Result[Reach, Oom] = .Ok(.{ reached = 0, farthest = 0, at_farthest = 0 })
     testing.assert_eq(reach_from_a_corner(1), stationary, "a one-square board must reach only its starting square")?
@@ -167,16 +167,16 @@ test fn a_board_with_no_move_on_it_reaches_only_the_corner() {
 }
 
 // An oversized allocation returns `Err(Oom.Exhausted)` to the caller.
-test fn a_board_too_wide_to_hold_is_refused_as_a_value() {
+test "a board too wide to hold is refused as a value" {
     let oversized = reach_from_a_corner(100000000)
     testing.assert(oversized.is_err(), "a board of ten quadrillion squares must report an allocation failure")?
 }
 
-test fn a_default_board_matches_an_explicit_eight_by_eight_board() {
+test "a default board matches an explicit eight by eight board" {
     testing.assert_eq(reach_from_a_corner(), reach_from_a_corner(side: 8), "the default board differs from an explicit eight-by-eight board")?
 }
 
-test fn an_unrepresentable_board_is_refused_as_a_value() {
+test "an unrepresentable board is refused as a value" {
     // 876706529 is the first side whose three tables exceed a 64-bit byte count;
     // 1518500250 is the first whose single eight-byte table exceeds that count.
     // The maximum side also exercises overflow of the square count itself.

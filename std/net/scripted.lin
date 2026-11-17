@@ -20,7 +20,7 @@ pub fn scripted(sink listener: Listener, sink script: [Option[NetError]; 4], sin
     ScriptedListener { listener, script, taken = 0, close_failure }
 }
 
-test fn a_scripted_listener_fails_as_scripted_then_accepts_and_reports_its_close_failure() {
+test "a scripted listener fails as scripted then accepts and reports its close failure" {
     let listener = listen(loopback(0)).unwrap()
     let client = connect(listener.local_address().unwrap()).unwrap()
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }

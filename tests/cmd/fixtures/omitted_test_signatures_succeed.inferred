@@ -5,16 +5,16 @@ fn main() -> UInt8 {
     0
 }
 
-test fn fallthrough_succeeds() {
+test "fallthrough succeeds" {
     testing.assert(true, "fallthrough")?
 }
 
-test fn bare_return_succeeds() {
+test "bare return succeeds" {
     testing.assert(true, "bare return")?
     return
 }
 
-test fn deferred_cleanup_runs_before_success() {
+test "deferred cleanup runs before success" {
     defer mark_cleanup()
     return
 }
@@ -23,15 +23,15 @@ fn mark_cleanup() {
     io.eprintln[Str]("cleanup")
 }
 
-test fn explicit_custom_signature_is_preserved() -> Result[(), Str] {
+test "explicit custom signature is preserved" -> Result[(), Str] {
     return .Ok({})
 }
 
-test trap fn an_explicit_trap_remains_expected() -> Result[(), Str] {
+test trap "an explicit trap remains expected" -> Result[(), Str] {
     panic("expected")
 }
 
-test fn trailing_match_succeeds() {
+test "trailing match succeeds" {
     let value: Option[UInt8] = .None
     match value {
         Some(_) => testing.assert(false, "unexpected payload")?,
@@ -39,7 +39,7 @@ test fn trailing_match_succeeds() {
     }
 }
 
-test fn trailing_integer_match_succeeds() {
+test "trailing integer match succeeds" {
     let value: UInt8 = 3
     match value {
         0 => testing.assert(false, "unexpected zero")?,
@@ -47,7 +47,7 @@ test fn trailing_integer_match_succeeds() {
     }
 }
 
-test fn trailing_conditional_succeeds() {
+test "trailing conditional succeeds" {
     if true {
         testing.assert(true, "taken branch")?
     } else {
@@ -55,7 +55,7 @@ test fn trailing_conditional_succeeds() {
     }
 }
 
-test fn trailing_match_with_returning_first_arm_succeeds() {
+test "trailing match with returning first arm succeeds" {
     let value: Option[UInt8] = .None
     match value {
         Some(_) => {

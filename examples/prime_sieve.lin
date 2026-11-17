@@ -41,7 +41,7 @@ fn primes_below(limit: UInt64) -> Result[UInt64, Oom] {
     .Ok(candidates.as_slice().filter(|candidate| *candidate).count())
 }
 
-test fn a_sieve_counts_the_primes_below_its_limit() {
+test "a sieve counts the primes_below its limit" {
     // The primes below 10 are 2, 3, 5 and 7.
     testing.assert_eq(primes_below(10), .Ok(4), "primes below ten")?
     // The primes below 30 are 2, 3, 5, 7, 11, 13, 17, 19, 23 and 29.

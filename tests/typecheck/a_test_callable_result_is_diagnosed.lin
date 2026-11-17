@@ -1,4 +1,4 @@
-test fn gives_number() -> fn(read x: UInt8) -> UInt8 {
+test "gives number" -> fn(read x: UInt8) -> UInt8 {
     0
 }
 

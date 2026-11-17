@@ -20,7 +20,7 @@ fn usage[W: Writer](inout w: W) -> Result[(), W.Error] {
 }
 
 // A `String` is a `Writer` too, so a test writes into one and compares the text.
-test fn usage_explains_how_to_supply_names() {
+test "usage explains how to supply names" {
     defer var written = String.new()
     usage(&written).unwrap()
     // The empty last line stands for the line break `line` writes after the
@@ -38,7 +38,7 @@ fn hello[W: Writer](name: Str, inout w: W) -> Result[(), W.Error] where carries(
     line("Hello, {name}!", &w)
 }
 
-test fn each_name_gets_a_greeting() {
+test "each name gets a greeting" {
     defer var written = String.new()
     hello("Ada", &written).unwrap()
     hello("José", &written).unwrap()

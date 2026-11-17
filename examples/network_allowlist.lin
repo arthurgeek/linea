@@ -39,7 +39,7 @@ fn permits[T: Equatable](rules: [Rule[T]; 3], request: Rule[T]) -> Bool {
     rules.as_slice().any([request] |sink rule| *rule == request)
 }
 
-test fn a_request_needs_a_rule_for_its_host_and_port() {
+test "a request needs a rule for its host and port" {
     let rules: [Rule[UInt16]; _] = [
         .{ host = host(10, 0, 0, 5), allowed = 443 },
         .{ host = host(10, 0, 0, 5), allowed = 22 },
@@ -50,7 +50,7 @@ test fn a_request_needs_a_rule_for_its_host_and_port() {
     testing.assert(!permits(rules, .{ host = host(10, 0, 0, 6), allowed = 443 }), "an unlisted host was allowed")?
 }
 
-test fn hosts_compare_by_every_octet() {
+test "hosts compare by every octet" {
     testing.assert_eq(host(192, 168, 1, 20), Host { octets = [192, 168, 1, 20] }, "equal addresses compared unequal")?
     testing.assert(host(192, 168, 1, 20) != host(192, 168, 1, 21), "the last octet was ignored")?
     testing.assert_eq(host(192, 168, 1, 20).octets, [192, 168, 1, 20], "the octets changed")?

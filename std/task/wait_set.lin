@@ -66,7 +66,7 @@ impl[T] Registered[T] {
         .{ set, slot, generation }
     }
 
-    test fn a_minted_key_names_what_it_was_minted_for() {
+    test "a minted key names what it was minted for" {
         let key: Registered[UInt64] = Registered.minted(3, 4, 5)
         testing.assert_eq(key.names(), (UInt64(3), UInt64(4), UInt64(5)), "the key named another registration")?
         .Ok(())
@@ -77,7 +77,7 @@ impl[T] Registered[T] {
         (self.set, self.slot, self.generation)
     }
 
-    test fn a_copied_key_names_the_same_registration() {
+    test "a copied key names the same registration" {
         let key: Registered[UInt64] = Registered.minted(1, 2, 3)
         let other = copy(key)
         testing.assert_eq(other.names(), key.names(), "a copy of a key named another registration")?
@@ -254,7 +254,7 @@ impl[M] WaitSet[M] {
         .{ set, identity = linea_waitset_identity(set), held = mem.Vec.new() }
     }
 
-    test fn a_set_with_nothing_registered_answers_none_without_waiting() {
+    test "a set with nothing registered answers none without waiting" {
         var waiting: WaitSet[UInt64] = WaitSet.open()
         let nothing = match &waiting.next() {
             None => true,
@@ -279,7 +279,7 @@ impl[M] WaitSet[M] {
         Registered.minted(self.identity, slot, generation)
     }
 
-    test fn a_registered_endpoint_is_delivered_once_its_peer_sends() {
+    test "a registered endpoint is delivered once its peer sends" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let _key = &waiting.received(wait_test_sender(41), |sink ready| WaitTestWoke.Sent(ready))
         let number = wait_test_settle(&waiting.next().unwrap())
@@ -301,7 +301,7 @@ impl[M] WaitSet[M] {
         Registered.minted(self.identity, slot, generation)
     }
 
-    test fn an_offering_endpoint_is_delivered_once_its_peer_chooses() {
+    test "an offering endpoint is delivered once its peer chooses" {
         let body = sink [] |sink me: Chan[Choose[End, End]]| {
             me.choose_right().close()
         }
@@ -326,7 +326,7 @@ impl[M] WaitSet[M] {
         Registered.minted(self.identity, slot, generation)
     }
 
-    test fn a_handle_is_delivered_once_its_body_has_returned() {
+    test "a handle is delivered once its body has returned" {
         let body = sink [] |sink me: Chan[End]| {
             me.close()
         }
@@ -355,7 +355,7 @@ impl[M] WaitSet[M] {
         Registered.minted(self.identity, slot, generation)
     }
 
-    test fn a_timer_is_registered_and_withdrawn() {
+    test "a timer is registered and withdrawn" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let key = &waiting.after(time.Duration.from_seconds(60), UInt64(42), |sink n| WaitTestWoke.Tick(n))
         let taken = &waiting.take(key).unwrap()
@@ -402,7 +402,7 @@ impl[M] WaitSet[M] {
         &self.polled(holder, wrap, .Readable)
     }
 
-    test fn a_value_that_is_ready_now_is_delivered_at_once() {
+    test "a value that is ready now is delivered at once" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let _key = &waiting.readable(WaitTestReady { tag = 5 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
         let tag = wait_test_settle(&waiting.next().unwrap())
@@ -417,7 +417,7 @@ impl[M] WaitSet[M] {
         &self.polled(holder, wrap, .Writable)
     }
 
-    test fn a_value_that_is_writable_at_once_is_delivered() {
+    test "a value that is writable at once is delivered" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let _key = &waiting.writable(WaitTestReady { tag = 6 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
         let tag = wait_test_settle(&waiting.next().unwrap())
@@ -449,7 +449,7 @@ impl[M] WaitSet[M] {
         }
     }
 
-    test fn a_signal_is_registered_in_a_wait_set_and_withdrawn() {
+    test "a signal is registered in a wait set and withdrawn" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let stop = &waiting.signal(.User2, |sink share| WaitTestWoke.Stop(share)).unwrap()
         let taken = &waiting.take(stop).unwrap()
@@ -492,7 +492,7 @@ impl[M] WaitSet[M] {
         .Some(&self.deliver_held(UInt64(slot)))
     }
 
-    test fn each_next_delivers_one_of_several_ready_sources() {
+    test "each next delivers one of several ready sources" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let _a = &waiting.readable(WaitTestReady { tag = 1 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
         let _b = &waiting.readable(WaitTestReady { tag = 2 }, |sink ready| WaitTestWoke.Always(ready)).unwrap()
@@ -513,7 +513,7 @@ impl[M] WaitSet[M] {
         &self.withdraw(key, 0)
     }
 
-    test fn a_taken_endpoint_comes_back_with_its_peer_still_waiting() {
+    test "a taken endpoint comes back with its peer still waiting" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let key = &waiting.received(wait_test_sender(12), |sink ready| WaitTestWoke.Sent(ready))
         let chan = &waiting.take(key).unwrap()
@@ -530,7 +530,7 @@ impl[M] WaitSet[M] {
         .Ok(())
     }
 
-    test fn a_key_is_refused_by_another_set_and_after_its_slot_is_reused() {
+    test "a key is refused by another set and after its slot is reused" {
         var one: WaitSet[WaitTestWoke] = WaitSet.open()
         var other: WaitSet[WaitTestWoke] = WaitSet.open()
         let far = time.Duration.from_seconds(3600)
@@ -598,7 +598,7 @@ impl[M] WaitSet[M] {
         left
     }
 
-    test fn closing_a_set_answers_what_it_still_holds() {
+    test "closing a set answers what it still holds" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let _peer = &waiting.received(wait_test_sender(30), |sink ready| WaitTestWoke.Sent(ready))
         let _timer = &waiting.after(time.Duration.from_seconds(3600), UInt64(4), |sink n| WaitTestWoke.Tick(n))

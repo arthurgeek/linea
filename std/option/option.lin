@@ -31,7 +31,7 @@ fn option_test_accepts_ordered[T: Ordered](_value: T) -> Bool {
     true
 }
 
-test fn derived_option_equality_compares_cases_and_payloads() {
+test "derived option equality compares cases and payloads" {
     let one: Option[UInt8] = .Some(1)
     let same: Option[UInt8] = .Some(1)
     let other: Option[UInt8] = .Some(2)
@@ -45,7 +45,7 @@ test fn derived_option_equality_compares_cases_and_payloads() {
     testing.assert(option_test_accepts_ordered(other), "Option did not derive Ordered")?
 }
 
-test fn derived_option_debug_renders_its_case_and_payload() {
+test "derived option debug renders its case and payload" {
     let none: Option[UInt8] = .None
     let some: Option[UInt8] = .Some(7)
     // Sixty-four bytes leave room for the complete debug text checked below.
@@ -57,7 +57,7 @@ test fn derived_option_debug_renders_its_case_and_payload() {
     testing.assert(rendered, "Option.Debug did not render its cases and payload")?
 }
 
-test fn derived_option_release_releases_only_a_present_payload() {
+test "derived option release releases only a present payload" {
     let log = mem.ReleaseLog.open(1)
     let absent: Option[mem.ReleaseTag] = .None
     absent.release()
@@ -93,7 +93,7 @@ impl[T] Option[T] {
         match read self { Some(_) => true, None => false }
     }
 
-    test fn is_some_answers_whether_a_value_is_present() {
+    test "is_some answers whether a value is present" {
         let present: Option[UInt8] = .Some(1)
         let absent: Option[UInt8] = .None
         testing.assert(present.is_some(), "a present value was absent")?
@@ -105,7 +105,7 @@ impl[T] Option[T] {
         match read self { Some(_) => false, None => true }
     }
 
-    test fn tag_predicates_preserve_affine_payloads() {
+    test "tag predicates preserve affine payloads" {
         let present: Option[OptionPredicateAffine] = .Some(.Value(7))
         let absent: Option[OptionPredicateAffine] = .None
         let present_tags = present.is_some() && !present.is_none() && present.is_some()
@@ -119,7 +119,7 @@ impl[T] Option[T] {
         testing.assert_eq(number, 7, "Option predicates consumed or changed the payload")?
     }
 
-    test fn tag_predicates_preserve_linear_payloads() {
+    test "tag predicates preserve linear payloads" {
         let present: Option[OptionPredicateLinear] = .Some(.Value(7))
         let absent: Option[OptionPredicateLinear] = .None
         let present_tags = present.is_some() && !present.is_none() && present.is_some()
@@ -133,7 +133,7 @@ impl[T] Option[T] {
         testing.assert_eq(number, 7, "Option predicates consumed or changed the payload")?
     }
 
-    test fn map_takes_a_transform_that_changes_a_lent_count() {
+    test "map takes a transform that changes a lent count" {
         var calls = UInt8(0)
         let present: Option[UInt8] = .Some(4)
         let mapped = present.map(
@@ -146,7 +146,7 @@ impl[T] Option[T] {
         testing.assert_eq(calls, UInt8(1), "map did not call its transform once")?
     }
 
-    test fn map_transforms_some_and_preserves_none() {
+    test "map transforms some and preserves none" {
         let present: Option[UInt8] = .Some(4)
         let mapped_present: Option[UInt8] = present.map(|sink value| value + 3)
         match mapped_present {
@@ -162,7 +162,7 @@ impl[T] Option[T] {
         }
     }
 
-    test fn map_preserves_a_record_borrowed_from_its_callback() {
+    test "map preserves a record borrowed from its callback" {
         let source = OptionAffineValue { number = 17 }
         let mapped = {
             let present: Option[UInt8] = .Some(4)
@@ -185,7 +185,7 @@ impl[T] Option[T] {
         }
     }
 
-    test fn a_mutable_map_calls_its_transform_only_for_some() {
+    test "a mutable map calls its transform only for some" {
         var calls = UInt8(0)
         var transform = inout [inout calls] |sink value: UInt8| {
             calls += 1
@@ -200,7 +200,7 @@ impl[T] Option[T] {
         testing.assert_eq(calls, UInt8(1), "mutable Option.map called its callback for None")?
     }
 
-    test fn mutable_option_combinator_preserves_its_callers_protocol_capture() {
+    test "mutable option combinator preserves its caller's protocol capture" {
         var transform = [sink token = OptionPredicateLinear.Value(UInt8(7))] |sink value: UInt8| {
             value + match read token { Value(number) => number }
         }
@@ -215,7 +215,7 @@ impl[T] Option[T] {
         testing.assert_eq(recovered, UInt8(7), "mutable Option.map settled its caller's protocol capture")?
     }
 
-    test fn and_then_takes_a_transform_that_changes_a_lent_count() {
+    test "and_then takes a transform that changes a lent count" {
         var calls = UInt8(0)
         let present: Option[UInt8] = .Some(4)
         let chained = present.and_then(
@@ -228,7 +228,7 @@ impl[T] Option[T] {
         testing.assert_eq(calls, UInt8(1), "and_then did not call its transform once")?
     }
 
-    test fn and_then_transforms_some_and_preserves_none() {
+    test "and_then transforms some and preserves none" {
         let present: Option[UInt8] = .Some(4)
         let transformed_present: Option[UInt16] = present.and_then(|sink value| .Some(UInt16(value) + 3))
         match transformed_present {
@@ -244,7 +244,7 @@ impl[T] Option[T] {
         }
     }
 
-    test fn option_combinators_preserve_borrowed_payloads() {
+    test "option combinators preserve borrowed payloads" {
         let source: UInt64 = 17
         let other: UInt64 = 23
         let present: Option[borrow UInt64] = .Some(borrow source)
@@ -264,7 +264,7 @@ impl[T] Option[T] {
         }
     }
 
-    test fn a_mutable_and_then_calls_its_transform_only_for_some() {
+    test "a mutable and_then calls its transform only for some" {
         var calls = UInt8(0)
         var chain = inout [inout calls] |sink value: UInt8| {
             calls += 1
@@ -288,12 +288,12 @@ impl[T] Option[T] {
         }
     }
 
-    test fn unwrap_returns_some() {
+    test "unwrap returns some" {
         let present: Option[UInt8] = .Some(5)
         testing.assert_eq(present.unwrap(), 5, "unwrap did not return the Some payload")?
     }
 
-    test trap fn unwrap_traps_on_none() -> Result[(), testing.Failure] {
+    test trap "unwrap traps on none" -> Result[(), testing.Failure] {
         let absent: Option[UInt8] = .None
         let _unwrapped = absent.unwrap()
         .Ok(())
@@ -311,7 +311,7 @@ impl[T] Option[T] {
         }
     }
 
-    test fn unwrap_or_returns_some_or_the_eager_fallback() {
+    test "unwrap_or returns some or the eager fallback" {
         let present: Option[UInt8] = .Some(6)
         testing.assert_eq(present.unwrap_or(9), 6, "unwrap_or returned its fallback for Some")?
 
@@ -319,7 +319,7 @@ impl[T] Option[T] {
         testing.assert_eq(absent.unwrap_or(9), 9, "unwrap_or did not return its fallback for None")?
     }
 
-    test fn an_eager_option_fallback_accepts_affine_values() {
+    test "an eager option fallback accepts affine values" {
         let present: Option[OptionAffineValue] = .Some(.{ number = 4 })
         let selected = present.unwrap_or(.{ number = 9 })
         testing.assert_eq(selected.number, UInt8(4), "an affine Some payload was replaced by its fallback")?
@@ -328,7 +328,7 @@ impl[T] Option[T] {
         testing.assert_eq(fallback.number, UInt8(9), "an affine fallback was not returned")?
     }
 
-    test fn unwrap_or_else_takes_a_fallback_that_changes_a_lent_count() {
+    test "unwrap_or_else takes a fallback that changes a lent count" {
         var calls = UInt8(0)
         let absent: Option[UInt8] = .None
         let value = absent.unwrap_or_else(
@@ -341,7 +341,7 @@ impl[T] Option[T] {
         testing.assert_eq(calls, UInt8(1), "unwrap_or_else did not call its fallback once")?
     }
 
-    test fn unwrap_or_else_calls_only_for_none() {
+    test "unwrap_or_else calls only for none" {
         let present: Option[UInt8] = .Some(7)
         testing.assert(
             present.unwrap_or_else(option_test_fallback_must_not_run) == 7,
@@ -361,7 +361,7 @@ impl[T] Option[T] {
         }
     }
 
-    test fn a_mutable_fallback_runs_only_for_none() {
+    test "a mutable fallback runs only for none" {
         var calls = UInt8(0)
         var fallback = inout [inout calls] || {
             calls += 1

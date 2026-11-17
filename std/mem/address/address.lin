@@ -14,7 +14,7 @@ internal fn nowhere[T]() -> Address[T] {
     Address(0)
 }
 
-test fn nowhere_is_the_address_of_no_bytes() {
+test "nowhere is the address of no bytes" {
     let none: Address[UInt64] = nowhere()
     let Address(number) = none
     testing.assert_eq(number, 0, "nowhere named a byte")?

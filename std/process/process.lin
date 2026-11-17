@@ -37,7 +37,7 @@ pub fn raise_open_file_limit() -> Result[UInt64, io.IoError] {
 // tests/cmd/the_open_file_limit_is_never_above_what_the_process_may_open.cmd
 // checks the answer in processes of its own, started with the soft limit
 // already raised or unlimited.
-test fn raising_the_open_file_limit_twice_answers_the_same_limit() {
+test "raising the open file limit twice answers the same limit" {
     let first = raise_open_file_limit().unwrap()
     let second = raise_open_file_limit().unwrap()
     testing.assert(first > 0, "the open-file limit admits no file")?

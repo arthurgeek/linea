@@ -18,13 +18,13 @@ impl hash.Hash for Str {
     }
 }
 
-test fn text_hashes_preserve_utf8_bytes_and_length() {
+test "text hashes preserve utf8 bytes and length" {
     testing.assert("café".hash() != "cafè".hash(), "text hashing ignored UTF-8 bytes")?
     testing.assert("café".hash() != "café\u{0}".hash(), "a trailing NUL was lost")?
     testing.assert("".hash() != "\u{0}".hash(), "empty text and a NUL were conflated")?
 }
 
-test fn text_queries_compare_contents() {
+test "text queries compare contents" {
     testing.assert("tea".matches("tea"), "equal text query did not match")?
     testing.assert(!"tea".matches("coffee"), "different text query matched")?
 }
@@ -38,7 +38,7 @@ impl[A: Allocator] Equatable for String[A] {
 
 impl[A: Allocator] Equivalent for String[A] {}
 
-test fn owned_text_equality_compares_utf8_contents() {
+test "owned text equality compares utf8 contents" {
     defer let first = "café\u{0}".to_owned().unwrap()
     defer let second = "café\u{0}".to_owned().unwrap()
     defer let shorter = "café".to_owned().unwrap()
@@ -55,7 +55,7 @@ impl[A: Allocator] hash.Hash for String[A] {
     }
 }
 
-test fn equal_owned_and_observed_text_share_a_content_hash() {
+test "equal owned and observed text share a content hash" {
     defer let first = "café\u{0}".to_owned().unwrap()
     defer let second = "café\u{0}".to_owned().unwrap()
     defer let shorter = "café".to_owned().unwrap()
@@ -74,7 +74,7 @@ impl[A: Allocator] hash.Key for String[A] {
     }
 }
 
-test fn owned_text_accepts_unallocated_queries() {
+test "owned text accepts unallocated queries" {
     defer let key = "café".to_owned().unwrap()
     testing.assert(key.matches("café"), "equal literal query did not match")?
     testing.assert(!key.matches("cafè"), "different UTF-8 query matched")?

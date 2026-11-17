@@ -8,7 +8,7 @@ fn square(num: UInt8) -> UInt8 {
     num * num
 }
 
-test fn a_square_is_a_number_times_itself() -> Result[(), testing.Failure] {
+test "a square is a number times itself" -> Result[(), testing.Failure] {
     testing.assert_eq(square(3), 9, "three squared is nine")?
 
     return .Ok(())

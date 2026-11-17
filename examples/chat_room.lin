@@ -96,7 +96,7 @@ fn run_room(sink first: Member, sink second: Member, sink third: Member) -> mem.
     heard
 }
 
-test fn the_room_hears_every_line_of_every_member() {
+test "the room hears every line of every member" {
     defer let heard = run_room(
         member(3, time.Duration.from_milliseconds(1)),
         member(2, time.Duration.from_milliseconds(0)),

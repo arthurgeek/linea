@@ -8,7 +8,7 @@ struct Box {
 
 // A test declares no visibility, inside an impl or at top level.
 impl Box {
-    pub test fn a_thing_holds() -> Result[(), IoError] {
+    pub test "a thing holds" -> Result[(), IoError] {
         return .Ok({})
     }
 }

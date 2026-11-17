@@ -8,7 +8,7 @@ pub fn size() -> UInt8 {
     7
 }
 
-test fn a_ledger_holds_seven_entries() -> Result[(), IoError] {
+test "a ledger holds seven entries" -> Result[(), IoError] {
     if size() != 7 {
         return .Err(IoError.from_os(.Write, 1))
     }

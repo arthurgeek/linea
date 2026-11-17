@@ -36,7 +36,7 @@ fn measure(text: Str) -> Measure {
     .{ words, sentences }
 }
 
-test fn measure_counts_words_and_sentences() {
+test "measure counts words and sentences" {
     testing.assert_eq(measure("One two. Three four five."), .{ words = 5, sentences = 2 }, "the measure was wrong")?
 }
 
@@ -46,7 +46,7 @@ fn minutes_for(words: UInt64) -> UInt64 {
     (words + 199) / 200
 }
 
-test fn minutes_for_rounds_up() {
+test "minutes_for rounds up" {
     testing.assert_eq(minutes_for(1), 1, "a short article took no time")?
     testing.assert_eq(minutes_for(400), 2, "an exact count was rounded")?
 }

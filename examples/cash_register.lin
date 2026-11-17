@@ -45,17 +45,17 @@ fn total[T: Cash](registers: [T; 3]) -> UInt64 {
     registers.as_slice().map(|sink register| register.cents()).sum()
 }
 
-test fn coins_are_counted_by_denomination() {
+test "coins are counted by denomination" {
     let drawer = Coins { pennies = 10, nickels = 2, dimes = 1, quarters = 2 }
     testing.assert_eq(drawer.cents(), 80, "coin value in cents")?
 }
 
-test fn notes_are_converted_to_cents() {
+test "notes are converted to cents" {
     let drawer = Notes { ones = 5, fives = 1, tens = 0, twenties = 1 }
     testing.assert_eq(drawer.cents(), 3000, "note value in cents")?
 }
 
-test fn register_totals_include_empty_drawers() {
+test "register totals include empty drawers" {
     let coins: [Coins; _] = [
         .{ pennies = 0, nickels = 0, dimes = 0, quarters = 0 },
         .{ pennies = 1, nickels = 1, dimes = 1, quarters = 1 },

@@ -163,7 +163,7 @@ impl Book {
         .Ok(())
     }
 
-    test fn initialize_creates_the_entries_table_in_a_file() {
+    test "initialize creates the entries table in a file" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -197,7 +197,7 @@ impl Book {
         .Ok(Book { database })
     }
 
-    test fn a_connection_reads_what_another_signed() {
+    test "a connection reads what another signed" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -214,7 +214,7 @@ impl Book {
     // As many connections as a server's serving tasks open at once, each on
     // a thread of its own, to one file `initialize` prepared: every one opens
     // and reads.
-    test fn every_serving_task_opens_its_connection_at_once() {
+    test "every serving task opens its connection at once" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -239,7 +239,7 @@ impl Book {
     // its own, all signing the book at once. SQLite writes one signature at a
     // time, and a connection waits at most two seconds for the others, so
     // each commit must be short for every signature to be written.
-    test fn every_serving_task_signs_at_once() {
+    test "every serving task signs at once" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -268,7 +268,7 @@ impl Book {
     // waiting for the disk. The test above fails only where the disk makes
     // each commit slow; this one fails everywhere if `connect` leaves the
     // setting out.
-    test fn a_connection_commits_without_waiting_for_the_disk() {
+    test "a connection commits without waiting for the disk" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -287,7 +287,7 @@ impl Book {
     // would wait for the read to finish and fail with `SQLITE_BUSY` after the
     // two seconds `wait_when_busy` allows. The unfinished query keeps reading
     // the entries as they were when it began.
-    test fn a_read_in_progress_lets_another_connection_read_and_sign() {
+    test "a read in progress lets another connection read and sign" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -319,7 +319,7 @@ impl Book {
     // signs through its own, and the task sends back over its session
     // whether the signature was written; the query, still open, reads the
     // entries as they were when it began.
-    test fn a_task_signs_while_another_thread_holds_a_read_open() {
+    test "a task signs while another thread holds a read open" {
         defer let path = scratch_path()
         defer {
             remove_database(path.view())
@@ -368,7 +368,7 @@ impl Book {
         .Ok(Book { database })
     }
 
-    test fn open_in_memory_starts_with_no_entries() {
+    test "open_in_memory starts with no entries" {
         defer var book = Book.open_in_memory("starts_with_no_entries").unwrap()
         defer let listed = &book.newest(10).unwrap()
         testing.assert_eq(listed.length(), UInt64(0), "a new book was not empty")?
@@ -386,7 +386,7 @@ impl Book {
         .Ok(())
     }
 
-    test fn sign_stores_text_holding_quotes_and_sql() {
+    test "sign stores text holding quotes and sql" {
         defer var book = Book.open_in_memory("sign_stores_text_holding_quotes_and_sql").unwrap()
         &book.sign("O'Connor", "'); DROP TABLE entries; --").unwrap()
         defer let listed = &book.newest(10).unwrap()
@@ -414,7 +414,7 @@ impl Book {
         .Ok(entries)
     }
 
-    test fn signing_and_listing_returns_newest_first_up_to_the_limit() {
+    test "signing and listing returns newest first up to the limit" {
         defer var book = Book.open_in_memory("signing_and_listing_returns_newest_first_up_to_the_limit").unwrap()
         &book.sign("Ada", "First").unwrap()
         &book.sign("Grace", "Second").unwrap()
@@ -426,7 +426,7 @@ impl Book {
         .Ok(())
     }
 
-    test fn newest_refuses_a_negative_limit() {
+    test "newest refuses a negative limit" {
         defer var book = Book.open_in_memory("newest_refuses_a_negative_limit").unwrap()
         let refused = match &book.newest(-1) {
             Ok(entries) => {
@@ -446,7 +446,7 @@ impl Book {
         .Ok(())
     }
 
-    test fn newest_zero_returns_no_entries() {
+    test "newest zero returns no entries" {
         defer var book = Book.open_in_memory("newest_zero_returns_no_entries").unwrap()
         &book.sign("Ada", "Hello").unwrap()
         defer let listed = &book.newest(0).unwrap()
@@ -454,7 +454,7 @@ impl Book {
         .Ok(())
     }
 
-    test fn invalid_timestamps_are_refused_rather_than_faked() {
+    test "invalid timestamps are refused rather than faked" {
         defer var book = Book.open_in_memory("invalid_timestamps_are_refused_rather_than_faked").unwrap()
         // Year 10000+ Unix timestamp is outside Linea's representable range.
         let invalid_stamp: Int64 = 300000000000
@@ -481,7 +481,7 @@ impl Book {
         .Ok(())
     }
 
-    test fn a_refused_entry_push_settles_the_rejected_entry_and_earlier_rows() {
+    test "a refused entry push settles the rejected entry and earlier rows" {
         let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         var entries: Vec[Entry, mem.RefusingAllocator[mem.SystemAllocator]] = Vec.new_in(log.allocator())
         let first = Entry { name = "Ada".to_owned().unwrap(), message = "First".to_owned().unwrap(), signed = time.now() }
@@ -509,7 +509,7 @@ impl Book {
         database.close()
     }
 
-    test fn close_consumes_the_book() {
+    test "close consumes the book" {
         let book = Book.open_in_memory("close_consumes_the_book").unwrap()
         book.close()
         .Ok(())

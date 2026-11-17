@@ -22,7 +22,7 @@ impl[R: Copyable] Errno[R] {
         copy(self.value)
     }
 
-    test fn the_value_is_what_c_returned() {
+    test "the value is what c returned" {
         let answer: Errno[Int32] = .{ value = 7, code = 2 }
         testing.assert_eq(answer.value(), 7, "the value was not what C returned")?
         .Ok(())
@@ -38,7 +38,7 @@ impl[R: Copyable] Errno[R] {
         .Ok(copy(self.value))
     }
 
-    test fn errno_is_answered_only_when_the_call_failed() {
+    test "errno is answered only when the call failed" {
         let answer: Errno[Int64] = .{ value = -4, code = 9 }
         testing.assert_eq(answer.failed_when(answer.value() < 0), .Err(9), "a failed call lost its errno")?
         testing.assert_eq(answer.failed_when(false), .Ok(-4), "a successful call answered errno")?
@@ -54,7 +54,7 @@ impl[R: Copyable + Equatable] Errno[R] {
         self.failed_when(self.value.equals(failure))
     }
 
-    test fn the_failure_value_selects_errno() {
+    test "the failure value selects errno" {
         let failed: Errno[Int32] = .{ value = -1, code = 2 }
         testing.assert_eq(failed.failed_at(-1), .Err(2), "-1 did not select errno")?
         let succeeded: Errno[Int32] = .{ value = 3, code = 2 }

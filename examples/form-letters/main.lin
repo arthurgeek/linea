@@ -29,7 +29,7 @@ struct Order[A: Allocator = mem.SystemAllocator] {
 // Orders decode into memory from `mem.system()`.
 alias OrderList = Vec[Order]
 
-test fn an_order_with_a_count_in_words_is_refused() {
+test "an order with a count in words is refused" {
     let decoded: Result[OrderList, json.DecodeError] = json.decode(r#"[{"name":"Ada","count":"three","item":"notebooks","city":"London"}]"#)
     defer let refused = match decoded {
         Err(error) => {
@@ -107,7 +107,7 @@ fn fill[A: Allocator](form: Str, order: Order[A]) -> Result[String[mem.SystemAll
 // line as written: it ends only at a `"` followed by `#`, so the quotes
 // inside are text. The annotation tells `json.decode` to build an `Order`,
 // and `unwrap` hands it over.
-test fn a_template_keeps_its_backslashes_and_fills_its_fields() {
+test "a template keeps its backslashes and fills its fields" {
     defer let order: Order = json.decode(r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
     // In a raw literal a backslash is an ordinary byte, so a Windows path
     // needs no escaping.
@@ -115,7 +115,7 @@ test fn a_template_keeps_its_backslashes_and_fills_its_fields() {
     testing.assert_eq(path.view(), r"C:\letters\Ada-3.txt", "the path lost a backslash")?
 }
 
-test fn a_field_the_order_lacks_is_refused() {
+test "a field the order lacks is refused" {
     defer let order: Order = json.decode(r#"{"name":"Ada","count":3,"item":"notebooks","city":"London"}"#).unwrap()
     let refused = match fill(r"Hello {nickname}", order) {
         Err(error) => {

@@ -5,7 +5,7 @@ fn change_due(paid: Int64, price: Int64) -> Int64 {
     -short
 }
 
-test fn change_is_what_was_paid_over_the_price() {
+test "change is what was paid over the price" {
     if change_due(10, 7) != 3 {
         panic("10 paid for 7 did not give 3 back")
     }

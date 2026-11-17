@@ -32,7 +32,7 @@ fn upgrade(installed: Version, available: Version) -> Upgrade {
     }
 }
 
-test fn newer_releases_distinguish_minor_updates_from_major_upgrades() {
+test "newer releases distinguish minor updates from major upgrades" {
     let installed = Version { major = 1, minor = 9 }
     testing.assert_eq(
         upgrade(installed, .{ major = 1, minor = 10 }),
@@ -46,7 +46,7 @@ test fn newer_releases_distinguish_minor_updates_from_major_upgrades() {
     )?
 }
 
-test fn equal_and_older_releases_keep_the_installed_version() {
+test "equal and older releases keep the installed version" {
     let installed = Version { major = 2, minor = 3 }
     testing.assert_eq(upgrade(installed, installed), Upgrade.KeepInstalled, "the installed release needs no upgrade")?
     testing.assert_eq(

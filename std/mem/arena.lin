@@ -85,7 +85,7 @@ impl[H: Allocator] Arena[H] {
     }
 
     // Release resources before assertions: a failing assertion returns early.
-    test fn an_arena_hands_out_storage_and_gives_the_slab_back() {
+    test "an arena hands out storage and gives the slab back" {
         let arena = Arena.open(system(), 4096)
         let a = arena.handle()
 
@@ -128,7 +128,7 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    test fn a_handle_written_without_a_parent_is_a_handle_over_the_system() {
+    test "a handle written without a parent is a handle over the system" {
         let arena = Arena.open(system(), 64)
         let short: Handle = arena.handle()
         let long: Handle[SystemAllocator] = short
@@ -146,7 +146,7 @@ impl[H: Allocator] Arena[H] {
     }
 
     // Release the inner arena before the outer arena that owns its storage.
-    test fn an_arena_backs_another_arena() {
+    test "an arena backs another arena" {
         let outer = Arena.open(system(), 4096)
         let a = outer.handle()
 
@@ -179,7 +179,7 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    test fn an_arena_the_backing_refused_refuses_everything() {
+    test "an arena the backing refused refuses everything" {
         // The log refuses its first acquisition, the arena's first chunk.
         defer let log = AllocationLog.open(system(), 1).unwrap()
         let arena = Arena.open(log.allocator(), 64)
@@ -205,7 +205,7 @@ impl[H: Allocator] Arena[H] {
     // An arena gives nothing back when a buffer is disposed into it, so an
     // arena over it takes its whole size at once, as it holds exactly what
     // the outer arena gave it.
-    test fn an_arena_over_an_arena_takes_its_whole_size_from_it() {
+    test "an arena over an arena takes its whole size from it" {
         // The outer arena hands out 200008 bytes: the inner arena's size.
         defer let outer = Arena.open(system(), 200016)
         defer let inner = Arena.open(outer.handle(), 200008)
@@ -217,7 +217,7 @@ impl[H: Allocator] Arena[H] {
         testing.assert(second, "an arena over an arena needed more of the outer arena than its size")?
     }
 
-    test fn an_arena_over_an_arena_is_rewound_in_place() {
+    test "an arena over an arena is rewound in place" {
         defer let outer = Arena.open(system(), 1048576)
         defer var inner = Arena.open(outer.handle(), 262144)
         var accepted: UInt64 = 0
@@ -230,7 +230,7 @@ impl[H: Allocator] Arena[H] {
         testing.assert_eq(accepted, UInt64(10), "rewinding an arena over an arena took more of the outer arena")?
     }
 
-    test fn a_reservation_larger_than_the_first_chunk_is_handed_out_whole() {
+    test "a reservation larger than the first chunk is handed out whole" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         defer let arena = Arena.open(log.allocator(), 1048576)
         var large = arena.handle().acquire(200000).unwrap()
@@ -246,7 +246,7 @@ impl[H: Allocator] Arena[H] {
         testing.assert_eq(log.acquired(), UInt64(2), "a reservation past the first chunk took other than one more chunk")?
     }
 
-    test fn a_parent_refusing_a_chunk_refuses_the_reservation_that_needed_it() {
+    test "a parent refusing a chunk refuses the reservation that needed it" {
         // The log accepts the first chunk and refuses the next acquisition.
         defer let log = AllocationLog.open(system(), 2).unwrap()
         defer let arena = Arena.open(log.allocator(), 1048576)
@@ -256,7 +256,7 @@ impl[H: Allocator] Arena[H] {
         testing.assert(small, "a refused chunk stopped the first chunk handing out storage")?
     }
 
-    test fn a_chunked_arena_hands_out_exactly_its_size_less_the_cursor() {
+    test "a chunked arena hands out exactly its size less the cursor" {
         // The eight-byte cursor leaves 262144 bytes to hand out.
         defer let arena = Arena.open(system(), 262152)
         let handle = arena.handle()
@@ -270,7 +270,7 @@ impl[H: Allocator] Arena[H] {
         testing.assert(full, "a full chunked arena handed out an empty reservation")?
     }
 
-    test fn a_buffer_from_a_later_chunk_is_disposed_into_its_arena() {
+    test "a buffer from a later chunk is disposed into its arena" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         defer let arena = Arena.open(log.allocator(), 1048576)
         let small = arena.handle().acquire(16).unwrap()
@@ -282,7 +282,7 @@ impl[H: Allocator] Arena[H] {
         testing.assert(log.acquired() >= 2, "the reservations fit in the first chunk")?
     }
 
-    test fn an_arena_refuses_what_it_cannot_hold() {
+    test "an arena refuses what it cannot hold" {
         let arena = Arena.open(system(), 256)
         let a = arena.handle()
 
@@ -316,7 +316,7 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    test fn allocating_again_preserves_a_live_buffer_view() {
+    test "allocating again preserves a live buffer view" {
         defer let arena = Arena.open(system(), 64)
         let handle = arena.handle()
         defer var first = handle.acquire(8).unwrap()
@@ -327,7 +327,7 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    test fn a_refused_overflowing_reservation_keeps_the_cursor() {
+    test "a refused overflowing reservation keeps the cursor" {
         // The eight-byte cursor leaves exactly 24 bytes available in this slab.
         defer let arena = Arena.open(system(), 32)
         let handle = arena.handle()
@@ -390,7 +390,7 @@ impl[H: Allocator] Arena[H] {
         }
     }
 
-    test fn a_rewound_arena_hands_out_its_slab_again_zeroed() {
+    test "a rewound arena hands out its slab again zeroed" {
         // The eight-byte cursor leaves 56 bytes to hand out.
         defer var arena = Arena.open(system(), 64)
         var first = arena.handle().acquire(56).unwrap()
@@ -411,7 +411,7 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    test fn an_arena_smaller_than_its_cursor_rewinds_to_nothing() {
+    test "an arena smaller than its cursor rewinds to nothing" {
         // Four bytes cannot hold the eight-byte cursor.
         defer var arena = Arena.open(system(), 4)
         &arena.rewind()
@@ -421,7 +421,7 @@ impl[H: Allocator] Arena[H] {
         .Ok(())
     }
 
-    test fn rewinding_gives_back_every_chunk_but_the_first() {
+    test "rewinding gives back every chunk but the first" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         var arena = Arena.open(log.allocator(), 1048576)
         let opened = log.live_bytes()

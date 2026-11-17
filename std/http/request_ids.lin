@@ -110,7 +110,7 @@ fn well_formed(id: Str) -> Bool {
     true
 }
 
-test fn an_id_is_kept_only_when_it_is_short_visible_ascii() {
+test "an id is kept only when it is short visible ascii" {
     testing.assert(well_formed("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17"), "a UUID was refused")?
     testing.assert(well_formed("a"), "a one-byte id was refused")?
     testing.assert(!well_formed(""), "an empty id was kept")?
@@ -251,7 +251,7 @@ impl[P: Allocator, T] Handler[T, P] for Echoing {
     }
 }
 
-test fn a_malformed_id_the_client_sent_is_replaced() {
+test "a malformed id the client sent is replaced" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var nothing = ()
@@ -267,7 +267,7 @@ test fn a_malformed_id_the_client_sent_is_replaced() {
 
 // A request whose allocator has nothing left is still given an id, since the
 // id is made without allocating and copied into the middleware's buffers.
-test fn a_generated_id_takes_nothing_from_the_request_allocator() {
+test "a generated id takes nothing from the request allocator" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     let sent = new_request(arena.handle(), "GET", "/a", body: "").unwrap()
@@ -285,7 +285,7 @@ test fn a_generated_id_takes_nothing_from_the_request_allocator() {
 
 // The buffers keep the size of the largest head seen, so a middleware whose
 // allocator is a small arena answers any number of requests it makes ids for.
-test fn buffers_in_an_arena_last_for_any_number_of_requests() {
+test "buffers in an arena last for any number of requests" {
     defer let kept = mem.Arena.open(mem.system(), size: 4096)
     defer var identifying = with_request_ids_in(kept.handle(), Echoing { served = 0 })
     var nothing = ()
@@ -302,7 +302,7 @@ test fn buffers_in_an_arena_last_for_any_number_of_requests() {
     testing.assert_eq(failed, UInt64(0), "requests failed once the middleware's arena filled")?
 }
 
-test fn an_identified_request_keeps_the_rest_of_the_request() {
+test "an identified request keeps the rest of the request" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var sent = new_request(arena.handle(), "POST", "/orders?id=7", body: "payload").unwrap()
@@ -320,7 +320,7 @@ test fn an_identified_request_keeps_the_rest_of_the_request() {
 
 // Ids given outside `logged` are in the line the exchange logs, and the router
 // inside answers as it does alone.
-test fn an_identified_exchange_is_logged_with_its_id() {
+test "an identified exchange is logged with its id" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: health-1\r\n\r\n")
@@ -342,7 +342,7 @@ test fn an_identified_exchange_is_logged_with_its_id() {
 }
 
 // A buffer that cannot grow answers the request 500 and loses nothing.
-test fn each_allocation_failure_covers_every_buffer_identifying_grows() -> Result[(), testing.Failure] {
+test "each allocation failure covers every buffer identifying grows" -> Result[(), testing.Failure] {
     defer let backing = mem.Arena.open(mem.system(), size: 65536)
     let checked = testing.each_allocation_failure(
         backing.handle(),
@@ -374,7 +374,7 @@ test fn each_allocation_failure_covers_every_buffer_identifying_grows() -> Resul
 // `logged` prints the id from the field only `RequestIds` sets, so a header a
 // client sends is never logged without the middleware, and a malformed one is
 // never logged with it.
-test fn a_malformed_or_unread_client_id_is_never_logged() {
+test "a malformed or unread client id is never logged" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let forged = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: 1 status=200\r\n\r\n")
@@ -411,7 +411,7 @@ test fn a_malformed_or_unread_client_id_is_never_logged() {
 
 // The headers a handler walks are the client's, in arrival order, with the id
 // first in place of every one the client sent under its name.
-test fn a_walk_of_the_headers_shows_one_id() {
+test "a walk of the headers shows one id" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
@@ -443,7 +443,7 @@ impl[P: Allocator, T] Handler[T, P] for SelfIdentifying {
     }
 }
 
-test fn a_handlers_own_id_is_replaced() {
+test "a handlers own id is replaced" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var own = with_request_ids(SelfIdentifying { served = 0 })
     var nothing = ()
@@ -455,7 +455,7 @@ test fn a_handlers_own_id_is_replaced() {
 
 // A request the server answers without calling the handler is logged without
 // an id, not with the previous request's.
-test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
+test "a request the handler never saw is logged without an id" {
     var listener = net.listen(net.loopback(0)).unwrap()
     let first = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\nX-Request-Id: seen\r\n\r\n")
     var client = net.connect(listener.local_address().unwrap()).unwrap()
@@ -501,7 +501,7 @@ test fn a_request_the_handler_never_saw_is_logged_without_an_id() {
 
 // A buffer that cannot grow answers 500 without calling the handler, and
 // nothing is lost.
-test fn a_refused_buffer_answers_500_before_the_handler() -> Result[(), testing.Failure] {
+test "a refused buffer answers 500 before the handler" -> Result[(), testing.Failure] {
     defer let backing = mem.Arena.open(mem.system(), size: 65536)
     let checked = testing.each_allocation_failure(
         backing.handle(),
@@ -533,7 +533,7 @@ test fn a_refused_buffer_answers_500_before_the_handler() -> Result[(), testing.
     .Ok(())
 }
 
-test fn each_request_gets_a_time_ordered_uuid() {
+test "each request gets a time ordered uuid" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var nothing = ()
@@ -551,7 +551,7 @@ test fn each_request_gets_a_time_ordered_uuid() {
     testing.assert(first_id != second_id, "two requests got the same id")?
 }
 
-test fn a_well_formed_id_the_client_sent_is_kept() {
+test "a well_formed id the client sent is kept" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     defer var identifying = with_request_ids(Echoing { served = 0 })
     var nothing = ()

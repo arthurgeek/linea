@@ -21,7 +21,7 @@ pub fn extend[I: Iterator, A: Allocator](
     .Ok(())
 }
 
-test fn extend_appends_items_in_source_order() {
+test "extend appends items in source order" {
     defer var values = Vec.filled(count: 1, value: UInt64(9)).unwrap()
     var source = UInt64(1)..4
     match extend(&values, &source) {
@@ -36,7 +36,7 @@ test fn extend_appends_items_in_source_order() {
     testing.assert(&source.next().is_none(), "extension left an item unread")?
 }
 
-test fn extend_at_exact_capacity_does_not_allocate_after_exhaustion() {
+test "extend at exact capacity does not allocate after exhaustion" {
     // Eight cursor bytes and four UInt64 slots leave no room for another allocation.
     defer let arena = mem.Arena.open(mem.system(), size: 40)
     var values = Vec.filled_in(arena.handle(), count: 4, value: UInt64(7)).unwrap()
@@ -45,7 +45,7 @@ test fn extend_at_exact_capacity_does_not_allocate_after_exhaustion() {
     testing.assert_eq(values.length(), UInt64(4), "empty extension changed the prefix")?
 }
 
-test fn extend_fills_exact_remaining_capacity_before_exhaustion() {
+test "extend fills exact remaining capacity before exhaustion" {
     defer let arena = mem.Arena.open(mem.system(), size: 40)
     var values: Vec[UInt64, mem.Handle] = Vec.new_in(arena.handle())
     &values.reserve(4).unwrap()
@@ -60,7 +60,7 @@ test fn extend_fills_exact_remaining_capacity_before_exhaustion() {
     testing.assert(&source.next().is_none(), "extension left its final item unread")?
 }
 
-test fn extend_returns_the_rejected_item_and_resumes_without_recomputing() {
+test "extend returns the rejected item and resumes without recomputing" {
     // The cursor and four UInt64 slots consume all 40 bytes.
     defer let arena = mem.Arena.open(mem.system(), size: 40)
     var values: Vec[UInt64, mem.Handle] = Vec.new_in(arena.handle())
@@ -93,7 +93,7 @@ test fn extend_returns_the_rejected_item_and_resumes_without_recomputing() {
     }
 }
 
-test fn each_allocation_failure_covers_every_growth_step_of_an_extension() -> Result[(), testing.Failure] {
+test "each allocation failure covers every growth step of an extension" -> Result[(), testing.Failure] {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.PushFailure[UInt64]] {
@@ -128,7 +128,7 @@ pub fn extend_owned[I: Iterator, A: Allocator](
 
 // The vector lives in an arena, so it carries the arena's borrow; it still
 // keeps nothing of `readings`, which changes while the vector is live.
-test fn extend_owned_keeps_nothing_of_what_the_iterator_walks() {
+test "extend_owned keeps nothing of what the iterator walks" {
     defer let arena = mem.Arena.open(mem.system(), 128)
     var values: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
     var readings = [UInt8(3), 5, 8]
@@ -138,7 +138,7 @@ test fn extend_owned_keeps_nothing_of_what_the_iterator_walks() {
     testing.assert_eq(values.as_slice(), [UInt8(6), 10, 16].as_slice(), "the items did not arrive in source order")?
 }
 
-test fn extend_owned_returns_the_refused_item_and_keeps_the_prefix() {
+test "extend_owned returns the refused item and keeps the prefix" {
     // The cursor and four UInt64 slots consume all 40 bytes.
     defer let arena = mem.Arena.open(mem.system(), size: 40)
     var values: Vec[UInt64, mem.Handle] = Vec.new_in(arena.handle())
@@ -188,7 +188,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] Release for CollectFailure
     }
 }
 
-test fn a_failed_collection_can_be_released_whole() {
+test "a failed collection can be released whole" {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
     let released = match (UInt64(0)..3).collect_in(arena.handle()) {
@@ -218,7 +218,7 @@ impl[I: Iterator + Release, A: Allocator, T: Release] release.Settle for Collect
     }
 }
 
-test fn settling_a_failed_collection_keeps_the_allocation_reason() {
+test "settling a failed collection keeps the allocation reason" {
     // The arena's cursor fills all eight bytes, so the first item is refused.
     defer let arena = mem.Arena.open(mem.system(), size: 8)
     let settled = (UInt64(0)..3).collect_in(arena.handle()).settled()

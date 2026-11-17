@@ -80,7 +80,7 @@ impl Status {
         }
     }
 
-    test fn a_named_code_finds_its_variant() {
+    test "a named code finds its variant" {
         let named = [Status.Ok, Status.Created, Status.Accepted, Status.NoContent, Status.MovedPermanently, Status.Found, Status.SeeOther, Status.NotModified, Status.TemporaryRedirect, Status.PermanentRedirect, Status.BadRequest, Status.Unauthorized, Status.Forbidden, Status.NotFound, Status.MethodNotAllowed, Status.RequestTimeout, Status.ContentTooLarge, Status.UriTooLong, Status.UnsupportedMediaType, Status.UnprocessableContent, Status.RequestHeaderFieldsTooLarge, Status.InternalServerError, Status.NotImplemented, Status.ServiceUnavailable, Status.HttpVersionNotSupported]
         for status in named {
             let found = Status.of(Code?(status.code()).unwrap())
@@ -122,7 +122,7 @@ impl Status {
         }
     }
 
-    test fn a_status_has_its_code() {
+    test "a status has its code" {
         let statuses = [Status.Ok, Status.Created, Status.Accepted, Status.NoContent, Status.MovedPermanently, Status.Found, Status.SeeOther, Status.NotModified, Status.TemporaryRedirect, Status.PermanentRedirect, Status.BadRequest, Status.Unauthorized, Status.Forbidden, Status.NotFound, Status.MethodNotAllowed, Status.RequestTimeout, Status.ContentTooLarge, Status.UriTooLong, Status.UnsupportedMediaType, Status.UnprocessableContent, Status.RequestHeaderFieldsTooLarge, Status.InternalServerError, Status.NotImplemented, Status.ServiceUnavailable, Status.HttpVersionNotSupported, Status.Other(Code(418))]
         let codes: [UInt16; 26] = [200, 201, 202, 204, 301, 302, 303, 304, 307, 308, 400, 401, 403, 404, 405, 408, 413, 414, 415, 422, 431, 500, 501, 503, 505, 418]
         for index in 0..codes.length() {
@@ -139,7 +139,7 @@ impl Status {
         (code >= 100 && code < 200) || code == 204 || code == 304
     }
 
-    test fn bodyless_statuses_are_recognised() {
+    test "bodyless statuses are recognised" {
         testing.assert(Status.NoContent.is_bodyless(), "204 is bodyless")?
         testing.assert(Status.NotModified.is_bodyless(), "304 is bodyless")?
         testing.assert(Status.Other(Code(100)).is_bodyless(), "100 Continue is bodyless")?
@@ -188,7 +188,7 @@ impl Status {
         }
     }
 
-    test fn a_status_has_its_reason_phrase() {
+    test "a status has its reason phrase" {
         testing.assert_eq(Status.Ok.reason(), "OK", "200")?
         testing.assert_eq(Status.SeeOther.reason(), "See Other", "303")?
         testing.assert_eq(Status.TemporaryRedirect.reason(), "Temporary Redirect", "307")?
@@ -218,7 +218,7 @@ impl Equatable for Status {
     }
 }
 
-test fn a_status_equals_the_same_code_spelled_as_other() {
+test "a status equals the same code spelled as other" {
     testing.assert_eq(Status.NotFound, Status.Other(Code(404)), "a named status differed from its code")?
     testing.assert_eq(Status.Other(Code(404)), Status.NotFound, "equality was one-sided")?
     testing.assert(Status.NotFound != Status.Other(Code(405)), "different codes compared equal")?

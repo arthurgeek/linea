@@ -32,7 +32,7 @@ impl OutputFormat {
         }
     }
 
-    test fn output_format_parses_and_serializes() {
+    test "output format parses and serializes" {
         testing.assert_eq(OutputFormat.parse("table"), Option.Some(OutputFormat.Table), "table was not parsed")?
         testing.assert_eq(OutputFormat.parse("TABLE"), Option.Some(OutputFormat.Table), "uppercase TABLE was not parsed")?
         testing.assert_eq(OutputFormat.parse("json"), Option.Some(OutputFormat.Json), "json was not parsed")?
@@ -106,7 +106,7 @@ impl Config[mem.SystemAllocator] {
         }
     }
 
-    test fn default_config_holds_expected_defaults() {
+    test "default config holds expected defaults" {
         defer let config = Config.default()
         testing.assert_eq(config.default_format, OutputFormat.Table, "default format differs")?
         testing.assert_eq(config.default_priority, Priority.Normal, "default priority differs")?

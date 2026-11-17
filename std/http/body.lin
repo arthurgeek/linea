@@ -288,7 +288,7 @@ impl[P: Allocator] Release for RequestBody[P] {
 
 // A body is consumed once through one mutable reader. Materializing its bytes
 // keeps their owner alive until every response viewing them has been written.
-test fn a_body_reader_advances_and_stops_at_its_boundary() {
+test "a body reader advances and stops at its boundary" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     defer var body = RequestBody.from_slice("hello".as_bytes(), arena.handle())
     defer var bytes = mem.system().acquire(8).unwrap()
@@ -303,7 +303,7 @@ test fn a_body_reader_advances_and_stops_at_its_boundary() {
     .Ok(())
 }
 
-test fn materializing_a_body_keeps_its_bytes_for_repeated_readers() {
+test "materializing a body keeps its bytes for repeated readers" {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
     let sent = new_request(arena.handle(), "POST", "/", body: "").unwrap()
     defer var body = RequestBody.from_slice("hello".as_bytes(), arena.handle())
@@ -316,7 +316,7 @@ test fn materializing_a_body_keeps_its_bytes_for_repeated_readers() {
     .Ok(())
 }
 
-test fn a_socket_body_preserves_the_next_requests_read_ahead() {
+test "a socket body preserves the next requests read ahead" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     defer var listener = net.listen(net.loopback(0)).unwrap()
     defer var client = net.connect(listener.local_address().unwrap()).unwrap()
@@ -338,7 +338,7 @@ test fn a_socket_body_preserves_the_next_requests_read_ahead() {
     .Ok(())
 }
 
-test fn a_truncated_socket_body_reports_a_sticky_bad_request() {
+test "a truncated socket body reports a sticky bad request" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     defer var listener = net.listen(net.loopback(0)).unwrap()
     defer var client = net.connect(listener.local_address().unwrap()).unwrap()
@@ -358,7 +358,7 @@ test fn a_truncated_socket_body_reports_a_sticky_bad_request() {
     .Ok(())
 }
 
-test fn an_empty_body_materializes_without_arena_headroom() {
+test "an empty body materializes without arena headroom" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     // Reservations remain in the arena until its rewind, so consume every

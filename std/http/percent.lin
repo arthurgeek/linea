@@ -55,7 +55,7 @@ impl Display for PercentError {
     }
 }
 
-test fn a_percent_error_displays_its_reason() {
+test "a percent error displays its reason" {
     defer let escape = fmt.render_owned(PercentError.Escape(4)).unwrap()
     defer let encoding = fmt.render_owned(PercentError.Encoding(strings.Utf8Error { offset = 3 })).unwrap()
     defer let memory = fmt.render_owned(PercentError.Allocation(.Exhausted)).unwrap()
@@ -77,7 +77,7 @@ impl[P: Allocator] From[PercentError] for Error[P] {
     }
 }
 
-test fn text_that_does_not_decode_answers_400() {
+test "text that does not decode answers 400" {
     let escape: Error = PercentError.Escape(0).into()
     let encoding: Error = PercentError.Encoding(strings.Utf8Error { offset = 0 }).into()
     let memory: Error = PercentError.Allocation(.Exhausted).into()
@@ -125,7 +125,7 @@ pub fn percent_encoded(text: Str) -> PercentEncoded where carries(text) {
     .{ text = copy(text) }
 }
 
-test fn percent_encoding_keeps_only_unreserved_bytes() {
+test "percent encoding keeps only unreserved bytes" {
     defer let plain = fmt.render_owned(percent_encoded("AZaz09-._~")).unwrap()
     defer let spaced = fmt.render_owned(percent_encoded("Zoë <b>")).unwrap()
     defer let reserved = fmt.render_owned(percent_encoded("a/b?c#d%e+f=g&h;i,j\"k")).unwrap()
@@ -137,7 +137,7 @@ test fn percent_encoding_keeps_only_unreserved_bytes() {
     .Ok(())
 }
 
-test fn percent_encoded_text_reads_in_an_interpolation() {
+test "percent_encoded text reads in an interpolation" {
     defer let location = fmt.render_owned("/notes/{percent_encoded("Ada López")}?tag={percent_encoded("a&b")}").unwrap()
     testing.assert_eq(location.view(), "/notes/Ada%20L%C3%B3pez?tag=a%26b", "an interpolated value was not encoded")?
     .Ok(())
@@ -149,7 +149,7 @@ fn is_unreserved(byte: UInt8) -> Bool {
     (byte >= ascii_upper_a && byte <= ascii_upper_z) || (byte >= ascii_lower_a && byte <= ascii_lower_z) || (byte >= ascii_zero && byte <= ascii_nine) || byte == ascii_hyphen || byte == ascii_dot || byte == ascii_underscore || byte == ascii_tilde
 }
 
-test fn the_unreserved_bytes_are_letters_digits_and_four_marks() {
+test "the unreserved bytes are letters digits and four marks" {
     var kept = 0
     for byte in UInt8.min..=UInt8.max {
         if is_unreserved(byte) {
@@ -170,7 +170,7 @@ fn write_escape[W: Writer](byte: UInt8, inout w: W) -> Result[(), W.Error] where
     "%{byte:02X}".fmt(&w)
 }
 
-test fn an_escape_is_a_percent_and_two_capital_digits() {
+test "an escape is a percent and two capital digits" {
     defer var out = String.new()
     write_escape(10, &out).unwrap()
     write_escape(255, &out).unwrap()
@@ -192,7 +192,7 @@ pub fn percent_decode_in[A: Allocator](allocator: A, text: Str) -> Result[String
     .Ok(decoded)
 }
 
-test fn percent_decoding_reads_escapes_in_either_case_and_keeps_plus() {
+test "percent decoding reads escapes in either case and keeps plus" {
     defer let arena = mem.Arena.open(mem.system(), size: 256)
     let decoded = percent_decode_in(arena.handle(), "Zo%C3%ab%20%3Cb%3E+c").unwrap()
     testing.assert_eq(decoded.view(), "Zoë <b>+c", "an escape was not decoded, or a plus became a space")?
@@ -201,7 +201,7 @@ test fn percent_decoding_reads_escapes_in_either_case_and_keeps_plus() {
     .Ok(())
 }
 
-test fn percent_decoding_reports_a_full_allocator() {
+test "percent decoding reports a full allocator" {
     defer let arena = mem.Arena.open(mem.system(), size: 8)
     let full = match percent_decode_in(arena.handle(), "a longer text than the arena holds") {
         Ok(text) => {
@@ -220,7 +220,7 @@ pub fn percent_decode(text: Str) -> Result[String[mem.SystemAllocator], PercentE
     percent_decode_in(mem.system(), text)
 }
 
-test fn percent_decoding_refuses_an_escape_that_is_not_two_hexadecimal_digits() {
+test "percent decoding refuses an escape that is not two hexadecimal digits" {
     for malformed in ["ab%4", "%", "a%zz", "%G0", "ok%2"] {
         let refused = match percent_decode(malformed) {
             Ok(text) => {
@@ -242,7 +242,7 @@ test fn percent_decoding_refuses_an_escape_that_is_not_two_hexadecimal_digits() 
     .Ok(())
 }
 
-test fn percent_decoding_refuses_bytes_that_are_not_utf8() {
+test "percent decoding refuses bytes that are not utf8" {
     let offset = match percent_decode("caf%E9") {
         Ok(text) => {
             text.release()
@@ -254,7 +254,7 @@ test fn percent_decoding_refuses_bytes_that_are_not_utf8() {
     .Ok(())
 }
 
-test fn percent_decoding_undoes_percent_encoding() {
+test "percent decoding undoes percent encoding" {
     let original = "Zoë <b> & 100% \"C++\" 🚀"
     defer let encoded = fmt.render_owned(percent_encoded(original)).unwrap()
     defer let decoded = percent_decode(encoded.view()).unwrap()
@@ -281,7 +281,7 @@ fn append_decoded[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is_s
     }
 }
 
-test fn decoding_appends_the_bytes_escapes_spell() {
+test "decoding appends the bytes escapes spell" {
     defer var stored: Vec[UInt8] = Vec.new()
     let spaced = append_decoded(&stored, "a%20b+c", plus_is_space: false).unwrap()
     let formed = append_decoded(&stored, "Ada+L%C3%B3pez", plus_is_space: true).unwrap()
@@ -337,7 +337,7 @@ fn append_unescaped[A: Allocator](inout stored: Vec[UInt8, A], raw: Str, plus_is
     outcome
 }
 
-test fn unescaping_keeps_bytes_that_are_not_utf8() {
+test "unescaping keeps bytes that are not utf8" {
     defer var stored: Vec[UInt8] = Vec.new()
     append_unescaped(&stored, "caf%E9", plus_is_space: false).unwrap()
     testing.assert_eq(stored.length(), UInt64(4), "an escape did not become one byte")?

@@ -4,7 +4,7 @@ struct Silent {
 
 // A failure is rendered when the test fails, so a type that never says how it
 // reads leaves nothing to report.
-test fn a_thing_holds() -> Result[(), Silent] {
+test "a thing holds" -> Result[(), Silent] {
     return .Err(.{ x = 1 })
 }
 

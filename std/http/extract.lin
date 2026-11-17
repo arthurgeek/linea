@@ -45,7 +45,7 @@ impl[P: Allocator] Request[P] {
     }
 }
 
-test fn a_request_extracts_any_type_that_implements_extract() {
+test "a request extracts any type that implements extract" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var named = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     &named.add_header("X-Guest", "ada").unwrap()
@@ -116,7 +116,7 @@ impl[P: Allocator, T: FromPath] Extract[P] for Path[T] {
     }
 }
 
-test fn a_path_is_refused_when_no_router_matched() {
+test "a path is refused when no router matched" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/orders/42", body: "").unwrap()
     let refused = match sent.request().extract[Path[UInt64]]() {
@@ -155,7 +155,7 @@ fn order_of[P: Allocator](inout _: (), request: Request[P], inout _body: Request
     text(request, "order {id}")
 }
 
-test fn a_path_reads_its_fields_from_the_path_values() {
+test "a path reads its fields from the path values" {
     defer var router = Router.new()
     &router.route_raw(r"GET /days/{year}/{month}", month_of).unwrap()
     &router.route_raw(r"GET /orders/{id}", order_of).unwrap()
@@ -246,7 +246,7 @@ fn listing_of[P: Allocator](inout _: (), request: Request[P], inout _body: Reque
     text(request, "page {page}, {shown} by {order}")
 }
 
-test fn a_query_reads_its_fields_by_name() {
+test "a query reads its fields by name" {
     defer var router = Router.new()
     &router.route_raw("GET /orders", listing_of).unwrap()
     defer let first = served(&router, "GET", "/orders?page=1")
@@ -269,7 +269,7 @@ fn days_of[P: Allocator](inout _: (), request: Request[P], inout _body: RequestB
     text(request, "days {span.from} to {span.to}")
 }
 
-test fn a_query_answers_a_refusal_of_a_params_of_its_own() {
+test "a query answers a refusal of a params of its own" {
     defer var router = Router.new()
     &router.route_raw("GET /days", days_of).unwrap()
     defer let ordered = served(&router, "GET", "/days?from=3&to=9")
@@ -379,7 +379,7 @@ fn form_posted(content_type: Str, body: Str) -> String {
     described
 }
 
-test fn a_request_extracts_a_form_by_its_field_names() {
+test "a request extracts a form by its field names" {
     defer let noted = form_posted("application/x-www-form-urlencoded", "name=Ada+L%C3%B3pez&age=30")
     defer let typed = form_posted("application/json", "name=Ada&age=30")
     defer let malformed = form_posted("application/x-www-form-urlencoded", "name=%zz&age=30")
@@ -447,7 +447,7 @@ impl[P: Allocator, T: json_format.Decode[mem.Handle[P]]] Extract[P] for Json[T] 
     }
 }
 
-test fn json_refuses_a_body_that_is_not_utf8() {
+test "json refuses a body that is not utf8" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let input = "POST / HTTP/1.1\r\nHost: loopback\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\nhé"
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 16, Limits.default()).unwrap()
@@ -484,7 +484,7 @@ fn is_json(content_type: Option[Str]) -> Bool {
     application.equals_ascii_folded("application/") && suffix.equals_ascii_folded("+json")
 }
 
-test fn json_is_named_by_its_media_type() {
+test "json is named by its media type" {
     testing.assert(is_json(.Some("application/json")), "application/json was not JSON")?
     testing.assert(is_json(.Some("Application/JSON; charset=utf-8")), "a folded type with a parameter was not JSON")?
     testing.assert(is_json(.Some("application/problem+json")), "a +json type was not JSON")?
@@ -536,7 +536,7 @@ fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
     described
 }
 
-test fn json_decodes_the_body_or_names_what_is_wrong() {
+test "json decodes the body or names what is wrong" {
     defer let noted = posted("application/json", r#"{"text":"hi"}"#)
     defer let typed = posted("text/plain", r#"{"text":"hi"}"#)
     defer let malformed = posted("application/json", r"{")
@@ -564,7 +564,7 @@ fn repeated(prefix: Str, piece: Str, times: UInt64, suffix: Str) -> String {
 // A JSON body at the default body limit decodes in the default request arena,
 // whether it is one long string or the most values `json.decode` admits, and
 // is answered for what it says rather than 500.
-test fn a_json_body_within_the_default_limits_decodes_in_the_default_arena() {
+test "a json body within the default limits decodes in the default arena" {
     let limits = Limits.default()
     defer let text = repeated(r#"{"text":""#, "x", limits.max_body_bytes - 11, r#""}"#)
     defer let values = repeated(r#"{"text":"a","pad":["#, "0,", 99990, "0]}")
@@ -579,7 +579,7 @@ test fn a_json_body_within_the_default_limits_decodes_in_the_default_arena() {
 }
 
 // Request metadata and its streamed body are independent inputs.
-test fn json_reads_the_explicit_body_instead_of_the_metadata_payload() {
+test "json reads the explicit body instead of the metadata payload" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "POST", "/notes", body: "", content_type: "application/json").unwrap()
     defer var body = RequestBody.from_slice(r#"{"text":"streamed"}"#.as_bytes(), arena.handle())
@@ -590,7 +590,7 @@ test fn json_reads_the_explicit_body_instead_of_the_metadata_payload() {
     .Ok(())
 }
 
-test fn form_reads_borrowed_fields_from_the_explicit_body() {
+test "form reads borrowed fields from the explicit body" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "POST", "/signup", body: "", content_type: "application/x-www-form-urlencoded").unwrap()
     defer var body = RequestBody.from_slice("name=Ada+Lovelace&age=36".as_bytes(), arena.handle())

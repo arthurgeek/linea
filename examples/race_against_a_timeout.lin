@@ -74,7 +74,7 @@ fn collect(sink late: Quote) -> UInt64 {
     cents
 }
 
-test fn the_faster_service_wins() {
+test "the faster service wins" {
     let outcome = race(service(500, time.Duration.from_milliseconds(200)), service(450, time.Duration.from_milliseconds(0)), time.Duration.from_seconds(60))
     let (winner, late) = match outcome {
         Won(name, cents, loser) => (name == "south" && cents == 450, collect(loser)),

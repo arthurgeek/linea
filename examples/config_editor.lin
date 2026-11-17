@@ -69,7 +69,7 @@ fn parse_in[A: Allocator](allocator: A, input: Str) -> Result[Vec[Entry, A], Con
     .Ok(entries)
 }
 
-test fn parsing_reports_the_record_that_exhausts_entry_storage() {
+test "parsing reports the record that exhausts entry storage" {
     // Four entries fit in 256 bytes; the next eight-entry reservation does not.
     defer let arena = mem.Arena.open(mem.system(), size: 256)
     let records =
@@ -93,7 +93,7 @@ fn parse(input: Str) -> Result[Vec[Entry], ConfigError] where carries(.Ok: input
     parse_in(mem.system(), input)
 }
 
-test fn configuration_parsing_retains_trimmed_views() {
+test "configuration parsing retains trimmed views" {
     defer let entries = parse("# settings\n name = Ada \ncount=3\n").unwrap()
     testing.assert_eq(entries.length(), 2, "the comment line became an entry")?
     testing.assert_eq(entries[0].key, "name", "the key was not trimmed")?
@@ -101,7 +101,7 @@ test fn configuration_parsing_retains_trimmed_views() {
     testing.assert_eq(entries[1].value, "3", "the second value changed")?
 }
 
-test fn configuration_parsing_refuses_ambiguous_or_malformed_records() {
+test "configuration parsing refuses ambiguous or malformed records" {
     let duplicate = match parse("name=Ada\nname=Grace\n") {
         Err(error) => match read error.reason { Duplicate => error.line == 2, _ => false },
         Ok(entries) => {
@@ -146,7 +146,7 @@ fn render_in[A: Allocator, B: Allocator](allocator: B, entries: Vec[Entry, A], k
     .Ok(output)
 }
 
-test fn rendering_reports_allocation_failure_after_a_short_entry() {
+test "rendering reports allocation failure after a short entry" {
     defer let entries = parse("a=b\n").unwrap()
     // Sixty-four bytes accommodate the short entry, but not this longer value.
     defer let arena = mem.Arena.open(mem.system(), size: 64)
@@ -167,7 +167,7 @@ fn render[A: Allocator](entries: Vec[Entry, A], key: Str, value: Str, max_bytes:
     render_in(mem.system(), entries, key: key, value: value, max_bytes: max_bytes)
 }
 
-test fn rendered_configuration_owns_its_bytes_after_input_is_released() {
+test "rendered configuration owns its bytes after input is released" {
     let input = "name=Ada\ncount=3\n".to_owned().unwrap()
     let entries = parse(input.view()).unwrap()
     defer let rendered = render(entries, key: "name", value: "Grace", max_bytes: max_config_bytes).unwrap()
@@ -176,13 +176,13 @@ test fn rendered_configuration_owns_its_bytes_after_input_is_released() {
     testing.assert_eq(rendered.view(), "name=Grace\ncount=3\n", "rendered configuration retained an input dependency")?
 }
 
-test fn a_missing_configuration_key_is_appended() {
+test "a missing configuration key is appended" {
     defer let entries = parse("name=Ada\n").unwrap()
     defer let rendered = render(entries, key: "count", value: "4", max_bytes: max_config_bytes).unwrap()
     testing.assert_eq(rendered.view(), "name=Ada\ncount=4\n", "a new key replaced another entry or was omitted")?
 }
 
-test fn rendering_refuses_a_configuration_larger_than_its_read_limit() {
+test "rendering refuses a configuration larger than its read limit" {
     defer let entries = parse("k=v\n").unwrap()
     // "k=v\n" occupies exactly four bytes; appending another entry exceeds it.
     defer let exact = render(entries, key: "k", value: "v", max_bytes: 4).unwrap()

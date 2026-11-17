@@ -53,7 +53,7 @@ impl Writer for Gathered {
     }
 }
 
-test fn gathered_bytes_reach_the_target_once_rendering_ends() {
+test "gathered bytes reach the target once rendering ends" {
     var out = Gathered.into(stdout())
     let rendered = "ready".fmt(&out).is_ok()
     let gathered = out.bytes.length()
@@ -73,7 +73,7 @@ pub fn print[T: Display](x: T) -> Result[(), IoError] {
     written
 }
 
-test fn print_renders_a_value_to_standard_output() {
+test "print renders a value to standard output" {
     // The test runner discards what a test writes to standard output.
     testing.assert(print("ready").is_ok(), "writing text to standard output failed")?
     testing.assert(print(1250).is_ok(), "writing a number to standard output failed")?
@@ -86,7 +86,7 @@ pub fn line[T: Display, W: Writer](x: T, inout w: W) -> Result[(), W.Error] wher
     &w.write_str("\n")
 }
 
-test fn a_line_is_the_value_and_the_ending_after_it() {
+test "a line is the value and the ending after it" {
     var w = testing.Recorder.of(64) else |_| {
         return testing.assert(false, "a recorder was refused")
     }
@@ -119,12 +119,12 @@ pub fn println[T: Display](x: T) -> Result[(), IoError] {
     written
 }
 
-test fn println_ends_the_value_with_a_line_on_standard_output() {
+test "println ends the value with a line on standard output" {
     testing.assert(println("ready").is_ok(), "writing a line to standard output failed")?
     .Ok(())
 }
 
-test fn a_value_that_prints_while_it_is_printed_is_printed() {
+test "a value that prints while it is printed is printed" {
     testing.assert(println(Noisy {}).is_ok(), "printing a value that prints failed")?
     .Ok(())
 }
@@ -147,7 +147,7 @@ pub fn eprint[T: Display](x: T) {
     }
 }
 
-test fn eprint_renders_a_value_and_ignores_a_refused_write() {
+test "eprint renders a value and ignores a refused write" {
     // The test runner shows what a test wrote to standard error only when it
     // fails.
     eprint("checked")
@@ -189,7 +189,7 @@ impl Display for Noisy {
     }
 }
 
-test fn eprintln_renders_a_line_and_ignores_a_refused_write() {
+test "eprintln renders a line and ignores a refused write" {
     eprintln("checked")
     var recorder = testing.Recorder.of(16).unwrap()
     eprintln_to("ready", &recorder)

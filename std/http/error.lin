@@ -43,7 +43,7 @@ impl[P: Allocator] Error[P] {
         .{ answer = copy(status), text = .None, headers = .None }
     }
 
-    test fn a_new_error_has_its_status_and_no_message() {
+    test "a new error has its status and no message" {
         let error: Error = Error.new(.NotFound)
         testing.assert_eq(error.status(), Status.NotFound, "the status changed")?
         testing.assert_eq(error.message(), .None, "a new error had a message")?
@@ -55,7 +55,7 @@ impl[P: Allocator] Error[P] {
         copy(self.answer)
     }
 
-    test fn status_returns_the_status_the_error_answers_with() {
+    test "status returns the status the error answers with" {
         let error: Error = Error.new(.UnsupportedMediaType)
         testing.assert_eq(error.status(), Status.UnsupportedMediaType, "the status changed")?
         .Ok(())
@@ -81,7 +81,7 @@ impl[P: Allocator] Error[P] {
         set_kept_header(&self.headers, request.allocator(), name, value)
     }
 
-    test fn an_error_sends_the_headers_it_is_given() {
+    test "an error sends the headers it is given" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
         var refused = error(sent.request(), .Unauthorized, "who are you?")
@@ -104,7 +104,7 @@ impl[P: Allocator] Error[P] {
         }
     }
 
-    test fn header_compares_names_under_ascii_case_folding() {
+    test "header compares names under ascii case folding" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
         var busy = error(sent.request(), .ServiceUnavailable, "try again soon")
@@ -127,7 +127,7 @@ pub fn error[P: Allocator, M: Display](request: Request[P], status: Status, mess
     }
 }
 
-test fn an_error_renders_its_message_into_the_arena() {
+test "an error renders its message into the arena" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "PUT", "/items/7", body: "").unwrap()
     let request = sent.request()
@@ -139,7 +139,7 @@ test fn an_error_renders_its_message_into_the_arena() {
 }
 
 // A message the arena cannot hold leaves the status with its reason phrase.
-test fn an_error_whose_message_does_not_fit_keeps_its_status() {
+test "an error whose message does not fit keeps its status" {
     // The request's head fills eight of this arena's 56 usable bytes.
     defer let arena = mem.Arena.open(mem.system(), size: 64)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
@@ -150,7 +150,7 @@ test fn an_error_whose_message_does_not_fit_keeps_its_status() {
     .Ok(())
 }
 
-test fn an_error_reads_its_status_and_message() {
+test "an error reads its status and message" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
     let explained = error(sent.request(), .Forbidden, "no entry")
@@ -179,7 +179,7 @@ impl[P: Allocator] Display for Error[P] {
     }
 }
 
-test fn an_error_displays_its_status_and_message() {
+test "an error displays its status and message" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "POST", "/echo", body: "").unwrap()
     let plain: Error = Error.new(.NotFound)
@@ -202,7 +202,7 @@ impl[P: Allocator] From[io.IoError] for Error[P] {
     }
 }
 
-test fn an_io_error_answers_500() {
+test "an io error answers 500" {
     let failure = io.IoError { operation = .Write, category = .BrokenPipe, code = .None, progress = 3 }
     let error: Error = failure.into()
     testing.assert_eq(error.status(), Status.InternalServerError, "an I/O error did not answer 500")?
@@ -217,7 +217,7 @@ impl[P: Allocator] From[io.WriteFailure[io.IoError]] for Error[P] {
     }
 }
 
-test fn a_failed_flush_answers_500() {
+test "a failed flush answers 500" {
     let failure: io.WriteFailure[io.IoError] = .{ kind = .NoProgress, reason = .None, written = 0 }
     let error: Error = failure.into()
     testing.assert_eq(error.status(), Status.InternalServerError, "a failed flush did not answer 500")?
@@ -231,7 +231,7 @@ impl[P: Allocator] From[mem.Oom] for Error[P] {
     }
 }
 
-test fn running_out_of_memory_answers_500() {
+test "running out of memory answers 500" {
     let error: Error = mem.Oom.Exhausted.into()
     testing.assert_eq(error.status(), Status.InternalServerError, "running out of memory did not answer 500")?
     .Ok(())
@@ -250,7 +250,7 @@ impl[P: Allocator, E: Into[Error[P]]] From[collections.UpsertReason[E]] for Erro
     }
 }
 
-test fn an_upsert_reason_answers_with_its_cause() {
+test "an upsert reason answers with its cause" {
     let full: collections.UpsertReason[mem.Oom] = .Allocation(.Exhausted)
     let refused: collections.UpsertReason[strings.Utf8Error] = .Factory(.{ offset = 2 })
     let mismatched: collections.UpsertReason[mem.Oom] = .KeyMismatch
@@ -269,7 +269,7 @@ impl[P: Allocator] From[json_format.MutationReason] for Error[P] {
     }
 }
 
-test fn a_refused_document_change_answers_500() {
+test "a refused document change answers 500" {
     defer var list = json_format.Value.array()
     let refused = &list.insert("summary", json_format.Value.boolean(true))
     let status = match refused {
@@ -294,7 +294,7 @@ impl[P: Allocator] From[strings.Utf8Error] for Error[P] {
     }
 }
 
-test fn a_body_that_is_not_utf8_answers_400() {
+test "a body that is not utf8 answers 400" {
     let error: Error = strings.Utf8Error { offset = 1 }.into()
     testing.assert_eq(error.status(), Status.BadRequest, "a body that is not UTF-8 did not answer 400")?
     .Ok(())
@@ -311,7 +311,7 @@ impl[P: Allocator] From[json_format.ParseError] for Error[P] {
     }
 }
 
-test fn a_body_that_is_not_json_answers_400() {
+test "a body that is not json answers 400" {
     let refused = match json_format.parse("not json") {
         Ok(value) => {
             value.release()
@@ -347,7 +347,7 @@ impl[P: Allocator, A: Allocator] From[json_format.DecodeError[A]] for Error[P] {
     }
 }
 
-test fn a_decode_error_answers_by_whose_mistake_it_is() {
+test "a decode error answers by whose mistake it is" {
     let shaped: Result[UInt64, json_format.DecodeError] = json_format.decode(r#"{"x":1}"#)
     let wrong: Error = match shaped {
         Ok(_) => return testing.assert(false, "an object decoded as a number"),
@@ -374,7 +374,7 @@ impl[P: Allocator] From[json_format.EncodeError[mem.Oom]] for Error[P] {
     }
 }
 
-test fn a_failed_encoding_answers_500() {
+test "a failed encoding answers 500" {
     let failed: json_format.EncodeError[mem.Oom] = .NonFiniteNumber
     let error: Error = failed.into()
     testing.assert_eq(error.status(), Status.InternalServerError, "a failed encoding did not answer 500")?
@@ -392,7 +392,7 @@ impl[P: Allocator] From[RequestError] for Error[P] {
     }
 }
 
-test fn a_request_error_answers_its_status() {
+test "a request error answers its status" {
     let refused: Error = RequestError.Status(.ContentTooLarge).into()
     let closed: Error = RequestError.Closed.into()
     testing.assert_eq(refused.status(), Status.ContentTooLarge, "a refusal changed its status")?

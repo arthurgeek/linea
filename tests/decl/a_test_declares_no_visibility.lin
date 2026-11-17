@@ -4,7 +4,7 @@ import std.io
 use io.IoError
 use io.println
 
-pub test fn a_thing_holds() -> Result[(), IoError] {
+pub test "a thing holds" -> Result[(), IoError] {
     println("visible to nobody")?
     return .Ok({})
 }

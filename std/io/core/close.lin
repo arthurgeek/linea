@@ -22,7 +22,7 @@ impl Close for Descriptor {
     }
 }
 
-test fn closing_a_descriptor_wrapper_succeeds() {
+test "closing a descriptor wrapper succeeds" {
     let closed = stderr().close()
     testing.assert(closed.is_ok(), "closing a descriptor wrapper failed")?
     // The wrapper did not own standard error, so it still accepts output.

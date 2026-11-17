@@ -32,7 +32,7 @@ fn copied_in[A: Allocator](allocator: A, at: address.Address[UInt8], length: UIn
     .Ok(copied)
 }
 
-test fn bytes_are_copied_from_an_address() {
+test "bytes are copied from an address" {
     defer let held = CString.open("xyz").unwrap()
     let lent = held.text()
     defer let copied = copied_in(mem.system(), lent.at(), 2).unwrap()
@@ -55,7 +55,7 @@ impl CText {
         at == 0
     }
 
-    test fn only_a_zero_address_is_null() {
+    test "only a zero address is_null" {
         testing.assert(CText(0).is_null(), "a zero address was not null")?
         defer let held = CString.open("x").unwrap()
         testing.assert(!held.text().is_null(), "held text was null")?
@@ -76,7 +76,7 @@ impl CText {
         count
     }
 
-    test fn the_length_stops_at_the_terminator() {
+    test "the length stops at the terminator" {
         defer let held = CString.open("Ada").unwrap()
         testing.assert_eq(held.text().length(), UInt64(3), "the terminator was miscounted")?
         testing.assert_eq(CText(0).length(), UInt64(0), "a null pointer had a length")?
@@ -99,7 +99,7 @@ impl CText {
         }
     }
 
-    test fn text_is_copied_into_the_given_allocator() {
+    test "text is copied into the given allocator" {
         defer let arena = mem.Arena.open(mem.system(), 64)
         defer let held = CString.open("Grace").unwrap()
         let copied = held.text().to_owned_in(arena.handle()).unwrap()
@@ -112,7 +112,7 @@ impl CText {
         self.to_owned_in(mem.system())
     }
 
-    test fn null_text_is_refused_rather_than_read() {
+    test "null text is refused rather than read" {
         let refused = match CText(0).to_owned() {
             Ok(owned) => {
                 owned.release()
@@ -137,7 +137,7 @@ impl CText {
         .Ok(copied_in(allocator, self.at(), length)?)
     }
 
-    test fn bytes_past_a_nul_are_copied_by_length() {
+    test "bytes past a nul are copied by length" {
         defer let held = CString.open("ab").unwrap()
         defer let copied = held.text().copy_bytes_in(mem.system(), length: 3).unwrap()
         testing.assert_eq(copied.length(), UInt64(3), "the copy took another length")?
@@ -150,7 +150,7 @@ impl CText {
         self.copy_bytes_in(mem.system(), length: length)
     }
 
-    test fn no_bytes_are_copied_from_a_null_pointer_of_no_length() {
+    test "no bytes are copied from a null pointer of no length" {
         defer let copied = CText(0).copy_bytes(length: 0).unwrap()
         testing.assert_eq(copied.length(), UInt64(0), "bytes appeared from nowhere")?
         .Ok(())

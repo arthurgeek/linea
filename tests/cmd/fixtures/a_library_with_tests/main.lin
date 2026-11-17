@@ -11,7 +11,7 @@ export fn sum() -> UInt8 {
     total
 }
 
-test fn a_lending_sum_checks_each_number() -> Result[(), testing.Failure] {
+test "a lending sum checks each number" -> Result[(), testing.Failure] {
     testing.assert_eq(sum(), 9, "four plus five is nine")?
     return .Ok({})
 }

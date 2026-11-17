@@ -12,7 +12,7 @@ Every command that compiles prints its notes, whether or not it then succeeds.
     |
   5 |     -short
     |     ^ end the previous line with it if that was meant
-  ok    change_is_what_was_paid_over_the_price
+  ok    change is what was paid over the price
   
   1 passed, 0 failed
   $ linea run "$LINEA_ROOT"/tests/cmd/fixtures/a_note_does_not_stop_a_program.lin
@@ -32,6 +32,6 @@ Both streams sent to one file keep everything each wrote, in order.
     |
   5 |     -short
     |     ^ end the previous line with it if that was meant
-  ok    change_is_what_was_paid_over_the_price
+  ok    change is what was paid over the price
   
   1 passed, 0 failed

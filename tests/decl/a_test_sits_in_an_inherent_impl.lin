@@ -11,7 +11,7 @@ impl Box {
         Box { value = value }
     }
 
-    test fn holds_its_value() {
+    test "holds its value" {
         let b = Box.new(42)
         testing.assert_eq(b.value, 42, "the box holds its value")?
         .Ok(())

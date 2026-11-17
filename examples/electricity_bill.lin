@@ -83,18 +83,18 @@ fn bill(document: Str) -> Result[Bill, BillError] {
     .Ok(.{ meter, kwh, cents = kwh * cents_per_kwh })
 }
 
-test fn a_reading_is_billed_by_the_kilowatt_hours_used() {
+test "a reading is billed by the kilowatt hours used" {
     let billed = bill(r#"{"meter":"0042","previous":1200,"current":1375}"#)
     testing.assert_eq(billed, .Ok(.{ meter = 42, kwh = 175, cents = 4025 }), "the bill changed")?
 }
 
-test fn each_library_error_becomes_its_bill_error() {
+test "each library error becomes its bill error" {
     testing.assert_eq(bill(r#"{"meter":"0042""#), .Err(.Document(.{ kind = .Syntax, offset = 15 })), "a truncated document was accepted")?
     testing.assert_eq(bill(r#"{"meter":"0042","previous":1.5,"current":2}"#), .Err(.Reading(.NotInteger)), "a fractional reading was accepted")?
     testing.assert_eq(bill(r#"{"meter":"00A2","previous":1,"current":2}"#), .Err(.MeterNumber(.Syntax(2))), "a lettered meter number was accepted")?
 }
 
-test fn a_meter_that_runs_backward_is_refused() {
+test "a meter that runs backward is refused" {
     testing.assert_eq(bill(r#"{"meter":"0042","previous":9,"current":8}"#), .Err(.RunsBackward), "a backward reading was billed")?
     testing.assert_eq(bill(r#"{"meter":"0042","current":8}"#), .Err(.Reading(.MissingField)), "a missing reading was billed")?
 }

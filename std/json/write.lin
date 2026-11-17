@@ -102,7 +102,7 @@ pub fn write[A: Allocator, W: Writer](inout writer: W, value: Value[A]) -> Resul
     .Ok(())
 }
 
-test fn write_preserves_borrowed_writer_failures_and_the_document() {
+test "write preserves borrowed writer failures and the document" {
     defer let message = "stopped".to_owned().unwrap()
     defer let document = parse(r#"[1,"tea"]"#).unwrap()
     for budget in UInt64(0)..9 {
@@ -133,19 +133,19 @@ pub fn render[A: Allocator](value: Value[A]) -> Result[String[mem.SystemAllocato
     render_in(mem.system(), value)
 }
 
-test fn render_allocates_the_text_from_the_system_allocator() {
+test "render allocates the text from the system allocator" {
     defer let document = Value.array()
     defer let output = render(document).unwrap()
     testing.assert_eq(output.view(), "[]", "an empty array rendered as other text")?
 }
 
-test fn document_output_preserves_number_tokens_and_escapes_text() {
+test "document output preserves number tokens and escapes text" {
     defer let document = parse(r#"[null,true,false,-0,1.00,1e400,"a\u0000\u000b\u001f\n\t\b\f\r\"\\/é"]"#).unwrap()
     defer let output = render(document).unwrap()
     testing.assert_eq(output.view(), r#"[null,true,false,-0,1.00,1e400,"a\u0000\u000b\u001f\n\t\b\f\r\"\\/é"]"#, "JSON output changed values or token spelling")?
 }
 
-test fn rendered_text_is_independent_of_the_document() {
+test "rendered text is independent of the document" {
     let document = parse(r#"{"name":"tea"}"#).unwrap()
     let output = render(document).unwrap()
     document.release()
@@ -153,7 +153,7 @@ test fn rendered_text_is_independent_of_the_document() {
     testing.assert_eq(output.view(), r#"{"name":"tea"}"#, "rendered output retained document storage")?
 }
 
-test fn render_allocation_failure_leaves_the_document_usable() {
+test "render allocation failure leaves the document usable" {
     defer let document = parse("[1,2,3]").unwrap()
     defer let arena = mem.Arena.open(mem.system(), 0)
     let failed = match render_in(arena.handle(), document) {
@@ -167,7 +167,7 @@ test fn render_allocation_failure_leaves_the_document_usable() {
     testing.assert_eq(document.at(1).unwrap().as_uint64().unwrap(), UInt64(2), "failed rendering changed the document")?
 }
 
-test fn a_document_renders_into_an_arena() {
+test "a document renders into an arena" {
     defer let document = parse(r#"{"tea":[1,2]}"#).unwrap()
     defer let arena = mem.Arena.open(mem.system(), 256)
     let rendered = render_in(arena.handle(), document).unwrap()
@@ -213,7 +213,7 @@ fn same_document[A: Allocator, B: Allocator](left: Value[A], right: Value[B]) ->
     }
 }
 
-test fn document_round_trips_preserve_structure_independent_of_member_order() {
+test "document round trips preserve structure independent of member order" {
     let inputs = ["null", "[]", r"{}", r#"[false,-0,1.00,1e400,"é😀"]"#, r#"{"a":[{"b":2}],"c":null,"d":{}}"#]
     for input in inputs {
         defer let first = parse(input).unwrap()
@@ -225,7 +225,7 @@ test fn document_round_trips_preserve_structure_independent_of_member_order() {
     }
 }
 
-test fn document_output_escapes_every_control_byte() {
+test "document output escapes every control byte" {
     let bytes = Vec.from_fn(count: 32, initializer: |index| UInt8(index)).unwrap()
     let source = String.from_bytes(bytes).unwrap()
     let document = Value.string(source.view()).unwrap()
@@ -243,7 +243,7 @@ test fn document_output_escapes_every_control_byte() {
 // `testing.each_allocation_failure`, which accepts a refused run that
 // completes: here every refusal must be reported as an allocation error, and
 // nothing may be allocated after it.
-test fn json_render_disposes_partial_output_on_each_allocation_refusal() {
+test "json render disposes partial output on each allocation refusal" {
     defer let document = parse(r#"{"message":"a longer string with \n escapes and text","values":[1,2,3,4,5,6,7,8,9,10]}"#).unwrap()
     defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
     let allocator = baseline.allocator()

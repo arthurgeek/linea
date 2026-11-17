@@ -76,7 +76,7 @@ impl[S, A: Allocator] Closure[S, A] {
         Closure.erase(allocator, callback)
     }
 
-    test fn a_closure_keeps_its_captures_in_an_arena() {
+    test "a closure keeps its captures in an arena" {
         defer let arena = Arena.open(system(), 64)
         let rate: UInt64 = 10
         // Arena storage is reclaimed with the arena, so this closure is dropped
@@ -91,7 +91,7 @@ impl[S, A: Allocator] Closure[S, A] {
         .Ok(())
     }
 
-    test fn a_refused_allocation_releases_the_callback() {
+    test "a refused allocation releases the callback" {
         let log = AllocationLog.open(system(), 0).unwrap()
         var kept: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
         let pushed = match &kept.push(7) {
@@ -149,7 +149,7 @@ impl[S] Closure[S, SystemAllocator] {
         Closure.erase(system(), callback)
     }
 
-    test fn a_closure_opened_in_the_system_allocator_calls_what_it_captured() {
+    test "a closure opened in the system allocator calls what it captured" {
         let step: UInt64 = 5
         let bump: Result[Closure[fn(value: UInt64) -> UInt64], Oom] = Closure.open(
             [sink step] |value: UInt64| -> UInt64 {
@@ -162,7 +162,7 @@ impl[S] Closure[S, SystemAllocator] {
         testing.assert_eq(raised, UInt64(15), "the closure lost its capture")?
     }
 
-    test fn a_closure_calls_what_it_captured() {
+    test "a closure calls what it captured" {
         let rate: UInt64 = 10
         let discount = Closure.open(
             [sink rate] |cents: UInt64| -> UInt64 {
@@ -175,7 +175,7 @@ impl[S] Closure[S, SystemAllocator] {
         .Ok(())
     }
 
-    test fn a_lambda_that_captures_nothing_allocates_nothing() {
+    test "a lambda that captures nothing allocates nothing" {
         let log = AllocationLog.open(system(), 0).unwrap()
         let doubling = Closure.open_in(
             log.allocator(),
@@ -202,7 +202,7 @@ impl[S, A: Allocator] Release for Closure[S, A] {
     }
 }
 
-test fn releasing_a_closure_returns_its_bytes() {
+test "releasing a closure returns its bytes" {
     let log = AllocationLog.open(system(), 0).unwrap()
     let offset: UInt64 = 5
     let shifted = Closure.open_in(

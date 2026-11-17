@@ -38,7 +38,7 @@ fn is_leap(year: UInt64) -> Bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
-test fn leap_years_follow_the_gregorian_rule() {
+test "leap years follow the gregorian rule" {
     testing.assert(is_leap(2024), "2024 is a leap year")?
     testing.assert(!is_leap(2026), "2026 is not a leap year")?
     testing.assert(!is_leap(1900), "1900 is not a leap year")?
@@ -65,7 +65,7 @@ fn weekday(year: UInt64, month: UInt64, day: UInt64) -> UInt64 {
     sum % 7
 }
 
-test fn a_weekday_is_found_from_the_date() {
+test "a weekday is found from the date" {
     // 1 January 2026 is a Thursday, and 29 February 2024 was one too.
     testing.assert_eq(weekday_names[weekday(2026, 1, 1)], "Thursday", "1 January 2026 moved")?
     testing.assert_eq(weekday_names[weekday(2024, 2, 29)], "Thursday", "29 February 2024 moved")?
@@ -116,7 +116,7 @@ fn routes(inout router: http.Router[App]) -> Result[(), http.RouteError] {
 
 // A request built in an arena goes through the router, which records the
 // path value the handler reads.
-test fn a_year_out_of_range_is_refused_before_streaming() {
+test "a year out of range is refused before streaming" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
@@ -144,7 +144,7 @@ test fn a_year_out_of_range_is_refused_before_streaming() {
 
 // `recorded_body` runs the streamed body into the request's arena, so a test
 // reads the CSV a client would receive.
-test fn a_year_streams_one_line_per_day() {
+test "a year streams one line per day" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
@@ -183,7 +183,7 @@ fn write_date[W: Writer](inout out: W, year: UInt64, month: UInt64, day: UInt64)
     "{year:04}-{month:02}-{day:02}".fmt(&out)
 }
 
-test fn a_date_is_written_with_leading_zeros() {
+test "a date is written with leading zeros" {
     defer var out = String.new()
     write_date(&out, 987, 3, 7).unwrap()
     testing.assert_eq(out.view(), "0987-03-07", "the date changed")?

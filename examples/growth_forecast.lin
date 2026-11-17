@@ -11,7 +11,7 @@ fn annual_balance(opening: Float64, rate: Float64, years: Float64) -> Float64 {
     opening * (1.0 + rate).pow(exponent: years)
 }
 
-test fn projections_retain_the_opening_balance_at_zero_years() {
+test "projections retain the opening balance at zero years" {
     testing.assert_eq(annual_balance(opening: 1000.0, rate: 0.05, years: 0.0), 1000.0, "annual projection at opening")?
     testing.assert_eq(continuous_balance(opening: 1000.0, rate: 0.05, years: 0.0), 1000.0, "continuous projection at opening")?
 }
@@ -26,7 +26,7 @@ fn years_to_target(opening: Float64, target: Float64, rate: Float64) -> Float64 
     (target / opening).ln() / (1.0 + rate).ln()
 }
 
-test fn annual_target_time_reconstructs_the_target() {
+test "annual target time reconstructs the target" {
     let years = years_to_target(opening: 1000.0, target: 2000.0, rate: 0.05)
     let projected = annual_balance(opening: 1000.0, rate: 0.05, years: years)
     testing.assert((projected - 2000.0).abs() < 1e-8, "the logarithmic target time agrees with annual growth")?

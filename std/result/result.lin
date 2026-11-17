@@ -23,7 +23,7 @@ fn result_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
     true
 }
 
-test fn derived_result_equality_compares_cases_and_payloads() {
+test "derived result equality compares cases and payloads" {
     let ok: Result[UInt8, UInt8] = .Ok(1)
     let same: Result[UInt8, UInt8] = .Ok(1)
     let other: Result[UInt8, UInt8] = .Ok(2)
@@ -34,7 +34,7 @@ test fn derived_result_equality_compares_cases_and_payloads() {
     testing.assert(result_test_accepts_equivalent(error), "Result did not derive Equivalent")?
 }
 
-test fn derived_result_debug_renders_both_cases() {
+test "derived result debug renders both cases" {
     let ok: Result[UInt8, UInt8] = .Ok(7)
     let error: Result[UInt8, UInt8] = .Err(9)
     // Sixty-four bytes leave room for the complete debug text checked below.
@@ -46,7 +46,7 @@ test fn derived_result_debug_renders_both_cases() {
     testing.assert(rendered, "Result.Debug did not render both cases")?
 }
 
-test fn derived_result_release_releases_the_payload_of_either_case() {
+test "derived result release releases the payload of either case" {
     let log = mem.ReleaseLog.open(2)
     let ok: Result[mem.ReleaseTag, mem.ReleaseTag] = .Ok(log.tag(20))
     ok.release()
@@ -105,7 +105,7 @@ impl[T, E] Result[T, E] {
         match read self { Ok(_) => true, Err(_) => false }
     }
 
-    test fn is_ok_answers_whether_this_is_a_success() {
+    test "is_ok answers whether this is a success" {
         let success: Result[UInt8, UInt8] = .Ok(1)
         let failure: Result[UInt8, UInt8] = .Err(1)
         testing.assert(success.is_ok(), "a success was not Ok")?
@@ -117,7 +117,7 @@ impl[T, E] Result[T, E] {
         match read self { Ok(_) => false, Err(_) => true }
     }
 
-    test fn tag_predicates_preserve_affine_payloads() {
+    test "tag predicates preserve affine payloads" {
         let success: Result[ResultPredicateAffine, ResultPredicateAffine] = .Ok(.Value(7))
         let failure: Result[ResultPredicateAffine, ResultPredicateAffine] = .Err(.Value(9))
         let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
@@ -135,7 +135,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(failure_number, 9, "Result predicates consumed or changed the Err payload")?
     }
 
-    test fn tag_predicates_preserve_linear_payloads() {
+    test "tag predicates preserve linear payloads" {
         let success: Result[ResultPredicateLinear, ResultPredicateLinear] = .Ok(.Value(7))
         let failure: Result[ResultPredicateLinear, ResultPredicateLinear] = .Err(.Value(9))
         let success_tags = success.is_ok() && !success.is_err() && success.is_ok()
@@ -153,7 +153,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(failure_number, 9, "Result predicates consumed or changed the Err payload")?
     }
 
-    test fn map_takes_a_transform_that_changes_a_lent_count() {
+    test "map takes a transform that changes a lent count" {
         var calls = UInt8(0)
         let succeeded: Result[UInt8, UInt8] = .Ok(4)
         let mapped = succeeded.map(
@@ -166,7 +166,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(calls, UInt8(1), "map did not call its transform once")?
     }
 
-    test fn map_transforms_ok_and_preserves_err() {
+    test "map transforms ok and preserves err" {
         let success: Result[UInt8, UInt8] = .Ok(5)
         let mapped_success: Result[UInt8, UInt8] = success.map(|sink value| value * 2)
         match mapped_success {
@@ -182,7 +182,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn result_combinators_preserve_borrowed_payloads() {
+    test "result combinators preserve borrowed payloads" {
         let source: UInt64 = 17
         let other: UInt64 = 23
         let success: Result[borrow UInt64, borrow UInt64] = .Ok(borrow source)
@@ -204,7 +204,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn a_mutable_map_calls_its_transform_only_for_ok() {
+    test "a mutable map calls its transform only for ok" {
         var calls = UInt8(0)
         var transform = inout [inout calls] |sink value: UInt8| {
             calls += 1
@@ -220,7 +220,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(calls, UInt8(1), "mutable Result.map ran for Err")?
     }
 
-    test fn mutable_result_combinator_preserves_its_callers_protocol_capture() {
+    test "mutable result combinator preserves its caller's protocol capture" {
         var transform = [sink token = ResultTestToken.Number(UInt8(7))] |sink value: UInt8| {
             value + match read token { Number(number) => number }
         }
@@ -237,7 +237,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(recovered, UInt8(7), "mutable Result.map settled its caller's protocol capture")?
     }
 
-    test fn map_err_takes_a_transform_that_changes_a_lent_count() {
+    test "map_err takes a transform that changes a lent count" {
         var calls = UInt8(0)
         let failed: Result[UInt8, UInt8] = .Err(4)
         let mapped = failed.map_err(
@@ -250,7 +250,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(calls, UInt8(1), "map_err did not call its transform once")?
     }
 
-    test fn map_err_transforms_err_and_preserves_ok() {
+    test "map_err transforms err and preserves ok" {
         let success: Result[UInt8, UInt8] = .Ok(5)
         let mapped_success = success.map_err(|sink error| UInt16(error) + 1)
         match mapped_success {
@@ -266,7 +266,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn map_err_wraps_an_error_in_the_contextual_enum() {
+    test "map_err wraps an error in the contextual enum" {
         let success: Result[UInt8, UInt8] = .Ok(5)
         let failure: Result[UInt8, UInt8] = .Err(9)
         let mapped_success: Result[UInt8, ResultMappedError] = success.map_err(.Code)
@@ -286,7 +286,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn a_mutable_map_err_consumes_only_an_error() {
+    test "a mutable map_err consumes only an error" {
         var calls = UInt8(0)
         var transform = inout [inout calls] |sink error: ResultTestToken| {
             calls += 1
@@ -303,7 +303,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(calls, UInt8(1), "mutable Result.map_err ran for Ok")?
     }
 
-    test fn and_then_takes_a_transform_that_changes_a_lent_count() {
+    test "and_then takes a transform that changes a lent count" {
         var calls = UInt8(0)
         let succeeded: Result[UInt8, UInt8] = .Ok(4)
         let chained = succeeded.and_then(
@@ -316,7 +316,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(calls, UInt8(1), "and_then did not call its transform once")?
     }
 
-    test fn and_then_transforms_ok_and_preserves_err() {
+    test "and_then transforms ok and preserves err" {
         let success: Result[UInt8, UInt8] = .Ok(4)
         let transformed_success: Result[UInt16, UInt8] = success.and_then(
             |sink value| .Ok(UInt16(value) + 3),
@@ -345,7 +345,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn a_mutable_and_then_calls_its_transform_only_for_ok() {
+    test "a mutable and_then calls its transform only for ok" {
         var calls = UInt8(0)
         var chain = inout [inout calls] |sink value: UInt8| {
             calls += 1
@@ -372,14 +372,14 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn unwrap_returns_ok() {
+    test "unwrap returns ok" {
         let success: Result[ResultTestToken, UInt8] = .Ok(.Number(5))
         match success.unwrap() {
             Number(value) => testing.assert_eq(value, 5, "unwrap did not return the Ok payload")?,
         }
     }
 
-    test trap fn unwrap_traps_on_err() -> Result[(), testing.Failure] {
+    test trap "unwrap traps on err" -> Result[(), testing.Failure] {
         let failure: Result[UInt8, UInt8] = .Err(3)
         let _unwrapped = failure.unwrap()
         .Ok(())
@@ -398,7 +398,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn unwrap_or_returns_ok_or_the_eager_fallback() {
+    test "unwrap_or returns ok or the eager fallback" {
         let success: Result[UInt8, UInt8] = .Ok(6)
         testing.assert_eq(success.unwrap_or(9), 6, "unwrap_or returned its fallback for Ok")?
 
@@ -406,7 +406,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(failure.unwrap_or(9), 9, "unwrap_or did not return its fallback for Err")?
     }
 
-    test fn an_eager_result_fallback_discards_affine_values_and_errors() {
+    test "an eager result fallback discards affine values and errors" {
         let success: Result[ResultAffineValue, ResultAffineError] = .Ok(.{ number = 4 })
         let selected = success.unwrap_or(.{ number = 9 })
         testing.assert_eq(selected.number, UInt8(4), "an affine Ok payload was replaced by its fallback")?
@@ -415,7 +415,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(fallback.number, UInt8(9), "an affine error prevented returning the fallback")?
     }
 
-    test fn unwrap_or_else_takes_a_fallback_that_changes_a_lent_count() {
+    test "unwrap_or_else takes a fallback that changes a lent count" {
         var calls = UInt8(0)
         let failed: Result[UInt8, UInt8] = .Err(4)
         let value = failed.unwrap_or_else(
@@ -428,7 +428,7 @@ impl[T, E] Result[T, E] {
         testing.assert_eq(calls, UInt8(1), "unwrap_or_else did not call its fallback once")?
     }
 
-    test fn unwrap_or_else_calls_only_for_err() {
+    test "unwrap_or_else calls only for err" {
         let success: Result[UInt8, ResultTestToken] = .Ok(7)
         testing.assert(
             success.unwrap_or_else(result_test_fallback_must_not_run) == 7,
@@ -444,7 +444,7 @@ impl[T, E] Result[T, E] {
         )?
     }
 
-    test fn a_result_fallback_can_close_an_owned_error_arena() {
+    test "a result fallback can close an owned error arena" {
         // The eight-byte capacity is incidental: only the arena owner is consumed.
         let arena = mem.Arena.open(mem.system(), 8)
         let failure: Result[UInt8, mem.Arena[mem.SystemAllocator]] = .Err(arena)
@@ -461,7 +461,7 @@ impl[T, E] Result[T, E] {
         }
     }
 
-    test fn a_mutable_fallback_consumes_only_an_error() {
+    test "a mutable fallback consumes only an error" {
         var calls = UInt8(0)
         var fallback = inout [inout calls] |sink error: ResultTestToken| {
             calls += 1
@@ -518,7 +518,7 @@ impl[T, E: release.Settle] Result[T, E] {
         }
     }
 
-    test fn settled_keeps_ok_and_reduces_err_to_its_reason() {
+    test "settled keeps ok and reduces err to its reason" {
         let delivered: Result[UInt8, ResultTestRefusedParcel] = .Ok(3)
         let refused: Result[UInt8, ResultTestRefusedParcel] = .Err(.{ weight = 40, seal = .{ number = 1 } })
         let kept = delivered.settled()

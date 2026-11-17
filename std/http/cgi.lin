@@ -78,7 +78,7 @@ impl Display for CgiError {
     }
 }
 
-test fn a_cgi_error_displays_its_cause() {
+test "a cgi error displays its cause" {
     defer let not_cgi = fmt.render_owned(CgiError.NotCgi).unwrap()
     defer let small = fmt.render_owned(CgiError.ArenaTooSmall).unwrap()
     testing.assert_eq(not_cgi.view(), "REQUEST_METHOD is not set, so no web server started this program to answer a request", "the missing request changed")?
@@ -106,7 +106,7 @@ pub fn serve_cgi[H: Handler[S, mem.SystemAllocator] + Observer + Release, S: Rel
 
 // Limits whose arena cannot hold a request are refused before the
 // environment is read, whatever variables the test process was started with.
-test fn an_arena_too_small_for_the_limits_is_refused() {
+test "an arena too small for the limits is refused" {
     let small = Limits { request_arena_bytes = 1024, ..Limits.default() }
     let refused: Router[()] = Router.new()
     testing.assert_eq(serve_cgi(refused, limits: small), .Err(.ArenaTooSmall), "an arena too small for the limits was accepted")?
@@ -149,7 +149,7 @@ pub fn serve_cgi_in[P: Allocator, H: Handler[S, P] + Observer + Release, S: Rele
     }
 }
 
-test fn an_arena_too_small_for_the_limits_is_refused_with_a_parent() {
+test "an arena too small for the limits is refused with a parent" {
     defer let parent = mem.Arena.open(mem.system(), size: 65536)
     let small = Limits { request_arena_bytes = 1024, ..Limits.default() }
     let router: Router[(), mem.Handle] = Router.new_in(parent.handle())
@@ -423,7 +423,7 @@ fn stored_target[A: Allocator](inout head: String[A], path_info: mem.Slice[UInt8
     .Ok(.{ start, end = head.length() })
 }
 
-test fn a_decoded_path_is_encoded_again_into_the_target() {
+test "a decoded path is encoded again into the target" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var head = String.new_in(arena.handle())
     let plain = stored_target(&head, "/notes/7".as_bytes(), "").unwrap()
@@ -504,7 +504,7 @@ fn header_name[A: Allocator](inout name: Vec[UInt8, A], variable: mem.Slice[UInt
     }
 }
 
-test fn a_header_is_spelled_from_its_variable() {
+test "a header is spelled from its variable" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     var name: Vec[UInt8, mem.Handle] = Vec.new_in(arena.handle())
     testing.assert_eq(header_name(&name, "HTTP_USER_AGENT".as_bytes()).unwrap(), "User-Agent", "a two-word name changed")?
@@ -745,7 +745,7 @@ fn moved[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBod
     .Ok(response)
 }
 
-test fn a_get_is_answered_with_a_status_header() {
+test "a get is answered_with a status header" {
     var router = cgi_router()
     let variables = described("GET", "/greet/Ada López", query: "mood=glad")
     defer let answer = cgi_exchange(variables.as_slice(), "", &router)
@@ -755,7 +755,7 @@ test fn a_get_is_answered_with_a_status_header() {
     .Ok(())
 }
 
-test fn an_http_variable_is_a_header() {
+test "an http variable is a header" {
     var router = cgi_router()
     let variables = [
         given("REQUEST_METHOD", "GET"),
@@ -769,7 +769,7 @@ test fn an_http_variable_is_a_header() {
     .Ok(())
 }
 
-test fn a_form_body_is_read_from_standard_input() {
+test "a form body is read from standard input" {
     var router = cgi_router()
     let variables = [
         given("REQUEST_METHOD", "POST"),
@@ -784,7 +784,7 @@ test fn a_form_body_is_read_from_standard_input() {
     .Ok(())
 }
 
-test fn a_cgi_head_request_is_answered_with_the_head_alone() {
+test "a cgi head request is answered_with the head alone" {
     var router = cgi_router()
     let variables = described("HEAD", "/greet/Ada")
     defer let answer = cgi_exchange(variables.as_slice(), "", &router)
@@ -793,7 +793,7 @@ test fn a_cgi_head_request_is_answered_with_the_head_alone() {
     .Ok(())
 }
 
-test fn a_handler_error_is_answered_with_its_status_and_message() {
+test "a handler error is answered_with its status and message" {
     var router = cgi_router()
     let variables = described("POST", "/notes")
     defer let answer = cgi_exchange(variables.as_slice(), "", &router)
@@ -815,7 +815,7 @@ fn answered_with(variables: mem.Slice[Entry], input: Str, limits: Limits = stand
     written
 }
 
-test fn a_malformed_request_is_refused_before_the_handler() {
+test "a malformed request is refused before the handler" {
     let bad_method = [given("REQUEST_METHOD", "G T")]
     defer let method = answered_with(bad_method.as_slice(), "")
     let lettered = [
@@ -847,7 +847,7 @@ test fn a_malformed_request_is_refused_before_the_handler() {
     .Ok(())
 }
 
-test fn the_protocol_the_client_spoke_is_not_the_programs() {
+test "the protocol the client spoke is not the programs" {
     for protocol in ["HTTP/1.1", "HTTP/2.0", "HTTP/2", "INCLUDED"] {
         let variables = [
             given("REQUEST_METHOD", "GET"),
@@ -860,7 +860,7 @@ test fn the_protocol_the_client_spoke_is_not_the_programs() {
     .Ok(())
 }
 
-test fn content_length_alone_frames_the_body() {
+test "content length alone frames the body" {
     let chunked = [
         given("REQUEST_METHOD", "POST"),
         given("PATH_INFO", "/notes"),
@@ -882,7 +882,7 @@ test fn content_length_alone_frames_the_body() {
     .Ok(())
 }
 
-test fn a_handler_cannot_set_the_status_as_a_header() {
+test "a handler cannot set the status as a header" {
     let variables = described("GET", "/moved")
     defer let answer = answered_with(variables.as_slice(), "")
     testing.assert_eq(answer.view(), "Status: 500 Internal Server Error\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nInternal Server Error\n", "a Status header was sent")?
@@ -894,7 +894,7 @@ test fn a_handler_cannot_set_the_status_as_a_header() {
 // read it as they read the same path from a client, and a method, query or
 // header that is not UTF-8 is refused with 400, as `serve` refuses a line
 // that is not.
-test fn a_variable_that_is_not_utf8_is_read_as_its_bytes() {
+test "a variable that is not utf8 is read as its bytes" {
     // 233 is `é` in Latin-1, a byte UTF-8 never holds alone.
     let path = [UInt8(47), 101, 99, 104, 111, 47, 99, 97, 102, 233]
     let latin = [UInt8(97), 61, 233]
@@ -926,7 +926,7 @@ test fn a_variable_that_is_not_utf8_is_read_as_its_bytes() {
 
 // A variable named twice is read where it first appears, as `env.variable`
 // reads it.
-test fn the_first_of_a_repeated_variable_is_read() {
+test "the first of a repeated variable is read" {
     let variables = [
         given("REQUEST_METHOD", "GET"),
         given("PATH_INFO", "/greet/Ada"),
@@ -942,7 +942,7 @@ test fn the_first_of_a_repeated_variable_is_read() {
     .Ok(())
 }
 
-test fn a_cgi_request_answers_each_limits_status_one_past_the_bound() {
+test "a cgi request answers each limits status one past the bound" {
     let limits = Limits { max_line_bytes = 32, max_headers = 2, max_body_bytes = 4, ..Limits.default() }
     let posted = [
         given("REQUEST_METHOD", "POST"),
@@ -975,7 +975,7 @@ test fn a_cgi_request_answers_each_limits_status_one_past_the_bound() {
     .Ok(())
 }
 
-test fn a_request_at_the_header_and_body_limits_is_answered() {
+test "a request at the header and body limits is answered" {
     let limits = Limits { max_line_bytes = 64, max_headers = 2, max_body_bytes = 13, ..Limits.default() }
     let at_limits = [
         given("REQUEST_METHOD", "POST"),
@@ -990,7 +990,7 @@ test fn a_request_at_the_header_and_body_limits_is_answered() {
     .Ok(())
 }
 
-test fn a_missing_request_method_answers_nothing() {
+test "a missing request method answers nothing" {
     var router = cgi_router()
     // A refusal elsewhere in the variables does not make a request of them.
     let variables = [
@@ -1012,7 +1012,7 @@ fn smallest_cgi_arena(limits: Limits) -> UInt64 {
     added(smallest_arena(limits), added(multiplied(body, 4), multiplied(forms, 2)))
 }
 
-test fn cgi_reserves_full_body_storage_while_http_streams_it() {
+test "cgi reserves full body storage while http streams it" {
     let limits = Limits { max_body_bytes = UInt64.max, ..Limits.default() }
     testing.assert_eq(smallest_cgi_arena(limits), UInt64.max, "CGI admitted a body no arena could materialize")?
     testing.assert(smallest_arena(limits) < UInt64.max, "HTTP reserved a streamed body eagerly")
@@ -1034,7 +1034,7 @@ fn counted_cgi_form(pairs: CgiPairCount, request: Request) -> Result[Response, E
     text(request, "{pairs.count} pairs")
 }
 
-test fn typed_cgi_endpoints_keep_the_configured_form_limit() {
+test "typed cgi endpoints keep the configured form limit" {
     defer var input = String.new()
     for _ in 0..100 {
         &input.append("x=1&").unwrap()

@@ -94,7 +94,7 @@ impl Debug for Float64 {
     }
 }
 
-test fn float_debug_preserves_fractions_and_signed_zero() {
+test "float debug preserves fractions and signed zero" {
     testing.assert(debug_text_equals(2.5, "2.5"), "fractional digits changed")?
     testing.assert(debug_text_equals(0.1, "0.1"), "one tenth is not concise")?
     testing.assert(debug_text_equals(2.0, "2.0"), "an integral float lost its decimal point")?
@@ -103,7 +103,7 @@ test fn float_debug_preserves_fractions_and_signed_zero() {
     .Ok(())
 }
 
-test fn float_debug_names_infinities_and_canonical_nan() {
+test "float debug names infinities and canonical nan" {
     let infinity = 1.0 / 0.0
     let nan = 0.0 / 0.0
     testing.assert(debug_text_equals(infinity, "inf"), "positive infinity changed")?
@@ -113,7 +113,7 @@ test fn float_debug_names_infinities_and_canonical_nan() {
     .Ok(())
 }
 
-test fn float_debug_preserves_extremes_and_subnormals() {
+test "float debug preserves extremes and subnormals" {
     testing.assert(debug_text_equals(5e-324, "5e-324"), "smallest subnormal changed")?
     testing.assert(debug_text_equals(-5e-324, "-5e-324"), "negative subnormal changed")?
     testing.assert(debug_text_equals(2.2250738585072014e-308, "2.2250738585072014e-308"), "smallest normal changed")?
@@ -121,7 +121,7 @@ test fn float_debug_preserves_extremes_and_subnormals() {
     .Ok(())
 }
 
-test fn float_debug_switches_notation_at_the_documented_thresholds() {
+test "float debug switches notation at the documented thresholds" {
     testing.assert(debug_text_equals(1e-6, "0.000001"), "lower fixed-notation boundary changed")?
     testing.assert(debug_text_equals(-1e-6, "-0.000001"), "negative fixed-notation boundary changed")?
     testing.assert(debug_text_equals(1e-7, "1e-7"), "small magnitudes should use scientific notation")?
@@ -131,7 +131,7 @@ test fn float_debug_switches_notation_at_the_documented_thresholds() {
     .Ok(())
 }
 
-test fn float_debug_distinguishes_adjacent_values() {
+test "float debug distinguishes adjacent values" {
     testing.assert(debug_text_equals(0.9999999999999999, "0.9999999999999999"), "value below one rounded to one")?
     testing.assert(debug_text_equals(1.0000000000000002, "1.0000000000000002"), "value above one rounded to one")?
     testing.assert(debug_text_equals(0.10000000000000002, "0.10000000000000002"), "value above one tenth lost precision")?
@@ -145,14 +145,14 @@ struct FloatDebugReading { value: Float64 }
 @(copyable, derive(Debug))
 struct FloatDebugEnvelope { reading: FloatDebugReading }
 
-test fn float_debug_composes_with_nested_derivation() {
+test "float debug composes with nested derivation" {
     let reading = FloatDebugReading { value = 2.5 }
     let envelope = FloatDebugEnvelope { reading }
     testing.assert(debug_text_equals(envelope, r"FloatDebugEnvelope { reading: FloatDebugReading { value: 2.5 } }"), "nested Debug lost its floating-point field")?
     .Ok(())
 }
 
-test fn float_debug_supports_complete_value_assertions() {
+test "float debug supports complete value assertions" {
     testing.assert_eq(2.5, 2.5, "equal floats differ")?
     testing.assert_eq(0.0, -0.0, "signed zeros should compare equal")?
     let present: Option[Float64] = .Some(2.5)
@@ -170,7 +170,7 @@ test fn float_debug_supports_complete_value_assertions() {
     .Ok(())
 }
 
-test fn float_debug_propagates_the_first_writer_failure() {
+test "float debug propagates the first writer failure" {
     testing.assert(debug_preserves_writer_failure(2.5), "finite Debug lost a writer failure")?
     testing.assert(debug_preserves_writer_failure(-0.0), "zero Debug lost a writer failure")?
     testing.assert(debug_preserves_writer_failure(1.0 / 0.0), "infinity Debug lost a writer failure")?
@@ -191,7 +191,7 @@ impl Display for Float64 {
     }
 }
 
-test fn float_display_renders_the_shortest_round_trip_decimal() {
+test "float display renders the shortest round trip decimal" {
     testing.assert(display_text_equals(0.1, "0.1"), "one tenth is not concise")?
     testing.assert(display_text_equals(0.2, "0.2"), "one fifth is not concise")?
     testing.assert(display_text_equals(0.3, "0.3"), "three tenths is not concise")?
@@ -205,7 +205,7 @@ test fn float_display_renders_the_shortest_round_trip_decimal() {
     .Ok(())
 }
 
-test fn float_display_keeps_a_decimal_point_on_integral_values() {
+test "float display keeps a decimal point on integral values" {
     testing.assert(display_text_equals(20.0, "20.0"), "twenty lost its decimal point")?
     testing.assert(display_text_equals(1629.0, "1629.0"), "an integral reading lost its decimal point")?
     testing.assert(display_text_equals(-7.0, "-7.0"), "a negative integral value lost its decimal point")?
@@ -213,13 +213,13 @@ test fn float_display_keeps_a_decimal_point_on_integral_values() {
     .Ok(())
 }
 
-test fn float_display_preserves_signed_zero() {
+test "float display preserves signed zero" {
     testing.assert(display_text_equals(0.0, "0.0"), "positive zero changed")?
     testing.assert(display_text_equals(-0.0, "-0.0"), "negative zero lost its sign")?
     .Ok(())
 }
 
-test fn float_display_names_infinities_and_nan() {
+test "float display names infinities and nan" {
     let infinity = 1.0 / 0.0
     let nan = 0.0 / 0.0
     testing.assert(display_text_equals(infinity, "inf"), "positive infinity changed")?
@@ -229,7 +229,7 @@ test fn float_display_names_infinities_and_nan() {
     .Ok(())
 }
 
-test fn float_display_uses_an_exponent_outside_the_fixed_range() {
+test "float display uses an exponent outside the fixed range" {
     testing.assert(display_text_equals(1e-6, "0.000001"), "the smallest fixed magnitude changed")?
     testing.assert(display_text_equals(-1e-6, "-0.000001"), "the smallest negative fixed magnitude changed")?
     testing.assert(display_text_equals(1e-7, "1e-7"), "a magnitude below 1e-6 kept fixed notation")?
@@ -242,7 +242,7 @@ test fn float_display_uses_an_exponent_outside_the_fixed_range() {
     .Ok(())
 }
 
-test fn float_display_preserves_extremes_and_subnormals() {
+test "float display preserves extremes and subnormals" {
     testing.assert(display_text_equals(5e-324, "5e-324"), "the smallest subnormal changed")?
     testing.assert(display_text_equals(-5e-324, "-5e-324"), "the smallest negative subnormal changed")?
     testing.assert(display_text_equals(2.225073858507201e-308, "2.225073858507201e-308"), "the largest subnormal changed")?
@@ -252,7 +252,7 @@ test fn float_display_preserves_extremes_and_subnormals() {
     .Ok(())
 }
 
-test fn float_display_composes_with_interpolation_and_wrappers() {
+test "float display composes with interpolation and wrappers" {
     let celsius = 21.5
     let present: Option[Float64] = .Some(0.1)
     let measured: Result[Float64, Str] = .Ok(-0.0)
@@ -265,7 +265,7 @@ test fn float_display_composes_with_interpolation_and_wrappers() {
     .Ok(())
 }
 
-test fn float_display_propagates_the_first_writer_failure() {
+test "float display propagates the first writer failure" {
     testing.assert(display_preserves_writer_failure(2.5), "finite Display lost a writer failure")?
     testing.assert(display_preserves_writer_failure(-0.0), "zero Display lost a writer failure")?
     testing.assert(display_preserves_writer_failure(1.0 / 0.0), "infinity Display lost a writer failure")?
@@ -282,7 +282,7 @@ impl Debug for Float32 {
     }
 }
 
-test fn float32_debug_writes_the_shortest_binary32_decimal() {
+test "float32 debug writes the shortest binary32 decimal" {
     let tenth: Float32 = 0.1
     let third: Float32 = 1.0 / 3.0
     testing.assert(debug_text_equals(tenth, "0.1"), "one tenth is not concise")?
@@ -305,7 +305,7 @@ impl Display for Float32 {
     }
 }
 
-test fn float32_display_renders_the_shortest_round_trip_decimal() {
+test "float32 display renders the shortest round trip decimal" {
     let tenth: Float32 = 0.1
     testing.assert(display_text_equals(tenth, "0.1"), "one tenth is not concise")?
     testing.assert(display_text_equals(tenth + 0.2, "0.3"), "the binary32 sum of 0.1 and 0.2 changed")?
@@ -410,7 +410,7 @@ fn write_point_and_zeros[W: Writer](places: UInt64, inout w: W) -> Result[(), W.
     write_repeated("0", places, &w)
 }
 
-test fn fixed_digits_round_half_away_from_zero() {
+test "fixed digits round half away from zero" {
     testing.assert(fixed_text_equals(2675, -3, 2, "2.68"), "a half did not round up")?
     testing.assert(fixed_text_equals(2674, -3, 2, "2.67"), "less than half rounded up")?
     testing.assert(fixed_text_equals(9999, -3, 2, "10.00"), "rounding did not carry")?

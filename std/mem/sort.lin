@@ -14,13 +14,13 @@ impl[T: Ordered, A: Allocator] Vec[T, A] {
         &self.sort_by(|left, right| left < right)
     }
 
-    test fn sort_orders_integers_ascending() {
+    test "sort orders integers ascending" {
         defer var values = sort_test_values([UInt64(5), 3, 9, 1, 3, 7].as_slice())
         &values.sort()
         testing.assert_eq(values.as_slice(), [UInt64(1), 3, 3, 5, 7, 9].as_slice(), "the integers were not sorted")?
     }
 
-    test fn sort_keeps_sorted_input_and_reverses_descending_input() {
+    test "sort keeps sorted input and reverses descending input" {
         defer var ascending = Vec.from_fn(count: 100, initializer: |index| index).unwrap()
         defer var descending = Vec.from_fn(count: 100, initializer: |index| 99 - index).unwrap()
         &ascending.sort()
@@ -32,7 +32,7 @@ impl[T: Ordered, A: Allocator] Vec[T, A] {
         testing.assert(ordered, "sorted or reversed input did not end ascending")?
     }
 
-    test fn sort_orders_text_and_derived_orders() {
+    test "sort orders text and derived orders" {
         defer var words: Vec[Str] = Vec.new()
         for word in ["pear", "apple", "fig", "apple"] {
             &words.push(word).unwrap()
@@ -65,7 +65,7 @@ impl[T, A: Allocator] Vec[T, A] {
         stable_sort(&self, &less)
     }
 
-    test fn sorting_an_empty_or_one_element_vector_compares_nothing() {
+    test "sorting an empty or one element vector compares nothing" {
         defer var empty: Vec[UInt64] = Vec.new()
         defer var single = sort_test_values([UInt64(4)].as_slice())
         var calls: UInt64 = 0
@@ -86,7 +86,7 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(calls, UInt64(0), "a vector with nothing to order called the comparison")?
     }
 
-    test fn sort_by_keeps_equal_keys_in_order_at_every_length_up_to_seventy() {
+    test "sort_by keeps equal keys in order at every length up to seventy" {
         var failures: UInt64 = 0
         for count in UInt64(0)..=70 {
             var probes = sort_test_probes(count, keys: 5, seed: count + 1)
@@ -99,7 +99,7 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(failures, UInt64(0), "a short vector was not sorted stably")?
     }
 
-    test fn sort_by_sorts_a_large_random_vector_stably() {
+    test "sort_by sorts a large random vector stably" {
         for keys in [UInt64(7), 1000, 1000000] {
             defer var probes = sort_test_probes(3000, keys, seed: keys)
             &probes.sort_by(|left, right| left.key < right.key)
@@ -107,7 +107,7 @@ impl[T, A: Allocator] Vec[T, A] {
         }
     }
 
-    test fn sort_by_makes_n_log_n_comparisons() {
+    test "sort_by makes n log n comparisons" {
         defer var probes = sort_test_probes(4096, keys: 4096, seed: 9)
         var calls: UInt64 = 0
         &probes.sort_by(
@@ -123,7 +123,7 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert(sorted_stably(&probes), "the counted sort was wrong")?
     }
 
-    test fn sorting_allocates_nothing() {
+    test "sorting allocates nothing" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         defer var values: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
         for value in UInt64(0)..500 {
@@ -136,7 +136,7 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(values[0], UInt64(499), "the descending sort did not put the largest first")?
     }
 
-    test fn an_inconsistent_comparison_leaves_a_permutation() {
+    test "an inconsistent comparison leaves a permutation" {
         for count in [UInt64(1), 2, 3, 63, 64, 65, 1000] {
             defer var probes = sort_test_probes(count, keys: 3, seed: count)
             var calls: UInt64 = 0
@@ -160,7 +160,7 @@ impl[T, A: Allocator] Vec[T, A] {
         }
     }
 
-    test fn sort_by_reorders_linear_elements() {
+    test "sort_by reorders linear elements" {
         var tickets: Vec[SortTicket] = Vec.new()
         for number in [UInt64(30), 10, 20] {
             &tickets.push(.{ number }).unwrap()
@@ -176,7 +176,7 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(order, UInt64(102030), "the tickets were not moved into ascending order")?
     }
 
-    test fn floats_sort_with_a_comparison_that_places_nan() {
+    test "floats sort with a comparison that places nan" {
         let nan = Float64(0.0) / 0.0
         defer var readings: Vec[Float64] = Vec.new()
         &readings.append_slice([Float64(2.5), nan, -1.0, 0.5, nan].as_slice()).unwrap()

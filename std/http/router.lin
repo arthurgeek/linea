@@ -163,13 +163,13 @@ impl[S] Router[S, mem.SystemAllocator] {
         Router.new_in(mem.system())
     }
 
-    test fn a_router_written_without_an_allocator_is_the_system_router() {
+    test "a router written without an allocator is the system router" {
         let short: Router[()] = Router.new()
         let long: Router[(), mem.SystemAllocator] = short
         long.release()
     }
 
-    test fn a_new_router_answers_404() {
+    test "a new router answers 404" {
         defer var router = Router.new()
         defer let received = served(&router, "GET", "/")
         testing.assert_eq(received.view(), not_found, "a stateless router matched")?
@@ -177,7 +177,7 @@ impl[S] Router[S, mem.SystemAllocator] {
     }
 
     // Each request to `/visit` counts one visit in the state the router is lent.
-    test fn a_stateful_router_lends_the_state_to_each_route() {
+    test "a stateful router lends the state to each route" {
         defer var router: Router[Visits] = Router.new()
         testing.assert_ok_eq(&router.route_raw("GET /visit", visit), (), "registering failed")?
         var visits = Visits { count = 0 }
@@ -208,7 +208,7 @@ impl[S, P: Allocator] Router[S, P] {
         }
     }
 
-    test fn a_router_built_in_an_allocator_answers_404() {
+    test "a router built in an allocator answers 404" {
         defer var router = Router.new_in(mem.system())
         defer let received = served(&router, "GET", "/")
         testing.assert_eq(received.view(), not_found, "a new router matched")?
@@ -242,7 +242,7 @@ impl[S, P: Allocator] Router[S, P] {
         .Ok(())
     }
 
-    test fn a_route_is_registered_once_per_shape_and_method() {
+    test "a route is registered once per shape and method" {
         defer var router = Router.new()
         let first = &router.route_raw(r"/items/{id}", first_handler)
         let other_method = &router.route_raw(r"POST /items/{id}", second_handler)
@@ -255,7 +255,7 @@ impl[S, P: Allocator] Router[S, P] {
         .Ok(())
     }
 
-    test fn identical_shapes_are_a_duplicate() {
+    test "identical shapes are a duplicate" {
         defer var router = Router.new()
         let first = &router.route_raw(r"/a/{x}", first_handler)
         let renamed = &router.route_raw(r"/a/{y}", second_handler)
@@ -275,7 +275,7 @@ impl[S, P: Allocator] Router[S, P] {
     }
 
     // A route closure reads what it captured, here the text it answers with.
-    test fn a_route_closure_reads_what_it_captured() {
+    test "a route closure reads what it captured" {
         defer var router = Router.new()
         let greeting = "hello"
         let registered = &router.route_raw("GET /greet", [greeting] |inout _, request, inout _body| text(request, greeting))
@@ -285,7 +285,7 @@ impl[S, P: Allocator] Router[S, P] {
         .Ok(())
     }
 
-    test fn a_router_keeps_its_routes_in_an_arena() {
+    test "a router keeps its routes in an arena" {
         // The router's tables and the request's 65536-byte arena both come from
         // this parent arena.
         defer let parent = mem.Arena.open(mem.system(), size: 131072)
@@ -297,7 +297,7 @@ impl[S, P: Allocator] Router[S, P] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_table_a_route_grows() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every table a route grows" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), RouteError] {
@@ -434,7 +434,7 @@ impl[S, P: Allocator] Router[S, P] {
         .{ found, visited = search.visited }
     }
 
-    test fn a_match_visits_only_nodes_whose_prefix_matches() {
+    test "a match visits only nodes whose prefix matches" {
         defer var router = Router.new()
         for index in UInt64(0)..1000 {
             let pattern = fmt.render_owned("GET /r{index}/{{id}}").unwrap()
@@ -628,7 +628,7 @@ impl[S, P: Allocator] Handler[S, P] for Router[S, P] {
     }
 }
 
-test fn a_literal_beats_a_parameter_at_the_same_position() {
+test "a literal beats a parameter at the same position" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw(r"/items/{id}", second_handler), (), "registering failed")?
@@ -639,7 +639,7 @@ test fn a_literal_beats_a_parameter_at_the_same_position() {
     .Ok(())
 }
 
-test fn a_dead_end_literal_gives_way_to_a_parameter() {
+test "a dead end literal gives way to a parameter" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("/items/new", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw(r"/items/{id}/edit", named_id), (), "registering failed")?
@@ -650,7 +650,7 @@ test fn a_dead_end_literal_gives_way_to_a_parameter() {
     .Ok(())
 }
 
-test fn a_method_mismatch_gives_way_to_a_less_specific_path() {
+test "a method mismatch gives way to a less specific path" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw(r"GET /a/{x}", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw("POST /a/b", second_handler), (), "registering failed")?
@@ -661,7 +661,7 @@ test fn a_method_mismatch_gives_way_to_a_less_specific_path() {
     .Ok(())
 }
 
-test fn a_parameter_beats_a_remainder() {
+test "a parameter beats a remainder" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw(r"/files/{name}", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw(r"/files/{rest...}", named_rest), (), "registering failed")?
@@ -676,7 +676,7 @@ test fn a_parameter_beats_a_remainder() {
     .Ok(())
 }
 
-test fn a_method_pattern_beats_a_methodless_one() {
+test "a method pattern beats a methodless one" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("POST /x", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw("/x", second_handler), (), "registering failed")?
@@ -689,7 +689,7 @@ test fn a_method_pattern_beats_a_methodless_one() {
     .Ok(())
 }
 
-test fn get_answers_head() {
+test "get answers head" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("GET /x", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw("GET /y", first_handler), (), "registering failed")?
@@ -703,7 +703,7 @@ test fn get_answers_head() {
     .Ok(())
 }
 
-test fn a_wrong_method_is_405_with_allow() {
+test "a wrong method is 405 with allow" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("POST /x", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw("GET /y", first_handler), (), "registering failed")?
@@ -722,7 +722,7 @@ test fn a_wrong_method_is_405_with_allow() {
     .Ok(())
 }
 
-test fn no_match_is_404() {
+test "no match is 404" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw(r"/items/{id}", first_handler), (), "registering failed")?
     for path in ["/", "/items", "/items/", "/items/1/2", "/other/1"] {
@@ -734,7 +734,7 @@ test fn no_match_is_404() {
     .Ok(())
 }
 
-test fn a_pattern_ending_in_a_slash_matches_that_path_alone() {
+test "a pattern ending in a slash matches that path alone" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("/static/", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw(r"/files/{rest...}", second_handler), (), "registering failed")?
@@ -753,7 +753,7 @@ test fn a_pattern_ending_in_a_slash_matches_that_path_alone() {
     .Ok(())
 }
 
-test fn the_root_pattern_matches_the_root_alone() {
+test "the root pattern matches the root alone" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw("GET /", first_handler), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw("POST /reply", second_handler), (), "registering failed")?
@@ -768,7 +768,7 @@ test fn the_root_pattern_matches_the_root_alone() {
     .Ok(())
 }
 
-test fn a_path_value_decodes_escapes_after_matching() {
+test "a path value decodes escapes after matching" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw(r"/files/{name}", named_value), (), "registering failed")?
     defer let space = served(&router, "GET", "/files/a%20b")
@@ -787,7 +787,7 @@ test fn a_path_value_decodes_escapes_after_matching() {
 
 // The router keeps the path values of the request it answered last, and a
 // request whose pattern has none reads none.
-test fn path_values_belong_to_the_request_answered() {
+test "path values belong to the request answered" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route_raw(r"/files/{name}", named_value), (), "registering failed")?
     testing.assert_ok_eq(&router.route_raw("/files", named_value), (), "registering failed")?
@@ -822,7 +822,7 @@ fn capture_count(pattern: Str) -> UInt64 {
     count
 }
 
-test fn a_pattern_has_one_capture_for_each_named_segment() {
+test "a pattern has one capture for each named segment" {
     testing.assert_eq(capture_count(""), UInt64(0), "the root pattern captured something")?
     testing.assert_eq(capture_count("static/site.css"), UInt64(0), "a literal path captured something")?
     testing.assert_eq(capture_count(r"users/{id}/posts/{post}"), UInt64(2), "two names were not two captures")?

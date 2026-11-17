@@ -218,7 +218,7 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
     &router.route("GET /health", health)
 }
 
-test fn echo_answers_the_caller_with_their_text() {
+test "echo answers the caller with their text" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -234,7 +234,7 @@ test fn echo_answers_the_caller_with_their_text() {
 
 // The scheme is read without regard to case, and a request naming no caller
 // is refused with 401 and the scheme to use.
-test fn echo_reads_the_caller_from_a_bearer_header() {
+test "echo reads the caller from a bearer header" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -257,7 +257,7 @@ test fn echo_reads_the_caller_from_a_bearer_header() {
     }
 }
 
-test fn echo_refuses_a_body_that_is_not_json() {
+test "echo refuses a body that is not json" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -276,7 +276,7 @@ test fn echo_refuses_a_body_that_is_not_json() {
 
 // A document that is JSON but not a message is refused with 422 and the
 // field at fault: here the text is missing, and then it is a number.
-test fn echo_names_the_field_a_message_gets_wrong() {
+test "echo names the field a message gets wrong" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -302,7 +302,7 @@ test fn echo_names_the_field_a_message_gets_wrong() {
 
 // An arena that holds the request but not the message decoded from it is the
 // server's shortage, not the caller's mistake, so it is answered 500.
-test fn echo_answers_500_when_the_arena_cannot_hold_the_message() {
+test "echo answers 500 when the arena cannot hold the message" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let letters = Vec.filled(3000, UInt8(120)).unwrap()
@@ -326,7 +326,7 @@ test fn echo_answers_500_when_the_arena_cannot_hold_the_message() {
 // document of the most values `json.decode` admits, which the arena holds
 // besides the request: the one is answered 200 and the other is refused for
 // its field, never 500.
-test fn echo_answers_the_largest_messages_the_default_limits_allow() {
+test "echo answers the largest messages the default limits allow" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     let limits = http.Limits.default()
@@ -368,7 +368,7 @@ test fn echo_answers_the_largest_messages_the_default_limits_allow() {
 // `http.with_request_ids` wraps the whole router, so every response carries
 // the id its client sent, or a new UUID when it sent none. A test lends the
 // context itself, `&ctx`, as `http.with_state` does when serving.
-test fn each_response_carries_its_request_id() {
+test "each response carries its request id" {
     var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var identified = http.with_request_ids(router)
@@ -389,7 +389,7 @@ test fn each_response_carries_its_request_id() {
 
 // The router records the path value `greet` reads, so this request goes
 // through it.
-test fn greet_escapes_the_name_as_a_json_string() {
+test "greet escapes the name as a json string" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let shared = task.own(App { echoed = 0 }).unwrap()
@@ -403,7 +403,7 @@ test fn greet_escapes_the_name_as_a_json_string() {
 
 // POST /signup reads a form's fields by name, exactly as a browser sends
 // one, and answers 415 for a body sent as anything else.
-test fn signup_reads_a_form_by_field_name() {
+test "signup reads a form by field name" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let shared = task.own(App { echoed = 0 }).unwrap()
@@ -424,7 +424,7 @@ test fn signup_reads_a_form_by_field_name() {
 
 // GET /stats answers with the count `echo` keeps in the state, which
 // `with_state` lends through `http.with_request_ids` to the router and reads back.
-test fn stats_counts_the_messages_echoed() {
+test "stats counts the messages echoed" {
     var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer let shared = task.own(App { echoed = 0 }).unwrap()

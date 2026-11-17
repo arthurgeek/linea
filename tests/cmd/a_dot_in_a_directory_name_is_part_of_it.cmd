@@ -4,7 +4,7 @@ a `.` the directory's own name holds written `\.`.
 
   $ linea test "$LINEA_ROOT"/tests/cmd/fixtures/a_dot_in_a_directory_name_is_part_of_it > out
   $ cat out
-  ok    a.b.holds_seven
-  ok    a\.b.holds_seven
+  ok    a.b.holds seven
+  ok    a\.b.holds seven
   
   2 passed, 0 failed

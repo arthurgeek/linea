@@ -28,7 +28,7 @@ impl Display for HeaderError {
     }
 }
 
-test fn a_header_error_displays_its_reason() {
+test "a header error displays its reason" {
     defer let token = fmt.render_owned(HeaderError.NotAToken).unwrap()
     defer let framing = fmt.render_owned(HeaderError.Framing).unwrap()
     defer let control = fmt.render_owned(HeaderError.ControlByte).unwrap()
@@ -48,7 +48,7 @@ impl[P: Allocator] From[HeaderError] for Error[P] {
     }
 }
 
-test fn a_refused_header_answers_500() {
+test "a refused header answers 500" {
     for refusal in [HeaderError.NotAToken, .Framing, .ControlByte, .Allocation(.Exhausted)] {
         let error: Error = refusal.into()
         testing.assert_eq(error.status(), Status.InternalServerError, "a refused header did not answer 500")?
@@ -83,7 +83,7 @@ fn release_header_lists[A: Allocator](sink lists: Vec[ResponseHeaders[A], A]) {
     lists.release()
 }
 
-test fn header_lists_held_in_a_vector_release_in_generic_code() {
+test "header lists held in a vector release in generic code" {
     var lists: Vec[ResponseHeaders[mem.SystemAllocator]] = Vec.new()
     var headers = ResponseHeaders.new_in(mem.system())
     &headers.add("X-Request-Id", "7").unwrap()
@@ -96,7 +96,7 @@ impl[A: Allocator] ResponseHeaders[A] {
         .{ allocator = copy(allocator), fields = Vec.new_in(allocator) }
     }
 
-    test fn a_new_header_list_is_empty() {
+    test "a new header list is empty" {
         defer let headers = ResponseHeaders.new_in(mem.system())
         testing.assert_eq(headers.get("Content-Type"), .None, "a new list held a header")?
         .Ok(())
@@ -112,7 +112,7 @@ impl[A: Allocator] ResponseHeaders[A] {
         .Ok(())
     }
 
-    test fn setting_a_header_replaces_every_value() {
+    test "setting a header replaces every value" {
         defer var headers = ResponseHeaders.new_in(mem.system())
         let added = &headers.add("Cache-Control", "no-cache")
         let again = &headers.add("cache-control", "no-store")
@@ -129,7 +129,7 @@ impl[A: Allocator] ResponseHeaders[A] {
     }
 
     // A 1 KiB arena holds the first header, but not a 2 KiB replacement value.
-    test fn a_replacement_refused_for_memory_keeps_the_old_value() {
+    test "a replacement refused for memory keeps the old value" {
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         defer let long = Vec.filled(2048, UInt8(120)).unwrap()
         defer var headers = ResponseHeaders.new_in(arena.handle())
@@ -155,7 +155,7 @@ impl[A: Allocator] ResponseHeaders[A] {
         .Ok(())
     }
 
-    test fn adding_a_header_keeps_earlier_values() {
+    test "adding a header keeps earlier values" {
         defer var headers = ResponseHeaders.new_in(mem.system())
         let first = &headers.add("Vary", "Accept")
         let second = &headers.add("Vary", "Origin")
@@ -200,7 +200,7 @@ impl[A: Allocator] ResponseHeaders[A] {
         &self.fields.truncate(kept)
     }
 
-    test fn removing_a_header_drops_every_value() {
+    test "removing a header drops every value" {
         defer var headers = ResponseHeaders.new_in(mem.system())
         testing.assert_ok_eq(&headers.add("Vary", "Accept"), (), "adding failed")?
         testing.assert_ok_eq(&headers.add("Allow", "GET"), (), "adding failed")?
@@ -221,7 +221,7 @@ impl[A: Allocator] ResponseHeaders[A] {
         .None
     }
 
-    test fn a_header_is_read_by_its_folded_name() {
+    test "a header is read by its folded name" {
         defer var headers = ResponseHeaders.new_in(mem.system())
         testing.assert_ok_eq(&headers.add("Content-Type", "text/html"), (), "adding failed")?
         testing.assert_eq(headers.get("content-type"), Option.Some("text/html"), "the value was not found")?
