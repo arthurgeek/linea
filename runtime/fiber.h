@@ -11,7 +11,7 @@ struct linea_op;
 typedef void (*linea_fiber_entry)(void *argument);
 typedef long (*linea_fiber_attempt)(struct linea_op *operation);
 
-/* A prepared fiber owns its fixed stack and is pinned to one carrier. It is
+/* A prepared fiber owns its fixed stack and starts assigned to a carrier. It is
  * not runnable until started. finished runs on the scheduler stack, after
  * the fiber's final context has been saved. */
 struct linea_fiber *linea_fiber_create(unsigned long identity, unsigned long stack_bytes,

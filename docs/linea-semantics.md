@@ -6704,8 +6704,16 @@ owner, as the standard library's `ReleaseTag` observes the `ReleaseLog` it
 writes, so the bound and this rule see the write
 ([ADR 0250](adr/0250-tasks-are-structured-through-linear-sessions.md) §5).
 
-A task runs on its own operating-system thread or as a fiber pinned to a
-carrier of its selected loop. `start` orders everything its creator did before it before everything the body does; a `send` returns
+A task runs on its own operating-system thread or as a fiber on a carrier of
+its selected loop. On supported backends, a guarded compiled fiber may start
+on any carrier of that loop and resume on another after its context is saved
+and its source-owned wait resources and references have retired. An unknown
+native operation binds the calling fiber to its current carrier before native
+effects, for the remainder of that fiber's execution. This preserves execution
+affinity; a thread-bound foreign resource instead stays in its owning execution
+context, such as a task selected with `io.system()`. Holding that owner's client
+does not itself bind a fiber. `start` orders everything its creator did before
+it before everything the body does; a `send` returns
 once the other end has received the value, and orders everything the sender
 did before it before everything the receiver does after the `recv`; `close`
 on the handle returns once the body has returned and the task has been

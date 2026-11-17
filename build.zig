@@ -2344,7 +2344,7 @@ pub fn build(b: *std.Build) void {
     native_task_step.dependOn(owner_watchdog_step);
 
     const handoff_proof = b.step("test-fiber-handoff-proof", "Compile and force one started Linea continuation across two carriers");
-    const completed_wait_proof = b.step("test-fiber-completed-waits", "Force a started Linea continuation across a completed session wait");
+    const completed_wait_proof = b.step("test-fiber-completed-waits", "Force started Linea continuations across completed session and timer waits");
     const completed_io_proof = b.step("test-fiber-completed-io", "Force a started Linea continuation across completed socket I/O");
     const waitset_proof = b.step("test-fiber-waitset-migration", "Migrate a Linea wait-set continuation with retained registrations");
     const join_proof = b.step("test-fiber-completed-joins", "Migrate a Linea continuation after a structured child join");
@@ -2525,6 +2525,7 @@ pub fn build(b: *std.Build) void {
             .{ .source = "unknown_pinned.lin", .completed_wait = false, .trace = true },
             .{ .source = "unproven.lin", .completed_wait = false, .trace = true },
             .{ .source = "session.lin" },
+            .{ .source = "timer.lin" },
             .{ .source = "owner.lin" },
             .{ .source = "io.lin" },
             .{ .source = "io.lin", .ring = .ordinary },

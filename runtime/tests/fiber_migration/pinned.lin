@@ -11,7 +11,11 @@ fn main() -> UInt8 {
     var stayed = false
     let body = sink [inout stayed] |sink me: Chan[End]| {
         let first = task.current_carrier().unwrap()
-        // Nonzero sleep conservatively binds this fiber before native effects.
+        // This unaudited native query binds before its thread-local observation.
+        if io.current() == io.system() {
+            panic("the fiber lost its selected loop")
+        }
+        // A neutral timer must preserve an already-established restriction.
         time.sleep(time.Duration.from_nanoseconds(1))
         let second = task.current_carrier().unwrap()
         time.sleep(time.Duration.from_nanoseconds(0))

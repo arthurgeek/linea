@@ -782,6 +782,10 @@ static int canonical_net_kind(enum linea_op_kind kind) {
     return kind == LINEA_OP_READ || kind == LINEA_OP_WRITE || kind == LINEA_OP_ACCEPT || kind == LINEA_OP_CONNECT;
 }
 
+static int audited_wait_kind(enum linea_op_kind kind) {
+    return kind == LINEA_OP_READABLE || kind == LINEA_OP_SLEEP;
+}
+
 #if defined(LINEA_FIBER_CAN_MIGRATE)
 /* A detached saved continuation has one transfer claim until it is either
  * restored to its queue or claimed directly by the receiving dispatcher. */
@@ -800,7 +804,7 @@ static int completed_io_retired(struct linea_fiber *f) {
         __atomic_load_n(&op->state, __ATOMIC_ACQUIRE) == operation_complete &&
         !op->registered && op->completion_cookie == 0 &&
         ((op->audited_net && canonical_net_kind(op->operation->kind)) ||
-         (op->attempt == NULL && op->operation->kind == LINEA_OP_READABLE));
+         (op->attempt == NULL && audited_wait_kind(op->operation->kind)));
 }
 
 static int clean_runnable(struct linea_fiber *f, struct carrier *source) {
@@ -1694,11 +1698,11 @@ static long perform_operation(struct linea_op *op, linea_fiber_attempt attempt, 
     struct linea_fiber *f = current_fiber();
     if (f == NULL) fail("linea: an operation has no executing fiber\n");
     /* Scheduler callbacks have no current fiber to restrict. Audited socket
-     * paths and callback-free readiness leave no persistent thread state.
+     * paths, callback-free readiness and timers leave no persistent thread state.
      * Bind every other invocation, including unknown callbacks, first. */
     audited_net = audited_net && canonical_net_kind(op->kind) && attempt != NULL;
     const int neutral = audited_net ||
-        (attempt == NULL && op->kind == LINEA_OP_READABLE);
+        (attempt == NULL && audited_wait_kind(op->kind));
     if (!neutral)
         linea_fiber_restrict_current();
     if (op->deadline_ns != 0 && now() >= op->deadline_ns) return op->kind == LINEA_OP_SLEEP ? 0 : -(long)ETIMEDOUT;

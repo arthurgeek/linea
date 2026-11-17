@@ -208,6 +208,8 @@ static void continuation_entry(void *argument) {
         assert(linea_fiber_perform(&operation, unknown_attempt) == 17);
         assert(f->bound == r->observed[1]);
     } else if (r->bind_after_first == 2) {
+        /* A completed timer cannot clear an earlier unknown-call restriction. */
+        linea_fiber_restrict_current();
         assert(linea_clock_sleep(1) == 0);
         assert(f->bound == r->observed[1]);
     } else if (r->bind_after_first) {
