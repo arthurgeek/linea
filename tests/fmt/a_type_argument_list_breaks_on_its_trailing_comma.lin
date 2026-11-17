@@ -1,0 +1,15 @@
+// A type argument list is laid out by its trailing comma, like every other
+// delimited list: with one, each argument takes a line of its own.
+struct Pair[A, B] {
+    first: A,
+    second: B,
+}
+
+fn first(pair: Pair[UInt8, UInt8,]) -> UInt8 {
+    pair.first
+}
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, UInt8] = .{ first = 0, second = 1 }
+    first(pair)
+}

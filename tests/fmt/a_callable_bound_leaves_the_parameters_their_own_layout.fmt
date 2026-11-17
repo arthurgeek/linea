@@ -1,0 +1,13 @@
+// A callable bound's parentheses belong to the bound. The parameter list
+// after the type parameters keeps the layout its own comma asks for.
+fn apply[F: fn(value: UInt8) -> UInt8](
+    f: F,
+) -> UInt8 {
+    f(1)
+}
+
+fn twice[F: fn(
+    value: UInt8,
+) -> UInt8](f: F) -> UInt8 {
+    f(f(1))
+}

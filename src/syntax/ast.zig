@@ -118,6 +118,7 @@ pub const Ast = struct {
     template_requirements: []const node.TemplateRequirement,
     type_refs: []const node.TypeRef,
     callable_types: []const node.CallableType,
+    lambda_headers: []const node.LambdaHeader,
     variants: []const Variant,
     fields: []const node.Field,
     /// Children of nodes that hold more than a payload's two indices. A node
@@ -166,6 +167,7 @@ pub const Ast = struct {
         gpa.free(self.template_requirements);
         gpa.free(self.type_refs);
         gpa.free(self.callable_types);
+        gpa.free(self.lambda_headers);
         gpa.free(self.variants);
         gpa.free(self.fields);
         self.* = undefined;
@@ -1689,27 +1691,21 @@ pub const Ast = struct {
     pub fn lambda(self: *const Ast, id: ExprId) Lambda {
         std.debug.assert(self.exprTag(id) == .lambda);
         const data = self.exprs.items(.data)[id.index()].lambda;
-        const at = data.extra.index();
-        const start = self.extra[at].index();
-        const end = self.extra[at + 1].index();
+        const header = self.lambda_headers[data.header.index()];
         return .{
-            .params = self.params[start..end],
+            .params = self.params[header.params.start..header.params.end],
             .body = data.body,
-            .invocation_token = tokenFromExpr(self.extra[at + 2]),
-            .invocation = @enumFromInt(self.extra[at + 4].index()),
-            .captures = self.captures[self.extra[at + 5].index()..self.extra[at + 6].index()],
-            .capture_open = tokenFromExpr(self.extra[at + 7]),
-            .capture_close = tokenFromExpr(self.extra[at + 8]),
-            .contracts = .{ .start = self.extra[at + 9].index(), .end = self.extra[at + 10].index() },
-            .result = self.type_refs[self.extra[at + 11].index()],
-            .result_arrow = tokenFromExpr(self.extra[at + 12]),
+            .invocation_token = header.invocation_token,
+            .invocation = header.invocation,
+            .captures = self.captures[header.captures.start..header.captures.end],
+            .capture_open = header.capture_open,
+            .capture_close = header.capture_close,
+            .contracts = header.contracts,
+            .result = header.result,
+            .result_arrow = header.result_arrow,
             .open = self.exprMain(id),
-            .close = tokenFromExpr(self.extra[at + 3]),
+            .close = header.close,
         };
-    }
-
-    fn tokenFromExpr(id: ExprId) TokenId {
-        return if (id == ExprId.none) .none else TokenId.at(id.index());
     }
 
     /// One token per argument of a `.call`-tagged expression, `.none` where
@@ -2001,6 +1997,7 @@ pub const Ast = struct {
         template_requirements: std.ArrayList(node.TemplateRequirement) = .empty,
         type_refs: std.ArrayList(node.TypeRef) = .empty,
         callable_types: std.ArrayList(node.CallableType) = .empty,
+        lambda_headers: std.ArrayList(node.LambdaHeader) = .empty,
         variants: std.ArrayList(Variant) = .empty,
         fields: std.ArrayList(node.Field) = .empty,
 
@@ -2037,6 +2034,7 @@ pub const Ast = struct {
             try out.template_requirements.appendSlice(gpa, source.template_requirements);
             try out.type_refs.appendSlice(gpa, source.type_refs);
             try out.callable_types.appendSlice(gpa, source.callable_types);
+            try out.lambda_headers.appendSlice(gpa, source.lambda_headers);
             try out.variants.appendSlice(gpa, source.variants);
             try out.fields.appendSlice(gpa, source.fields);
             return out;
@@ -2067,6 +2065,7 @@ pub const Ast = struct {
             self.template_requirements.deinit(self.gpa);
             self.type_refs.deinit(self.gpa);
             self.callable_types.deinit(self.gpa);
+            self.lambda_headers.deinit(self.gpa);
             self.variants.deinit(self.gpa);
             self.fields.deinit(self.gpa);
             self.* = undefined;
@@ -2289,28 +2288,24 @@ pub const Ast = struct {
         ) !ExprId {
             const capture_start: u32 = @intCast(self.captures.items.len);
             try self.captures.appendSlice(self.gpa, captures);
-            const result_index = self.typeRefMark();
-            try self.addTypeRef(result);
-            const extra = try self.addExtra(&.{
-                ExprId.at(params.start),
-                ExprId.at(params.end),
-                if (invocation_token == .none) ExprId.none else ExprId.at(invocation_token.index()),
-                ExprId.at(close.index()),
-                ExprId.at(@intFromEnum(invocation)),
-                ExprId.at(capture_start),
-                ExprId.at(@intCast(self.captures.items.len)),
-                if (capture_open == .none) ExprId.none else ExprId.at(capture_open.index()),
-                if (capture_close == .none) ExprId.none else ExprId.at(capture_close.index()),
-                ExprId.at(contracts.start),
-                ExprId.at(contracts.end),
-                ExprId.at(result_index),
-                if (result_arrow == .none) ExprId.none else ExprId.at(result_arrow.index()),
+            const header = node.LambdaHeaderId.at(@intCast(self.lambda_headers.items.len));
+            try self.lambda_headers.append(self.gpa, .{
+                .params = params,
+                .captures = .{ .start = capture_start, .end = @intCast(self.captures.items.len) },
+                .contracts = contracts,
+                .result = result,
+                .result_arrow = result_arrow,
+                .invocation = invocation,
+                .invocation_token = invocation_token,
+                .capture_open = capture_open,
+                .capture_close = capture_close,
+                .close = close,
             });
             return self.addExpr(.{
                 .tag = .lambda,
                 .main_token = open,
                 .token_range = range,
-                .data = .{ .lambda = .{ .body = body, .extra = extra } },
+                .data = .{ .lambda = .{ .body = body, .header = header } },
             });
         }
 
@@ -2737,6 +2732,8 @@ pub const Ast = struct {
             errdefer self.gpa.free(finished_type_refs);
             const finished_callable_types = try self.callable_types.toOwnedSlice(self.gpa);
             errdefer self.gpa.free(finished_callable_types);
+            const finished_lambda_headers = try self.lambda_headers.toOwnedSlice(self.gpa);
+            errdefer self.gpa.free(finished_lambda_headers);
             const finished_variants = try self.variants.toOwnedSlice(self.gpa);
             errdefer self.gpa.free(finished_variants);
             const finished_fields = try self.fields.toOwnedSlice(self.gpa);
@@ -2769,6 +2766,7 @@ pub const Ast = struct {
                 .template_requirements = finished_template_requirements,
                 .type_refs = finished_type_refs,
                 .callable_types = finished_callable_types,
+                .lambda_headers = finished_lambda_headers,
                 .variants = finished_variants,
                 .fields = finished_fields,
             };

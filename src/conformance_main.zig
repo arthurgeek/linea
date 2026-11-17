@@ -8834,7 +8834,7 @@ fn checkGeneratedProgram(
         const properties_zone = tracy.beginZone(@src(), "generated.properties");
         defer properties_zone.end();
         var formatted: ?[]const u8 = null;
-        const formatting = fmt.checkPropertiesReporting(scratch, text, &diagnostics.writer) catch |e| blk: {
+        const formatting = fmt.checkPropertiesReporting(scratch, display_path, text, &diagnostics.writer) catch |e| blk: {
             try failures.append(scratch, .{
                 .path = display_path,
                 .what = "formatting properties",
@@ -13080,13 +13080,15 @@ fn settledRefsWritten(ast: *const Ast, program: *const Program, in_library: []co
         }
     }
 
-    // Lambda parameter roots are held in the parameter table; their nested
-    // components and the result annotation already occur in type_refs.
+    // A lambda's parameter types and its result type are held in its header
+    // row, not in the argument table; their nested components are there.
     for (ast.exprs.items(.tag), 0..) |tag, i| {
         if (tag != .lambda) continue;
-        for (ast.lambda(ExprId.at(@intCast(i))).params) |param| {
+        const lambda = ast.lambda(ExprId.at(@intCast(i)));
+        for (lambda.params) |param| {
             if (ownSettledRef(ast, in_library, param.written)) n += 1;
         }
+        if (ownSettledRef(ast, in_library, lambda.result)) n += 1;
     }
 
     return n;
@@ -22469,12 +22471,13 @@ fn checkCase(
         // what the accounting at the end of the run is entitled to assume.
         var formatted: ?[]const u8 = null;
         var formatting_checked = false;
-        const formatting = fmt.checkProperties(gpa, f.text) catch |e| blk: {
+        var reasons: std.Io.Writer.Allocating = .init(gpa);
+        const formatting = fmt.checkPropertiesReporting(gpa, f.path, f.text, &reasons.writer) catch |e| blk: {
             try w.failures.append(gpa, .{
                 .path = display_path,
                 .what = "formatting properties",
                 .expected = "preserved, idempotent, re-parsing",
-                .actual = @errorName(e),
+                .actual = try std.fmt.allocPrint(gpa, "{s}: {s}", .{ @errorName(e), reasons.written() }),
             });
             formatted = try formattedText(gpa, f.text);
             break :blk null;

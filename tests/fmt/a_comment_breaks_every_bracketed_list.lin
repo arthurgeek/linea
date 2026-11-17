@@ -1,0 +1,17 @@
+// A comment after the last element breaks its list, and a broken list ends
+// in a comma whichever delimiter closes it.
+struct Box[T // the element
+] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let n: UInt8 = 0
+    let values = [n // the only value
+    ]
+    let first = [n // captured by copy
+    ] || n
+    let pick = |x: UInt8 // the argument
+    | x
+    pick(values[0] + first())
+}

@@ -1,0 +1,16 @@
+// A bracket inside an attribute belongs to the trait it names. The type
+// parameters after the name keep the layout their own comma asks for.
+@derive(Show[UInt8])
+struct Box[
+    T,
+] {
+    value: T,
+}
+
+@derive(Show[
+    UInt8,
+])
+struct Pair[T] {
+    first: T,
+    second: T,
+}

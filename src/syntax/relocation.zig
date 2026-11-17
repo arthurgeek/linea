@@ -28,6 +28,7 @@ pub const Mark = struct {
     template_requirements: u32 = 0,
     type_refs: u32 = 0,
     callable_types: u32 = 0,
+    lambda_headers: u32 = 0,
     variants: u32 = 0,
     fields: u32 = 0,
     extra: u32 = 0,
@@ -46,7 +47,7 @@ pub const Mark = struct {
         return result;
     }
 };
-pub const Domain = enum { parts, tokens, exprs, stmts, blocks, block_stmts, decls, decl_attribute_groups, params, captures, type_params, bounds, where_predicates, contracts, contract_steps, derive_traits, attribute_items, attribute_groups, template_requirements, type_refs, callable_types, variants, fields, extra, call_names, interpolation_formats, struct_literal_heads, bracket_types, files };
+pub const Domain = enum { parts, tokens, exprs, stmts, blocks, block_stmts, decls, decl_attribute_groups, params, captures, type_params, bounds, where_predicates, contracts, contract_steps, derive_traits, attribute_items, attribute_groups, template_requirements, type_refs, callable_types, lambda_headers, variants, fields, extra, call_names, interpolation_formats, struct_literal_heads, bracket_types, files };
 
 /// Source IDs remain fixed; generated IDs move after the destination source.
 /// String IDs remain fixed because the destination interner contains the full
@@ -71,6 +72,7 @@ pub const Relocation = struct {
         if (T == node.InterpolationFormatIndex) return @enumFromInt(self.index(.interpolation_formats, @intFromEnum(at)));
         if (T == node.TypeRefId) return @enumFromInt(self.index(.type_refs, @intFromEnum(at)));
         if (T == node.CallableTypeId) return @enumFromInt(self.index(.callable_types, @intFromEnum(at)));
+        if (T == node.LambdaHeaderId) return @enumFromInt(self.index(.lambda_headers, @intFromEnum(at)));
         if (T == node.DeriveTraitId) return @enumFromInt(self.index(.derive_traits, @intFromEnum(at)));
         if (T == node.TemplateRequirementId) return @enumFromInt(self.index(.template_requirements, @intFromEnum(at)));
         if (T == FileId) return @enumFromInt(self.index(.files, @intFromEnum(at)));
@@ -101,6 +103,7 @@ pub const Relocation = struct {
         if (T == node.InterpolationFormatIndex) return self.id(T, input);
         if (T == node.TypeRefId) return self.id(T, input);
         if (T == node.CallableTypeId) return self.id(T, input);
+        if (T == node.LambdaHeaderId) return self.id(T, input);
         if (T == node.DeriveTraitId) return self.id(T, input);
         if (T == node.TemplateRequirementId) return self.id(T, input);
         if (T == FileId) return self.id(T, input);
@@ -232,6 +235,13 @@ pub const Relocation = struct {
                     result.params = self.positioned(.params, input.params);
                     result.contracts = self.positioned(.contracts, input.contracts);
                 }
+                if (T == node.LambdaHeader) {
+                    result.params = self.positioned(.params, input.params);
+                    result.captures = self.positioned(.captures, input.captures);
+                    // Without an arrow no contract run was parsed, so there is
+                    // no position to move.
+                    result.contracts = if (input.result_arrow != .none) self.positioned(.contracts, input.contracts) else input.contracts;
+                }
                 if (T == node.TypeParam or T == node.WherePredicate or T == node.TemplateRequirement) result.bounds = self.positioned(.bounds, input.bounds);
                 if (T == node.Variant) result.fields = self.positioned(.fields, input.fields);
                 if (T == node.ContractPath and input.root != .none) result.steps = self.positioned(.contract_steps, input.steps);
@@ -259,7 +269,7 @@ pub const Relocation = struct {
     /// Relocates only the ID slots of the heterogeneous expression payloads.
     pub fn extra(self: Relocation, expression: node.Expr, source_extra: []const node.ExprId, destination_extra: []node.ExprId) void {
         switch (expression.tag.payload()) {
-            .none, .unary, .binary, .block => {},
+            .none, .unary, .binary, .block, .lambda => {},
             .conditional => {
                 const at = expression.data.conditional.arms.index();
                 for (0..2) |offset| self.extraId(node.ExprId, at + @as(u32, @intCast(offset)), source_extra, destination_extra);
@@ -270,19 +280,6 @@ pub const Relocation = struct {
                 for (0..count) |offset| self.extraId(node.ExprId, at + 1 + @as(u32, @intCast(offset)), source_extra, destination_extra);
             },
             .range => self.extraId(node.ExprId, expression.data.range.extra.index(), source_extra, destination_extra),
-            .lambda => {
-                const at = expression.data.lambda.extra.index();
-                inline for (.{ Domain.params, .captures, .contracts }, .{ 0, 5, 9 }) |domain, offset| {
-                    // A lambda without an arrow has no parsed contract run.
-                    if (domain != .contracts or source_extra[at + 12] != .none) {
-                        const mapped = self.range(domain, source_extra[at + offset].index(), source_extra[at + offset + 1].index());
-                        destination_extra[self.index(.extra, at + offset)] = .at(mapped.start);
-                        destination_extra[self.index(.extra, at + offset + 1)] = .at(mapped.end);
-                    }
-                }
-                inline for (.{ 2, 3, 7, 8, 12 }) |offset| self.extraId(token.TokenId, at + offset, source_extra, destination_extra);
-                self.extraId(node.TypeRefId, at + 11, source_extra, destination_extra);
-            },
         }
     }
 

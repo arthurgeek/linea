@@ -204,6 +204,41 @@ pub const ParamRange = struct {
     }
 };
 
+/// Index into the lambda-header table.
+pub const LambdaHeaderId = enum(u32) {
+    _,
+
+    pub fn at(i: u32) LambdaHeaderId {
+        return @enumFromInt(i);
+    }
+
+    pub fn index(self: LambdaHeaderId) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+/// A half-open range into the capture table.
+pub const CaptureRange = struct {
+    start: u32,
+    end: u32,
+};
+
+/// What a lambda writes besides its body: `inout [n] |x: UInt8| -> UInt8`.
+pub const LambdaHeader = struct {
+    params: ParamRange,
+    captures: CaptureRange,
+    /// Parsed only after a result arrow; empty and unpositioned without one.
+    contracts: ContractRange,
+    result: TypeRef,
+    result_arrow: TokenId,
+    invocation: Convention,
+    invocation_token: TokenId,
+    capture_open: TokenId,
+    capture_close: TokenId,
+    /// The `|` closing the parameters; the expression's main token opens them.
+    close: TokenId,
+};
+
 /// A named source observed or transferred into a closure environment.
 pub const Capture = struct {
     name: TokenId,
@@ -1528,7 +1563,7 @@ pub const Expr = struct {
             pieces: ExtraIndex,
             formats: InterpolationFormatIndex,
         },
-        lambda: struct { body: ExprId, extra: ExtraIndex },
+        lambda: struct { body: ExprId, header: LambdaHeaderId },
         block: BlockId,
         /// `lo` sits inline; the side array holds `hi` and `inclusive`, the
         /// flag stored as `ExprId.at(0)` or `ExprId.at(1)` the way a call's

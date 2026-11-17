@@ -1,0 +1,6 @@
+// The type an implementation is for is respaced like any written type.
+trait Describe {}
+
+impl Describe for (UInt8,   UInt8) {}
+
+impl Describe for fn(x: UInt8)   -> UInt8 {}
