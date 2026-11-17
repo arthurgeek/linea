@@ -50,11 +50,14 @@ fn validate(result: std.process.RunResult, workload: []const u8, control: []cons
     const observation = try parse(result.stdout, workload);
     if (checksum) |expected| if (observation.checksum != expected) return error.ChecksumMismatch;
     const distributed = std.mem.eql(u8, workload, "balanced") or std.mem.eql(u8, control, "placement");
-    if (observation.first_count != (if (distributed) @as(u64, 16) else 32)) return error.WrongPlacement;
+    const stealing = std.mem.eql(u8, control, "stealing");
+    // A thief can move a fresh context before its first observation. Only
+    // non-stealing controls have a fixed observed initial distribution.
+    if (!stealing and observation.first_count != (if (distributed) @as(u64, 16) else 32)) return error.WrongPlacement;
     const bound = std.mem.eql(u8, workload, "affinity");
     const pinned = bound or std.mem.eql(u8, control, "pinned") or std.mem.eql(u8, control, "placement");
     if (pinned and observation.moves != 0) return error.UnexpectedTransfer;
-    if (!pinned and !std.mem.eql(u8, workload, "balanced") and observation.moves == 0) return error.MissingTransfer;
+    if (std.mem.eql(u8, control, "forced") and !bound and observation.moves == 0) return error.MissingTransfer;
     return observation;
 }
 
@@ -75,7 +78,8 @@ test "failed or malformed scheduling children never produce timing evidence" {
     const success = std.process.RunResult{ .term = .{ .exited = 0 }, .stdout = @constCast(example), .stderr = &.{} };
     _ = try validate(success, "imbalanced", "pinned", 91);
     try testing.expectError(error.ChecksumMismatch, validate(success, "imbalanced", "pinned", 92));
-    try testing.expectError(error.MissingTransfer, validate(success, "imbalanced", "stealing", 91));
+    try testing.expectError(error.MissingTransfer, validate(success, "imbalanced", "forced", 91));
+    _ = try validate(success, "imbalanced", "stealing", 91);
     try testing.expectError(error.WrongPlacement, validate(success, "imbalanced", "placement", 91));
     var failed = success;
     failed.term = .{ .exited = 1 };

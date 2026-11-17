@@ -2358,6 +2358,7 @@ pub fn build(b: *std.Build) void {
     const task_entry_proof = b.step("test-fiber-task-entry", "Migrate a Linea task through compiler-owned entry eligibility");
     const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
     const busy_stealing_proof = b.step("test-fiber-busy-stealing", "Steal an already-started Linea continuation while its source runs another Linea task");
+    const new_work_proof = b.step("test-fiber-new-work-stealing", "Start queued Linea work on an idle carrier while its source runs another task");
     const completion_proof = b.step("test-fiber-completion-backend", "Run actual Linux completion I/O and timeout retirement before migration");
     const scheduling_proof = b.step("test-fiber-scheduling-controls", "Check matched pinned, placement, forced and stealing Linea workloads without recording measurements");
     const scheduling_measurement = b.step("measure-fiber-scheduling", "Compare scheduling controls on an idle host with matched Linea workloads");
@@ -2373,6 +2374,7 @@ pub fn build(b: *std.Build) void {
             break :candidate runtimeObject(b, runtime_target, "fiber_candidate", b.path("runtime/fiber.c"), candidate_flags.items);
         } else null;
         if (sanitize == .none) {
+            native_task_step.dependOn(scheduling_proof);
             const files = b.addWriteFiles();
             const scheduling_source = files.addCopyFile(b.path("runtime/tests/fiber_migration/scheduling_workload.lin"), "main.lin");
             var binaries: [4]std.Build.LazyPath = undefined;
@@ -2421,6 +2423,7 @@ pub fn build(b: *std.Build) void {
         }
         native_task_step.dependOn(stealing_proof);
         native_task_step.dependOn(busy_stealing_proof);
+        native_task_step.dependOn(new_work_proof);
         const busy_files = b.addWriteFiles();
         const busy_source = busy_files.addCopyFile(b.path("runtime/tests/fiber_migration/busy_source.lin"), "main.lin");
         var busy_flags: std.ArrayList([]const u8) = .empty;
@@ -2428,6 +2431,13 @@ pub fn build(b: *std.Build) void {
         busy_flags.append(b.allocator, "-DLINEA_FIBER_BUSY_SOURCE_TEST=1") catch @panic("OOM");
         if (migration_candidate) busy_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
         const busy_fiber = runtimeObject(b, runtime_target, "fiber_busy_source", b.path("runtime/fiber.c"), busy_flags.items);
+        const new_files = b.addWriteFiles();
+        const new_source = new_files.addCopyFile(b.path("runtime/tests/fiber_migration/new_work.lin"), "main.lin");
+        var new_flags: std.ArrayList([]const u8) = .empty;
+        new_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        new_flags.append(b.allocator, "-DLINEA_FIBER_NEW_WORK_TEST=1") catch @panic("OOM");
+        if (migration_candidate) new_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
+        const new_fiber = runtimeObject(b, runtime_target, "fiber_new_work", b.path("runtime/fiber.c"), new_flags.items);
         const AllocationMode = struct {
             name: []const u8,
             archive: std.Build.LazyPath,
@@ -2444,26 +2454,28 @@ pub fn build(b: *std.Build) void {
                 candidate_runtime.addArtifactArg(fiber_object);
                 break :candidate archive;
             } else allocation.archive;
-            const busy_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
-            const busy_archive = busy_runtime.addOutputFileArg(allocation.name);
-            for (allocation.objects) |object| busy_runtime.addArtifactArg(object);
-            busy_runtime.addArtifactArg(busy_fiber);
-            const compile_busy = b.addSystemCommand(&.{"env"});
-            compile_busy.addPrefixedFileArg("LINEA_RUNTIME=", busy_archive);
-            if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile_busy.setEnvironmentVariable(variable.name, variable.value);
-            compile_busy.addFileArg(exe.getEmittedBin());
-            compile_busy.addArg("build");
-            compile_busy.addFileArg(busy_source);
-            compile_busy.addArg("-o");
-            const busy_binary = compile_busy.addOutputFileArg("busy-stealing");
-            const run_busy = b.addRunArtifact(migration_metrics_tool);
-            run_busy.addArg("--check-busy-run");
-            run_busy.addFileArg(busy_binary);
-            if (sanitize == .address) run_busy.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
-            if (sanitize == .thread) run_busy.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
-            run_busy.has_side_effects = true;
-            run_busy.expectExitCode(0);
-            busy_stealing_proof.dependOn(&run_busy.step);
+            for ([_]bool{ false, true }) |new_work| {
+                const busy_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+                const busy_archive = busy_runtime.addOutputFileArg(allocation.name);
+                for (allocation.objects) |object| busy_runtime.addArtifactArg(object);
+                busy_runtime.addArtifactArg(if (new_work) new_fiber else busy_fiber);
+                const compile_busy = b.addSystemCommand(&.{"env"});
+                compile_busy.addPrefixedFileArg("LINEA_RUNTIME=", busy_archive);
+                if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile_busy.setEnvironmentVariable(variable.name, variable.value);
+                compile_busy.addFileArg(exe.getEmittedBin());
+                compile_busy.addArg("build");
+                compile_busy.addFileArg(if (new_work) new_source else busy_source);
+                compile_busy.addArg("-o");
+                const busy_binary = compile_busy.addOutputFileArg("busy-stealing");
+                const run_busy = b.addRunArtifact(migration_metrics_tool);
+                run_busy.addArg(if (new_work) "--check-new-work-run" else "--check-busy-run");
+                run_busy.addFileArg(busy_binary);
+                if (sanitize == .address) run_busy.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+                if (sanitize == .thread) run_busy.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
+                run_busy.has_side_effects = true;
+                run_busy.expectExitCode(0);
+                (if (new_work) new_work_proof else busy_stealing_proof).dependOn(&run_busy.step);
+            }
             for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
                 const files = b.addWriteFiles();
                 const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture})), "main.lin");
@@ -2805,6 +2817,7 @@ pub fn build(b: *std.Build) void {
         task_entry_proof.dependOn(&unavailable.step);
         stealing_proof.dependOn(&unavailable.step);
         busy_stealing_proof.dependOn(&unavailable.step);
+        new_work_proof.dependOn(&unavailable.step);
         completion_proof.dependOn(&unavailable.step);
         scheduling_proof.dependOn(&unavailable.step);
         scheduling_measurement.dependOn(&unavailable.step);

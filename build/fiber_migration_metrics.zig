@@ -278,8 +278,9 @@ test "pinned controls reject an observed destination carrier change" {
 
 const Expectation = enum { round_trip, refusal_probes, source_busy, pinned, unproven };
 
-const ChildOutput = enum { plain, traced, busy_source };
+const ChildOutput = enum { plain, traced, busy_source, new_work };
 const busy_source_proof = "native stealing: saved continuation claimed while source ran Linea\n";
+const new_work_proof = "native stealing: new continuation claimed while source ran Linea\n";
 
 fn validateRun(result: std.process.RunResult, expected: ChildOutput) !?Report {
     switch (result.term) {
@@ -291,6 +292,7 @@ fn validateRun(result: std.process.RunResult, expected: ChildOutput) !?Report {
         .plain => if (result.stderr.len != 0) error.UnexpectedOutput else null,
         .traced => try inspectTrace(result.stderr),
         .busy_source => if (!std.mem.eql(u8, result.stderr, busy_source_proof)) error.MissingBusySourceProof else null,
+        .new_work => if (!std.mem.eql(u8, result.stderr, new_work_proof)) error.MissingNewWorkProof else null,
     };
 }
 
@@ -304,6 +306,12 @@ test "busy-source execution needs runtime claim evidence as well as Linea succes
     try testing.expectError(error.MissingBusySourceProof, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = &.{} }, .busy_source));
     try testing.expectError(error.MissingBusySourceProof, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast("busy") }, .busy_source));
     try testing.expect((try validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast(busy_source_proof) }, .busy_source)) == null);
+}
+
+test "never-started work requires its own claim and execution proof" {
+    try testing.expectError(error.MissingNewWorkProof, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = &.{} }, .new_work));
+    try testing.expectError(error.MissingNewWorkProof, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast(busy_source_proof) }, .new_work));
+    try testing.expect((try validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast(new_work_proof) }, .new_work)) == null);
 }
 
 fn inspectTraceFor(text: []const u8, expectation: Expectation) !Report {
@@ -358,6 +366,10 @@ pub fn main(init: std.process.Init) !void {
     }
     if (args.len == 3 and std.mem.eql(u8, args[1], "--check-busy-run")) {
         _ = try sampleRun(gpa, init.io, args[2], .busy_source);
+        return;
+    }
+    if (args.len == 3 and std.mem.eql(u8, args[1], "--check-new-work-run")) {
+        _ = try sampleRun(gpa, init.io, args[2], .new_work);
         return;
     }
     var buffer: [4096]u8 = undefined;

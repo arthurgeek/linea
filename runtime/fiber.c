@@ -50,7 +50,7 @@
 #if defined(LINEA_FIBER_CAN_MIGRATE) && !defined(LINEA_FIBER_MIGRATION_TEST)
 #define LINEA_FIBER_AUTO_STEAL 1
 #endif
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST) && !defined(LINEA_FIBER_AUTO_STEAL)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST)) && !defined(LINEA_FIBER_AUTO_STEAL)
 #error Busy-source proof requires the normal work-stealing scheduler
 #endif
 #if __has_feature(address_sanitizer)
@@ -221,7 +221,7 @@ struct fiber_loop {
 #endif
 };
 
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
 /* A bounded policy barrier delays idle thieves until the other Linea body
  * has entered its CPU loop. Eligibility and dispatch use the normal code. */
 static struct {
@@ -493,12 +493,25 @@ int linea_fiber_active(void) {
     return current_fiber() != NULL && linea_foreign_depth() == 0;
 }
 
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
 static void busy_test_observe(struct carrier *c) {
     must(pthread_mutex_lock(&busy_test.lock));
     struct linea_fiber *f = c->executing;
     lock_fiber(f);
     int release = 0;
+#if defined(LINEA_FIBER_NEW_WORK_TEST)
+    if (!busy_test.body_seen) {
+        busy_test.body_seen = 1;
+        busy_test.body = f;
+        busy_test.source = c;
+        if (c != &c->loop->carriers[0] || c->loop->count != 4)
+            fail("linea: new-work source has the wrong initial placement\n");
+    } else if (f == busy_test.body) {
+        release = 1;
+    } else if (f != busy_test.worker || !busy_test.claimed) {
+        fail("linea: never-started work did not escape its busy source\n");
+    }
+#else
     if (!busy_test.worker_seen) {
         busy_test.worker_seen = 1;
         busy_test.worker = f;
@@ -514,6 +527,7 @@ static void busy_test_observe(struct carrier *c) {
     } else if (f == busy_test.body) {
         release = 1;
     }
+#endif
     if (f == busy_test.worker && c != busy_test.source) {
         if (busy_test.body == NULL || busy_test.source->executing != busy_test.body)
             fail("linea: a stolen continuation resumed after its busy source stopped\n");
@@ -551,7 +565,7 @@ unsigned long linea_fiber_current_carrier(void) {
      * fiber record or scheduler claim escapes through the observation. */
     const unsigned long identity = c != NULL && c->loop != NULL && c->executing != NULL ?
         (unsigned long)c : 0;
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
     if (identity != 0) busy_test_observe(c);
 #endif
     errno = error;
@@ -804,7 +818,7 @@ static int clean_runnable(struct linea_fiber *f, struct carrier *source) {
         TRACE_COUNT(source->loop, ref_source); return 0;
     }
     const int retired = (f->operation == NULL &&
-          ((f->waiting == waiting_yield && f->park == NULL && f->waiter == NULL) ||
+          (((f->waiting == waiting_none || f->waiting == waiting_yield) && f->park == NULL && f->waiter == NULL) ||
            (f->waiting == waiting_park && f->park != NULL && f->waiter != NULL))) ||
          completed_io_retired(f);
     if (!retired) { TRACE_COUNT(source->loop, ref_source); return 0; }
@@ -898,7 +912,14 @@ static int finish_transfer(struct transfer_claim *claim, struct carrier *target,
     f->forced_transfers += 1;
 #endif
     f->home = target;
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
+#if defined(LINEA_FIBER_NEW_WORK_TEST)
+    if (dispatch && f != busy_test.body && busy_test.worker == NULL) {
+        if (f->waiting != waiting_none) fail("linea: the new-work claim used an already-started continuation\n");
+        busy_test.worker = f;
+        busy_test.worker_seen = 1;
+    }
+#endif
     if (dispatch && f == busy_test.worker && !busy_test.claimed) {
         if (source != busy_test.source || source->executing != busy_test.body || busy_test.body == NULL)
             fail("linea: a continuation was not stolen from its busy Linea source\n");
@@ -2060,7 +2081,7 @@ static void *run_carrier(void *argument) {
         expire_timers(c);
         struct linea_fiber *f = dequeue(c);
 #if defined(LINEA_FIBER_AUTO_STEAL)
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
         if (f == NULL) busy_test_wait(c);
 #endif
         if (f == NULL) f = steal_for_dispatch(c);
@@ -2199,10 +2220,29 @@ static void start_fiber(struct linea_fiber *f, int compiled) {
     if (compiled && f->loop != NULL) f->proven = 1;
     f->started = 1;
     f->state = runnable;
+#if defined(LINEA_FIBER_CAN_MIGRATE) && !defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    /* Before first dispatch this is an untouched context. Every suspension
+     * sets waiting before saving, so waiting_none cannot describe a saved
+     * already-running continuation. No carrier resources need retirement. */
+    f->transfer_ready = f->proven && f->bound == NULL && f->loop != NULL &&
+        f->waiting == waiting_none && f->park == NULL && f->waiter == NULL &&
+        f->operation == NULL && f->timer_index == no_timer && f->source_claims == 0;
+#endif
     enqueue_locked(f);
     if (f->home->simulation == 0) wake = f->home;
+#if defined(LINEA_FIBER_CAN_MIGRATE)
+    const int wake_peers = wake != NULL && f->queued == stealable_lane;
+#endif
     unlock_fiber(f);
     if (wake != NULL) wake_carrier(wake);
+#if defined(LINEA_FIBER_CAN_MIGRATE)
+    if (wake_peers) wake_idle_peers(wake);
+#endif
+#if defined(LINEA_FIBER_NEW_WORK_TEST)
+    must(pthread_mutex_lock(&busy_test.lock));
+    while (!busy_test.released) must(pthread_cond_wait(&busy_test.changed, &busy_test.lock));
+    must(pthread_mutex_unlock(&busy_test.lock));
+#endif
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
     (void)alarm(60);
 #if defined(LINEA_FIBER_WAIT_FOR_PARK_TEST)
@@ -2232,7 +2272,7 @@ void linea_fiber_destroy(struct linea_fiber *f) {
 #if defined(LINEA_FIBER_STALE_COOKIE_TEST)
     const int was_started = f->started;
 #endif
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
     const int report_busy = f == busy_test.body;
     if (report_busy && (!busy_test.claimed || !busy_test.observed))
         fail("linea: busy-source proof did not observe the claimed continuation resume\n");
@@ -2251,9 +2291,13 @@ void linea_fiber_destroy(struct linea_fiber *f) {
 #endif
     if (munmap(f->mapping, f->mapping_bytes) != 0) fail("linea: a fiber's stack could not be unmapped\n");
     free(f);
-#if defined(LINEA_FIBER_BUSY_SOURCE_TEST)
+#if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
     if (report_busy) {
+#if defined(LINEA_FIBER_NEW_WORK_TEST)
+        const char message[] = "native stealing: new continuation claimed while source ran Linea\n";
+#else
         const char message[] = "native stealing: saved continuation claimed while source ran Linea\n";
+#endif
         report_bytes(message, sizeof message - 1);
     }
 #endif
