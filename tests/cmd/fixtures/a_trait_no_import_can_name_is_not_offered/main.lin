@@ -6,7 +6,7 @@ fn main() -> UInt8 {
     0
 }
 
-test fn a_box_counts_its_size() -> Result[(), UInt8] {
+test "a box counts its size" -> Result[(), UInt8] {
     let b = shapes.Box { size = 3 }
     if b.count() == 3 {
         return .Ok(())

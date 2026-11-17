@@ -83,7 +83,7 @@ impl[E: Display] Display for LineError[E] {
     }
 }
 
-test fn line_errors_display_their_reason() {
+test "line errors display their reason" {
     let input: LineError[Str] = .Input(.{ reason = "device unplugged", stream_offset = 40 })
     let allocation: LineError[Str] = .Allocation(.Exhausted)
     let limit: LineError[Str] = .Limit
@@ -184,7 +184,7 @@ impl[R: Reader] BufferedReader[R, mem.SystemAllocator] {
         BufferedReader.open_in(mem.system(), capacity, reader)
     }
 
-    test fn a_reader_buffers_from_the_system_allocator() {
+    test "a reader buffers from the system allocator" {
         let source = FragmentReader { bytes = "tea\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
             return testing.assert(false, "a system read-ahead buffer was refused")
@@ -260,7 +260,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         update(&self.reader)
     }
 
-    test fn chunk_reads_keep_read_ahead_for_the_next_line() {
+    test "chunk reads keep read ahead for the next line" {
         let source = FragmentReader { bytes = "head\nbodytail\n".as_bytes(), position = 0, step = 32, fail_at = UInt64.max }
         var reader = BufferedReader.open_in(mem.system(), capacity: 32, reader: source).unwrap()
         defer var target = mem.system().acquire(8).unwrap()
@@ -301,7 +301,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
     }
 
-    test fn open_returns_the_reader_when_no_buffer_is_made() {
+    test "open returns the reader when no buffer is made" {
         let input = "kept"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
         let returned = match BufferedReader.open(capacity: 0, reader: source) {
@@ -329,7 +329,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_opening_a_reader() -> Result[(), testing.Failure] {
+    test "each allocation failure covers opening a reader" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), mem.Oom] {
@@ -369,7 +369,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         reader
     }
 
-    test fn abandon_returns_the_reader_and_drops_its_read_ahead() {
+    test "abandon returns the reader and drops its read ahead" {
         let input = "ab\ncd\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -395,7 +395,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
     }
 
-    test fn an_oversized_line_retains_its_consumed_prefix() {
+    test "an oversized line retains its consumed prefix" {
         let input = "abcd\nnext\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -431,7 +431,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         &self.text_view()
     }
 
-    test fn text_lines_strip_only_their_terminators() {
+    test "text lines strip only their terminators" {
         let input = "á\r\n\nlast\r"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
@@ -461,7 +461,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn an_incomplete_utf8_prefix_is_retained_after_input_failure() {
+    test "an incomplete utf8 prefix is retained after input failure" {
         let input = "ok\ná\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 4 }
         var reader = BufferedReader.open(capacity: 2, reader: source) else |_| {
@@ -483,7 +483,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn a_smaller_line_limit_releases_excess_record_capacity() {
+    test "a smaller line limit releases excess record capacity" {
         let input = "a long first line\nx\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 32, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 32, reader: source) else |_| {
@@ -508,7 +508,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_borrowed_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a borrowed line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -542,7 +542,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         &self.owned_text()
     }
 
-    test fn owned_lines_outlive_the_input_and_reader() {
+    test "owned lines outlive the input and reader" {
         let input = "owned á\n".to_owned().unwrap()
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
@@ -566,7 +566,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
     }
 
-    test fn invalid_owned_text_restores_the_complete_raw_record() {
+    test "invalid owned text restores the complete raw record" {
         defer var bytes = mem.system().acquire(6).unwrap()
         // FF is invalid UTF-8; the following line-ending bytes test record framing.
         &bytes.store_byte(0, 255)
@@ -610,7 +610,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn owned_lines_are_allocated_from_an_arena() {
+    test "owned lines are allocated from an arena" {
         // The arena holds the read-ahead buffer and every record the line grows into.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
@@ -627,7 +627,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_an_owned_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of an owned line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -665,7 +665,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(.Some(self.pending()))
     }
 
-    test fn a_borrowed_raw_line_keeps_its_terminator_and_bytes_that_are_not_utf8() {
+    test "a borrowed raw line keeps its terminator and bytes that are not utf8" {
         defer var bytes = mem.system().acquire(3).unwrap()
         // FF is invalid UTF-8, and a raw line keeps it as it arrived.
         &bytes.store_byte(0, 255)
@@ -690,7 +690,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_borrowed_raw_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a borrowed raw line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -726,7 +726,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(.Some(&self.take_bytes(length)))
     }
 
-    test fn a_raw_line_preserves_crlf_without_text_conversion() {
+    test "a raw line preserves crlf without text conversion" {
         let input = "raw\r\nlast"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
@@ -751,7 +751,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn owned_raw_lines_are_allocated_from_an_arena() {
+    test "owned raw lines are allocated from an arena" {
         // The arena holds the read-ahead buffer and every record the line grows into.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
@@ -768,7 +768,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_an_owned_raw_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of an owned raw line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -865,7 +865,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
 
     // The arena's eight-byte header leaves `scarce` no room for the body, while
     // `ample` holds the read-ahead buffer and the body.
-    test fn read_exact_allocates_the_body_from_its_allocator() {
+    test "read_exact allocates the body from its allocator" {
         let input = "hello"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 5, fail_at = UInt64.max }
         let ample = mem.Arena.open(mem.system(), size: 64)
@@ -903,7 +903,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn read_exact_keeps_its_bytes_apart_from_the_reader_allocator() {
+    test "read_exact keeps its bytes apart from the reader allocator" {
         // The reader's read-ahead comes from the arena; the bytes read come
         // from the system allocator and are still there once the arena is gone.
         let arena = mem.Arena.open(mem.system(), size: 64)
@@ -932,7 +932,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         &self.read_exact_in(mem.system(), count, max_bytes)
     }
 
-    test fn read_exact_allocates_from_the_system_allocator() {
+    test "read_exact allocates from the system allocator" {
         let source = FragmentReader { bytes = "abc".as_bytes(), position = 0, step = 3, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
             return testing.assert(false, "reader allocation failed")
@@ -949,7 +949,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         testing.assert_eq(length, UInt64(2), "an exact read into the system allocator lost bytes")
     }
 
-    test fn read_exact_collects_a_body_split_across_reads() {
+    test "read_exact collects a body split across reads" {
         let input = "hello world"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
@@ -973,7 +973,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn read_exact_refuses_past_its_limit_before_reading() {
+    test "read_exact refuses past its limit before reading" {
         let input = "hello world"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 4, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -997,7 +997,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn read_exact_reports_how_much_arrived_before_the_end() {
+    test "read_exact reports how much arrived before the end" {
         let input = "abc"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
@@ -1016,7 +1016,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn read_exact_refuses_while_a_line_read_needs_recovery() {
+    test "read_exact refuses while a line read needs recovery" {
         let input = "abcd\nnext\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -1042,7 +1042,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
     // ExcessReadFixture (defined in read_all.lin, this module's other whole-input
     // reader) misreports its own progress, overrunning the destination it was
     // given. read_exact treats this as unusable rather than trusting the count.
-    test fn read_exact_reports_a_reader_that_overruns_its_destination() {
+    test "read_exact reports a reader that overruns its destination" {
         let source = ExcessReadFixture {}
         var reader = BufferedReader.open(capacity: 4, reader: source) else |_| {
             return testing.assert(false, "reader allocation failed")
@@ -1079,7 +1079,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         }
     }
 
-    test fn taking_an_invalid_complete_line_does_not_discard_the_following_line() {
+    test "taking an invalid complete line does not discard the following line" {
         defer var bytes = mem.system().acquire(5).unwrap()
         // FF is invalid UTF-8; the following line-ending bytes test record framing.
         &bytes.store_byte(0, 255)
@@ -1117,7 +1117,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn allocation_failure_preserves_the_prefix_and_unconsumed_lookahead() {
+    test "allocation failure preserves the prefix and unconsumed lookahead" {
         defer var bytes = Vec.filled(count: 70, value: UInt8(97)).unwrap()
         bytes[69] = 10
         let source = FragmentReader { bytes = bytes.as_slice(), position = 0, step = 1, fail_at = UInt64.max }
@@ -1189,7 +1189,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(.{ discarded = discarded, boundary = false })
     }
 
-    test fn partial_discard_preserves_extractable_bytes_but_prevents_resume() {
+    test "partial discard preserves extractable bytes but prevents resume" {
         let input = "abcdef\nnext\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 8, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -1243,7 +1243,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         &self.text_view()
     }
 
-    test fn an_incomplete_line_resumes_with_its_retained_prefix() {
+    test "an incomplete line resumes with its retained prefix" {
         let input = "abcdef\nnext\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 2, fail_at = UInt64.max }
         var reader = BufferedReader.open(capacity: 3, reader: source) else |_| {
@@ -1268,7 +1268,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn resuming_with_a_smaller_limit_bounds_the_retained_capacity() {
+    test "resuming with a smaller limit bounds the retained capacity" {
         let input = "x\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
         var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
@@ -1293,7 +1293,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn refused_resume_shrinking_preserves_the_previous_prefix() {
+    test "refused resume shrinking preserves the previous prefix" {
         let input = "x\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
         // Header, read-ahead and the first record exhaust this slab exactly.
@@ -1331,7 +1331,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn a_resumed_borrowed_line_is_held_in_an_arena() {
+    test "a resumed borrowed line is held in an arena" {
         // The arena holds the read-ahead buffer and every record the line grows into.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
@@ -1354,7 +1354,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_borrowed_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a resumed borrowed line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -1400,7 +1400,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         &self.owned_text()
     }
 
-    test fn an_input_failure_can_resume_an_owned_line() {
+    test "an input failure can_resume an owned line" {
         let input = "á\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 1 }
         var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
@@ -1429,7 +1429,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn a_resumed_owned_line_is_allocated_from_an_arena() {
+    test "a resumed owned line is allocated from an arena" {
         // The arena holds the read-ahead buffer and every record the line grows into.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
@@ -1456,7 +1456,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_owned_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a resumed owned line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -1505,7 +1505,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(.Some(self.pending()))
     }
 
-    test fn a_borrowed_raw_line_resumes_with_its_retained_prefix() {
+    test "a borrowed raw line resumes with its retained prefix" {
         let input = "ab\r\ncd\n"
         let source = FragmentReader { bytes = input.as_bytes(), position = 0, step = 1, fail_at = 2 }
         var reader = BufferedReader.open(capacity: 1, reader: source) else |_| {
@@ -1544,7 +1544,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn a_resumed_borrowed_raw_line_is_held_in_an_arena() {
+    test "a resumed borrowed raw line is held in an arena" {
         // The arena holds the read-ahead buffer and every record the line grows into.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
@@ -1567,7 +1567,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_borrowed_raw_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a resumed borrowed raw line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {
@@ -1613,7 +1613,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(.Some(&self.take_bytes(length)))
     }
 
-    test fn raw_resume_preserves_invalid_utf8_and_the_terminator() {
+    test "raw resume preserves invalid utf8 and the terminator" {
         defer var bytes = mem.system().acquire(2).unwrap()
         // FF is invalid UTF-8; the following line-ending bytes test record framing.
         &bytes.store_byte(0, 255)
@@ -1644,7 +1644,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn a_resumed_owned_raw_line_is_allocated_from_an_arena() {
+    test "a resumed owned raw line is allocated from an arena" {
         // The arena holds the read-ahead buffer and every record the line grows into.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let source = FragmentReader { bytes = "a line long enough to grow its record twice\nnext\n".as_bytes(), position = 0, step = 4, fail_at = 20 }
@@ -1671,7 +1671,7 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_every_growth_step_of_a_resumed_owned_raw_line() -> Result[(), testing.Failure] {
+    test "each allocation failure covers every growth step of a resumed owned raw line" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), LineError[UInt8]] {

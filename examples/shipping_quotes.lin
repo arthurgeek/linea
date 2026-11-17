@@ -49,7 +49,7 @@ fn quote(weight_grams: UInt64, service: Service = .Standard, tariff: Tariff = ra
     .Some(rate.base_cents + kilograms * rate.per_kg_cents)
 }
 
-test fn quotes_charge_each_started_kilogram() {
+test "quotes charge each started kilogram" {
     testing.assert_eq(quote(1000), .Some(425), "one kilogram uses one weight charge")?
     testing.assert_eq(quote(1001), .Some(550), "a partial kilogram adds one weight charge")?
     testing.assert_eq(quote(1001, service: .Express), .Some(1050), "express uses its own rate")?
@@ -58,7 +58,7 @@ test fn quotes_charge_each_started_kilogram() {
     testing.assert_eq(quote(20001), .None, "an overweight parcel has no shipping quote")?
 }
 
-test fn a_custom_tariff_keeps_the_published_card_unchanged() {
+test "a custom tariff keeps the published card unchanged" {
     var local = copy(rate_card)
     local.rates[0].base_cents = 200
     local.maximum_grams = 5000

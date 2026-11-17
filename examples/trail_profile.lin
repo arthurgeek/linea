@@ -18,7 +18,7 @@ fn total_climb(elevations: mem.Slice[Int64]) -> Int64 {
     elevations.windows(2).map(|sink pair| pair[1] - pair[0]).filter(|change| change > 0).sum()
 }
 
-test fn only_the_ascents_count_as_climb() {
+test "only the ascents count as climb" {
     testing.assert_eq(total_climb([Int64(400), 520, 480, 610].as_slice()), 250, "a descent was counted as climb")?
     testing.assert_eq(total_climb([Int64(400)].as_slice()), 0, "a trail of one marker has no climb")?
 }
@@ -51,7 +51,7 @@ fn longest_ascent(elevations: mem.Slice[Int64]) -> Int64 {
     longest
 }
 
-test fn the_longest_ascent_spans_neighbouring_rises() {
+test "the longest_ascent spans neighbouring rises" {
     testing.assert_eq(longest_ascent([Int64(400), 520, 480, 610, 690, 650].as_slice()), 210, "two rises in a row are one ascent")?
     testing.assert_eq(longest_ascent([Int64(500), 450, 400].as_slice()), 0, "a trail that only falls has no ascent")?
 }

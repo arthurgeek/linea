@@ -60,6 +60,6 @@ fn main() -> Bool {
 fn stop() -> Never { panic("stop") }
 //                     ^ keyword.control.return
 
-test trap fn expected_stop() -> Never { panic("stop") }
-// <- keyword.storage.modifier
+test trap "expected stop" -> Never { panic("stop") }
+// <- keyword.function
 //    ^ keyword.storage.modifier

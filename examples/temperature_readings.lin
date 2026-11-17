@@ -34,7 +34,7 @@ fn first_at_least(w: Week, limit: UInt64) -> Option[UInt64] {
     }
 }
 
-test fn the_first_temperature_at_the_threshold_triggers_ventilation() {
+test "the first temperature at the threshold triggers ventilation" {
     let w = Week { readings = [12, 19, 23, 17, 30] }
 
     testing.assert_eq(first_at_least(w, 20), .Some(23), "the first reading above twenty is 23")?
@@ -50,7 +50,7 @@ fn calibrate(inout w: Week, shift: UInt64) {
     }
 }
 
-test fn calibration_adjusts_each_daily_temperature() {
+test "calibration adjusts each daily temperature" {
     var w = Week { readings = [1, 2, 3, 4, 5] }
     calibrate(&w, 10)
     testing.assert_eq(w.readings, [11, 12, 13, 14, 15], "every reading moves up by the shift")?

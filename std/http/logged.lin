@@ -130,7 +130,7 @@ pub fn logged[H, S: log.Sink, A: Allocator](sink logger: log.Logger[S, A], sink 
     .{ handler, logger }
 }
 
-test fn an_exchange_is_logged_at_the_level_its_status_calls_for() {
+test "an exchange is logged at the level its status calls for" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/items/7?full=1", body: "").unwrap()
     let request = sent.request()
@@ -162,7 +162,7 @@ test fn an_exchange_is_logged_at_the_level_its_status_calls_for() {
     .Ok(())
 }
 
-test fn a_retried_accept_is_logged_as_a_warning() {
+test "a retried accept is logged as a warning" {
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), Counting { observed = 0 })
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
@@ -176,7 +176,7 @@ test fn a_retried_accept_is_logged_as_a_warning() {
     .Ok(())
 }
 
-test fn the_bound_address_is_logged_as_listening() {
+test "the bound address is logged as listening" {
     let file = log.capture()
     var served = logged(file.logger(minimum: .Info), Counting { observed = 0 })
     let event: Event = .Listening(net.loopback(8080))
@@ -191,7 +191,7 @@ test fn the_bound_address_is_logged_as_listening() {
 
 // A logged router answers as the router does, and each exchange is one line
 // with the time the handler took to answer.
-test fn a_logged_router_logs_each_exchange_it_serves() {
+test "a logged router logs each exchange it serves" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let found = send(bound, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")

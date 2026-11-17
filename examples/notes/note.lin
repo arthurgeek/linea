@@ -18,7 +18,7 @@ impl Note[mem.SystemAllocator] {
         Note.new_in(mem.system(), id, title, priority, tags)
     }
 
-    test fn note_constructs_and_matches_filters() {
+    test "note constructs and matches filters" {
         var tags: Vec[String] = Vec.new()
         &tags.push("work".to_owned().unwrap()).unwrap()
         &tags.push("urgent".to_owned().unwrap()).unwrap()

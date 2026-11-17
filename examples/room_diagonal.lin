@@ -14,11 +14,11 @@ fn diagonal(width_mm: UInt16, length_mm: UInt16) -> UInt64 {
     UInt64(distance.round())
 }
 
-test fn a_three_by_four_metre_room_has_a_five_metre_diagonal() {
+test "a three by four metre room has a five metre diagonal" {
     testing.assert_eq(diagonal(3000, 4000), 5000, "the room diagonal should be five metres")?
 }
 
-test fn diagonals_round_to_the_nearest_millimetre() {
+test "diagonals round to the nearest millimetre" {
     testing.assert_eq(diagonal(1000, 1000), 1414, "the square room diagonal rounded incorrectly")?
     testing.assert_eq(diagonal(2500, 3500), 4301, "the rectangular room diagonal rounded incorrectly")?
     testing.assert_eq(diagonal(0, 4000), 4000, "a zero-width room should retain its length")?

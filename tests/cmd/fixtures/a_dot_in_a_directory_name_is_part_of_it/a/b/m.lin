@@ -7,7 +7,7 @@ pub fn size() -> UInt8 {
     7
 }
 
-test fn holds_seven() -> Result[(), IoError] {
+test "holds seven" -> Result[(), IoError] {
     if size() != 7 {
         return .Err(IoError.from_os(.Write, 1))
     }

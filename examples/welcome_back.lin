@@ -50,7 +50,7 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
     &router.route(r"GET /hello/{name}", hello)
 }
 
-test fn a_first_visit_sets_the_cookie() {
+test "a first visit sets the cookie" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -63,7 +63,7 @@ test fn a_first_visit_sets_the_cookie() {
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "the page changed")?
 }
 
-test fn a_returning_visitor_is_counted() {
+test "a returning visitor is counted" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -76,7 +76,7 @@ test fn a_returning_visitor_is_counted() {
     testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=3; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie did not advance")?
 }
 
-test fn a_cookie_that_is_not_a_count_starts_over() {
+test "a cookie that is not a count starts over" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -88,7 +88,7 @@ test fn a_cookie_that_is_not_a_count_starts_over() {
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "a bad cookie was counted")?
 }
 
-test fn the_count_stops_at_its_limit() {
+test "the count stops at its limit" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -100,7 +100,7 @@ test fn the_count_stops_at_its_limit() {
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1000.</p>", "the count passed its limit")?
 }
 
-test fn a_name_with_markup_is_shown_as_text() {
+test "a name with markup is shown as text" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)

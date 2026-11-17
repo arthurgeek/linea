@@ -60,7 +60,7 @@ fn limits() -> http.Limits {
     http.Limits { max_body_bytes = longest_form, open_connections = connection_budget, ..http.Limits.default() }
 }
 
-test fn the_longest_non_ascii_signature_fits_the_body_limit() {
+test "the longest non ascii signature fits the body limit" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("the_longest_non_ascii_signature_fits_the_body_limit", .None).unwrap()
@@ -156,7 +156,7 @@ fn database_path_from(variable: Option[Str]) -> Str {
     }
 }
 
-test fn the_database_path_drops_surrounding_spaces() {
+test "the database_path drops surrounding spaces" {
     testing.assert_eq(database_path_from(.Some("  guests.db\n")), "guests.db", "the spaces around the path were kept")?
     testing.assert_eq(database_path_from(.Some(" \t ")), "guest-book.db", "a blank path was used")?
     testing.assert_eq(database_path_from(.None), "guest-book.db", "the default path changed")?
@@ -212,7 +212,7 @@ impl Ctx {
         .Ok(Ctx { book = Book.open_in_memory(name)?, proxy_trust = trust })
     }
 
-    test fn releasing_a_ctx_closes_its_connection() {
+    test "releasing a ctx closes its connection" {
         let ctx = Ctx.in_memory("releasing_a_ctx", .None).unwrap()
         ctx.release()
         .Ok(())
@@ -274,7 +274,7 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
     &router.route("POST /sign", sign)
 }
 
-test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
+test "signing redirects sets a cookie and renders on the home page" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("signing_redirects_sets_a_cookie_and_renders_on_the_home_page", .None).unwrap()
@@ -310,7 +310,7 @@ test fn signing_redirects_sets_a_cookie_and_renders_on_the_home_page() {
     .Ok(())
 }
 
-test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
+test "exact length boundaries are accepted and one scalar past is refused" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused", .None).unwrap()
@@ -359,7 +359,7 @@ test fn exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused() {
     .Ok(())
 }
 
-test fn control_and_format_characters_are_refused_and_line_breaks_in_a_message_are_kept() {
+test "control and format characters are refused and line breaks in a message are kept" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("control_and_format_characters_are_refused_and_line_breaks_in_a_message_are_kept", .None).unwrap()
@@ -411,7 +411,7 @@ test fn control_and_format_characters_are_refused_and_line_breaks_in_a_message_a
     .Ok(())
 }
 
-test fn a_line_break_counts_once_towards_the_message_limit() {
+test "a line break counts once towards the message limit" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("a_line_break_counts_once_towards_the_message_limit", .None).unwrap()
@@ -432,7 +432,7 @@ test fn a_line_break_counts_once_towards_the_message_limit() {
     .Ok(())
 }
 
-test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
+test "origin and fetch site spoofing attempts answer 403" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("origin_and_fetch_site_spoofing_attempts_answer_403", .None).unwrap()
@@ -502,7 +502,7 @@ test fn origin_and_fetch_site_spoofing_attempts_answer_403() {
     .Ok(())
 }
 
-test fn favicon_answers_204_no_content() {
+test "favicon answers 204 no content" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     defer var app = Ctx.in_memory("favicon_answers_204_no_content", .None).unwrap()
@@ -516,7 +516,7 @@ test fn favicon_answers_204_no_content() {
     .Ok(())
 }
 
-test fn forwarded_proto_https_is_recognised_for_same_origin() {
+test "forwarded proto https is recognised for same origin" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
     // Two serving tasks, one trusting no proxy and one trusting every proxy,

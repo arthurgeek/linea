@@ -16,7 +16,7 @@ impl Str {
         .Ok(owned)
     }
 
-    test fn an_empty_allocator_refuses_owned_text() {
+    test "an empty allocator refuses owned text" {
         defer let arena = mem.Arena.open(mem.system(), 0)
         let result = "text".to_owned_in(arena.handle())
         let failed = match result {
@@ -30,7 +30,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn initial_copy_refusal_releases_the_empty_owner() {
+    test "initial copy refusal releases the empty owner" {
         // The cursor fills the arena, leaving no space for content.
         defer let arena = mem.Arena.open(mem.system(), 8)
         let refused = match "content".to_owned_in(arena.handle()) {
@@ -49,12 +49,12 @@ impl Str {
         self.to_owned_in(mem.system())
     }
 
-    test fn owned_text_copies_into_the_system_allocator() {
+    test "owned text copies into the system allocator" {
         defer let text = "olá".to_owned().unwrap()
         testing.assert_eq(text.view(), "olá", "the copy changed the text")?
     }
 
-    test fn copied_text_outlives_its_source_owner() {
+    test "copied text outlives its source owner" {
         let original = "kept á\u{0}".to_owned().unwrap()
         let copied = original.view().to_owned().unwrap()
         original.release()
@@ -63,7 +63,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn copied_text_outlives_the_source_allocation_owner() {
+    test "copied text outlives the source allocation owner" {
         defer let copied = {
             defer let arena = mem.Arena.open(mem.system(), 64)
             defer let original = "source á".to_owned_in(arena.handle()).unwrap()
@@ -85,7 +85,7 @@ impl Str {
     }
 
     // An argument index beyond the process argument count returns None.
-    test fn an_argument_past_the_count_is_nothing() {
+    test "an argument past the count is nothing" {
         match Str.argument(1000000) {
             Some(_) => testing.assert(false, "an index past the count named an argument")?,
             None => {},
@@ -101,7 +101,7 @@ impl Str {
         .Ok(.{ bytes = copy(bytes) })
     }
 
-    test fn from_bytes_accepts_valid_utf8_and_refuses_the_rest() {
+    test "from_bytes accepts valid utf8 and refuses the rest" {
         let text = Str.from_bytes("olá".as_bytes()).unwrap()
         testing.assert_eq(text, "olá", "valid bytes did not become the same text")?
         // 195 opens a two-byte character, so on its own it is not UTF-8.
@@ -115,7 +115,7 @@ impl Str {
         copy(self.bytes)
     }
 
-    test fn as_bytes_views_the_encoded_bytes() {
+    test "as_bytes views the encoded bytes" {
         let bytes = "olá".as_bytes()
         testing.assert_eq(bytes.length(), UInt64(4), "the view lost a byte")?
         testing.assert_eq(bytes[2], UInt8(195), "the view changed the lead byte of á")?
@@ -127,7 +127,7 @@ impl Str {
         self.bytes.length()
     }
 
-    test fn length_counts_encoded_bytes() {
+    test "length counts encoded bytes" {
         testing.assert_eq("".length(), UInt64(0), "empty text has a length")?
         testing.assert_eq("olá".length(), UInt64(4), "a two-byte character was counted once")?
         .Ok(())
@@ -143,7 +143,7 @@ impl Str {
     }
 
     // Lengths and indexes count UTF-8 bytes: á occupies two bytes.
-    test fn a_length_counts_bytes_and_not_characters() {
+    test "a length counts bytes and not characters" {
         testing.assert_eq(Str.length(self: "abc"), 3, "a byte per character is not counted one each")?
 
         // "olá" holds four bytes but three Unicode scalars.
@@ -182,7 +182,7 @@ impl Str {
     }
 
     // Empty text has no bytes and permits only the empty slice.
-    test fn an_empty_str_has_no_bytes() {
+    test "an empty str has no bytes" {
         testing.assert_eq("".length(), 0, "a view of no bytes has a length")?
 
         match "".byte(0) {
@@ -199,7 +199,7 @@ impl Str {
     }
 
     // Slices require ordered, in-bounds offsets at UTF-8 character boundaries.
-    test fn a_slice_refuses_what_is_not_text() {
+    test "a slice refuses what is not text" {
         match "abc".slice(2, 1) {
             Some(_) => testing.assert(false, "a slice whose ends are reversed is text")?,
             None => {},
@@ -298,7 +298,7 @@ impl Comparable for Str {
 // Every pair of strings has one order, determined by bytes and then length.
 impl Ordered for Str {}
 
-test fn text_equality_and_order_are_total_by_bytes() {
+test "text equality and order are total by bytes" {
     let samples = ["", "a", "a", "aa", "b", "á"]
     for read a in samples {
         testing.assert(a.equals(a), "text equality is not reflexive")?

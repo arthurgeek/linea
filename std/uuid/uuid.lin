@@ -57,7 +57,7 @@ impl Display for ParseError {
     }
 }
 
-test fn a_parse_error_says_where_the_text_went_wrong() {
+test "a parse error says where the text went wrong" {
     defer let length = fmt.render_owned(ParseError.Length(12)).unwrap()
     testing.assert_eq(length.view(), "a UUID is 36 bytes long, and this text is 12", "the length message changed")?
     defer let digit = fmt.render_owned(ParseError.Digit(3)).unwrap()
@@ -119,7 +119,7 @@ impl Uuid {
         .{ high = high - high % two_to_16 + version * two_to_12 + high % two_to_12, low = with_variant(low) }
     }
 
-    test fn a_v4_identifier_has_version_4_and_the_rfc_variant() {
+    test "a v4 identifier has version 4 and the rfc variant" {
         let id = Uuid.v4()
         testing.assert_eq(id.version(), UInt8(4), "the version is not 4")?
         testing.assert_eq(id.variant(), Variant.Rfc9562, "the variant is not RFC 9562")?
@@ -144,7 +144,7 @@ impl Uuid {
         .{ high = milliseconds * two_to_16 + version * two_to_12 + high % two_to_12, low = with_variant(low) }
     }
 
-    test fn a_v7_identifier_records_when_it_was_made() {
+    test "a v7 identifier records when it was made" {
         let before = time.now()
         let id = Uuid.v7()
         let after = time.now()
@@ -154,7 +154,7 @@ impl Uuid {
         testing.assert(made.unix_seconds() >= before.unix_seconds() && made.unix_seconds() <= after.unix_seconds(), "the recorded time is not the time it was made")?
     }
 
-    test fn v7_identifiers_made_in_later_milliseconds_sort_later() {
+    test "v7 identifiers made in later milliseconds sort later" {
         let first = Uuid.v7()
         time.sleep(time.Duration.from_milliseconds(2))
         let second = Uuid.v7()
@@ -166,7 +166,7 @@ impl Uuid {
         .{ high = 0, low = 0 }
     }
 
-    test fn the_nil_identifier_is_all_zero() {
+    test "the nil identifier is all zero" {
         defer let written = fmt.render_owned(Uuid.nil()).unwrap()
         testing.assert_eq(written.view(), "00000000-0000-0000-0000-000000000000", "nil is not all zero")?
     }
@@ -177,7 +177,7 @@ impl Uuid {
         .{ high = UInt64.max, low = UInt64.max }
     }
 
-    test fn the_max_identifier_is_all_one_and_sorts_last() {
+    test "the max identifier is all one and sorts last" {
         defer let written = fmt.render_owned(Uuid.max()).unwrap()
         testing.assert_eq(written.view(), "ffffffff-ffff-ffff-ffff-ffffffffffff", "max is not all one")?
         testing.assert(Uuid.v7() < Uuid.max(), "an identifier sorted after max")?
@@ -196,7 +196,7 @@ impl Uuid {
         .{ high, low }
     }
 
-    test fn bytes_come_back_as_they_went_in() {
+    test "bytes come back as they went in" {
         let bytes: [UInt8; 16] = [1, 144, 179, 226, 124, 26, 125, 78, 159, 33, 58, 92, 142, 11, 109, 23]
         let id = Uuid.from_bytes(bytes)
         testing.assert_eq(id.bytes(), bytes, "the bytes changed")?
@@ -218,7 +218,7 @@ impl Uuid {
         bytes
     }
 
-    test fn the_bytes_of_max_are_all_255() {
+    test "the bytes of max are all 255" {
         testing.assert_eq(Uuid.max().bytes(), [UInt8(255), 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255], "a byte of max is not 255")?
     }
 
@@ -228,7 +228,7 @@ impl Uuid {
         UInt8(self.high / two_to_12 % 16)
     }
 
-    test fn the_version_is_read_from_its_four_bits() {
+    test "the version is read from its four bits" {
         testing.assert_eq(Uuid.nil().version(), UInt8(0), "nil has a version")?
         testing.assert_eq(Uuid.max().version(), UInt8(15), "max's version bits are not all one")?
         testing.assert_eq(Uuid.parse("6ba7b810-9dad-11d1-80b4-00c04fd430c8").unwrap().version(), UInt8(1), "a version 1 identifier read another version")?
@@ -248,7 +248,7 @@ impl Uuid {
         }
     }
 
-    test fn the_variant_is_read_from_the_top_bits_of_byte_8() {
+    test "the variant is read from the top bits of byte 8" {
         testing.assert_eq(Uuid.nil().variant(), Variant.Ncs, "nil is not NCS")?
         testing.assert_eq(Uuid.parse("00000000-0000-0000-bfff-000000000000").unwrap().variant(), Variant.Rfc9562, "10 is not RFC 9562")?
         testing.assert_eq(Uuid.parse("00000000-0000-0000-c000-000000000000").unwrap().variant(), Variant.Microsoft, "110 is not Microsoft")?
@@ -268,7 +268,7 @@ impl Uuid {
         time.Timestamp.from_unix(Int64(seconds), UInt32(nanoseconds))
     }
 
-    test fn a_timestamp_is_read_only_from_version_7() {
+    test "a timestamp is read only from version 7" {
         // RFC 9562's version 7 example records 2022-02-22T19:22:22Z.
         let example = Uuid.parse("017f22e2-79b0-7cc3-98c4-dc0c0c07398f").unwrap()
         let recorded = example.timestamp().unwrap()
@@ -309,14 +309,14 @@ impl Uuid {
         .Ok(.{ high, low })
     }
 
-    test fn an_identifier_parses_back_to_itself() {
+    test "an identifier parses back to itself" {
         let id = Uuid.v7()
         defer let written = fmt.render_owned(id).unwrap()
         testing.assert_eq(Uuid.parse(written.view()).unwrap(), id, "the written form parsed to another identifier")?
         testing.assert_eq(Uuid.parse("0190B3E2-7C1A-7D4E-9F21-3A5C8E0B6D17").unwrap(), Uuid.parse("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17").unwrap(), "uppercase digits parsed differently")?
     }
 
-    test fn text_that_is_not_an_identifier_is_refused_where_it_goes_wrong() {
+    test "text that is not an identifier is refused where it goes wrong" {
         refused_as("0190b3e2", .Length(8), "a short text was not refused by length")?
         refused_as(r"{0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17}", .Length(38), "braces were accepted")?
         refused_as("0190b3e2_7c1a-7d4e-9f21-3a5c8e0b6d17", .Hyphen(8), "an underscore was read as a hyphen")?
@@ -365,7 +365,7 @@ impl Uuid {
         written
     }
 
-    test fn ascii_is_the_written_form() {
+    test "ascii is the written form" {
         let id = Uuid.parse("0190B3E2-7C1A-7D4E-9F21-3A5C8E0B6D17").unwrap()
         let written = id.ascii()
         testing.assert_eq(Str.from_bytes(written.as_slice()), .Ok("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17"), "the written form changed")?
@@ -392,7 +392,7 @@ impl Debug for Uuid {
     }
 }
 
-test fn debug_writes_the_identifier_as_display_does() {
+test "debug writes the identifier as display does" {
     let id = Uuid.parse("0190b3e2-7c1a-7d4e-9f21-3a5c8e0b6d17").unwrap()
     var recorder = testing.Recorder.of(64).unwrap()
     let wrote = id.debug(&recorder).is_ok()
@@ -401,7 +401,7 @@ test fn debug_writes_the_identifier_as_display_does() {
     testing.assert(wrote && holds, "debug wrote another form")?
 }
 
-test fn equal_identifiers_hash_alike() {
+test "equal identifiers hash alike" {
     let id = Uuid.v4()
     testing.assert_eq(id.hash(), Uuid.from_bytes(id.bytes()).hash(), "equal identifiers hashed differently")?
 }

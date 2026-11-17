@@ -14,14 +14,14 @@ pub fn doubled(n: UInt8) -> UInt8 {
     n * 2
 }
 
-test fn doubling_two_gives_four() -> Result[(), IoError] {
+test "doubling two gives four" -> Result[(), IoError] {
     if doubled(2) != 4 {
         return .Err(IoError.from_os(.Write, 1))
     }
     return .Ok({})
 }
 
-test fn doubling_one_gives_two() -> Result[(), IoError] {
+test "doubling one gives two" -> Result[(), IoError] {
     if doubled(1) != 2 {
         return .Err(IoError.from_os(.Write, 2))
     }

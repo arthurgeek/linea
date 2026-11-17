@@ -35,7 +35,7 @@ fn method_of(token: Str) -> Method {
     }
 }
 
-test fn a_method_token_names_its_method_exactly() {
+test "a method token names its method exactly" {
     testing.assert_eq(method_of("GET"), Method.Get, "GET")?
     testing.assert_eq(method_of("HEAD"), Method.Head, "HEAD")?
     testing.assert_eq(method_of("POST"), Method.Post, "POST")?

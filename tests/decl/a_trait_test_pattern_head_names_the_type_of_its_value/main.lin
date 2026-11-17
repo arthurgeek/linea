@@ -10,7 +10,7 @@ trait Packed {
 
     fn weight(self: Self) -> UInt32
 
-    test fn the_heaviest_item_weighs_nine_hundred_grams() {
+    test "the heaviest item weighs nine hundred grams" {
         let Item { grams } = parcels.heaviest()
         testing.assert_eq(grams, 900, "the heaviest item weighs 900 g")?
     }

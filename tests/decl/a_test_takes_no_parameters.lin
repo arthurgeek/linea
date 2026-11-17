@@ -4,7 +4,7 @@ import std.io
 use io.IoError
 use io.println
 
-test fn a_thing_holds(n: UInt8) -> Result[(), IoError] {
+test "a thing holds"(n: UInt8) -> Result[(), IoError] {
     println(n)?
     return .Ok({})
 }

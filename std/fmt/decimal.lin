@@ -95,7 +95,7 @@ impl[T: Integer] Debug for T {
     }
 }
 
-test fn int8_renderers_preserve_decimal_boundaries() {
+test "int8 renderers preserve decimal boundaries" {
     let least: Int8 = -128
     testing.assert(display_text_equals(least, "-128"), "Int8.display changed least")?
     testing.assert(debug_text_equals(least, "-128"), "Int8.debug changed least")?
@@ -110,7 +110,7 @@ test fn int8_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn uint8_renderers_preserve_decimal_boundaries() {
+test "uint8 renderers preserve decimal boundaries" {
     let least: UInt8 = 0
     testing.assert(display_text_equals(least, "0"), "UInt8.display changed least")?
     testing.assert(debug_text_equals(least, "0"), "UInt8.debug changed least")?
@@ -122,7 +122,7 @@ test fn uint8_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn int16_renderers_preserve_decimal_boundaries() {
+test "int16 renderers preserve decimal boundaries" {
     let least: Int16 = -32768
     testing.assert(display_text_equals(least, "-32768"), "Int16.display changed least")?
     testing.assert(debug_text_equals(least, "-32768"), "Int16.debug changed least")?
@@ -137,7 +137,7 @@ test fn int16_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn uint16_renderers_preserve_decimal_boundaries() {
+test "uint16 renderers preserve decimal boundaries" {
     let least: UInt16 = 0
     testing.assert(display_text_equals(least, "0"), "UInt16.display changed least")?
     testing.assert(debug_text_equals(least, "0"), "UInt16.debug changed least")?
@@ -149,7 +149,7 @@ test fn uint16_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn int32_renderers_preserve_decimal_boundaries() {
+test "int32 renderers preserve decimal boundaries" {
     let least: Int32 = -2147483648
     testing.assert(display_text_equals(least, "-2147483648"), "Int32.display changed least")?
     testing.assert(debug_text_equals(least, "-2147483648"), "Int32.debug changed least")?
@@ -164,7 +164,7 @@ test fn int32_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn uint32_renderers_preserve_decimal_boundaries() {
+test "uint32 renderers preserve decimal boundaries" {
     let least: UInt32 = 0
     testing.assert(display_text_equals(least, "0"), "UInt32.display changed least")?
     testing.assert(debug_text_equals(least, "0"), "UInt32.debug changed least")?
@@ -176,7 +176,7 @@ test fn uint32_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn int64_renderers_preserve_decimal_boundaries() {
+test "int64 renderers preserve decimal boundaries" {
     let least = -9223372036854775808
     testing.assert(display_text_equals(least, "-9223372036854775808"), "Int64.display changed least")?
     testing.assert(debug_text_equals(least, "-9223372036854775808"), "Int64.debug changed least")?
@@ -191,7 +191,7 @@ test fn int64_renderers_preserve_decimal_boundaries() {
     .Ok(())
 }
 
-test fn uint64_renderers_preserve_decimal_boundaries() {
+test "uint64 renderers preserve decimal boundaries" {
     let least: UInt64 = 0
     testing.assert(display_text_equals(least, "0"), "UInt64.display changed least")?
     testing.assert(debug_text_equals(least, "0"), "UInt64.debug changed least")?
@@ -214,7 +214,7 @@ fn decimal_digits(n: UInt64) -> UInt64 {
     count
 }
 
-test fn decimal_digits_count_every_place() {
+test "decimal_digits count every place" {
     testing.assert_eq(decimal_digits(0), UInt64(1), "zero has one digit")?
     testing.assert_eq(decimal_digits(9), UInt64(1), "nine has one digit")?
     testing.assert_eq(decimal_digits(10), UInt64(2), "ten has two digits")?
@@ -233,7 +233,7 @@ fn power_of_ten(n: UInt64) -> UInt64 {
     result
 }
 
-test fn power_of_ten_multiplies_by_ten_each_step() {
+test "power_of_ten multiplies by ten each step" {
     testing.assert_eq(power_of_ten(0), UInt64(1), "10^0 is not one")?
     testing.assert_eq(power_of_ten(3), UInt64(1000), "10^3 changed")?
     let largest: UInt64 = 10000000000000000000

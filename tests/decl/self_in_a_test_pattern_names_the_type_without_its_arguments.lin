@@ -13,7 +13,7 @@ impl Boxed[UInt8] {
         Boxed[UInt8] { value = 1 }
     }
 
-    test fn self_for_written_arguments() {
+    test "self for written arguments" {
         let Self { value } = Boxed.small()
         testing.assert_eq(value, 1, "a small box holds one")?
     }
@@ -28,7 +28,7 @@ impl[T] Shelf[T] {
         1
     }
 
-    test fn self_for_open_parameters() {
+    test "self for open parameters" {
         let Self { item } = Shelf[UInt32] { item = 3 }
         testing.assert_eq(item, 3, "the shelf holds three")?
     }

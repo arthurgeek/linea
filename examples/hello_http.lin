@@ -68,7 +68,7 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 
 // A test builds a request in an arena, as the server does, and sends it
 // through the routes, so no socket is involved.
-test fn health_answers_ok() {
+test "health answers ok" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -79,7 +79,7 @@ test fn health_answers_ok() {
     testing.assert_ok_eq(response.text(), "ok", "the health answer changed")?
 }
 
-test fn echo_answers_the_text_it_was_sent() {
+test "echo answers the text it was sent" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -92,7 +92,7 @@ test fn echo_answers_the_text_it_was_sent() {
     testing.assert_ok_eq(response.text(), r#"{"echo":"hello"}"#, "the echo changed")?
 }
 
-test fn echo_refuses_a_body_without_text() {
+test "echo refuses a body without text" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)

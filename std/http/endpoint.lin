@@ -296,7 +296,7 @@ fn stateful_6(inout calls_seen: CallCount, a: Word, b: Word, c: Word, d: Word, e
     text(request, "6:{calls_seen.calls}{a.text}{b.text}{c.text}{d.text}{e.text}{f.text}")
 }
 
-test fn a_stateless_function_is_registered_with_each_count_of_extractors() {
+test "a stateless function is registered with each count of extractors" {
     defer var router: Router[CallCount] = Router.new()
     var calls_seen = CallCount { calls = 0 }
     testing.assert_ok_eq(&router.route("GET /s0", stateless_0), (), "registering 0 extractors failed")?
@@ -324,7 +324,7 @@ test fn a_stateless_function_is_registered_with_each_count_of_extractors() {
     .Ok(())
 }
 
-test fn a_stateful_function_is_lent_the_state_with_each_count_of_extractors() {
+test "a stateful function is lent the state with each count of extractors" {
     defer var router: Router[CallCount] = Router.new()
     var calls_seen = CallCount { calls = 0 }
     testing.assert_ok_eq(&router.route("GET /t0", stateful_0), (), "registering 0 extractors failed")?
@@ -352,7 +352,7 @@ test fn a_stateful_function_is_lent_the_state_with_each_count_of_extractors() {
     .Ok(())
 }
 
-test fn a_stateless_function_serves_a_router_with_no_state() {
+test "a stateless function serves a router with no state" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route("GET /health", stateless_0), (), "registering failed")?
     defer let answered = served(&router, "GET", "/health")
@@ -360,7 +360,7 @@ test fn a_stateless_function_serves_a_router_with_no_state() {
     .Ok(())
 }
 
-test fn the_first_refusing_extractor_answers_the_request() {
+test "the first refusing extractor answers the request" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route("GET /s2", stateless_2), (), "registering failed")?
     defer let answered = served(&router, "GET", "/s2")
@@ -558,7 +558,7 @@ fn probe(inout router: Router[CallCount], target: Str, refused: Str, answer: Str
     held && answered
 }
 
-test fn every_shape_releases_its_extractors_last_first_and_stops_at_a_refusal() {
+test "every shape releases its extractors last first and stops at a refusal" {
     defer var router: Router[CallCount] = Router.new()
     testing.assert_ok_eq(&router.route("GET /s1", probed_s1), (), "registering 1 probes failed")?
     testing.assert_ok_eq(&router.route("GET /s2", probed_s2), (), "registering 2 probes failed")?
@@ -636,7 +636,7 @@ fn greedy_after_a_probe(inout _calls: CallCount, _first: First, _greedy: Greedy,
 // An arena too small for what an extractor allocates fails the request with
 // 500, as every refused allocation does, and what was already read is released
 // once while the extractor after it is never read.
-test fn an_extractor_the_arena_cannot_hold_answers_500_and_releases_what_was_read() {
+test "an extractor the arena cannot hold answers 500 and releases what was read" {
     defer var router: Router[CallCount] = Router.new()
     testing.assert_ok_eq(&router.route("GET /greedy", greedy_after_a_probe), (), "registering failed")?
     let log = mem.ReleaseLog.open(4)
@@ -680,7 +680,7 @@ fn show(id: Path[UInt64], pick: Query[Pick], order: Order, request: ProbeRequest
     text(request, "order {id.value} page {pick.value.page} of {order.quantity}")
 }
 
-test fn the_library_extractors_and_a_type_that_reads_itself_are_arguments() {
+test "the library extractors and a type that reads itself are arguments" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route(r"POST /orders/{id}", show), (), "registering failed")?
     let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -703,7 +703,7 @@ fn echo_stream(request: ProbeRequest, inout body: RequestBody) -> ProbeAnswer wh
     text(request, input)
 }
 
-test fn an_endpoint_receives_the_same_body_through_a_stated_router() {
+test "an endpoint receives the same body through a stated router" {
     var router = Router.new()
     &router.route("POST /echo", echo_stream).unwrap()
     defer var handler = with_state((), router)

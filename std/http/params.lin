@@ -33,7 +33,7 @@ impl ParamValues {
         .Ok(found)
     }
 
-    test fn a_param_value_is_found_by_its_exact_name_once() {
+    test "a param value is found by its exact name once" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/?year=2026&year=1999&Name=ada", body: "").unwrap()
         let values = sent.request().query_params().unwrap()
@@ -49,7 +49,7 @@ impl ParamValues {
         self.fields.length()
     }
 
-    test fn count_includes_every_value_a_repeated_name_holds() {
+    test "count includes every value a repeated name holds" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let repeated = new_request(arena.handle(), "GET", "/?tag=a&tag=b&page=2", body: "").unwrap()
         let bare = new_request(arena.handle(), "GET", "/", body: "").unwrap()
@@ -76,7 +76,7 @@ impl ParamValues {
         }
     }
 
-    test fn a_field_reads_its_value_or_says_why_it_cannot() {
+    test "a field reads its value or says why it cannot" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let sent = new_request(arena.handle(), "GET", "/?year=2026&page=x", body: "").unwrap()
         let values = sent.request().query_params().unwrap()
@@ -105,7 +105,7 @@ impl ParamValues {
         read_value(stored_part(self.stored, entry.name), stored_part(self.stored, entry.value))
     }
 
-    test fn only_reads_the_single_value_whatever_its_name() {
+    test "only reads the single value whatever its name" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         let several = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
         let refused: Result[UInt32, ParamError] = several.request().query_params().unwrap().only()
@@ -169,7 +169,7 @@ impl Params for DayRange {
     }
 }
 
-test fn a_params_of_its_own_refuses_a_value_with_a_reason() {
+test "a params of its own refuses a value with a reason" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let ordered = new_request(arena.handle(), "GET", "/?from=3&to=9", body: "").unwrap()
     let reversed = new_request(arena.handle(), "GET", "/?from=9&to=3", body: "").unwrap()
@@ -226,7 +226,7 @@ impl[T: ParamValue] ParamValue for Option[T] {
     }
 }
 
-test fn a_param_value_parses_borrows_or_is_optional() {
+test "a param value parses borrows or is optional" {
     let number: Result[Int16, strings.ParseError] = ParamValue.from_param("-12")
     let text: Result[Str, strings.ParseError] = ParamValue.from_param("12x")
     let present: Result[Option[UInt8], strings.ParseError] = ParamValue.from_param("7")
@@ -283,7 +283,7 @@ struct Archive {
     title: Str,
 }
 
-test fn a_derived_params_reads_each_field_by_its_name() {
+test "a derived params reads each field by its name" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/?title=Old+news&year=1999", body: "").unwrap()
     let archive: Result[Archive, ParamError] = Params.from_params(sent.request().query_params().unwrap())
@@ -380,7 +380,7 @@ impl FromPath for Float32 {
     }
 }
 
-test fn a_path_reads_a_struct_by_name_or_its_only_value() {
+test "a path reads a struct by name or its only value" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = new_request(arena.handle(), "GET", "/?year=1999&title=x", body: "").unwrap()
     let values = sent.request().query_params().unwrap()

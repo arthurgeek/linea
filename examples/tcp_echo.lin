@@ -245,12 +245,12 @@ fn echo_text(text: Str) -> String {
     text
 }
 
-test fn a_client_gets_its_lines_back() {
+test "a client gets its lines back" {
     defer let echoed = echo_text("one\ntwo\n")
     testing.assert_eq(echoed.view(), "one\ntwo\n", "the lines were not echoed")?
 }
 
-test fn a_client_that_sends_nothing_gets_nothing_back() {
+test "a client that sends nothing gets nothing back" {
     defer let echoed = echo_text("")
     testing.assert_eq(echoed.view(), "", "an empty message was answered")?
 }

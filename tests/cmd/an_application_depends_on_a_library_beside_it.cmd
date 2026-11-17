@@ -13,7 +13,7 @@ directory. The path in its manifest is relative to the manifest.
   >     name.byte(0).unwrap_or(0)
   > }
   > 
-  > test fn an_initial_is_the_first_byte() {
+  > test "an initial is the first byte" {
   >     testing.assert_eq(initial("Ada"), 65, "A is 65")?
   > }
   > LIN
@@ -28,14 +28,14 @@ directory. The path in its manifest is relative to the manifest.
   >     names.initial("Grace")
   > }
   > 
-  > test fn grace_starts_with_g() {
+  > test "grace starts with g" {
   >     testing.assert_eq(names.initial("Grace"), 71, "G is 71")?
   > }
   > LIN
   $ linea run guests
   [71]
   $ linea test names
-  ok    an_initial_is_the_first_byte
+  ok    an initial is the first byte
   
   1 passed, 0 failed
   $ linea check names/names.lin
@@ -43,6 +43,6 @@ directory. The path in its manifest is relative to the manifest.
 Testing the application runs its own tests, not the library's.
 
   $ linea test guests
-  ok    grace_starts_with_g
+  ok    grace starts with g
   
   1 passed, 0 failed

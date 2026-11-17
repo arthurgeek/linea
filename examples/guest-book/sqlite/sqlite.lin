@@ -65,7 +65,7 @@ extern fn sqlite3_threadsafe() -> Int32
 
 // The SQLite this library links is the one every test runs against, so
 // this checks that a connection per thread is safe there.
-test fn the_linked_sqlite_allows_a_connection_per_thread() {
+test "the linked sqlite allows a connection per thread" {
     testing.assert(sqlite3_threadsafe() != 0, "the linked SQLite was compiled with SQLITE_THREADSAFE=0")?
     .Ok(())
 }
@@ -233,7 +233,7 @@ impl Database {
         Database.open_flagged(path, read_write_create)
     }
 
-    test fn open_creates_a_file_database_and_waits_when_busy() {
+    test "open creates a file database and waits when busy" {
         let stamp = time.now().nanoseconds()
         defer let path_text = fmt.render_owned("/tmp/linea-sqlite-{stamp}.db").unwrap()
         let path = fs.Path.from_str(path_text.view()).unwrap()
@@ -270,13 +270,13 @@ impl Database {
         Database.open_flagged(uri.view(), read_write_create + uri_filename)
     }
 
-    test fn open_in_memory_starts_an_empty_database() {
+    test "open_in_memory starts an empty database" {
         defer var database = Database.open_in_memory("starts-empty").unwrap()
         testing.assert_eq(database.changes(), Int64(0), "a fresh database reported changes")?
         .Ok(())
     }
 
-    test fn connections_opened_with_one_name_share_the_database() {
+    test "connections opened with one name share the database" {
         defer var writer = Database.open_in_memory("shared_by_name").unwrap()
         &writer.execute("CREATE TABLE items (name TEXT NOT NULL); INSERT INTO items VALUES ('notebook');").unwrap()
         defer var reader = Database.open_in_memory("shared_by_name").unwrap()
@@ -286,7 +286,7 @@ impl Database {
         .Ok(())
     }
 
-    test fn a_name_outside_letters_digits_dashes_and_underscores_is_refused() {
+    test "a name outside letters digits dashes and underscores is refused" {
         for read name in ["", "a?b", "a/b", "a b", "a%20b"] {
             let refused = match Database.open_in_memory(name) {
                 Ok(database) => {
@@ -326,7 +326,7 @@ impl Database {
         .Ok(())
     }
 
-    test fn wait_when_busy_sets_the_timeout() {
+    test "wait_when_busy sets the timeout" {
         defer var database = Database.open_in_memory("wait_when_busy_sets_the_timeout").unwrap()
         &database.wait_when_busy(1000).unwrap()
         .Ok(())
@@ -352,7 +352,7 @@ impl Database {
         .Ok(())
     }
 
-    test fn execute_runs_a_script_of_several_statements() {
+    test "execute runs a script of several statements" {
         defer var database = Database.open_in_memory("execute_runs_a_script_of_several_statements").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (10); INSERT INTO t VALUES (20);").unwrap()
         defer var count = database.prepare("SELECT SUM(n) FROM t").unwrap()
@@ -391,7 +391,7 @@ impl Database {
         .Ok(statement)
     }
 
-    test fn prepare_refuses_a_misspelt_statement_and_trailing_sql() {
+    test "prepare refuses a misspelt statement and trailing sql" {
         defer var database = Database.open_in_memory("prepare_refuses_a_misspelt_statement_and_trailing_sql").unwrap()
         defer let misspelt = match database.prepare("SELEC 1") {
             Ok(statement) => {
@@ -424,7 +424,7 @@ impl Database {
         .Ok(())
     }
 
-    test fn prepare_refuses_empty_sql_and_comments() {
+    test "prepare refuses empty sql and comments" {
         defer var database = Database.open_in_memory("prepare_refuses_empty_sql_and_comments").unwrap()
         let empty = match database.prepare("") {
             Ok(statement) => {
@@ -466,7 +466,7 @@ impl Database {
         sqlite3_changes64(self.handle)
     }
 
-    test fn changes_counts_the_rows_an_insert_added() {
+    test "changes counts the rows an insert added" {
         defer var database = Database.open_in_memory("changes_counts_the_rows_an_insert_added").unwrap()
         &database.execute("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('a'), ('b');").unwrap()
         testing.assert_eq(database.changes(), Int64(2), "changes did not count the two inserted rows")?
@@ -481,7 +481,7 @@ impl Database {
         let _closed = sqlite3_close_v2(handle)
     }
 
-    test fn close_consumes_the_connection_once_its_statements_finish() {
+    test "close consumes the connection once its statements finish" {
         let database = Database.open_in_memory("close_consumes_the_connection_once_its_statements_finish").unwrap()
         let statement = database.prepare("SELECT 1").unwrap()
         statement.finish()
@@ -519,7 +519,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn bind_text_preserves_a_nul_byte_inside_the_string() {
+    test "bind_text preserves a nul byte inside the string" {
         defer var database = Database.open_in_memory("bind_text_preserves_a_nul_byte_inside_the_string").unwrap()
         &database.execute("CREATE TABLE t (name TEXT);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (?1)").unwrap()
@@ -545,7 +545,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn binding_parameter_zero_is_refused() {
+    test "binding parameter zero is refused" {
         defer var database = Database.open_in_memory("binding_parameter_zero_is_refused").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER, s TEXT);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (?1, ?2)").unwrap()
@@ -576,7 +576,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn bind_integer_binds_a_64_bit_value() {
+    test "bind_integer binds a 64 bit value" {
         defer var database = Database.open_in_memory("bind_integer_binds_a_64_bit_value").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (?1)").unwrap()
@@ -601,7 +601,7 @@ impl Statement {
         .Err(self.refused(code))
     }
 
-    test fn step_walks_each_row_and_then_answers_false() {
+    test "step walks each row and then answers false" {
         defer var database = Database.open_in_memory("step_walks_each_row_and_then_answers_false").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1), (2);").unwrap()
         defer var select = database.prepare("SELECT n FROM t ORDER BY n").unwrap()
@@ -619,7 +619,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn run_reports_a_constraint_with_sqlite_s_sentence() {
+    test "run reports a constraint with sqlite's sentence" {
         defer var database = Database.open_in_memory("run_reports_a_constraint_with_sqlite_s_sentence").unwrap()
         &database.execute("CREATE TABLE t (name TEXT NOT NULL);").unwrap()
         defer var insert = database.prepare("INSERT INTO t VALUES (NULL)").unwrap()
@@ -645,7 +645,7 @@ impl Statement {
         }
     }
 
-    test fn column_count_reports_number_of_columns() {
+    test "column_count reports number of columns" {
         defer var database = Database.open_in_memory("column_count_reports_number_of_columns").unwrap()
         &database.execute("CREATE TABLE t (a INTEGER, b TEXT, c INTEGER);").unwrap()
         defer var select = database.prepare("SELECT a, b, c FROM t").unwrap()
@@ -694,7 +694,7 @@ impl Statement {
         }
     }
 
-    test fn text_in_copies_into_an_arena_and_refuses_null() {
+    test "text_in copies into an arena and refuses null" {
         defer let arena = mem.Arena.open(mem.system(), size: 4096)
         defer var database = Database.open_in_memory("text_in_copies_into_an_arena_and_refuses_null").unwrap()
         &database.execute("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('Ada'), (NULL);").unwrap()
@@ -718,7 +718,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn text_in_reads_an_empty_value_as_empty_text() {
+    test "text_in reads an empty value as empty text" {
         defer var database = Database.open_in_memory("text_in_reads_an_empty_value_as_empty_text").unwrap()
         defer var select = database.prepare("SELECT '', x''").unwrap()
         testing.assert(&select.step().unwrap(), "no row")?
@@ -735,7 +735,7 @@ impl Statement {
         self.text_in(mem.system(), column)
     }
 
-    test fn text_reads_a_column_into_a_system_string() {
+    test "text reads a column into a system string" {
         defer var database = Database.open_in_memory("text_reads_a_column_into_a_system_string").unwrap()
         &database.execute("CREATE TABLE t (name TEXT NOT NULL); INSERT INTO t VALUES ('Grace');").unwrap()
         defer var select = database.prepare("SELECT name FROM t").unwrap()
@@ -764,7 +764,7 @@ impl Statement {
         .Ok(sqlite3_column_int64(self.handle, index))
     }
 
-    test fn integer_reads_a_value_and_refuses_null() {
+    test "integer reads a value and refuses null" {
         defer var database = Database.open_in_memory("integer_reads_a_value_and_refuses_null").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (42), (NULL);").unwrap()
         defer var select = database.prepare("SELECT n FROM t").unwrap()
@@ -786,7 +786,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn column_out_of_bounds_is_refused() {
+    test "column out of bounds is refused" {
         defer var database = Database.open_in_memory("column_out_of_bounds_is_refused").unwrap()
         &database.execute("CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1);").unwrap()
         defer var select = database.prepare("SELECT n FROM t").unwrap()
@@ -821,7 +821,7 @@ impl Statement {
         .Ok(())
     }
 
-    test fn integer_converts_numeric_text_according_to_sqlite_rules() {
+    test "integer converts numeric text according to sqlite rules" {
         defer var database = Database.open_in_memory("integer_converts_numeric_text_according_to_sqlite_rules").unwrap()
         &database.execute("CREATE TABLE t (s TEXT); INSERT INTO t VALUES ('42');").unwrap()
         defer var select = database.prepare("SELECT s FROM t").unwrap()
@@ -839,7 +839,7 @@ impl Statement {
         let _finalized = sqlite3_finalize(handle)
     }
 
-    test fn finish_consumes_the_statement() {
+    test "finish consumes the statement" {
         defer var database = Database.open_in_memory("finish_consumes_the_statement").unwrap()
         let statement = database.prepare("SELECT 1").unwrap()
         statement.finish()

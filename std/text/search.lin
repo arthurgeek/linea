@@ -7,7 +7,7 @@ pub enum SplitError {
     EmptySeparator,
 }
 
-test fn search_errors_can_be_released_explicitly() {
+test "search errors can be released explicitly" {
     let error: SplitError = .EmptySeparator
     error.release()
     .Ok(())
@@ -119,7 +119,7 @@ impl Str {
         .None
     }
 
-    test fn find_respects_boundaries_and_empty_needles() {
+    test "find respects boundaries and empty needles" {
         testing.assert_eq("olá olá".find("á", start: 0), Option.Some(UInt64(2)), "search lost the byte offset")?
         testing.assert_eq("olá olá".find("á", start: 4), Option.Some(UInt64(7)), "search ignored its start")?
         testing.assert("olá".find("", start: 3).is_none(), "search accepted a continuation boundary")?
@@ -131,7 +131,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn a_search_position_outlives_the_text_that_was_searched() {
+    test "a search position outlives the text that was searched" {
         let source = "before:after".to_owned().unwrap()
         let position = source.view().find(":")
         source.release()
@@ -144,7 +144,7 @@ impl Str {
         prefix.length() <= self.length() && matches_at(self, prefix, 0)
     }
 
-    test fn starts_with_compares_the_leading_bytes() {
+    test "starts_with compares the leading bytes" {
         testing.assert("ábc".starts_with("á"), "a prefix did not match")?
         testing.assert("abc".starts_with(""), "the empty prefix did not match")?
         testing.assert(!"a".starts_with("aa"), "a longer prefix matched")?
@@ -160,7 +160,7 @@ impl Str {
         }
     }
 
-    test fn ends_with_compares_the_trailing_bytes() {
+    test "ends_with compares the trailing bytes" {
         testing.assert("ábc".ends_with("bc"), "a suffix did not match")?
         testing.assert("abc".ends_with(""), "the empty suffix did not match")?
         testing.assert(!"a".ends_with("aa"), "a longer suffix matched")?
@@ -178,7 +178,7 @@ impl Str {
         }
     }
 
-    test fn split_preserves_empty_fields_and_stays_finished() {
+    test "split preserves empty fields and stays finished" {
         var cursor = ",á,,".split(",") else |_| {
             return testing.assert(false, "nonempty separator was rejected")
         }
@@ -192,7 +192,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn split_handles_empty_input_and_multibyte_delimiters() {
+    test "split handles empty input and multibyte delimiters" {
         var empty = "".split(",").unwrap()
         testing.assert_eq(&empty.next(), Option.Some(""), "empty input did not yield an empty field")?
         testing.assert(&empty.next().is_none(), "empty input yielded multiple fields")?
@@ -222,7 +222,7 @@ impl Str {
         .Some((self.slice(0, at).unwrap(), self.slice(at + separator.length(), self.length()).unwrap()))
     }
 
-    test fn split_once_cuts_at_the_first_separator_of_any_width() {
+    test "split_once cuts at the first separator of any width" {
         let (key, value) = "name: a: b".split_once(": ") else {
             return testing.assert(false, "a present separator was not found")
         }
@@ -255,7 +255,7 @@ impl Str {
         .{ text = copy(self), at = 0 }
     }
 
-    test fn lines_split_at_newlines_and_drop_the_terminator() {
+    test "lines split at newlines and drop the terminator" {
         var cursor = "a\r\nb\n\nc\rd\ne".lines()
         testing.assert_eq(&cursor.next(), Option.Some("a"), "a carriage return stayed in a line")?
         testing.assert_eq(&cursor.next(), Option.Some("b"), "the second line changed")?
@@ -266,7 +266,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn lines_have_no_empty_final_line() {
+    test "lines have no empty final line" {
         var terminated = "a\n".lines()
         testing.assert_eq(&terminated.next(), Option.Some("a"), "the terminated line changed")?
         testing.assert(&terminated.next().is_none(), "a final terminator started another line")?

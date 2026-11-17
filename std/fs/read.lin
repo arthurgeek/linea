@@ -94,7 +94,7 @@ impl[A: Allocator] release.Settle for ReadFileFailure[A] {
     }
 }
 
-test fn settling_a_failed_file_read_keeps_the_read_and_close_errors() {
+test "settling a failed file read keeps the read and close errors" {
     var file = File { fd = -1 }
     let outcome = io.read_all(&file, max_bytes: 8)
     let settled = finish_file_read(file, outcome).settled()
@@ -121,7 +121,7 @@ pub fn read_file_in[A: Allocator](allocator: A, path: Path, max_bytes: UInt64) -
     finish_file_read(file, outcome)
 }
 
-test fn reading_a_file_allocates_its_bytes_from_an_arena() {
+test "reading a file allocates its bytes from an arena" {
     // The arena holds the path scratch and anything the operation returns.
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
     let allocator = arena.handle()
@@ -137,7 +137,7 @@ test fn reading_a_file_allocates_its_bytes_from_an_arena() {
     .Ok(())
 }
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_file_read() -> Result[(), testing.Failure] {
+test "each allocation failure covers every growth step of a file read" -> Result[(), testing.Failure] {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), ReadFileReason] {
@@ -163,7 +163,7 @@ pub fn read_file(path: Path, max_bytes: UInt64) -> Result[Vec[UInt8, mem.SystemA
     read_file_in(mem.system(), path, max_bytes)
 }
 
-test fn reading_a_file_allocates_from_the_system_allocator() {
+test "reading a file allocates from the system allocator" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -172,7 +172,7 @@ test fn reading_a_file_allocates_from_the_system_allocator() {
     testing.assert_eq(bytes.length(), UInt64(3), "reading into the system allocator lost bytes")?
 }
 
-test fn reading_a_file_retains_the_extra_byte_after_a_limit_failure() {
+test "reading a file retains the extra byte after a limit failure" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -194,7 +194,7 @@ test fn reading_a_file_retains_the_extra_byte_after_a_limit_failure() {
     .Ok(())
 }
 
-test fn reading_a_file_accepts_its_exact_byte_limit() {
+test "reading a file accepts its exact byte limit" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -208,7 +208,7 @@ test fn reading_a_file_accepts_its_exact_byte_limit() {
     .Ok(())
 }
 
-test fn a_file_open_failure_has_no_partial_allocation() {
+test "a file open failure has no partial allocation" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     match read_file(path, max_bytes: 8) {
@@ -270,7 +270,7 @@ pub fn read_text(path: Path, max_bytes: UInt64) -> Result[String[mem.SystemAlloc
     read_text_in(mem.system(), path, max_bytes)
 }
 
-test fn reading_text_decodes_the_file_as_utf8() {
+test "reading text decodes the file as utf8" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -279,7 +279,7 @@ test fn reading_text_decodes_the_file_as_utf8() {
     testing.assert_eq(text.view(), "café\n", "reading text changed the file's contents")?
 }
 
-test fn reading_text_names_the_offset_of_invalid_utf8() {
+test "reading text names the offset of invalid utf8" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -299,7 +299,7 @@ test fn reading_text_names_the_offset_of_invalid_utf8() {
     testing.assert_eq(offset, UInt64(1), "invalid UTF-8 was not reported at its first bad byte")?
 }
 
-test fn reading_text_reports_a_missing_file_as_a_read_failure() {
+test "reading text reports a missing file as a read failure" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     let opening = match read_text(path, max_bytes: 16) {
@@ -313,7 +313,7 @@ test fn reading_text_reports_a_missing_file_as_a_read_failure() {
     testing.assert(opening, "a missing file was not a read failure")?
 }
 
-test fn reading_text_releases_the_bytes_of_every_failure_and_every_refusal() -> Result[(), testing.Failure] {
+test "reading text releases the bytes of every failure and every refusal" -> Result[(), testing.Failure] {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -355,7 +355,7 @@ fn finish_file_read[A: Allocator](sink file: File, sink outcome: Result[Vec[UInt
     }
 }
 
-test fn a_file_close_failure_returns_all_successfully_read_bytes() {
+test "a file close failure returns all successfully read bytes" {
     let bytes = Vec.filled(count: 3, value: UInt8(7)).unwrap()
     let file = File { fd = -1 }
     let outcome: Result[Vec[UInt8], io.ReadAllFailure[mem.SystemAllocator, io.IoError]] = .Ok(bytes)
@@ -375,7 +375,7 @@ test fn a_file_close_failure_returns_all_successfully_read_bytes() {
     .Ok(())
 }
 
-test fn a_file_read_failure_and_close_failure_are_both_retained() {
+test "a file read failure and close failure are both retained" {
     var file = File { fd = -1 }
     let outcome = io.read_all(&file, max_bytes: 8)
     match finish_file_read(file, outcome) {
@@ -397,7 +397,7 @@ test fn a_file_read_failure_and_close_failure_are_both_retained() {
     .Ok(())
 }
 
-test fn a_file_read_failure_displays_its_primary_and_cleanup_reasons() {
+test "a file read failure displays its primary and cleanup reasons" {
     var file = File { fd = -1 }
     let outcome = io.read_all(&file, max_bytes: 8)
     let failure = match finish_file_read(file, outcome) {

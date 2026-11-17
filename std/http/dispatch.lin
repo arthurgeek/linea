@@ -25,7 +25,7 @@ pub enum Shutdown {
     Manual,
 }
 
-test fn pipelined_requests_keep_their_order_on_a_sequential_dispatcher() {
+test "pipelined requests keep their order on a sequential dispatcher" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\nGET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")
     let served = serve(listener, health_router, limits: serving(1), policy: .Sequential, shutdown: .Manual)
@@ -953,7 +953,7 @@ fn dispatch_open_for[L, E, F](sink listener: L, _worker: DispatchFree[E, F]) -> 
 }
 
 // A threaded dispatcher preserves pipelining with a single serving task too.
-test fn pipelined_requests_keep_their_order_with_one_worker() {
+test "pipelined requests keep their order with one worker" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\n\r\nGET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")
     let served = serve(listener, health_router, limits: serving(1), policy: .Threads(1), shutdown: .Manual)
@@ -986,7 +986,7 @@ fn dispatch_read_known(inout client: net.Connection, expected: Str) -> Bool {
     found == expected
 }
 
-test fn more_idle_connections_than_workers_can_all_make_another_request() {
+test "more idle connections than workers can all make another request" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     let body = sink [sink listener] |sink me: session.Chan[session.Send[Result[(), ServeError], session.End]]| {
@@ -1018,7 +1018,7 @@ test fn more_idle_connections_than_workers_can_all_make_another_request() {
     .Ok(())
 }
 
-test fn a_newcomer_at_capacity_closes_the_connection_idle_longest_and_keeps_the_rest() {
+test "a newcomer at capacity closes the connection idle longest and keeps the rest" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     let limits = Limits { open_connections = 2, ..serving(3) }
@@ -1048,7 +1048,7 @@ test fn a_newcomer_at_capacity_closes_the_connection_idle_longest_and_keeps_the_
     .Ok(())
 }
 
-test fn a_close_token_in_a_second_connection_header_closes_after_the_response() {
+test "a close token in a second connection header closes after the response" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: keep-alive\r\nConnection: close\r\n\r\n")
     let served = serve(listener, health_router, limits: serving(1), policy: .Sequential, shutdown: .Manual)
@@ -1058,7 +1058,7 @@ test fn a_close_token_in_a_second_connection_header_closes_after_the_response() 
     .Ok(())
 }
 
-test fn an_idle_keepalive_connection_expires_without_another_response() {
+test "an idle keepalive connection expires without another response" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), dispatch_keepalive_request)
     let limits = Limits { idle_timeout_ms = 5, ..serving(1) }

@@ -19,7 +19,7 @@ fn inspect(sink weights: mem.Slice[UInt64], limit: UInt64) -> Inspection {
     .{ overweight = found, inspected }
 }
 
-test fn inspection_stops_at_the_first_overweight_parcel() {
+test "inspection stops at the first overweight parcel" {
     let weights = [UInt64(1200), 3500, 6400, 5100, 900]
     let expected = Inspection { overweight = .Some(6400), inspected = 3 }
     testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "inspection continued beyond the first overweight parcel")?
@@ -27,19 +27,19 @@ test fn inspection_stops_at_the_first_overweight_parcel() {
     testing.assert_eq(inspect(weights.as_slice(), limit: 7000), accepted, "inspection ignored the configured weight limit")?
 }
 
-test fn an_empty_batch_inspects_no_parcels() {
+test "an empty batch inspects no parcels" {
     let expected = Inspection { overweight = .None, inspected = 0 }
     let weights: [UInt64; 0] = []
     testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "empty inspection has a nonzero count")?
 }
 
-test fn a_batch_below_the_limit_is_fully_inspected() {
+test "a batch below the limit is fully inspected" {
     let expected = Inspection { overweight = .None, inspected = 3 }
     let weights = [UInt64(1200), 3500, 900]
     testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "inspection skipped parcels below the limit")?
 }
 
-test fn a_parcel_at_the_limit_is_accepted() {
+test "a parcel at the limit is accepted" {
     let expected = Inspection { overweight = .Some(5001), inspected = 2 }
     let weights = [UInt64(5000), 5001]
     testing.assert_eq(inspect(weights.as_slice(), limit: 5000), expected, "inspection treated the weight limit as overweight")?

@@ -1,0 +1,15 @@
+// A space at either end of a test's name would print it as another test's
+// name, so a name begins and ends with something visible.
+import std.testing
+
+test "keeps its first" {
+    testing.assert(true, "the first is kept")?
+}
+
+test "keeps its first " {
+    testing.assert(true, "the first is kept")?
+}
+
+fn main() -> UInt8 {
+    0
+}

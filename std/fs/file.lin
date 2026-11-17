@@ -144,7 +144,7 @@ impl File {
         File.open_in(mem.system(), path)
     }
 
-    test fn opening_a_file_reads_what_was_written() {
+    test "opening a file reads what was written" {
         defer let owned = scratch_path()
         let path = Path.from_str(owned.view()).unwrap()
         defer remove_scratch(path)
@@ -158,7 +158,7 @@ impl File {
         testing.assert_eq(received.unwrap(), UInt64(3), "a file opened with the system allocator read the wrong extent")
     }
 
-    test fn opening_a_path_reports_scratch_allocation_failure() {
+    test "opening a path reports scratch allocation failure" {
         let system = mem.system()
         defer let arena = mem.Arena.open(system, 0)
         let allocator = arena.handle()
@@ -173,7 +173,7 @@ impl File {
         .Ok(())
     }
 
-    test fn opening_a_file_takes_its_path_scratch_from_an_arena() {
+    test "opening a file takes its path scratch from an arena" {
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         defer let owned = scratch_path()
         let path = Path.from_str(owned.view()).unwrap()
@@ -196,7 +196,7 @@ impl File {
         open_file(allocator, path, code)
     }
 
-    test fn creating_a_file_takes_its_path_scratch_from_an_arena() {
+    test "creating a file takes its path scratch from an arena" {
         // The arena holds the path scratch and anything the operation returns.
         defer let arena = mem.Arena.open(mem.system(), size: 1024)
         let allocator = arena.handle()
@@ -210,7 +210,7 @@ impl File {
         .Ok(())
     }
 
-    test fn each_allocation_failure_covers_creating_a_file() -> Result[(), testing.Failure] {
+    test "each allocation failure covers creating a file" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), FsFailure] {
@@ -228,7 +228,7 @@ impl File {
         .Ok(())
     }
 
-    test fn creating_a_file_reports_scratch_allocation_failure() {
+    test "creating a file reports scratch allocation failure" {
         // An empty arena refuses every acquisition, so the call fails only if its
         // scratch comes from the allocator it was given.
         defer let arena = mem.Arena.open(mem.system(), 0)
@@ -252,7 +252,7 @@ impl File {
         File.create_in(mem.system(), path, policy)
     }
 
-    test fn creating_a_file_makes_an_entry_that_opens() {
+    test "creating a file makes an entry that opens" {
         defer let owned = scratch_path()
         let path = Path.from_str(owned.view()).unwrap()
         defer remove_scratch(path)
@@ -262,7 +262,7 @@ impl File {
         opened.close().unwrap()
     }
 
-    test fn create_refuses_an_existing_entry_unless_it_replaces_it() {
+    test "create refuses an existing entry unless it replaces it" {
         defer let owned = scratch_path()
         let path = Path.from_str(owned.view()).unwrap()
         defer remove_scratch(path)
@@ -303,7 +303,7 @@ impl File {
         }
     }
 
-    test fn positional_file_reads_and_writes_at_offsets() {
+    test "positional file reads and writes at offsets" {
         defer let owned = scratch_path()
         let path = Path.from_str(owned.view()).unwrap()
         defer remove_scratch(path)
@@ -354,7 +354,7 @@ impl File {
         }
     }
 
-    test fn file_close_consumes_a_failed_descriptor() {
+    test "file close consumes a failed descriptor" {
         let file = File { fd = -1 }
         match file.close() {
             Ok(_) => return testing.assert(false, "invalid close succeeded"),
@@ -417,7 +417,7 @@ pub fn write_file_in[A: Allocator](allocator: A, path: Path, bytes: mem.Slice[UI
     }
 }
 
-test fn a_direct_file_write_takes_its_path_scratch_from_an_arena() {
+test "a direct file write takes its path scratch from an arena" {
     // The arena holds the path scratch and anything the operation returns.
     defer let arena = mem.Arena.open(mem.system(), size: 1024)
     let allocator = arena.handle()
@@ -431,7 +431,7 @@ test fn a_direct_file_write_takes_its_path_scratch_from_an_arena() {
     .Ok(())
 }
 
-test fn each_allocation_failure_covers_a_direct_file_write() -> Result[(), testing.Failure] {
+test "each allocation failure covers a direct file write" -> Result[(), testing.Failure] {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), FsFailure] {
@@ -448,7 +448,7 @@ test fn each_allocation_failure_covers_a_direct_file_write() -> Result[(), testi
     .Ok(())
 }
 
-test fn a_direct_file_write_reports_scratch_allocation_failure() {
+test "a direct file write reports scratch allocation failure" {
     // An empty arena refuses every acquisition, so the call fails only if its
     // scratch comes from the allocator it was given.
     defer let arena = mem.Arena.open(mem.system(), 0)
@@ -469,7 +469,7 @@ pub fn write_file(path: Path, bytes: mem.Slice[UInt8], policy: WritePolicy) -> R
     write_file_in(mem.system(), path, bytes, policy)
 }
 
-test fn writing_a_file_reports_the_bytes_written() {
+test "writing a file reports the bytes written" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)
@@ -477,7 +477,7 @@ test fn writing_a_file_reports_the_bytes_written() {
     testing.assert_eq(written, UInt64(3), "a direct write lost its accepted count")?
 }
 
-test fn direct_file_writes_require_a_policy_and_report_the_accepted_extent() {
+test "direct file writes require a policy and report the accepted extent" {
     let allocator = mem.system()
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
@@ -522,7 +522,7 @@ pub fn remove_file(path: Path) -> Result[(), FsFailure] where carries() {
     remove_file_in(mem.system(), path)
 }
 
-test fn removing_a_file_takes_its_name_and_reports_a_missing_one() {
+test "removing a file takes its name and reports a missing one" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     let _written = write_file(path, "abc".as_bytes(), policy: .CreateNew).unwrap()
@@ -604,7 +604,7 @@ impl log.Sink for File {
     }
 }
 
-test fn a_file_takes_a_logged_line() {
+test "a file takes a logged line" {
     defer let owned = scratch_path()
     let path = Path.from_str(owned.view()).unwrap()
     defer remove_scratch(path)

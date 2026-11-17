@@ -26,7 +26,7 @@ impl Str {
         true
     }
 
-    test fn ascii_folding_ignores_case_and_nothing_else() {
+    test "ascii folding ignores case and nothing else" {
         testing.assert("Content-Length".equals_ascii_folded("content-length"), "case mattered")?
         testing.assert(!"Content-Length".equals_ascii_folded("content-lengths"), "length ignored")?
         testing.assert(!"É".equals_ascii_folded("é"), "non-ASCII folded")?

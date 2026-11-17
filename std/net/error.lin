@@ -23,7 +23,7 @@ impl Display for NetError {
     }
 }
 
-test fn a_net_error_displays_its_reason() {
+test "a net error displays its reason" {
     let refused = io.IoError { operation = .Connect, category = .ConnectionRefused, code = .None, progress = 0 }
     // The 256-byte recorder holds all three reasons, one per line.
     var writer = testing.Recorder.of(256).unwrap()

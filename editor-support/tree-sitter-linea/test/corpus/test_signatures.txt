@@ -2,28 +2,25 @@
 Omitted and explicit test signatures
 ==================
 
-test fn succeeds() {}
-test fn returns() { return }
-test fn custom() -> Result[(), Failure] { return .Ok({}) }
-test trap fn traps() { panic("expected") }
+test "succeeds" {}
+test "returns" { return }
+test "custom" -> Result[(), Failure] { return .Ok({}) }
+test trap "traps" { panic("expected") }
 fn ordinary() {}
 
 ---
 
 (source_file
-  (function_declaration
-    (identifier)
-    (parameter_list)
+  (test_declaration
+    (string_literal)
     (block))
-  (function_declaration
-    (identifier)
-    (parameter_list)
+  (test_declaration
+    (string_literal)
     (block
       (expression_statement
         (return_expression))))
-  (function_declaration
-    (identifier)
-    (parameter_list)
+  (test_declaration
+    (string_literal)
     (generic_type
       (type_identifier)
       (type_arguments
@@ -37,9 +34,8 @@ fn ordinary() {}
               (type_identifier))
             (argument_list
               (block)))))))
-  (function_declaration
-    (identifier)
-    (parameter_list)
+  (test_declaration
+    (string_literal)
     (block
       (expression_statement
         (panic_expression

@@ -60,7 +60,7 @@ impl Str {
         .{ text = copy(self), at = 0 }
     }
 
-    test fn scalar_iteration_reports_values_and_byte_positions() {
+    test "scalar iteration reports values and byte positions" {
         var cursor = "aá€😀".scalars()
         // Code points for a, á, €, and 😀; offsets count their UTF-8 bytes.
         let values: [UInt32; _] = [97, 225, 8364, 128512]
@@ -79,7 +79,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn scalar_iteration_preserves_nul_bom_and_scalar_extrema() {
+    test "scalar iteration preserves nul bom and scalar extrema" {
         var empty = "".scalars()
         testing.assert(&empty.next().is_none(), "empty text yielded a scalar")?
         let text = "\u{0}\u{7f}\u{80}\u{7ff}\u{800}\u{d7ff}\u{e000}\u{feff}\u{ffff}\u{10000}\u{10ffff}"
@@ -94,7 +94,7 @@ impl Str {
         .Ok(())
     }
 
-    test fn a_scalar_value_outlives_the_text_that_encoded_it() {
+    test "a scalar value outlives the text that encoded it" {
         let source = "á".to_owned().unwrap()
         var scalars = source.view().scalars()
         let first = &scalars.next().unwrap()

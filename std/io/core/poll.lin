@@ -31,7 +31,7 @@ pub fn source[T](holder: T, fd: Int32) -> Source[T] where borrows(holder) {
     .{ fd, holder = borrow holder }
 }
 
-test fn a_source_names_the_descriptor_it_was_made_from() {
+test "a source names the descriptor it was made from" {
     let holder = UInt64(1)
     let made = source(holder, 7)
     testing.assert_eq(made.fd, Int32(7), "the source named another descriptor")?
@@ -61,7 +61,7 @@ impl[T] Readiness[T] {
         }
     }
 
-    test fn a_readiness_within_its_holder_watches_the_same_descriptor() {
+    test "a readiness within its holder watches the same descriptor" {
         let inner = UInt64(1)
         let outer = UInt64(2)
         let ready: Readiness[UInt64] = .Wait(source(inner, 9))

@@ -45,7 +45,7 @@ impl[H: Allocator] AllocationLog[H] {
         .Ok(.{ buffer, backing = copy(backing) })
     }
 
-    test fn open_records_into_the_backing_the_caller_chooses() {
+    test "open records into the backing the caller chooses" {
         // The log's 8240 bytes and both allocations fit in sixteen kilobytes.
         defer let arena = Arena.open(system(), 16384)
         defer let log = AllocationLog.open(arena.handle(), 2).unwrap()
@@ -60,7 +60,7 @@ impl[H: Allocator] AllocationLog[H] {
         testing.assert(log.all_disposed(), "an arena-backed release was not recorded")?
     }
 
-    test fn open_refuses_the_acquisition_it_names() {
+    test "open refuses the acquisition it names" {
         defer let log = AllocationLog.open(system(), 2).unwrap()
         let first = log.allocator().acquire(16)
         let accepted = first.is_ok()
@@ -79,7 +79,7 @@ impl[H: Allocator] AllocationLog[H] {
         .{ log = borrow self }
     }
 
-    test fn allocator_hands_out_buffers_the_log_records() {
+    test "allocator hands out buffers the log records" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         let buffer = log.allocator().acquire(16).unwrap()
         let length = buffer.length()
@@ -94,7 +94,7 @@ impl[H: Allocator] AllocationLog[H] {
         self.buffer.load(log_attempts)
     }
 
-    test fn attempts_count_refused_acquisitions_too() {
+    test "attempts count refused acquisitions too" {
         defer let log = AllocationLog.open(system(), 1).unwrap()
         let refused = log.allocator().acquire(8)
         refused.release()
@@ -108,7 +108,7 @@ impl[H: Allocator] AllocationLog[H] {
         self.buffer.load(log_acquired)
     }
 
-    test fn acquired_counts_only_successful_acquisitions() {
+    test "acquired counts only successful acquisitions" {
         defer let log = AllocationLog.open(system(), 2).unwrap()
         let first = log.allocator().acquire(16).unwrap()
         let second = log.allocator().acquire(8)
@@ -122,7 +122,7 @@ impl[H: Allocator] AllocationLog[H] {
         self.buffer.load(log_peak_bytes)
     }
 
-    test fn peak_bytes_remembers_the_most_bytes_live_at_once() {
+    test "peak_bytes remembers the most bytes live at once" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         let first = log.allocator().acquire(16).unwrap()
         let second = log.allocator().acquire(8).unwrap()
@@ -139,7 +139,7 @@ impl[H: Allocator] AllocationLog[H] {
         self.buffer.load(log_live_bytes)
     }
 
-    test fn live_bytes_counts_what_is_acquired_and_not_disposed() {
+    test "live_bytes counts what is acquired and not disposed" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         let first = log.allocator().acquire(16).unwrap()
         let second = log.allocator().acquire(8).unwrap()
@@ -158,7 +158,7 @@ impl[H: Allocator] AllocationLog[H] {
         linea_raw_store(address.raw(bytes_in(self.buffer, 0)), self.buffer.len, log_refuse_at, attempt)
     }
 
-    test fn refuse_attempt_refuses_a_later_acquisition_through_live_handles() {
+    test "refuse_attempt refuses a later acquisition through live handles" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         let allocator = log.allocator()
         allocator.acquire(8).unwrap().release()
@@ -188,7 +188,7 @@ impl[H: Allocator] AllocationLog[H] {
         true
     }
 
-    test fn all_disposed_is_false_while_an_allocation_is_live() {
+    test "all_disposed is false while an allocation is live" {
         defer let log = AllocationLog.open(system(), 0).unwrap()
         let buffer = log.allocator().acquire(16).unwrap()
         let settled_while_live = log.all_disposed()

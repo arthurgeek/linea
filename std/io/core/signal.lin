@@ -103,7 +103,7 @@ impl SignalShare {
         self.delivered
     }
 
-    test fn a_share_taken_back_was_not_delivered() {
+    test "a share taken back was not delivered" {
         let share = SignalShare.acquire(.User2).unwrap()
         let delivered = share.delivered()
         share.settle()
@@ -118,7 +118,7 @@ impl SignalShare {
         linea_signal_release(signal, home)
     }
 
-    test fn settling_the_last_share_lets_the_signal_be_shared_again() {
+    test "settling the last share lets the signal be shared again" {
         let first = SignalShare.acquire(.User1).unwrap()
         first.settle()
         let second = SignalShare.acquire(.User1).unwrap()

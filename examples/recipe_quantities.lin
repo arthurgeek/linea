@@ -49,7 +49,7 @@ fn write_ingredient[T: fmt.Display, W: io.Writer](inout w: W, name: Str, amount:
     io.line("{name}: {amount}", &w)
 }
 
-test fn each_quantity_prints_in_its_own_unit() {
+test "each quantity prints in its own unit" {
     let flour: Quantity[Grams] = .{ amount = 1250 }
     let yeast: Quantity[Grams] = .{ amount = 7 }
     let water: Quantity[Millilitres] = .{ amount = 800 }

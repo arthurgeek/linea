@@ -320,19 +320,19 @@ fn serve_one(bounds: Bounds, lines: Str, silent: Bool) -> String {
     text
 }
 
-test fn a_connection_gets_its_lines_back() {
+test "a connection gets its lines back" {
     defer let echoed = serve_one(Bounds { session_ms = 5000, max_echo_bytes = 1024 }, "one\ntwo\n", silent: false)
     testing.assert_eq(echoed.view(), "one\ntwo\n", "the lines were not echoed")?
 }
 
-test fn a_client_that_sends_nothing_is_dropped_when_its_session_ends() {
+test "a client that sends nothing is dropped when its session ends" {
     let start = time.Instant.now()
     defer let echoed = serve_one(Bounds { session_ms = 100, max_echo_bytes = 1024 }, "partial", silent: true)
     testing.assert_eq(echoed.view(), "", "a connection that never finished a line was echoed")?
     testing.assert(start.elapsed() >= time.Duration.from_milliseconds(100), "the server gave up before the session ended")?
 }
 
-test fn a_client_that_sends_more_than_the_limit_is_dropped_unanswered() {
+test "a client that sends more than the limit is dropped unanswered" {
     let lines = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
     defer var many = String.new()
     for _ in 0..4 {

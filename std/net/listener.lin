@@ -33,7 +33,7 @@ pub struct Accepted {
 @(copyable, derive(Equatable, Debug))
 pub type Backlog = UInt64 where it in 1..=4096
 
-test fn a_backlog_holds_one_to_4096_connections() {
+test "a backlog holds one to 4096 connections" {
     testing.assert_eq(Backlog?(0), .None, "a backlog of 0 was accepted")?
     testing.assert_eq(Backlog?(4097), .None, "a backlog over 4096 was accepted")?
     testing.assert_eq(Backlog?(4096), .Some(Backlog(4096)), "a backlog of 4096 was refused")?
@@ -51,7 +51,7 @@ pub fn listen(address: Address, backlog: Backlog = Backlog(128)) -> Result[Liste
     .Ok(Listener { fd = Int32(answer) })
 }
 
-test fn listen_queues_the_default_backlog_or_the_one_given() {
+test "listen queues the default backlog or the one given" {
     let default_listened = match listen(loopback(0)) {
         Ok(listener) => listener.close().is_ok(),
         Err(_) => false,
@@ -65,7 +65,7 @@ test fn listen_queues_the_default_backlog_or_the_one_given() {
     .Ok(())
 }
 
-test fn a_second_listener_on_one_address_is_in_use() {
+test "a second listener on one address is in use" {
     let first = listen(loopback(0)).unwrap()
     let bound = first.local_address().unwrap()
     let refused = match listen(bound) {
@@ -114,7 +114,7 @@ fn accept_by(inout listener: Listener, deadline_ns: UInt64) -> Result[Accepted, 
     }
 }
 
-test fn a_connection_reaches_its_own_listener() {
+test "a connection reaches its own listener" {
     var listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     // The backlog queues the connection before accept is called.
@@ -141,7 +141,7 @@ test fn a_connection_reaches_its_own_listener() {
     .Ok(())
 }
 
-test fn a_connection_reset_before_accept_is_reported_as_reset_and_the_next_is_accepted() {
+test "a connection reset before accept is reported as reset and the next is accepted" {
     var listener = listen(loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     connect(bound).unwrap().reset().unwrap()
@@ -179,13 +179,13 @@ impl Listener {
         close_descriptor(fd)
     }
 
-    test fn a_listener_close_reports_success() {
+    test "a listener close reports success" {
         let listener = listen(loopback(0)).unwrap()
         testing.assert_ok_eq(listener.close(), (), "closing the listener failed")?
         .Ok(())
     }
 
-    test fn a_listener_close_consumes_a_failed_descriptor() {
+    test "a listener close consumes a failed descriptor" {
         let listener = Listener { fd = -1 }
         // EBADF is 9 on every platform the runtime targets.
         let invalid = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .Some(9), progress = 0 }
@@ -202,7 +202,7 @@ impl Listener {
         .Ok(Address.unpacked(answer))
     }
 
-    test fn a_listener_reports_the_port_it_was_given() {
+    test "a listener reports the port it was given" {
         let listener = listen(loopback(0)).unwrap()
         let bound = listener.local_address()
         let closed = listener.close().is_ok()
@@ -228,7 +228,7 @@ impl Listener {
         accept_by(&self, deadline)
     }
 
-    test fn an_accept_whose_connection_is_ready_at_its_deadline_takes_it() {
+    test "an accept whose connection is ready at its deadline takes it" {
         // Every delivery takes 10 ms of virtual time. The client is connected
         // once its SYN and the SYN-ACK have crossed, after 20 ms, and the
         // server's end is ready to accept once the client's ACK arrives, 10 ms
@@ -254,7 +254,7 @@ impl Listener {
         testing.assert_eq(waited, time.Duration.from_milliseconds(10), "the accepts waited other than the ACK's 10 ms")?
     }
 
-    test fn an_accept_with_no_bound_waits_as_accept_does() {
+    test "an accept with no bound waits as accept does" {
         var listener = listen(loopback(0)).unwrap()
         let client = connect(listener.local_address().unwrap()).unwrap()
         let accepted = !timed_out(&listener.accept_within(ms: 0))
@@ -276,7 +276,7 @@ fn timed_out(sink outcome: Result[Accepted, NetError]) -> Bool {
     }
 }
 
-test fn only_a_timed_out_accept_is_timed_out() {
+test "only a timed_out accept is timed_out" {
     let timeout = io.IoError { operation = .Accept, category = .TimedOut, code = .None, progress = 0 }
     let refusal = io.IoError { operation = .Accept, category = .ConnectionRefused, code = .None, progress = 0 }
     testing.assert(timed_out(.Err(.Io(timeout))), "a timed-out accept was not timed out")?
@@ -311,7 +311,7 @@ fn accept_once[L: Acceptor](sink acceptor: L) -> Result[Address, NetError] {
     .Ok(address)
 }
 
-test fn a_listener_accepts_through_the_acceptor_trait() {
+test "a listener accepts through the acceptor trait" {
     let listener = listen(loopback(0)).unwrap()
     let client = connect(listener.local_address().unwrap()).unwrap()
     let accepted = accept_once(listener).unwrap()

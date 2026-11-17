@@ -76,7 +76,7 @@ pub fn own[S: Owned + Isolated](sink state: S, on: core.Io = core.inherited) -> 
     }
 }
 
-test fn an_owning_task_hands_its_state_back_when_closed() {
+test "an owning task hands its state back when closed" {
     let owner = own(UInt64(41)).unwrap()
     let state = owner.close()
     testing.assert_eq(state, UInt64(41), "the state came back changed")?
@@ -90,7 +90,7 @@ impl[S: Owned + Isolated] Owner[S] {
         .{ owner = borrow self }
     }
 
-    test fn a_client_reaches_the_state_its_owner_holds() {
+    test "a client reaches the state its owner holds" {
         let owner = own(UInt64(7)).unwrap()
         let doubled = owner.client().call(|inout n: UInt64| n * 2)
         let state = owner.close()
@@ -108,7 +108,7 @@ impl[S: Owned + Isolated] Owner[S] {
         state
     }
 
-    test fn closing_answers_every_change_a_call_made() {
+    test "closing answers every change a call made" {
         let owner = own(UInt64(0)).unwrap()
         let counter = owner.client()
         for _ in 0..10 {
@@ -126,7 +126,7 @@ impl[S: Owned + Isolated + Release] Release for Owner[S] {
     }
 }
 
-test fn releasing_an_owner_joins_its_task() {
+test "releasing an owner joins its task" {
     defer let owner = own(UInt64(5)).unwrap()
     let answered = owner.client().call(|inout n: UInt64| n + 1)
     testing.assert_eq(answered, UInt64(6), "the owner did not answer before it was released")?
@@ -147,7 +147,7 @@ impl[S: Owned + Isolated] Release for Client[S] {
     }
 }
 
-test fn releasing_a_client_leaves_its_owner_serving() {
+test "releasing a client leaves its owner serving" {
     let owner = own(UInt64(3)).unwrap()
     owner.client().release()
     let tripled = owner.client().call(|inout n: UInt64| n * 3)
@@ -166,7 +166,7 @@ impl[S: Owned + Isolated] Client[S] {
         mem.call_owner[S, R, F](self.owner.queue, job)
     }
 
-    test fn calls_from_two_tasks_run_one_at_a_time() {
+    test "calls from two tasks run one at a time" {
         let owner = own(UInt64(0)).unwrap()
         let counter = owner.client()
         let other = prepare(

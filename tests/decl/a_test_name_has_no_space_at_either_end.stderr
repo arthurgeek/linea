@@ -1,0 +1,5 @@
+error[S-Test]: a test's name has no space at either end
+ --> tests/decl/a_test_name_has_no_space_at_either_end.lin:9:6
+  |
+9 | test "keeps its first " {
+  |      ^^^^^^^^^^^^^^^^^^ a space there prints as a name it is not; remove it

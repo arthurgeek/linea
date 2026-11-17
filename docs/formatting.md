@@ -221,6 +221,23 @@ match kind {
 }
 ```
 
+### Tests
+
+A test is written `test`, then `trap` where it has one, then its name, each
+separated by one space, and then what a function writes after its parameters:
+` -> ` and the result where one is written, then the body. The name is a
+string and is kept byte for byte, like every string.
+
+```linea
+// written
+test   trap"a seat past the last stops the program"->Result[(),Failure]{ check() }
+
+// formatted
+test trap "a seat past the last stops the program" -> Result[(), Failure] {
+    check()
+}
+```
+
 ### What it never does
 
 - **It does not measure anything.** No width, no reflow.

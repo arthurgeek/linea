@@ -191,7 +191,7 @@ impl NoteStore {
         self.notes.length()
     }
 
-    test fn note_store_crud_lifecycle() {
+    test "note store crud lifecycle" {
         let path = fs.Path.from_str("test_notes.json").unwrap()
         var store = NoteStore.open(path).unwrap()
         defer store.release()

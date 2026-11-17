@@ -15,13 +15,13 @@ fn bounds(readings: [Int64; 7]) -> (Int64, Int64) {
     (lowest, highest)
 }
 
-test fn the_extremes_span_the_whole_week() {
+test "the extremes span the whole week" {
     let (lowest, highest) = bounds([4, -3, 7, 0, -8, 12, 5])
     testing.assert_eq(lowest, -8, "the lowest reading is -8")?
     testing.assert_eq(highest, 12, "the highest reading is 12")?
 }
 
-test fn a_constant_week_has_equal_extremes() {
+test "a constant week has equal extremes" {
     testing.assert_eq(bounds([6, 6, 6, 6, 6, 6, 6]), (6, 6), "every reading is 6")?
 }
 

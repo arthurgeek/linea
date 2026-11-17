@@ -1,0 +1,7 @@
+error[N-Duplicate]: "starts empty" already names a test in this module
+  --> tests/decl/tests_in_two_impls_of_one_module_are_named_apart.lin:28:10
+   |
+18 |     test "starts empty" {
+   |          -------------- the test of this name
+28 |     test "starts empty" {
+   |          ^^^^^^^^^^^^^^ a module names each of its tests once

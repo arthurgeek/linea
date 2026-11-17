@@ -38,7 +38,7 @@ fn extension_for(directory: Rolodex, name: Str) -> Option[UInt16] {
     }
 }
 
-test fn an_updated_contact_is_found_by_name() {
+test "an updated contact is found by name" {
     var directory = Rolodex { cards = [
         .{ name = "Reception", extension = 100 },
         .{ name = "Facilities", extension = 210 },

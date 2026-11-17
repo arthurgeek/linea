@@ -18,7 +18,7 @@ impl Checklist {
     // `4..=0` counts down, so the checklist runs from its last step to ignition.
     trav positions = 4..=0
 
-    test fn launch_preparations_finish_before_ignition() {
+    test "launch preparations finish before ignition" {
         let launch = checklist()
         let sequence = ["hold released", "arms retracted", "tanks pressurised", "gimbal check", "ignition"]
         var next: UInt64 = 0

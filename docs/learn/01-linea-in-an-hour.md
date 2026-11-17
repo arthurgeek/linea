@@ -1906,8 +1906,9 @@ If you know Rust: the entry is a path dependency, `almanac = { path =
 
 ## Tests
 
-Tests live beside the code they test. A `test fn` takes no arguments, and each
-assertion is followed by `?`, which ends the test at the first failure:
+Tests live beside the code they test. A test is `test` and a string that says
+what it checks, and each assertion is followed by `?`, which ends the test at
+the first failure:
 
 ```linea
 import std.io
@@ -1920,17 +1921,17 @@ fn tiles_needed(floor: UInt64, tile: UInt64) -> UInt64 {
     floor / tile + 1
 }
 
-test fn a_floor_that_divides_evenly_needs_no_extra_tile() {
+test "a floor that divides evenly needs no extra tile" {
     testing.assert_eq(tiles_needed(16, 4), 4, "16 square metres of 4-metre tiles")?
 }
 
-test fn a_partial_tile_counts_as_a_whole_one() {
+test "a partial tile counts as a whole one" {
     testing.assert_eq(tiles_needed(15, 4), 4, "15 square metres of 4-metre tiles")?
 }
 
-// `test trap fn` marks a test that passes only if the program stops, here by
+// `test trap` marks a test that passes only if the program stops, here by
 // dividing by zero.
-test trap fn a_tile_of_no_size_stops_the_program() {
+test trap "a tile of no size stops the program" {
     let _tiles = tiles_needed(15, 0)
 }
 
@@ -1945,9 +1946,9 @@ linea test tiles.lin
 ```
 
 ```
-ok    a_floor_that_divides_evenly_needs_no_extra_tile
-ok    a_partial_tile_counts_as_a_whole_one
-ok    a_tile_of_no_size_stops_the_program
+ok    a floor that divides evenly needs no extra tile
+ok    a partial tile counts as a whole one
+ok    a tile of no size stops the program
 
 3 passed, 0 failed
 ```
@@ -1957,11 +1958,11 @@ and your message:
 
 <!-- guide: unchecked the output of an edited or partial program -->
 ```
-ok    a_floor_that_divides_evenly_needs_no_extra_tile
-FAIL  a_partial_tile_counts_as_a_whole_one
+ok    a floor that divides evenly needs no extra tile
+FAIL  a partial tile counts as a whole one
         expected 4, got 3
         error: 15 square metres of 4-metre tiles
-ok    a_tile_of_no_size_stops_the_program
+ok    a tile of no size stops the program
 
 2 passed, 1 failed
 ```
@@ -2027,7 +2028,7 @@ files; and `linea emit-mlir <path>` prints the generated MLIR.
   `let (a, b) = pair` takes it apart; use a struct when the parts deserve
   names.
 - A module is a directory; `pub` makes a declaration visible outside it.
-- `test fn` sits beside the code, and `linea test` runs it.
+- `test "what it checks"` sits beside the code, and `linea test` runs it.
 
 You can safely ignore for now: allocators other than `mem.system()`, the
 `borrows`, `carries` and `retains` clauses that some signatures carry, and the

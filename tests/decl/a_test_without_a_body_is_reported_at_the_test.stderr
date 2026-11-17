@@ -1,0 +1,5 @@
+error[S-Brace]: expected `{`
+ --> tests/decl/a_test_without_a_body_is_reported_at_the_test.lin:3:6
+  |
+3 | test "no body"
+  |      ^^^^^^^^^ a test needs a body

@@ -31,7 +31,7 @@ import starting with `std` still names the standard library.
     the linea.json for 'named' names it `std`, the library every program depends on: give it another name, or make it a library
   [64]
   $ mkdir std
-  $ printf 'fn main() -> UInt8 {\n    return 7\n}\n\ntest fn the_program_is_its_own() {}\n' > std/main.lin
+  $ printf 'fn main() -> UInt8 {\n    return 7\n}\n\ntest "the_program_is_its_own" {}\n' > std/main.lin
   $ linea check std
   $ linea run std
   [7]

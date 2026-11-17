@@ -32,7 +32,7 @@ fn setting(settings: Str, key: Str) -> Option[Str] where carries(.Some: settings
     .None
 }
 
-test fn a_setting_is_read_from_the_line_that_names_it() {
+test "a setting is read from the line that names it" {
     testing.assert_eq(setting(sample, "port"), .Some("8080"), "the port line")?
     testing.assert_eq(setting(sample, "host"), .Some("127.0.0.1"), "the host line")?
     testing.assert_eq(setting(sample, "workers"), .None, "a key no line names")?

@@ -6,7 +6,7 @@ import std.testing
 trait Naming {
     fn name(_self: Self) -> Str
 
-    test fn a_label_is_named() {
+    test "a_label_is_named" {
         let label = Label {}
         testing.assert_eq(label.name(), "label", "a label names itself")?
     }

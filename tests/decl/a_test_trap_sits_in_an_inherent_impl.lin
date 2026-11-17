@@ -12,7 +12,7 @@ impl Divider {
         Divider { divisor = divisor }
     }
 
-    test trap fn divides_by_zero() {
+    test trap "divides by zero" {
         let d = Divider.new(runtime_zero())
         let _q = 10 / d.divisor
     }

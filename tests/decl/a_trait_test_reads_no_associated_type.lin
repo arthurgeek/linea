@@ -8,12 +8,12 @@ trait Holding {
 
     fn held(self: Self) -> Item
 
-    test fn an_associated_type_alone() {
+    test "an associated type alone" {
         let item: Item = Crate.fill(2).held()
         testing.assert_eq(item, 2, "the crate holds two")?
     }
 
-    test fn an_associated_type_through_self() {
+    test "an associated type through self" {
         let item: Self.Item = Crate.fill(2).held()
         testing.assert_eq(item, 2, "the crate holds two")?
     }
@@ -22,7 +22,7 @@ trait Holding {
 trait Opening[K] {
     fn opens(self: Self, key: K) -> Bool
 
-    test fn a_parameter_of_the_trait() {
+    test "a parameter of the trait" {
         let key: K = true
         testing.assert(Crate.fill(2).opens(key), "the key opens the crate")?
     }

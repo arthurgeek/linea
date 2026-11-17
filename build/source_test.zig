@@ -3149,7 +3149,7 @@ test "the guide gate: a run command between a program and its output chooses the
 
     const reading = readFixture(gpa,
         \\```linea
-        \\test fn works() {
+        \\test "works" {
         \\}
         \\```
         \\
@@ -3272,7 +3272,7 @@ test "the guide gate: a library's file with tests completes a project beside its
         \\    3
         \\}
         \\
-        \\test fn three_days() {
+        \\test "three days" {
         \\}
         \\```
         \\

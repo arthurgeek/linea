@@ -138,7 +138,7 @@ impl CliParser {
         cmd.usage()
     }
 
-    test fn usage_contains_all_command_names() {
+    test "usage contains all command names" {
         defer let text = CliParser.usage().unwrap()
         testing.assert(text.view().find("add").is_some(), "usage missing add")?
         testing.assert(text.view().find("list").is_some(), "usage missing list")?

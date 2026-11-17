@@ -21,7 +21,7 @@ impl[A: Allocator] Release for Buffer[A] {
     }
 }
 
-test fn a_buffer_disposes_through_its_stored_allocator() {
+test "a buffer disposes through its stored allocator" {
     let bytes = system().acquire(8).unwrap()
     let answer = bytes.length()
     bytes.release()
@@ -60,7 +60,7 @@ fn oom_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
     true
 }
 
-test fn derived_oom_equality_compares_its_case() {
+test "derived oom equality compares its case" {
     let exhausted: Oom = .Exhausted
     let same: Oom = .Exhausted
     testing.assert(exhausted.equals(same), "out-of-memory values differed")?
@@ -68,7 +68,7 @@ test fn derived_oom_equality_compares_its_case() {
     .Ok(())
 }
 
-test fn derived_oom_rendering_names_its_case() {
+test "derived oom rendering names its case" {
     let exhausted: Oom = .Exhausted
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = "{exhausted} {exhausted:?}".fmt(&writer).is_ok()
@@ -79,7 +79,7 @@ test fn derived_oom_rendering_names_its_case() {
     .Ok(())
 }
 
-test fn derived_oom_release_consumes_its_case() {
+test "derived oom release consumes its case" {
     let exhausted: Oom = .Exhausted
     exhausted.release()
     .Ok(())
@@ -89,7 +89,7 @@ impl[A: Allocator] Buffer[A] {
     // Eight-byte alignment supports all scalar loads and stores.
     let alignment: UInt64 = 8
 
-    test fn an_address_at_a_number_names_the_bytes_there() {
+    test "an address at a number names the bytes there" {
         var bytes = system().acquire(8).unwrap()
         &bytes.store_byte(0, 7)
         let found = foreign_byte(foreign_at(bytes.at), 0)
@@ -104,7 +104,7 @@ impl[A: Allocator] Buffer[A] {
     }
 
     // Empty buffers have length zero but still reserve storage that must be freed.
-    test fn an_empty_buffer_is_allocated_rather_than_refused() {
+    test "an empty buffer is allocated rather than refused" {
         let a = system()
         match a.acquire(0) {
             Err(_) => testing.assert(false, "a buffer of no bytes is refused")?,
@@ -126,7 +126,7 @@ impl[A: Allocator] Buffer[A] {
         buffer_span(self, 0, self.len)
     }
 
-    test fn a_buffer_byte_view_covers_the_requested_extent() {
+    test "a buffer byte view covers the requested extent" {
         let allocator = system()
         defer var bytes = allocator.acquire(3).unwrap()
         &bytes.store_byte(1, 201)
@@ -144,7 +144,7 @@ impl[A: Allocator] Buffer[A] {
         linea_raw_store(address.raw(bytes_in(self, 0)), self.len, i, v)
     }
 
-    test trap fn store_traps_past_the_end() -> Result[(), testing.Failure] {
+    test trap "store traps past the end" -> Result[(), testing.Failure] {
         let a = system()
         var b = a.acquire(16) else |_| {
             return testing.assert(false, "a buffer of sixteen bytes was refused")
@@ -154,7 +154,7 @@ impl[A: Allocator] Buffer[A] {
         .Ok(())
     }
 
-    test trap fn store_traps_at_a_misaligned_offset() -> Result[(), testing.Failure] {
+    test trap "store traps at a misaligned offset" -> Result[(), testing.Failure] {
         let a = system()
         var b = a.acquire(16) else |_| {
             return testing.assert(false, "a buffer of sixteen bytes was refused")
@@ -165,7 +165,7 @@ impl[A: Allocator] Buffer[A] {
     }
 
     // Dispose the buffer before assertions so failure cannot skip cleanup.
-    test fn a_buffer_arrives_zeroed_and_holds_what_it_is_given() {
+    test "a buffer arrives zeroed and holds what it is given" {
         let a = system()
         var b = a.acquire(32) else |_| {
             return testing.assert(false, "a buffer of thirty-two bytes was refused")
@@ -201,7 +201,7 @@ impl[A: Allocator] Buffer[A] {
         linea_raw_load(address.raw(bytes_in(self, 0)), self.len, i)
     }
 
-    test trap fn load_traps_past_the_end() -> Result[(), testing.Failure] {
+    test trap "load traps past the end" -> Result[(), testing.Failure] {
         let a = system()
         match a.acquire(16) {
             Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
@@ -213,7 +213,7 @@ impl[A: Allocator] Buffer[A] {
         .Ok(())
     }
 
-    test trap fn load_traps_at_a_misaligned_offset() -> Result[(), testing.Failure] {
+    test trap "load traps at a misaligned offset" -> Result[(), testing.Failure] {
         let a = system()
         match a.acquire(16) {
             Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
@@ -230,7 +230,7 @@ impl[A: Allocator] Buffer[A] {
         linea_raw_store8(address.raw(bytes_in(self, 0)), self.len, i, v)
     }
 
-    test trap fn store_byte_traps_past_the_end() -> Result[(), testing.Failure] {
+    test trap "store_byte traps past the end" -> Result[(), testing.Failure] {
         let a = system()
         var b = a.acquire(8) else |_| {
             return testing.assert(false, "a buffer of eight bytes was refused")
@@ -240,7 +240,7 @@ impl[A: Allocator] Buffer[A] {
         .Ok(())
     }
 
-    test fn a_byte_store_reaches_one_byte() {
+    test "a byte store reaches one byte" {
         let a = system()
         var b = a.acquire(8) else |_| {
             return testing.assert(false, "a buffer of eight bytes was refused")
@@ -265,7 +265,7 @@ impl[A: Allocator] Buffer[A] {
         linea_raw_load8(address.raw(bytes_in(self, 0)), self.len, i)
     }
 
-    test trap fn load_byte_traps_past_the_end() -> Result[(), testing.Failure] {
+    test trap "load_byte traps past the end" -> Result[(), testing.Failure] {
         let a = system()
         match a.acquire(8) {
             Err(_) => testing.assert(false, "a buffer of eight bytes was refused")?,

@@ -100,7 +100,7 @@ impl[R: Close] release.Settle for BufferOpenFailure[R] {
     }
 }
 
-test fn settling_a_refused_buffer_closes_the_stream_and_keeps_the_reason() {
+test "settling a refused buffer closes the stream and keeps the reason" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 7 }
     let settled = BufferedWriter.open(capacity: 0, writer: output).settled()
     let zero = match settled {
@@ -114,7 +114,7 @@ test fn settling_a_refused_buffer_closes_the_stream_and_keeps_the_reason() {
     .Ok(())
 }
 
-test fn a_refused_buffer_displays_a_failed_close() {
+test "a refused buffer displays a failed close" {
     let reason: BufferOpenReason[UInt8] = .{ reason = .ZeroCapacity, close = .Some(5) }
     // The 64-byte recorder holds the refusal and the close failure.
     var writer = testing.Recorder.of(64).unwrap()
@@ -155,7 +155,7 @@ impl[W: ByteWriter + Release, A: Allocator, E: Release] Release for FinishFailur
     }
 }
 
-test fn a_failed_finish_can_be_released_whole() {
+test "a failed finish can be released whole" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 0 }
     var writer = BufferedWriter.open(capacity: 4, writer: output).settled().unwrap()
     let accepted = &writer.write_some("ab".as_bytes()).is_ok()
@@ -185,7 +185,7 @@ impl[W: ByteWriter + Close, A: Allocator, E: Release] release.Settle for FinishF
     }
 }
 
-test fn settling_a_failed_finish_keeps_the_write_failure_and_a_failed_close() {
+test "settling a failed finish keeps the write failure and a failed close" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
     var writer = BufferedWriter.open(capacity: 4, writer: output).settled().unwrap()
     let accepted = &writer.write_some("abcd".as_bytes()).is_ok()
@@ -288,7 +288,7 @@ impl[W: ByteWriter] BufferedWriter[W, mem.SystemAllocator] {
         BufferedWriter.open_in(mem.system(), capacity, writer)
     }
 
-    test fn a_writer_buffers_from_the_system_allocator() {
+    test "a writer buffers from the system allocator" {
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 8, stop = 8 }
         var writer = BufferedWriter.open(capacity: 4, writer: output).settled().unwrap()
         let accepted = &writer.write_some("tea".as_bytes()).is_ok()
@@ -296,7 +296,7 @@ impl[W: ByteWriter] BufferedWriter[W, mem.SystemAllocator] {
         testing.assert(accepted && probe.length == 3, "a system write buffer lost bytes")
     }
 
-    test fn a_buffer_refusal_returns_the_supplied_writer() {
+    test "a buffer refusal returns the supplied writer" {
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 7 }
         let refused = match BufferedWriter.open(capacity: 0, writer: output) {
             Ok(writer) => {
@@ -328,7 +328,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         .{ writer, bytes, start = 0, length = 0 }
     }
 
-    test fn a_preallocated_write_buffer_needs_no_further_allocation() {
+    test "a preallocated write buffer needs no further allocation" {
         defer let log = mem.AllocationLog.open(mem.system(), 2).unwrap()
         let bytes = log.allocator().acquire(4).unwrap()
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
@@ -347,7 +347,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         .Ok(())
     }
 
-    test trap fn a_preallocated_writer_requires_nonempty_storage() -> Result[(), testing.Failure] {
+    test trap "a preallocated writer requires nonempty storage" -> Result[(), testing.Failure] {
         let bytes = mem.system().acquire(0).unwrap()
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
         let writer = BufferedWriter.with_buffer(bytes, output)
@@ -367,7 +367,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         }
     }
 
-    test fn allocation_refusal_returns_an_untouched_writer() {
+    test "allocation refusal returns an untouched writer" {
         let arena = mem.Arena.open(mem.system(), size: 0)
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 7 }
         let refused = match BufferedWriter.open_in(arena.handle(), capacity: 4, writer: output) {
@@ -384,7 +384,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         .Ok(())
     }
 
-    test fn a_buffered_writer_holds_its_bytes_in_an_arena() {
+    test "a buffered writer holds its bytes in an arena" {
         defer let arena = mem.Arena.open(mem.system(), size: 64)
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
         var writer = BufferedWriter.open_in(arena.handle(), capacity: 4, writer: output) else |_| {
@@ -409,7 +409,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         self.bytes.as_slice().subspan(start: self.start, count: self.length).unwrap()
     }
 
-    test fn pending_holds_the_bytes_not_yet_handed_on() {
+    test "pending holds the bytes not yet handed on" {
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
         var writer = BufferedWriter.open(capacity: 4, writer: output) else |_| {
             return testing.assert(false, "buffer allocation failed")
@@ -431,7 +431,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         writer
     }
 
-    test fn abort_drops_pending_bytes_and_returns_the_writer() {
+    test "abort drops pending bytes and returns the writer" {
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
         var writer = BufferedWriter.open(capacity: 4, writer: output) else |_| {
             return testing.assert(false, "buffer allocation failed")
@@ -455,7 +455,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         }
     }
 
-    test fn a_buffered_writer_renders_a_utf8_line_across_short_writes() {
+    test "a buffered writer renders a utf8 line across short writes" {
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 1, stop = 8 }
         var writer = BufferedWriter.open(capacity: 1, writer: output) else |_| {
             return testing.assert(false, "buffer allocation failed")
@@ -472,7 +472,7 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
         .Ok(())
     }
 
-    test fn finishing_after_an_underlying_flush_failure_does_not_repeat_bytes() {
+    test "finishing after an underlying flush failure does not repeat bytes" {
         let output = FlushOnceWriter {
             output = .{ bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 },
             failed = false,
@@ -592,7 +592,7 @@ impl[W: ByteWriter, A: Allocator] Writer for BufferedWriter[W, A] {
     }
 }
 
-test fn a_buffered_text_failure_preserves_accepted_progress_and_pending_bytes() {
+test "a buffered text failure preserves accepted progress and pending bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 1, stop = 3 }
     var writer = BufferedWriter.open(capacity: 2, writer: output) else |_| {
         return testing.assert(false, "buffer allocation failed")
@@ -612,7 +612,7 @@ test fn a_buffered_text_failure_preserves_accepted_progress_and_pending_bytes() 
     .Ok(())
 }
 
-test fn buffered_output_retries_only_its_unsent_suffix() {
+test "buffered output retries only its unsent suffix" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 3 }
     var writer = BufferedWriter.open(capacity: 5, writer: output) else |_| {
         return testing.assert(false, "buffer allocation failed")
@@ -640,7 +640,7 @@ test fn buffered_output_retries_only_its_unsent_suffix() {
     .Ok(())
 }
 
-test fn draining_a_full_buffer_can_fail_without_accepting_new_bytes() {
+test "draining a full buffer can fail without accepting new bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
     var writer = BufferedWriter.open(capacity: 3, writer: output) else |_| {
         return testing.assert(false, "buffer allocation failed")
@@ -669,7 +669,7 @@ test fn draining_a_full_buffer_can_fail_without_accepting_new_bytes() {
     .Ok(())
 }
 
-test fn a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes() {
+test "a full buffer accepts new bytes only after draining old bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
     var writer = BufferedWriter.open(capacity: 3, writer: output) else |_| {
         return testing.assert(false, "buffer allocation failed")
@@ -697,7 +697,7 @@ test fn a_full_buffer_accepts_new_bytes_only_after_draining_old_bytes() {
     .Ok(())
 }
 
-test fn an_empty_buffered_write_does_not_drain_a_full_buffer() {
+test "an empty buffered write does not drain a full buffer" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 0 }
     var writer = BufferedWriter.open(capacity: 2, writer: output) else |_| {
         return testing.assert(false, "writer allocation failed")
@@ -717,7 +717,7 @@ test fn an_empty_buffered_write_does_not_drain_a_full_buffer() {
     .Ok(())
 }
 
-test fn nested_buffered_flush_preserves_delivery_progress_and_pending_bytes() {
+test "nested buffered flush preserves delivery progress and pending bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
     let inner = BufferedWriter.open(capacity: 4, writer: output) else |_| {
         return testing.assert(false, "inner buffer allocation failed")
@@ -753,7 +753,7 @@ test fn nested_buffered_flush_preserves_delivery_progress_and_pending_bytes() {
     .Ok(())
 }
 
-test fn nested_buffered_drain_failure_counts_only_delivered_bytes() {
+test "nested buffered drain failure counts only delivered bytes" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 3 }
     let inner = BufferedWriter.open(capacity: 2, writer: output) else |_| {
         return testing.assert(false, "inner buffer allocation failed")
@@ -787,7 +787,7 @@ test fn nested_buffered_drain_failure_counts_only_delivered_bytes() {
     .Ok(())
 }
 
-test fn three_buffered_layers_count_each_delivered_byte_once() {
+test "three buffered layers count each delivered byte once" {
     let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 2 }
     let inner = BufferedWriter.open(capacity: 4, writer: output) else |_| {
         return testing.assert(false, "inner buffer allocation failed")

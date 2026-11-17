@@ -22,7 +22,7 @@ extern fn linea_signal_deliver_simulated(home: UInt64, signal: UInt8)
 
 let nanoseconds_per_millisecond: UInt64 = 1000000
 
-test fn inherited_resolves_in_the_task_that_uses_it() {
+test "inherited resolves in the task that uses it" {
     var sim = Simulation.open(seed: 1).unwrap()
     let captured = current()
     let (selected, simulated) = &sim.run(|inout _world| (inherited.runtime_identity(), inherited.is_simulated()))
@@ -32,7 +32,7 @@ test fn inherited_resolves_in_the_task_that_uses_it() {
     testing.assert(simulated, "inherited did not resolve the simulation")?
 }
 
-test fn the_io_inside_a_run_is_its_simulation() {
+test "the io inside a run is its simulation" {
     var sim = Simulation.open(seed: 1).unwrap()
     let (inside, simulated) = &sim.run(|inout _world| (current(), current().is_simulated()))
     sim.close()
@@ -69,7 +69,7 @@ impl Default for Network {
     }
 }
 
-test fn the_default_network_delivers_whole_writes_after_a_millisecond() {
+test "the default network delivers whole writes after a millisecond" {
     let network = Network.default()
     testing.assert_eq(network.latency_ms, UInt64(1), "the default latency changed")?
     testing.assert_eq(network.chunk_bytes, UInt64(0), "the default network cut writes into chunks")?
@@ -103,7 +103,7 @@ fn as_nanoseconds(ms: UInt64) -> UInt64 {
     ms * nanoseconds_per_millisecond
 }
 
-test fn milliseconds_too_many_to_count_saturate() {
+test "milliseconds too many to count saturate" {
     testing.assert_eq(as_nanoseconds(3), UInt64(3000000), "3 ms changed")?
     testing.assert_eq(as_nanoseconds(UInt64.max), UInt64.max, "an overflowing length did not saturate")?
 }
@@ -127,7 +127,7 @@ impl Simulation {
         .Ok(Simulation { identity })
     }
 
-    test fn a_simulation_opens_with_the_default_network_or_the_one_given() {
+    test "a simulation opens with the default network or the one given" {
         var plain = Simulation.open(seed: 1).unwrap()
         var slow = Simulation.open(seed: 1, network: Network { latency_ms = 250, ..Network.default() }).unwrap()
         let plain_ms = &plain.run(|inout _world| time.Instant.now().monotonic_nanoseconds())
@@ -161,7 +161,7 @@ impl Simulation {
         answer
     }
 
-    test fn a_long_sleep_inside_a_run_waits_for_nothing() {
+    test "a long sleep inside a run waits for nothing" {
         var sim = Simulation.open(seed: 1).unwrap()
         let started = time.Instant.now()
         let slept = &sim.run(
@@ -184,7 +184,7 @@ impl Simulation {
         linea_sim_fingerprint(self.identity)
     }
 
-    test fn a_simulation_that_has_done_nothing_has_a_fixed_fingerprint() {
+    test "a simulation that has done nothing has a fixed fingerprint" {
         let first = Simulation.open(seed: 3).unwrap()
         let second = Simulation.open(seed: 4).unwrap()
         let same = first.fingerprint() == second.fingerprint()
@@ -201,7 +201,7 @@ impl Simulation {
         linea_sim_close(identity)
     }
 
-    test fn a_closed_simulation_leaves_the_system_current() {
+    test "a closed simulation leaves the system current" {
         var sim = Simulation.open(seed: 1).unwrap()
         &sim.run(|inout _world| {})
         sim.close()
@@ -222,7 +222,7 @@ impl World {
         linea_sim_advance(self.identity, duration.nanoseconds())
     }
 
-    test fn advancing_the_world_moves_the_virtual_clock_by_exactly_that_much() {
+    test "advancing the world moves the virtual clock by exactly that much" {
         var sim = Simulation.open(seed: 1).unwrap()
         let moved = &sim.run(
             |inout world| {
@@ -242,7 +242,7 @@ impl World {
         linea_signal_deliver_simulated(self.identity, signal.number())
     }
 
-    test fn a_delivery_with_nothing_waiting_for_it_changes_nothing() {
+    test "a delivery with nothing waiting for it changes nothing" {
         var sim = Simulation.open(seed: 2).unwrap()
         let moved = &sim.run(
             |inout world| {

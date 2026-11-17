@@ -13,7 +13,7 @@ fn sample(time_seconds: Float64, frequency_hz: Float64) -> Signal {
     Signal { in_phase = angle.cos(), quadrature = angle.sin() }
 }
 
-test fn a_quarter_cycle_advances_the_two_components() {
+test "a quarter cycle advances the two components" {
     let start = sample(time_seconds: 0.0, frequency_hz: 1.0)
     let quarter = sample(time_seconds: 0.25, frequency_hz: 1.0)
     testing.assert_eq(start.in_phase, 1.0, "the in-phase component starts at one")?
@@ -22,7 +22,7 @@ test fn a_quarter_cycle_advances_the_two_components() {
     testing.assert((quarter.quadrature - 1.0).abs() < 1e-12, "a quarter cycle reaches unit quadrature")?
 }
 
-test fn frequency_sets_the_period() {
+test "frequency sets the period" {
     let cycle = sample(time_seconds: 0.5, frequency_hz: 2.0)
     testing.assert(cycle.quadrature.abs() < 1e-12, "two hertz completes a cycle in half a second")?
     testing.assert((cycle.in_phase - 1.0).abs() < 1e-12, "the in-phase component returns to its starting amplitude")?

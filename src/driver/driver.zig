@@ -312,7 +312,10 @@ pub const spec: cli.Spec = .{
             .name = "test",
             .operand = "<root>",
             .help = "run every test beneath a program root",
-            .options = &.{optLevelOption(toolchain.run_level)},
+            .options = &.{
+                optLevelOption(toolchain.run_level),
+                .{ .name = "--filter", .arity = .value, .metavar = "<text>", .help = "run only the tests whose names hold this text" },
+            },
         },
         .{ .tag = .lsp, .name = "lsp", .operand = "", .help = "serve the Language Server Protocol on standard input and output", .common_options = false },
         .{
@@ -530,6 +533,7 @@ pub fn run(process: std.process.Init) !u8 {
     var out_path: ?[]const u8 = null;
     var opt_level: []const u8 = defaultOptLevel(cmd.tag);
     var keep = false;
+    var filter: []const u8 = "";
     var storage: toolchain.Storage = if (cmd.tag == .@"test") .checked else .unchecked;
     // What a lowering is for. Only `emit-mlir` offers the choice today, and
     // it offers it so that a test binary's generated entry point can be read
@@ -559,6 +563,8 @@ pub fn run(process: std.process.Init) !u8 {
                 opt_level = o.value;
             } else if (std.mem.eql(u8, o.name, "--keep")) {
                 keep = true;
+            } else if (std.mem.eql(u8, o.name, "--filter")) {
+                filter = o.value;
             } else if (std.mem.eql(u8, o.name, "--check-storage")) {
                 storage = .checked;
             } else if (std.mem.eql(u8, o.name, "--tests")) {
@@ -978,6 +984,7 @@ pub fn run(process: std.process.Init) !u8 {
                                     res.tests,
                                     std.Thread.getCpuCount() catch 1,
                                     file_path,
+                                    filter,
                                     stdout_w,
                                 );
                                 try stdout.flush();

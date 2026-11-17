@@ -1,0 +1,14 @@
+// A test's name is printed on one line of `linea test`'s report, so it is one
+// quoted string rather than a multi-line literal.
+import std.testing
+
+test
+    \\a name
+    \\over two lines
+{
+    testing.assert(true, "a name is one line")?
+}
+
+fn main() -> UInt8 {
+    0
+}

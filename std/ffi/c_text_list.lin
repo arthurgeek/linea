@@ -27,7 +27,7 @@ impl CTextList {
         CText(mem.foreign_word(mem.foreign_at(at), index * pointer_bytes))
     }
 
-    test fn entries_are_read_where_the_list_holds_them() {
+    test "entries are read where the list holds them" {
         defer let first = CString.open("Ada").unwrap()
         defer let second = CString.open("Grace").unwrap()
         let system = mem.system()

@@ -109,7 +109,7 @@ pub fn write_all[W: ByteWriter](inout writer: W, bytes: mem.Slice[UInt8]) -> Res
     .Ok(written)
 }
 
-test fn write_all_preserves_the_prefix_across_short_writes() {
+test "write_all preserves the prefix across short writes" {
     var writer = ShortByteWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
     let text = "hello"
     match write_all(&writer, text.as_bytes()) {
@@ -122,7 +122,7 @@ test fn write_all_preserves_the_prefix_across_short_writes() {
     .Ok(())
 }
 
-test fn write_all_reports_progress_before_an_underlying_failure() {
+test "write_all reports progress before an underlying failure" {
     var writer = ShortByteWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 3 }
     let text = "hello"
     match write_all(&writer, text.as_bytes()) {
@@ -137,7 +137,7 @@ test fn write_all_reports_progress_before_an_underlying_failure() {
     .Ok(())
 }
 
-test fn write_all_rejects_zero_progress_and_skips_empty_inputs() {
+test "write_all rejects zero progress and skips empty inputs" {
     var writer = ShortByteWriter { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 0, stop = 8 }
     let text = "x"
     match write_all(&writer, text.as_bytes()) {
@@ -180,7 +180,7 @@ impl[E: Display] Display for WriteFailure[E] {
     }
 }
 
-test fn write_failures_display_their_kind_or_underlying_reason() {
+test "write failures display their kind or underlying reason" {
     let underlying: WriteFailure[UInt8] = .{ kind = .Underlying, reason = .Some(9), written = 3 }
     let unexplained: WriteFailure[UInt8] = .{ kind = .Underlying, reason = .None, written = 0 }
     let stalled: WriteFailure[UInt8] = .{ kind = .NoProgress, reason = .None, written = 2 }

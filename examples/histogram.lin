@@ -48,7 +48,7 @@ impl Histogram {
         counts.release()
     }
 
-    test fn a_histogram_counts_what_is_recorded_into_it() {
+    test "a histogram counts what is recorded into it" {
         var h = Histogram.open(4).unwrap()
         // Leave bucket 0 empty; record once in bucket 1 and twice in bucket 3.
         &h.record(1)
@@ -65,7 +65,7 @@ impl Histogram {
         testing.assert_eq(twice, 2, "a bucket recorded twice does not hold two")?
     }
 
-    test fn two_histograms_keep_independent_counts() {
+    test "two histograms keep independent counts" {
         var first = Histogram.open(2).unwrap()
         var second = Histogram.open(2).unwrap()
         &first.record(0)
@@ -81,7 +81,7 @@ impl Histogram {
         testing.assert_eq(two, 2, "a second histogram did not count its own")?
     }
 
-    test fn an_unrepresentable_bucket_count_is_refused() {
+    test "an unrepresentable bucket count is refused" {
         match Histogram.open(UInt64.max) {
             Err(_) => {},
             Ok(histogram) => {
@@ -103,7 +103,7 @@ fn latency_bucket(duration: UInt64) -> UInt64 {
     }
 }
 
-test fn latency_ranges_include_their_lower_bound() {
+test "latency ranges include their lower bound" {
     testing.assert_eq(latency_bucket(0), 0, "zero latency is outside the first bucket")?
     testing.assert_eq(latency_bucket(99), 0, "99 ms is outside the first bucket")?
     testing.assert_eq(latency_bucket(100), 1, "100 ms is outside the second bucket")?

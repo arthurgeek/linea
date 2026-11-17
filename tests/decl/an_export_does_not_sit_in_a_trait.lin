@@ -6,7 +6,7 @@ import std.testing
 trait Measured {
     fn length(self: Self) -> UInt32
 
-    export test fn a_rope_is_measured() {
+    export test "a rope is measured" {
         let rope = Rope { metres = 3 }
         testing.assert_eq(rope.length(), 3, "the rope is three metres")?
     }

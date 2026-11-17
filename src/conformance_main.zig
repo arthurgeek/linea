@@ -1179,7 +1179,7 @@ fn checkCommandOptimisation(
         .data =
         \\fn main() -> UInt8 { 0 }
         \\
-        \\test fn a_program_has_a_test() {}
+        \\test "a program has a test" {}
         \\
         ,
     });
@@ -1852,7 +1852,7 @@ test "the two corpus tallies account for the corpus exactly" {
 /// the function holding it -- so a literal in an unused `std` body would
 /// fail every case that imports the prelude and calls nothing over floats.
 ///
-/// And only what an ordinary build emits. A `test fn` body is checked and left
+/// And only what an ordinary build emits. A test's body is checked and left
 /// out of the artefact, so a float literal inside one reaches no backend and
 /// has no constant to be found -- the same reason as above, arrived at from the
 /// other side. Without this the property reads a case declaring a test over

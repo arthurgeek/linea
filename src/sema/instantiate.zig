@@ -62,6 +62,9 @@ const symbol_names = @import("../support/symbol.zig");
 ///   list ends where its grammar ends, not at the first `]` or `;` a count of
 ///   characters meets -- a default's text may hold either.
 ///
+/// A test's name is the string it is named by, quotes and escapes as written:
+/// the closing quote ends it, so it is followed by nothing a name could hold.
+///
 /// Escaping is injective because `$` is always escaped, and the prefix is
 /// constant; only a name shortened past the bound to a digest can collide,
 /// which the module verifier reports.

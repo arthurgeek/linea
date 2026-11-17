@@ -19,7 +19,7 @@ pub fn render_owned_in[A: Allocator, T: Display](allocator: A, value: T) -> Resu
     .Ok(rendered)
 }
 
-test fn owned_rendering_settles_its_partial_string_on_allocation_failure() {
+test "owned rendering settles its partial string on allocation failure" {
     // The eight-byte cursor and rounded first allocation consume 16 bytes.
     // The remaining eight cannot hold the next fragment's 16-byte reservation.
     let arena = mem.Arena.open(mem.system(), 24)
@@ -36,14 +36,14 @@ test fn owned_rendering_settles_its_partial_string_on_allocation_failure() {
     .Ok(())
 }
 
-test fn owned_rendering_allocates_its_text_from_an_arena() {
+test "owned rendering allocates its text from an arena" {
     defer let arena = mem.Arena.open(mem.system(), 64)
     let count: UInt64 = 3
     let rendered = render_owned_in(arena.handle(), "{count} teas").unwrap()
     testing.assert_eq(rendered.view(), "3 teas", "owned rendering into an arena changed its text")?
 }
 
-test fn each_allocation_failure_covers_every_growth_step_of_an_owned_rendering() -> Result[(), testing.Failure] {
+test "each allocation failure covers every growth step of an owned rendering" -> Result[(), testing.Failure] {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.Oom] {
@@ -64,12 +64,12 @@ pub fn render_owned[T: Display](value: T) -> Result[String[mem.SystemAllocator],
     render_owned_in(mem.system(), value)
 }
 
-test fn owned_rendering_allocates_from_the_system_allocator() {
+test "owned rendering allocates from the system allocator" {
     defer let rendered = render_owned(UInt64(42)).unwrap()
     testing.assert_eq(rendered.view(), "42", "rendering into the system allocator changed the value")?
 }
 
-test fn owned_rendering_formats_interpolation_values() {
+test "owned rendering formats interpolation values" {
     let count: UInt64 = 3
     let enabled = true
     defer let rendered = render_owned("count={count}, enabled={enabled}").unwrap()
@@ -77,7 +77,7 @@ test fn owned_rendering_formats_interpolation_values() {
     .Ok(())
 }
 
-test fn owned_rendering_outlives_its_input_owner() {
+test "owned rendering outlives its input owner" {
     defer let rendered = {
         defer let source = "source á".to_owned().unwrap()
         render_owned(source.view()).unwrap()
@@ -101,7 +101,7 @@ impl Display for Str {
     }
 }
 
-test fn string_display_preserves_empty_and_unicode_text() {
+test "string display preserves empty and unicode text" {
     testing.assert(display_text_equals("", ""), "Str.Display changed empty text")?
     testing.assert(display_text_equals("café 🚀", "café 🚀"), "Str.Display changed UTF-8 text")?
     .Ok(())
@@ -123,7 +123,7 @@ impl Debug for Bool {
     }
 }
 
-test fn boolean_renderers_name_both_values() {
+test "boolean renderers name both values" {
     testing.assert(display_text_equals(true, "true"), "Bool.Display changed true")?
     testing.assert(display_text_equals(false, "false"), "Bool.Display changed false")?
     testing.assert(debug_text_equals(true, "true"), "Bool.Debug changed true")?
@@ -145,7 +145,7 @@ impl Debug for Never {
     }
 }
 
-test fn an_impossible_close_error_renders_as_none() {
+test "an impossible close error renders as none" {
     let absent: Option[Never] = .None
     // The 16-byte recorder holds the rendered option.
     var writer = testing.Recorder.of(16).unwrap()
@@ -213,7 +213,7 @@ impl Debug for Str {
     }
 }
 
-test fn string_debug_quotes_escapes_and_preserves_utf8_scalars() {
+test "string debug quotes escapes and preserves utf8 scalars" {
     testing.assert(debug_text_equals("", r#""""#), "Str.Debug changed empty text")?
     testing.assert(debug_text_equals("café 🚀", r#""café 🚀""#), "Str.Debug split a UTF-8 scalar")?
     testing.assert(debug_text_equals("\"\\\n\t\r\0", r#""\"\\\n\t\r\0""#), "Str.Debug changed an escape")?
@@ -227,7 +227,7 @@ impl Debug for () {
     }
 }
 
-test fn unit_debug_renders_as_empty_parentheses() {
+test "unit debug renders as empty parentheses" {
     testing.assert(debug_text_equals((), "()"), "Unit.Debug changed ()")?
     let succeeded: Result[(), UInt8] = .Ok(())
     testing.assert(debug_text_equals(succeeded, "Ok(())"), "a unit success lost its payload")?
@@ -244,7 +244,7 @@ impl[T: Display] Display for Option[T] {
     }
 }
 
-test fn option_display_distinguishes_absence_and_renders_its_payload() {
+test "option display distinguishes absence and renders its payload" {
     let present: Option[UInt8] = .Some(37)
     let absent: Option[UInt8] = .None
     testing.assert(display_text_equals(present, "37"), "Option.Display changed its payload")?
@@ -262,7 +262,7 @@ impl[T: Display, E: Display] Display for Result[T, E] {
     }
 }
 
-test fn result_display_renders_both_payloads() {
+test "result display renders both payloads" {
     let ok: Result[UInt8, Str] = .Ok(42)
     let error: Result[UInt8, Str] = .Err("refused")
     testing.assert(display_text_equals(ok, "42"), "Result.Display changed success")?
@@ -307,7 +307,7 @@ fn debug_preserves_writer_failure[T: Debug](value: T) -> Bool {
     failed && calls == 1
 }
 
-test fn renderers_stop_at_the_first_writer_failure() {
+test "renderers stop at the first writer failure" {
     testing.assert(display_preserves_writer_failure("text"), "Str.Display lost a writer failure")?
     testing.assert(debug_preserves_writer_failure("text"), "Str.Debug wrote after failure")?
     testing.assert(display_preserves_writer_failure(true), "Bool.Display lost a writer failure")?
@@ -374,7 +374,7 @@ impl Display for SplitError {
     }
 }
 
-test fn text_errors_render_the_reason_and_byte_offset() {
+test "text errors render the reason and byte offset" {
     // The 160-byte recorder holds all five error renderings and separators.
     var writer = testing.Recorder.of(160).unwrap()
     let syntax: ParseError = .Syntax(2)
@@ -388,7 +388,7 @@ test fn text_errors_render_the_reason_and_byte_offset() {
     .Ok(())
 }
 
-test fn a_nullary_parse_error_renders_its_reason() {
+test "a nullary parse error renders its reason" {
     var writer = testing.Recorder.of(96).unwrap()
     let out_of_range: ParseError = .OutOfRange
     let token_limit: ParseError = .TokenLimit
@@ -435,7 +435,7 @@ impl Display for TextError {
     }
 }
 
-test fn owned_text_renders_content_and_encoding_errors() {
+test "owned text renders content and encoding errors" {
     defer let value = "á\n".to_owned().unwrap()
     // The 128-byte recorder holds raw text, its quoted form and the error message.
     var writer = testing.Recorder.of(128).unwrap()
@@ -451,7 +451,7 @@ test fn owned_text_renders_content_and_encoding_errors() {
     .Ok(())
 }
 
-test fn a_utf8_failure_displays_its_offset_and_keeps_its_bytes() {
+test "a utf8 failure displays its offset and keeps its bytes" {
     var bytes = Vec.filled(count: 3, value: UInt8(97)).unwrap()
     // 255 is never valid in UTF-8.
     bytes[2] = 255

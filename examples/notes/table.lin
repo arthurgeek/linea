@@ -66,7 +66,7 @@ impl TableFormatter {
         output
     }
 
-    test fn json_serialization_escapes_special_characters() {
+    test "json serialization escapes special characters" {
         var tags: Vec[String] = Vec.new()
         &tags.push("tag\"with\"quotes".to_owned().unwrap()).unwrap()
         let note = Note.new(42, "Title with \"quotes\" and \n newline", .Normal, tags).unwrap()
@@ -158,7 +158,7 @@ impl TableFormatter {
         TableFormatter.render_filtered_table(notes, .None, .None)
     }
 
-    test fn table_formatter_renders_aligned_rows() {
+    test "table formatter renders aligned rows" {
         var tags1: Vec[String] = Vec.new()
         &tags1.push("work".to_owned().unwrap()).unwrap()
         &tags1.push("spec".to_owned().unwrap()).unwrap()

@@ -42,7 +42,7 @@ impl[I: Display, O: Display] Display for PromptError[I, O] {
     }
 }
 
-test fn prompt_errors_display_the_failed_step_and_its_reason() {
+test "prompt errors display the failed step and its reason" {
     let output: PromptError[Str, Str] = .Write(.{ kind = .Underlying, reason = .Some("pipe closed"), written = 1 })
     let flush: PromptError[Str, Str] = .Flush(.{ kind = .NoProgress, reason = .None, written = 0 })
     let response: PromptError[Str, Str] = .Read(.Limit)
@@ -136,7 +136,7 @@ pub fn prompt_with[R: Reader, A: Allocator, W: ByteWriter](inout reader: Buffere
     }
 }
 
-test fn a_prompt_finishes_short_writes_and_keeps_input_lookahead() {
+test "a prompt finishes short writes and keeps input lookahead" {
     let input = "one\ntwo\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
     var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -170,7 +170,7 @@ test fn a_prompt_finishes_short_writes_and_keeps_input_lookahead() {
     .Ok(())
 }
 
-test fn a_failed_prompt_write_does_not_read_input() {
+test "a failed prompt write does not read input" {
     let input = "answer\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
     var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -192,7 +192,7 @@ test fn a_failed_prompt_write_does_not_read_input() {
     .Ok(())
 }
 
-test fn a_failed_prompt_flush_does_not_read_input() {
+test "a failed prompt flush does not read input" {
     let input = "answer\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
     var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -214,7 +214,7 @@ test fn a_failed_prompt_flush_does_not_read_input() {
     .Ok(())
 }
 
-test fn a_failed_prompt_preserves_existing_input_lookahead() {
+test "a failed prompt preserves existing input lookahead" {
     let input = "one\ntwo\n"
     let source = PromptTestReader { bytes = input.as_bytes(), position = 0, calls = 0 }
     var reader = BufferedReader.open(capacity: 8, reader: source) else |_| {
@@ -253,7 +253,7 @@ test fn a_failed_prompt_preserves_existing_input_lookahead() {
     .Ok(())
 }
 
-test fn a_prompt_reads_its_response_into_an_arena() {
+test "a prompt reads its response into an arena" {
     // The arena holds the read-ahead buffer and every record the response grows into.
     defer let arena = mem.Arena.open(mem.system(), size: 1024)
     let input = "a response long enough to grow its record\n"
@@ -272,7 +272,7 @@ test fn a_prompt_reads_its_response_into_an_arena() {
     .Ok(())
 }
 
-test fn each_allocation_failure_covers_every_growth_step_of_a_prompt() -> Result[(), testing.Failure] {
+test "each allocation failure covers every growth step of a prompt" -> Result[(), testing.Failure] {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), PromptError[UInt8, UInt8]] {
@@ -305,7 +305,7 @@ pub fn prompt[A: Allocator](inout reader: BufferedReader[Descriptor, A], message
     prompt_with(&reader, &writer, message, max_bytes)
 }
 
-test fn prompt_writes_to_standard_error_and_reads_its_reader() {
+test "prompt writes to standard error and reads its reader" {
     // An invalid descriptor stands in for standard input, so the read fails
     // after the empty message is written to standard error and flushed.
     var reader = BufferedReader.open(capacity: 8, reader: descriptor(-1)) else |_| {
@@ -324,7 +324,7 @@ test fn prompt_writes_to_standard_error_and_reads_its_reader() {
     .Ok(())
 }
 
-test fn prompt_reads_through_a_reader_in_an_arena() {
+test "prompt reads through a reader in an arena" {
     // `/dev/null` stands in for standard input and reads as empty, so the
     // prompt succeeds with no response; the read-ahead buffer comes from the
     // arena.

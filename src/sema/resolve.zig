@@ -16,6 +16,7 @@ const interner_mod = @import("../support/interner.zig");
 const Interner = interner_mod.Interner;
 const StringId = interner_mod.StringId;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const text_mod = @import("../support/text.zig");
 const Fix = @import("../diagnostics/diagnostic.zig").Fix;
 const Edit = @import("../diagnostics/diagnostic.zig").Edit;
 const diagnostic_mod = @import("../diagnostics/diagnostic.zig");
@@ -816,7 +817,7 @@ pub const Resolution = struct {
     /// diagnostic reported about it, so the passes after resolution check it
     /// without reporting.
     several_entry_points: bool = false,
-    /// Every `test fn` the program itself declares, in the order the walk
+    /// Every test the program itself declares, in the order the walk
     /// reached them.
     ///
     /// Not in the order anything presents them. What a reader sees is ordered
@@ -1108,7 +1109,7 @@ pub const Resolution = struct {
         try testing.expectEqual(@as(u32, 1), found);
     }
 
-    /// One `test fn`, and the name everything outside the compiler calls it.
+    /// One test, and the name everything outside the compiler calls it.
     pub const Test = struct {
         decl: DeclId,
         expects_trap: bool,
@@ -4110,6 +4111,8 @@ fn resolveInternal(
     // the first test recorded and that hand-over would otherwise leak every
     // name spelled so far.
     defer r.tests.deinit(gpa);
+    defer r.module_tests.deinit(gpa);
+    defer r.module_test_names.deinit(gpa);
     defer r.bindings.deinit(gpa);
     defer r.visible.deinit(gpa);
     defer r.here_named.deinit(gpa);
@@ -4208,7 +4211,6 @@ fn resolveInternal(
         r.publishPrelude(ambient.items);
         try r.checkModifiers();
         try r.checkEntryPoint();
-        try r.checkTests();
         r.ast = &expanded.ast;
         try r.declareModuleScopes();
         for (ast.parts) |part| {
@@ -4337,7 +4339,6 @@ fn resolveInternal(
             defer z.end();
             try r.checkModifiers();
             try r.checkEntryPoint();
-            try r.checkTests();
         }
 
         // Every module's run is settled by here -- its own declarations, its
@@ -4744,14 +4745,6 @@ fn resolveInternal(
     errdefer gpa.free(finished_deferred_unused);
     const finished_deferred_immutable = try r.deferred_immutable.toOwnedSlice(gpa);
     errdefer gpa.free(finished_deferred_immutable);
-
-    // After the bodies, because what an expression reaches is what this reads
-    // and none of it is settled until they are walked.
-    {
-        const z = tracy.beginZone(@src(), "rs.tests");
-        defer z.end();
-        try r.refuseNamesThatReachATest();
-    }
 
     if (captured_seed) |out| out.* = try Seed.capture(gpa, &r, prelude.items);
 
@@ -5545,8 +5538,8 @@ pub fn refuseSeveralEntryPoints(program: *const Program, sink: *Sink) !bool {
 
 pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
     if (ast.declTag(d) != .function) return false;
-    // A test is called by the test runner and nothing else, whatever it is
-    // named, so it is never the function the runtime starts.
+    // A function after a `test` the parser refused is still marked a test,
+    // and is not a function the runtime starts.
     if (ast.declIsTest(d)) return false;
     if (ast.memberOwner(d) != TokenId.none) return false;
     const name = ast.declName(d);
@@ -5556,43 +5549,31 @@ pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
 
 /// Whether this declaration is reached by something that writes no call to it.
 ///
-/// The entry point, which the runtime reaches; every test, which the compiler
-/// calls where it runs one; and every `export`, which something outside the
-/// module links against. None of the three is named by anything a program
-/// writes, so none of them is what [N-Unused] is for -- and whatever any of
-/// them calls is reached through it.
+/// The entry point, which the runtime reaches, and every `export`, which
+/// something outside the module links against. Neither is named by anything a
+/// program writes, so neither is what [N-Unused] is for -- and whatever either
+/// calls is reached through it. A test binds no name at all, so it is never
+/// asked.
 ///
-/// One question with one answer, because the exemption above was three
+/// One question with one answer, because the exemption above was several
 /// answers once and let a `struct main` out of a rule it was never entitled to
 /// escape. A second declaration reached without a call is added here or
 /// nowhere.
 pub fn reachedWithoutACall(ast: *const Ast, d: DeclId, in_root: bool) bool {
-    // The entry point is the root module's and a test is any module's. That
-    // asymmetry is the whole of why this takes the module: a program is tested
-    // module by module, so a test below the root is an ordinary test and not a
-    // declaration nothing reaches.
+    // The entry point is the root module's alone: a `main` below the root is
+    // an ordinary function.
     if (in_root and namesTheEntryPoint(ast, d)) return true;
 
     // An export is reached from outside the module that declares it: what
     // links against it is not this compilation, so no module's own boundary
     // decides whether something names it.
     //
-    // Held to being a function for the reason a test is. Only a function is an
-    // entry point something can call, and an `export` written on anything else
-    // is refused -- so exempting one would let a declaration nothing reaches
-    // out of a rule it was never entitled to escape, which is the mistake this
-    // routine exists to have made once.
-    if (ast.declIsExport(d) and ast.declTag(d) == .function) return true;
-
-    if (!ast.declIsTest(d)) return false;
-
-    // Held to being a function, as an export is: `test` written on anything
-    // else is refused, and what it was written on is not a body anything
-    // runs. Where the function is written does not matter. A test the parser
-    // refused for sitting in a trait implementation or a template is still a
-    // test, and telling the reader to call it would be advice nothing can
-    // follow.
-    return ast.declTag(d) == .function;
+    // Held to being a function: only a function is an entry point something
+    // can call, and an `export` written on anything else is refused -- so
+    // exempting one would let a declaration nothing reaches out of a rule it
+    // was never entitled to escape, which is the mistake this routine exists
+    // to have made once.
+    return ast.declIsExport(d) and ast.declTag(d) == .function;
 }
 
 /// What a compilation is for.
@@ -5611,14 +5592,15 @@ pub const Purpose = enum { program, tests };
 /// The name a test is known by outside the compiler.
 ///
 /// A module is a directory, so a test's identity is that directory's path
-/// beneath the program root, dot-separated, with the declaration's own name
-/// last. The root module contributes nothing, which is what makes a test in a
-/// program of one file known by its bare name.
+/// beneath the program root, dot-separated, with the string the test is named
+/// by last. The root module contributes nothing, which is what makes a test in
+/// a program of one file known by its bare name.
 ///
-/// A `.` inside a directory's name is written `\.`, and a `\` is written
-/// `\\`, so the one directory `a.b` names its tests `a\.b.name` and the two
-/// directories `a/b` name theirs `a.b.name`. Every other byte is the path as
-/// written, so a reader still recognises the directory.
+/// A `.` inside a directory's name or the test's is written `\.`, and a `\`
+/// is written `\\`, so the one directory `a.b` names its tests `a\.b.name`
+/// and the two directories `a/b` name theirs `a.b.name`, and a test named
+/// `"b.name"` in `a` is `a.b\.name`. Every other byte is the path and the
+/// string as written, so a reader still recognises both.
 ///
 /// Not the emitted symbol. That one is mangled and carries type arguments,
 /// because it identifies an instantiation to a linker; this one identifies a
@@ -5657,7 +5639,10 @@ pub fn qualifiedTestName(
         if (rest.len > 0) try out.append(gpa, '.');
     }
 
-    try out.appendSlice(gpa, name);
+    for (name) |c| switch (c) {
+        '.', '\\' => try out.appendSlice(gpa, &.{ '\\', c }),
+        else => try out.append(gpa, c),
+    };
     return out.toOwnedSlice(gpa);
 }
 
@@ -6401,6 +6386,12 @@ const Resolver = struct {
     /// Every test the program declares, filled as the walk enters each
     /// declaration and sorted once at the end.
     tests: std.ArrayList(Resolution.Test) = .empty,
+    /// The tests of the module being declared, with the name each decodes to,
+    /// so two of one name are found by one sort of what that module holds.
+    /// Emptied per module, which keeps its length the module's own count.
+    module_tests: std.ArrayList(ModuleTest) = .empty,
+    /// The decoded names `module_tests` slices, emptied with it.
+    module_test_names: std.ArrayList(u8) = .empty,
 
     /// The declaration whose type parameters are in scope, while its
     /// annotations are being read. `.none` everywhere else.
@@ -7132,8 +7123,17 @@ const Resolver = struct {
         for (from..self.top.items.len) |at| try self.noteTop(@intCast(at));
 
         const decls = self.program.get(m).decls;
+        self.module_tests.clearRetainingCapacity();
+        self.module_test_names.clearRetainingCapacity();
         for (decls.start..decls.end) |j| {
             const d = DeclId.at(@intCast(j));
+            // A test binds no name: it is named by a string, which nothing
+            // in the language can write a reference to. A type or a constant
+            // written after a refused `test` is still what it declares.
+            if (self.ast.declIsTest(d) and (self.ast.declTag(d) == .function or self.ast.declTag(d) == .err)) {
+                try self.noteTest(d);
+                continue;
+            }
             if (self.ast.tokenTag(self.ast.declName(d)) != .identifier) continue;
             // An `impl` declares no name of its own. It names the type it
             // belongs to so that its extent is recorded, and the members
@@ -7153,6 +7153,7 @@ const Resolver = struct {
             }
             try self.declareTop(d);
         }
+        try self.settleModuleTests();
 
         // The prelude last, and only where the module declares no name of its
         // own: a module's declaration or `use` of a prelude name shadows the
@@ -7390,36 +7391,97 @@ const Resolver = struct {
     /// Enters a declaration into the module scope. Phase one: nothing inside
     /// it is looked at yet, so a name's position among the declarations stops
     /// mattering for types exactly as it does for functions.
-    /// Records a test under the name everything outside the compiler uses.
+    /// A test of the module being declared and the name it is written
+    /// under: `name` indexes `module_test_names`.
+    const ModuleTest = struct {
+        decl: DeclId,
+        name: struct { start: u32, end: u32 },
+    };
+
+    /// Notes a test of the module being declared under the name its string
+    /// decodes to. A name the parser refused, interpolated, multi-line, not
+    /// a string at all or one `testNameFault` refuses, names no test and is
+    /// not noted.
+    fn noteTest(self: *Resolver, d: DeclId) !void {
+        if (self.ast.declTag(d) != .function) return;
+        const name = self.ast.declName(d);
+        if (self.ast.tokenTag(name) != .string_literal) return;
+        const start: u32 = @intCast(self.module_test_names.items.len);
+        const invalid = try text_mod.decode(self.gpa, &self.module_test_names, self.ast.tokenText(name)) != null;
+        if (invalid or text_mod.testNameFault(self.module_test_names.items[start..]) != null) {
+            self.module_test_names.shrinkRetainingCapacity(start);
+            return;
+        }
+        try self.module_tests.append(self.gpa, .{
+            .decl = d,
+            .name = .{ .start = start, .end = @intCast(self.module_test_names.items.len) },
+        });
+    }
+
+    /// Refuses a second test of one name in the module just declared, and
+    /// records every other test the root's own modules hold under the name
+    /// everything outside the compiler uses.
+    ///
+    /// **Bound:** a sort of the module's own tests, so a module pays for the
+    /// tests it holds and not for the program's.
     ///
     /// The library's tests are not the program's. A program is compiled with
     /// the library beside it, so both are walked here, and running the
     /// library's tests as part of a program's would report failures nobody
     /// asked for and nobody in that program can fix. The library is tested as
     /// a program of its own, which is the only place its tests are its.
-    fn recordTest(self: *Resolver, d: DeclId, spelled: []const u8) !void {
+    fn settleModuleTests(self: *Resolver) !void {
+        const names = self.module_test_names.items;
+        // By name, and among one name in the order written, so the first of
+        // a name keeps it and every later one is the one reported.
+        std.mem.sort(ModuleTest, self.module_tests.items, names, struct {
+            fn before(bytes: []const u8, a: ModuleTest, b: ModuleTest) bool {
+                const left = bytes[a.name.start..a.name.end];
+                const right = bytes[b.name.start..b.name.end];
+                return switch (std.mem.order(u8, left, right)) {
+                    .lt => true,
+                    .gt => false,
+                    .eq => a.decl.index() < b.decl.index(),
+                };
+            }
+        }.before);
+
         const m = self.program.get(self.current);
+        const recorded = m.root == self.program.root().root;
+        var first: ?ModuleTest = null;
+        for (self.module_tests.items) |t| {
+            const spelled = names[t.name.start..t.name.end];
+            if (first) |held| {
+                if (std.mem.eql(u8, names[held.name.start..held.name.end], spelled)) {
+                    try self.refuseDuplicateTest(held.decl, t.decl);
+                    continue;
+                }
+            }
+            first = t;
+            if (!recorded) continue;
 
-        // Another root's: the standard library or a dependency. A program is
-        // compiled with its libraries beside it, so all of them are walked
-        // here, and running a library's tests as part of a program's would
-        // report failures nobody in that program asked for or can fix. Tested
-        // on its own terms a library is the root, and its tests are the ones
-        // to run.
-        if (m.root != self.program.root().root) return;
+            const qualified = try qualifiedTestName(self.gpa, self.program.root().dir, m.dir, spelled);
+            errdefer self.gpa.free(qualified);
+            try self.tests.append(self.gpa, .{
+                .decl = t.decl,
+                .expects_trap = self.ast.declExpectsTrap(t.decl),
+                .qualified_name = qualified,
+            });
+        }
+    }
 
-        const qualified = try qualifiedTestName(
-            self.gpa,
-            self.program.root().dir,
-            m.dir,
-            spelled,
-        );
-        errdefer self.gpa.free(qualified);
-        try self.tests.append(self.gpa, .{
-            .decl = d,
-            .expects_trap = self.ast.declExpectsTrap(d),
-            .qualified_name = qualified,
+    /// [N-Duplicate] at a test whose name a test before it in the module
+    /// already has: `linea test` reports and selects a test by its name, so
+    /// one name in one module means one test.
+    fn refuseDuplicateTest(self: *Resolver, held: DeclId, again: DeclId) !void {
+        const at = self.ast.declName(again);
+        const before = self.ast.declName(held);
+        const message = try std.fmt.allocPrint(self.sink.arena, "{s} already names a test in this module", .{self.ast.tokenText(at)});
+        const labels = try self.sink.arena.dupe(Label, &.{
+            .{ .file = self.ast.fileOf(at), .span = self.ast.tokenSpan(at), .message = "a module names each of its tests once" },
+            .{ .file = self.ast.fileOf(before), .span = self.ast.tokenSpan(before), .message = "the test of this name", .style = .secondary },
         });
+        try self.sink.add(.{ .severity = .err, .code = .n_duplicate, .message = message, .labels = labels });
     }
 
     fn declareTop(self: *Resolver, d: DeclId) !void {
@@ -7460,10 +7522,7 @@ const Resolver = struct {
 
         const text = self.ast.tokenText(name_token);
         // Whether this is a declaration nothing here writes a call to, which
-        // both exempts it from the unused rule and decides whether it is one of
-        // the tests recorded below. Asked once: two calls could disagree only
-        // by one of them being given a different module, and that is exactly
-        // the mistake the argument exists to make visible.
+        // exempts it from the unused rule.
         const reached_without_a_call = reachedWithoutACall(self.ast, d, self.program.isRootModule(self.current));
 
         const at: u32 = @intCast(self.top.items.len);
@@ -7528,7 +7587,6 @@ const Resolver = struct {
         // Chained once the binding it names exists, because the chain is
         // keyed by the name that binding carries.
         try self.noteTop(at);
-        if (reached_without_a_call and self.ast.declIsTest(d)) try self.recordTest(d, text);
         if (self.ast.declTag(d) == .import_) {
             try self.noteModule(BindingId.at(@intCast(self.bindings.items.len - 1)));
         }
@@ -7920,18 +7978,9 @@ const Resolver = struct {
         const root = self.program.root();
         var found: u32 = 0;
         var entry: DeclId = DeclId.at(0);
-        // A test named `main`, which a reader may have meant as the entry
-        // point. Kept only to say why it is not one.
-        var test_main: DeclId = DeclId.none;
         for (root.decls.start..root.decls.end) |i| {
             const d = DeclId.at(@intCast(i));
-            if (!namesTheEntryPoint(self.ast, d)) {
-                if (test_main == DeclId.none and self.ast.declIsTest(d) and
-                    self.ast.declTag(d) == .function and
-                    std.mem.eql(u8, self.ast.tokenText(self.ast.declName(d)), "main"))
-                    test_main = d;
-                continue;
-            }
+            if (!namesTheEntryPoint(self.ast, d)) continue;
             found += 1;
             entry = d;
         }
@@ -7970,17 +8019,6 @@ const Resolver = struct {
         // `refuseSeveralEntryPoints`.
         if (found > 1) return;
 
-        if (test_main != DeclId.none) {
-            try self.sink.addError(
-                .s_entry,
-                self.ast.fileOfDecl(test_main),
-                self.ast.declNameSpan(test_main),
-                "a program declares exactly one `main`",
-                "this is a test, and a test is never the entry point; rename it and declare `fn main() -> UInt8`",
-            );
-            return;
-        }
-
         // The program's own source, never the tree's first file: the library
         // is loaded before an entry directory and after a single entry file,
         // so the tree's first file is whichever of the two happened to be
@@ -8015,120 +8053,6 @@ const Resolver = struct {
             .code = .s_entry,
             .message = "a program declares exactly one `main`, and this one holds no source",
         });
-    }
-
-    /// The entry point is `main() -> u8` and not merely something called
-    /// `main`.
-    ///
-    /// The rule names a signature, so every part of that spelling is checked
-    /// and not just the name. Nothing downstream can recover from a wrong one:
-    /// the runtime calls the entry point with no arguments and reads its result
-    /// as a byte, and the emitter writes that convention out unconditionally.
-    /// A `main` returning a structure was accepted, and the exit status the
-    /// operating system then observed was the low byte of a stack address.
-    ///
-    /// Checked against what was written rather than against a resolved type,
-    /// because `UInt8` is a word the grammar reserves and so has exactly one
-    /// spelling -- there is no annotation, alias or import that reaches this
-    /// type under another name, and nothing to resolve.
-    ///
-    /// Each clause reports on its own: a `main` that is generic *and* takes a
-    /// parameter is wrong twice, and being told once per edit is what makes the
-    /// second one findable.
-    /// Refuses every name that reaches a test.
-    ///
-    /// The compiler writes the only call to a test, and that is a claim about
-    /// what a program may contain rather than a description of what it happens
-    /// to. A test something calls is a test something ships: it is reached from
-    /// the entry point like any other function, lowered like any other, and the
-    /// artefact then holds a body that exists to be run by the runner and not
-    /// by the program.
-    ///
-    /// So no expression names one, and that includes another test. A test
-    /// calling a test was admitted while nothing was injured by it, and this is
-    /// the injury: the rule cannot be "no ordinary code names a test" without
-    /// deciding, per call, which code is ordinary -- and a rule that reads the
-    /// caller is a rule with two answers the day a test is lowered.
-    ///
-    /// One walk over the table an expression's target is written into, which is
-    /// the one place any of them is recorded.
-    fn refuseNamesThatReachATest(self: *Resolver) !void {
-        for (self.targets.items, 0..) |b, i| {
-            if (b == BindingId.none) continue;
-            const d = self.declIfDeclaredHere(b);
-            if (d == DeclId.none) continue;
-            if (!self.ast.declIsTest(d)) continue;
-
-            const at = self.spelled.items[i];
-            if (at == TokenId.none) continue;
-
-            try self.sink.addError(
-                .s_test,
-                self.ast.fileOfExpr(ExprId.at(@intCast(i))),
-                self.ast.tokenSpan(at),
-                "a test is not called by name",
-                "the compiler writes the only call to a test, so a program naming one would ship it",
-            );
-        }
-    }
-
-    /// The declaration a binding names, while the resolver is still building
-    /// the tables `Resolution.declIfDeclared` reads.
-    fn declIfDeclaredHere(self: *const Resolver, b: BindingId) DeclId {
-        return switch (self.bindings.items[b.index()].kind) {
-            .function, .declared_type, .associated_type => self.bindings.items[b.index()].decl,
-            else => DeclId.none,
-        };
-    }
-
-    /// Every test's shape, over every declaration the compilation holds.
-    ///
-    /// Not the root's alone: a test sits in any module, so the rules about what
-    /// one may declare have to reach any module. The library is walked with
-    /// everything else, which costs one pass over declarations that hold no
-    /// test and answers for the ones that will.
-    fn checkTests(self: *Resolver) !void {
-        for (0..self.ast.declCount()) |i| {
-            const d = DeclId.at(@intCast(i));
-            if (!self.ast.declIsTest(d)) continue;
-            // A modifier the parser already refused on this form reports there.
-            // Asking a type about its parameters would report a second time
-            // for one mistake -- and an `extern` is a function by tag, so the
-            // tag alone does not settle it.
-            if (self.ast.declTag(d) != .function) continue;
-            if (self.ast.declIsExtern(d)) continue;
-            try self.checkTestSignature(d);
-        }
-    }
-
-    /// What a test may declare.
-    ///
-    /// The entry point's questions asked of a different declaration, and for
-    /// the entry point's reason: the compiler writes the only call, so there is
-    /// nothing to pass and nothing to settle. Asked of every test rather than
-    /// of one declaration, which is the only way the two differ.
-    fn checkTestSignature(self: *Resolver, d: DeclId) !void {
-        const file = self.ast.fileOfDecl(d);
-
-        for (self.ast.declTypeParams(d)) |p| {
-            try self.sink.addError(
-                .s_test,
-                file,
-                self.ast.tokenSpan(p.name),
-                "a test is not generic",
-                "the compiler writes the only call to a test, so nothing settles this",
-            );
-        }
-
-        for (self.ast.declParams(d)) |p| {
-            try self.sink.addError(
-                .s_test,
-                file,
-                self.ast.tokenSpan(p.name),
-                "a test takes no parameters",
-                "the compiler writes the only call to a test, and has nothing to pass",
-            );
-        }
     }
 
     fn checkEntrySignature(self: *Resolver, d: DeclId) !void {
@@ -19148,38 +19072,43 @@ test "a test is named by the module it sits in, beneath the root" {
     // the transcript alike.
     const gpa = testing.allocator;
 
-    const bare = try qualifiedTestName(gpa, "/p", "/p", "a_thing_holds");
+    const bare = try qualifiedTestName(gpa, "/p", "/p", "a thing holds");
     defer gpa.free(bare);
-    try testing.expectEqualStrings("a_thing_holds", bare);
+    try testing.expectEqualStrings("a thing holds", bare);
 
-    const under = try qualifiedTestName(gpa, "/p", "/p/deep", "a_thing_holds");
+    const under = try qualifiedTestName(gpa, "/p", "/p/deep", "a thing holds");
     defer gpa.free(under);
-    try testing.expectEqualStrings("deep.a_thing_holds", under);
+    try testing.expectEqualStrings("deep.a thing holds", under);
 
-    const nested = try qualifiedTestName(gpa, "/p", "/p/text/str", "a_thing_holds");
+    const nested = try qualifiedTestName(gpa, "/p", "/p/text/str", "a thing holds");
     defer gpa.free(nested);
-    try testing.expectEqualStrings("text.str.a_thing_holds", nested);
+    try testing.expectEqualStrings("text.str.a thing holds", nested);
 
     // A `.` in one directory's name is not the separator between two.
-    const dotted = try qualifiedTestName(gpa, "/p", "/p/a.b", "a_thing_holds");
+    const dotted = try qualifiedTestName(gpa, "/p", "/p/a.b", "a thing holds");
     defer gpa.free(dotted);
-    try testing.expectEqualStrings("a\\.b.a_thing_holds", dotted);
+    try testing.expectEqualStrings("a\\.b.a thing holds", dotted);
 
-    const slashed = try qualifiedTestName(gpa, "/p", "/p/a\\b", "a_thing_holds");
+    const slashed = try qualifiedTestName(gpa, "/p", "/p/a\\b", "a thing holds");
     defer gpa.free(slashed);
-    try testing.expectEqualStrings("a\\\\b.a_thing_holds", slashed);
+    try testing.expectEqualStrings("a\\\\b.a thing holds", slashed);
 
     // A root written with a trailing separator names the same module as one
     // without, so neither may leave an empty component in front of the name.
-    const trailing = try qualifiedTestName(gpa, "/p/", "/p/deep", "a_thing_holds");
+    const trailing = try qualifiedTestName(gpa, "/p/", "/p/deep", "a thing holds");
     defer gpa.free(trailing);
-    try testing.expectEqualStrings("deep.a_thing_holds", trailing);
+    try testing.expectEqualStrings("deep.a thing holds", trailing);
 
     // A sibling whose name merely begins with the root's is not beneath it, so
     // it contributes no component at all.
-    const sibling = try qualifiedTestName(gpa, "/p", "/paranoid", "a_thing_holds");
+    const sibling = try qualifiedTestName(gpa, "/p", "/paranoid", "a thing holds");
     defer gpa.free(sibling);
-    try testing.expectEqualStrings("a_thing_holds", sibling);
+    try testing.expectEqualStrings("a thing holds", sibling);
+
+    // A `.` in the test's name is not the separator before it either.
+    const named_dotted = try qualifiedTestName(gpa, "/p", "/p/deep", "1.5 rounds up");
+    defer gpa.free(named_dotted);
+    try testing.expectEqualStrings("deep.1\\.5 rounds up", named_dotted);
 }
 
 test "a traversal receiver is bound only in its initializer" {

@@ -1,0 +1,12 @@
+// A test's name is fixed when the test is written, so it interpolates nothing.
+import std.testing
+
+let size: UInt32 = 4
+
+test "a box of {size} holds four" {
+    testing.assert_eq(size, 4, "the box holds four")?
+}
+
+fn main() -> UInt8 {
+    if size == 4 { 0 } else { 1 }
+}

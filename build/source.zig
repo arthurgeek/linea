@@ -1514,7 +1514,7 @@ pub const GuideCommand = enum { run, check, @"test" };
 
 /// Where the code the gate compiles comes from.
 pub const GuideSource = enum {
-    /// A `linea` block with `fn main` or a `test fn`, or the files of a
+    /// A `linea` block with `fn main` or a test, or the files of a
     /// project its labels name.
     program,
     /// A `linea` block that is not a program, written alone as the root file
@@ -1669,7 +1669,7 @@ const GuideFence = struct {
     fn hasEntryPoint(self: GuideFence) bool {
         var lines = std.mem.splitScalar(u8, self.body, '\n');
         while (lines.next()) |line| {
-            for ([_][]const u8{ "fn main", "pub fn main", "test fn ", "test trap fn " }) |opening| {
+            for ([_][]const u8{ "fn main", "pub fn main", "test \"", "test trap \"" }) |opening| {
                 if (std.mem.startsWith(u8, line, opening)) return true;
             }
         }
@@ -2058,7 +2058,7 @@ fn claimOutput(
 /// Every complete program a chapter pastes, every fragment, and an account
 /// of the rest.
 ///
-/// A `linea` block is a program when it has `fn main` or a `test fn`, or
+/// A `linea` block is a program when it has `fn main` or a test, or
 /// when it is one of the files a `` `path.lin`: `` line labels, which together
 /// make a project once `main.lin` arrives. Its output is the block `Claim`
 /// describes. `<!-- guide: check REASON -->` above a program compiles it with
@@ -2131,7 +2131,7 @@ pub fn readGuideChapter(gpa: std.mem.Allocator, chapter: GuideChapter) GuideRead
             problems.append(gpa, .{
                 .chapter = chapter.file,
                 .line = fence.line,
-                .message = "`<!-- guide: check REASON -->` belongs directly above a program, a `linea` block with `fn main`, a `test fn` or a `` `path.lin`: `` label; a fragment is only ever checked",
+                .message = "`<!-- guide: check REASON -->` belongs directly above a program, a `linea` block with `fn main`, a test or a `` `path.lin`: `` label; a fragment is only ever checked",
             }) catch @panic("out of memory");
             continue;
         }

@@ -10,7 +10,7 @@ pub struct Address {
     port: UInt16,
 }
 
-test fn an_address_debugs_its_parts() {
+test "an address debugs its parts" {
     let address = Address.v4(10, 0, 0, 2, 443)
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = address.debug(&writer).is_ok()
@@ -26,7 +26,7 @@ impl Display for Address {
     }
 }
 
-test fn an_address_displays_as_dotted_octets_and_a_port() {
+test "an address displays as dotted octets and a port" {
     var writer = testing.Recorder.of(32).unwrap()
     let wrote = Address.v4(10, 0, 0, 2, 443).fmt(&writer).is_ok()
     let printed = writer.holds("10.0.0.2:443")
@@ -40,7 +40,7 @@ pub fn loopback(port: UInt16) -> Address {
     Address.v4(127, 0, 0, 1, port)
 }
 
-test fn loopback_names_this_host() {
+test "loopback names this host" {
     testing.assert_eq(loopback(8080), Address.v4(127, 0, 0, 1, 8080), "loopback is not 127.0.0.1")?
     .Ok(())
 }
@@ -50,7 +50,7 @@ pub fn any(port: UInt16) -> Address {
     Address.v4(0, 0, 0, 0, port)
 }
 
-test fn any_names_every_interface() {
+test "any names every interface" {
     testing.assert_eq(any(0), Address.v4(0, 0, 0, 0, 0), "any is not 0.0.0.0")?
     .Ok(())
 }
@@ -62,7 +62,7 @@ impl Address {
         .{ octets = [a, b, c, d], port = port }
     }
 
-    test fn an_address_keeps_the_parts_it_was_built_from() {
+    test "an address keeps the parts it was built from" {
         let address = Address.v4(192, 168, 1, 254, 443)
         testing.assert_eq(address.octets, [192, 168, 1, 254], "the octets changed")?
         testing.assert_eq(address.port, 443, "the port changed")?
@@ -101,7 +101,7 @@ impl Address {
         .Ok(.{ octets = octets, port = UInt16(port.value) })
     }
 
-    test fn an_address_parses_and_prints_the_same() {
+    test "an address parses and prints the same" {
         let address = Address.parse("127.0.0.1:8080").unwrap()
         testing.assert_eq(address, Address.v4(127, 0, 0, 1, 8080), "parse lost a part")?
         testing.assert_eq(address.port, 8080, "the port changed")?
@@ -113,7 +113,7 @@ impl Address {
         .Ok(())
     }
 
-    test fn an_address_refuses_what_is_not_ipv4() {
+    test "an address refuses what is not ipv4" {
         testing.assert(Address.parse("256.0.0.1:80").is_err(), "an octet past 255 parsed")?
         testing.assert(Address.parse("127.0.0.1").is_err(), "a missing port parsed")?
         testing.assert(Address.parse("127.0.0.1:65536").is_err(), "a port past 65535 parsed")?
@@ -149,7 +149,7 @@ impl Address {
         Address.v4(a, b, c, d, UInt16(bits % port_span))
     }
 
-    test fn an_address_survives_the_runtime_packing() {
+    test "an address survives the runtime packing" {
         let address = Address.v4(192, 168, 1, 254, 65535)
         testing.assert_eq(Address.unpacked(Int64(address.packed())), address, "packing lost a part")?
         .Ok(())

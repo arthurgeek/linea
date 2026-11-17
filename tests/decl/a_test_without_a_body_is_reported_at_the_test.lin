@@ -1,0 +1,7 @@
+// A test needs a body, and the report says so at the test rather than at the
+// declaration after it.
+test "no body"
+
+fn main() -> UInt8 {
+    0
+}

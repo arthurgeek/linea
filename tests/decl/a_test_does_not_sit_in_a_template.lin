@@ -12,7 +12,7 @@ template impl Named where reflect.target: struct {
         0
     }
 
-    test fn a_template_names_zero() {
+    test "a template names zero" {
         testing.assert(Self.name() == 0, "a template holds no test")?
     }
 }

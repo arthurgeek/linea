@@ -75,7 +75,7 @@ impl Display for Origin {
     }
 }
 
-test fn an_origin_displays_in_canonical_form() {
+test "an origin displays in canonical form" {
     defer let plain = fmt.render_owned(Origin.parse("http://example.test:80").unwrap()).unwrap()
     defer let custom = fmt.render_owned(Origin.parse("http://example.test:8080").unwrap()).unwrap()
     defer let secure = fmt.render_owned(Origin.parse("https://example.test:443").unwrap()).unwrap()
@@ -434,7 +434,7 @@ impl Origin {
         parse_authority(authority, is_https)
     }
 
-    test fn an_origin_parses_ipv6_with_custom_port() {
+    test "an origin parses ipv6 with custom port" {
         let ipv6 = Origin.parse("http://[::1]:8080").unwrap()
         testing.assert_eq(ipv6.host(), "[::1]", "host changed")?
         testing.assert_eq(ipv6.port(), UInt16(8080), "port changed")?
@@ -458,7 +458,7 @@ impl Origin {
         .Ok(())
     }
 
-    test fn an_origin_refuses_invalid_inputs() {
+    test "an origin refuses invalid inputs" {
         testing.assert_eq(Origin.parse("null"), .Err(OriginError.Opaque), "null was not opaque")?
         testing.assert_eq(Origin.parse("ftp://example.test"), .Err(OriginError.InvalidScheme), "ftp was accepted")?
         testing.assert_eq(Origin.parse("example.test"), .Err(OriginError.MissingScheme), "missing scheme was accepted")?
@@ -484,7 +484,7 @@ impl Origin {
         .Ok(())
     }
 
-    test fn an_origin_parses_normalizes_default_ports_and_folds_ascii_case() {
+    test "an origin parses normalizes default ports and folds ascii case" {
         let plain = Origin.parse("http://example.test").unwrap()
         let plain_port = Origin.parse("HTTP://EXAMPLE.TEST:80").unwrap()
         let plain_dot = Origin.parse("http://example.test.:80").unwrap()
@@ -522,7 +522,7 @@ impl Origin {
         parse_authority(trimmed, false).is_ok()
     }
 
-    test fn an_authority_is_a_host_and_an_optional_port() {
+    test "an authority is a host and an optional port" {
         testing.assert(Origin.is_valid_authority("example.test"), "a host was refused")?
         testing.assert(Origin.is_valid_authority(" example.test:8080 "), "a host and port with spaces around them were refused")?
         testing.assert(Origin.is_valid_authority("[::1]:443"), "an IPv6 literal and port were refused")?
@@ -665,7 +665,7 @@ pub fn same_origin[P: Allocator](request: Request[P], trust: ProxyTrust = .None)
     check_same_origin(request, expected, SameOriginPolicy.standard())
 }
 
-test fn same_origin_policy_validates_requests() {
+test "same_origin policy validates requests" {
     defer let arena = mem.Arena.open(mem.system(), size: 8192)
     let expected = Origin.parse("http://example.test").unwrap()
 

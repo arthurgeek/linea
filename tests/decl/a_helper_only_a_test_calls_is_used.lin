@@ -10,7 +10,7 @@ fn doubled(n: UInt8) -> UInt8 {
     n * 2
 }
 
-test fn doubling_two_gives_four() -> Result[(), IoError] {
+test "doubling two gives four" -> Result[(), IoError] {
     println(doubled(2))?
     return .Ok({})
 }

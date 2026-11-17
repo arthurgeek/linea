@@ -11,7 +11,7 @@ impl[T] Box[T] {
         Self { val = val }
     }
 
-    test fn creates_concrete_box() {
+    test "creates concrete box" {
         let b: Box[UInt32] = Box.new(100)
         testing.assert_eq(b.val, 100, "box value")?
         .Ok(())

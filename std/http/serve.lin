@@ -72,7 +72,7 @@ impl[E: Display] Display for ServeError[E] {
     }
 }
 
-test fn a_serve_error_displays_its_cause() {
+test "a serve error displays its cause" {
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
     let closing = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     let accept_error: ServeError = .Accept(.Io(invalid))
@@ -136,7 +136,7 @@ pub fn serve[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isol
     serve_made(listener, mem.system(), make_handler, limits, policy, .None, shutdown, on)
 }
 
-test fn serving_answers_each_client_on_its_own_task() {
+test "serving answers each client on its own task" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, health_request)
@@ -150,7 +150,7 @@ test fn serving_answers_each_client_on_its_own_task() {
     .Ok(())
 }
 
-test fn a_policy_of_no_threads_is_refused_and_closes_the_listener() {
+test "a policy of no threads is refused and closes the listener" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let served = serve(listener, health_router, limits: standard_limits, policy: .Threads(0))
@@ -166,7 +166,7 @@ test fn a_policy_of_no_threads_is_refused_and_closes_the_listener() {
     .Ok(())
 }
 
-test fn a_handler_a_sequential_server_cannot_make_closes_the_listener() {
+test "a handler a sequential server cannot make closes the listener" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let served = serve(listener, no_database, policy: .Sequential)
@@ -182,7 +182,7 @@ test fn a_handler_a_sequential_server_cannot_make_closes_the_listener() {
     .Ok(())
 }
 
-test fn serving_by_default_answers_two_requests_at_once() {
+test "serving by default answers two requests at once" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, health_request)
@@ -201,7 +201,7 @@ test fn serving_by_default_answers_two_requests_at_once() {
     .Ok(())
 }
 
-test fn sequential_routing_with_path_parameters() {
+test "sequential routing with path parameters" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, "GET /items/alpha HTTP/1.1\r\nHost: loopback\r\n\r\n")
@@ -215,7 +215,7 @@ test fn sequential_routing_with_path_parameters() {
     .Ok(())
 }
 
-test fn each_task_routes_path_parameters_through_its_own_router() {
+test "each task routes path parameters through its own router" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, "GET /items/alpha HTTP/1.1\r\nHost: loopback\r\n\r\n")
@@ -229,7 +229,7 @@ test fn each_task_routes_path_parameters_through_its_own_router() {
     .Ok(())
 }
 
-test fn one_connection_is_served_and_serve_returns() {
+test "one connection is served and serve returns" {
     let listener = net.listen(net.loopback(0)).unwrap()
     // The backlog queues the connection before serve accepts it.
     let client = send(listener.local_address().unwrap(), health_request)
@@ -240,7 +240,7 @@ test fn one_connection_is_served_and_serve_returns() {
     .Ok(())
 }
 
-test fn a_malformed_request_is_answered_and_serving_continues() {
+test "a malformed request is answered and serving continues" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let malformed = send(bound, "garbage\r\n\r\n")
@@ -254,7 +254,7 @@ test fn a_malformed_request_is_answered_and_serving_continues() {
     .Ok(())
 }
 
-test fn a_silent_client_times_out_and_the_next_is_served() {
+test "a silent client times out and the next is served" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     net.connect(bound).unwrap().close().unwrap()
@@ -273,7 +273,7 @@ test fn a_silent_client_times_out_and_the_next_is_served() {
     .Ok(())
 }
 
-test fn a_client_reset_before_accept_never_stops_serving_and_the_next_is_served() {
+test "a client reset before accept never stops serving and the next is served" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     send(bound, "GET /health HTTP/1.1\r\nHost: a\r\n").reset().unwrap()
@@ -292,7 +292,7 @@ test fn a_client_reset_before_accept_never_stops_serving_and_the_next_is_served(
     .Ok(())
 }
 
-test fn a_refused_body_left_unread_does_not_lose_the_answer() {
+test "a refused body left unread does not lose the answer" {
     let listener = net.listen(net.loopback(0)).unwrap()
     var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 20000\r\n\r\n")
     // 200 writes of 100 bytes send the whole 20000-byte body.
@@ -308,7 +308,7 @@ test fn a_refused_body_left_unread_does_not_lose_the_answer() {
     .Ok(())
 }
 
-test fn a_handler_error_before_headers_answers_its_status() {
+test "a handler error before headers answers its status" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
     let served = serve(listener, unprocessable, limits: serving(1), policy: .Sequential)
@@ -318,7 +318,7 @@ test fn a_handler_error_before_headers_answers_its_status() {
     .Ok(())
 }
 
-test fn a_streamed_answer_goes_out_as_it_is_written() {
+test "a streamed answer goes out as it is written" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let counted = send(bound, "GET /count HTTP/1.1\r\nHost: loopback\r\n\r\n")
@@ -334,7 +334,7 @@ test fn a_streamed_answer_goes_out_as_it_is_written() {
     .Ok(())
 }
 
-test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
+test "transient accept failures are retried until a connection is served" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
@@ -350,7 +350,7 @@ test fn transient_accept_failures_are_retried_until_a_connection_is_served() {
 // Each retried accept failure is reported to the observer with the pause
 // before the retry, which doubles while failures repeat and starts again at 5
 // ms once a connection has been accepted.
-test fn each_accept_retry_is_observed_with_its_pause() {
+test "each accept retry is observed with its pause" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let first = send(bound, health_request)
@@ -372,7 +372,7 @@ test fn each_accept_retry_is_observed_with_its_pause() {
     .Ok(())
 }
 
-test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
+test "a fatal accept failure ends serving and closes the listener" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
@@ -390,7 +390,7 @@ test fn a_fatal_accept_failure_ends_serving_and_closes_the_listener() {
     .Ok(())
 }
 
-test fn a_failed_listener_close_ends_serving_with_close() {
+test "a failed listener close ends serving with close" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
     let scripted = net.scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
@@ -399,7 +399,7 @@ test fn a_failed_listener_close_ends_serving_with_close() {
     .Ok(())
 }
 
-test fn an_arena_below_the_metadata_requirement_is_refused_before_serving() {
+test "an arena below the metadata requirement is refused before serving" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let limits = serving(1)
@@ -419,7 +419,7 @@ test fn an_arena_below_the_metadata_requirement_is_refused_before_serving() {
 
 // Limits too large for any arena to hold are refused as an arena too small,
 // whichever limit is large and however large the arena asked for is.
-test fn limits_beyond_every_arena_are_refused_without_overflowing() {
+test "limits beyond every arena are refused without overflowing" {
     let huge = UInt64.max
     let candidates = [
         Limits { max_line_bytes = 9000000000000000000, ..serving(0) },
@@ -444,7 +444,7 @@ pub fn serve_in[P: Allocator + Shareable, L: net.Acceptor + io.Close + io.Pollab
     serve_made(listener, parent, make_handler, limits, policy, .None, shutdown, on)
 }
 
-test fn serving_in_the_system_allocator_answers_a_request() {
+test "serving in the system allocator answers a request" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
     let served = serve_in(mem.system(), listener, health_router, limits: serving(1))
@@ -458,7 +458,7 @@ test fn serving_in_the_system_allocator_answers_a_request() {
 // for cannot be made. No client is answered, serving ends with `Handler`
 // although no connection limit would end it, and the handlers that were made,
 // with every arena, are released.
-test fn a_handler_one_task_cannot_make_ends_serving_before_anything_is_accepted() {
+test "a handler one task cannot make ends serving before anything is accepted" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
     defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
@@ -486,7 +486,7 @@ test fn a_handler_one_task_cannot_make_ends_serving_before_anything_is_accepted(
 // owns its text. Serving ends with one of them as `Handler`, the other one
 // is released when the two tasks' answers are joined, and every handler that
 // was made is released.
-test fn two_tasks_failing_with_owned_reasons_report_one_and_release_the_other() {
+test "two tasks failing with owned reasons report one and release the other" {
     let listener = net.listen(net.loopback(0)).unwrap()
     defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
     let owner = task.own(Tally { visits = 0 }).unwrap()
@@ -526,7 +526,7 @@ test fn two_tasks_failing_with_owned_reasons_report_one_and_release_the_other() 
 // buffer are acquired once each, and the chunks the filling handler grows the
 // arena by are given back when it is rewound. Each exchange starts from a
 // rewound arena.
-test fn every_exchange_returns_its_arena_to_the_parent() {
+test "every exchange returns its arena to the parent" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let requests = [
@@ -584,7 +584,7 @@ test fn every_exchange_returns_its_arena_to_the_parent() {
 
 // A parent that refuses the arena is answered 503, and serving opens the arena
 // again for the next connection.
-test fn a_refused_arena_is_answered_503() {
+test "a refused arena is answered 503" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let refused = send(bound, health_request)
@@ -609,7 +609,7 @@ test fn a_refused_arena_is_answered_503() {
 // A parent that can never hold a request arena still has every connection
 // answered 503, so the client reads the answer the observer reports rather
 // than a reset.
-test fn every_connection_is_answered_503_while_the_parent_refuses_the_arena() {
+test "every connection is answered 503 while the parent refuses the arena" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let first = send(bound, health_request)
@@ -637,7 +637,7 @@ test fn every_connection_is_answered_503_while_the_parent_refuses_the_arena() {
     .Ok(())
 }
 
-test fn a_parent_that_refuses_the_discard_buffer_ends_serving_before_accepting() {
+test "a parent that refuses the discard buffer ends serving before accepting" {
     let listener = net.listen(net.loopback(0)).unwrap()
     defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
     parent.refuse_size_from(request_buffer_bytes, 1)
@@ -667,7 +667,7 @@ fn serve_made[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Iso
 // whichever of them was refused, when the first to ask is refused and the
 // other seven are granted theirs and when only the first is granted it, and
 // every buffer serving took is given back either way.
-test fn a_serving_task_refused_its_discard_buffer_ends_serving_with_memory() {
+test "a serving task refused its discard buffer ends serving with memory" {
     served_refusing_discard_buffers(first: 1, from: 0)?
     served_refusing_discard_buffers(first: 0, from: 2)?
 }
@@ -756,7 +756,7 @@ fn items_router() -> Router[()] {
 // answer 503 and open the arena again. The walk then refuses each of those acquisitions in turn: a
 // refused discard buffer ends serving before it accepts, and every other run
 // answers 503. Every run gives back everything it took.
-test fn each_allocation_failure_covers_every_acquisition_from_the_parent() {
+test "each allocation failure covers every acquisition from the parent" {
     let attempts = served_refusing_arenas(0)?
     testing.assert_eq(attempts, UInt64(3), "serving took more from the parent than its discard buffer and two arenas")?
     for refused in UInt64(1)..attempts + 1 {
@@ -818,7 +818,7 @@ fn status_lines(answers: Vec[String]) -> String {
 // ready connection through the production exchange step with a smaller
 // arena. Six 3000-byte header lines exceed it, and the 8 KiB body left unread
 // is discarded so the client still reads the refusal.
-test fn a_request_larger_than_the_arena_is_answered_500() {
+test "a request larger than the arena is answered 500" {
     defer let received = exchanged_in_small_arena(headers: 6, length: 3000, arena_bytes: 8192)
     testing.assert_eq(received.view(), "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a request past the arena was not answered 500")?
     .Ok(())
@@ -827,7 +827,7 @@ test fn a_request_larger_than_the_arena_is_answered_500() {
 // Exhaust the arena after parsing the head, before reserving the response
 // buffer. The exchange refuses before calling the handler and drains the
 // unread body without materializing it.
-test fn a_request_that_leaves_no_room_for_the_response_is_answered_500() {
+test "a request that leaves no room for the response is answered 500" {
     defer let received = exchanged_in_small_arena(headers: 4, length: 3700, exhaust_after_head: true)
     testing.assert_eq(received.view(), "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", "a request leaving no room for the response was not answered 500")?
     .Ok(())
@@ -894,7 +894,7 @@ impl[E: Display] Display for ListenAndServeError[E] {
     }
 }
 
-test fn a_listen_and_serve_error_displays_its_cause() {
+test "a listen_and_serve error displays its cause" {
     let invalid = io.IoError { operation = .Listen, category = .InvalidDescriptor, code = .None, progress = 0 }
     let listening_error: ListenAndServeError = .Listen(.Io(invalid))
     defer let listening = fmt.render_owned(listening_error).unwrap()
@@ -924,7 +924,7 @@ pub fn listen_and_serve[R: MadeHandler[mem.SystemAllocator], M: Shareable + Copy
     listen_and_serve_in(mem.system(), address, make_handler, limits, policy, shutdown, on)
 }
 
-test fn a_listening_server_answers_on_every_task_it_serves_with() {
+test "a listening server answers on every task it serves with" {
     let served = listen_and_serve(net.loopback(0), health_router, limits: serving(0))
     testing.assert_ok_eq(served, (), "listening without serving failed")?
     .Ok(())
@@ -933,7 +933,7 @@ test fn a_listening_server_answers_on_every_task_it_serves_with() {
 // `listen_and_serve` makes the handler that announces the bound address
 // before it starts a serving task, so a factory that always fails is asked
 // once.
-test fn a_listening_server_whose_handler_cannot_be_made_asks_its_factory_once() {
+test "a listening server whose handler cannot be made asks its factory once" {
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
     let made = [sink counter] || -> Result[Router[()], Unopened] where carries(counter) {
@@ -947,7 +947,7 @@ test fn a_listening_server_whose_handler_cannot_be_made_asks_its_factory_once() 
     .Ok(())
 }
 
-test fn a_listening_server_announces_the_port_it_bound_before_accepting() {
+test "a listening server announces the port it bound before accepting" {
     let file = log.capture()
     let announcer = [file] || -> Announcer Announcer { report = file.logger(minimum: .Info) }
     let served = listen_and_serve(net.loopback(0), announcer, limits: serving(0), policy: .Sequential)
@@ -957,7 +957,7 @@ test fn a_listening_server_announces_the_port_it_bound_before_accepting() {
     .Ok(())
 }
 
-test fn a_port_that_is_taken_is_a_listen_failure() {
+test "a port that is taken is a listen failure" {
     let held = net.listen(net.loopback(0)).unwrap()
     let taken = held.local_address().unwrap()
     let served = listen_and_serve(taken, health_router, limits: serving(1))
@@ -971,7 +971,7 @@ test fn a_port_that_is_taken_is_a_listen_failure() {
     .Ok(())
 }
 
-test fn serving_that_cannot_begin_announces_nothing() {
+test "serving that cannot begin announces nothing" {
     let file = log.capture()
     // The capture exists even when validation refuses to create a handler.
     let primed = file.logger(minimum: .Info)
@@ -996,7 +996,7 @@ pub fn listen_and_serve_in[P: Allocator + Shareable, R: MadeHandler[P], M: Share
     serve_opened(listener, bound, parent, make_handler, limits, policy, shutdown, on)
 }
 
-test fn listening_in_the_system_allocator_serves_nothing_when_told_to() {
+test "listening in the system allocator serves nothing when told to" {
     let served = listen_and_serve_in(mem.system(), net.loopback(0), health_router, limits: serving(0))
     testing.assert_ok_eq(served, (), "listening without serving failed")?
     .Ok(())
@@ -1039,7 +1039,7 @@ pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Isolated + 
     }
 }
 
-test fn the_state_comes_back_when_serving_with_it_ends() {
+test "the state comes back when serving with it ends" {
     let served = listen_and_serve_with_in(mem.system(), net.loopback(0), visited, Tally { visits = 7 }, limits: serving(0))
     let kept = match served {
         Ok(tally) => tally.visits,
@@ -1064,7 +1064,7 @@ fn serve_opened[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + I
     }
 }
 
-test fn a_bound_address_that_cannot_be_read_closes_the_listener() {
+test "a bound address that cannot be read closes the listener" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Listen, category = .InvalidDescriptor, code = .None, progress = 0 }
@@ -1082,7 +1082,7 @@ test fn a_bound_address_that_cannot_be_read_closes_the_listener() {
     .Ok(())
 }
 
-test fn serving_reports_an_accept_failure_when_closing_the_listener_fails_too() {
+test "serving reports an accept failure when closing the listener fails too" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
@@ -1093,7 +1093,7 @@ test fn serving_reports_an_accept_failure_when_closing_the_listener_fails_too() 
     .Ok(())
 }
 
-test fn an_announced_server_answers_the_connection_queued_for_it() {
+test "an announced server answers the connection queued for it" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     let client = send(address, health_request)
@@ -1108,7 +1108,7 @@ test fn an_announced_server_answers_the_connection_queued_for_it() {
     .Ok(())
 }
 
-test fn the_shared_state_counts_every_request_from_every_task() {
+test "the shared state counts every request from every task" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let clients = [send(bound, health_request), send(bound, health_request), send(bound, health_request), send(bound, health_request)]
@@ -1130,7 +1130,7 @@ test fn the_shared_state_counts_every_request_from_every_task() {
     .Ok(())
 }
 
-test fn serve_opened_defaults_to_concurrent_worker_execution() {
+test "serve_opened defaults to concurrent worker execution" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let client1 = send(bound, health_request)
@@ -1188,7 +1188,7 @@ fn smallest_arena(limits: Limits) -> UInt64 {
     total
 }
 
-test fn the_default_arena_holds_every_request_the_default_limits_admit() {
+test "the default arena holds every request the default limits admit" {
     let limits = Limits.default()
     testing.assert(limits.request_arena_bytes >= smallest_arena(limits), "the default arena is smaller than the default limits need")?
     .Ok(())
@@ -1198,7 +1198,7 @@ test fn the_default_arena_holds_every_request_the_default_limits_admit() {
 // for those limits: a request line and six header lines at the line limit,
 // two short headers that bring the count to the limit of eight, and a body at
 // the body limit.
-test fn a_request_at_every_limit_is_answered_in_the_smallest_arena() {
+test "a request at every limit is answered in the smallest arena" {
     let limits = Limits { max_line_bytes = 256, max_headers = 8, max_body_bytes = 1024, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 6, line_length: 256)
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a request at every limit was refused")?
@@ -1209,7 +1209,7 @@ test fn a_request_at_every_limit_is_answered_in_the_smallest_arena() {
 // pairs is decoded within the smallest arena, so a route that never reads it
 // still answers. Each pair is 81 letters and `&`, 82 bytes, and the query's
 // 8169 bytes hold 99 of them and a 100th of 51 letters.
-test fn a_query_of_the_most_pairs_is_answered_in_the_smallest_arena() {
+test "a query of the most pairs is answered in the smallest arena" {
     let limits = Limits { max_body_bytes = 8, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 0, line_length: 8192, query_part: query_pair(81))
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a query of the most pairs was refused")?
@@ -1221,7 +1221,7 @@ test fn a_query_of_the_most_pairs_is_answered_in_the_smallest_arena() {
 // each pair is 81 letters and `&`, 82 bytes, and the body's 8169 bytes hold
 // 99 of them and a 100th of 51 letters, exactly as a query's pairs are
 // counted.
-test fn a_form_of_the_most_pairs_is_answered_in_the_smallest_arena() {
+test "a form of the most pairs is answered in the smallest arena" {
     let limits = Limits { max_body_bytes = 8169, ..serving(1) }
     defer let received = served_form_at_limits(limits, query_pair(81))
     testing.assert_eq(received.view(), health_answer, "a form of the most pairs was refused")?
@@ -1230,7 +1230,7 @@ test fn a_form_of_the_most_pairs_is_answered_in_the_smallest_arena() {
 
 // A header after a line at the limit makes the head's text grow past it, and
 // the request is still answered in the smallest arena.
-test fn a_short_header_after_a_long_line_is_answered_in_the_smallest_arena() {
+test "a short header after a long line is answered in the smallest arena" {
     let limits = Limits { max_body_bytes = 8192, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 1, line_length: 8192)
     testing.assert_eq(received.view(), "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nok", "a short header after a long line was refused")?
@@ -1253,7 +1253,7 @@ fn multiplied(left: UInt64, right: UInt64) -> UInt64 {
     left * right
 }
 
-test fn arena_arithmetic_stops_at_the_largest_integer() {
+test "arena arithmetic stops at the largest integer" {
     testing.assert_eq(added(2, 3), UInt64(5), "a sum changed")?
     testing.assert_eq(added(UInt64.max, 1), UInt64.max, "a sum past the largest integer wrapped")?
     testing.assert_eq(multiplied(4, 8), UInt64(32), "a product changed")?
@@ -1264,7 +1264,7 @@ test fn arena_arithmetic_stops_at_the_largest_integer() {
 
 // One pair past `max_query_pairs` is refused with 414 before it is decoded:
 // pairs of 80 letters and `&` fit 100 in the query and a 101st of 69 letters.
-test fn a_query_of_one_pair_too_many_is_refused_with_414() {
+test "a query of one pair too many is refused with 414" {
     let limits = Limits { max_body_bytes = 8, ..serving(1) }
     defer let received = served_at_limits(limits, header_lines: 0, line_length: 8192, query_part: query_pair(80))
     testing.assert(received.starts_with("HTTP/1.1 414 URI Too Long\r\n"), "a query of too many pairs was answered")?
@@ -1279,7 +1279,7 @@ fn query_pair(letters: UInt64) -> Str {
 
 // One pair past `max_form_pairs` is refused with 413 before it is decoded:
 // pairs of 80 letters and `&` fit 100 in the body and a 101st of 69 letters.
-test fn a_form_of_one_pair_too_many_is_refused_with_413() {
+test "a form of one pair too many is refused with 413" {
     let limits = Limits { max_body_bytes = 8169, ..serving(1) }
     defer let received = served_form_at_limits(limits, query_pair(80))
     testing.assert(received.starts_with("HTTP/1.1 413 Content Too Large\r\n"), "a form of too many pairs was answered")?
@@ -1398,7 +1398,7 @@ fn answer_one[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.C
 // An exchange whose handler fills a 1 MiB arena grows it chunk by chunk from
 // the parent, and rewinding the arena once the answer is written gives the
 // parent back every chunk but the first.
-test fn a_rewound_request_arena_keeps_only_its_first_chunk() {
+test "a rewound request arena keeps only its first chunk" {
     var listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), "GET /fill HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
@@ -1566,7 +1566,7 @@ fn linger_wait(read_timeout_ms: UInt64) -> UInt64 {
     read_timeout_ms
 }
 
-test fn a_linger_read_waits_no_longer_than_the_read_timeout() {
+test "a linger read waits no longer than the read timeout" {
     testing.assert_eq(linger_wait(100), 100, "a shorter read timeout was exceeded")?
     testing.assert_eq(linger_wait(5000), 500, "the linger waited past 500 ms")?
     testing.assert_eq(linger_wait(0), 500, "no read timeout let the linger wait forever")?
@@ -1976,7 +1976,7 @@ fn refuse_reading[H: Observer, P: Allocator](sink reader: Reading, inout handler
     .Closed
 }
 
-test fn streaming_body_limits_do_not_reserve_the_body_in_the_arena() {
+test "streaming body limits do not reserve the body in the arena" {
     let limits = Limits { max_body_bytes = UInt64.max, max_form_pairs = UInt64.max, ..serving(0) }
     testing.assert_eq(smallest_arena(limits), smallest_arena(serving(0)), "streaming limits changed metadata storage")?
     let listener = net.listen(net.loopback(0)).unwrap()

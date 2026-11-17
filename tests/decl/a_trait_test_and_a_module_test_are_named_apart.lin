@@ -1,5 +1,5 @@
-// A test inside a trait declaration is named at module scope like every other
-// test, so it does not share a name with a test outside the trait.
+// A module names each of its tests once, so a test inside a trait declaration
+// does not share a name with a test outside the trait.
 import std.testing
 
 trait Counting {
@@ -9,7 +9,7 @@ trait Counting {
         self.count() == 0
     }
 
-    test fn starts_empty() {
+    test "starts empty" {
         let shelf = Shelf { books = 0 }
         testing.assert(shelf.is_empty(), "no books is empty")?
     }
@@ -25,7 +25,7 @@ impl Counting for Shelf {
     }
 }
 
-test fn starts_empty() {
+test "starts empty" {
     let shelf = Shelf { books = 0 }
     testing.assert_eq(shelf.count(), 0, "nothing is shelved")?
 }

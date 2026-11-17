@@ -17,7 +17,7 @@ fn savings_after(months: UInt8, monthly_increment: UInt64 = 1000) -> UInt64 {
         .sum()
 }
 
-test fn savings_accumulate_the_monthly_deposits() {
+test "savings accumulate the monthly deposits" {
     testing.assert_eq(savings_after(0), 0, "no deposits before the first month")?
     testing.assert_eq(savings_after(1), 1000, "the first deposit is 1000 cents")?
     testing.assert_eq(savings_after(3), 6000, "1000 + 2000 + 3000 cents")?

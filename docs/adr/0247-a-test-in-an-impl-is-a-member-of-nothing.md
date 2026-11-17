@@ -1,6 +1,7 @@
 # 247. A test in an inherent `impl` is a member of nothing
 
-Status: Accepted — 2026-10-24
+Status: Accepted — 2026-10-24; namespace clause superseded by
+[0277](0277-a-test-is-named-by-a-string.md)
 
 ## Context
 

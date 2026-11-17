@@ -64,7 +64,7 @@ fn upstream_only(h: Held[Upstream]) -> UInt64 {
 // And it still costs nothing. A `Held` is its `at` and no more, so two tags
 // over one layout stay one layout -- asserted by the sizes agreeing, since a
 // parameter that reached the representation would make them differ.
-test fn a_tag_tells_types_apart_and_costs_no_bytes() -> Result[(), testing.Failure] {
+test "a tag tells types apart and costs no bytes" -> Result[(), testing.Failure] {
     let up: Held[Upstream] = Held.of(7)
     let down: Held[Downstream] = Held.of(9)
 

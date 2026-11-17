@@ -80,7 +80,7 @@ impl Release for Str {
     fn release(sink _self: Self) {}
 }
 
-test fn str_release_preserves_shared_literal_storage() {
+test "str release preserves shared literal storage" {
     let text = "Linea λ"
     Release.release(copy(text))
     testing.assert_eq(text, "Linea λ", "release changed shared text storage")?
@@ -95,7 +95,7 @@ impl Release for Never {
     }
 }
 
-test fn never_release_is_available_to_an_uninhabited_payload() {
+test "never release is available to an uninhabited payload" {
     let empty: Option[Never] = .None
     empty.release()
     .Ok(())
@@ -106,7 +106,7 @@ test fn never_release_is_available_to_an_uninhabited_payload() {
 // implement `Release`.
 pub fn discard[T: Discardable](sink _value: T) {}
 
-test fn discarding_a_copyable_value_runs_nothing() {
+test "discarding a copyable value runs nothing" {
     let octets = [UInt8(10), 0, 0, 1]
     discard(copy(octets))
     testing.assert_eq(octets, [10, 0, 0, 1], "discarding a copy changed the original")?
@@ -141,7 +141,7 @@ impl[T] Release for borrow T {
     fn release(sink _self: Self) {}
 }
 
-test fn releasing_an_observation_leaves_its_owner_available() {
+test "releasing an observation leaves its owner available" {
     let owner = ObservedWithoutRelease { number = 7 }
     let observation = borrow owner
     observation.release()

@@ -50,11 +50,11 @@ trait Gauge {
         self.size() * 2
     }
 
-    test fn twice_doubles_a_reading() {
+    test "twice doubles a reading" {
         check()
     }
 
-    test trap fn twice_past_the_largest_reading_traps() {
+    test trap "twice past the largest reading traps" {
         check()
     }
 }
@@ -87,17 +87,15 @@ trait Gauge {
                 field: (identifier))
               (argument_list))
             (integer_literal)))))
-    (function_declaration
-      name: (identifier)
-      (parameter_list)
+    (test_declaration
+      name: (string_literal)
       body: (block
         (expression_statement
           (call_expression
             callee: (identifier)
             (argument_list)))))
-    (function_declaration
-      name: (identifier)
-      (parameter_list)
+    (test_declaration
+      name: (string_literal)
       body: (block
         (expression_statement
           (call_expression

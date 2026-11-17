@@ -5,17 +5,17 @@ import std.testing
 trait Starting {
     fn start() -> Self
 
-    test fn self_in_an_annotation() {
+    test "self in an annotation" {
         let gauge: Self = Gauge.start()
         testing.assert_eq(gauge.level, 1, "a gauge starts at one")?
     }
 
-    test fn self_before_a_call() {
+    test "self before a call" {
         let gauge = Self.start()
         testing.assert_eq(gauge.level, 1, "a gauge starts at one")?
     }
 
-    test fn self_in_a_pattern() {
+    test "self in a pattern" {
         let Self { level } = Gauge.start()
         testing.assert_eq(level, 1, "a gauge starts at one")?
     }

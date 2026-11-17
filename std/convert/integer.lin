@@ -17,7 +17,7 @@ impl[Source: Integer, Target: Integer] TryFrom[Source] for Target {
 
 // Each source/target pair checks shared endpoints and interior values, plus
 // source extremes and adjacent target values where they fall outside the range.
-test fn int8_to_int16_preserves_exact_values_and_checks_bounds() {
+test "int8 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(Int8(-128))
     testing.assert_eq(lower, Option.Some(Int16(-128)), "lower accepted value changed")?
     let interior = Int16.try_from(Int8(-1))
@@ -27,7 +27,7 @@ test fn int8_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_int16_preserves_exact_values_and_checks_bounds() {
+test "int32 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(Int32(-32768))
     testing.assert_eq(lower, Option.Some(Int16(-32768)), "lower accepted value changed")?
     let interior = Int16.try_from(Int32(-1))
@@ -57,7 +57,7 @@ test fn int32_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_int16_preserves_exact_values_and_checks_bounds() {
+test "int64 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(Int64(-32768))
     testing.assert_eq(lower, Option.Some(Int16(-32768)), "lower accepted value changed")?
     let interior = Int16.try_from(Int64(-1))
@@ -87,7 +87,7 @@ test fn int64_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_int16_preserves_exact_values_and_checks_bounds() {
+test "uint8 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
     let interior = Int16.try_from(UInt8(1))
@@ -97,7 +97,7 @@ test fn uint8_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_int16_preserves_exact_values_and_checks_bounds() {
+test "uint16 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
     let interior = Int16.try_from(UInt16(1))
@@ -117,7 +117,7 @@ test fn uint16_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_int16_preserves_exact_values_and_checks_bounds() {
+test "uint32 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
     let interior = Int16.try_from(UInt32(1))
@@ -137,7 +137,7 @@ test fn uint32_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_int16_preserves_exact_values_and_checks_bounds() {
+test "uint64 to int16 preserves exact values and checks bounds" {
     let lower = Int16.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(Int16(0)), "lower accepted value changed")?
     let interior = Int16.try_from(UInt64(1))
@@ -157,7 +157,7 @@ test fn uint64_to_int16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_to_int32_preserves_exact_values_and_checks_bounds() {
+test "int8 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(Int8(-128))
     testing.assert_eq(lower, Option.Some(Int32(-128)), "lower accepted value changed")?
     let interior = Int32.try_from(Int8(-1))
@@ -167,7 +167,7 @@ test fn int8_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_int32_preserves_exact_values_and_checks_bounds() {
+test "int16 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(Int16(-32768))
     testing.assert_eq(lower, Option.Some(Int32(-32768)), "lower accepted value changed")?
     let interior = Int32.try_from(Int16(-1))
@@ -177,7 +177,7 @@ test fn int16_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_int32_preserves_exact_values_and_checks_bounds() {
+test "int64 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(Int64(-2147483648))
     testing.assert_eq(lower, Option.Some(Int32(-2147483648)), "lower accepted value changed")?
     let interior = Int32.try_from(Int64(-1))
@@ -207,7 +207,7 @@ test fn int64_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_int32_preserves_exact_values_and_checks_bounds() {
+test "uint8 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
     let interior = Int32.try_from(UInt8(1))
@@ -217,7 +217,7 @@ test fn uint8_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_int32_preserves_exact_values_and_checks_bounds() {
+test "uint16 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
     let interior = Int32.try_from(UInt16(1))
@@ -227,7 +227,7 @@ test fn uint16_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_int32_preserves_exact_values_and_checks_bounds() {
+test "uint32 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
     let interior = Int32.try_from(UInt32(1))
@@ -247,7 +247,7 @@ test fn uint32_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_int32_preserves_exact_values_and_checks_bounds() {
+test "uint64 to int32 preserves exact values and checks bounds" {
     let lower = Int32.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(Int32(0)), "lower accepted value changed")?
     let interior = Int32.try_from(UInt64(1))
@@ -267,7 +267,7 @@ test fn uint64_to_int32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_to_int64_preserves_exact_values_and_checks_bounds() {
+test "int8 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(Int8(-128))
     testing.assert_eq(lower, Option.Some(Int64(-128)), "lower accepted value changed")?
     let interior = Int64.try_from(Int8(-1))
@@ -277,7 +277,7 @@ test fn int8_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_int64_preserves_exact_values_and_checks_bounds() {
+test "int16 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(Int16(-32768))
     testing.assert_eq(lower, Option.Some(Int64(-32768)), "lower accepted value changed")?
     let interior = Int64.try_from(Int16(-1))
@@ -287,7 +287,7 @@ test fn int16_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_int64_preserves_exact_values_and_checks_bounds() {
+test "int32 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(Int32(-2147483648))
     testing.assert_eq(lower, Option.Some(Int64(-2147483648)), "lower accepted value changed")?
     let interior = Int64.try_from(Int32(-1))
@@ -297,7 +297,7 @@ test fn int32_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_int64_preserves_exact_values_and_checks_bounds() {
+test "uint8 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
     let interior = Int64.try_from(UInt8(1))
@@ -307,7 +307,7 @@ test fn uint8_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_int64_preserves_exact_values_and_checks_bounds() {
+test "uint16 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
     let interior = Int64.try_from(UInt16(1))
@@ -317,7 +317,7 @@ test fn uint16_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_int64_preserves_exact_values_and_checks_bounds() {
+test "uint32 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
     let interior = Int64.try_from(UInt32(1))
@@ -327,7 +327,7 @@ test fn uint32_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_int64_preserves_exact_values_and_checks_bounds() {
+test "uint64 to int64 preserves exact values and checks bounds" {
     let lower = Int64.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(Int64(0)), "lower accepted value changed")?
     let interior = Int64.try_from(UInt64(1))
@@ -348,7 +348,7 @@ test fn uint64_to_int64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_int8_preserves_exact_values_and_checks_bounds() {
+test "int16 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(Int16(-128))
     testing.assert_eq(lower, Option.Some(Int8(-128)), "lower accepted value changed")?
     let interior = Int8.try_from(Int16(-1))
@@ -378,7 +378,7 @@ test fn int16_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_int8_preserves_exact_values_and_checks_bounds() {
+test "int32 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(Int32(-128))
     testing.assert_eq(lower, Option.Some(Int8(-128)), "lower accepted value changed")?
     let interior = Int8.try_from(Int32(-1))
@@ -408,7 +408,7 @@ test fn int32_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_int8_preserves_exact_values_and_checks_bounds() {
+test "int64 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(Int64(-128))
     testing.assert_eq(lower, Option.Some(Int8(-128)), "lower accepted value changed")?
     let interior = Int8.try_from(Int64(-1))
@@ -438,7 +438,7 @@ test fn int64_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_int8_preserves_exact_values_and_checks_bounds() {
+test "uint8 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
     let interior = Int8.try_from(UInt8(1))
@@ -458,7 +458,7 @@ test fn uint8_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_int8_preserves_exact_values_and_checks_bounds() {
+test "uint16 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
     let interior = Int8.try_from(UInt16(1))
@@ -478,7 +478,7 @@ test fn uint16_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_int8_preserves_exact_values_and_checks_bounds() {
+test "uint32 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
     let interior = Int8.try_from(UInt32(1))
@@ -498,7 +498,7 @@ test fn uint32_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_int8_preserves_exact_values_and_checks_bounds() {
+test "uint64 to int8 preserves exact values and checks bounds" {
     let lower = Int8.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(Int8(0)), "lower accepted value changed")?
     let interior = Int8.try_from(UInt64(1))
@@ -518,7 +518,7 @@ test fn uint64_to_int8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "int8 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(Int8(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(Int8(1))
@@ -538,7 +538,7 @@ test fn int8_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "int16 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(Int16(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(Int16(1))
@@ -558,7 +558,7 @@ test fn int16_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "int32 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(Int32(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(Int32(1))
@@ -588,7 +588,7 @@ test fn int32_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "int64 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(Int64(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(Int64(1))
@@ -618,7 +618,7 @@ test fn int64_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "uint8 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(UInt8(1))
@@ -628,7 +628,7 @@ test fn uint8_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "uint32 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(UInt32(1))
@@ -648,7 +648,7 @@ test fn uint32_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_uint16_preserves_exact_values_and_checks_bounds() {
+test "uint64 to uint16 preserves exact values and checks bounds" {
     let lower = UInt16.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(UInt16(0)), "lower accepted value changed")?
     let interior = UInt16.try_from(UInt64(1))
@@ -668,7 +668,7 @@ test fn uint64_to_uint16_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "int8 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(Int8(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(Int8(1))
@@ -688,7 +688,7 @@ test fn int8_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "int16 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(Int16(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(Int16(1))
@@ -708,7 +708,7 @@ test fn int16_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "int32 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(Int32(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(Int32(1))
@@ -728,7 +728,7 @@ test fn int32_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "int64 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(Int64(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(Int64(1))
@@ -758,7 +758,7 @@ test fn int64_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "uint8 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(UInt8(1))
@@ -768,7 +768,7 @@ test fn uint8_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "uint16 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(UInt16(1))
@@ -778,7 +778,7 @@ test fn uint16_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_uint32_preserves_exact_values_and_checks_bounds() {
+test "uint64 to uint32 preserves exact values and checks bounds" {
     let lower = UInt32.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(UInt32(0)), "lower accepted value changed")?
     let interior = UInt32.try_from(UInt64(1))
@@ -798,7 +798,7 @@ test fn uint64_to_uint32_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "int8 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(Int8(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(Int8(1))
@@ -818,7 +818,7 @@ test fn int8_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "int16 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(Int16(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(Int16(1))
@@ -838,7 +838,7 @@ test fn int16_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "int32 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(Int32(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(Int32(1))
@@ -858,7 +858,7 @@ test fn int32_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "int64 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(Int64(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(Int64(1))
@@ -878,7 +878,7 @@ test fn int64_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint8_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "uint8 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(UInt8(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(UInt8(1))
@@ -888,7 +888,7 @@ test fn uint8_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "uint16 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(UInt16(1))
@@ -898,7 +898,7 @@ test fn uint16_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_uint64_preserves_exact_values_and_checks_bounds() {
+test "uint32 to uint64 preserves exact values and checks bounds" {
     let lower = UInt64.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(UInt64(0)), "lower accepted value changed")?
     let interior = UInt64.try_from(UInt32(1))
@@ -908,7 +908,7 @@ test fn uint32_to_uint64_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "int8 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(Int8(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(Int8(1))
@@ -928,7 +928,7 @@ test fn int8_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int16_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "int16 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(Int16(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(Int16(1))
@@ -958,7 +958,7 @@ test fn int16_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int32_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "int32 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(Int32(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(Int32(1))
@@ -988,7 +988,7 @@ test fn int32_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int64_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "int64 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(Int64(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(Int64(1))
@@ -1018,7 +1018,7 @@ test fn int64_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint16_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "uint16 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(UInt16(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(UInt16(1))
@@ -1038,7 +1038,7 @@ test fn uint16_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint32_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "uint32 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(UInt32(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(UInt32(1))
@@ -1058,7 +1058,7 @@ test fn uint32_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn uint64_to_uint8_preserves_exact_values_and_checks_bounds() {
+test "uint64 to uint8 preserves exact values and checks bounds" {
     let lower = UInt8.try_from(UInt64(0))
     testing.assert_eq(lower, Option.Some(UInt8(0)), "lower accepted value changed")?
     let interior = UInt8.try_from(UInt64(1))
@@ -1078,7 +1078,7 @@ test fn uint64_to_uint8_preserves_exact_values_and_checks_bounds() {
     .Ok(())
 }
 
-test fn int8_identity_conversion_preserves_its_range() {
+test "int8 identity conversion preserves its range" {
     let lower = Int8.try_from(Int8.min)
     testing.assert_eq(lower, Option.Some(Int8.min), "identity conversion changed the minimum")?
     let zero = Int8.try_from(Int8(0))
@@ -1088,7 +1088,7 @@ test fn int8_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn int16_identity_conversion_preserves_its_range() {
+test "int16 identity conversion preserves its range" {
     let lower = Int16.try_from(Int16.min)
     testing.assert_eq(lower, Option.Some(Int16.min), "identity conversion changed the minimum")?
     let zero = Int16.try_from(Int16(0))
@@ -1098,7 +1098,7 @@ test fn int16_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn int32_identity_conversion_preserves_its_range() {
+test "int32 identity conversion preserves its range" {
     let lower = Int32.try_from(Int32.min)
     testing.assert_eq(lower, Option.Some(Int32.min), "identity conversion changed the minimum")?
     let zero = Int32.try_from(Int32(0))
@@ -1108,7 +1108,7 @@ test fn int32_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn int64_identity_conversion_preserves_its_range() {
+test "int64 identity conversion preserves its range" {
     let lower = Int64.try_from(Int64.min)
     testing.assert_eq(lower, Option.Some(Int64.min), "identity conversion changed the minimum")?
     let zero = Int64.try_from(Int64(0))
@@ -1118,7 +1118,7 @@ test fn int64_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn uint8_identity_conversion_preserves_its_range() {
+test "uint8 identity conversion preserves its range" {
     let lower = UInt8.try_from(UInt8.min)
     testing.assert_eq(lower, Option.Some(UInt8.min), "identity conversion changed the minimum")?
     let zero = UInt8.try_from(UInt8(0))
@@ -1128,7 +1128,7 @@ test fn uint8_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn uint16_identity_conversion_preserves_its_range() {
+test "uint16 identity conversion preserves its range" {
     let lower = UInt16.try_from(UInt16.min)
     testing.assert_eq(lower, Option.Some(UInt16.min), "identity conversion changed the minimum")?
     let zero = UInt16.try_from(UInt16(0))
@@ -1138,7 +1138,7 @@ test fn uint16_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn uint32_identity_conversion_preserves_its_range() {
+test "uint32 identity conversion preserves its range" {
     let lower = UInt32.try_from(UInt32.min)
     testing.assert_eq(lower, Option.Some(UInt32.min), "identity conversion changed the minimum")?
     let zero = UInt32.try_from(UInt32(0))
@@ -1148,7 +1148,7 @@ test fn uint32_identity_conversion_preserves_its_range() {
     .Ok(())
 }
 
-test fn uint64_identity_conversion_preserves_its_range() {
+test "uint64 identity conversion preserves its range" {
     let lower = UInt64.try_from(UInt64.min)
     testing.assert_eq(lower, Option.Some(UInt64.min), "identity conversion changed the minimum")?
     let zero = UInt64.try_from(UInt64(0))

@@ -1,0 +1,10 @@
+error[S-Test]: a test's name is not empty
+ --> tests/decl/a_refused_test_name_names_no_test.lin:5:6
+  |
+5 | test "" {
+  |      ^^ say what the test checks; `linea test` prints this name and `--filter` matches it
+error[S-Test]: a test's name is not empty
+ --> tests/decl/a_refused_test_name_names_no_test.lin:9:6
+  |
+9 | test r"" {
+  |      ^^^ say what the test checks; `linea test` prints this name and `--filter` matches it

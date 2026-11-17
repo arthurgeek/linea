@@ -13,7 +13,7 @@ fn system_allocator_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
     true
 }
 
-test fn derived_system_allocator_equality_compares_its_case() {
+test "derived system allocator equality compares its case" {
     let allocator: SystemAllocator = .System
     let same: SystemAllocator = .System
     testing.assert(allocator.equals(same), "system allocators differed")?
@@ -21,7 +21,7 @@ test fn derived_system_allocator_equality_compares_its_case() {
     .Ok(())
 }
 
-test fn derived_system_allocator_debug_renders_its_case() {
+test "derived system allocator debug renders its case" {
     let allocator: SystemAllocator = .System
     var writer = testing.Recorder.of(64).unwrap()
     let wrote = "{allocator:?}".fmt(&writer).is_ok()
@@ -37,7 +37,7 @@ pub fn system() -> SystemAllocator {
     .System
 }
 
-test fn one_handle_serves_more_than_one_allocation() {
+test "one handle serves more than one allocation" {
     let a = system()
 
     match a.acquire(16) {

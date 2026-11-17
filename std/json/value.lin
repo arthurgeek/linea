@@ -131,7 +131,7 @@ impl Value[mem.SystemAllocator] {
         Value.null_in(mem.system())
     }
 
-    test fn null_makes_a_null_value_in_the_system_allocator() {
+    test "null makes a null value in the system allocator" {
         defer let null = Value.null()
         testing.assert_eq(null.kind(), Kind.Null, "null constructor changed kind")?
     }
@@ -141,7 +141,7 @@ impl Value[mem.SystemAllocator] {
         Value.boolean_in(mem.system(), value)
     }
 
-    test fn boolean_makes_a_boolean_value_in_the_system_allocator() {
+    test "boolean makes a boolean value in the system allocator" {
         defer let boolean = Value.boolean(false)
         testing.assert_eq(boolean.as_bool(), Option.Some(false), "boolean snapshot changed")?
     }
@@ -152,7 +152,7 @@ impl Value[mem.SystemAllocator] {
         Value.array_in(mem.system())
     }
 
-    test fn array_makes_an_empty_array_in_the_system_allocator() {
+    test "array makes an empty array in the system allocator" {
         defer let array = Value.array()
         testing.assert_eq(array.elements().unwrap().length(), UInt64(0), "empty array contained children")?
     }
@@ -163,7 +163,7 @@ impl Value[mem.SystemAllocator] {
         Value.object_in(mem.system())
     }
 
-    test fn object_makes_an_empty_object_in_the_system_allocator() {
+    test "object makes an empty object in the system allocator" {
         defer let object = Value.object()
         testing.assert(object.get("missing").is_none(), "empty object contained a member")?
     }
@@ -173,12 +173,12 @@ impl Value[mem.SystemAllocator] {
         Value.string_in(mem.system(), input)
     }
 
-    test fn string_copies_its_text_into_the_system_allocator() {
+    test "string copies its text into the system allocator" {
         defer let string = Value.string("tea").unwrap()
         testing.assert_eq(string.as_str().unwrap(), "tea", "string changed its text")?
     }
 
-    test fn string_values_own_their_text() {
+    test "string values own their text" {
         let source = "tea".to_owned().unwrap()
         let string = Value.string(source.view()).unwrap()
         source.release()
@@ -192,7 +192,7 @@ impl Value[mem.SystemAllocator] {
         Value.number_in(mem.system(), input)
     }
 
-    test fn number_keeps_its_spelling_in_the_system_allocator() {
+    test "number keeps its spelling in the system allocator" {
         defer let number = Value.number("2.50").unwrap()
         testing.assert_eq(number.number_text().unwrap(), "2.50", "number lost its spelling")?
     }
@@ -203,12 +203,12 @@ impl Value[mem.SystemAllocator] {
         Value.from_int_in(mem.system(), value)
     }
 
-    test fn from_int_makes_a_number_value_in_the_system_allocator() {
+    test "from_int makes a number value in the system allocator" {
         defer let signed = Value.from_int(-7).unwrap()
         testing.assert_eq(signed.as_int64().unwrap(), Int64(-7), "signed constructor changed its value")?
     }
 
-    test fn from_int_makes_a_number_value() {
+    test "from_int makes a number value" {
         defer let signed = Value.from_int(Int64.min).unwrap()
         testing.assert_eq(signed.as_int64().unwrap(), Int64.min, "signed constructor changed its value")?
     }
@@ -219,12 +219,12 @@ impl Value[mem.SystemAllocator] {
         Value.from_uint_in(mem.system(), value)
     }
 
-    test fn from_uint_makes_a_number_value_in_the_system_allocator() {
+    test "from_uint makes a number value in the system allocator" {
         defer let unsigned = Value.from_uint(7).unwrap()
         testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64(7), "unsigned constructor changed its value")?
     }
 
-    test fn from_uint_makes_a_number_value() {
+    test "from_uint makes a number value" {
         defer let unsigned = Value.from_uint(UInt64.max).unwrap()
         testing.assert_eq(unsigned.as_uint64().unwrap(), UInt64.max, "unsigned constructor changed its value")?
     }
@@ -236,7 +236,7 @@ impl[A: Allocator] Value[A] {
         .{ node = .Null, height = 0, allocator = copy(allocator) }
     }
 
-    test fn null_makes_a_null_value_without_allocating() {
+    test "null makes a null value without allocating" {
         defer let arena = mem.Arena.open(mem.system(), 0)
         defer let null = Value.null_in(arena.handle())
         testing.assert_eq(null.kind(), Kind.Null, "null constructor changed kind")?
@@ -248,7 +248,7 @@ impl[A: Allocator] Value[A] {
         .{ node = .Boolean(value), height = 0, allocator = copy(allocator) }
     }
 
-    test fn boolean_makes_a_boolean_value_without_allocating() {
+    test "boolean makes a boolean value without allocating" {
         defer let arena = mem.Arena.open(mem.system(), 0)
         defer let boolean = Value.boolean_in(arena.handle(), true)
         testing.assert_eq(boolean.as_bool(), Option.Some(true), "boolean snapshot changed")?
@@ -260,7 +260,7 @@ impl[A: Allocator] Value[A] {
         .{ node = .Array(Vec.new_in(allocator)), height = 1, allocator = copy(allocator) }
     }
 
-    test fn array_makes_an_empty_array_without_allocating() {
+    test "array makes an empty array without allocating" {
         defer let arena = mem.Arena.open(mem.system(), 0)
         defer let array = Value.array_in(arena.handle())
         testing.assert_eq(array.elements().unwrap().length(), UInt64(0), "empty array contained children")?
@@ -272,7 +272,7 @@ impl[A: Allocator] Value[A] {
         .{ node = .Object(collections.Map.new_in(allocator)), height = 1, allocator = copy(allocator) }
     }
 
-    test fn object_makes_an_empty_object_without_allocating() {
+    test "object makes an empty object without allocating" {
         defer let arena = mem.Arena.open(mem.system(), 0)
         defer let object = Value.object_in(arena.handle())
         testing.assert(object.get("missing").is_none(), "empty object contained a member")?
@@ -292,7 +292,7 @@ impl[A: Allocator] Value[A] {
         .Ok(value_from_number(allocator, owned))
     }
 
-    test fn number_values_keep_their_spelling_and_refuse_other_text() {
+    test "number values keep their spelling and refuse other text" {
         defer let arena = mem.Arena.open(mem.system(), 64)
         defer let number = Value.number_in(arena.handle(), "1.00").unwrap()
         testing.assert_eq(number.number_text().unwrap(), "1.00", "number lost its spelling")?
@@ -330,7 +330,7 @@ impl[A: Allocator] Value[A] {
         }
     }
 
-    test fn kind_names_every_kind_of_value() {
+    test "kind names every kind of value" {
         defer let null = Value.null()
         defer let flag = Value.boolean(false)
         defer let number = Value.from_uint(1).unwrap()
@@ -350,7 +350,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Boolean(value) => .Some(value), _ => .None }
     }
 
-    test fn as_bool_reads_only_a_boolean() {
+    test "as_bool reads only a boolean" {
         defer let flag = Value.boolean(false)
         defer let text = Value.string("false").unwrap()
         testing.assert_eq(flag.as_bool(), Option.Some(false), "a boolean lost its flag")?
@@ -362,7 +362,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { String(value) => .Some(value.view()), _ => .None }
     }
 
-    test fn as_str_reads_only_a_string() {
+    test "as_str reads only a string" {
         defer let text = Value.string("tea").unwrap()
         defer let number = Value.number("7").unwrap()
         testing.assert_eq(text.as_str(), Option.Some("tea"), "a string lost its text")?
@@ -375,7 +375,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Number(value) => .Some(value.text()), _ => .None }
     }
 
-    test fn number_text_reads_only_a_number() {
+    test "number_text reads only a number" {
         defer let number = Value.number("-2.50e1").unwrap()
         defer let text = Value.string("-2.50e1").unwrap()
         testing.assert_eq(number.number_text(), Option.Some("-2.50e1"), "a number token changed")?
@@ -388,7 +388,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Number(value) => value.as_int64(), _ => .Err(.WrongKind) }
     }
 
-    test fn as_int64_reads_a_number_value_and_refuses_other_kinds() {
+    test "as_int64 reads a number value and refuses other kinds" {
         defer let number = Value.from_int(-12).unwrap()
         defer let text = Value.string("-12").unwrap()
         testing.assert_eq(number.as_int64(), .Ok(Int64(-12)), "a signed value changed")?
@@ -401,7 +401,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Number(value) => value.as_uint64(), _ => .Err(.WrongKind) }
     }
 
-    test fn as_uint64_reads_a_number_value_and_refuses_other_kinds() {
+    test "as_uint64 reads a number value and refuses other kinds" {
         defer let number = Value.from_uint(12).unwrap()
         defer let flag = Value.boolean(true)
         testing.assert_eq(number.as_uint64(), .Ok(UInt64(12)), "an unsigned value changed")?
@@ -414,7 +414,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Number(value) => value.as_float64(), _ => .Err(.WrongKind) }
     }
 
-    test fn float_observations_are_independent_of_the_document() {
+    test "float observations are independent of the document" {
         let document = Value.number("1.25e2").unwrap()
         let value = document.as_float64().unwrap()
         document.release()
@@ -428,7 +428,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Array(values) => .Some(values.as_slice()), _ => .None }
     }
 
-    test fn elements_borrow_only_an_arrays_children() {
+    test "elements borrow only an arrays children" {
         defer var array = Value.array()
         &array.append(Value.boolean(true)).unwrap()
         defer let object = Value.object()
@@ -441,7 +441,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Object(values) => .Some(values.entries()), _ => .None }
     }
 
-    test fn members_walk_only_an_objects_entries() {
+    test "members walk only an objects entries" {
         defer var object = Value.object()
         &object.insert("a", Value.null()).unwrap().release()
         &object.insert("b", Value.null()).unwrap().release()
@@ -457,7 +457,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Object(values) => values.get(key), _ => .None }
     }
 
-    test fn get_finds_a_member_by_name_without_retaining_the_query() {
+    test "get finds a member by name without retaining the query" {
         defer var object = Value.object()
         &object.insert("tea", Value.string("green").unwrap()).unwrap().release()
         let query = "tea".to_owned().unwrap()
@@ -475,7 +475,7 @@ impl[A: Allocator] Value[A] {
         match read self.node { Array(values) => values.as_slice().get(index), _ => .None }
     }
 
-    test fn at_finds_an_element_by_position() {
+    test "at finds an element by position" {
         defer var array = Value.array()
         &array.append(Value.boolean(true)).unwrap()
         &array.append(Value.string("tea").unwrap()).unwrap()
@@ -515,7 +515,7 @@ impl[A: Allocator] Value[A] {
         }
     }
 
-    test fn refused_mutations_return_the_complete_incoming_owner() {
+    test "refused mutations return the complete incoming owner" {
         defer var scalar = Value.null()
         let failure = match &scalar.append(Value.string("kept").unwrap()) {
             Err(failure) => failure,
@@ -536,7 +536,7 @@ impl[A: Allocator] Value[A] {
         testing.assert(wrong_kind, "wrong-kind removal looked like absence")?
     }
 
-    test fn array_allocation_refusal_preserves_the_incoming_value() {
+    test "array allocation refusal preserves the incoming value" {
         defer let empty = mem.Arena.open(mem.system(), 0)
         defer let storage = mem.Arena.open(mem.system(), 1024)
         defer var array = Value.array_in(empty.handle())
@@ -615,7 +615,7 @@ impl[A: Allocator] Value[A] {
         }
     }
 
-    test fn insert_replaces_a_member_and_returns_the_previous_value() {
+    test "insert replaces a member and returns the previous value" {
         defer var object = Value.object()
         &object.insert("tea", Value.boolean(false)).unwrap().release()
         defer let replaced = &object.insert("tea", Value.string("green").unwrap()).unwrap().unwrap()
@@ -623,7 +623,7 @@ impl[A: Allocator] Value[A] {
         testing.assert_eq(object.get("tea").unwrap().as_str().unwrap(), "green", "replacement lost the new value")?
     }
 
-    test fn wrong_kind_insertion_returns_the_complete_subtree() {
+    test "wrong kind insertion returns the complete subtree" {
         defer var array = Value.array()
         &array.append(Value.boolean(true)).unwrap()
         var incoming = Value.object()
@@ -649,7 +649,7 @@ impl[A: Allocator] Value[A] {
         testing.assert(wrong_kind, "object element removal looked like absence")?
     }
 
-    test fn attachment_enforces_depth_and_recomputes_height_after_removal() {
+    test "attachment enforces depth and recomputes height after removal" {
         let allocator = mem.system()
         defer let child = depth_test_value(allocator, hard_depth)
         testing.assert_eq(child.height, hard_depth, "maximum-depth construction lost its height")?
@@ -668,7 +668,7 @@ impl[A: Allocator] Value[A] {
         testing.assert_eq(parent.height, UInt64(1), "removing the tallest child kept a stale height")?
     }
 
-    test fn replacement_reuses_the_stored_key_with_an_exhausted_allocator() {
+    test "replacement reuses the stored key with an exhausted allocator" {
         defer let arena = mem.Arena.open(mem.system(), 4096)
         let allocator = arena.handle()
         defer var object = Value.object_in(allocator)
@@ -696,7 +696,7 @@ impl[A: Allocator] Value[A] {
         testing.assert(object.get("key").is_none(), "removal kept its exhausted-allocator member")?
     }
 
-    test fn member_limit_refuses_new_names_and_allows_replacement() {
+    test "member limit refuses new names and allows replacement" {
         let allocator = mem.system()
         defer var object = Value.object()
         for index in UInt64(0)..hard_object_members {
@@ -719,7 +719,7 @@ impl[A: Allocator] Value[A] {
         testing.assert_eq(object.get("0").unwrap().as_bool(), Option.Some(true), "member cap refused replacement")?
     }
 
-    test fn height_tracks_repeated_maxima_and_replacement_of_the_last_tall_child() {
+    test "height tracks repeated maxima and replacement of the last tall child" {
         defer var object = Value.object()
         var first = Value.array()
         &first.append(Value.array()).unwrap()
@@ -740,7 +740,7 @@ impl[A: Allocator] Value[A] {
     // after the destination is built, and checks that each refusal is reported as
     // an allocation failure that returns the incoming value and leaves the
     // destination unchanged.
-    test fn json_mutation_allocation_refusals_preserve_destinations_and_return_subtrees() {
+    test "json mutation allocation refusals preserve destinations and return subtrees" {
         for object in [false, true] {
             var mutation_attempts: UInt64 = 1
             var refusal: UInt64 = 0
@@ -809,7 +809,7 @@ impl[A: Allocator] Value[A] {
         }
     }
 
-    test fn json_replacement_and_removal_transfer_owners_without_allocation() {
+    test "json replacement and removal transfer owners without allocation" {
         defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
         let allocator = log.allocator()
         defer var destination = json_mutation_destination(allocator, true)
@@ -843,7 +843,7 @@ impl[A: Allocator] Value[A] {
         .Ok(removed)
     }
 
-    test fn arrays_transfer_children_and_preserve_order_after_removal() {
+    test "arrays transfer children and preserve order after removal" {
         defer var array = Value.array()
         &array.append(Value.boolean(true)).unwrap()
         &array.append(Value.string("tea").unwrap()).unwrap()
@@ -858,7 +858,7 @@ impl[A: Allocator] Value[A] {
         testing.assert_eq(array.height, UInt64(1), "scalar array height changed")?
     }
 
-    test fn array_height_tracks_repeated_maxima_and_absent_removal() {
+    test "array_height tracks repeated maxima and absent removal" {
         let allocator = mem.system()
         defer var array = Value.array()
         &array.append(depth_test_value(allocator, 2)).unwrap()
@@ -899,7 +899,7 @@ impl[A: Allocator] Value[A] {
         }
     }
 
-    test fn remove_member_returns_the_stored_value_and_forgets_its_name() {
+    test "remove_member returns the stored value and forgets its name" {
         defer var object = Value.object()
         &object.insert("tea", Value.string("green").unwrap()).unwrap().release()
         defer let removed = &object.remove_member("tea").unwrap().unwrap()
@@ -927,7 +927,7 @@ impl[A: Allocator] Release for Value[A] {
     }
 }
 
-test fn releasing_a_recursive_document_settles_both_allocator_owners() {
+test "releasing a recursive document settles both allocator owners" {
     let first = mem.Arena.open(mem.system(), 4096)
     let second = mem.Arena.open(mem.system(), 4096)
     var root = Value.array_in(first.handle())

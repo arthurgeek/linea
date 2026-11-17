@@ -95,7 +95,7 @@ fn refused_router() -> Result[Router[()], Unopened] {
     .Err(.NoDatabase)
 }
 
-test fn a_handler_is_made_as_itself_and_a_result_as_what_it_holds() {
+test "a handler is made as itself and a result as what it holds" {
     defer var made = made_by(greeting_router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var nothing = ()
@@ -118,7 +118,7 @@ fn greeting[P: Allocator](inout _: (), request: Request[P], inout _body: Request
     text(request, "hello")
 }
 
-test fn a_route_returning_a_response_is_registered_and_answers() {
+test "a route returning a response is registered and answers" {
     defer var router: Router[()] = Router.new()
     &router.route_raw("GET /hello", greeting).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)

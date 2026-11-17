@@ -108,7 +108,7 @@ impl Writer for Disk {
     }
 }
 
-test fn settings_output_stops_at_the_first_writer_error() {
+test "settings output stops at the first writer error" {
     defer let settings: Settings = json.decode(r#"{"name":"catalog","ports":[8080]}"#).unwrap()
     // One byte of room takes the opening `{`, and the next write does not fit.
     var disk = Disk { free = 1, attempts = 0 }
@@ -118,7 +118,7 @@ test fn settings_output_stops_at_the_first_writer_error() {
     testing.assert_eq(settings.name.view(), "catalog", "output failure changed the settings")?
 }
 
-test fn settings_own_fields_after_input_is_released() {
+test "settings own fields after input is released" {
     let source = r#"{"name":"catalog","ports":[8080]}"#.to_owned().unwrap()
     let parsed: Result[Settings, json.DecodeError] = json.decode(source.view())
     source.release()
@@ -129,7 +129,7 @@ test fn settings_own_fields_after_input_is_released() {
     testing.assert(validate(settings).is_ok(), "valid settings failed validation")?
 }
 
-test fn settings_report_the_nested_field_that_failed() {
+test "settings report the nested field that failed" {
     let parsed: Result[Settings, json.DecodeError] = json.decode(r#"{"name":"catalog","ports":[8080,"https"]}"#)
     defer let error = match parsed {
         Err(error) => error,

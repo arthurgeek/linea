@@ -3,6 +3,7 @@
 
 (function_declaration body: (block) @function.inside) @function.around
 (provided_operation body: (block) @function.inside) @function.around
+(test_declaration body: (block) @test.inside) @test.around
 (lambda_expression body: (_) @function.inside) @function.around
 
 (enum_declaration)   @class.around

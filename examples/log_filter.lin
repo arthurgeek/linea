@@ -17,7 +17,7 @@ fn severity(line: Str) -> Option[UInt64] {
     .Some(value)
 }
 
-test fn log_severity_requires_a_complete_numeric_field() {
+test "log severity requires a complete numeric field" {
     testing.assert_eq(severity("42 service ready"), .Some(42), "severity was not parsed")?
     testing.assert_eq(severity("4x bad field"), .None, "a partial number was accepted")?
     testing.assert_eq(severity("42"), .None, "a record without a message separator was accepted")?

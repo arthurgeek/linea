@@ -36,7 +36,7 @@ impl Hasher {
         .{ low = initial_digest, high = 0 }
     }
 
-    test fn hasher_new_starts_with_an_empty_stream() {
+    test "hasher new starts with an empty stream" {
         let first = Hasher.new()
         let second = Hasher.new()
         let empty_digest: UInt64 = 5381
@@ -53,7 +53,7 @@ impl Hasher {
         self.low = product % limb_base
     }
 
-    test fn hasher_write_byte_preserves_byte_extremes_and_limb_carries() {
+    test "hasher write_byte preserves byte extremes and limb carries" {
         var zero = Hasher.new()
         &zero.write_byte(0)
         let zero_digest: UInt64 = 352988220
@@ -77,7 +77,7 @@ impl Hasher {
         testing.assert_eq(mixed.finish(), mixed_digest, "mixed bytes changed the polynomial remainder")?
     }
 
-    test fn long_streams_keep_checked_arithmetic_in_range() {
+    test "long streams keep checked arithmetic in range" {
         var first = Hasher.new()
         var second = Hasher.new()
         for _i in 0..10000 {
@@ -98,7 +98,7 @@ impl Hasher {
         }
     }
 
-    test fn hasher_write_u64_preserves_all_bytes_in_little_endian_order() {
+    test "hasher write_u64 preserves all bytes in little endian order" {
         // Its little-endian bytes are 8, 7, 6, 5, 4, 3, 2, 1.
         let little_endian_word: UInt64 = 72623859790382856
         var word = Hasher.new()
@@ -121,7 +121,7 @@ impl Hasher {
         self.high * limb_base + self.low
     }
 
-    test fn hasher_finish_observes_without_resetting_or_consuming_the_stream() {
+    test "hasher finish observes without resetting or consuming the stream" {
         var state = Hasher.new()
         &state.write_byte(255)
         let first = state.finish()
@@ -161,7 +161,7 @@ fn check_integer_hash[T: Integer + Hash](_sample: T) -> Result[(), testing.Failu
     .Ok(())
 }
 
-test fn integer_hashes_accept_every_width_and_signed_boundary() {
+test "integer hashes accept every width and signed boundary" {
     check_integer_hash(Int8(0))?
     check_integer_hash(Int16(0))?
     check_integer_hash(Int32(0))?
@@ -189,7 +189,7 @@ impl Hash for Bool {
     }
 }
 
-test fn boolean_hashes_distinguish_values() {
+test "boolean hashes distinguish values" {
     testing.assert(Hash.hash(false) != Hash.hash(true), "Boolean values were conflated")?
 }
 
@@ -199,7 +199,7 @@ impl Hash for () {
     }
 }
 
-test fn unit_hashes_are_deterministic() {
+test "unit hashes are deterministic" {
     testing.assert_eq(Hash.hash(()), Hasher.new().finish(), "unit hashing added bytes")?
 }
 
@@ -244,7 +244,7 @@ derive[T: Equivalent] Equivalent for GenericHash[T]
 
 derive[T: Hash] Hash for GenericHash[T]
 
-test fn structural_hashing_preserves_field_order_and_variant_identity() {
+test "structural hashing preserves field order and variant identity" {
     let first = HashPair { first = 1, second = 2 }
     let equal = HashPair { first = 1, second = 2 }
     let swapped = HashPair { first = 2, second = 1 }

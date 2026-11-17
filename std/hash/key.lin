@@ -18,17 +18,17 @@ default impl[T: Hash] Key for T {
     }
 }
 
-test fn integer_queries_preserve_numeric_type_and_equality() {
+test "integer queries preserve numeric type and equality" {
     let key: UInt64 = 7
     testing.assert(key.matches(7), "equal integer query did not match")?
     testing.assert(!key.matches(8), "different integer query matched")?
 }
 
-test fn boolean_queries_match_only_the_same_value() {
+test "boolean queries match only the same value" {
     testing.assert(Key.matches(true, true), "equal Boolean query did not match")?
     testing.assert(!Key.matches(true, false), "different Boolean query matched")?
 }
 
-test fn unit_queries_match() {
+test "unit queries match" {
     testing.assert(Key.matches((), ()), "unit query did not match")?
 }

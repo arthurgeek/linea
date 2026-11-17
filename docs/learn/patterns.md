@@ -238,7 +238,7 @@ while the schema is built is kept on the command, and `parse` reports it as
 import std.cli
 import std.testing
 
-test fn a_schema_reads_options_in_every_spelling() {
+test "a schema reads options in every spelling" {
     defer var cmd = cli.Command.new("notes", "Manage personal notes")
     &cmd.flag("loud", "--loud", "shout the summary", short: .Some("-l"))
     &cmd.flag("quiet", "--quiet", "print nothing", short: .Some("-q"))
@@ -271,7 +271,7 @@ test fn a_schema_reads_options_in_every_spelling() {
 ```
 
 ```
-ok    a_schema_reads_options_in_every_spelling
+ok    a schema reads options in every spelling
 
 1 passed, 0 failed
 ```

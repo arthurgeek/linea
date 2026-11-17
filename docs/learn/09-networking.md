@@ -375,7 +375,7 @@ fn hang_up(sink connection: net.Connection, _peer: net.Address) {
     let _closed = connection.close()
 }
 
-test fn serve_stops_after_the_connections_it_was_given() {
+test "serve stops after the connections it was given" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     // Both clients connect first; the kernel holds them until `serve` accepts.
@@ -390,7 +390,7 @@ test fn serve_stops_after_the_connections_it_was_given() {
 ```
 
 ```
-ok    serve_stops_after_the_connections_it_was_given
+ok    serve stops after the connections it was given
 
 1 passed, 0 failed
 ```
@@ -853,7 +853,7 @@ fn first_byte_arrives(inout connection: net.Connection, ms: UInt64) -> Bool {
     arrived
 }
 
-test fn a_silent_client_is_given_up_on_after_thirty_seconds() {
+test "a silent client is given up on after thirty seconds" {
     var sim = io.Simulation.open(seed: 1).unwrap()
     let (arrived, waited) = &sim.run(
         |inout _world| {
@@ -877,7 +877,7 @@ test fn a_silent_client_is_given_up_on_after_thirty_seconds() {
 ```
 
 ```text
-ok    a_silent_client_is_given_up_on_after_thirty_seconds
+ok    a silent client is given up on after thirty seconds
 
 1 passed, 0 failed
 ```
@@ -2094,7 +2094,7 @@ fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBod
     http.text(request, "{total} bytes")
 }
 
-test fn an_upload_is_counted_without_collecting_it() {
+test "an upload is counted without collecting it" {
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "POST", "/count", body: "").unwrap()
     defer var incoming = http.RequestBody.from_slice("hello".as_bytes(), arena.handle())
@@ -2104,7 +2104,7 @@ test fn an_upload_is_counted_without_collecting_it() {
 ```
 
 ```
-ok    an_upload_is_counted_without_collecting_it
+ok    an upload is counted without collecting it
 
 1 passed, 0 failed
 ```

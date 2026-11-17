@@ -2,8 +2,8 @@ fn main() -> UInt8 {
     0
 }
 
-test fn fallthrough_without_an_import() {}
+test "fallthrough without an import" {}
 
-test fn bare_return_without_an_import() {
+test "bare return without an import" {
     return
 }

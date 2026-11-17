@@ -93,7 +93,7 @@ impl[T] Slice[T] {
         self.len
     }
 
-    test fn length_counts_the_viewed_elements() {
+    test "length counts the viewed elements" {
         let values = [UInt64(3), 5, 8]
         testing.assert_eq(values.as_slice().length(), UInt64(3), "a view miscounted its elements")?
         .Ok(())
@@ -108,7 +108,7 @@ impl[T] Slice[T] {
         }
     }
 
-    test fn get_borrows_an_element_or_answers_none_past_the_end() {
+    test "get borrows an element or answers none past the end" {
         let values = [UInt64(3), 5]
         let view = values.as_slice()
         testing.assert_eq(*view.get(1).unwrap(), UInt64(5), "get borrowed the wrong element")?
@@ -128,7 +128,7 @@ impl[T] Slice[T] {
         }
     }
 
-    test fn a_slice_observes_only_its_initialized_extent() {
+    test "a slice observes only its initialized extent" {
         defer var values: Vec[UInt64] = Vec.new()
         &values.reserve(100).unwrap()
         &values.push(11).unwrap()
@@ -143,7 +143,7 @@ impl[T] Slice[T] {
         .Ok(())
     }
 
-    test fn an_empty_slice_accepts_its_empty_subspan() {
+    test "an empty slice accepts its empty subspan" {
         defer let values: Vec[UInt8] = Vec.new()
         let view = values.as_slice()
         testing.assert_eq(view.length(), UInt64(0), "empty slice gained an element")?
@@ -166,7 +166,7 @@ impl[T] Slice[T] {
         .{ view = copy(self), size, at = 0 }
     }
 
-    test fn windows_yield_each_run_of_consecutive_elements() {
+    test "windows yield each run of consecutive elements" {
         let readings = [UInt64(3), 5, 8, 13]
         var rises: UInt64 = 0
         for pair in readings.as_slice().windows(2) {
@@ -188,7 +188,7 @@ impl[T] Slice[T] {
     // may be copied freely and may observe storage nothing may write.
     trav positions(self: Self) = 0..self.len
 
-    test fn a_read_walk_lends_each_viewed_element() {
+    test "a read walk lends each viewed element" {
         let values = [UInt64(3), 5, 8, 13]
         let view = values.as_slice().subspan(start: 1, count: 2).unwrap()
         var total: UInt64 = 0
@@ -199,7 +199,7 @@ impl[T] Slice[T] {
         .Ok(())
     }
 
-    test fn releasing_a_slice_leaves_its_storage_owned() {
+    test "releasing a slice leaves its storage owned" {
         var values = Vec.filled(count: 3, value: UInt64(7)).unwrap()
         let view = values.as_slice()
         view.release()
@@ -236,7 +236,7 @@ impl[T: Equatable] Equatable for Slice[T] {
     }
 }
 
-test fn slices_equal_by_their_elements() {
+test "slices equal by their elements" {
     let first = [UInt64(3), 5, 8]
     let same = [UInt64(3), 5, 8]
     let changed = [UInt64(3), 5, 9]
@@ -274,7 +274,7 @@ impl[T: Comparable] Comparable for Slice[T] {
     }
 }
 
-test fn slices_order_by_their_first_different_element() {
+test "slices order by their first different element" {
     let low = [UInt8(1), 9]
     let high = [UInt8(2), 0]
     let prefix = [UInt8(1)]
@@ -302,7 +302,7 @@ impl[T: hash.Hash] hash.Hash for Slice[T] {
     }
 }
 
-test fn equal_slices_hash_equally() {
+test "equal slices hash equally" {
     let first = [UInt16(4), 2]
     let same = [UInt16(4), 2]
     let reordered = [UInt16(2), 4]
@@ -327,7 +327,7 @@ impl[T: Debug] Debug for Slice[T] {
     }
 }
 
-test fn a_slice_debugs_as_its_elements_in_brackets() {
+test "a slice debugs as its elements in brackets" {
     let words = ["tea", "jam"]
     let empty: [Bool; _] = []
     var rendered = testing.Recorder.of(32).unwrap()
@@ -387,7 +387,7 @@ impl[T] iter.DoubleEnded for SliceIter[T] {
     }
 }
 
-test fn slice_iteration_from_both_ends_yields_each_element_once() {
+test "slice iteration from both ends yields each element once" {
     let values = [UInt64(1), 2, 3]
     var walking = values.as_slice().iterate()
     testing.assert_eq(*&walking.next_back().unwrap(), UInt64(3), "the back of a slice is its last element")?
@@ -397,7 +397,7 @@ test fn slice_iteration_from_both_ends_yields_each_element_once() {
     testing.assert(&walking.next_back().is_none(), "the back passed the front")?
 }
 
-test fn slice_iteration_retains_order_and_independent_observations() {
+test "slice iteration retains order and independent observations" {
     defer let values = Vec.from_fn(count: 3, initializer: |index| index + 11).unwrap()
     var iterator = values.as_slice().iterate()
     let first = &iterator.next().unwrap()
@@ -411,7 +411,7 @@ test fn slice_iteration_retains_order_and_independent_observations() {
     testing.assert_eq(*third, UInt64(13), "iteration changed the final element")?
 }
 
-test fn slice_iteration_handles_empty_and_single_element_subspans() {
+test "slice iteration handles empty and single element subspans" {
     defer let empty: Vec[UInt64] = Vec.new()
     var empty_iterator = empty.as_slice().iterate()
     testing.assert(&empty_iterator.next().is_none(), "empty source yielded an item")?
@@ -467,7 +467,7 @@ struct SliceRecord { number: UInt64 }
 @linear
 struct SliceTicket { number: UInt64 }
 
-test fn slice_iteration_observes_affine_and_linear_elements_without_copying_or_settling() {
+test "slice iteration observes affine and linear elements without copying or settling" {
     var records: Vec[SliceRecord] = Vec.new()
     &records.push(.{ number = 7 }).unwrap()
     var tickets: Vec[SliceTicket] = Vec.new()
@@ -487,7 +487,7 @@ test fn slice_iteration_observes_affine_and_linear_elements_without_copying_or_s
     testing.assert_eq(record.number + number, UInt64(18), "iteration consumed a source element")?
 }
 
-test fn slice_iteration_early_exit_leaves_the_source_mutable() {
+test "slice iteration early exit leaves the source mutable" {
     defer var values = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
     var selected: UInt64 = 0
     for item in values.as_slice().iterate() {
@@ -501,7 +501,7 @@ test fn slice_iteration_early_exit_leaves_the_source_mutable() {
     testing.assert_eq(values.length(), UInt64(3), "early iteration removed source elements")?
 }
 
-test fn slice_iteration_collects_observations_and_transformed_values() {
+test "slice iteration collects observations and transformed values" {
     defer let source = Vec.from_fn(count: 3, initializer: |index| index + 1).unwrap()
     let { values: observations, iterator: observed } = source.as_slice().collect().unwrap()
     observed.release()
@@ -525,7 +525,7 @@ internal fn foreign_address(view: Slice[UInt8]) -> address.Address[UInt8] where 
     slice_address(view)
 }
 
-test fn a_foreign_address_is_where_the_bytes_are() {
+test "a foreign_address is where the bytes are" {
     let bytes = [UInt8(7), 9]
     let view = bytes.as_slice()
     testing.assert_eq(foreign_byte(foreign_address(view), 1), UInt8(9), "the address did not hold the view's bytes")?
@@ -551,7 +551,7 @@ internal fn foreign_byte(at: address.Address[UInt8], offset: UInt64) -> UInt8 {
     linea_raw_load8(address.raw(at), offset + 1, offset)
 }
 
-test fn a_foreign_byte_is_read_at_its_offset() {
+test "a foreign_byte is read at its offset" {
     let bytes = [UInt8(4), 5, 6]
     testing.assert_eq(foreign_byte(foreign_address(bytes.as_slice()), 2), UInt8(6), "the wrong byte was read")?
     .Ok(())
@@ -563,7 +563,7 @@ internal fn foreign_word(at: address.Address[UInt8], offset: UInt64) -> UInt64 {
     linea_raw_load(address.raw(at), offset + 8, offset)
 }
 
-test fn a_foreign_word_is_read_at_its_offset() {
+test "a foreign_word is read at its offset" {
     var words = system().acquire(16) else |_| {
         return testing.assert(false, "a buffer of sixteen bytes was refused")
     }

@@ -34,7 +34,7 @@ impl Priority {
         }
     }
 
-    test fn priority_parses_case_insensitively_and_serializes() {
+    test "priority parses case insensitively and serializes" {
         testing.assert_eq(Priority.parse("low"), Option.Some(Priority.Low), "low was not parsed")?
         testing.assert_eq(Priority.parse("LOW"), Option.Some(Priority.Low), "uppercase LOW was not parsed")?
         testing.assert_eq(Priority.parse("normal"), Option.Some(Priority.Normal), "normal was not parsed")?

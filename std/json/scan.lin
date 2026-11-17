@@ -77,7 +77,7 @@ fn scan_number(input: Str, start: UInt64, max_bytes: UInt64) -> Result[UInt64, P
     .Ok(at)
 }
 
-test fn number_scanning_stops_before_delimiters_and_reports_absolute_offsets() {
+test "number scanning stops before delimiters and reports absolute offsets" {
     testing.assert_eq(scan_number("x-12.5e+2,", 1, 8).unwrap(), UInt64(9), "number scanner consumed a delimiter")?
     let cases = ["01", "-01", "1.", "1e", "1e+", "+1", "--1"]
     for input in cases {
@@ -89,7 +89,7 @@ test fn number_scanning_stops_before_delimiters_and_reports_absolute_offsets() {
     .Ok(())
 }
 
-test fn number_scanning_classifies_every_prefix_of_a_number() {
+test "number scanning classifies every prefix of a number" {
     let input = "-12.34e+56"
     for end in UInt64(0)..input.length() + 1 {
         let prefix = input.slice(from: 0, to: end).unwrap()
@@ -264,7 +264,7 @@ fn scan_string[A: Allocator](allocator: A, input: Str, inout offset: UInt64, max
     .Ok(value)
 }
 
-test fn string_scanning_decodes_all_short_escapes() {
+test "string scanning decodes all short escapes" {
     var at: UInt64 = 1
     defer let value = scan_string(mem.system(), r#"x"\"\\\/\b\f\n\r\t","#, &at, 8).unwrap()
     let expected: [UInt8; _] = [34, 92, 47, 8, 12, 10, 13, 9]
@@ -276,7 +276,7 @@ test fn string_scanning_decodes_all_short_escapes() {
     .Ok(())
 }
 
-test fn string_scanning_preserves_unicode_and_decodes_surrogate_pairs() {
+test "string scanning preserves unicode and decodes surrogate pairs" {
     var at: UInt64 = 0
     defer let value = scan_string(mem.system(), r#""olá\u0000\uD7FF\uE000\uD83D\uDE00\uDBFF\uDFFF""#, &at, 64).unwrap()
     testing.assert_eq(value.view(), "olá\u{0}\u{d7ff}\u{e000}😀\u{10ffff}", "Unicode scalar decoding changed bytes")?
@@ -286,14 +286,14 @@ test fn string_scanning_preserves_unicode_and_decodes_surrogate_pairs() {
     .Ok(())
 }
 
-test fn unicode_escapes_cover_each_utf8_width_boundary() {
+test "unicode escapes cover each utf8 width boundary" {
     var at: UInt64 = 0
     defer let value = scan_string(mem.system(), r#""\u007f\u0080\u07ff\u0800\uffff\ud800\udc00""#, &at, 64).unwrap()
     testing.assert_eq(value.view(), "\u{7f}\u{80}\u{7ff}\u{800}\u{ffff}\u{10000}", "UTF-8 width boundary changed")?
     .Ok(())
 }
 
-test fn string_scanning_rejects_raw_controls_and_accepts_their_unicode_escapes() {
+test "string scanning rejects raw controls and accepts their unicode escapes" {
     for code in UInt64(0)..32 {
         var raw_bytes = Vec.filled(count: 3, value: UInt8(34)).unwrap()
         raw_bytes[1] = UInt8(code)
@@ -317,7 +317,7 @@ test fn string_scanning_rejects_raw_controls_and_accepts_their_unicode_escapes()
     .Ok(())
 }
 
-test fn string_scanning_rejects_bad_escapes_surrogates_and_truncated_prefixes() {
+test "string scanning rejects bad escapes surrogates and truncated prefixes" {
     let invalid = [r#""\x""#, r#""\u00xz""#, r#""\uD800""#, r#""\uDC00""#, r#""\uD800\u0041""#, r#""\uD800\uD800""#, r#""\uD800x""#]
     for input in invalid {
         var at: UInt64 = 0
@@ -345,7 +345,7 @@ test fn string_scanning_rejects_bad_escapes_surrogates_and_truncated_prefixes() 
     .Ok(())
 }
 
-test fn string_escape_errors_keep_absolute_offsets_after_input_release() {
+test "string escape errors keep absolute offsets after input release" {
     let inputs = [r#"x"\q""#, r#"x"\u0x00""#, r#"x"\uD800""#, r#"x"\uDC00""#, r#"x"\uD800\u0041""#]
     let kinds = [ParseErrorKind.InvalidEscape, ParseErrorKind.InvalidEscape, ParseErrorKind.InvalidSurrogate, ParseErrorKind.InvalidSurrogate, ParseErrorKind.InvalidSurrogate]
     let offsets: [UInt64; _] = [3, 5, 2, 2, 2]
@@ -369,7 +369,7 @@ test fn string_escape_errors_keep_absolute_offsets_after_input_release() {
     .Ok(())
 }
 
-test fn a_bom_inside_a_string_is_preserved() {
+test "a bom inside a string is preserved" {
     let input = "x\"a\u{feff}\""
     var at: UInt64 = 1
     defer let value = scan_string(mem.system(), input, &at, 4).unwrap()
@@ -378,7 +378,7 @@ test fn a_bom_inside_a_string_is_preserved() {
     .Ok(())
 }
 
-test fn string_limits_count_decoded_bytes_and_allow_empty_text() {
+test "string limits count decoded bytes and allow empty text" {
     var at: UInt64 = 0
     let empty = scan_string(mem.system(), r#""""#, &at, 0).unwrap()
     empty.release()
@@ -433,7 +433,7 @@ test fn string_limits_count_decoded_bytes_and_allow_empty_text() {
     .Ok(())
 }
 
-test fn decoded_string_owns_storage_and_settles_allocation_failure() {
+test "decoded string owns storage and settles allocation failure" {
     defer let decoded = {
         let input = r#""name\u0000😀""#.to_owned().unwrap()
         var at: UInt64 = 0

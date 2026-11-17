@@ -32,7 +32,7 @@ impl Display for RequestError {
     }
 }
 
-test fn a_request_error_displays_its_reason() {
+test "a request error displays its reason" {
     let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
     defer let closed = fmt.render_owned(RequestError.Closed).unwrap()
     defer let refused = fmt.render_owned(RequestError.Status(.ContentTooLarge)).unwrap()
@@ -58,7 +58,7 @@ impl RequestError {
         }
     }
 
-    test fn a_request_error_names_the_status_that_answers_it() {
+    test "a request error names the status that answers it" {
         let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
         let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
         testing.assert_eq(RequestError.Closed.status(), .None, "a closed connection was answered")?
@@ -139,7 +139,7 @@ fn assembled[P: Allocator](memory: mem.Handle[P], sink head: String[mem.Handle[P
     .Ok(.{ memory = copy(memory), known_method = method, is_http_11, head, method_token, target, header_fields, query_text, query_fields, payload, body_text, body_fields })
 }
 
-test fn a_request_with_a_body_parses() {
+test "a request with a body parses" {
     let input = "POST /echo?x=1 HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello"
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 7, Limits.default()).unwrap()
@@ -157,7 +157,7 @@ test fn a_request_with_a_body_parses() {
     .Ok(())
 }
 
-test fn a_request_split_into_single_bytes_parses_as_one() {
+test "a request split into single bytes parses as one" {
     let input = "POST /echo?x=1 HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r\nhello"
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 1, Limits.default()).unwrap()
@@ -170,7 +170,7 @@ test fn a_request_split_into_single_bytes_parses_as_one() {
     .Ok(())
 }
 
-test fn a_bare_lf_ends_a_line() {
+test "a bare lf ends a line" {
     let input = "GET / HTTP/1.1\nHost: a\n\n"
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let sent = read_in_steps(arena.handle(), input.as_bytes(), 3, Limits.default()).unwrap()
@@ -182,14 +182,14 @@ test fn a_bare_lf_ends_a_line() {
     .Ok(())
 }
 
-test fn a_silent_close_is_closed_not_an_error() {
+test "a silent close is closed not an error" {
     testing.assert_eq(refusal("", 4, Limits.default()), Option.Some(RequestError.Closed), "an empty connection was not closed")?
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost", 4, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a request cut off in its headers was accepted")?
     testing.assert_eq(refusal("GET / HTT", 4, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a request cut off in its request line was accepted")?
     .Ok(())
 }
 
-test fn each_limit_answers_its_status_at_one_past_the_bound() {
+test "each limit answers its status at one past the bound" {
     let limits = Limits { max_line_bytes = 32, max_headers = 2, max_body_bytes = 4, ..Limits.default() }
     // Each line below is exactly 32 bytes with its CRLF.
     testing.assert_eq(refusal("GET /aaaaaaaaaaaaaaaa HTTP/1.0\r\n\r\n", 5, limits), .None, "a request line at the limit was refused")?
@@ -204,7 +204,7 @@ test fn each_limit_answers_its_status_at_one_past_the_bound() {
     .Ok(())
 }
 
-test fn a_read_timeout_answers_408() {
+test "a read timeout answers 408" {
     let timeout = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
     let unstarted = Fragments { bytes = "".as_bytes(), position = 0, step = 4, failure = .Some(copy(timeout)) }
@@ -233,14 +233,14 @@ test fn a_read_timeout_answers_408() {
     .Ok(())
 }
 
-test fn transfer_encoding_is_not_implemented() {
+test "transfer encoding is not implemented" {
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.NotImplemented)), "a transfer coding was accepted")?
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\n\r\nabc", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a transfer coding beside a length")?
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\ntransfer-encoding: chunked\r\n\r\nabc", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a length beside a transfer coding")?
     .Ok(())
 }
 
-test fn content_length_must_be_digits_and_agree() {
+test "content_length must be digits and agree" {
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 12a\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a length with a letter was accepted")?
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: +5\r\n\r\nhello", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a signed length was accepted")?
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length:\r\n\r\n", 6, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "an empty length was accepted")?
@@ -257,14 +257,14 @@ test fn content_length_must_be_digits_and_agree() {
     .Ok(())
 }
 
-test fn an_unknown_version_is_refused() {
+test "an unknown version is refused" {
     testing.assert_eq(refusal("GET / HTTP/2.0\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.HttpVersionNotSupported)), "HTTP/2.0 was accepted")?
     testing.assert_eq(refusal("GET / HTTP/1.0\r\n\r\n", 5, Limits.default()), .None, "HTTP/1.0 was refused")?
     testing.assert_eq(refusal("GET / HTTX/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a malformed version")?
     .Ok(())
 }
 
-test fn a_malformed_request_line_is_refused() {
+test "a malformed request line is refused" {
     testing.assert_eq(refusal("GET  / HTTP/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "two spaces were accepted")?
     testing.assert_eq(refusal("GET / HTTP/1.1 extra\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a fourth part was accepted")?
     testing.assert_eq(refusal("GET /\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a missing version was accepted")?
@@ -275,14 +275,14 @@ test fn a_malformed_request_line_is_refused() {
     .Ok(())
 }
 
-test fn a_folded_header_is_refused() {
+test "a folded header is refused" {
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n b\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a space-folded header was accepted")?
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n\tb\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a tab-folded header was accepted")?
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost: a\r\nX: a\r\n b: c\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a folded line holding a colon was accepted")?
     .Ok(())
 }
 
-test fn a_malformed_header_is_refused() {
+test "a malformed header is refused" {
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost: a\r\nno colon\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a header without a colon was accepted")?
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost: a\r\nX : a\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "whitespace before the colon was accepted")?
     testing.assert_eq(refusal("GET / HTTP/1.1\r\nHost: a\r\n: a\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "an empty name was accepted")?
@@ -294,12 +294,12 @@ test fn a_malformed_header_is_refused() {
     .Ok(())
 }
 
-test fn a_body_shorter_than_its_length_is_malformed() {
+test "a body shorter than its length is malformed" {
     testing.assert_eq(refusal("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc", 2, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "a short body was accepted")?
     .Ok(())
 }
 
-test fn http_11_host_header_is_strictly_enforced() {
+test "http 11 host header is strictly enforced" {
     // Missing Host header in HTTP/1.1 is refused with 400.
     testing.assert_eq(refusal("GET / HTTP/1.1\r\n\r\n", 5, Limits.default()), Option.Some(RequestError.Status(.BadRequest)), "missing host in HTTP/1.1 was accepted")?
 
@@ -704,7 +704,7 @@ fn refusal(input: Str, step: UInt64, limits: Limits) -> Option[RequestError] {
     refused
 }
 
-test fn a_head_is_read_without_waiting_for_its_body() {
+test "a head is read without waiting for its body" {
     defer let arena = mem.Arena.open(mem.system(), 8192)
     let input = "POST /upload HTTP/1.1\r\nHost: a\r\nContent-Length: 5000\r\n\r\n"
     let source = Fragments { bytes = input.as_bytes(), position = 0, step = 7, failure = .None }
@@ -715,7 +715,7 @@ test fn a_head_is_read_without_waiting_for_its_body() {
     .Ok(())
 }
 
-test fn ambiguous_framing_is_rejected_before_the_body_size() {
+test "ambiguous framing is rejected before the body size" {
     let limits = Limits { max_body_bytes = 4, ..Limits.default() }
     let input = "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n"
     testing.assert_eq(refusal(input, 6, limits), Option.Some(RequestError.Status(.BadRequest)), "ambiguous framing was classified as a body limit")

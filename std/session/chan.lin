@@ -48,7 +48,7 @@ impl[P: Protocol, H] Chan[P, H] {
         self.endpoint
     }
 
-    test fn an_endpoint_answers_the_number_it_was_opened_with() {
+    test "an endpoint answers the number it was opened with" {
         let asking: Chan[SessionTestAsk] = Chan.opened(9)
         let number = asking.number()
         let Chan { endpoint: _, body: _ } = asking
@@ -63,7 +63,7 @@ impl[P: Protocol, H] Chan[P, H] {
         .{ endpoint, body }
     }
 
-    test fn entering_a_protocol_keeps_the_endpoint() {
+    test "entering a protocol keeps the endpoint" {
         let asking: Chan[SessionTestAsk] = Chan.opened(7)
         let Chan { endpoint, body: _ } = asking.enter()
         testing.assert_eq(endpoint, UInt64(7), "entering a protocol changed the endpoint")?
@@ -81,7 +81,7 @@ impl[P: Protocol, H: Owned] Chan[P, H] {
         .{ endpoint, body = .{} }
     }
 
-    test fn an_owned_handle_can_be_detached() {
+    test "an owned handle can be detached" {
         let body = sink [] |sink me: Chan[Recv[UInt64, End]]| {
             let (_, done) = me.recv()
             done.close()
@@ -105,7 +105,7 @@ impl[T: Owned, N: Protocol, H] Chan[Send[T, N], H] {
         .{ endpoint, body }
     }
 
-    test fn a_send_hands_the_value_to_the_peer() {
+    test "a send hands the value to the peer" {
         let body = sink [] |sink me: Chan[Recv[UInt64, Send[UInt64, End]]]| {
             let (number, answering) = me.recv()
             answering.send(number + 1).close()
@@ -127,7 +127,7 @@ impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
         (value, .{ endpoint, body })
     }
 
-    test fn a_receive_answers_what_the_peer_sent() {
+    test "a receive answers what the peer sent" {
         let body = sink [] |sink me: Chan[Send[UInt64, Send[UInt64, End]]]| {
             me.send(3).send(4).close()
         }
@@ -148,7 +148,7 @@ impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
         }
     }
 
-    test fn a_receive_until_hands_the_endpoint_back_when_the_peer_is_late() {
+    test "a receive until hands the endpoint back when the peer is late" {
         let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
             time.sleep(time.Duration.from_milliseconds(200))
             me.send(7).close()
@@ -168,7 +168,7 @@ impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
         testing.assert(late, "a receive answered before the peer sent")?
     }
 
-    test fn a_receive_until_answers_what_a_prompt_peer_sent() {
+    test "a receive until answers what a prompt peer sent" {
         let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
             me.send(7).close()
         }
@@ -203,7 +203,7 @@ impl[L: Protocol, R: Protocol, H] Chan[Choose[L, R], H] {
         .{ endpoint, body }
     }
 
-    test fn choosing_left_runs_the_peers_left_branch() {
+    test "choosing left runs the peers left branch" {
         let body = sink [] |sink me: SessionTestReporting| {
             session_test_branch_reporter(me)
         }
@@ -220,7 +220,7 @@ impl[L: Protocol, R: Protocol, H] Chan[Choose[L, R], H] {
         .{ endpoint, body }
     }
 
-    test fn choosing_right_runs_the_peers_right_branch() {
+    test "choosing right runs the peers right branch" {
         let body = sink [] |sink me: SessionTestReporting| {
             session_test_branch_reporter(me)
         }
@@ -262,7 +262,7 @@ impl[L: Protocol, R: Protocol, H] Chan[Offer[L, R], H] {
         }
     }
 
-    test fn an_offer_answers_the_branch_the_peer_chose() {
+    test "an offer answers the branch the peer chose" {
         let body = sink [] |sink me: Chan[Choose[End, End]]| {
             me.choose_right().close()
         }
@@ -290,7 +290,7 @@ impl[H] Chan[End, H] {
         linea_chan_close(endpoint)
     }
 
-    test fn closing_a_handle_waits_for_the_body() {
+    test "closing a handle waits for the body" {
         var steps = UInt64(0)
         let body = sink [inout steps] |sink me: Chan[End]| {
             for _ in 0..1000 {

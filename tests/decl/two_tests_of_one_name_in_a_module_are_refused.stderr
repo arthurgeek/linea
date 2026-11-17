@@ -1,0 +1,7 @@
+error[N-Duplicate]: "doubling two gives four" already names a test in this module
+  --> tests/decl/two_tests_of_one_name_in_a_module_are_refused.lin:13:6
+   |
+9  | test "doubling two gives four" {
+   |      ------------------------- the test of this name
+13 | test "doubling two gives four" {
+   |      ^^^^^^^^^^^^^^^^^^^^^^^^^ a module names each of its tests once

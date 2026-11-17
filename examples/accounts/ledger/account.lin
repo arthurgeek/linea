@@ -22,7 +22,7 @@ impl Account {
         funds
     }
 
-    test fn an_empty_account_can_be_opened_and_closed() {
+    test "an empty account can be opened and closed" {
         let account = Account.open(0)
         testing.assert_eq(account.close(), 0, "empty account returns no funds")?
     }

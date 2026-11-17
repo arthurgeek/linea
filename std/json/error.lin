@@ -124,7 +124,7 @@ impl ParseError {
         }
     }
 
-    test fn only_an_allocation_failure_is_running_out_of_memory() {
+    test "only an allocation failure is running out of memory" {
         let full = ParseError { kind = .Allocation, offset = 3 }
         let malformed = ParseError { kind = .Syntax, offset = 3 }
         testing.assert(full.ran_out_of_memory(), "an allocation failure was the input's fault")?
@@ -132,7 +132,7 @@ impl ParseError {
     }
 }
 
-test fn a_parse_error_displays_its_problem_and_the_byte_it_stopped_at() {
+test "a parse error displays its problem and the byte it stopped at" {
     let syntax = ParseError { kind = .Syntax, offset = 7 }
     defer let shown = fmt.render_owned(syntax).unwrap()
     testing.assert_eq(shown.view(), "invalid syntax at byte 7", "the syntax error changed")?
@@ -162,7 +162,7 @@ impl Display for MutationReason {
     }
 }
 
-test fn a_mutation_reason_displays_its_problem() {
+test "a mutation reason displays its problem" {
     // The 64-byte recorder holds the longest reason.
     var writer = testing.Recorder.of(64).unwrap()
     let reason = MutationReason.WrongKind
@@ -186,7 +186,7 @@ impl[A: Allocator] release.Settle for MutationFailure[A] {
     }
 }
 
-test fn settling_a_refused_member_releases_it_and_keeps_the_reason() {
+test "settling a refused member releases it and keeps the reason" {
     defer var list = Value.array()
     let wrong_kind = match &list.insert("summary", Value.string("all clear").unwrap()).settled() {
         Ok(previous) => {

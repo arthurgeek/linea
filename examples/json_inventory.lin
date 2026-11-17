@@ -92,7 +92,7 @@ fn inventory_total[A: Allocator](document: json.Value[A]) -> Result[UInt64, Inve
     .Ok(total)
 }
 
-test fn inventory_totals_integer_counts() {
+test "inventory totals integer counts" {
     let input = sample.to_owned().unwrap()
     defer let document = json.parse(input.view()).unwrap()
     // Parsing owns its text; the input can be released before using the result.
@@ -100,7 +100,7 @@ test fn inventory_totals_integer_counts() {
     testing.assert_eq(inventory_total(document).unwrap(), 5, "inventory total changed")?
 }
 
-test fn inventory_refuses_fractional_negative_and_overflowing_counts() {
+test "inventory refuses fractional negative and overflowing counts" {
     let inputs = [
         r#"{"products":[{"name":"tea","units":1.5}]}"#,
         r#"{"products":[{"name":"tea","units":-1}]}"#,
@@ -131,7 +131,7 @@ fn attach_summary[A: Allocator](allocator: A, inout document: json.Value[A]) -> 
     .Ok(())
 }
 
-test fn summaries_replace_the_previous_owned_value() {
+test "summaries replace the previous owned value" {
     defer var document = json.parse(sample).unwrap()
     attach_summary(mem.system(), &document).unwrap()
     attach_summary(mem.system(), &document).unwrap()
@@ -187,7 +187,7 @@ impl Writer for Disk {
     }
 }
 
-test fn inventory_output_propagates_failure_without_consuming_the_inventory() {
+test "inventory output propagates failure without consuming the inventory" {
     defer var document = json.parse(sample).unwrap()
     attach_summary(mem.system(), &document).unwrap()
     // One byte of room takes the opening `{`, and the next write does not fit.

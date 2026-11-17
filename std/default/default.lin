@@ -112,7 +112,7 @@ impl[T] Default for Option[T] {
     }
 }
 
-test fn numbers_default_to_zero() {
+test "numbers default to zero" {
     let small = Int8.default()
     let count = UInt64.default()
     let ratio = Float64.default()
@@ -123,7 +123,7 @@ test fn numbers_default_to_zero() {
     testing.assert_eq(level, 0.0, "Float32 did not default to zero")?
 }
 
-test fn bool_text_and_option_default_to_empty_values() {
+test "bool text and option default to empty values" {
     let flag = Bool.default()
     let label = Str.default()
     let chosen: Option[UInt8] = Option.default()
@@ -142,7 +142,7 @@ struct Preferences {
     theme: Option[Str],
 }
 
-test fn a_derived_default_builds_each_field_from_its_default() {
+test "a derived default builds each field from its default" {
     let fresh = Preferences.default()
     testing.assert_eq(fresh.volume, UInt8(0), "the volume did not start at zero")?
     testing.assert(!fresh.muted, "the form started muted")?
@@ -158,7 +158,7 @@ fn chosen_or_default[T: Default](sink choice: Option[T]) -> T where carries(choi
     }
 }
 
-test fn generic_code_starts_from_a_default() {
+test "generic code starts from a default" {
     testing.assert_eq(chosen_or_default(Option.Some(UInt8(7))), UInt8(7), "a chosen value was replaced")?
     let unset: Option[UInt8] = .None
     testing.assert_eq(chosen_or_default(unset), UInt8(0), "an unset value did not start from zero")?

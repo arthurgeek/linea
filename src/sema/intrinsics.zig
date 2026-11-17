@@ -399,7 +399,7 @@ pub const RawAccesses = struct {
             .slice_address = rawAccessDecl(program, ast, "slice_address", 1),
             .number_address = rawAccessDecl(program, ast, "number_address", 1),
             .foreign_at = moduleFunction(program, ast, "mem", "foreign_at"),
-            .foreign_at_test = testIn(program, ast, "mem", "an_address_at_a_number_names_the_bytes_there"),
+            .foreign_at_test = testIn(program, ast, "mem", "\"an address at a number names the bytes there\""),
             .bytes_of = moduleFunction(program, ast, "ffi", "bytes_of"),
             .c_string_text = memberOf(program, ast, "ffi", "CString", "text"),
             .c_text_list_get = memberOf(program, ast, "ffi", "CTextList", "get"),
@@ -410,12 +410,12 @@ pub const RawAccesses = struct {
             .task_run_body = moduleFunction(program, ast, "task", "run_body"),
             .keep_value = moduleFunction(program, ast, "mem", "keep_value"),
             .take_value = moduleFunction(program, ast, "mem", "take_value"),
-            .kept_value_test = testIn(program, ast, "mem", "a_kept_value_comes_back_as_it_went_in"),
+            .kept_value_test = testIn(program, ast, "mem", "\"a kept value comes back as it went in\""),
             .wait_set = structIn(program, ast, "task", "WaitSet"),
             .registered = structIn(program, ast, "task", "Registered"),
             .registered_minted = memberOf(program, ast, "task", "Registered", "minted"),
-            .registered_minted_test = testIn(program, ast, "task", "a_minted_key_names_what_it_was_minted_for"),
-            .registered_names_test = testIn(program, ast, "task", "a_copied_key_names_the_same_registration"),
+            .registered_minted_test = testIn(program, ast, "task", "\"a minted key names what it was minted for\""),
+            .registered_names_test = testIn(program, ast, "task", "\"a copied key names the same registration\""),
             .vec = structIn(program, ast, "mem", "Vec"),
             .kept = structIn(program, ast, "mem", "Kept"),
             .vector_from_buffer = moduleFunction(program, ast, "mem", "vector_from_buffer"),
@@ -463,9 +463,9 @@ pub const RawAccesses = struct {
             .foreign_byte = moduleFunction(program, ast, "mem", "foreign_byte"),
             .foreign_word = moduleFunction(program, ast, "mem", "foreign_word"),
             .copied_in = moduleFunction(program, ast, "ffi", "copied_in"),
-            .foreign_address_test = testIn(program, ast, "mem", "a_foreign_address_is_where_the_bytes_are"),
-            .foreign_byte_test = testIn(program, ast, "mem", "a_foreign_byte_is_read_at_its_offset"),
-            .foreign_word_test = testIn(program, ast, "mem", "a_foreign_word_is_read_at_its_offset"),
+            .foreign_address_test = testIn(program, ast, "mem", "\"a foreign_address is where the bytes are\""),
+            .foreign_byte_test = testIn(program, ast, "mem", "\"a foreign_byte is read at its offset\""),
+            .foreign_word_test = testIn(program, ast, "mem", "\"a foreign_word is read at its offset\""),
             .vec_test_log_store = moduleFunction(program, ast, "mem", "vec_test_log_store"),
             .carried = structIn(program, ast, "mem", "Carried"),
             .span = rawAccessDecl(program, ast, "slot_span", 4),
@@ -899,7 +899,8 @@ fn moduleFunction(program: *const ExpandedProgram, ast: *const Ast, module_name:
 /// nothing: a name is a label.
 const float_bits_symbols = [_][]const u8{ "linea_float64_to_bits", "linea_float64_from_bits", "linea_float32_to_bits", "linea_float32_from_bits" };
 
-/// The library test `name` of `module_name`.
+/// The library test of `module_name` whose name is written `name`, quotes
+/// included.
 fn testIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
     const declared = program.libraryDeclIn(module_name, name) orelse return .none;
     return if (ast.declIsTest(declared)) declared else .none;

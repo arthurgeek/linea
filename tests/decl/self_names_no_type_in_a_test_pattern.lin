@@ -19,22 +19,22 @@ impl Meter {
         Meter { reading = 1 }
     }
 
-    test fn self_in_a_destructuring_let() {
+    test "self in a destructuring let" {
         let Self { reading } = Meter.new()
         testing.assert_eq(reading, 1, "a new meter reads one")?
     }
 
-    test fn self_with_a_field_the_type_lacks() {
+    test "self with a field the type lacks" {
         let Self { reading, depth } = Meter.new()
         testing.assert_eq(reading + depth, 1, "a new meter reads one")?
     }
 
-    test fn self_taking_apart_another_type() {
+    test "self taking apart another type" {
         let Self { reading } = Gauge { reading = 1 }
         testing.assert_eq(reading, 1, "the gauge reads one")?
     }
 
-    test fn self_in_a_match_arm() {
+    test "self in a match arm" {
         match Meter.new() {
             Self { reading } => testing.assert_eq(reading, 1, "a new meter reads one")?,
         }
@@ -50,12 +50,12 @@ impl Litres {
         Litres(5)
     }
 
-    test fn self_in_a_newtype_pattern() {
+    test "self in a newtype pattern" {
         let Self(amount) = Litres.full()
         testing.assert_eq(amount, 5, "a full tank holds five litres")?
     }
 
-    test fn self_taking_apart_another_newtype() {
+    test "self taking apart another newtype" {
         let Self(amount) = Gallons(5)
         testing.assert_eq(amount, 5, "five gallons")?
     }

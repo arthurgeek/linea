@@ -1,0 +1,15 @@
+// A test's name is printed on one line of `linea test`'s report, so it holds
+// no control character, ASCII or not, and no line or paragraph separator.
+import std.testing
+
+test "a next line\u{85}control" {
+    testing.assert(true, "a name is one line")?
+}
+
+test "a line\u{2028}separator" {
+    testing.assert(true, "a name is one line")?
+}
+
+fn main() -> UInt8 {
+    0
+}

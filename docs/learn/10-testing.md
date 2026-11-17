@@ -1,16 +1,16 @@
 # Testing
 
 [Linea in an hour](01-linea-in-an-hour.md#tests) showed the shape of a test:
-a `test fn` beside the code, assertions followed by `?`, and `linea test` to run
+a `test "…"` beside the code, assertions followed by `?`, and `linea test` to run
 them. This chapter covers what real tests need: helpers that build what several
 tests share, tests that expect the program to stop, checking that every
 allocation can fail safely, and testing an HTTP server without a network.
 
 ## Assertions
 
-A `test fn` takes no arguments, and its body runs like any function's. Each
-assertion answers a `Result`, and `?` ends the test at the first one that
-fails:
+A test is `test` followed by a string that says what it checks, and a body
+that runs like any function's. Each assertion answers a `Result`, and `?` ends
+the test at the first one that fails:
 
 | Assertion | Passes when |
 | --- | --- |
@@ -43,16 +43,16 @@ fn port_of(address: Str) -> Result[UInt16, text.ParseError] {
     port.parse[UInt16]()
 }
 
-test fn the_port_follows_the_colon() {
+test "the port follows the colon" {
     testing.assert_ok_eq(port_of("localhost:8080"), 8080, "the port of localhost:8080")?
 }
 
-test fn an_address_without_a_port_is_refused() {
+test "an address without a port is refused" {
     testing.assert_err(port_of("localhost"), "an address with no colon")?
 }
 
 // The `match` checks the error's shape: a `Syntax` error, at whatever byte.
-test fn a_letter_in_the_port_is_a_syntax_error() {
+test "a letter in the port is a syntax error" {
     testing.assert(match port_of("localhost:80x0") {
         Err(Syntax(_)) => true,
         _ => false,
@@ -67,21 +67,25 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-ok    a_letter_in_the_port_is_a_syntax_error
-ok    an_address_without_a_port_is_refused
-ok    the_port_follows_the_colon
+ok    a letter in the port is a syntax error
+ok    an address without a port is refused
+ok    the port follows the colon
 
 3 passed, 0 failed
 ```
 
 The report lists the tests by name, in alphabetical order, not in the order
-the file declares them. The third test checks the error's variant with a
-pattern inside a pattern, `Err(Syntax(_))`, which matches only an `Err`
-carrying a `Syntax` error ([Errors](03-errors.md#when-to-keep-match)).
+the file declares them. A name is any sentence that says what the test checks,
+written once: two tests of one module may not share it, an empty name is
+refused, a name neither begins nor ends with a space, and the name holds no
+`{…}` interpolation, since it is fixed where the test is written. The third
+test checks the error's variant with a pattern inside a pattern,
+`Err(Syntax(_))`, which matches only an `Err` carrying a `Syntax` error
+([Errors](03-errors.md#when-to-keep-match)).
 
 ## Tests inside an implementation
 
-A `test fn` can sit at the top level of a module, beside the functions it tests,
+A test can sit at the top level of a module, beside the functions it tests,
 and it can also sit directly inside an inherent `impl Type { … }` block beside
 the methods:
 
@@ -98,7 +102,7 @@ impl Counter {
         Counter { value = 0 }
     }
 
-    test fn a_new_counter_starts_at_zero() {
+    test "a new counter starts at zero" {
         let counter = Counter.new()
         testing.assert_eq(counter.value, 0, "initial value")?
     }
@@ -107,7 +111,7 @@ impl Counter {
         self.value += 1
     }
 
-    test fn bump_increments_the_counter() {
+    test "bump increments the counter" {
         var counter = Counter.new()
         &counter.bump()
         testing.assert_eq(counter.value, 1, "value after one bump")?
@@ -123,8 +127,8 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-ok    a_new_counter_starts_at_zero
-ok    bump_increments_the_counter
+ok    a new counter starts at zero
+ok    bump increments the counter
 
 2 passed, 0 failed
 ```
@@ -132,8 +136,7 @@ ok    bump_increments_the_counter
 This keeps each method and its unit tests together without having to close and
 reopen the `impl` block around them. The braces only decide where the test is
 written: it is a member of nothing, and it is named and checked exactly as if it
-sat at the top level of the module. Nothing calls it as
-`Counter.a_new_counter_starts_at_zero`, `linea test` reports it by its own name,
+sat at the top level of the module. `linea test` reports it by its own name,
 and two tests of one name in two `impl` blocks of one module are a duplicate.
 
 The same holds for the names an `impl` gives its members. A test is not
@@ -152,7 +155,7 @@ impl Meter {
         Meter { reading = 1 }
     }
 
-    test fn a_new_meter_reads_one() {
+    test "a new meter reads one" {
         let meter = Self.new()
         testing.assert_eq(meter.reading, 1, "a new meter reads one")?
     }
@@ -199,7 +202,7 @@ trait Doubling {
         self.value() * 2
     }
 
-    test fn doubled_is_twice_the_value() {
+    test "doubled is twice the value" {
         let meter = Meter { reading = 4 }
         testing.assert_eq(meter.doubled(), 8, "twice four is eight")?
     }
@@ -223,14 +226,14 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-ok    doubled_is_twice_the_value
+ok    doubled is twice the value
 
 1 passed, 0 failed
 ```
 
 The test is not part of the trait. `impl Doubling for Meter` supplies `value`
-and nothing else, `Doubling.doubled_is_twice_the_value` names nothing, and a
-module that imports `Doubling` gets no test with it. As inside an `impl`, the
+and nothing else, nothing reaches the test through `Doubling`, and a module
+that imports `Doubling` gets no test with it. As inside an `impl`, the
 test is named and checked as if it sat at the top level of the module.
 
 A trait's body is written for whatever type implements it, but a test runs
@@ -284,11 +287,11 @@ fn sample_order() -> [Line; 3] {
     ]
 }
 
-test fn the_total_counts_every_line() {
+test "the total counts every line" {
     testing.assert_eq(total(sample_order()), 1155, "the sample order's total")?
 }
 
-test fn a_free_line_adds_nothing() {
+test "a free line adds nothing" {
     var order = sample_order()
     order[1].cents = 0
     testing.assert_eq(total(order), 980, "the order without the croissant")?
@@ -306,8 +309,8 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-ok    a_free_line_adds_nothing
-ok    the_total_counts_every_line
+ok    a free line adds nothing
+ok    the total counts every line
 
 2 passed, 0 failed
 ```
@@ -373,12 +376,12 @@ fn seat_label(row: UInt8, seat: UInt8) -> UInt64 {
     UInt64(row) * 100 + UInt64(seat)
 }
 
-test fn the_label_joins_row_and_seat() {
+test "the label joins row and seat" {
     testing.assert_eq(seat_label(3, 14), 314, "row 3, seat 14")?
 }
 
-// `test trap fn` marks a test that passes only when its body stops the program.
-test trap fn seat_twenty_one_stops_the_program() {
+// `test trap` marks a test that passes only when its body stops the program.
+test trap "seat twenty one stops the program" {
     let _label = seat_label(3, 21)
 }
 
@@ -389,20 +392,20 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-ok    seat_twenty_one_stops_the_program
-ok    the_label_joins_row_and_seat
+ok    seat twenty one stops the program
+ok    the label joins row and seat
 
 2 passed, 0 failed
 ```
 
 Each test runs in its own process, so one that stops takes no other test with
-it. A `test trap fn` that finishes normally fails; ask for seat 20 instead of 21:
+it. A `test trap` that finishes normally fails; ask for seat 20 instead of 21:
 
 <!-- guide: unchecked the output of an edited or partial program -->
 ```
-FAIL  seat_twenty_one_stops_the_program
+FAIL  seat twenty one stops the program
         expected the test to trap
-ok    the_label_joins_row_and_seat
+ok    the label joins row and seat
 
 1 passed, 1 failed
 ```
@@ -433,7 +436,7 @@ fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oo
     .Ok(line)
 }
 
-test fn a_banner_frames_its_title() {
+test "a banner frames its title" {
     defer let heading = banner_in(mem.system(), "Daily report").unwrap()
     testing.assert_eq(heading.view(), "== Daily report ==", "the banner changed")?
 }
@@ -441,7 +444,7 @@ test fn a_banner_frames_its_title() {
 // `each_allocation_failure` runs the body once to count the allocations it
 // asks for, then once more for each of them with that one refused. Every run
 // must end cleanly: with the refusal passed up, or with success.
-test fn every_allocation_the_banner_asks_for_can_fail() {
+test "every allocation the banner asks for can fail" {
     let attempts = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.Oom] {
@@ -464,8 +467,8 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 ```
-ok    a_banner_frames_its_title
-ok    every_allocation_the_banner_asks_for_can_fail
+ok    a banner frames its title
+ok    every allocation the banner asks for can fail
 
 2 passed, 0 failed
 ```
@@ -500,7 +503,7 @@ still fails the test. Add this test to `banner.lin`:
 ```linea
 // Every run that builds the banner must build it right, whichever allocation
 // was refused before it.
-test fn every_banner_that_is_built_reads_right() {
+test "every banner that is built reads right" {
     let _attempts = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), testing.Failure] {
@@ -517,9 +520,9 @@ test fn every_banner_that_is_built_reads_right() {
 ```
 
 ```
-ok    a_banner_frames_its_title
-ok    every_allocation_the_banner_asks_for_can_fail
-ok    every_banner_that_is_built_reads_right
+ok    a banner frames its title
+ok    every allocation the banner asks for can fail
+ok    every banner that is built reads right
 
 3 passed, 0 failed
 ```
@@ -533,9 +536,9 @@ the program:
 
 <!-- guide: unchecked the output of an edited or partial program -->
 ```
-ok    a_banner_frames_its_title
-FAIL  every_allocation_the_banner_asks_for_can_fail
-        linea: panic: called Result.unwrap on Err at std/result/result.lin:394:23
+ok    a banner frames its title
+FAIL  every allocation the banner asks for can fail
+        linea: panic: called Result.unwrap on Err at std/result/result.lin:371:23
 
 1 passed, 1 failed
 ```
@@ -556,7 +559,7 @@ memory from `backing` too, so `open` answers a `Result`. Add this test to
 // `AllocationLog.open(mem.system(), 2)` refuses the second allocation its
 // allocator is asked for. The test checks that `banner_in` passes the refusal up,
 // and that the first allocation was given back on the way out.
-test fn a_refused_second_allocation_leaves_nothing_behind() {
+test "a refused second allocation leaves nothing behind" {
     defer let log = mem.AllocationLog.open(mem.system(), 2).unwrap()
     let refused = match banner_in(log.allocator(), "Daily report") {
         Ok(heading) => {
@@ -572,9 +575,9 @@ test fn a_refused_second_allocation_leaves_nothing_behind() {
 ```
 
 ```
-ok    a_banner_frames_its_title
-ok    a_refused_second_allocation_leaves_nothing_behind
-ok    every_allocation_the_banner_asks_for_can_fail
+ok    a banner frames its title
+ok    a refused second allocation leaves nothing behind
+ok    every allocation the banner asks for can fail
 
 3 passed, 0 failed
 ```
@@ -618,7 +621,7 @@ fn hello[P: mem.Allocator](inout _: (), request: http.Request[P], inout _incomin
     http.text(request, "hello")
 }
 
-test fn a_server_refused_its_buffers_stops_and_gives_everything_back() {
+test "a server refused its buffers stops and gives everything back" {
     defer let log = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
     log.refuse_size_from(4096, 1)
     let parent = log.allocator()
@@ -637,7 +640,7 @@ test fn a_server_refused_its_buffers_stops_and_gives_everything_back() {
 ```
 
 ```
-ok    a_server_refused_its_buffers_stops_and_gives_everything_back
+ok    a server refused its buffers stops and gives everything back
 
 1 passed, 0 failed
 ```
@@ -667,7 +670,7 @@ fn quiet() -> App {
 }
 
 // Build a request in an arena, as `serve` would, and send it through the routes.
-test fn a_reading_is_recorded_and_counted() {
+test "a reading is recorded and counted" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -681,7 +684,7 @@ test fn a_reading_is_recorded_and_counted() {
 }
 
 // A request that names no station is refused before anything is counted.
-test fn a_reading_without_a_station_is_refused() {
+test "a reading without a station is refused" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -698,7 +701,7 @@ test fn a_reading_without_a_station_is_refused() {
 
 // `recorded_body` runs a streamed body into the request's arena, so a test
 // reads what a client would receive.
-test fn the_outlook_streams_one_line_a_day() {
+test "the outlook streams one line a day" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -710,7 +713,7 @@ test fn the_outlook_streams_one_line_a_day() {
 }
 
 // A route that is a closure is reached the same way.
-test fn the_root_answers_with_the_greeting() {
+test "the root answers with the greeting" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -723,10 +726,10 @@ test fn the_root_answers_with_the_greeting() {
 ```
 
 ```
-ok    a_reading_is_recorded_and_counted
-ok    a_reading_without_a_station_is_refused
-ok    the_outlook_streams_one_line_a_day
-ok    the_root_answers_with_the_greeting
+ok    a reading is recorded and counted
+ok    a reading without a station is refused
+ok    the outlook streams one line a day
+ok    the root answers with the greeting
 
 4 passed, 0 failed
 ```
@@ -775,6 +778,46 @@ runs the tests of every module beneath it. The report lists each test with
 exits with status 1 when any test failed, so a script or a CI job can rely on
 it.
 
+`--filter TEXT` runs only the tests whose names hold `TEXT`. A test below the
+root is named after its module's directory too, as `geometry.a square has four
+sides`, so a filter can pick out one module or one test. Against `ports.lin`
+from the start of this chapter, `linea test --filter refused ports.lin` runs
+the one test whose name holds `refused`, `an address without a port is
+refused`, and reports `1 passed, 0 failed`. Quote a filter that holds spaces,
+as any shell argument: `--filter "the port"`. A filter that matches no test
+says so, and the command succeeds.
+
+A filter is matched against the name as the report spells it, and the report
+writes a `.` inside a test's name as `\.`, so that it is not read as the dot
+before a module's directory. Save this as `rounding.lin`:
+
+```linea
+import std.testing
+
+// Round a count of tenths to the nearest whole number, halves up.
+fn rounded(tenths: UInt32) -> UInt32 {
+    (tenths + 5) / 10
+}
+
+test "1.5 rounds up to 2" {
+    testing.assert_eq(rounded(15), 2, "fifteen tenths round to two")?
+}
+
+test "1.4 rounds down to 1" {
+    testing.assert_eq(rounded(14), 1, "fourteen tenths round to one")?
+}
+```
+
+```
+ok    1\.4 rounds down to 1
+ok    1\.5 rounds up to 2
+
+2 passed, 0 failed
+```
+
+`linea test --filter '1\.5' rounding.lin` runs the second test alone, while
+`--filter '1.5'` matches no name and says so.
+
 ## What you have seen
 
 - `testing.assert` and `testing.assert_eq` check conditions and whole values,
@@ -782,9 +825,11 @@ it.
   ends a test at the first failure.
 - A helper that only tests call is an ordinary function: it counts as used,
   and it is left out of the program.
-- A `test fn` sits beside what it tests: at the top level of a module, inside
+- A test is named by a string, `test "what it checks" { … }`, and sits beside
+  what it tests: at the top level of a module, inside
   an inherent `impl`, or inside a trait, beside the operation it tests.
-- `test trap fn` marks a test that must stop the program.
+- `test trap` marks a test that must stop the program.
+- `linea test --filter TEXT` runs only the tests whose names hold `TEXT`.
 - `testing.each_allocation_failure(allocator, body, is_refusal)` refuses each
   allocation in turn and checks that every one is handled.
 - `testing.SharedAllocationLog` counts and refuses allocations made from many

@@ -61,7 +61,7 @@ fn session_test_serves(_side: SessionTestAnswer) -> Bool {
     true
 }
 
-test fn the_dual_of_a_protocol_is_what_its_peer_does() {
+test "the dual of a protocol is what its peer does" {
     let side: SessionTestAsk.Dual = .{}
     testing.assert(session_test_serves(side), "the dual of a send was not a receive")?
     .Ok(())
@@ -72,7 +72,7 @@ fn session_test_asks(_side: SessionTestAsk) -> Bool {
     true
 }
 
-test fn the_dual_of_the_dual_is_the_protocol() {
+test "the dual of the dual is the protocol" {
     let side: SessionTestAsk.Dual.Dual = .{}
     testing.assert(session_test_asks(side), "the dual of the dual was not the protocol")?
     .Ok(())

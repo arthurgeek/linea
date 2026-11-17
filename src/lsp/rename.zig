@@ -473,7 +473,7 @@ test "a type is renamed where a test inside a trait names it" {
         \\trait Sized {
         \\    fn size(self: Self) -> UInt8
         \\
-        \\    test fn a_parcel_has_its_weight_for_a_size() {
+        \\    test "a parcel has its weight for a size" {
         \\        let parcel = Parcel { weight = 2 }
         \\        let _size = parcel.size()
         \\    }

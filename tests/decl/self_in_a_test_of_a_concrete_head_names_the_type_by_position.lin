@@ -12,12 +12,12 @@ impl Boxed[UInt8] {
         Self { value = value }
     }
 
-    test fn holds_three() {
+    test "holds three" {
         let boxed: Self = Boxed.new(3)
         testing.assert_eq(boxed.value, 3, "the box holds three")?
     }
 
-    test fn holds_four() {
+    test "holds four" {
         let boxed = Self.new(4)
         testing.assert_eq(boxed.value, 4, "the box holds four")?
     }

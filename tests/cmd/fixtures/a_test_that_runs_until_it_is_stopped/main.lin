@@ -4,7 +4,7 @@ fn main() -> UInt8 {
     0
 }
 
-test fn counts_until_it_is_stopped() {
+test "counts until it is stopped" {
     var turns: UInt64 = 0
     while true {
         turns = turns % 1000 + 1

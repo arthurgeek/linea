@@ -1,0 +1,5 @@
+error[S-Test]: a test's name interpolates nothing
+ --> tests/decl/a_test_name_has_no_interpolation.lin:6:6
+  |
+6 | test "a box of {size} holds four" {
+  |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ a test is named where it is written; write the name without `{…}`

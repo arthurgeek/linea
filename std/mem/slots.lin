@@ -75,7 +75,7 @@ impl[T, A: Allocator] Storage[T, A] {
         buffer.release()
     }
 
-    test fn typed_slots_move_an_aggregate_to_independent_storage() {
+    test "typed slots move an aggregate to independent storage" {
         let allocator = system()
         let shape: SlotType[SlotTestPair] = .Type
         match allocator.acquire(slot_stride(shape)) {

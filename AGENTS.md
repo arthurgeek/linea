@@ -92,7 +92,7 @@ until it is green.
   output pasted beside it with what the compiler prints; a Markdown page in
   `docs/learn` the index does not link fails the gate. Run it after changing
   a chapter, a diagnostic's wording, or the library a chapter shows. A `linea`
-  block with `fn main`, a `test fn` or a `` `path.lin`: `` label is a program;
+  block with `fn main`, a `test` declaration or a `` `path.lin`: `` label is a program;
   the bare or `text` block after it (past an optional `sh` block holding
   `linea run|check|test PATH`) is its output, and is all of what the compiler
   prints. A fenced block labelled `` `path/linea.json`: ``, `` `path.c`: `` or

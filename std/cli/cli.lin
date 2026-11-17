@@ -25,7 +25,7 @@ impl ArgCursor {
         .{ args = .Some(copy(args)), slice = .None, count, index = 1 }
     }
 
-    test fn new_creates_cursor_from_args() {
+    test "new creates cursor from args" {
         let a = env.args()
         let cursor = ArgCursor.new(a)
         testing.assert_eq(cursor.index, UInt64(1), "new cursor index should start at 1")?
@@ -38,7 +38,7 @@ impl ArgCursor {
         .{ args = .None, slice = .Some(copy(slice)), count, index = 0 }
     }
 
-    test fn from_slice_creates_cursor_from_slice() {
+    test "from_slice creates a cursor from a slice" {
         let input = ["alpha", "beta"]
         let cursor = ArgCursor.from_slice(input.as_slice())
         testing.assert_eq(cursor.count, UInt64(2), "cursor count differed")?
@@ -51,7 +51,7 @@ impl ArgCursor {
         self.index < self.count
     }
 
-    test fn has_next_reports_available_tokens() {
+    test "has_next reports available tokens" {
         let input = ["one"]
         var cursor = ArgCursor.from_slice(input.as_slice())
         testing.assert(cursor.has_next(), "cursor should report available tokens")?
@@ -84,7 +84,7 @@ impl ArgCursor {
         self.token(self.index)
     }
 
-    test fn peek_inspects_token_without_advancing() {
+    test "peek inspects token without advancing" {
         let input = ["first", "second"]
         let cursor = ArgCursor.from_slice(input.as_slice())
         testing.assert_eq(cursor.peek(), .Ok(Option.Some("first")), "peek should see first token")?
@@ -102,7 +102,7 @@ impl ArgCursor {
         current
     }
 
-    test fn next_advances_and_returns_tokens() {
+    test "next advances and returns tokens" {
         let input = ["first", "second"]
         var cursor = ArgCursor.from_slice(input.as_slice())
         testing.assert_eq(&cursor.next(), .Ok(Option.Some("first")), "next differed on first token")?
@@ -120,7 +120,7 @@ impl ArgCursor {
         }
     }
 
-    test fn require_value_extracts_value_or_fails() {
+    test "require_value extracts value or fails" {
         let input = ["val"]
         var cursor = ArgCursor.from_slice(input.as_slice())
         let opt_name = "--test"
@@ -139,7 +139,7 @@ impl ArgCursor {
         }
     }
 
-    test fn expect_end_verifies_all_tokens_consumed() {
+    test "expect_end verifies all tokens consumed" {
         let done = ["done"]
         var cursor = ArgCursor.from_slice(done.as_slice())
         let _ = &cursor.next().unwrap()
@@ -252,7 +252,7 @@ impl[A: Allocator] Matches[A] {
         false
     }
 
-    test fn is_help_reports_help_request() {
+    test "is_help reports help request" {
         defer var root = Command.new("tool")
         var run_cmd = Command.new("run")
         let fast_cmd = Command.new("fast")
@@ -280,7 +280,7 @@ impl[A: Allocator] Matches[A] {
         false
     }
 
-    test fn flag_reports_presence_of_flags() {
+    test "flag reports presence of flags" {
         var flags: Vec[Str] = Vec.new()
         &flags.push("verbose").unwrap()
         defer let m: Matches = .{
@@ -315,7 +315,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn option_retrieves_matched_option_value() {
+    test "option retrieves matched option value" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "format", flag = "--format", value = .Some("json"), supplied = true }).unwrap()
         &options.push(.{ name = "output", flag = "--output", value = .None, supplied = false }).unwrap()
@@ -343,7 +343,7 @@ impl[A: Allocator] Matches[A] {
         false
     }
 
-    test fn is_supplied_distinguishes_user_options_from_defaults() {
+    test "is_supplied distinguishes user options from defaults" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "user_opt", flag = "--user-opt", value = .Some("yes"), supplied = true }).unwrap()
         &options.push(.{ name = "def_opt", flag = "--def-opt", value = .Some("default"), supplied = false }).unwrap()
@@ -374,7 +374,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(result)
     }
 
-    test fn options_all_collects_repeatable_options() {
+    test "options_all collects repeatable options" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "include", flag = "--include", value = .Some("foo"), supplied = true }).unwrap()
         &options.push(.{ name = "include", flag = "--include", value = .Some("bar"), supplied = true }).unwrap()
@@ -403,7 +403,7 @@ impl[A: Allocator] Matches[A] {
         .None
     }
 
-    test fn positional_retrieves_positional_arguments() {
+    test "positional retrieves positional arguments" {
         var positionals: Vec[PositionalMatch] = Vec.new()
         &positionals.push(.{ name = "target", value = "main.lin" }).unwrap()
         defer let m: Matches = .{
@@ -430,7 +430,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(result)
     }
 
-    test fn positionals_all_collects_variadic_positionals() {
+    test "positionals_all collects variadic positionals" {
         var positionals: Vec[PositionalMatch] = Vec.new()
         &positionals.push(.{ name = "message", value = "hello" }).unwrap()
         &positionals.push(.{ name = "message", value = "world" }).unwrap()
@@ -466,7 +466,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(parsed)
     }
 
-    test fn get_parses_typed_option_values() {
+    test "get parses typed option values" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "port", flag = "--port", value = .Some("8080"), supplied = true }).unwrap()
         &options.push(.{ name = "count", flag = "--count", value = .Some("many"), supplied = true }).unwrap()
@@ -503,7 +503,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(.Some(parsed))
     }
 
-    test fn get_optional_parses_present_and_absent_options() {
+    test "get_optional parses present and absent options" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "timeout", flag = "--timeout", value = .Some("30"), supplied = true }).unwrap()
         &options.push(.{ name = "retries", flag = "--retries", value = .Some("x"), supplied = true }).unwrap()
@@ -536,7 +536,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(parsed)
     }
 
-    test fn get_positional_parses_typed_positionals() {
+    test "get_positional parses typed positionals" {
         var positionals: Vec[PositionalMatch] = Vec.new()
         &positionals.push(.{ name = "count", value = "5" }).unwrap()
         &positionals.push(.{ name = "id", value = "abc" }).unwrap()
@@ -563,7 +563,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn required_positional_extracts_value_or_fails() {
+    test "required_positional extracts value or fails" {
         var positionals: Vec[PositionalMatch] = Vec.new()
         &positionals.push(.{ name = "file", value = "main.lin" }).unwrap()
         defer let m: Matches = .{
@@ -590,7 +590,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn required_option_extracts_value_or_fails() {
+    test "required_option extracts value or fails" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "name", flag = "--name", value = .Some("linea"), supplied = true }).unwrap()
         &options.push(.{ name = "owner", flag = "--owner", value = .None, supplied = false }).unwrap()
@@ -622,7 +622,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(.Some(parsed))
     }
 
-    test fn optional_parsed_converts_present_option_or_none() {
+    test "optional_parsed converts present option or none" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "level", flag = "--level", value = .Some("10"), supplied = true }).unwrap()
         &options.push(.{ name = "depth", flag = "--depth", value = .Some("deep"), supplied = true }).unwrap()
@@ -664,7 +664,7 @@ impl[A: Allocator] Matches[A] {
         .Ok(parsed)
     }
 
-    test fn required_parsed_converts_present_option_or_fails() {
+    test "required_parsed converts present option or fails" {
         var options: Vec[OptionMatch] = Vec.new()
         &options.push(.{ name = "speed", flag = "--speed", value = .Some("50"), supplied = true }).unwrap()
         &options.push(.{ name = "mode", flag = "--mode", value = .None, supplied = false }).unwrap()
@@ -705,7 +705,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn help_command_reports_active_help_target() {
+    test "help_command reports active help target" {
         defer var root = Command.new("tool")
         var run_cmd = Command.new("run")
         let fast_cmd = Command.new("fast")
@@ -732,7 +732,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn subcommand_returns_matched_subcommand_record() {
+    test "subcommand returns matched subcommand record" {
         var subcommands: Vec[SubcommandMatch] = Vec.new()
         &subcommands.push(.{ name = "init", matches = empty_matches(mem.system(), false) }).unwrap()
         defer let m: Matches = .{
@@ -757,7 +757,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn subcommand_name_returns_subcommand_identifier() {
+    test "subcommand_name returns subcommand identifier" {
         var subcommands: Vec[SubcommandMatch] = Vec.new()
         &subcommands.push(.{ name = "start", matches = empty_matches(mem.system(), false) }).unwrap()
         defer let m: Matches = .{
@@ -781,7 +781,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn subcommand_matches_returns_child_matches() {
+    test "subcommand_matches returns child matches" {
         var sub_flags: Vec[Str] = Vec.new()
         &sub_flags.push("all").unwrap()
         let sub_matches: Matches = .{
@@ -819,7 +819,7 @@ impl[A: Allocator] Matches[A] {
         }
     }
 
-    test fn find_flag_searches_hierarchically() {
+    test "find_flag searches hierarchically" {
         defer var root = Command.new("tool")
         &root.flag("root_flag", "--root-flag", global: true)
         var run_cmd = Command.new("run")
@@ -851,7 +851,7 @@ impl[A: Allocator] Matches[A] {
         self.option(name)
     }
 
-    test fn find_option_searches_hierarchically() {
+    test "find_option searches hierarchically" {
         defer var root = Command.new("tool")
         &root.option("config", "--config", global: true)
         &root.option("format", "--format", default: .Some("table"))
@@ -907,7 +907,7 @@ impl fmt.Display for CliError {
     }
 }
 
-test fn cli_errors_display_what_went_wrong() {
+test "cli errors display what went wrong" {
     defer let unknown = fmt.render_owned(CliError.UnknownCommand("run")).unwrap()
     testing.assert_eq(unknown.view(), "unknown command 'run'", "an unknown command changed")?
     defer let missing = fmt.render_owned(CliError.MissingOption("--format")).unwrap()
@@ -1337,7 +1337,7 @@ impl Command[mem.SystemAllocator] {
         Command.new_in(mem.system(), name, about)
     }
 
-    test fn new_creates_system_command() {
+    test "new creates system command" {
         defer let cmd = Command.new("linea", "compiler")
         testing.assert_eq(cmd.name, "linea", "command name differed")?
         testing.assert_eq(cmd.about, "compiler", "command about differed")?
@@ -1362,7 +1362,7 @@ impl[A: Allocator] Command[A] {
         }
     }
 
-    test fn new_in_creates_custom_allocator_command() {
+    test "new_in creates a custom allocator command" {
         defer let cmd = Command.new_in(mem.system(), "test_cmd", "testing")
         testing.assert_eq(cmd.name, "test_cmd", "command name differed")?
         .Ok(())
@@ -1373,7 +1373,7 @@ impl[A: Allocator] Command[A] {
         self.custom_usage_text = .Some(text)
     }
 
-    test fn custom_usage_overrides_usage_output() {
+    test "custom_usage overrides usage output" {
         defer var cmd = Command.new("demo")
         &cmd.custom_usage("custom usage text")
         defer let u = cmd.usage().unwrap()
@@ -1398,7 +1398,7 @@ impl[A: Allocator] Command[A] {
         }
     }
 
-    test fn flag_registers_boolean_switches() {
+    test "flag registers boolean switches" {
         defer var cmd = Command.new("demo")
         &cmd.flag("quiet", "--quiet", "suppress output", short: Option.Some("-q"))
         testing.assert_eq(cmd.flags.length(), UInt64(1), "flag count differed")?
@@ -1416,7 +1416,7 @@ impl[A: Allocator] Command[A] {
         }
     }
 
-    test fn option_registers_valued_options() {
+    test "option registers valued options" {
         defer var cmd = Command.new("demo")
         &cmd.option("output", "--output", "destination file", default: Option.Some("out.txt"))
         testing.assert_eq(cmd.options.length(), UInt64(1), "option count differed")?
@@ -1434,7 +1434,7 @@ impl[A: Allocator] Command[A] {
         }
     }
 
-    test fn positional_registers_positional_arguments() {
+    test "positional registers positional arguments" {
         defer var cmd = Command.new("demo")
         &cmd.positional("src", "source path", required: true)
         testing.assert_eq(cmd.positionals.length(), UInt64(1), "positional count differed")?
@@ -1464,7 +1464,7 @@ impl[A: Allocator] Command[A] {
         }
     }
 
-    test fn subcommand_registers_nested_commands() {
+    test "subcommand registers nested commands" {
         defer var root = Command.new("git")
         let clone_cmd = Command.new("clone")
         &root.subcommand(clone_cmd)
@@ -1561,7 +1561,7 @@ impl[A: Allocator] Command[A] {
         self.render_help(self.allocator, self.name, no_flags.as_slice(), no_options.as_slice())
     }
 
-    test fn usage_formats_aligned_help_documentation() {
+    test "usage formats aligned help documentation" {
         defer var cmd = Command.new("demo", "A demo utility")
         &cmd.flag("quiet", "--quiet", "suppress output", short: .Some("-q"))
         &cmd.option("output", "--output", "destination file")
@@ -1576,7 +1576,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn usage_aligns_columns_by_characters() {
+    test "usage aligns columns by characters" {
         defer var cmd = Command.new("demo")
         &cmd.flag("size", "--größe", "pick a size", short: .Some("-ß"))
         &cmd.option("output", "--output", "destination")
@@ -1589,7 +1589,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn usage_lists_positionals_before_the_subcommand() {
+    test "usage lists positionals before the subcommand" {
         defer var cmd = Command.new("run")
         &cmd.positional("target")
         let fast_cmd = Command.new("fast")
@@ -1642,7 +1642,7 @@ impl[A: Allocator] Command[A] {
         self.help_at(matches, UInt64.max)
     }
 
-    test fn format_help_returns_subcommand_or_root_help() {
+    test "format_help returns subcommand or root help" {
         defer var root = Command.new("app", "My app")
         &root.flag("verbose", "--verbose", "say more", global: true)
         var run_cmd = Command.new("run", "run the app")
@@ -1868,7 +1868,7 @@ impl[A: Allocator] Command[A] {
         self.descend(0, &state, &cursor)
     }
 
-    test fn parse_parses_cursor_into_matches() {
+    test "parse parses cursor into matches" {
         defer var cmd = Command.new("app")
         &cmd.flag("dry_run", "--dry-run")
         let input = ["--dry-run"]
@@ -1878,7 +1878,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_handles_optional_and_variadic_positionals() {
+    test "parse handles optional and variadic positionals" {
         defer var cmd = Command.new("demo")
         &cmd.positional("mode", required: true)
         &cmd.positional("target", required: false)
@@ -1915,7 +1915,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_handles_subcommand_variadic_positionals() {
+    test "parse handles subcommand variadic positionals" {
         defer var root = Command.new("echo_tool")
         var send_cmd = Command.new("send")
         &send_cmd.option("port", "--port", required: true)
@@ -1935,7 +1935,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_descends_into_nested_subcommands() {
+    test "parse descends into nested subcommands" {
         defer var root = Command.new("tool")
         var run_cmd = Command.new("run", "run a task")
         &run_cmd.positional("task", required: false)
@@ -1958,7 +1958,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_records_global_switches_where_they_are_declared() {
+    test "parse records global switches where they are declared" {
         defer var root = Command.new("tool")
         &root.flag("json", "--json", global: true)
         &root.option("config", "--config", global: true)
@@ -1997,7 +1997,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_takes_an_attached_long_option_value() {
+    test "parse takes an attached long option value" {
         defer var cmd = Command.new("app")
         &cmd.option("format", "--format")
         &cmd.option("label", "--label")
@@ -2009,7 +2009,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_refuses_a_value_attached_to_a_flag() {
+    test "parse refuses a value attached to a flag" {
         defer var cmd = Command.new("app")
         &cmd.flag("verbose", "--verbose")
         let input = ["--verbose=yes"]
@@ -2037,7 +2037,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_splits_short_clusters_and_attached_short_values() {
+    test "parse splits short clusters and attached short values" {
         defer var cmd = Command.new("app")
         &cmd.flag("verbose", "--verbose", short: .Some("-v"))
         &cmd.flag("all", "--all", short: .Some("-a"))
@@ -2067,7 +2067,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_takes_a_lone_dash_as_a_positional() {
+    test "parse takes a lone dash as a positional" {
         defer var cmd = Command.new("app")
         &cmd.positional("input", required: true)
         let input = ["-"]
@@ -2077,7 +2077,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_does_not_take_a_declared_switch_as_a_value() {
+    test "parse does not take a declared switch as a value" {
         defer var cmd = Command.new("app")
         &cmd.option("format", "--format")
         &cmd.flag("verbose", "--verbose")
@@ -2120,7 +2120,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_ends_subcommand_matching_at_a_double_dash() {
+    test "parse ends subcommand matching at a double dash" {
         defer var root = Command.new("tool")
         &root.positional("rest", required: false, variadic: true)
         let run_cmd = Command.new("run")
@@ -2136,7 +2136,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_names_a_missing_required_option_by_its_flag() {
+    test "parse names a missing required option by its flag" {
         defer var cmd = Command.new("app")
         &cmd.option("format", "--format", required: true)
         let input: [Str; 0] = []
@@ -2152,7 +2152,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_lets_a_declared_short_h_name_its_own_switch() {
+    test "parse lets a declared short h name its own switch" {
         defer var cmd = Command.new("client")
         &cmd.option("host", "--host", short: .Some("-h"))
         let input = ["-h", "example.org"]
@@ -2168,7 +2168,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn parse_reads_help_only_where_a_help_subcommand_is_registered() {
+    test "parse reads help only where a help subcommand is registered" {
         defer var root = Command.new("tool")
         var run_cmd = Command.new("run")
         let fast_cmd = Command.new("fast")
@@ -2208,7 +2208,7 @@ impl[A: Allocator] Command[A] {
 
     // A refused allocation while the schema is built, while parsing, or while
     // writing help is reported, the first two by `parse`.
-    test fn parse_reports_every_refused_allocation() -> Result[(), testing.Failure] {
+    test "parse reports every refused allocation" -> Result[(), testing.Failure] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), mem.Oom] {
@@ -2350,7 +2350,7 @@ impl[A: Allocator] Command[A] {
         self.help_at(borrow matches, levels)
     }
 
-    test fn help_for_arguments_shows_the_command_a_refused_parse_reached() {
+    test "help_for_arguments shows the command a refused parse reached" {
         defer var root = Command.new("tool")
         var serve_cmd = Command.new("serve", "serve requests")
         &serve_cmd.option("port", "--port", "port to listen on", required: true)
@@ -2371,7 +2371,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn help_for_arguments_shows_the_command_whose_argument_was_refused() {
+    test "help_for_arguments shows the command whose argument was refused" {
         defer var root = Command.new("tool")
         &root.flag("json", "--json", "print JSON", global: true)
         &root.option("config", "--config", "configuration file")
@@ -2478,7 +2478,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn help_for_arguments_shows_the_command_missing_a_requirement() {
+    test "help_for_arguments shows the command missing a requirement" {
         defer var root = Command.new("run")
         &root.positional("target")
         &root.option("mode", "--mode", "how to run", required: true)
@@ -2543,7 +2543,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn help_for_arguments_shows_the_command_that_declares_a_refused_value() {
+    test "help_for_arguments shows the command that declares a refused value" {
         defer var root = Command.new("tool")
         &root.option("level", "--level", "log level")
         var serve_cmd = Command.new("serve", "serve requests")
@@ -2571,7 +2571,7 @@ impl[A: Allocator] Command[A] {
         .Ok(())
     }
 
-    test fn help_for_arguments_shows_the_command_whose_value_was_refused_when_names_repeat() {
+    test "help_for_arguments shows the command whose value was refused when names repeat" {
         defer var root = Command.new("tool")
         &root.option("level", "--level", "log level")
         &root.positional("name")
@@ -2606,7 +2606,7 @@ impl[A: Allocator] Command[A] {
         self.parse(&cursor)
     }
 
-    test fn parse_args_parses_process_arguments() {
+    test "parse_args parses process arguments" {
         defer var cmd = Command.new("test_args_app")
         &cmd.positional("rest", required: false, variadic: true)
         let res = cmd.parse_args(env.args())

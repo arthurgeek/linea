@@ -83,7 +83,7 @@ fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Er
     &w.write_str(rest)
 }
 
-test fn fill_escapes_text_and_streams_entries_without_unreplaced_placeholders() {
+test "fill escapes text and streams entries without unreplaced placeholders" {
     let stamp = time.Timestamp.from_unix(1792497600, 0).unwrap()
     defer var row = String.new()
     fill(
@@ -132,7 +132,7 @@ impl Display for Page {
     }
 }
 
-test fn duplicate_fields_render_only_the_first_match() {
+test "duplicate fields render only the first match" {
     defer var out = String.new()
     fill(
         &out,
@@ -147,7 +147,7 @@ test fn duplicate_fields_render_only_the_first_match() {
     .Ok(())
 }
 
-test fn unknown_and_unclosed_placeholders_are_preserved_verbatim() {
+test "unknown and unclosed placeholders are preserved verbatim" {
     defer var out = String.new()
     fill(
         &out,

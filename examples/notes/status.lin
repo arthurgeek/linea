@@ -30,7 +30,7 @@ impl Status {
         }
     }
 
-    test fn status_parses_case_insensitively_and_serializes() {
+    test "status parses case insensitively and serializes" {
         testing.assert_eq(Status.parse("open"), Option.Some(Status.Open), "open was not parsed")?
         testing.assert_eq(Status.parse("OPEN"), Option.Some(Status.Open), "uppercase OPEN was not parsed")?
         testing.assert_eq(Status.parse("done"), Option.Some(Status.Done), "done was not parsed")?

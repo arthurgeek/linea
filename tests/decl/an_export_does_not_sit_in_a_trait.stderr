@@ -1,7 +1,7 @@
 error[S-Export]: an export does not sit in a trait
  --> tests/decl/an_export_does_not_sit_in_a_trait.lin:9:5
   |
-9 |     export test fn a_rope_is_measured() {
+9 |     export test "a rope is measured" {
   |     ^^^^^^ a trait declares what its implementations supply, and an export names a module's own entry point
 error[S-Export]: an export does not sit in a trait
   --> tests/decl/an_export_does_not_sit_in_a_trait.lin:14:5

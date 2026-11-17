@@ -54,7 +54,7 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 
 // Each test builds a request in an arena, as `serve_cgi` does, and hands it
 // to the router.
-test fn the_icon_is_answered_byte_for_byte() {
+test "the icon is answered byte for byte" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
@@ -69,7 +69,7 @@ test fn the_icon_is_answered_byte_for_byte() {
     testing.assert(body[0] == 0 && body[1] == 0 && body[2] == 1, "the bytes are not an icon file")?
 }
 
-test fn the_page_names_the_icon() {
+test "the page names the icon" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
     defer let arena = mem.Arena.open(mem.system(), size: 65536)

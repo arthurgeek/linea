@@ -22,7 +22,7 @@ fn discounted_price(price: UInt64, sink discount Percent(percent): Percent) -> U
     price - (price / 100) * rate - ((price % 100) * rate) / 100
 }
 
-test fn discounts_reduce_the_order_total() {
+test "discounts reduce the order total" {
     testing.assert_eq(discounted_price(5000, Percent(15)), 4250, "15% off a 5000-cent order")?
     testing.assert_eq(discounted_price(5000, Percent(0)), 5000, "zero discount keeps the price")?
     testing.assert_eq(discounted_price(5000, Percent(100)), 0, "100% discount makes the order free")?
@@ -30,7 +30,7 @@ test fn discounts_reduce_the_order_total() {
     testing.assert_eq(discounted_price(0, Percent(15)), 0, "an empty order stays free")?
 }
 
-test fn discount_input_must_be_a_percentage() {
+test "discount input must be a percentage" {
     // `Percent?(value)` is the fallible constructor: it checks the value when
     // the program runs and returns None when it is outside the range.
     testing.assert_eq(Percent?(0), .Some(Percent(0)), "no discount is a valid percentage")?

@@ -11,12 +11,12 @@ impl Meter {
         Meter { reading = 1 }
     }
 
-    test fn self_in_an_annotation() {
+    test "self in an annotation" {
         let meter: Self = Meter.new()
         testing.assert_eq(meter.reading, 1, "a new meter reads one")?
     }
 
-    test fn self_before_a_call() {
+    test "self before a call" {
         let meter = Self.new()
         testing.assert_eq(meter.reading, 1, "a new meter reads one")?
     }
