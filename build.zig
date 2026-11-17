@@ -2482,7 +2482,7 @@ pub fn build(b: *std.Build) void {
                 run_busy.expectExitCode(0);
                 (if (new_work) new_work_proof else busy_stealing_proof).dependOn(&run_busy.step);
             }
-            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "stdlib_values.lin", "stdlib_io.lin", "stdlib_combinators.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
+            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "stdlib_values.lin", "stdlib_io.lin", "stdlib_combinators.lin", "stdlib_process.lin", "stdlib_files.lin", "stdlib_signals.lin", "stdlib_contexts.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
                 const files = b.addWriteFiles();
                 const main_source = migrationFixture(b, files, fixture);
                 if (std.mem.eql(u8, fixture, "stealing_owner.lin")) {

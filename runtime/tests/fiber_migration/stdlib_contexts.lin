@@ -1,0 +1,62 @@
+import std.io
+import std.process
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+
+fn changed_carrier(before: task.Carrier) {
+    var attempts = UInt64(0)
+    while attempts < 65536 && before == task.current_carrier().unwrap() {
+        time.sleep(time.Duration.from_nanoseconds(0))
+        attempts += 1
+    }
+    if before == task.current_carrier().unwrap() {
+        panic("opening execution contexts pinned their calling continuation")
+    }
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[End]| {
+        let before = task.current_carrier().unwrap()
+        if io.Loop.open(carriers: 0).is_ok() {
+            panic("an empty carrier set was accepted")
+        }
+        let nested = io.Loop.open(carriers: 1).unwrap()
+        if nested == io.current() {
+            panic("opening a loop changed the caller's execution context")
+        }
+        let _file_limit = process.raise_open_file_limit()
+        let simulation = io.Simulation.open(seed: 42).unwrap()
+        let another = io.Simulation.open(seed: 17).unwrap()
+        if simulation.fingerprint() != another.fingerprint() {
+            panic("an unstarted simulation had an event history")
+        }
+        another.close()
+        simulation.close()
+        changed_carrier(before)
+
+        // Running a simulation temporarily installs a thread-local execution
+        // context. Its arbitrary callbacks may retain native thread state,
+        // so the outer fiber must keep its carrier after this boundary.
+        var running = io.Simulation.open(seed: 1).unwrap()
+        let original = task.current_carrier().unwrap()
+        let answer = &running.run(|inout _world| UInt64(42))
+        running.close()
+        if answer != 42 {
+            panic("a nested simulation lost its result")
+        }
+        for _ in 0..64 {
+            time.sleep(time.Duration.from_nanoseconds(0))
+            if original != task.current_carrier().unwrap() {
+                panic("a thread-local execution context lost its affinity")
+            }
+        }
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    0
+}

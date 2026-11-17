@@ -1,0 +1,42 @@
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+
+fn changed_carrier(before: task.Carrier) {
+    var attempts = UInt64(0)
+    while attempts < 65536 && before == task.current_carrier().unwrap() {
+        time.sleep(time.Duration.from_nanoseconds(0))
+        attempts += 1
+    }
+    if before == task.current_carrier().unwrap() {
+        panic("signal registrations pinned their calling continuation")
+    }
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[End]| {
+        let before = task.current_carrier().unwrap()
+        var waiting: task.WaitSet[io.SignalShare] = task.WaitSet.open()
+        let key = &waiting.signal(.User1, |sink share| share).unwrap()
+        let share = &waiting.take(key).unwrap()
+        if share.delivered() {
+            panic("an untriggered signal was reported delivered")
+        }
+        // The share is a process-wide disposition lease, not an OS-thread
+        // lease. Retain it across a completed wait and carrier transfer.
+        changed_carrier(before)
+        let again = &waiting.signal_with(share, |sink ready| ready).unwrap()
+        let final_share = &waiting.take(again).unwrap()
+        final_share.settle()
+        waiting.close().finish().unwrap()
+        changed_carrier(task.current_carrier().unwrap())
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    0
+}
