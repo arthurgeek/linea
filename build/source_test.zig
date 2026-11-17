@@ -4919,3 +4919,67 @@ test "the passes discard no error but where an exception names it, and every exc
         }
     }
 }
+
+test "the package holds every top-level path the build reads" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const io = testing.io;
+    const cwd = std.Io.Dir.cwd();
+
+    // What `zig fetch` keeps of the repository: the strings `.paths` lists.
+    const zon = try cwd.readFileAlloc(io, "build.zig.zon", gpa, .limited(1 << 16));
+    const listed_at = std.mem.indexOf(u8, zon, ".paths") orelse return error.TestUnexpectedResult;
+    var packaged: std.StringHashMapUnmanaged(void) = .empty;
+    for (try stringLiterals(gpa, zon[listed_at..])) |path| try packaged.put(gpa, path, {});
+
+    // The repository's own top-level entries, as git tracks them, so a cache
+    // or an output beside them is not taken for something the build reads.
+    const tracked = try std.process.run(gpa, io, .{ .argv = &.{ "git", "ls-files", "-z" } });
+    try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, tracked.term);
+    var top: std.StringHashMapUnmanaged(void) = .empty;
+    var files = std.mem.tokenizeScalar(u8, tracked.stdout, 0);
+    while (files.next()) |file| try top.put(gpa, file[0 .. std.mem.indexOfScalar(u8, file, '/') orelse file.len], {});
+
+    // Every path the build script and the gates it imports name, by the
+    // top-level entry it starts with.
+    var readers: std.ArrayList([]const u8) = .empty;
+    try readers.append(gpa, "build.zig");
+    var build_dir = try cwd.openDir(io, "build", .{ .iterate = true });
+    defer build_dir.close(io);
+    var entries = build_dir.iterate();
+    while (try entries.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".zig") or std.mem.endsWith(u8, entry.name, "_test.zig")) continue;
+        try readers.append(gpa, try std.fmt.allocPrint(gpa, "build/{s}", .{entry.name}));
+    }
+    var missing = false;
+    for (readers.items) |reader| {
+        const text = try cwd.readFileAlloc(io, reader, gpa, .limited(1 << 22));
+        for (try stringLiterals(gpa, text)) |literal| {
+            const first = literal[0 .. std.mem.indexOfScalar(u8, literal, '/') orelse literal.len];
+            if (!top.contains(first) or packaged.contains(first)) continue;
+            std.debug.print("{s} names \"{s}\", and build.zig.zon's paths leave out \"{s}\"\n", .{ reader, literal, first });
+            missing = true;
+        }
+    }
+    try testing.expect(!missing);
+}
+
+/// The contents of every plain string literal in `text`.
+fn stringLiterals(gpa: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+    const z = try gpa.dupeZ(u8, text);
+    var tokens: std.zig.Tokenizer = .init(z);
+    var out: std.ArrayList([]const u8) = .empty;
+    while (true) {
+        const token = tokens.next();
+        switch (token.tag) {
+            .eof => break,
+            .string_literal => {
+                const quoted = z[token.loc.start..token.loc.end];
+                if (quoted.len >= 2) try out.append(gpa, quoted[1 .. quoted.len - 1]);
+            },
+            else => {},
+        }
+    }
+    return out.items;
+}
