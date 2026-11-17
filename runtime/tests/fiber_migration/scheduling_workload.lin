@@ -1,0 +1,137 @@
+import std.env
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+@(copyable, derive(Release))
+struct Observation {
+    value: UInt64,
+    admission_ns: UInt64,
+    yield_ns: UInt64,
+    maximum_ns: UInt64,
+    moves: UInt64,
+    first: task.Carrier,
+}
+
+fn work(index: UInt64, queued: time.Instant, locality: Bool, affinity: Bool) -> Observation {
+    let admission_ns = queued.elapsed().nanoseconds()
+    let first = task.current_carrier().unwrap()
+    if affinity && env.args().count() == 0 {
+        panic("process has no argument zero")
+    }
+    let words = if locality {
+        UInt64(4096)
+    } else {
+        UInt64(1)
+    }
+    var bytes = mem.system().acquire(words * 8).unwrap()
+    for word in 0..words {
+        &bytes.store(word * 8, word + index)
+    }
+    var value = index + 1
+    var previous = copy(first)
+    var moves = UInt64(0)
+    var yield_ns = UInt64(0)
+    var maximum_ns = UInt64(0)
+    for _round in 0..8 {
+        for iteration in 0..32768 {
+            value = (value * 1664525 + 1013904223) % 4294967296
+            if locality {
+                let offset = (iteration % words) * 8
+                value = (value + bytes.load(offset)) % 4294967296
+                &bytes.store(offset, value)
+            }
+        }
+        let before = time.Instant.now()
+        time.sleep(time.Duration.from_nanoseconds(0))
+        let duration = before.elapsed().nanoseconds()
+        yield_ns += duration
+        if duration > maximum_ns {
+            maximum_ns = duration
+        }
+        let position = task.current_carrier().unwrap()
+        if position != previous {
+            moves += 1
+        }
+        previous = position
+    }
+    bytes.release()
+    Observation { value, admission_ns, yield_ns, maximum_ns, moves, first }
+}
+
+fn skip_placement(execution: io.Io) {
+    let unused = task.prepare(
+        sink [] |sink me: Chan[End]| {
+            me.close()
+        },
+        on: execution,
+    ).unwrap()
+    let _unrun = unused.cancel()
+}
+
+fn main() -> UInt8 {
+    let arguments = env.args()
+    let workload = arguments.at(1).unwrap()
+    let placement = arguments.at(2).unwrap() == "placement"
+    let balanced = workload == "balanced"
+    let locality = workload == "locality"
+    let affinity = workload == "affinity"
+    if !balanced && !locality && !affinity && workload != "imbalanced" {
+        return 1
+    }
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var handles: mem.Vec[Chan[Recv[Observation, End]]] = mem.Vec.new()
+    let began = time.Instant.now()
+    for index in 0..32 {
+        let ordinal = UInt64(index)
+        let before = (balanced || placement) && index % 2 == 1
+        if before {
+            skip_placement(execution)
+        }
+        let queued = time.Instant.now()
+        let body = sink [sink ordinal, sink queued, sink locality = locality, sink affinity = affinity] |sink me: Chan[Send[Observation, End]]| {
+            me.send(work(ordinal, queued, locality, affinity)).close()
+        }
+        let handle = task.prepare(body, on: execution).unwrap().start()
+        &handles.push(handle.detach()).unwrap()
+        if !before {
+            skip_placement(execution)
+        }
+    }
+    var pending = handles.drain()
+    var checksum = UInt64(0)
+    var admission_ns = UInt64(0)
+    var yield_ns = UInt64(0)
+    var maximum_ns = UInt64(0)
+    var moves = UInt64(0)
+    var first: Option[task.Carrier] = .None
+    var first_count = UInt64(0)
+    for handle in &pending {
+        let (result, done) = handle.recv()
+        done.close()
+        checksum += result.value
+        admission_ns += result.admission_ns
+        yield_ns += result.yield_ns
+        moves += result.moves
+        if result.maximum_ns > maximum_ns {
+            maximum_ns = result.maximum_ns
+        }
+        if first.is_none() {
+            first = .Some(copy(result.first))
+        }
+        if first == .Some(copy(result.first)) {
+            first_count += 1
+        }
+    }
+    pending.finish().unwrap()
+    let wall_ns = began.elapsed().nanoseconds()
+    io.println("scheduling-v1 {workload} tasks=32 checksum={checksum} wall_ns={wall_ns} admission_ns={admission_ns} yield_ns={yield_ns} maximum_ns={maximum_ns} moves={moves} first_count={first_count}").unwrap()
+    0
+}

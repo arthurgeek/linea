@@ -973,10 +973,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_object_entry.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_object_entry.zig" },
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
     },
     .{
         .dir = "runtime",
@@ -2328,6 +2328,15 @@ pub fn build(b: *std.Build) void {
     migration_metrics_step.dependOn(&migration_metrics_tests.step);
     native_task_step.dependOn(&migration_metrics_tests.step);
 
+    const scheduling_module = b.createModule(.{
+        .root_source_file = b.path("build/fiber_scheduling_measurements.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    const scheduling_tool = b.addExecutable(.{ .name = "fiber-scheduling-measurements", .root_module = scheduling_module });
+    const scheduling_tests = b.addRunArtifact(b.addTest(.{ .root_module = scheduling_module }));
+    native_task_step.dependOn(&scheduling_tests.step);
+
     const owner_watchdog_step = b.step("test-foreign-owner-watchdog", "Check foreign-owner watchdog deadlines and refusal paths");
     const owner_watchdog_module = b.createModule(.{
         .root_source_file = b.path("tests/cmd/foreign_owner/watchdog.zig"),
@@ -2350,6 +2359,8 @@ pub fn build(b: *std.Build) void {
     const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
     const busy_stealing_proof = b.step("test-fiber-busy-stealing", "Steal an already-started Linea continuation while its source runs another Linea task");
     const completion_proof = b.step("test-fiber-completion-backend", "Run actual Linux completion I/O and timeout retirement before migration");
+    const scheduling_proof = b.step("test-fiber-scheduling-controls", "Check matched pinned, placement, forced and stealing Linea workloads without recording measurements");
+    const scheduling_measurement = b.step("measure-fiber-scheduling", "Compare scheduling controls on an idle host with matched Linea workloads");
     if (target.result.os.tag != .linux) {
         const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'io_uring completion proof requires Linux' >&2; exit 1" });
         completion_proof.dependOn(&unavailable.step);
@@ -2361,6 +2372,53 @@ pub fn build(b: *std.Build) void {
             candidate_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
             break :candidate runtimeObject(b, runtime_target, "fiber_candidate", b.path("runtime/fiber.c"), candidate_flags.items);
         } else null;
+        if (sanitize == .none) {
+            const files = b.addWriteFiles();
+            const scheduling_source = files.addCopyFile(b.path("runtime/tests/fiber_migration/scheduling_workload.lin"), "main.lin");
+            var binaries: [4]std.Build.LazyPath = undefined;
+            var manifests: [3]std.Build.LazyPath = undefined;
+            for ([_][]const u8{ "pinned", "forced", "stealing" }, 0..) |policy, i| {
+                var flags: std.ArrayList([]const u8) = .empty;
+                flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+                if (i == 0) flags.append(b.allocator, "-DLINEA_FIBER_SCHEDULING_PINNED_TEST=1") catch @panic("OOM");
+                if (i == 1) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
+                if (migration_candidate and i != 1) flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
+                const archive = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+                const scheduling_archive = archive.addOutputFileArg(runtime_symbols.archive_name);
+                for (ordinary_nonfiber_objects.items) |object| archive.addArtifactArg(object);
+                archive.addArtifactArg(runtimeObject(b, runtime_target, b.fmt("fiber_scheduling_{s}", .{policy}), b.path("runtime/fiber.c"), flags.items));
+                const compile = b.addSystemCommand(&.{"env"});
+                compile.addPrefixedFileArg("LINEA_RUNTIME=", scheduling_archive);
+                compile.addFileArg(exe.getEmittedBin());
+                compile.addArgs(&.{ "build", "--keep" });
+                compile.addFileArg(scheduling_source);
+                compile.addArg("-o");
+                const binary = compile.addOutputFileArg("scheduling-workload");
+                binaries[if (i == 0) 0 else i + 1] = binary;
+                if (i == 0) binaries[1] = binary;
+                const coverage = b.addRunArtifact(call_coverage_tool);
+                coverage.addFileArg(binary.dirname().path(b, "scheduling-workload.mlir"));
+                coverage.step.dependOn(&compile.step);
+                coverage.step.dependOn(&run_coverage_tests.step);
+                manifests[i] = coverage.captureStdOut(.{});
+            }
+            for ([_]bool{ false, true }) |measure| {
+                const run = b.addRunArtifact(scheduling_tool);
+                run.addArg(if (measure) "--measure" else "--check");
+                for (binaries) |binary| run.addFileArg(binary);
+                for (manifests) |manifest| run.addFileInput(manifest);
+                run.step.dependOn(&scheduling_tests.step);
+                run.has_side_effects = true;
+                if (measure) {
+                    const observations = run.captureStdOut(.{});
+                    scheduling_measurement.dependOn(&b.addInstallFile(observations, "fiber-scheduling-measurements.tsv").step);
+                } else scheduling_proof.dependOn(&run.step);
+            }
+        } else {
+            const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'scheduling comparison requires an unsanitized runtime' >&2; exit 1" });
+            scheduling_proof.dependOn(&unavailable.step);
+            scheduling_measurement.dependOn(&unavailable.step);
+        }
         native_task_step.dependOn(stealing_proof);
         native_task_step.dependOn(busy_stealing_proof);
         const busy_files = b.addWriteFiles();
@@ -2742,6 +2800,8 @@ pub fn build(b: *std.Build) void {
         stealing_proof.dependOn(&unavailable.step);
         busy_stealing_proof.dependOn(&unavailable.step);
         completion_proof.dependOn(&unavailable.step);
+        scheduling_proof.dependOn(&unavailable.step);
+        scheduling_measurement.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");
