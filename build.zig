@@ -2333,8 +2333,32 @@ pub fn build(b: *std.Build) void {
     const platform_proof = b.step("test-fiber-platform-state", "Check FP, signal and protected-frame state across actual Linea handoffs");
     const task_entry_proof = b.step("test-fiber-task-entry", "Migrate a Linea task through compiler-owned entry eligibility");
     const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
+    const busy_stealing_proof = b.step("test-fiber-busy-stealing", "Steal an already-started Linea continuation while its source runs another Linea task");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
         native_task_step.dependOn(stealing_proof);
+        native_task_step.dependOn(busy_stealing_proof);
+        const busy_files = b.addWriteFiles();
+        const busy_source = busy_files.addCopyFile(b.path("runtime/tests/fiber_migration/busy_source.lin"), "main.lin");
+        var busy_flags: std.ArrayList([]const u8) = .empty;
+        busy_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        busy_flags.append(b.allocator, "-DLINEA_FIBER_BUSY_SOURCE_TEST=1") catch @panic("OOM");
+        const busy_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+        const busy_archive = busy_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
+        for (checked_nonfiber_objects.items) |object| busy_runtime.addArtifactArg(object);
+        busy_runtime.addArtifactArg(runtimeObject(b, runtime_target, "fiber_busy_source", b.path("runtime/fiber.c"), busy_flags.items));
+        const compile_busy = b.addSystemCommand(&.{"env"});
+        compile_busy.addPrefixedFileArg("LINEA_RUNTIME=", busy_archive);
+        compile_busy.addFileArg(exe.getEmittedBin());
+        compile_busy.addArg("build");
+        compile_busy.addFileArg(busy_source);
+        compile_busy.addArg("-o");
+        const busy_binary = compile_busy.addOutputFileArg("busy-stealing");
+        const run_busy = b.addRunArtifact(migration_metrics_tool);
+        run_busy.addArg("--check-busy-run");
+        run_busy.addFileArg(busy_binary);
+        run_busy.has_side_effects = true;
+        run_busy.expectExitCode(0);
+        busy_stealing_proof.dependOn(&run_busy.step);
         for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
             const files = b.addWriteFiles();
             const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture})), "main.lin");
@@ -2552,6 +2576,7 @@ pub fn build(b: *std.Build) void {
         platform_proof.dependOn(&unavailable.step);
         task_entry_proof.dependOn(&unavailable.step);
         stealing_proof.dependOn(&unavailable.step);
+        busy_stealing_proof.dependOn(&unavailable.step);
     }
 
     const run_step = b.step("run", "Run the compiler");

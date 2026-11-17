@@ -278,19 +278,32 @@ test "pinned controls reject an observed destination carrier change" {
 
 const Expectation = enum { round_trip, refusal_probes, source_busy, pinned, unproven };
 
-fn validateRun(result: std.process.RunResult, traced: bool) !?Report {
+const ChildOutput = enum { plain, traced, busy_source };
+const busy_source_proof = "native stealing: saved continuation claimed while source ran Linea\n";
+
+fn validateRun(result: std.process.RunResult, expected: ChildOutput) !?Report {
     switch (result.term) {
         .exited => |code| if (code != 0) return error.ChildFailed,
         else => return error.ChildFailed,
     }
-    if (result.stdout.len != 0 or (!traced and result.stderr.len != 0)) return error.UnexpectedOutput;
-    return if (traced) try inspectTrace(result.stderr) else null;
+    if (result.stdout.len != 0) return error.UnexpectedOutput;
+    return switch (expected) {
+        .plain => if (result.stderr.len != 0) error.UnexpectedOutput else null,
+        .traced => try inspectTrace(result.stderr),
+        .busy_source => if (!std.mem.eql(u8, result.stderr, busy_source_proof)) error.MissingBusySourceProof else null,
+    };
 }
 
 test "measurement refuses a failed or unexpected child rather than timing it as success" {
-    try testing.expectError(error.ChildFailed, validateRun(.{ .term = .{ .exited = 1 }, .stdout = &.{}, .stderr = &.{} }, false));
-    try testing.expectError(error.UnexpectedOutput, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast("unexpected") }, false));
-    try testing.expectError(error.BadTrace, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = &.{} }, true));
+    try testing.expectError(error.ChildFailed, validateRun(.{ .term = .{ .exited = 1 }, .stdout = &.{}, .stderr = &.{} }, .plain));
+    try testing.expectError(error.UnexpectedOutput, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast("unexpected") }, .plain));
+    try testing.expectError(error.BadTrace, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = &.{} }, .traced));
+}
+
+test "busy-source execution needs runtime claim evidence as well as Linea success" {
+    try testing.expectError(error.MissingBusySourceProof, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = &.{} }, .busy_source));
+    try testing.expectError(error.MissingBusySourceProof, validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast("busy") }, .busy_source));
+    try testing.expect((try validateRun(.{ .term = .{ .exited = 0 }, .stdout = &.{}, .stderr = @constCast(busy_source_proof) }, .busy_source)) == null);
 }
 
 fn inspectTraceFor(text: []const u8, expectation: Expectation) !Report {
@@ -320,7 +333,7 @@ fn writeReport(output: *std.Io.Writer, report: Report) !void {
 
 const Sample = struct { process_wall_ns: i96, report: ?Report };
 
-fn sampleRun(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, traced: bool) !Sample {
+fn sampleRun(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, expected: ChildOutput) !Sample {
     const start = std.Io.Clock.awake.now(io);
     const result = try std.process.run(gpa, io, .{
         .argv = &.{binary},
@@ -333,14 +346,18 @@ fn sampleRun(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, traced: boo
     defer gpa.free(result.stderr);
     const duration = start.durationTo(finish).toNanoseconds();
     if (duration < 0) return error.ClockOrder;
-    return .{ .process_wall_ns = duration, .report = try validateRun(result, traced) };
+    return .{ .process_wall_ns = duration, .report = try validateRun(result, expected) };
 }
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.arena.allocator();
     const args = try init.minimal.args.toSlice(gpa);
     if (args.len == 3 and std.mem.eql(u8, args[1], "--check-run")) {
-        _ = try sampleRun(gpa, init.io, args[2], false);
+        _ = try sampleRun(gpa, init.io, args[2], .plain);
+        return;
+    }
+    if (args.len == 3 and std.mem.eql(u8, args[1], "--check-busy-run")) {
+        _ = try sampleRun(gpa, init.io, args[2], .busy_source);
         return;
     }
     var buffer: [4096]u8 = undefined;
@@ -349,12 +366,12 @@ pub fn main(init: std.process.Init) !void {
         // Both binaries execute the same Linea assertions for two real handoffs.
         // Wall time includes process/carrier startup and collection: it is not
         // an isolated context-switch cost. ABBA order limits simple time drift.
-        _ = try sampleRun(gpa, init.io, args[2], false);
-        _ = try sampleRun(gpa, init.io, args[3], true);
+        _ = try sampleRun(gpa, init.io, args[2], .plain);
+        _ = try sampleRun(gpa, init.io, args[3], .traced);
         try output.interface.writeAll("measurement\tprocess_wall_including_startup_and_collection\norder\tABBA\nwarmups_per_variant\t1\nhandoffs_per_invocation\t2\n");
         for (0..8) |block| {
             for ([_]bool{ false, true, true, false }, 0..) |traced, position| {
-                const sample = try sampleRun(gpa, init.io, args[if (traced) 3 else 2], traced);
+                const sample = try sampleRun(gpa, init.io, args[if (traced) 3 else 2], if (traced) .traced else .plain);
                 try output.interface.print("trial\t{d}\t{s}\t{d}\n", .{ block * 4 + position, if (traced) "traced" else "plain", sample.process_wall_ns });
                 if (sample.report) |report| try writeReport(&output.interface, report);
             }
