@@ -40,8 +40,8 @@
 #endif
 /* Cross-thread restoration is enabled only on the validated native ABI.
  * Reference profiles keep their deterministic transfer policy. */
-#if defined(LINEA_FIBER_MIGRATION_CANDIDATE) && (!defined(__linux__) || (!defined(__aarch64__) && !defined(__x86_64__)) || __has_feature(address_sanitizer) || __has_feature(thread_sanitizer))
-#error Migration candidate requires unsanitized Linux arm64 or x86-64
+#if defined(LINEA_FIBER_MIGRATION_CANDIDATE) && (!defined(__linux__) || (!defined(__aarch64__) && !defined(__x86_64__)))
+#error Migration candidate requires Linux arm64 or x86-64
 #endif
 #if defined(LINEA_FIBER_MIGRATION_TEST) || defined(LINEA_FIBER_MIGRATION_CANDIDATE) || (defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer))
 #define LINEA_FIBER_CAN_MIGRATE 1
@@ -55,6 +55,10 @@
 #if __has_feature(address_sanitizer)
 void __sanitizer_start_switch_fiber(void **save, const void *bottom, size_t size);
 void __sanitizer_finish_switch_fiber(void *save, const void **bottom, size_t *size);
+#if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
+void *__asan_get_current_fake_stack(void);
+void *__asan_addr_is_in_fake_stack(void *stack, void *address, void **begin, void **end);
+#endif
 #endif
 #if __has_feature(thread_sanitizer)
 void *__tsan_create_fiber(unsigned flags);
@@ -395,6 +399,64 @@ static void platform_fibre_begin(void) {
     __atomic_store_n(&platform_signal_sent, 1U, __ATOMIC_RELEASE);
     platform_check(c, 1);
 }
+
+#if __has_feature(address_sanitizer)
+/* Check the active ASan context, not just bytes which can remain intact even
+ * when the runtime forgot to restore the continuation's fake stack. */
+static void platform_fake_frame(volatile unsigned char *frame) {
+    void *stack = __asan_get_current_fake_stack();
+    if (stack == NULL || __asan_addr_is_in_fake_stack(stack, (void *)frame, NULL, NULL) == NULL)
+        fail("linea: a protected frame lost its sanitizer context\n");
+}
+#endif
+
+#if defined(LINEA_FIBER_SANITIZER_FAULT_TEST)
+static void platform_fault_marker(void) {
+    const char message[] = "native migration: injecting a sanitizer fault after transfer\n";
+    report_bytes(message, sizeof message - 1);
+}
+#if __has_feature(address_sanitizer)
+__attribute__((noinline))
+static void platform_fault_target(volatile unsigned char *frame) {
+    platform_fault_marker();
+    volatile size_t outside = 32;
+    (void)frame[outside];
+    fail("linea: ASan missed a transferred frame overflow\n");
+}
+#elif __has_feature(thread_sanitizer)
+static unsigned platform_fault_phase;
+static volatile unsigned platform_fault_value;
+
+static void platform_fault_wait(unsigned phase) {
+    /* Relaxed coordination deliberately supplies no happens-before edge for
+     * the accesses this negative control requires TSan to detect. */
+    for (unsigned i = 0; i < 5000; i += 1) {
+        if (__atomic_load_n(&platform_fault_phase, __ATOMIC_RELAXED) >= phase) return;
+        const struct timespec pause = { 0, 1000000 };
+        nanosleep(&pause, NULL);
+    }
+    fail("linea: sanitizer fault control did not rendezvous\n");
+}
+
+static void platform_fault_source(struct carrier *source) {
+    if (!platform_first(source)) return;
+    platform_fault_wait(1);
+    platform_fault_value = 17;
+    __atomic_store_n(&platform_fault_phase, 2U, __ATOMIC_RELAXED);
+}
+
+static void platform_fault_target(volatile unsigned char *frame) {
+    (void)frame;
+    platform_fault_marker();
+    __atomic_store_n(&platform_fault_phase, 1U, __ATOMIC_RELAXED);
+    platform_fault_wait(2);
+    (void)platform_fault_value;
+    fail("linea: TSan missed a cross-carrier race\n");
+}
+#else
+#error Sanitizer fault control requires ASan or TSan
+#endif
+#endif
 #endif
 
 /* Foreign code can leave a thread dependency after returning. This is a
@@ -1246,6 +1308,9 @@ static void leave_fiber(struct linea_fiber *f, int ending) {
 #if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
     volatile unsigned char protected_frame[32];
     for (unsigned i = 0; i < sizeof protected_frame; i += 1) protected_frame[i] = (unsigned char)(i * 7U + 29U);
+#if __has_feature(address_sanitizer)
+    platform_fake_frame(protected_frame);
+#endif
 #endif
     lock_fiber(f);
     struct carrier *c = f->home;
@@ -1268,9 +1333,17 @@ static void leave_fiber(struct linea_fiber *f, int ending) {
 #if defined(LINEA_FIBER_PLATFORM_STATE_TEST)
     struct carrier *resumed = current_carrier();
     platform_check(resumed, 1);
+#if __has_feature(address_sanitizer)
+    platform_fake_frame(protected_frame);
+#endif
     for (unsigned i = 0; i < sizeof protected_frame; i += 1)
         if (protected_frame[i] != (unsigned char)(i * 7U + 29U)) fail("linea: a protected frame changed across transfer\n");
-    if (resumed != c) __atomic_fetch_add(&platform_migrations, 1U, __ATOMIC_RELEASE);
+    if (resumed != c) {
+        __atomic_fetch_add(&platform_migrations, 1U, __ATOMIC_RELEASE);
+#if defined(LINEA_FIBER_SANITIZER_FAULT_TEST)
+        platform_fault_target(protected_frame);
+#endif
+    }
 #endif
 #if defined(LINEA_FIBER_MIGRATION_TRACE_TEST)
     TRACE_BEGIN(resume_trace);
@@ -1824,6 +1897,9 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
 #endif
 #if defined(LINEA_FIBER_MIGRATION_TEST)
     if (kind == waiting_yield) linea_fiber_pause(linea_fiber_transfer_ready);
+#endif
+#if defined(LINEA_FIBER_SANITIZER_FAULT_TEST) && __has_feature(thread_sanitizer)
+    if (kind == waiting_yield) platform_fault_source(c);
 #endif
     /* Publication may let the joiner immediately reclaim the fiber. */
     if (ended != NULL) ended(argument);

@@ -249,11 +249,100 @@ fn inspectCalls(gpa: std.mem.Allocator, text: []const u8, lookup: Lookup) ![]Row
     return rows.toOwnedSlice(gpa);
 }
 
+fn hasSanitizerAttribute(line: []const u8, attributes: usize, required: []const u8) bool {
+    const prefix = "passthrough = [";
+    const start = std.mem.indexOfPos(u8, line, attributes, prefix) orelse return false;
+    var i = start + prefix.len;
+    var depth: usize = 1;
+    var found = false;
+    while (i < line.len) {
+        switch (line[i]) {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if (depth == 0) return found;
+            },
+            '"' => {
+                i += 1;
+                const value = i;
+                while (i < line.len and line[i] != '"') {
+                    if (line[i] == '\\') i += 1;
+                    i += 1;
+                }
+                if (i >= line.len) return false;
+                if (depth == 1 and std.mem.eql(u8, line[value..i], required)) found = true;
+            },
+            else => {},
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn inspectSanitizer(text: []const u8, name: []const u8) !void {
+    const required = if (std.mem.eql(u8, name, "address")) "sanitize_address" else if (std.mem.eql(u8, name, "thread")) "sanitize_thread" else return error.BadSanitizer;
+    var bodies: usize = 0;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (functionName(line) == null or !std.mem.endsWith(u8, line, "{")) continue;
+        bodies += 1;
+        const attributes = std.mem.lastIndexOf(u8, line, " attributes {") orelse return error.MissingSanitizerInstrumentation;
+        if (!hasSanitizerAttribute(line, attributes, required)) return error.MissingSanitizerInstrumentation;
+    }
+    if (bodies == 0) return error.NoFunctionBodies;
+}
+
+test "sanitizer coverage refuses an uninstrumented generated body" {
+    const text =
+        \\module {
+        \\ func.func private @lin.body() {
+        \\ }
+        \\}
+    ;
+    try testing.expectError(error.MissingSanitizerInstrumentation, inspectSanitizer(text, "address"));
+}
+
+test "sanitizer coverage checks every body including a weak fallback" {
+    const text =
+        \\module {
+        \\ func.func private @lin.body() attributes {passthrough = [["probe-stack", "inline-asm"], "sanitize_address"]} {
+        \\ }
+        \\ func.func @fallback() attributes {llvm.linkage = #llvm.linkage<weak>, passthrough = ["sanitize_thread"]} {
+        \\ }
+        \\}
+    ;
+    try testing.expectError(error.MissingSanitizerInstrumentation, inspectSanitizer(text, "address"));
+}
+
+test "sanitizer coverage accepts only the requested instrumentation" {
+    const text =
+        \\module {
+        \\ func.func private @external()
+        \\ func.func private @lin.body() attributes {passthrough = [["probe-stack", "inline-asm"], "sanitize_address"]} {
+        \\ }
+        \\ func.func @fallback() attributes {llvm.linkage = #llvm.linkage<weak>, passthrough = ["sanitize_address"]} {
+        \\ }
+        \\}
+    ;
+    try inspectSanitizer(text, "address");
+    try testing.expectError(error.MissingSanitizerInstrumentation, inspectSanitizer(text, "thread"));
+    const threaded = try std.mem.replaceOwned(u8, testing.allocator, text, "sanitize_address", "sanitize_thread");
+    defer testing.allocator.free(threaded);
+    try inspectSanitizer(threaded, "thread");
+    try testing.expectError(error.BadSanitizer, inspectSanitizer(text, "none"));
+    try testing.expectError(error.NoFunctionBodies, inspectSanitizer("module {}", "address"));
+    try testing.expect(!hasSanitizerAttribute("passthrough = [[\"probe-stack\", \"sanitize_address\"]]", 0, "sanitize_address"));
+    try testing.expect(!hasSanitizerAttribute("passthrough = [\"noinline\"], other = [\"sanitize_address\"]", 0, "sanitize_address"));
+    try testing.expect(!hasSanitizerAttribute("passthrough = [\"sanitize_address\"", 0, "sanitize_address"));
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.arena.allocator();
     const args = try init.minimal.args.toSlice(gpa);
-    if (args.len != 2) return error.ExpectedEmittedModulePath;
+    if (args.len != 2 and args.len != 3) return error.ExpectedEmittedModulePath;
     const text = try std.Io.Dir.cwd().readFileAlloc(init.io, args[1], gpa, .limited(32 << 20));
+    if (args.len == 3) try inspectSanitizer(text, args[2]);
     const rows = try inspectCalls(gpa, text, nativeContract);
     var has_clock = false;
     for (rows) |row| {

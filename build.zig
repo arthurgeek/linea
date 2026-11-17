@@ -1525,8 +1525,8 @@ pub fn build(b: *std.Build) void {
         "Build Linux migration proof archives without changing the installed runtime",
     ) orelse false;
     if (migration_candidate and !(target.result.os.tag == .linux and
-        (target.result.cpu.arch == .aarch64 or target.result.cpu.arch == .x86_64) and sanitize == .none))
-        @panic("migration candidate requires unsanitized Linux arm64 or x86-64");
+        (target.result.cpu.arch == .aarch64 or target.result.cpu.arch == .x86_64)))
+        @panic("migration candidate requires Linux arm64 or x86-64");
 
     const update_goldens = b.option(
         bool,
@@ -2385,6 +2385,7 @@ pub fn build(b: *std.Build) void {
             busy_runtime.addArtifactArg(busy_fiber);
             const compile_busy = b.addSystemCommand(&.{"env"});
             compile_busy.addPrefixedFileArg("LINEA_RUNTIME=", busy_archive);
+            if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile_busy.setEnvironmentVariable(variable.name, variable.value);
             compile_busy.addFileArg(exe.getEmittedBin());
             compile_busy.addArg("build");
             compile_busy.addFileArg(busy_source);
@@ -2393,6 +2394,8 @@ pub fn build(b: *std.Build) void {
             const run_busy = b.addRunArtifact(migration_metrics_tool);
             run_busy.addArg("--check-busy-run");
             run_busy.addFileArg(busy_binary);
+            if (sanitize == .address) run_busy.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+            if (sanitize == .thread) run_busy.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
             run_busy.has_side_effects = true;
             run_busy.expectExitCode(0);
             busy_stealing_proof.dependOn(&run_busy.step);
@@ -2404,6 +2407,7 @@ pub fn build(b: *std.Build) void {
                 }
                 const compile = b.addSystemCommand(&.{"env"});
                 compile.addPrefixedFileArg("LINEA_RUNTIME=", stealing_archive);
+                if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile.setEnvironmentVariable(variable.name, variable.value);
                 compile.addFileArg(exe.getEmittedBin());
                 compile.addArg("build");
                 compile.addFileArg(main_source);
@@ -2412,6 +2416,8 @@ pub fn build(b: *std.Build) void {
                 const run = b.addRunArtifact(migration_metrics_tool);
                 run.addArg("--check-run");
                 run.addFileArg(binary);
+                if (sanitize == .address) run.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+                if (sanitize == .thread) run.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
                 run.has_side_effects = true;
                 run.expectExitCode(0);
                 stealing_proof.dependOn(&run.step);
@@ -2440,9 +2446,10 @@ pub fn build(b: *std.Build) void {
             pinned_start: bool = false,
             keep: bool = true,
             guard_fault: bool = false,
+            sanitizer_fault: bool = false,
             completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
         };
-        inline for ([_]ProofCase{
+        for ([_]ProofCase{
             .{ .source = "continuation.lin", .completed_wait = false },
             .{ .source = "continuation.lin", .completed_wait = false, .entry_provenance = true },
             .{ .source = "continuation.lin", .completed_wait = false, .entry_provenance = true, .keep = false },
@@ -2450,6 +2457,7 @@ pub fn build(b: *std.Build) void {
             .{ .source = "pinned.lin", .completed_wait = false, .entry_provenance = true },
             .{ .source = "unknown_pinned.lin", .completed_wait = false, .entry_provenance = true },
             .{ .source = "continuation.lin", .completed_wait = false, .platform = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .platform = true, .sanitizer_fault = true },
             .{ .source = "overflow_after_handoff.lin", .completed_wait = false, .platform = true, .guard_fault = true },
             .{ .source = "continuation.lin", .completed_wait = false, .trace = true },
             .{ .source = "continuation.lin", .completed_wait = false, .trace = true, .refusal_probes = true },
@@ -2474,6 +2482,10 @@ pub fn build(b: *std.Build) void {
             .{ .source = "session.lin", .delay_notifier = true },
             .{ .source = "session.lin", .delay_notifier = true, .trace = true },
         }) |proof_case| {
+            // Sanitizers own stack-fault reporting. This case observes the
+            // unsanitized runtime's exact handler and is tested in that mode.
+            if (proof_case.guard_fault and sanitize != .none) continue;
+            if (proof_case.sanitizer_fault and sanitize == .none) continue;
             const completed_wait = proof_case.completed_wait;
             const files = b.addWriteFiles();
             const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{proof_case.source})), "main.lin");
@@ -2495,6 +2507,7 @@ pub fn build(b: *std.Build) void {
             if (proof_case.trace) handoff_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1") catch @panic("OOM");
             if (proof_case.refusal_probes) handoff_flags.append(b.allocator, "-DLINEA_FIBER_REFUSAL_PROBES_TEST=1") catch @panic("OOM");
             if (proof_case.platform) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_PLATFORM_STATE_TEST=1", "-fstack-protector-all" }) catch @panic("OOM");
+            if (proof_case.sanitizer_fault) handoff_flags.append(b.allocator, "-DLINEA_FIBER_SANITIZER_FAULT_TEST=1") catch @panic("OOM");
             if (proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_ENTRY_PROVENANCE_TEST=1") catch @panic("OOM");
             if (std.mem.eql(u8, proof_case.source, "unproven.lin") and !proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
             switch (proof_case.completion) {
@@ -2517,6 +2530,7 @@ pub fn build(b: *std.Build) void {
             if (proof_case.entry_provenance and !proof_case.pinned_start and proof_case.keep and std.mem.eql(u8, proof_case.source, "continuation.lin")) entry_archive = handoff_archive;
             const compile = b.addSystemCommand(&.{"env"});
             compile.addPrefixedFileArg("LINEA_RUNTIME=", handoff_archive);
+            if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile.setEnvironmentVariable(variable.name, variable.value);
             compile.addFileArg(exe.getEmittedBin());
             compile.addArg("build");
             if (proof_case.keep) compile.addArg("--keep");
@@ -2526,6 +2540,7 @@ pub fn build(b: *std.Build) void {
             const manifest: ?std.Build.LazyPath = if (proof_case.keep) blk: {
                 const check_calls = b.addRunArtifact(call_coverage_tool);
                 check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
+                if (sanitize.flag()) |name| check_calls.addArg(name);
                 check_calls.step.dependOn(&compile.step);
                 check_calls.step.dependOn(&run_coverage_tests.step);
                 break :blk check_calls.captureStdOut(.{});
@@ -2536,10 +2551,16 @@ pub fn build(b: *std.Build) void {
                 measurement_manifests[index] = manifest;
             }
             const run_proof = b.addSystemCommand(&.{"env"});
+            if (sanitize == .address) run_proof.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+            if (sanitize == .thread) run_proof.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
             run_proof.addFileArg(binary);
             if (manifest) |coverage| run_proof.addFileInput(coverage);
             run_proof.has_side_effects = true;
-            if (proof_case.guard_fault) {
+            if (proof_case.sanitizer_fault) {
+                run_proof.expectExitCode(if (sanitize == .thread) 66 else 1);
+                run_proof.expectStdErrMatch("native migration: injecting a sanitizer fault after transfer");
+                run_proof.expectStdErrMatch(if (sanitize == .thread) "ThreadSanitizer: data race" else "AddressSanitizer: stack-buffer-overflow");
+            } else if (proof_case.guard_fault) {
                 run_proof.addCheck(.{ .expect_term = .{ .signal = .ABRT } });
                 run_proof.expectStdErrEqual("linea: a stack overflowed\n");
             } else {
@@ -2575,11 +2596,18 @@ pub fn build(b: *std.Build) void {
         const object_source = object_files.addCopyFile(b.path("runtime/tests/fiber_migration/entry_object.lin"), "main.lin");
         _ = object_files.add("linea.json", "{\"kind\":\"library\"}\n");
         const compile_object = b.addSystemCommand(&.{"env"});
+        if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile_object.setEnvironmentVariable(variable.name, variable.value);
         compile_object.addFileArg(exe.getEmittedBin());
         compile_object.addArgs(&.{ "build", "--keep" });
         compile_object.addFileArg(object_source);
         compile_object.addArg("-o");
         const entry_object = compile_object.addOutputFileArg("entry.o");
+        const check_object_calls = b.addRunArtifact(call_coverage_tool);
+        check_object_calls.addFileArg(entry_object.dirname().path(b, "entry.o.mlir"));
+        if (sanitize.flag()) |name| check_object_calls.addArg(name);
+        check_object_calls.step.dependOn(&compile_object.step);
+        check_object_calls.step.dependOn(&run_coverage_tests.step);
+        const object_manifest = check_object_calls.captureStdOut(.{});
         const object_test_module = b.createModule(.{
             .root_source_file = b.path("build/fiber_object_entry.zig"),
             .target = target,
@@ -2587,9 +2615,25 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         });
         object_test_module.addAnonymousImport("object_ir", .{ .root_source_file = entry_object.dirname().path(b, "entry.o.mlir") });
-        object_test_module.addObjectFile(entry_object);
-        object_test_module.addObjectFile(entry_archive.?);
-        const run_object_test = b.addRunArtifact(b.addTest(.{ .root_module = object_test_module }));
+        const run_object_test = if (sanitize.flag()) |sanitizer| sanitized: {
+            // Let the C toolchain supply its matching sanitizer runtime. The
+            // Zig harness only calls the separately compiled Linea entry.
+            const harness = b.addTest(.{ .root_module = object_test_module, .emit_object = true });
+            const link = b.addSystemCommand(&.{ "cc", b.fmt("-fsanitize={s}", .{sanitizer}), "-fsanitize=undefined", "-fno-sanitize-recover=all" });
+            link.addArtifactArg(harness);
+            link.addFileArg(entry_object);
+            link.addFileArg(entry_archive.?);
+            link.addArgs(&.{ "-lm", "-lpthread", "-o" });
+            const binary = link.addOutputFileArg("object-entry");
+            const run = b.addSystemCommand(&.{"env"});
+            run.addFileArg(binary);
+            break :sanitized run;
+        } else ordinary: {
+            object_test_module.addObjectFile(entry_object);
+            object_test_module.addObjectFile(entry_archive.?);
+            break :ordinary b.addRunArtifact(b.addTest(.{ .root_module = object_test_module }));
+        };
+        run_object_test.addFileInput(object_manifest);
         run_object_test.has_side_effects = true;
         task_entry_proof.dependOn(&run_object_test.step);
         const measure = b.addRunArtifact(migration_metrics_tool);
