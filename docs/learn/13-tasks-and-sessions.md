@@ -496,7 +496,7 @@ error[T-UnknownOperation]: `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, me
 20  |     let (square, done) = asking.recv()
     |                          ^^^^^^ this is `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, mem.SystemAllocator)]`, which `Chan[Recv[T, N], H]` does not match
    ::: std/session/chan.lin
-120 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
+147 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
     |                                ------------------- `recv` is declared for `Chan[Recv[T, N], H]`
 ```
 
@@ -1325,7 +1325,7 @@ error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End]
 21  |     let _key = &waiting.received(sending, |sink ready| Waited.Ready(ready))
     |                                  ^^^^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
    ::: std/task/wait_set.lin
-273 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
+277 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
     |                                                                 ---- expected because of this parameter
 ```
 
