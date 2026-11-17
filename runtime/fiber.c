@@ -1448,8 +1448,9 @@ static int make_poller(struct carrier *c) {
     event.events = EPOLLIN;
     event.data.u64 = UINT64_MAX;
     if (epoll_ctl(c->kernel, EPOLL_CTL_ADD, c->wake, &event) != 0) return errno;
-#if defined(LINEA_FIBER_RING_TEST)
+#if !defined(LINEA_FIBER_READINESS_TEST)
     c->completion = linea_completion_open(c->wake);
+#if defined(LINEA_FIBER_RING_TEST)
     if (c->completion == NULL) {
 #if defined(LINEA_FIBER_RING_FALLBACK_TEST)
         const char message[] = "native completion: unavailable kernel used readiness fallback\n";
@@ -1458,6 +1459,7 @@ static int make_poller(struct carrier *c) {
         return ENOTSUP;
 #endif
     }
+#endif
 #endif
 #else
     c->kernel = kqueue();

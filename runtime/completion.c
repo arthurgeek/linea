@@ -321,8 +321,21 @@ static void completion_flush(struct linea_completion *queue) {
      * failed syscall never proves that the kernel relinquished the buffers. */
 }
 
+#if defined(LINEA_COMPLETION_ACCEPT_TIE_TEST)
+static int defer_accepted_result(struct linea_completion *queue) {
+    for (unsigned i = 0; i < completion_slots; i += 1) {
+        const struct completion_slot *slot = &queue->slots[i];
+        if (slot->pending != NULL && slot->opcode == IORING_OP_ACCEPT && !slot->expired) return 1;
+    }
+    return 0;
+}
+#endif
+
 static int completion_retry(struct linea_completion *queue) {
     if (queue == NULL) return 0;
+#if defined(LINEA_COMPLETION_ACCEPT_TIE_TEST)
+    if (defer_accepted_result(queue)) return 1;
+#endif
 #if defined(LINEA_COMPLETION_CAPACITY_TEST)
     if (queue->active != 0 && !__atomic_load_n(&capacity_refused, __ATOMIC_ACQUIRE)) return 1;
 #endif
@@ -384,6 +397,13 @@ static int retire_event(struct linea_completion *queue, struct io_uring_cqe even
         slot->result = event.res;
     }
     if (slot->original_live || slot->cancel_live) return 0;
+#if defined(LINEA_COMPLETION_ACCEPT_TIE_TEST)
+    if (slot->opcode == IORING_OP_ACCEPT) {
+        if (slot->result < 0 || !slot->expired || !slot->cancel_submitted) completion_fail();
+        const char message[] = "native completion: accepted descriptor won its expired deadline\n";
+        report_bytes(message, sizeof message - 1);
+    }
+#endif
 #if defined(LINEA_COMPLETION_STALE_COOKIE_TEST)
     if (!queue->recorded && !(event.user_data & 1U)) {
         queue->retired.user_data = event.user_data;
@@ -443,6 +463,12 @@ static int retire_event(struct linea_completion *queue, struct io_uring_cqe even
 
 static int completion_next(struct linea_completion *queue, struct linea_completion_result *result) {
     if (queue == NULL) return 0;
+#if defined(LINEA_COMPLETION_ACCEPT_TIE_TEST)
+    /* The kernel has accepted a real connection, but source retirement waits
+     * for the genuine timer to request cancellation. Its own successful CQE
+     * must still win after the control request also relinquishes its lease. */
+    if (defer_accepted_result(queue)) return 0;
+#endif
 #if defined(LINEA_COMPLETION_CAPACITY_TEST)
     /* Keep genuine request records live until the third Linea reader has
      * attempted admission. Nothing is fabricated or released during the hold. */
