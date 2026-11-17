@@ -266,6 +266,7 @@ const OwnerIndex = struct {
             total += bucket.count();
         };
         const sets = try gpa.alloc(SetId, total);
+        errdefer gpa.free(sets);
         var i: usize = 0;
         for (buckets) |found| if (found) |bucket| {
             var keys = bucket.keyIterator();

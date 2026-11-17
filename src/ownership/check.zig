@@ -3477,7 +3477,9 @@ test "a failed group entry does not suppress sibling generated ownership" {
 
 /// Runs the pass over `text` once per allocation it makes, cutting that
 /// allocation and every one after it, and requires each run to either refuse
-/// or report.
+/// or report. Every cut is made twice: once with resizing in place allowed,
+/// and once with every resize refused, so that a shrink falls back on a fresh
+/// allocation the cut can refuse too.
 ///
 /// `text` must be a program this pass rejects, so "reported nothing" is always
 /// the wrong answer and never merely an uninteresting one.
@@ -3503,30 +3505,33 @@ fn everyCutRefusesOrReports(gpa: std.mem.Allocator, text: []const u8) !void {
     var res = try resolveTree(scratch, &ast, &setup);
     var typing = try typecheckTree(scratch, &res, &setup);
 
-    var cut: usize = 0;
-    var refused: usize = 0;
-    while (cut < 4096) : (cut += 1) {
-        var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = cut });
-        var reports = std.heap.ArenaAllocator.init(failing.allocator());
-        defer reports.deinit();
-        var sink = Sink.init(reports.allocator());
+    for ([_]usize{ std.math.maxInt(usize), 0 }) |resize_fail_index| {
+        var cut: usize = 0;
+        var refused: usize = 0;
+        while (cut < 4096) : (cut += 1) {
+            var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = cut, .resize_fail_index = resize_fail_index });
+            var reports = std.heap.ArenaAllocator.init(failing.allocator());
+            defer reports.deinit();
+            var sink = Sink.init(reports.allocator());
 
-        if (checkTree(failing.allocator(), &res, &typing, &sink)) |returned| {
-            var plan = returned;
-            plan.deinit(failing.allocator());
-            // Returning normally is a claim that the program is safe, and this
-            // program is not. Whether the cut fell past the last allocation or
-            // on the one the diagnostic needed, the answer must be the same.
-            try testing.expect(sink.hasErrors());
-            if (cut > failing.alloc_index) break;
-        } else |err| {
-            try testing.expectEqual(error.OutOfMemory, err);
-            refused += 1;
+            if (checkTree(failing.allocator(), &res, &typing, &sink)) |returned| {
+                var plan = returned;
+                plan.deinit(failing.allocator());
+                // Returning normally is a claim that the program is safe, and
+                // this program is not. Whether the cut fell past the last
+                // allocation or on the one the diagnostic needed, the answer
+                // must be the same.
+                try testing.expect(sink.hasErrors());
+                if (cut > failing.alloc_index) break;
+            } else |err| {
+                try testing.expectEqual(error.OutOfMemory, err);
+                refused += 1;
+            }
         }
-    }
 
-    // A pass that allocated nothing would satisfy the loop vacuously.
-    try testing.expect(refused > 0);
+        // A pass that allocated nothing would satisfy the loop vacuously.
+        try testing.expect(refused > 0);
+    }
 }
 
 test "fixpoint budget covers reachability every state rise and open transfer" {
@@ -3982,6 +3987,25 @@ test "ownership allocation failure cannot accept an invalidated observation" {
         \\    let view = borrow owner
         \\    owner = 2
         \\    *view
+        \\}
+    );
+}
+
+test "ownership gives back what a function's graph and its invalidations took when allocation fails" {
+    // A function and a closure each with an `inout` parameter, whose lists
+    // pass to the graph, and a write invalidating a value that observes both
+    // the whole owner and one of its fields, whose set sits in both buckets.
+    try everyCutRefusesOrReports(testing.allocator,
+        \\struct Pair { a: UInt8, b: UInt8 }
+        \\struct Views { whole: borrow Pair, part: borrow UInt8 }
+        \\fn bump(inout p: Pair) { p.a = p.a + 1 }
+        \\fn main() -> UInt8 {
+        \\    var pair: Pair = .{ a = 1, b = 2 }
+        \\    let both: Views = .{ whole = borrow pair, part = borrow pair.a }
+        \\    let reset = |inout q: Pair| { q.b = 0 }
+        \\    reset(&pair)
+        \\    bump(&pair)
+        \\    *both.part + both.whole.b
         \\}
     );
 }

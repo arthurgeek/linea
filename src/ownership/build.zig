@@ -587,6 +587,8 @@ const Builder = struct {
             try self.markExit(self.at);
         }
 
+        const owned_inouts = try inouts.toOwnedSlice(self.gpa);
+        errdefer self.gpa.free(owned_inouts);
         try self.functions.append(self.gpa, .{
             .decl = d,
             .owner = d,
@@ -595,7 +597,7 @@ const Builder = struct {
             .parameters = self.res.parametersOf(d),
             .blocks = .{ .start = @intCast(first), .end = @intCast(self.blocks.items.len) },
             .scopes = .{ .start = @intCast(first_scope), .end = @intCast(self.scopes.items.len) },
-            .inouts = try inouts.toOwnedSlice(self.gpa),
+            .inouts = owned_inouts,
             .contract_declined = self.typing.declined_contracts.contains(d),
             .default_carrier = self.typing.defaulted_contracts.get(d),
         });
@@ -665,6 +667,8 @@ const Builder = struct {
         try self.returned(descriptor.body, descriptor.body);
         try self.endScopesTo(0, descriptor.body);
         if (self.at != .none) try self.markExit(self.at);
+        const owned_inouts = try inouts.toOwnedSlice(self.gpa);
+        errdefer self.gpa.free(owned_inouts);
         try self.functions.append(self.gpa, .{
             .decl = .none,
             .lambda = descriptor.expr,
@@ -674,7 +678,7 @@ const Builder = struct {
             .parameters = self.res.closureParameters(id),
             .blocks = .{ .start = @intCast(first), .end = @intCast(self.blocks.items.len) },
             .scopes = .{ .start = @intCast(first_scope), .end = @intCast(self.scopes.items.len) },
-            .inouts = try inouts.toOwnedSlice(self.gpa),
+            .inouts = owned_inouts,
             .contract_declined = descriptor.contract_declined,
             .default_carrier = descriptor.default_carrier,
         });
