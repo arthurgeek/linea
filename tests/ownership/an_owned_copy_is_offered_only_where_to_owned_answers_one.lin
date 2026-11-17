@@ -1,0 +1,73 @@
+// [O-Escapes]. A view returned from a function may come only from a source
+// its `where` clause names. Returning `….to_owned()` instead is offered only
+// where the view's `to_owned` answers a `Result` whose success observes
+// nothing: a copy that can fail. A `to_owned` answering anything else, or a
+// success that still observes, is no owned copy.
+struct Ticket {
+    text: Str,
+}
+
+struct Label {
+    text: Str,
+}
+
+struct Note {
+    text: Str,
+}
+
+struct Both[A, B] {
+    first: A,
+    second: B,
+}
+
+struct Size {
+    bytes: UInt64,
+}
+
+impl Ticket {
+    fn to_owned(self: Self) -> Result[Size, UInt8] {
+        .Ok(Size { bytes = self.text.length() })
+    }
+}
+
+impl Label {
+    fn to_owned(self: Self) -> Both[Size, UInt8] {
+        Both[Size, UInt8] { first = Size { bytes = self.text.length() }, second = 0 }
+    }
+}
+
+impl Note {
+    fn to_owned(_self: Self) -> Result[Note, UInt8] {
+        .Ok(Note { text = "fixed" })
+    }
+}
+
+fn ticket(value: String) -> Ticket where borrows(value) {
+    Ticket { text = value.view() }
+}
+
+fn label(value: String) -> Label where borrows(value) {
+    Label { text = value.view() }
+}
+
+fn note(value: String) -> Note where borrows(value) {
+    Note { text = value.view() }
+}
+
+fn pick_ticket(_kept: String, other: String) -> Ticket where borrows(_kept) {
+    ticket(other)
+}
+
+fn pick_label(_kept: String, other: String) -> Label where borrows(_kept) {
+    label(other)
+}
+
+fn pick_note(_kept: String, other: String) -> Note where borrows(_kept) {
+    note(other)
+}
+
+fn main() -> UInt8 {
+    defer let a = String.new()
+    defer let b = String.new()
+    UInt8(pick_ticket(a, b).text.length() + pick_label(a, b).text.length() + pick_note(a, b).text.length())
+}

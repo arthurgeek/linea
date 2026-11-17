@@ -1,0 +1,22 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ownership/an_owned_copy_is_offered_only_where_to_owned_answers_one.lin:58:5
+   |
+58 |     ticket(other)
+   |     ^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `other`; write `where borrows(_kept, other)` to say so
+   = help: an owned copy observes nothing and needs no clause: declare the result `Result[Size, UInt8]` and return `….to_owned()`, which copies the text and can fail with `UInt8`
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ownership/an_owned_copy_is_offered_only_where_to_owned_answers_one.lin:62:5
+   |
+62 |     label(other)
+   |     ^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `other`; write `where borrows(_kept, other)` to say so
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/ownership/an_owned_copy_is_offered_only_where_to_owned_answers_one.lin:66:5
+   |
+66 |     note(other)
+   |     ^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `other`; write `where borrows(_kept, other)` to say so

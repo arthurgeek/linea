@@ -24,6 +24,7 @@ const implementsAnyOf = @import("../sema/typecheck.zig").implementsAnyOf;
 const importEdit = @import("../sema/typecheck.zig").importEdit;
 const resultSiteOf = @import("../sema/typecheck.zig").resultSiteOf;
 const lambdaResultSite = @import("../sema/typecheck.zig").lambdaResultSite;
+const preludeDecl = @import("../sema/typecheck.zig").preludeDecl;
 const ModuleId = @import("../syntax/program.zig").ModuleId;
 const TokenId = @import("../lexer/token.zig").TokenId;
 const intrinsics = @import("../sema/intrinsics.zig");
@@ -3153,23 +3154,39 @@ const Analysis = struct {
     /// holds: the success its result carries and the failure it may report,
     /// each written as a help writes a type for the module `from`, where the
     /// report is, with the modules the success needs imported added to
-    /// `missing` and those the failure needs to `failure_missing`. Null where `held`
-    /// declares no `to_owned` answering a `Result`.
+    /// `missing` and those the failure needs to `failure_missing`.
+    ///
+    /// Null unless that `to_owned` is one the fix can call as
+    /// `….to_owned()` from `from` and its signature answers a copy: the
+    /// prelude's `Result`, whose success holds no view, both written without
+    /// a type parameter, since the declaration's parameters are not the
+    /// caller's types. Any other answer is a different operation of that
+    /// name, and declaring it as the function's result writes a mismatch.
     ///
     /// **Bound:** the members `held`'s declaration holds, once per report.
     fn ownedCopyOf(self: *const Analysis, held: ?types.TypeId, from: ModuleId, missing: *HelpImports, failure_missing: *HelpImports) std.mem.Allocator.Error!?struct { ty: types.TypeId, name: []const u8, failure: []const u8 } {
         const declared = self.typing.declOfType(held orelse return null) orelse return null;
+        const result_decl = preludeDecl(self.ast, self.res, "Result") orelse return null;
         var members = self.res.membersOfType(declared);
         while (members.next()) |member| {
             const sig = self.res.declaredBy(member);
             if (!std.mem.eql(u8, self.ast.tokenText(self.ast.declName(sig)), "to_owned")) continue;
-            const result = switch (self.typing.get(self.typing.declSignature(sig))) {
-                .callable => |callable| callable.result,
+            const callable = switch (self.typing.get(self.typing.declSignature(sig))) {
+                .callable => |callable| callable,
                 else => return null,
             };
-            const instance = self.typing.instanceOf(result) orelse return null;
+            // Called with no argument past its receiver.
+            const params = self.typing.callableParams(callable);
+            if (params.len == 0) return null;
+            for (params[1..]) |p| if (p.default == .absent) return null;
+            if (self.ast.declVisibility(sig) == .private and self.res.moduleOfFile(self.ast.fileOfDecl(sig)) != from) return null;
+
+            const instance = self.typing.instanceOf(callable.result) orelse return null;
+            if (instance.decl != result_decl) return null;
             const args = self.typing.argsOf(instance);
             if (args.len != 2) return null;
+            if (self.mentionsParameter(args[0]) or self.mentionsParameter(args[1])) return null;
+            if (try self.typing.holdsView(self.gpa, args[0])) return null;
             return .{
                 .ty = args[0],
                 .name = try helpTypeName(self.sink.arena, self.ast, self.program, self.res, self.typing, from, args[0], missing),
@@ -3177,6 +3194,22 @@ const Analysis = struct {
             };
         }
         return null;
+    }
+
+    /// Whether `ty` is a type parameter or is built from one.
+    ///
+    /// **Bound:** the type's written depth.
+    fn mentionsParameter(self: *const Analysis, ty: types.TypeId) bool {
+        return switch (self.typing.get(ty)) {
+            .parameter => true,
+            .borrow => |b| self.mentionsParameter(b.referent),
+            .array => |a| self.mentionsParameter(a.element),
+            else => {
+                const instance = self.typing.instanceOf(ty) orelse return false;
+                for (self.typing.argsOf(instance)) |arg| if (self.mentionsParameter(arg)) return true;
+                return false;
+            },
+        };
     }
 
     /// The part `head` selects in `held`. An alike instantiation's part is
