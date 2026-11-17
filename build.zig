@@ -1519,14 +1519,9 @@ pub fn build(b: *std.Build) void {
         "Build the runtime library with a sanitizer and link every program with it; generated code is not instrumented",
     ) orelse .none;
 
-    const migration_candidate = b.option(
-        bool,
-        "test-migration-candidate",
-        "Build Linux migration proof archives without changing the installed runtime",
-    ) orelse false;
-    if (migration_candidate and !(target.result.os.tag == .linux and
-        (target.result.cpu.arch == .aarch64 or target.result.cpu.arch == .x86_64)))
-        @panic("migration candidate requires Linux arm64 or x86-64");
+    const migration_supported = (target.result.os.tag == .linux and
+        (target.result.cpu.arch == .aarch64 or target.result.cpu.arch == .x86_64)) or
+        (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none);
 
     const update_goldens = b.option(
         bool,
@@ -2366,13 +2361,7 @@ pub fn build(b: *std.Build) void {
         const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'io_uring completion proof requires Linux' >&2; exit 1" });
         completion_proof.dependOn(&unavailable.step);
     }
-    if ((target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) or migration_candidate) {
-        const candidate_fiber = if (migration_candidate) candidate: {
-            var candidate_flags: std.ArrayList([]const u8) = .empty;
-            candidate_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
-            candidate_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
-            break :candidate runtimeObject(b, runtime_target, "fiber_candidate", b.path("runtime/fiber.c"), candidate_flags.items);
-        } else null;
+    if (migration_supported) {
         if (sanitize == .none) {
             native_task_step.dependOn(scheduling_proof);
             const files = b.addWriteFiles();
@@ -2384,7 +2373,6 @@ pub fn build(b: *std.Build) void {
                 flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
                 if (i == 0) flags.append(b.allocator, "-DLINEA_FIBER_SCHEDULING_PINNED_TEST=1") catch @panic("OOM");
                 if (i == 1) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
-                if (migration_candidate and i != 1) flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
                 const archive = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
                 const scheduling_archive = archive.addOutputFileArg(runtime_symbols.archive_name);
                 for (ordinary_nonfiber_objects.items) |object| archive.addArtifactArg(object);
@@ -2429,14 +2417,12 @@ pub fn build(b: *std.Build) void {
         var busy_flags: std.ArrayList([]const u8) = .empty;
         busy_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
         busy_flags.append(b.allocator, "-DLINEA_FIBER_BUSY_SOURCE_TEST=1") catch @panic("OOM");
-        if (migration_candidate) busy_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
         const busy_fiber = runtimeObject(b, runtime_target, "fiber_busy_source", b.path("runtime/fiber.c"), busy_flags.items);
         const new_files = b.addWriteFiles();
         const new_source = new_files.addCopyFile(b.path("runtime/tests/fiber_migration/new_work.lin"), "main.lin");
         var new_flags: std.ArrayList([]const u8) = .empty;
         new_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
         new_flags.append(b.allocator, "-DLINEA_FIBER_NEW_WORK_TEST=1") catch @panic("OOM");
-        if (migration_candidate) new_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
         const new_fiber = runtimeObject(b, runtime_target, "fiber_new_work", b.path("runtime/fiber.c"), new_flags.items);
         const AllocationMode = struct {
             name: []const u8,
@@ -2447,13 +2433,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = runtime_symbols.archive_name, .archive = runtime_archive, .objects = ordinary_nonfiber_objects.items },
             .{ .name = runtime_symbols.checked_archive_name, .archive = checked_runtime_archive, .objects = checked_nonfiber_objects.items },
         }) |allocation| {
-            const stealing_archive = if (candidate_fiber) |fiber_object| candidate: {
-                const candidate_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
-                const archive = candidate_runtime.addOutputFileArg(allocation.name);
-                for (allocation.objects) |object| candidate_runtime.addArtifactArg(object);
-                candidate_runtime.addArtifactArg(fiber_object);
-                break :candidate archive;
-            } else allocation.archive;
+            const stealing_archive = allocation.archive;
             for ([_]bool{ false, true }) |new_work| {
                 const busy_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
                 const busy_archive = busy_runtime.addOutputFileArg(allocation.name);
