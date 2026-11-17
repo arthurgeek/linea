@@ -329,6 +329,9 @@ pub const math_functions = math: {
             .parameters = if (operation.arity() == 2) &.{ p(.f64), p(.f64) } else &.{p(.f64)},
             .result = .f64,
             .declared_by = .compiler,
+            // The runtime restores errno, rounding, exception state and
+            // architecture control words before returning numeric results.
+            .migration_contract = .neutral,
         };
     }
     break :math table;
@@ -607,12 +610,15 @@ pub const runtime_functions = [_]Signature{
     // entry guards and can monotonically restrict the joining fiber.
     .{ .symbol = "linea_chan_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`close` on a `session.Chan`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_recv_until", .parameters = &.{ p(.u64), typed_bytes, p(.u64), p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv_until` on a `session.Chan`" } }, .migration_contract = .neutral },
-    .{ .symbol = "linea_float64_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse },
-    .{ .symbol = "linea_float64_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_float64_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_float32_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse },
-    .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted },
+    // Decimal conversion uses caller-owned buffers and stack-local integer
+    // algorithms with immutable tables. No allocator, callback, locale or
+    // thread-specific error state survives these synchronous calls.
+    .{ .symbol = "linea_float64_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse, .migration_contract = .neutral },
+    .{ .symbol = "linea_float64_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_float64_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_float32_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse, .migration_contract = .neutral },
+    .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
     .{ .symbol = "linea_raw_load", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
     .{ .symbol = "linea_raw_load8", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
     .{ .symbol = "linea_raw_store", .parameters = &.{ bytes_at, p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },

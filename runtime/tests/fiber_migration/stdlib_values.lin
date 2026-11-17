@@ -1,0 +1,52 @@
+import std.fmt
+import std.io
+import std.json
+import std.session
+import std.task
+import std.text
+import std.time
+
+use session.Chan
+use session.End
+
+fn changed_carrier(first: task.Carrier, failure: Str) {
+    var attempts = UInt64(0)
+    while attempts < 65536 && first == task.current_carrier().unwrap() {
+        time.sleep(time.Duration.from_nanoseconds(0))
+        attempts += 1
+    }
+    if first == task.current_carrier().unwrap() {
+        panic(failure)
+    }
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[End]| {
+        let before_values = task.current_carrier().unwrap()
+        defer let document = json.parse(r#"{"weight":1.25,"items":[3,1,2]}"#).unwrap()
+        let weight = document.get("weight").unwrap().as_float64().unwrap()
+        let narrow = text.parse_float32("1.25").unwrap()
+        defer let displayed = fmt.render_owned(weight).unwrap()
+        defer let displayed_narrow = fmt.render_owned(narrow).unwrap()
+        defer let fixed = fmt.render_owned("{weight:.2}").unwrap()
+        defer let fixed_narrow = fmt.render_owned("{narrow:.2}").unwrap()
+        defer let encoded = json.render(document).unwrap()
+        if weight != 1.25 || displayed.view() != "1.25" || displayed_narrow.view() != "1.25" || fixed.view() != "1.25" || fixed_narrow.view() != "1.25" || encoded.view().length() == 0 {
+            panic("JSON or float formatting changed its result")
+        }
+        changed_carrier(before_values, "JSON and float formatting pinned their calling continuation")
+        let before_math = task.current_carrier().unwrap()
+        let squared = weight.pow(2.0)
+        let root = squared.sqrt()
+        let logarithm = weight.ln().exp()
+        let trigonometry = weight.sin() + weight.cos()
+        if root != weight || logarithm < 1.249999 || logarithm > 1.250001 || trigonometry < 1.0 || weight.floor() != 1.0 || weight.ceil() != 2.0 || weight.trunc() != 1.0 || weight.round() != 1.0 {
+            panic("migratable math changed its numeric result")
+        }
+        changed_carrier(before_math, "numeric operations pinned their calling continuation")
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    0
+}

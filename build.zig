@@ -2471,7 +2471,7 @@ pub fn build(b: *std.Build) void {
                 run_busy.expectExitCode(0);
                 (if (new_work) new_work_proof else busy_stealing_proof).dependOn(&run_busy.step);
             }
-            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
+            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "stdlib_values.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
                 const files = b.addWriteFiles();
                 const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture})), "main.lin");
                 if (std.mem.eql(u8, fixture, "stealing_owner.lin")) {
