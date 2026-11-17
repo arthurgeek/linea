@@ -1,0 +1,27 @@
+// `A` requires `B` and `B` requires `A[Bool]`, and `C` reaches the cycle at
+// `A[UInt8]`. The cycle is reported once, and what a bound on it grants does
+// not depend on the order the traits are declared in: `S: C` is granted
+// `A[UInt8]`, `B` and `A[Bool]` whichever comes first.
+trait A[T]: B {
+    fn a(self: Self) -> UInt8
+}
+
+trait B: A[Bool] {
+    fn b(self: Self) -> UInt8
+}
+
+trait C: A[UInt8] {
+    fn c(self: Self) -> UInt8
+}
+
+fn need[S: A[Bool]](seed: S) -> UInt8 {
+    seed.a()
+}
+
+fn viac[S: C](seed: S) -> UInt8 {
+    need(seed)
+}
+
+fn main() -> UInt8 {
+    0
+}

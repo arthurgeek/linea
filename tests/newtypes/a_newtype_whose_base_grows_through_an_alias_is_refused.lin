@@ -1,0 +1,10 @@
+// The alias is spelled out where the newtype names it, so `G[T]`'s base is
+// `Vec[G[Option[T]]]` however it is written, and it grows the way that base
+// written out would.
+alias Grown[T] = Vec[G[Option[T]]]
+
+type G[T] = Grown[T]
+
+fn main() -> UInt8 {
+    0
+}

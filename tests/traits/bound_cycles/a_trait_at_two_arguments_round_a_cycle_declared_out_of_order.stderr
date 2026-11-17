@@ -1,0 +1,15 @@
+error[N-Unused]: `T` is never used
+ --> tests/traits/bound_cycles/a_trait_at_two_arguments_round_a_cycle_declared_out_of_order.lin:9:9
+  |
+9 | trait A[T]: B {
+  |         ^ name it in this declaration, declare it `phantom`, or remove it
+error[N-Unused]: `viac` is never used
+  --> tests/traits/bound_cycles/a_trait_at_two_arguments_round_a_cycle_declared_out_of_order.lin:21:4
+   |
+21 | fn viac[S: C](seed: S) -> UInt8 {
+   |    ^^^^ call it, or name it with a leading `_`
+error[T-Bound]: `A` requires `B`, and `B` requires `A`
+ --> tests/traits/bound_cycles/a_trait_at_two_arguments_round_a_cycle_declared_out_of_order.lin:9:13
+  |
+9 | trait A[T]: B {
+  |             ^ drop one of the two bounds

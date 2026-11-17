@@ -1,0 +1,10 @@
+// `Grow[T]` requires `Grow[Option[T]]`, which requires `Grow[Option[Option[T]]]`,
+// and every step round the cycle names a longer argument list. The cycle is
+// refused where its bound is written, and nothing reads the bound after that.
+trait Grow[T]: Grow[Option[T]] {
+    fn grow(self: Self, by: T) -> UInt8
+}
+
+fn main() -> UInt8 {
+    0
+}

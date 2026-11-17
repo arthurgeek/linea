@@ -1,0 +1,47 @@
+// Each alias names the one before it twice, so the last names `P` half a
+// million times over while the program holds one type per alias.
+// `UInt8` lacking `Show` is reported first, and the call of `show` on the
+// value lacks an implementation only because of it, so that is not reported
+// again. Deciding so reads each type the program holds once.
+@copyable
+struct P[phantom A, phantom B] {}
+
+alias A0[T] = P[T, T]
+alias A1[T] = P[A0[T], A0[T]]
+alias A2[T] = P[A1[T], A1[T]]
+alias A3[T] = P[A2[T], A2[T]]
+alias A4[T] = P[A3[T], A3[T]]
+alias A5[T] = P[A4[T], A4[T]]
+alias A6[T] = P[A5[T], A5[T]]
+alias A7[T] = P[A6[T], A6[T]]
+alias A8[T] = P[A7[T], A7[T]]
+alias A9[T] = P[A8[T], A8[T]]
+alias A10[T] = P[A9[T], A9[T]]
+alias A11[T] = P[A10[T], A10[T]]
+alias A12[T] = P[A11[T], A11[T]]
+alias A13[T] = P[A12[T], A12[T]]
+alias A14[T] = P[A13[T], A13[T]]
+alias A15[T] = P[A14[T], A14[T]]
+alias A16[T] = P[A15[T], A15[T]]
+alias A17[T] = P[A16[T], A16[T]]
+alias A18[T] = P[A17[T], A17[T]]
+
+trait Show {
+    fn show(self: Self) -> UInt8
+}
+
+impl[A: Show, B: Show] Show for P[A, B] {
+    fn show(_self: Self) -> UInt8 {
+        0
+    }
+}
+
+fn display[S: Show](s: S) -> UInt8 {
+    s.show()
+}
+
+fn main() -> UInt8 {
+    let _first = display(UInt8(1))
+    let x: A18[UInt8] = .{}
+    x.show()
+}

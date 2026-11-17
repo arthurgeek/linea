@@ -1,0 +1,34 @@
+// `A` requires `B` and `B` requires `A`, so the cycle is reported once, on
+// whichever bound closes it. Both bounds are still read as written: `S: A` is
+// granted `b` and `S: B` is granted `a`, the implementation of `A` owes `B`,
+// and `Seed` passed where `B` is required lacks it. Declaring the traits in
+// the other order reports the same mistakes.
+trait B: A {
+    fn b(self: Self) -> UInt8
+}
+
+trait A: B {
+    fn a(self: Self) -> UInt8
+}
+
+struct Seed {
+    size: UInt8,
+}
+
+impl A for Seed {
+    fn a(self: Self) -> UInt8 {
+        self.size
+    }
+}
+
+fn useb[S: A](seed: S) -> UInt8 {
+    seed.b()
+}
+
+fn usea[S: B](seed: S) -> UInt8 {
+    seed.a()
+}
+
+fn main() -> UInt8 {
+    useb(Seed { size = 1 }) + usea(Seed { size = 2 })
+}

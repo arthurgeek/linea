@@ -1,0 +1,25 @@
+error[N-Unused]: `T` is never used
+ --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bac.lin:5:9
+  |
+5 | trait B[T]: C[Bool] {
+  |         ^ name it in this declaration, declare it `phantom`, or remove it
+error[N-Unused]: `uc` is never used
+  --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bac.lin:21:4
+   |
+21 | fn uc[S: C[UInt8]](s: S) -> UInt8 {
+   |    ^^ call it, or name it with a leading `_`
+error[T-Bound]: `A` requires `B`, `B` requires `C`, and `C` requires `A`
+ --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bac.lin:9:13
+  |
+9 | trait A[T]: B[T] {
+  |             ^ drop one of the bounds on the cycle
+error[T-Bound]: nothing here settles `B`'s `T`
+  --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bac.lin:18:17
+   |
+18 |     s.c(true) + s.b()
+   |                 ^^^^^ pass what it stands for, or say what the call returns
+error[T-Bound]: `S` requires `A[Bool]`, and `S` does not implement it
+  --> tests/traits/bound_cycles/three_traits_round_a_cycle_declared_bac.lin:22:13
+   |
+22 |     s.a() + ua(s)
+   |             ^^ add `A[Bool]` to `S`'s bounds, or drop the bound

@@ -1,0 +1,5 @@
+error[T-InfiniteLayout]: L contains itself
+ --> tests/newtypes/a_newtype_that_is_its_own_base_has_no_size.lin:3:6
+  |
+3 | type L = L
+  |      ^ a value of this type would have to hold one, so it has no size

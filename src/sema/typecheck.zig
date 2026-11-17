@@ -875,6 +875,7 @@ fn typecheckInternal(
     }
     defer c.delegations_settled.deinit(gpa);
     defer c.delegation_cycles.deinit(gpa);
+    defer c.growing_trait_bounds.deinit(gpa);
     defer c.unsettled_parts.deinit(gpa);
     defer c.unsettled_heads.deinit(gpa);
     defer {
@@ -976,6 +977,7 @@ fn typecheckInternal(
     // could keep -- said here, once, rather than at each bound that reaches
     // one.
     try c.reportTraitBoundCycles();
+    try c.findGrowingTraitBounds();
 
     // After the cycles and before anything reads what a list demands: a list
     // asking a capability of a name twice is refused for what it says, and every
@@ -3312,7 +3314,7 @@ pub const Reach = struct {
     fn answersDirectly(self: Reach, gpa: std.mem.Allocator, held: TypeId, trait: node.DeclId) !bool {
         return rendersDisplayItself(self.typing, self.display, held, trait) or
             try self.index.any(gpa, self.impls, self.typing, trait.index(), held, self.scope, .direct) or
-            try self.index.hasOpenReceiver(self.typing, self.impls, trait.index(), held, self.scope);
+            try self.index.hasOpenReceiver(gpa, self.typing, self.impls, trait.index(), held, self.scope);
     }
 
     /// Associated names use exact-subject promises first, then the same
@@ -6120,6 +6122,14 @@ const Checker = struct {
     /// Field delegations reported as reaching themselves through their own
     /// backing field, which `settleDelegation` does not report again.
     delegation_cycles: std.AutoHashMapUnmanaged(node.DeclId, void) = .empty,
+    /// The trait bounds round which a cycle of requirements grows its
+    /// arguments, by the token naming the required trait: those that put one
+    /// of the requiring trait's parameters under a constructor where it flows
+    /// back to the same parameter (`findGrowingTraitBounds`).
+    /// `traitsBounding` follows one of them only from a requirement no such
+    /// bound reached, so `trait Grow[T]: Grow[Option[T]]` is walked one step
+    /// round rather than without end.
+    growing_trait_bounds: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
     /// Whether a structural selection is passed over rather than read: while
     /// parts are first read for their callable shapes and while
     /// implementation heads are settled, nothing could answer one yet.
@@ -7879,13 +7889,12 @@ const Checker = struct {
         for (self.program.modules, 0..) |_, mi| {
             for (self.program.declsOf(ModuleId.from(mi))) |d| {
                 switch (self.ast.declTag(d)) {
-                    .struct_ => for (self.ast.declFields(d)) |f| {
-                        try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = f.written });
-                    },
-                    .enum_ => for (self.ast.declVariants(d)) |v| {
-                        for (self.ast.variantFields(v)) |f| {
-                            try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = f.written });
-                        }
+                    // Through the reader that fills a declaration's parts, so
+                    // every part filling instantiates is measured here first,
+                    // a newtype's base among them.
+                    .struct_, .enum_, .newtype => for (0..self.partCount(d)) |k| {
+                        const ref = try self.partRef(.{ .decl = d, .index = @intCast(k) });
+                        try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = ref });
                     },
                     .alias => try out.append(self.gpa, .{ .m = ModuleId.from(mi), .d = d, .ref = self.ast.declReturnRef(d) }),
                     else => {},
@@ -8112,17 +8121,25 @@ const Checker = struct {
     /// head, and a reader handed those two separately decides what a written
     /// type is a second time.
     fn mentionsTypeParameter(self: *const Checker, d: node.DeclId, ref: node.TypeRef) bool {
+        return self.mentionsWrittenParameter(d, null, ref);
+    }
+
+    /// `mentionsTypeParameter` asked of `d`'s parameter `k` alone, or of any
+    /// of them where `k` is null.
+    fn mentionsWrittenParameter(self: *const Checker, d: node.DeclId, k: ?usize, ref: node.TypeRef) bool {
         if (ref.kind == .callable) {
             const callable = self.ast.callableType(ref);
             for (self.ast.params[callable.params.start..callable.params.end]) |param| {
-                if (self.mentionsTypeParameter(d, param.written)) return true;
+                if (self.mentionsWrittenParameter(d, k, param.written)) return true;
             }
-            return self.mentionsTypeParameter(d, callable.result);
+            return self.mentionsWrittenParameter(d, k, callable.result);
         }
-        if (ref.kind == .selection and self.mentionsTypeParameter(d, self.ast.selectionBase(ref))) return true;
-        if (ref.kind == .named and self.namesTypeParameter(d, ref.name)) return true;
+        if (ref.kind == .selection and self.mentionsWrittenParameter(d, k, self.ast.selectionBase(ref))) return true;
+        if (ref.kind == .named) if (self.parameterIndex(d, ref.name)) |at| {
+            if (k == null or k.? == at) return true;
+        };
         for (self.ast.typeArgs(ref.args)) |a| {
-            if (self.mentionsTypeParameter(d, a)) return true;
+            if (self.mentionsWrittenParameter(d, k, a)) return true;
         }
         return false;
     }
@@ -11091,35 +11108,6 @@ const Checker = struct {
         of_function: bool = false,
     };
 
-    /// Whether `ty` is `needle` or holds it as a part. Each distinct type is
-    /// visited once, so the walk is linear in the distinct types `ty` holds.
-    fn holdsType(self: *Checker, ty: TypeId, needle: TypeId) std.mem.Allocator.Error!bool {
-        const Find = struct {
-            checker: *Checker,
-            needle: TypeId,
-            seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
-            found: bool = false,
-
-            fn visit(find: *@This(), inside: TypeId) std.mem.Allocator.Error!void {
-                if (find.found) return;
-                if (inside == find.needle) {
-                    find.found = true;
-                    return;
-                }
-                if ((try find.seen.getOrPut(find.checker.gpa, inside)).found_existing) return;
-                try find.checker.builder.visitParts(inside, find);
-            }
-
-            pub fn part(find: *@This(), inside: TypeId) std.mem.Allocator.Error!void {
-                try find.visit(inside);
-            }
-        };
-        var find: Find = .{ .checker = self, .needle = needle };
-        defer find.seen.deinit(self.gpa);
-        try find.visit(ty);
-        return find.found;
-    }
-
     /// Whether the declared type of a parameter of `member` mentions the
     /// parameter of `member`'s implementation that stands for the position
     /// of the type parameter `fill` defaulted.
@@ -11166,7 +11154,7 @@ const Checker = struct {
             if (found.decl != fill.decl or wanted.decl != fill.decl) break :blk false;
             break :blk self.builder.argsOf(found)[fill.position] == fill.filled and
                 self.builder.argsOf(wanted)[fill.position] != fill.filled;
-        } else try self.holdsType(want.ty, fill.filled);
+        } else try self.builder.holdsType(want.ty, fill.filled);
         if (!explained) return null;
         return try std.fmt.allocPrint(
             self.sink.arena,
@@ -12862,7 +12850,7 @@ const Checker = struct {
             // A generic function named as a value has no parameters settled
             // yet, and says what is missing where it is used: the report
             // there is the cause, and this one would only precede it.
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             if (traitAt(self.ast, self.res, bound.named.name)) |refused_trait|
                 try self.noteRefusedDemand(.{ .ty = held, .lacks = .{ .trait = .{ .decl = refused_trait, .args = args } } });
@@ -12890,21 +12878,21 @@ const Checker = struct {
         }
         if (containmentBound(self.ast, self.res, bounds, .owned)) |bound| if (held != .poison and try self.builder.mayCarryDependencies(held)) {
             if (mode == .ask) return true;
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             try self.reportNotOwned(subject, held, bound, at, span);
             return true;
         };
         if (containmentBound(self.ast, self.res, bounds, .shareable)) |bound| if (held != .poison and !try self.builder.isShareable(held)) {
             if (mode == .ask) return true;
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             try self.reportNotContained(.shareable, subject, held, bound, at, span);
             return true;
         };
         if (containmentBound(self.ast, self.res, bounds, .isolated)) |bound| if (held != .poison and !try self.builder.isIsolated(held)) {
             if (mode == .ask) return true;
-            if (self.builder.view().mentionsOpenType(held)) return true;
+            if (try self.builder.mentionsOpen(held)) return true;
             try self.noteRefused(at);
             try self.reportNotContained(.isolated, subject, held, bound, at, span);
             return true;
@@ -14167,7 +14155,7 @@ const Checker = struct {
     /// is. The blanket rows are not sized by `ty`: a program declaring many
     /// blanket implementations pays their number once per such pair.
     fn prepareTraitSettlingResults(self: *Checker, owner: DeclId, ty: TypeId) !void {
-        var own = try self.builder.impl_index.rowsUnder(self.builder.implementations, &self.builder, ty);
+        var own = try self.builder.impl_index.rowsUnder(self.gpa, self.builder.implementations, &self.builder, ty);
         while (own.next()) |at| try self.prepareSettlingResultsOfRow(owner, ty, at);
         if (self.builder.headOf(ty) == .parameter) return;
         var blanket = self.builder.impl_index.membersOfHead(.parameter);
@@ -34004,12 +33992,25 @@ const Checker = struct {
     }
 
     /// **Bound:** one entry per written bound reachable from this list paired
-    /// with the arguments it was reached at. Every `written` appended comes
-    /// from a bound the program wrote, and the arguments come from
-    /// substituting into the entry that reached it, so the list grows only
-    /// while a new pair keeps turning up -- and an entry already in the list
-    /// is not walked again, which is what makes this finish over the cycle
-    /// `reportTraitBoundCycles` refuses.
+    /// with the arguments it was reached at, and each entry walked at most
+    /// twice. Every `written` appended comes from a bound the program wrote,
+    /// and the arguments come from substituting into the entry that reached
+    /// it, so the list grows only while a new pair keeps turning up, and a
+    /// pair already in the list is not walked again -- which is what ends the
+    /// walk round a cycle of traits whose arguments repeat.
+    ///
+    /// Round a cycle whose arguments grow (`growing_trait_bounds`) a new pair
+    /// turns up at every step, so a growing bound is followed only from an
+    /// entry no growing bound reached. An entry reached both ways keeps the
+    /// way that lets it follow more, and is walked again when it gains it.
+    /// Along any chain of entries a growing bound then appears at most once,
+    /// and the bounds that are not growing put a trait's parameter under a
+    /// constructor only on a bound no chain can come back to, so the
+    /// arguments a chain builds are of bounded height over finitely many
+    /// types, and the pairs are finite. Which bounds grow is a property of the
+    /// bounds as written, so what a list admits does not depend on the order
+    /// the traits are declared in, and a list reaching no growing bound is
+    /// walked exactly as one where none is written.
     fn traitsBounding(
         self: *Checker,
         interning: ?BoundInterning,
@@ -34023,17 +34024,28 @@ const Checker = struct {
             for (out.items) |b| if (b.args.len > 0) self.gpa.free(b.args);
             out.deinit(self.gpa);
         }
+        // Whether each entry was reached through a growing bound, beside
+        // `out`, and the entries still to walk, in the order they were
+        // admitted or regained the right to follow a growing bound.
+        var grown: std.ArrayList(bool) = .empty;
+        defer grown.deinit(self.gpa);
+        var pending: std.ArrayList(u32) = .empty;
+        defer pending.deinit(self.gpa);
+
         for (bounds) |b| {
             if (b.kind == .callable) continue;
-            if (try self.admitIntegerComparisons(&out, &seen, context, b)) continue;
+            if (try self.admitIntegerComparisons(&out, &seen, context, b)) {
+                try self.markAppended(&grown, &pending, out.items.len, false);
+                continue;
+            }
             const t = traitAt(self.ast, self.res, b.named.name) orelse continue;
             const args = try self.internedBoundArgs(interning, b);
-            try self.admitOnce(&out, &seen, context, t, b, args);
+            const at = try self.admitOnce(&out, &seen, context, t, b, args);
+            try self.markReached(&grown, &pending, at, self.growing_trait_bounds.contains(b.named.name));
         }
 
         // Walked as the list grows, so what a required trait requires is
-        // admitted too. The read index never passes the write index, and each
-        // entry is walked once.
+        // admitted too.
         //
         // A required trait is admitted at the arguments the trait requiring it
         // wrote -- `trait Fancy: Lookup[UInt64]` admits `Lookup` at `UInt64`
@@ -34041,8 +34053,10 @@ const Checker = struct {
         // requiring trait's own scope and may name its parameters, so they are
         // read there and settled by whatever the bound that reached it
         // supplied.
-        var at: usize = 0;
-        while (at < out.items.len) : (at += 1) {
+        var next: usize = 0;
+        while (next < pending.items.len) : (next += 1) {
+            const at = pending.items[next];
+            const from_grown = grown.items[at];
             const required = out.items[at].trait;
             const supplied = out.items[at].args;
             const through: ?BoundInterning = if (interning == null) null else .{
@@ -34051,11 +34065,16 @@ const Checker = struct {
             };
             for (self.ast.declBounds(required)) |b| {
                 if (b.kind == .callable) continue;
-                if (try self.admitIntegerComparisons(&out, &seen, context, b)) continue;
+                if (try self.admitIntegerComparisons(&out, &seen, context, b)) {
+                    try self.markAppended(&grown, &pending, out.items.len, from_grown);
+                    continue;
+                }
                 const t = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                const growing = self.growing_trait_bounds.contains(b.named.name);
+                if (growing and from_grown) continue;
                 const raw = try self.internedBoundArgs(through, b);
                 defer if (raw.len > 0) self.gpa.free(raw);
-                try self.admitOnce(
+                const reached = try self.admitOnce(
                     &out,
                     &seen,
                     context,
@@ -34063,9 +34082,43 @@ const Checker = struct {
                     b,
                     try self.substitutedBoundArgs(raw, required, supplied),
                 );
+                try self.markReached(&grown, &pending, reached, growing or from_grown);
             }
         }
         return out.toOwnedSlice(self.gpa);
+    }
+
+    /// Records the entries appended to the list without `markReached`, which
+    /// is what the integer comparisons admit, as reached the way `through`
+    /// says.
+    fn markAppended(
+        self: *Checker,
+        grown: *std.ArrayList(bool),
+        pending: *std.ArrayList(u32),
+        len: usize,
+        through_growing: bool,
+    ) std.mem.Allocator.Error!void {
+        while (grown.items.len < len) try self.markReached(grown, pending, @intCast(grown.items.len), through_growing);
+    }
+
+    /// Records how the walk reached entry `at`, which `admitOnce` gave: a new
+    /// entry is walked, and one already walked from a growing bound is walked
+    /// again when it is now reached without one.
+    fn markReached(
+        self: *Checker,
+        grown: *std.ArrayList(bool),
+        pending: *std.ArrayList(u32),
+        at: u32,
+        through_growing: bool,
+    ) std.mem.Allocator.Error!void {
+        if (at == grown.items.len) {
+            try grown.append(self.gpa, through_growing);
+            try pending.append(self.gpa, at);
+            return;
+        }
+        if (through_growing or !grown.items[at]) return;
+        grown.items[at] = false;
+        try pending.append(self.gpa, at);
     }
 
     /// The closed integer family guarantees these same-type comparison traits.
@@ -34074,7 +34127,7 @@ const Checker = struct {
         const declared = traitAt(self.ast, self.res, bound.named.name);
         if (resolve_mod.boundNames(self.ast, bound.named.name, declared) != .integer) return false;
         for ([_]?node.DeclId{ self.equatable_decl, self.comparable_decl }) |trait| {
-            if (trait) |known| try self.admitOnce(out, seen, context, known, bound, &.{});
+            if (trait) |known| _ = try self.admitOnce(out, seen, context, known, bound, &.{});
         }
         return true;
     }
@@ -34151,7 +34204,8 @@ const Checker = struct {
         }
     };
 
-    const BoundTraitSet = std.HashMapUnmanaged(BoundTraitKey, void, BoundTraitContext, 80);
+    /// Each pair admitted, with where it sits in the list.
+    const BoundTraitSet = std.HashMapUnmanaged(BoundTraitKey, u32, BoundTraitContext, 80);
 
     /// Appends a bound to what a run of them admits, unless the same bound is
     /// already there.
@@ -34185,14 +34239,15 @@ const Checker = struct {
         trait: node.DeclId,
         written: node.TraitBound,
         args: []const TypeId,
-    ) std.mem.Allocator.Error!void {
+    ) std.mem.Allocator.Error!u32 {
         const named: u32 = @intCast(trait.index());
         const key: BoundTraitKey = .{ .trait = named, .args = args, .written = written.named.args };
-        if (seen.containsContext(key, context)) {
+        if (seen.getContext(key, context)) |at| {
             if (args.len > 0) self.gpa.free(args);
-            return;
+            return at;
         }
-        seen.putContext(self.gpa, key, {}, context) catch |err| {
+        const at: u32 = @intCast(out.items.len);
+        seen.putContext(self.gpa, key, at, context) catch |err| {
             if (args.len > 0) self.gpa.free(args);
             return err;
         };
@@ -34201,6 +34256,7 @@ const Checker = struct {
             if (args.len > 0) self.gpa.free(args);
             return err;
         };
+        return at;
     }
 
     /// Whether two bounds' written arguments are one bound's, by the routine
@@ -34533,6 +34589,143 @@ const Checker = struct {
     /// own bounds have been stepped through. Named rather than local to the
     /// walk, because the message reads the path out and so takes it.
     const Descent = struct { trait: node.DeclId, at: usize };
+
+    /// Fills `growing_trait_bounds`: the trait bounds on a cycle of
+    /// requirements whose arguments grow at every turn.
+    ///
+    /// The graph has a node per parameter of each trait. A bound
+    /// `U[..., W, ...]` written on trait `T` draws an edge from each of `T`'s
+    /// parameters `W` mentions to `U`'s parameter at `W`'s position, and the
+    /// edge grows where `W` is more than that parameter written alone.
+    /// Following the bounds from a requirement carries each parameter's
+    /// argument along the edges, so an argument gains a constructor at every
+    /// growing edge it crosses, and it crosses one without end exactly where
+    /// the edge lies on a cycle: where its two ends are in one strongly
+    /// connected group. A bound with such an edge is growing. Every other
+    /// bound leaves the arguments a chain of requirements builds of bounded
+    /// height.
+    ///
+    /// **Bound:** one node per trait parameter and one edge per parameter
+    /// each written argument mentions, grouped in one walk of the graph.
+    fn findGrowingTraitBounds(self: *Checker) std.mem.Allocator.Error!void {
+        const Edge = struct { from: u32, to: u32, grows: bool, bound: TokenId };
+        const decls = self.ast.declCount();
+        // Where each trait's parameters begin among the nodes.
+        const first = try self.gpa.alloc(u32, decls);
+        defer self.gpa.free(first);
+        var nodes: u32 = 0;
+        for (0..decls) |i| {
+            first[i] = nodes;
+            const d = node.DeclId.at(@intCast(i));
+            if (self.ast.declTag(d) == .trait_) nodes += @intCast(self.ast.declTypeParams(d).len);
+        }
+
+        var edges: std.ArrayList(Edge) = .empty;
+        defer edges.deinit(self.gpa);
+        for (0..decls) |i| {
+            const from = node.DeclId.at(@intCast(i));
+            if (self.ast.declTag(from) != .trait_) continue;
+            const params = self.ast.declTypeParams(from).len;
+            for (self.ast.declBounds(from)) |b| {
+                if (b.kind == .callable) continue;
+                const to = traitAt(self.ast, self.res, b.named.name) orelse continue;
+                if (self.ast.declTag(to) != .trait_) continue;
+                for (self.ast.typeArgs(b.named.args), 0..) |written, j| {
+                    if (j >= self.ast.declTypeParams(to).len) break;
+                    for (0..params) |k| {
+                        if (!self.mentionsWrittenParameter(from, k, written)) continue;
+                        const alone = written.kind == .named and self.parameterIndex(from, written.name) == k;
+                        try edges.append(self.gpa, .{
+                            .from = first[i] + @as(u32, @intCast(k)),
+                            .to = first[to.index()] + @as(u32, @intCast(j)),
+                            .grows = !alone,
+                            .bound = b.named.name,
+                        });
+                    }
+                }
+            }
+        }
+
+        // The edges leaving each node, as a run.
+        const starts = try self.gpa.alloc(u32, nodes + 1);
+        defer self.gpa.free(starts);
+        @memset(starts, 0);
+        for (edges.items) |e| starts[e.from + 1] += 1;
+        for (1..nodes + 1) |n| starts[n] += starts[n - 1];
+        const runs = try self.gpa.alloc(u32, edges.items.len);
+        defer self.gpa.free(runs);
+        const cursor = try self.gpa.dupe(u32, starts[0..nodes]);
+        defer self.gpa.free(cursor);
+        for (edges.items, 0..) |e, n| {
+            runs[cursor[e.from]] = @intCast(n);
+            cursor[e.from] += 1;
+        }
+
+        // Strongly connected groups, by Tarjan's walk with its calls kept as a
+        // list, since how long a chain of requirements runs is what the source
+        // decides.
+        const unvisited = std.math.maxInt(u32);
+        const index = try self.gpa.alloc(u32, nodes);
+        defer self.gpa.free(index);
+        @memset(index, unvisited);
+        const low = try self.gpa.alloc(u32, nodes);
+        defer self.gpa.free(low);
+        const group = try self.gpa.alloc(u32, nodes);
+        defer self.gpa.free(group);
+        const on_stack = try self.gpa.alloc(bool, nodes);
+        defer self.gpa.free(on_stack);
+        @memset(on_stack, false);
+        var stack: std.ArrayList(u32) = .empty;
+        defer stack.deinit(self.gpa);
+        const Frame = struct { n: u32, next: u32 };
+        var calls: std.ArrayList(Frame) = .empty;
+        defer calls.deinit(self.gpa);
+        var counter: u32 = 0;
+        for (0..nodes) |root_index| {
+            const root: u32 = @intCast(root_index);
+            if (index[root] != unvisited) continue;
+            index[root] = counter;
+            low[root] = counter;
+            counter += 1;
+            try stack.append(self.gpa, root);
+            on_stack[root] = true;
+            try calls.append(self.gpa, .{ .n = root, .next = starts[root] });
+            while (calls.items.len > 0) {
+                const frame = &calls.items[calls.items.len - 1];
+                const n = frame.n;
+                if (frame.next < starts[n + 1]) {
+                    const to = edges.items[runs[frame.next]].to;
+                    frame.next += 1;
+                    if (index[to] == unvisited) {
+                        index[to] = counter;
+                        low[to] = counter;
+                        counter += 1;
+                        try stack.append(self.gpa, to);
+                        on_stack[to] = true;
+                        try calls.append(self.gpa, .{ .n = to, .next = starts[to] });
+                    } else if (on_stack[to]) {
+                        low[n] = @min(low[n], index[to]);
+                    }
+                    continue;
+                }
+                _ = calls.pop();
+                if (calls.items.len > 0) {
+                    const parent = calls.items[calls.items.len - 1].n;
+                    low[parent] = @min(low[parent], low[n]);
+                }
+                if (low[n] != index[n]) continue;
+                while (stack.pop()) |member| {
+                    on_stack[member] = false;
+                    group[member] = n;
+                    if (member == n) break;
+                }
+            }
+        }
+
+        for (edges.items) |e| {
+            if (e.grows and group[e.from] == group[e.to]) try self.growing_trait_bounds.put(self.gpa, e.bound, {});
+        }
+    }
 
     /// Refuses a trait whose own bounds reach itself.
     ///

@@ -4,7 +4,9 @@ Status: Accepted — 2026-09-26. Replaces the bracket clause of
 [0062](0062-an-indexed-place-is-a-place-and-every-index-is-checked.md), which
 was never implemented; extends
 [0161](0161-a-postfix-call-reaches-an-operation-never-a-field.md); refines
-[0176](0176-a-function-name-is-a-value-its-uses-instantiate.md).
+[0176](0176-a-function-name-is-a-value-its-uses-instantiate.md). Extended by
+[0275](0275-an-expression-inside-a-type-is-read-once.md), which replaces the
+cost consequence.
 
 ## Context
 

@@ -1,0 +1,5 @@
+error[T-PolyRec]: this part instantiates `G` with more than `Grown` was given
+ --> tests/newtypes/a_newtype_whose_base_grows_through_an_alias_is_refused.lin:4:22
+  |
+4 | alias Grown[T] = Vec[G[Option[T]]]
+  |                      ^ a part that reaches its own declaration again keeps or reduces the structure of its type arguments

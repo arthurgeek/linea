@@ -1,0 +1,5 @@
+error[T-Bound]: `H` requires `G`, and `G` requires `H`
+ --> tests/traits/bound_cycles/two_traits_growing_round_a_cycle_declared_in_order.lin:8:13
+  |
+8 | trait H[T]: G[(T, Bool)] {
+  |             ^ drop one of the two bounds

@@ -4138,7 +4138,7 @@ fn resolveInternal(
     defer r.folded.deinit(gpa);
     defer r.settled_aliases.deinit(gpa);
     defer r.aliases_settle.deinit(gpa);
-    defer r.length_reports.deinit(gpa);
+    defer r.type_expression_reports.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
     defer r.type_parameter_bindings.deinit(gpa);
@@ -6455,11 +6455,12 @@ const Resolver = struct {
     unlent_marks: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// See `Resolution.bracket_readings`.
     bracket_readings: std.AutoHashMapUnmanaged(ExprId, Resolution.BracketReading) = .empty,
-    /// What resolving each written length reported, keyed by the length. Two
-    /// readings of one bracket hold the same length expression, so the second
-    /// to reach it is given these instead of resolving it again: a closure or
-    /// a binding declared in a length is declared once.
-    length_reports: std.AutoHashMapUnmanaged(ExprId, []const Diagnostic) = .empty,
+    /// What resolving each expression written inside a type reported, an
+    /// array's length or a callable type parameter's default, keyed by the
+    /// expression. Two readings of one bracket hold the same expression, so
+    /// the second to reach it is given these instead of resolving it again: a
+    /// closure or a binding declared in one is declared once.
+    type_expression_reports: std.AutoHashMapUnmanaged(ExprId, []const Diagnostic) = .empty,
     /// See `Resolution.name_kinds`.
     name_kinds: std.AutoHashMapUnmanaged(TokenId, name_case.Kind) = .empty,
     /// The bracket a call is about to resolve as its callee, while it is
@@ -12805,16 +12806,7 @@ const Resolver = struct {
         // any other: it is read against the scope standing here, the binding
         // it reaches is used by being written, and reaching nothing is
         // [N-Undefined] rather than something to say about the form.
-        if (ref.length != ExprId.none) {
-            if (self.length_reports.get(ref.length)) |reports| {
-                for (reports) |report| try self.sink.add(report);
-            } else {
-                const reported = self.sink.list.items.len;
-                try self.useTypeExpression(ref.length);
-                const reports = try self.sink.arena.dupe(Diagnostic, self.sink.list.items[reported..]);
-                try self.length_reports.put(self.gpa, ref.length, reports);
-            }
-        }
+        if (ref.length != ExprId.none) try self.useTypeExpression(ref.length);
         for (self.ast.typeArgs(ref.args)) |a| try self.useRefIn(a, context.ofArguments());
     }
 
@@ -12879,11 +12871,20 @@ const Resolver = struct {
         for (self.ast.typeArgs(arg.args)) |nested| self.markHeadArgument(nested);
     }
 
+    /// An expression written inside a type, resolved once however many
+    /// readings of the brackets around it hold it.
     fn useTypeExpression(self: *Resolver, expression: ExprId) std.mem.Allocator.Error!void {
+        if (self.type_expression_reports.get(expression)) |reports| {
+            for (reports) |report| try self.sink.add(report);
+            return;
+        }
         const previous = self.record_written_expr;
         self.record_written_expr = true;
         defer self.record_written_expr = previous;
+        const reported = self.sink.list.items.len;
         try self.expr(expression);
+        const reports = try self.sink.arena.dupe(Diagnostic, self.sink.list.items[reported..]);
+        try self.type_expression_reports.put(self.gpa, expression, reports);
     }
 
     fn useCallableType(self: *Resolver, callable: node.CallableType) std.mem.Allocator.Error!void {

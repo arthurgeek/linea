@@ -1,0 +1,6 @@
+// A callable type's default is an expression written inside a type, like an
+// array's length, and every reading of the brackets around the type holds
+// the same default. It is read once, however many brackets surround it.
+fn main() -> UInt8 {
+    a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = a[B[fn(x: UInt8 = 0) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]) -> UInt8]]
+}

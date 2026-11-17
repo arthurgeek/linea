@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `a`
+ --> tests/parser/a_long_length_inside_nested_brackets_is_read_once.lin:6:5
+  |
+6 |     a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UInt8; a[B[[UIn ...
+  |     ^ no binding with this name is in scope

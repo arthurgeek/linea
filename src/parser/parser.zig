@@ -67,8 +67,8 @@ pub fn parse(
         defer gpa.free(delimiter_ends);
         @memset(delimiter_ends, delimiter_unknown);
 
-        var lengths: Parser.Lengths = .{};
-        defer lengths.deinit(gpa);
+        var type_exprs: Parser.TypeExprs = .{};
+        defer type_exprs.deinit(gpa);
         var p: Parser = .{
             .gpa = gpa,
             .cursor = Cursor.init(tokens.slice(), source.text, 0, @intCast(tokens.len)),
@@ -77,7 +77,7 @@ pub fn parse(
             .file = file,
             .delimiter_base = 0,
             .delimiter_ends = delimiter_ends,
-            .lengths = &lengths,
+            .type_exprs = &type_exprs,
         };
         try p.parseProgram();
     }
@@ -219,8 +219,8 @@ pub const Modules = struct {
             const delimiter_ends = try self.gpa.alloc(u32, part.token_end - part.token_start);
             defer self.gpa.free(delimiter_ends);
             @memset(delimiter_ends, delimiter_unknown);
-            var lengths: Parser.Lengths = .{};
-            defer lengths.deinit(self.gpa);
+            var type_exprs: Parser.TypeExprs = .{};
+            defer type_exprs.deinit(self.gpa);
             var p: Parser = .{
                 .gpa = self.gpa,
                 .cursor = Cursor.init(self.tokens.slice(), f.source.text, part.token_start, part.token_end),
@@ -229,7 +229,7 @@ pub const Modules = struct {
                 .file = part.file,
                 .delimiter_base = part.token_start,
                 .delimiter_ends = delimiter_ends,
-                .lengths = &lengths,
+                .type_exprs = &type_exprs,
             };
             try p.parseProgram();
 
@@ -380,10 +380,11 @@ const Parser = struct {
     /// arguments visits each token once rather than once per possible head.
     delimiter_base: u32,
     delimiter_ends: []u32,
-    /// The array lengths read so far in this file that another reading of
-    /// the same tokens may take as they are. Outside the parser's own value,
-    /// which an attempt copies and restores, so the list is one list.
-    lengths: *Lengths,
+    /// The expressions written inside types read so far in this file, which
+    /// another reading of the same tokens may take as they are. Outside the
+    /// parser's own value, which an attempt copies and restores, so the list
+    /// is one list.
+    type_exprs: *TypeExprs,
     /// The entry point's declared return type, or `.none` for a bare program.
     /// How many levels are open above what is being read. Recursive descent
     /// uses one stack frame per level, and the stack is a resource the
@@ -453,11 +454,14 @@ const Parser = struct {
 
     const LineEnd = struct { from: usize, end: usize };
 
-    /// What an array length was read under, as far as it decides how the
-    /// length reads. The nesting depth is left out: a length is kept only
-    /// where its tokens are too few to reach the nesting limit from either
-    /// place it is read at.
-    const LengthContext = struct {
+    /// What an expression written inside a type was read under, as far as it
+    /// decides how the expression reads. The nesting depth is left out: a
+    /// reading is kept with how far it reaches below where it began, and is
+    /// taken only where that reach stays inside the nesting limit.
+    const TypeExprContext = struct {
+        /// Whether a written type is open around the expression, which
+        /// decides whether a type inside it counts towards its height.
+        in_written_type: bool,
         in_lambda_default: bool,
         result_may_split: bool,
         reported_nesting: bool,
@@ -468,57 +472,69 @@ const Parser = struct {
         statement: StatementLine,
     };
 
-    /// One array length that read without a diagnostic and left the parser as
-    /// it found it.
+    /// One expression written inside a type, an array's length or a callable
+    /// type parameter's default, that read without a diagnostic and left the
+    /// parser as it found it.
     ///
     /// A bracket after a path is read as type arguments and as an index, and
-    /// an array type inside it is reached by both readings and by the
-    /// readings of every bracket around it. Each would read the length again
-    /// and keep its own copy, so a few nested brackets kept the innermost
-    /// length once per combination of readings. The length is one expression
-    /// with one meaning in every one of them, so they hold the one copy.
-    const Length = struct {
-        /// The token the length begins at and the token after it.
+    /// a type inside it is reached by both readings and by the readings of
+    /// every bracket around it. Each would read the expression again and keep
+    /// its own copy, so nested brackets around it would read it once per
+    /// combination of readings, twice as often for each bracket around it.
+    /// The expression is one expression with one meaning in every one of
+    /// them, so they hold the one copy and it is read once.
+    const TypeExpr = struct {
+        /// The token the expression begins at and the token after it.
         start: u32,
         end: u32,
         expr: ExprId,
         /// How many levels the expression stands above where it was read.
         height: u32,
-        context: LengthContext,
+        /// How many levels below where it was read the reading went, counting
+        /// every level a nesting check was asked about, inside an attempt or
+        /// not. A reading at another depth asks the same checks that many
+        /// levels below it, and they answer alike while they stay inside the
+        /// limit.
+        reach: u32,
+        context: TypeExprContext,
         /// Whether it was read inside an index bracket, where `^` begins an
         /// expression, and whether it holds a `^` for that to matter to.
         indexed: bool,
         caret: bool,
-        /// The builder's rows once the length was read. A rollback to fewer
-        /// took some of the length's rows with it.
+        /// The builder's rows once the expression was read. A rollback to
+        /// fewer took some of the expression's rows with it.
         rows: Ast.Builder.Checkpoint,
     };
 
-    const Lengths = struct {
+    const TypeExprs = struct {
         /// In the order they were read, so the ones a rollback takes are at
         /// the end.
-        read: std.ArrayList(Length) = .empty,
-        /// The newest length beginning at each token.
+        read: std.ArrayList(TypeExpr) = .empty,
+        /// The newest expression beginning at each token.
         by_start: std.AutoHashMapUnmanaged(u32, u32) = .empty,
+        /// The deepest level a nesting check has been asked about. Outside
+        /// the parser's value, like the list, so an attempt that is undone
+        /// still counts towards the reach of the reading around it.
+        deepest_asked: u32 = 0,
 
-        fn deinit(self: *Lengths, gpa: std.mem.Allocator) void {
+        fn deinit(self: *TypeExprs, gpa: std.mem.Allocator) void {
             self.read.deinit(gpa);
             self.by_start.deinit(gpa);
         }
 
-        fn at(self: *const Lengths, start: u32) ?Length {
+        fn at(self: *const TypeExprs, start: u32) ?TypeExpr {
             const index = self.by_start.get(start) orelse return null;
             return self.read.items[index];
         }
 
-        fn keep(self: *Lengths, gpa: std.mem.Allocator, length: Length) std.mem.Allocator.Error!void {
+        fn keep(self: *TypeExprs, gpa: std.mem.Allocator, kept: TypeExpr) std.mem.Allocator.Error!void {
             try self.by_start.ensureUnusedCapacity(gpa, 1);
-            try self.read.append(gpa, length);
-            self.by_start.putAssumeCapacity(length.start, @intCast(self.read.items.len - 1));
+            try self.read.append(gpa, kept);
+            self.by_start.putAssumeCapacity(kept.start, @intCast(self.read.items.len - 1));
         }
 
-        /// Forgets every length holding a row the builder no longer has.
-        fn rollback(self: *Lengths, to: Ast.Builder.Checkpoint) void {
+        /// Forgets every expression holding a row the builder no longer has.
+        fn rollback(self: *TypeExprs, to: Ast.Builder.Checkpoint) void {
             while (self.read.items.len > 0) {
                 const last = self.read.items[self.read.items.len - 1];
                 const gone = for (last.rows.lengths, to.lengths) |held, kept| {
@@ -532,8 +548,9 @@ const Parser = struct {
         }
     };
 
-    fn lengthContext(self: *const Parser) LengthContext {
+    fn typeExprContext(self: *const Parser) TypeExprContext {
         return .{
+            .in_written_type = self.written_type_depth != 0,
             .in_lambda_default = self.in_lambda_default,
             .result_may_split = self.result_may_split,
             .reported_nesting = self.reported_nesting,
@@ -545,38 +562,57 @@ const Parser = struct {
         };
     }
 
-    /// An array type's length, the cursor on its first token. Taken from the
-    /// lengths already read where one began at this token under the same
-    /// context, and read and kept otherwise.
-    fn parseArrayLength(self: *Parser) std.mem.Allocator.Error!ExprId {
+    /// Whether one more level opened here would be past the nesting limit.
+    /// Every nesting check asks through here, so the deepest level asked
+    /// about is known to `parseTypeExpression`.
+    fn atNestingLimit(self: *Parser) bool {
+        self.type_exprs.deepest_asked = @max(self.type_exprs.deepest_asked, self.depth + 1);
+        return self.depth == max_nesting;
+    }
+
+    /// An expression written inside a type, the cursor on its first token.
+    /// Taken from the expressions already read where one began at this token
+    /// under the same context and its reach from here stays inside the
+    /// nesting limit, and read and kept otherwise.
+    ///
+    /// **Bound:** each such expression is read once wherever its reach from
+    /// the depths it is reached at stays inside the limit, so the tokens a
+    /// type reading or an index reading holds are read once per bracket
+    /// around them that reads them, not once per combination of readings.
+    fn parseTypeExpression(self: *Parser) std.mem.Allocator.Error!ExprId {
         const start = self.cursor.index;
-        const context = self.lengthContext();
+        const context = self.typeExprContext();
         const indexed = self.indexes > 0;
-        if (self.lengths.at(start)) |known| {
+        if (self.type_exprs.at(start)) |known| {
             if (std.meta.eql(known.context, context) and
                 (known.indexed == indexed or !known.caret) and
-                self.depth + (known.end - known.start) <= max_nesting)
+                self.depth + known.reach <= max_nesting)
             {
                 self.cursor.seek(known.end);
                 self.deepest = @max(self.deepest, self.depth + known.height);
+                self.type_exprs.deepest_asked = @max(self.type_exprs.deepest_asked, self.depth + known.reach);
                 return known.expr;
             }
         }
 
         const said = self.sink.list.items.len;
         // Measured from this level, as an operand is, so the height can be
-        // given to another place the same length is read at.
+        // given to another place the same expression is read at.
         const outer = self.deepest;
         self.deepest = self.depth;
+        const outer_asked = self.type_exprs.deepest_asked;
+        self.type_exprs.deepest_asked = self.depth;
         const expr = try self.parseFull();
         const height = self.deepest - self.depth;
+        const reach = self.type_exprs.deepest_asked - self.depth;
         self.deepest = @max(outer, self.deepest);
+        self.type_exprs.deepest_asked = @max(outer_asked, self.type_exprs.deepest_asked);
 
         const end = self.cursor.index;
         if (end > start and
             self.sink.list.items.len == said and
-            std.meta.eql(context, self.lengthContext()) and
-            self.depth + (end - start) <= max_nesting)
+            std.meta.eql(context, self.typeExprContext()) and
+            self.depth + reach <= max_nesting)
         {
             var caret = false;
             var scan = self.cursor;
@@ -584,11 +620,12 @@ const Parser = struct {
             while (scan.index < end) : (_ = scan.advance()) {
                 if (scan.at(.caret)) caret = true;
             }
-            try self.lengths.keep(self.gpa, .{
+            try self.type_exprs.keep(self.gpa, .{
                 .start = start,
                 .end = end,
                 .expr = expr,
                 .height = height,
+                .reach = reach,
                 .context = context,
                 .indexed = indexed,
                 .caret = caret,
@@ -711,6 +748,8 @@ const Parser = struct {
         /// level would be past the limit.
         fn wrap(self: *Measure) bool {
             self.height += 1;
+            const asked = &self.parser.type_exprs.deepest_asked;
+            asked.* = @max(asked.*, self.base + self.height);
             return self.base + self.height <= max_nesting;
         }
 
@@ -3114,7 +3153,7 @@ const Parser = struct {
     /// path. Parentheses retain their spelling without creating value expressions.
     fn parseContractProjection(self: *Parser) std.mem.Allocator.Error!ContractProjection {
         const start = self.cursor.current();
-        if (self.depth == max_nesting) {
+        if (self.atNestingLimit()) {
             try self.refuseToDescend(start, "this contract path nests too deeply");
             return .{ .root = .none, .end = self.cursor.current() };
         }
@@ -3396,7 +3435,7 @@ const Parser = struct {
         }
         if (self.cursor.at(.keyword_borrow)) {
             const at = self.cursor.current();
-            if (self.depth == max_nesting) {
+            if (self.atNestingLimit()) {
                 return self.refuseTheType(at, at, "this borrow type nests too deeply");
             }
             self.depth += 1;
@@ -3469,7 +3508,7 @@ const Parser = struct {
         _ = self.cursor.advance();
         // A name left without its arguments would be reported for having
         // none, so the type is refused whole.
-        if (self.cursor.at(.l_bracket) and self.depth == max_nesting) {
+        if (self.cursor.at(.l_bracket) and self.atNestingLimit()) {
             return self.refuseTheType(self.cursor.current(), head, "this type nests too deeply");
         }
         return .{ .at = head, .name = head, .args = try self.parseTypeArgs() };
@@ -3547,7 +3586,7 @@ const Parser = struct {
 
     fn parseCallableType(self: *Parser) std.mem.Allocator.Error!node.TypeRef {
         const at = self.cursor.current();
-        if (self.depth == max_nesting) {
+        if (self.atNestingLimit()) {
             return self.refuseTheType(at, at, "this callable type nests too deeply");
         }
         self.depth += 1;
@@ -3594,7 +3633,7 @@ const Parser = struct {
         const open = self.cursor.current();
         _ = self.cursor.advance();
         if (self.cursor.eat(.r_paren) != null) return .{ .at = open, .name = open };
-        if (self.depth == max_nesting) {
+        if (self.atNestingLimit()) {
             return self.refuseTheType(open, open, "this grouped type nests too deeply");
         }
         self.depth += 1;
@@ -3673,7 +3712,7 @@ const Parser = struct {
     /// use, so nothing nests differently than it already did.
     fn parseArrayType(self: *Parser) std.mem.Allocator.Error!node.TypeRef {
         const open = self.cursor.current();
-        if (self.depth == max_nesting) {
+        if (self.atNestingLimit()) {
             return self.refuseTheType(open, open, "this type nests too deeply");
         }
         self.depth += 1;
@@ -3705,7 +3744,7 @@ const Parser = struct {
             self.cursor.advance()
         else
             .none;
-        const length = if (inferred_length == .none) try self.parseArrayLength() else ExprId.none;
+        const length = if (inferred_length == .none) try self.parseTypeExpression() else ExprId.none;
 
         if (self.cursor.eat(.r_bracket) == null) {
             try self.reportAt(
@@ -3721,7 +3760,7 @@ const Parser = struct {
 
     fn parseTypeArgs(self: *Parser) std.mem.Allocator.Error!node.TypeRefRange {
         if (!self.cursor.at(.l_bracket)) return node.TypeRefRange.empty;
-        if (self.depth == max_nesting) {
+        if (self.atNestingLimit()) {
             try self.refuseToDescend(self.cursor.current(), "this type nests too deeply");
             return node.TypeRefRange.empty;
         }
@@ -4070,7 +4109,12 @@ const Parser = struct {
                 const outer_default = self.in_lambda_default;
                 self.in_lambda_default = delimiter == .pipes;
                 defer self.in_lambda_default = outer_default;
-                default = try self.parseFull();
+                // A callable type's default is read by every reading of a
+                // bracket around the type, as an array's length is.
+                default = switch (site) {
+                    .callable_type => try self.parseTypeExpression(),
+                    .declaration => try self.parseFull(),
+                };
                 if (convention == .inout) {
                     try self.reportAt(
                         .s_default,
@@ -4691,7 +4735,7 @@ const Parser = struct {
         comptime readPattern: fn (*Parser) std.mem.Allocator.Error!ExprId,
     ) std.mem.Allocator.Error!ExprId {
         const at = self.cursor.current();
-        if (self.depth == max_nesting) {
+        if (self.atNestingLimit()) {
             try self.reportNesting(at, "this pattern nests too deeply");
             self.stepOverPattern();
             return self.builder.addLiteral(.err, at, self.rangeFrom(at));
@@ -6059,7 +6103,7 @@ const Parser = struct {
         // Every expression descends through here exactly once, so this is
         // where descent is counted. What is stacked rather than descended
         // through is counted by the loop that stacks it.
-        if (self.depth == max_nesting) return self.tooDeeplyNested(self.cursor.current());
+        if (self.atNestingLimit()) return self.tooDeeplyNested(self.cursor.current());
         self.depth += 1;
         self.deepest = @max(self.deepest, self.depth);
         defer self.depth -= 1;
@@ -6388,7 +6432,7 @@ const Parser = struct {
             parser.* = self.saved;
             if (!fits) {
                 parser.builder.rollback(self.checkpoint);
-                parser.lengths.rollback(self.checkpoint);
+                parser.type_exprs.rollback(self.checkpoint);
             }
             return fits;
         }
@@ -6407,7 +6451,10 @@ const Parser = struct {
     /// that may hold types -- one before a call, or one after a path such as
     /// `items[i]` -- nested inside another is read again by each enclosing
     /// bracket's attempt, so nested brackets cost their contents times their
-    /// nesting depth, and every bracket after a path is read twice. The depth is at most
+    /// nesting depth, and every bracket after a path is read twice. An
+    /// expression written inside a type, which both readings reach, is read
+    /// once and taken as it is by every later reading (`parseTypeExpression`),
+    /// so the readings do not multiply through it. The depth is at most
     /// `max_nesting`, which `parseTypeArgs` and the expression parser enforce
     /// by refusing to descend further; a reading refused that way is
     /// `.too_deep`, and the bracket is not read again.
@@ -6488,7 +6535,7 @@ const Parser = struct {
     fn parseElseArm(self: *Parser) std.mem.Allocator.Error!ExprId {
         if (!self.cursor.at(.keyword_if)) return self.parseArm();
 
-        if (self.depth == max_nesting) return self.tooDeeplyNested(self.cursor.current());
+        if (self.atNestingLimit()) return self.tooDeeplyNested(self.cursor.current());
         self.depth += 1;
         self.deepest = @max(self.deepest, self.depth);
         defer self.depth -= 1;
@@ -7900,6 +7947,44 @@ test "a bracket read as types and as an index keeps one copy of an array length 
     }
     // Twice the nesting is at most a few times the expressions.
     try testing.expect(counts[1] <= counts[0] * 4);
+}
+
+test "an expression inside a type is read once however long it is" {
+    // A length of six hundred terms holds more tokens than the nesting limit
+    // has levels, and a callable type's default is read through the same
+    // reuse. Twice the brackets around either is about twice the
+    // expressions: the length is read once, and each default once.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    var long: std.ArrayList(u8) = .empty;
+    try long.appendSlice(gpa, "1");
+    for (0..599) |_| try long.appendSlice(gpa, " + 1");
+
+    const wraps = .{ "a[B[[UInt8; {s}]]]", "a[B[fn(x: UInt8 = {s}) -> UInt8]]" };
+    const innermost = [_][]const u8{ long.items, "0" };
+    inline for (wraps, innermost) |wrap, first| {
+        var counts: [2]usize = undefined;
+        for ([_]usize{ 8, 16 }, &counts) |levels, *count| {
+            var inner: std.ArrayList(u8) = .empty;
+            try inner.appendSlice(gpa, first);
+            for (0..levels) |_| {
+                const wrapped = try std.fmt.allocPrint(gpa, wrap, .{inner.items});
+                inner.clearRetainingCapacity();
+                try inner.appendSlice(gpa, wrapped);
+            }
+            const text = try std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{\n    {s}\n}}\n", .{inner.items});
+            const source: Source = .{ .path = "t.lin", .text = text };
+            var sink = Sink.init(gpa);
+            var interner: Interner = .empty;
+            const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+            const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+            try testing.expectEqual(@as(u32, 0), sink.error_count);
+            count.* = ast.exprCount();
+        }
+        try testing.expect(counts[1] <= counts[0] * 3);
+    }
 }
 
 test "a chain of operators is bounded the same way" {
