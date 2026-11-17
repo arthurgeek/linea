@@ -5483,8 +5483,15 @@ pub const ImplIndex = struct {
                     _ = decided.prerequisite_sizes.remove(@enumFromInt(at));
             };
             for (im.predicates) |predicate| {
+                // What `directlySubstituted` changed is already the subject at
+                // the bindings, and substituting it again would read a binding
+                // that holds this implementation's own parameter, as one does
+                // inside the implementation's own body, a second time.
                 const direct = try self.directlySubstituted(impls, pool, decided, predicate.subject, im.decl.index(), bindings);
-                const subject = try pool.substitute(direct orelse predicate.subject, im.decl.index(), bindings);
+                const subject = if (direct != null and direct.? != predicate.subject)
+                    direct.?
+                else
+                    try pool.substitute(predicate.subject, im.decl.index(), bindings);
                 if (!try self.meetsDemand(impls, pool, decided, im, bindings, subject, predicate.demand)) break :blk false;
             }
             // A viewed array row applies exactly where the view's own
@@ -13631,6 +13638,7 @@ pub const Typing = struct {
                 if (self.dualOfDual(held, member)) |protocol| return .{ .ty = protocol, .head_definition = true };
                 if (try self.stepOfDual(owner, trait, args, held, member, named)) |mirrored| return .{ .ty = mirrored, .head_definition = true };
                 if (try self.settledThroughParameterHead(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
+                if (try self.settledThroughParameterArguments(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
                 return .{ .ty = try self.addSettledStandin(trait, args, held, member, named) };
             }
             const choice = try self.implementationChoiceWithin(owner, DeclId.at(trait), args, held) orelse return .{ .ty = .poison };
@@ -13705,6 +13713,26 @@ pub const Typing = struct {
                 return try self.settledBy(row, member, bound);
             }
             return null;
+        }
+
+        /// What `member` settles to for a key whose type is known and whose
+        /// trait arguments hold a type parameter, where an implementation
+        /// generic over those arguments answers it: `Tap.Item` at
+        /// `Source[X]` with `impl[X] Source[X] for Tap`. That implementation
+        /// matches every type that can settle the parameter, and coherence
+        /// refuses another that matches any of them, so the member is its
+        /// definition at the key's arguments rather than a key awaiting an
+        /// instantiation. Null where the type is itself a parameter or not yet
+        /// known, or where no declared implementation answers the key as it
+        /// stands.
+        ///
+        /// **Bound:** one implementation selection for the key.
+        fn settledThroughParameterArguments(self: *Builder, owner: DeclId, trait: u32, args: []const TypeId, held: TypeId, member: DeclId) std.mem.Allocator.Error!?TypeId {
+            if (self.awaits(held)) return null;
+            for (args) |a| if (self.get(a) == .open_type) return null;
+            const choice = try self.implementationChoiceWithin(owner, DeclId.at(trait), args, held) orelse return null;
+            const implementation = choice.declaredImplementation() orelse return null;
+            return try self.settledBy(self.implementations[implementation.index()], member, choice.impl_args);
         }
 
         /// The descriptor a handle stands for, so a caller can ask what kind

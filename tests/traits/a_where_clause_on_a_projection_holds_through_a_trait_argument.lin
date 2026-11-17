@@ -1,0 +1,50 @@
+// `Tap` implements `Source[X]` for every `X`, with `Item` a `Wrap[Wrap[X]]`.
+// Inside `outer`, where `X` implements `Walk`, `Tap.Item` at `Source[X]` is
+// that type, which implements `Walk` too, so `run`'s `where` clause holds.
+trait Walk {
+    fn walk(self: Self) -> UInt8
+}
+
+trait Source[X] {
+    type Item
+
+    fn feed(self: Self, x: X) -> UInt8
+}
+
+struct Wrap[T] {
+    v: T,
+}
+
+impl[T: Walk] Walk for Wrap[T] {
+    fn walk(self: Self) -> UInt8 {
+        self.v.walk() + 1
+    }
+}
+
+impl Walk for UInt8 {
+    fn walk(self: Self) -> UInt8 {
+        self
+    }
+}
+
+struct Tap {}
+
+impl[X] Source[X] for Tap {
+    type Item = Wrap[Wrap[X]]
+
+    fn feed(_self: Self, _x: X) -> UInt8 {
+        1
+    }
+}
+
+fn run[X, S: Source[X]](_s: S) -> UInt8 where S.Item: Walk {
+    2
+}
+
+fn outer[X: Walk](_x: X) -> UInt8 {
+    run[X, Tap](Tap {})
+}
+
+fn main() -> UInt8 {
+    outer(UInt8(3)) + run[UInt8, Tap](Tap {})
+}
