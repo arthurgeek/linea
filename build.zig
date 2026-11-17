@@ -2335,9 +2335,12 @@ pub fn build(b: *std.Build) void {
     const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
     if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
         native_task_step.dependOn(stealing_proof);
-        for ([_][]const u8{ "stealing.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
+        for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
             const files = b.addWriteFiles();
             const main_source = files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture})), "main.lin");
+            if (std.mem.eql(u8, fixture, "stealing_owner.lin")) {
+                _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
+            }
             const compile = b.addSystemCommand(&.{"env"});
             compile.addPrefixedFileArg("LINEA_RUNTIME=", checked_runtime_archive);
             compile.addFileArg(exe.getEmittedBin());
