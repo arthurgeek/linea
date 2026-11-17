@@ -30,7 +30,7 @@ pub fn run(mode: UInt8) -> UInt8 {
             &stream.set_deadline(time.Instant.now(), within_ms: 5000)
         }
         let expected = match &stream.read_some(&buffer, offset: 0, count: 1) {
-            Ok(_) => false,
+            Ok(count) => expected_mode == 3 && count == 0,
             Err(error) => if timed {
                 error.category == .TimedOut
             } else if expected_mode == 1 {
@@ -40,7 +40,7 @@ pub fn run(mode: UInt8) -> UInt8 {
             },
         }
         if !expected {
-            panic("the resumed I/O operation reported the wrong failure")
+            panic("the resumed I/O operation reported the wrong result")
         }
         if first == task.current_carrier().unwrap() {
             panic("a failed I/O operation did not migrate its continuation")
@@ -61,6 +61,9 @@ pub fn run(mode: UInt8) -> UInt8 {
         peer.release()
     } else if mode == 1 {
         peer.reset().unwrap()
+        running.close()
+    } else if mode == 3 {
+        peer.release()
         running.close()
     } else {
         let _sent = io.write_all(&peer, "x".as_bytes()).unwrap()

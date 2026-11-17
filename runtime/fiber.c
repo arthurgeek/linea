@@ -9,6 +9,7 @@
 #include "park.h"
 #include "sim.h"
 #include "op.h"
+#include "completion.h"
 #include "pipe_signal.h"
 
 #include <errno.h>
@@ -107,6 +108,8 @@ struct pending_operation {
     unsigned state;
     uint32_t slot;
     int registered;
+    int readiness_only;
+    uint64_t completion_cookie;
     long result;
     struct pending_operation *next;
 };
@@ -178,6 +181,7 @@ struct carrier {
     size_t timer_count, timer_capacity;
     int kernel;
     int wake;
+    struct linea_completion *completion;
     struct io_slot **pages;
     size_t page_count;
     uint32_t slots_made;
@@ -777,7 +781,7 @@ static int completed_io_retired(struct linea_fiber *f) {
     return f->waiting == waiting_io && f->park == NULL && f->waiter == NULL &&
         op != NULL && op->owner != NULL && op->owner->loop == f->loop &&
         __atomic_load_n(&op->state, __ATOMIC_ACQUIRE) == operation_complete &&
-        !op->registered &&
+        !op->registered && op->completion_cookie == 0 &&
         ((op->audited_read && op->operation->kind == LINEA_OP_READ) ||
          (op->attempt == NULL && op->operation->kind == LINEA_OP_READABLE));
 }
@@ -1432,6 +1436,17 @@ static int make_poller(struct carrier *c) {
     event.events = EPOLLIN;
     event.data.u64 = UINT64_MAX;
     if (epoll_ctl(c->kernel, EPOLL_CTL_ADD, c->wake, &event) != 0) return errno;
+#if defined(LINEA_FIBER_RING_TEST)
+    c->completion = linea_completion_open(c->wake);
+    if (c->completion == NULL) {
+#if defined(LINEA_FIBER_RING_FALLBACK_TEST)
+        const char message[] = "native completion: unavailable kernel used readiness fallback\n";
+        report_bytes(message, sizeof message - 1);
+#else
+        return ENOTSUP;
+#endif
+    }
+#endif
 #else
     c->kernel = kqueue();
     if (c->kernel < 0) return errno;
@@ -1462,6 +1477,7 @@ static void release_slot(struct pending_operation *pending) {
 }
 
 static void disarm_operation(struct pending_operation *pending) {
+    if (pending->completion_cookie != 0) fail("linea: an operation disarmed a live kernel request\n");
     if (!pending->registered) return;
     struct carrier *c = pending->owner;
     if (c->simulation != 0) {
@@ -1495,6 +1511,10 @@ static int arm_operation(struct pending_operation *pending) {
         return 0;
     }
     if (pending->operation->kind == LINEA_OP_SLEEP) return 0;
+    if (pending->audited_read && !pending->readiness_only && c->completion != NULL) {
+        pending->completion_cookie = linea_completion_submit(c->completion, pending->operation, pending);
+        if (pending->completion_cookie != 0) return 0;
+    }
     uint32_t index;
     if (c->first_free != 0) {
         index = c->first_free - 1;
@@ -1566,6 +1586,11 @@ static long attempt_operation(struct pending_operation *pending) {
 static void complete_operation(struct pending_operation *pending, int readable) {
     unsigned expected = operation_armed;
     if (!__atomic_compare_exchange_n(&pending->state, &expected, operation_claimed, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
+    if (pending->completion_cookie != 0) {
+        if (readable) fail("linea: readiness claimed a kernel-owned operation\n");
+        linea_completion_cancel(pending->owner->completion, pending->completion_cookie);
+        return;
+    }
     struct linea_fiber *f = pending->fiber;
     const unsigned long deadline = pending->operation->deadline_ns;
 #if defined(LINEA_FIBER_FORCE_REARM_TEST) || defined(LINEA_FIBER_FORCE_REARM_FAILURE_TEST)
@@ -1653,10 +1678,13 @@ static long perform_operation(struct linea_op *op, linea_fiber_attempt attempt, 
     f->deadline = op->deadline_ns;
     f->state = parking;
     unlock_fiber(f);
-    int error = arm_operation(&pending);
-    if (error == 0) error = timer_add(f);
+    /* Acquire timer storage before publishing a kernel request. An allocation
+     * refusal must not return a buffer which the kernel can still access. */
+    int error = timer_add(f);
+    if (error == 0) error = arm_operation(&pending);
     if (error != 0) {
         disarm_operation(&pending);
+        timer_remove(f);
         lock_fiber(f);
         f->state = running;
         f->waiting = waiting_none;
@@ -1757,7 +1785,56 @@ static void replay_stale_cookie(struct carrier *c) {
 }
 #endif
 
+static void drain_completions(struct carrier *c) {
+    linea_completion_flush(c->completion);
+    struct linea_completion_result result;
+    while (linea_completion_next(c->completion, &result)) {
+        struct pending_operation *pending = result.pending;
+        struct linea_fiber *f = pending->fiber;
+        if (pending->owner != c || pending->completion_cookie == 0 || pending->registered)
+            fail("linea: a kernel completion changed its poller ownership\n");
+        unsigned expected = operation_armed;
+        if (!__atomic_compare_exchange_n(&pending->state, &expected, operation_claimed, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) && expected != operation_claimed)
+            fail("linea: a kernel completion lost finalization authority\n");
+        pending->completion_cookie = 0;
+        long answer = result.result;
+        if (answer == -(long)ECANCELED && result.expired) answer = -(long)ETIMEDOUT;
+#if defined(LINEA_FIBER_RING_TEST)
+        if (result.expired && !result.cancel_submitted)
+            fail("linea: the timed-out read bypassed cancellation\n");
+        const char message[] = "native completion: own and control requests retired before migration\n";
+        report_bytes(message, sizeof message - 1);
+#endif
+        if (answer == -(long)EAGAIN || answer == -(long)EINTR || answer == -(long)EINVAL || answer == -(long)EOPNOTSUPP) {
+            /* A CQE error permits fallback only now: the original and every
+             * submitted control have relinquished their kernel references. */
+            pending->readiness_only = 1;
+#if defined(LINEA_COMPLETION_UNSUPPORTED_TEST)
+            const char fallback[] = "native completion: unsupported operation retired before readiness fallback\n";
+            report_bytes(fallback, sizeof fallback - 1);
+#endif
+            answer = attempt_operation(pending);
+            const unsigned long deadline = pending->operation->deadline_ns;
+            const int expired = result.expired || (deadline != 0 && now() >= deadline);
+            if (answer == -(long)EAGAIN && !expired) {
+                const int error = arm_operation(pending);
+                if (error == 0) {
+                    __atomic_store_n(&pending->state, operation_armed, __ATOMIC_RELEASE);
+                    continue;
+                }
+                answer = -(long)error;
+            } else if (answer == -(long)EAGAIN) answer = -(long)ETIMEDOUT;
+        }
+        timer_remove(f);
+        pending->result = answer;
+        __atomic_store_n(&pending->state, operation_complete, __ATOMIC_RELEASE);
+        notify(f);
+        /* No pending/fiber access after publication can permit reclamation. */
+    }
+}
+
 static void poll_carrier(struct carrier *c, int poll_only) {
+    drain_completions(c);
     enum { batch = 32 };
     lock_carrier(c);
     const unsigned long deadline = c->timer_count == 0 ? 0 : c->timers[0]->deadline;
@@ -1772,6 +1849,7 @@ static void poll_carrier(struct carrier *c, int poll_only) {
         const unsigned long ms = remaining / 1000000UL + (remaining % 1000000UL != 0);
         timeout = ms > (unsigned long)INT_MAX ? INT_MAX : (int)ms;
     }
+    if (linea_completion_retry(c->completion) && (timeout < 0 || timeout > 1)) timeout = 1;
     const int count = epoll_wait(c->kernel, events, batch, timeout);
     for (int i = 0; i < count; i += 1) cookies[i] = events[i].data.u64;
 #else
@@ -1802,6 +1880,7 @@ static void poll_carrier(struct carrier *c, int poll_only) {
         }
         (void)dispatch_io_cookie(c, cookie);
     }
+    drain_completions(c);
 #if defined(LINEA_FIBER_STALE_COOKIE_TEST)
     replay_stale_cookie(c);
 #endif
@@ -1955,6 +2034,7 @@ static void *run_carrier(void *argument) {
 
 static void free_carrier(struct carrier *c) {
     free(c->ready);
+    linea_completion_close(c->completion);
     if (c->wake >= 0) (void)close(c->wake);
     if (c->kernel >= 0) (void)close(c->kernel);
     if (c->signal_stack != NULL) (void)munmap(c->signal_stack, signal_bytes);
