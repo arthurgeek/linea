@@ -340,6 +340,9 @@ pub const task_start_signature: Signature = .{
     .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes },
     .result = .u64,
     .starts_task = true,
+    // The callbacks run in the child or on its later join. Starting publishes
+    // the child's logical execution record without borrowing the caller's TLS.
+    .migration_contract = .neutral,
     .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } },
 };
 
@@ -538,9 +541,9 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
     .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close },
     // The loop table and the simulations in it.
-    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution },
+    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution, .migration_contract = .neutral },
     .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop },
-    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_execution },
+    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_execution, .migration_contract = .neutral },
     .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_advance", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = io_simulation },
     .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation },
@@ -577,7 +580,10 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } } },
     .{ .symbol = "linea_fiber_current_carrier", .declared_by = heldBy("task", "`task.current_carrier`"), .parameters = &.{}, .result = .u64, .migration_contract = .neutral },
     .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = io_execution },
-    .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
+    // Preparation owns the new task's stack and logical Io. Its latch wait
+    // retains only the task record; neither success nor failure retains the
+    // preparing carrier. Cancellation joins that same unstarted record.
+    .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
     // The caller only exchanges fixed-stack request/result storage under the
     // queue's park lock. The owner executes the job in its own task; no callback
@@ -590,7 +596,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
     .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
     task_start_signature,
-    .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } } },
+    .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } } },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`choose_left` and `choose_right` on a `session.Chan`" } } },
@@ -677,6 +683,10 @@ test "an allocation, a descriptor and an address of bytes are confined to the mo
 }
 
 test "unclassified native boundaries have unknown migration behavior" {
-    for (internal_functions) |signature| try testing.expectEqual(MigrationContract.unknown, signature.migration_contract);
+    for (internal_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, task_start_migratable_signature.symbol)) {
+            try testing.expectEqual(MigrationContract.neutral, signature.migration_contract);
+        } else try testing.expectEqual(MigrationContract.unknown, signature.migration_contract);
+    }
     try testing.expect(signatureOf("unclassified_user_ffi") == null);
 }

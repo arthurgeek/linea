@@ -757,7 +757,9 @@ fn emitTaskStartFallback(w: *std.Io.Writer, sanitize: ?Sanitizer) std.Io.Writer.
     try w.print(") -> {s} attributes {{llvm.linkage = #llvm.linkage<weak>, passthrough = [\"noinline\"", .{mlirType(signature.result)});
     try writeSanitizeEntry(w, sanitize, true);
     try w.writeAll("]} {\n");
-    try writeMigrationGuard(w, runtime_symbols.task_start_signature);
+    // An older archive has no audited migratable-start implementation, even
+    // when the current runtime's ordinary start is migration-neutral.
+    try w.writeAll("    func.call @linea_fiber_restrict_current() : () -> ()\n");
     try w.print("    %result = func.call @{s}(", .{runtime_symbols.task_start_signature.symbol});
     for (signature.parameters, 0..) |_, i| {
         if (i != 0) try w.writeAll(", ");
