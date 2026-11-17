@@ -1519,6 +1519,15 @@ pub fn build(b: *std.Build) void {
         "Build the runtime library with a sanitizer and link every program with it; generated code is not instrumented",
     ) orelse .none;
 
+    const migration_candidate = b.option(
+        bool,
+        "test-migration-candidate",
+        "Build Linux migration proof archives without changing the installed runtime",
+    ) orelse false;
+    if (migration_candidate and !(target.result.os.tag == .linux and
+        (target.result.cpu.arch == .aarch64 or target.result.cpu.arch == .x86_64) and sanitize == .none))
+        @panic("migration candidate requires unsanitized Linux arm64 or x86-64");
+
     const update_goldens = b.option(
         bool,
         "update",
@@ -2334,7 +2343,17 @@ pub fn build(b: *std.Build) void {
     const task_entry_proof = b.step("test-fiber-task-entry", "Migrate a Linea task through compiler-owned entry eligibility");
     const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
     const busy_stealing_proof = b.step("test-fiber-busy-stealing", "Steal an already-started Linea continuation while its source runs another Linea task");
-    if (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) {
+    if ((target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none) or migration_candidate) {
+        const stealing_archive = if (migration_candidate) candidate: {
+            var candidate_flags: std.ArrayList([]const u8) = .empty;
+            candidate_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+            candidate_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
+            const candidate_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+            const archive = candidate_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
+            for (checked_nonfiber_objects.items) |object| candidate_runtime.addArtifactArg(object);
+            candidate_runtime.addArtifactArg(runtimeObject(b, runtime_target, "fiber_candidate", b.path("runtime/fiber.c"), candidate_flags.items));
+            break :candidate archive;
+        } else checked_runtime_archive;
         native_task_step.dependOn(stealing_proof);
         native_task_step.dependOn(busy_stealing_proof);
         const busy_files = b.addWriteFiles();
@@ -2342,6 +2361,7 @@ pub fn build(b: *std.Build) void {
         var busy_flags: std.ArrayList([]const u8) = .empty;
         busy_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
         busy_flags.append(b.allocator, "-DLINEA_FIBER_BUSY_SOURCE_TEST=1") catch @panic("OOM");
+        if (migration_candidate) busy_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_CANDIDATE=1") catch @panic("OOM");
         const busy_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
         const busy_archive = busy_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
         for (checked_nonfiber_objects.items) |object| busy_runtime.addArtifactArg(object);
@@ -2366,7 +2386,7 @@ pub fn build(b: *std.Build) void {
                 _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
             }
             const compile = b.addSystemCommand(&.{"env"});
-            compile.addPrefixedFileArg("LINEA_RUNTIME=", checked_runtime_archive);
+            compile.addPrefixedFileArg("LINEA_RUNTIME=", stealing_archive);
             compile.addFileArg(exe.getEmittedBin());
             compile.addArg("build");
             compile.addFileArg(main_source);

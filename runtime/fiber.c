@@ -40,7 +40,10 @@
 #endif
 /* Cross-thread restoration is enabled only on the validated native ABI.
  * Reference profiles keep their deterministic transfer policy. */
-#if defined(LINEA_FIBER_MIGRATION_TEST) || (defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer))
+#if defined(LINEA_FIBER_MIGRATION_CANDIDATE) && (!defined(__linux__) || (!defined(__aarch64__) && !defined(__x86_64__)) || __has_feature(address_sanitizer) || __has_feature(thread_sanitizer))
+#error Migration candidate requires unsanitized Linux arm64 or x86-64
+#endif
+#if defined(LINEA_FIBER_MIGRATION_TEST) || defined(LINEA_FIBER_MIGRATION_CANDIDATE) || (defined(__APPLE__) && defined(__aarch64__) && !__has_feature(address_sanitizer) && !__has_feature(thread_sanitizer))
 #define LINEA_FIBER_CAN_MIGRATE 1
 #endif
 #if defined(LINEA_FIBER_CAN_MIGRATE) && !defined(LINEA_FIBER_MIGRATION_TEST)
