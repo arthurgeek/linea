@@ -1,0 +1,83 @@
+// `start[T]` calls `walk` on a `Wrap[Wrap[T]]`, and `Back[T]` brings `T` back
+// to `start`, so every instantiation of `start` is at a type no larger than
+// the one it was given. `Tap.walk` joins the same cycle through `drain[Tap]`,
+// which walks the `Leaf` that `Tap.Item` names. A projection's height is
+// unknown, but it is selected from `Tap`, a type fixed in the program, so it is
+// bounded and does not make the recursion through `start` grow.
+trait Walk {
+    fn walk(sink self: Self) -> UInt8
+}
+
+trait Source {
+    type Item
+
+    fn pull(sink self: Self) -> Self.Item
+}
+
+struct Leaf {
+    value: UInt8,
+}
+
+impl Walk for Leaf {
+    fn walk(sink self: Self) -> UInt8 {
+        let Leaf { value } = self
+        value
+    }
+}
+
+struct Wrap[T] {
+    inner: T,
+}
+
+impl[T: Walk] Walk for Wrap[T] {
+    fn walk(sink self: Self) -> UInt8 {
+        let Wrap { inner } = self
+        inner.walk()
+    }
+}
+
+struct Back[T] {
+    inner: T,
+}
+
+impl[T: Walk] Walk for Back[T] {
+    fn walk(sink self: Self) -> UInt8 {
+        let Back { inner } = self
+        start(inner)
+    }
+}
+
+struct Tap {
+    value: UInt8,
+}
+
+impl Source for Tap {
+    type Item = Leaf
+
+    fn pull(sink self: Self) -> Leaf {
+        let Tap { value } = self
+        .{ value }
+    }
+}
+
+impl Walk for Tap {
+    fn walk(sink self: Self) -> UInt8 {
+        drain(self)
+    }
+}
+
+fn drain[S: Source](sink source: S) -> UInt8 where S.Item: Walk {
+    let item = source.pull()
+    item.walk()
+}
+
+fn start[T: Walk](sink value: T) -> UInt8 {
+    let twice: Wrap[Wrap[T]] = .{ inner = .{ inner = value } }
+    twice.walk()
+}
+
+fn main() -> UInt8 {
+    let tap: Tap = .{ value = 3 }
+    let back: Back[Leaf] = .{ inner = .{ value = 4 } }
+    start(tap) + back.walk() - 7
+}
