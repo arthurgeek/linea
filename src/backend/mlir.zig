@@ -362,7 +362,7 @@ pub fn emit(
         try emitForeignEntry(w, module, &module.functions[one.id.index()], one.id, one.entry, options.sanitize, one.body);
     }
 
-    if (try moduleStartsMigratableTask(gpa, module, options)) try emitTaskStartFallback(w);
+    if (try moduleStartsMigratableTask(gpa, module, options)) try emitTaskStartFallback(w, options.sanitize);
     try w.writeAll("}\n");
     return true;
 }
@@ -747,14 +747,16 @@ fn moduleStartsMigratableTask(gpa: std.mem.Allocator, module: *const Module, opt
     return false;
 }
 
-fn emitTaskStartFallback(w: *std.Io.Writer) std.Io.Writer.Error!void {
+fn emitTaskStartFallback(w: *std.Io.Writer, sanitize: ?Sanitizer) std.Io.Writer.Error!void {
     const signature = runtime_symbols.task_start_migratable_signature;
     try w.print("  func.func @{s}(", .{signature.symbol});
     for (signature.parameters, 0..) |parameter, i| {
         if (i != 0) try w.writeAll(", ");
         try w.print("%a{d}: {s}", .{ i, mlirType(parameter.scalar) });
     }
-    try w.print(") -> {s} attributes {{llvm.linkage = #llvm.linkage<weak>, passthrough = [\"noinline\"]}} {{\n", .{mlirType(signature.result)});
+    try w.print(") -> {s} attributes {{llvm.linkage = #llvm.linkage<weak>, passthrough = [\"noinline\"", .{mlirType(signature.result)});
+    try writeSanitizeEntry(w, sanitize, true);
+    try w.writeAll("]} {\n");
     try writeMigrationGuard(w, runtime_symbols.task_start_signature);
     try w.print("    %result = func.call @{s}(", .{runtime_symbols.task_start_signature.symbol});
     for (signature.parameters, 0..) |_, i| {
@@ -3788,7 +3790,7 @@ test "allocator zero facts require the exact library producer" {
 test "compiled migration task starts retain a guarded weak pinned fallback" {
     var output: std.Io.Writer.Allocating = .init(testing.allocator);
     defer output.deinit();
-    try emitTaskStartFallback(&output.writer);
+    try emitTaskStartFallback(&output.writer, null);
     try testing.expect(std.mem.indexOf(u8, output.written(), "func.func @linea_task_start_migratable(") != null);
     try testing.expect(std.mem.indexOf(u8, output.written(), "llvm.linkage = #llvm.linkage<weak>") != null);
     try testing.expect(std.mem.indexOf(u8, output.written(), "\"noinline\"") != null);
@@ -3796,6 +3798,16 @@ test "compiled migration task starts retain a guarded weak pinned fallback" {
     const fallback = std.mem.indexOf(u8, output.written(), "func.call @linea_task_start(") orelse return error.TestExpectedFallback;
     try testing.expect(guard < fallback);
     try testing.expect(std.mem.indexOf(u8, output.written(), ": (i64, !llvm.ptr, !llvm.ptr, i64, i64, i64) -> i64") != null);
+}
+
+test "migration fallback carries the selected sanitizer instrumentation" {
+    for ([_]Sanitizer{ .address, .thread }) |sanitize| {
+        var output: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer output.deinit();
+        try emitTaskStartFallback(&output.writer, sanitize);
+        try testing.expect(std.mem.indexOf(u8, output.written(), sanitize.attribute()) != null);
+        try testing.expect(std.mem.indexOf(u8, output.written(), "\"noinline\"") != null);
+    }
 }
 
 test "task-body migration eligibility excludes releases, native targets and object emission" {
