@@ -853,11 +853,14 @@ module.exports = grammar({
     call_grouped_type: $ => seq('(', $._call_listed_type, ')'),
     call_tuple_type: $ => seq('(', $._call_listed_type, ',', optional(commaSep1($._call_listed_type)), ')'),
     call_borrow_type: $ => seq('borrow', field('referent', $._call_listed_type)),
-    // Above a borrow, so `borrow A.Item` borrows the selected type.
-    call_settled_ref_type: $ => prec(1, seq(
+    // Above a borrow, so `borrow A.Item` borrows the selected type. The
+    // selected type takes the arguments written after it, `box.Box[UInt8]`,
+    // as a selection anywhere else does.
+    call_settled_ref_type: $ => prec.right(1, seq(
       field('base', $._call_listed_type),
       '.',
       field('member', alias($.identifier, $.type_identifier)),
+      optional(alias($.call_generic_arguments, $.type_arguments)),
     )),
     _call_type: $ => choice(alias($.call_generic_type, $.generic_type), alias($.identifier, $.type_identifier), $._type_only),
     _type_only: $ => choice($.array_type, $.callable_type, $.unit_type, alias($.call_only_generic_type, $.generic_type)),

@@ -119,3 +119,48 @@ fn main() -> UInt8 {
           (match_arm
             (wildcard_pattern)
             (integer_literal)))))))
+
+==================
+A selected type among several takes its own type arguments
+==================
+
+fn main() -> UInt8 {
+    first[box.Box[UInt8], UInt8](1, 2)
+    first[UInt8, Value.Item[Bool, UInt8]](1, 2)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (type_identifier)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (settled_ref_type
+              (type_identifier)
+              (type_identifier)
+              (type_arguments
+                (type_identifier)))
+            (type_identifier))
+          (argument_list
+            (integer_literal)
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier)
+            (settled_ref_type
+              (type_identifier)
+              (type_identifier)
+              (type_arguments
+                (type_identifier)
+                (type_identifier))))
+          (argument_list
+            (integer_literal)
+            (integer_literal)))))))
