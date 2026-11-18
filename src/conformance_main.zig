@@ -17249,6 +17249,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     var layouts_compared: u32 = 0;
     var levels_agreed: u32 = 0;
     var materialized_derives: u32 = 0;
+    var renames_run: u32 = 0;
     var made_rewrites: std.EnumMap(Transform, u32) = .{};
     var made_mutations: std.EnumMap(Mutation, u32) = .{};
     var made_damages: std.EnumMap(Damage, u32) = .{};
@@ -17647,6 +17648,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         layouts_compared += one.layouts_compared;
         levels_agreed += one.levels_agreed;
         materialized_derives += one.materialized_derives;
+        renames_run += one.renames_run;
         for (std.enums.values(Mutation)) |k| {
             if (one.mutations.get(k)) |n| mutations.put(k, (mutations.get(k) orelse 0) + n);
         }
@@ -17781,6 +17783,10 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     std.debug.print(
         "conformance: {d} program(s) checked with derives replaced by ordinary source\n",
         .{materialized_derives},
+    );
+    std.debug.print(
+        "conformance: {d} rename(s) the server accepted checked and run against the program renamed\n",
+        .{renames_run},
     );
     if (focused_floors and materialized_derives < 1) {
         try failures.append(gpa, .{
@@ -19673,6 +19679,126 @@ fn retainFrom(keep: std.mem.Allocator, failures: *std.ArrayList(Failure), from: 
         f.what = try keep.dupe(u8, f.what);
         f.expected = try keep.dupe(u8, f.expected);
         f.actual = try keep.dupe(u8, f.actual);
+    }
+}
+
+/// Property: a rename the server accepts leaves a program that checks and runs
+/// as the program it was made from did.
+///
+/// Every declaration the case's own files make is renamed, in turn, to every
+/// spelling another of them carries, which is where a rename can be captured
+/// or shadow something; past `rename_trials` pairs a sample seeded from the
+/// case's path is taken, so a failure names a reproducible pair. A refusal is
+/// not a failure. An accepted rename whose program reports an error, or runs
+/// to another outcome, is the server changing what the program means.
+///
+/// **Bound:** `rename_trials` renames per case, each one check by the server,
+/// one load and check here, and one build and run.
+fn checkRenamesRun(
+    gpa: std.mem.Allocator,
+    scratch_parent: std.mem.Allocator,
+    io: std.Io,
+    cache: *const OutcomeCache,
+    env: Env,
+    checked_library: *const loader.CheckedLibrary,
+    failures: *std.ArrayList(Failure),
+    count: *u32,
+    display_path: []const u8,
+    name: []const u8,
+    case: Case,
+    original: Ran,
+    foreign: Foreign,
+) !void {
+    const rename_trials = 200;
+    const inputs = try inputsOf(gpa, case);
+    var checked = try lsp_analysis.of(gpa, gpa, checked_library, inputs, case.entry);
+    defer checked.deinit();
+    if (checked.sink.hasErrors()) return;
+    const ast = &checked.program.ast;
+    const res = &checked.semantics.res;
+
+    const Trial = struct { binding: resolve_mod.BindingId, to: []const u8 };
+    var declared: std.ArrayList(resolve_mod.BindingId) = .empty;
+    var spellings: std.StringArrayHashMapUnmanaged(void) = .empty;
+    for (0..res.bindingCount()) |i| {
+        const b = resolve_mod.BindingId.at(@intCast(i));
+        const at = res.declaringToken(b);
+        if (at == TokenId.none or at.index() >= ast.tokenCount()) continue;
+        if (checked.library[ast.fileOf(at).index()]) continue;
+        if (ast.tokenTag(at) != .identifier) continue;
+        const text = ast.tokenText(at);
+        if (std.mem.startsWith(u8, text, "_") or std.mem.eql(u8, text, "main")) continue;
+        try declared.append(gpa, b);
+        try spellings.put(gpa, text, {});
+    }
+    var trials: std.ArrayList(Trial) = .empty;
+    for (declared.items) |b| {
+        const own = ast.tokenText(res.declaringToken(b));
+        for (spellings.keys()) |to| {
+            if (std.mem.eql(u8, to, own)) continue;
+            if (std.ascii.isUpper(to[0]) != std.ascii.isUpper(own[0])) continue;
+            try trials.append(gpa, .{ .binding = b, .to = to });
+        }
+    }
+    if (trials.items.len > rename_trials) {
+        var prng = std.Random.DefaultPrng.init(std.hash.Wyhash.hash(0, display_path));
+        prng.random().shuffle(Trial, trials.items);
+        trials.shrinkRetainingCapacity(rename_trials);
+    }
+
+    for (trials.items) |trial| {
+        var per_trial = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer per_trial.deinit();
+        const a = per_trial.allocator();
+        const at = res.declaringToken(trial.binding);
+        const was = ast.tokenText(at);
+        const file = ast.fileOf(at);
+        const position = lsp.offsets.indexToPosition(ast.partOfFile(file).?.source, ast.tokenSpan(at).start, .@"utf-16");
+        const answered = lsp_rename.forPosition(a, io, &checked, file, position, .@"utf-16", "", trial.to) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => continue,
+        };
+        const edit = answered orelse continue;
+
+        const after = try a.dupe(InMemoryFile, inputs);
+        var it = edit.changes.?.map.iterator();
+        while (it.next()) |entry| {
+            const path = try lsp_uri.pathOf(a, entry.key_ptr.*);
+            for (after) |*f| {
+                if (!std.mem.eql(u8, f.path, path)) continue;
+                f.text = try lsp_rename.applyTo(a, f.text, entry.value_ptr.*, .@"utf-16");
+            }
+        }
+
+        const what = try std.fmt.allocPrint(gpa, "a rename the server accepts, `{s}` to `{s}`, leaves the program meaning what it did", .{ was, trial.to });
+        var table: FileTable = .empty;
+        var sink = Sink.init(a);
+        var interner: Interner = .empty;
+        var loaded = try loadFromMemory(a, &table, &sink, &interner, case.entry, after, .program, true, .borrow);
+        try table.buildMaps(a);
+        var settled = try checkProgram(a, scratch_parent, &loaded, &interner, &sink, .program);
+        defer settled.deinit(a);
+        if (sink.hasErrors()) {
+            var why: std.Io.Writer.Allocating = .init(gpa);
+            try render.renderAll(&why.writer, &table, &sink, .{ .color = .never });
+            try failures.append(gpa, .{ .path = display_path, .what = what, .expected = "a program that checks", .actual = why.written() });
+            return;
+        }
+        const mir = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
+        var ir: std.Io.Writer.Allocating = .init(a);
+        const before = failures.items.len;
+        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize, env.foreign_symbols)) {
+            try retainFrom(gpa, failures, before);
+            return;
+        }
+        const ran = try outcomeOf(gpa, io, cache, env.buildRunOptions(
+            try std.fmt.allocPrint(gpa, "{s}.renamed-{d}", .{ name, count.* }),
+            try gpa.dupe(u8, ir.written()),
+            foreign,
+        ));
+        if (ran.tool_failed or ran.timed_out) continue;
+        count.* += 1;
+        if (try recordOutcomeDifferences(gpa, failures, display_path, what, original, ran, .moved)) return;
     }
 }
 
@@ -21925,6 +22051,7 @@ const Work = struct {
     passed_over: std.EnumMap(Property, u32) = .{},
     rewrites: std.EnumMap(Transform, u32) = .{},
     materialized_derives: u32 = 0,
+    renames_run: u32 = 0,
     damages: std.EnumMap(Damage, u32) = .{},
     mutations: std.EnumMap(Mutation, u32) = .{},
     /// The cases that carried a fix of each kind.
@@ -23023,6 +23150,26 @@ fn checkCase(
                                 ir.written(),
                                 ran,
                                 try besideOf(gpa, case),
+                                case.foreign(&program),
+                            );
+                            try checkRenamesRun(
+                                gpa,
+                                scratch_parent,
+                                io,
+                                env.cache,
+                                .{
+                                    .scratch = env.scratch_dir,
+                                    .runtime = rt,
+                                    .foreign_symbols = foreign_symbols,
+                                    .sanitize = env.sanitize,
+                                },
+                                env.library,
+                                &w.failures,
+                                &w.renames_run,
+                                display_path,
+                                case_name,
+                                case,
+                                ran,
                                 case.foreign(&program),
                             );
                         }

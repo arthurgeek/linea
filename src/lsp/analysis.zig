@@ -46,6 +46,22 @@ pub const Analysis = struct {
     /// ask and a per-request table is sized by the compilation rather than by
     /// the request. One byte per file, filled in one pass over the modules.
     library: []const bool,
+    /// What the analysis was made from beyond the sources its modules hold,
+    /// so a rename can check the program it would write the way this one was
+    /// checked (`rechecked`).
+    made_from: MadeFrom,
+
+    /// The checked library the analysis resumed from, the entry and the
+    /// module checked as the entry, the disk an embedded file is read from,
+    /// and the inputs that are no module's source: a manifest, an embedded
+    /// file. Copied into `source_arena`.
+    pub const MadeFrom = struct {
+        library: *const loader.CheckedLibrary,
+        entry: []const u8,
+        module: ?[]const u8,
+        embeds_from: ?std.Io,
+        extras: []const loader.InMemoryFile,
+    };
 
     pub fn deinit(self: *Analysis) void {
         self.arena.deinit();
@@ -182,6 +198,18 @@ fn analyze(
         for (m.files) |f| library_files[f.index()] = m.library;
     }
 
+    const kept = source_arena.allocator();
+    var extras: std.ArrayList(loader.InMemoryFile) = .empty;
+    for (files) |f| {
+        if (std.mem.endsWith(u8, f.path, ".lin")) continue;
+        try extras.append(kept, .{ .path = try kept.dupe(u8, f.path), .text = try kept.dupe(u8, f.text), .identity = try kept.dupe(u8, f.identity), .deferred = f.deferred });
+    }
+    // Allocate through `kept` before the result copies `source_arena`: an
+    // allocation after the copy would grow only the local arena, which
+    // nothing frees.
+    const kept_entry = try kept.dupe(u8, entry);
+    const kept_module = if (module) |dir| try kept.dupe(u8, dir) else null;
+
     return .{
         .arena = arena,
         .source_arena = source_arena,
@@ -192,7 +220,37 @@ fn analyze(
         .cursors = cursors,
         .uses = uses,
         .library = library_files,
+        .made_from = .{
+            .library = library,
+            .entry = kept_entry,
+            .module = kept_module,
+            .embeds_from = embeds_from,
+            .extras = extras.items,
+        },
     };
+}
+
+/// The analysis of `checked`'s program with each of its own sources as
+/// `sources` holds it: the same library, entry, module and other inputs, so
+/// what differs is what the sources changed. A source `sources` leaves out
+/// keeps the text it was checked with.
+pub fn rechecked(gpa: std.mem.Allocator, checked: *const Analysis, sources: []const loader.InMemoryFile) !Analysis {
+    var inputs: std.ArrayList(loader.InMemoryFile) = .empty;
+    defer inputs.deinit(gpa);
+    try inputs.appendSlice(gpa, sources);
+    for (checked.program.modules) |m| {
+        if (m.library) continue;
+        for (m.files) |f| {
+            const held = checked.table.get(f);
+            const given = for (sources) |s| {
+                if (std.mem.eql(u8, s.path, held.path)) break true;
+            } else false;
+            if (!given) try inputs.append(gpa, .{ .path = held.path, .text = held.text });
+        }
+    }
+    try inputs.appendSlice(gpa, checked.made_from.extras);
+    const from = checked.made_from;
+    return analyze(gpa, gpa, from.library, inputs.items, from.entry, from.module, from.embeds_from);
 }
 
 test "unrelated source payloads do not increase analysis allocation" {

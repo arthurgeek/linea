@@ -1,0 +1,12 @@
+// `lib` declares the trait, the type and both operations; this module calls
+// through them. `p.score()` runs the trait's `score`, which `P` does not
+// declare itself.
+import lib
+
+use lib.Score
+
+fn main() -> UInt8 {
+    let p = lib.P.make(3)
+    let q = lib.P.make(4)
+    p.score() + q.bonus()
+}

@@ -1,0 +1,27 @@
+// A call reaches the type's own operation before a trait's, whether it is
+// written after the value or through the type: `r.score()` and
+// `P.score(p)` both run the trait's `score`, which `P` does not declare.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+struct P { x: UInt8 }
+
+impl Score for P {
+    fn score(self: Self) -> UInt8 {
+        self.x + 10
+    }
+}
+
+impl P {
+    fn bonus(self: Self) -> UInt8 {
+        self.x + 20
+    }
+}
+
+fn main() -> UInt8 {
+    let p = P { x = 3 }
+    let q = P { x = 4 }
+    let r = P { x = 5 }
+    P.score(p) + q.bonus() + r.score() + q.x
+}
