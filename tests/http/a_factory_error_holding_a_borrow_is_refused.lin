@@ -1,0 +1,30 @@
+// A handler factory's error is moved from the serving task that met it to
+// the caller, so it must own everything it holds: an error observing the
+// factory's label could outlive it.
+import std.http
+import std.net
+
+@derive(Release)
+struct Unopened {
+    label: Str,
+}
+
+fn unopened() -> Result[http.Router[()], Unopened] {
+    .Err(Unopened { label = "the routes" })
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let served = http.serve(listener, unopened, policy: .Threads(2))
+    match served {
+        Err(Handler(reason)) => {
+            reason.release()
+            0
+        },
+        Err(other) => {
+            other.release()
+            1
+        },
+        Ok(_) => 2,
+    }
+}

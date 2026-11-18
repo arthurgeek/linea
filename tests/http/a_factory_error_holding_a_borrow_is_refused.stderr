@@ -1,0 +1,8 @@
+error[T-Bound]: `R.Error` requires `Owned`, and `Unopened` can carry a borrow: `label` is a `Str`, which holds a view of storage it does not own
+  --> tests/http/a_factory_error_holding_a_borrow_is_refused.lin:18:23
+   |
+18 |     let served = http.serve(listener, unopened, policy: .Threads(2))
+   |                       ^^^^^ `Unopened` is not `Owned`; pass a value whose type owns everything it holds
+  ::: std/http/serve.lin
+L  | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Release {
+   |                                                                 ------- required by this `where` clause
