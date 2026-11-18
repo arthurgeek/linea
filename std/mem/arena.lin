@@ -630,48 +630,6 @@ fn arena_reserve[H: Allocator](owner: Arena[H], size: UInt64) -> Option[ArenaRes
     }
 }
 
-// Answer whether `allocated` bytes at `at` lie within `length` bytes at
-// `base`, starting no lower than `lowest` bytes into them.
-fn arena_within(base: UInt64, length: UInt64, lowest: UInt64, at: UInt64, allocated: UInt64) -> Bool {
-    if at < base || lowest > length {
-        return false
-    }
-    let offset = at - base
-    offset >= lowest && offset <= length && allocated <= length - offset
-}
-
-// Answer whether a reservation of `allocated` bytes at `at` lies within one of
-// the arena's chunks, outside its words and its table. It tries the first
-// chunk and then the current one, where the latest reservations lie, and only
-// then looks through at most `owner.slots` chunks after the first, a number
-// bounded by the log of the arena's size.
-fn arena_holds[H: Allocator](owner: Arena[H], first: Buffer[H], at: UInt64, allocated: UInt64) -> Bool {
-    if arena_within(first.at, first.len, owner.start, at, allocated) {
-        return true
-    }
-    // An arena that has grown keeps its current chunk, the latest one it
-    // acquired, in its words.
-    let grown = first.load(arena_grown)
-    if owner.slots > 0 && grown > 0 && arena_within(first.load(arena_chunk_at), first.load(arena_chunk_len), 0, at, allocated) {
-        return true
-    }
-    // Each chunk's buffer is taken out of its slot to read where it lies and
-    // put back unchanged.
-    let shape: SlotType[Buffer[H]] = .Type
-    let stride = slot_stride(shape)
-    var table = arena_table_of(owner, first)
-    var found = false
-    var index: UInt64 = 0
-    while !found && index < grown {
-        let chunk: Buffer[H] = slot_take(&table, index * stride)
-        found = arena_within(chunk.at, chunk.len, 0, at, allocated)
-        slot_put(&table, index * stride, chunk)
-        index += 1
-    }
-    table.dispose()
-    found
-}
-
 impl[H: Allocator] Allocator for Handle[H] {
     type Obligation = ()
 
@@ -697,16 +655,11 @@ impl[H: Allocator] Allocator for Handle[H] {
         }
     }
 
-    // The buffer supplies its allocator, so callers cannot select another arena.
-    // Keep extent checks before discarding a reservation; reclamation is collective.
-    fn dispose(sink b { at: at, len: length, allocated: allocated, allocator: allocator, obligation: _ }: Buffer[Handle[H]]) {
-        match read allocator.owner.first {
-            None => panic("an allocation has no backing arena"),
-            Some(first) => {
-                if length > allocated || !arena_holds(*allocator.owner, first, at, allocated) {
-                    panic("an allocation lies outside its backing arena")
-                }
-            },
-        }
-    }
+    // The buffer supplies its allocator, so callers cannot select another
+    // arena, and its bytes come back only when the arena is rewound or
+    // released. A `Buffer[Handle[H]]` is made only by `acquire`, from a
+    // reservation `arena_reserve` cut out of one of this arena's chunks, and
+    // no other module can write a buffer's fields, so disposal has nothing to
+    // check.
+    fn dispose(sink b { at: _, len: _, allocated: _, allocator: _, obligation: _ }: Buffer[Handle[H]]) {}
 }

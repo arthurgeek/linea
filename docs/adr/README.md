@@ -189,7 +189,8 @@ true of a different implementation.
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214 |
 | [0222](0222-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |
-| [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md) | An arena grows in chunks up to its size, and a rewind returns them | Accepted; supersedes the arena-memory clause of 0154 |
+| [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md) | An arena grows in chunks up to its size, and a rewind returns them | Accepted; supersedes the arena-memory clause of 0154; disposal clause superseded by 0282 |
+| [0282](0282-an-arena-disposes-without-rechecking-where-a-buffer-lies.md) | An arena disposes of a buffer without rechecking where it lies | Accepted; supersedes the disposal clause of 0263 |
 | [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted; extended by 0249 |

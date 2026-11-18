@@ -216,8 +216,8 @@ pub const RawAccesses = struct {
     arena_rewind: DeclId = .none,
     /// `mem.Handle` and the arena's free functions that trust the first chunk
     /// they are handed: `arena_give_back` is named only by `Arena`'s members,
-    /// `arena_reserve` and `arena_holds` only by `Handle`'s, `arena_table_of`
-    /// only by the three that read the table, and `arena_write`, which writes
+    /// `arena_reserve` only by `Handle`'s, `arena_table_of` only by the two
+    /// that read the table, and `arena_write`, which writes
     /// a word of the first chunk, only by `Arena`'s members and the two free
     /// functions that write its words.
     handle: DeclId = .none,
@@ -225,7 +225,6 @@ pub const RawAccesses = struct {
     arena_table_of: DeclId = .none,
     arena_give_back: DeclId = .none,
     arena_reserve: DeclId = .none,
-    arena_holds: DeclId = .none,
     arena_write: DeclId = .none,
     /// `Storage.from_buffer`, which takes a buffer apart into slot storage.
     storage_from_buffer: DeclId = .none,
@@ -428,7 +427,6 @@ pub const RawAccesses = struct {
             .arena_table_of = moduleFunction(program, ast, "mem", "arena_table_of"),
             .arena_give_back = moduleFunction(program, ast, "mem", "arena_give_back"),
             .arena_reserve = moduleFunction(program, ast, "mem", "arena_reserve"),
-            .arena_holds = moduleFunction(program, ast, "mem", "arena_holds"),
             .arena_write = moduleFunction(program, ast, "mem", "arena_write"),
             .storage_from_buffer = memberOf(program, ast, "mem", "Storage", "from_buffer"),
             .storage_dispose = memberOf(program, ast, "mem", "Storage", "dispose"),
@@ -620,7 +618,7 @@ pub const RawAccesses = struct {
     /// `Buffer`'s members: an arena's bookkeeping, which reads where its
     /// chunks lie and writes its words, and the members of the library's test
     /// logs that read or write their words.
-    const buffer_numbers = [_][]const u8{ "arena_open", "arena_rewind", "arena_table_of", "arena_reserve", "arena_holds", "arena_write", "allocation_log_refuse_attempt", "release_log_words" };
+    const buffer_numbers = [_][]const u8{ "arena_open", "arena_rewind", "arena_table_of", "arena_reserve", "arena_write", "allocation_log_refuse_attempt", "release_log_words" };
 
     /// The test allocators that build a buffer of their backing allocator,
     /// which they hand out and take back on its behalf, and an arena's handle,
@@ -637,7 +635,7 @@ pub const RawAccesses = struct {
     /// is made from a buffer and taken back; a kept body's where
     /// `task.Slot.start` hands its addresses to the task it starts; an
     /// owner's where `task.own` builds one and `task.Client.call` reaches its queue; an
-    /// arena's where its free functions and its handle's release read it;
+    /// arena's where its free functions read it;
     /// a `ProbeTag`'s where `probe_tag` builds one; and a wait set's and a
     /// key's nowhere else, since the set's number and the key's slot and
     /// generation say which kept value a call takes and as what type.
@@ -651,7 +649,7 @@ pub const RawAccesses = struct {
         .{ .decl = "kept", .also = &.{ "keep_body", "task_slot_start" } },
         .{ .decl = "endpoint" },
         .{ .decl = "owner", .also = &.{ "client_call", "task_own" } },
-        .{ .decl = "arena", .also = &.{ "arena_table_of", "arena_give_back", "arena_reserve", "arena_holds", "handle_dispose" } },
+        .{ .decl = "arena", .also = &.{ "arena_table_of", "arena_give_back", "arena_reserve" } },
         .{ .decl = "probe_tag", .also = &.{"probe_tag_builder"} },
         .{ .decl = "wait_set" },
         .{ .decl = "registered" },
@@ -683,7 +681,7 @@ pub const RawAccesses = struct {
     /// payload's send and receive, an owning task's call and request, the
     /// release of a vector's elements, the byte vector given back as a
     /// buffer, whose bytes need no settling, and an arena's table of chunks.
-    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve", "arena_holds" };
+    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve" };
 
     const slots_message = "a slot is taken, put, placed or given up only by `Storage` and `Vec` and the declarations the table names, each of which settles or hands on every value it puts";
     const task_help = "start the task with `task.prepare(body)` and `start()`";
@@ -714,8 +712,8 @@ pub const RawAccesses = struct {
         .{ .decls = &.{"call_owner"}, .allowed = &.{"client_call"}, .message = queue_message, .help = queue_help },
         .{ .decls = &.{"next_owner_request"}, .allowed = &.{"run_owner"}, .message = queue_message, .help = queue_help },
         .{ .decls = &.{"arena_give_back"}, .types = &.{"arena"}, .message = arena_message, .help = arena_help },
-        .{ .decls = &.{ "arena_reserve", "arena_holds" }, .types = &.{"handle"}, .message = arena_message, .help = arena_help },
-        .{ .decls = &.{"arena_table_of"}, .allowed = &.{ "arena_give_back", "arena_reserve", "arena_holds" }, .message = arena_message, .help = arena_help },
+        .{ .decls = &.{"arena_reserve"}, .types = &.{"handle"}, .message = arena_message, .help = arena_help },
+        .{ .decls = &.{"arena_table_of"}, .allowed = &.{ "arena_give_back", "arena_reserve" }, .message = arena_message, .help = arena_help },
         .{ .decls = &.{"arena_write"}, .allowed = &.{ "arena_give_back", "arena_reserve" }, .types = &.{"arena"}, .message = arena_message, .help = arena_help },
         .{ .decls = &.{"record_release"}, .allowed = &.{ "release_tag_release", "probe_tag_release" }, .message = "`record_release` writes at the number it is given, so only the declarations the table names call it", .help = "release a `ReleaseTag`" },
         .{ .decls = &.{ "foreign_byte", "foreign_word" }, .allowed = &.{ "copied_in", "foreign_address_test", "foreign_byte_test", "foreign_word_test", "foreign_at_test" }, .types = &.{ "c_text", "c_text_list" }, .message = "C's memory has no extent to check a read against, so only a C view's own operations read it", .help = "read the view through its own operations" },
