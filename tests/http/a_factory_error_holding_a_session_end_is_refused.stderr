@@ -4,5 +4,5 @@ error[T-Bound]: `R.Error` requires `Isolated`, and `Desk` is not `Isolated`: `li
 34 |     let _served = http.listen_and_serve(net.loopback(8080), routes) else |failed| {
    |                        ^^^^^^^^^^^^^^^^ `Desk` is not `Isolated`; pass a value that holds no end of a session
   ::: std/http/serve.lin
-L  | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Isolated + Release {
+L  | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Isolated + Release {
    |                                                                 ------- required by this `where` clause
