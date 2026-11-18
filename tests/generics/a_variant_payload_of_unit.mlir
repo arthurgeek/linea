@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/generics/a_variant_payload_of_unit.lin\00") : !llvm.array<45 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -182,6 +183,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_variant_payload_of_unit.lin":34:11)
     %tl1 = arith.constant 34 : i32 loc("tests/generics/a_variant_payload_of_unit.lin":34:11)
     %tc1 = arith.constant 11 : i32 loc("tests/generics/a_variant_payload_of_unit.lin":34:11)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_variant_payload_of_unit.lin":34:11)
     llvm.unreachable loc("tests/generics/a_variant_payload_of_unit.lin":34:11)
   ^c1:
@@ -196,6 +198,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_variant_payload_of_unit.lin":34:20)
     %tl2 = arith.constant 34 : i32 loc("tests/generics/a_variant_payload_of_unit.lin":34:20)
     %tc2 = arith.constant 20 : i32 loc("tests/generics/a_variant_payload_of_unit.lin":34:20)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_variant_payload_of_unit.lin":34:20)
     llvm.unreachable loc("tests/generics/a_variant_payload_of_unit.lin":34:20)
   ^c2:
@@ -216,6 +219,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_variant_payload_of_unit.lin":30:27)
     %tl3 = arith.constant 30 : i32 loc("tests/generics/a_variant_payload_of_unit.lin":30:27)
     %tc3 = arith.constant 27 : i32 loc("tests/generics/a_variant_payload_of_unit.lin":30:27)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_variant_payload_of_unit.lin":30:27)
     llvm.unreachable loc("tests/generics/a_variant_payload_of_unit.lin":30:27)
   ^b8:

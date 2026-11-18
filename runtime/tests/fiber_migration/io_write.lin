@@ -1,0 +1,82 @@
+import std.io
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.time
+
+use io.ByteWriter
+use io.Reader
+use net.Acceptor
+use net.Accepted
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    var peer = net.connect(listener.local_address().unwrap()).unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    listener.release()
+    let total = UInt64(8388608)
+    var payload = mem.system().acquire(total).unwrap()
+    for index in 0..total {
+        &payload.store_byte(index, UInt8(index % 251))
+    }
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    var passed = false
+    let body = sink [total, sink connection, sink payload, inout entries, inout passed] |sink me: Chan[End]| {
+        entries += 1
+        var stream = connection
+        let first = task.current_carrier().unwrap()
+        let bytes = payload.as_slice()
+        var sent = UInt64(0)
+        var moved = false
+        while sent < total {
+            let remaining = bytes.subspan(start: sent, count: total - sent).unwrap()
+            let count = &stream.write_some(remaining).unwrap()
+            if count == 0 {
+                panic("the sender made no progress")
+            }
+            sent += count
+            moved = moved || first != task.current_carrier().unwrap()
+        }
+        if !moved || sent != total {
+            panic("a pending write did not preserve its moved continuation")
+        }
+        time.sleep(time.Duration.from_nanoseconds(0))
+        payload.release()
+        stream.release()
+        passed = true
+        me.close()
+    }
+    let running = task.prepare(body, on: execution).unwrap().start()
+    var buffer = mem.system().acquire(65536).unwrap()
+    var received = UInt64(0)
+    while received < total {
+        let remaining = total - received
+        let wanted = if remaining < 65536 {
+            remaining
+        } else {
+            UInt64(65536)
+        }
+        let count = &peer.read_some(&buffer, offset: 0, count: wanted).unwrap()
+        if count == 0 {
+            panic("the receiver lost part of the write")
+        }
+        for index in 0..count {
+            if buffer.as_slice()[index] != UInt8((received + index) % 251) {
+                panic("a partial write changed the byte sequence")
+            }
+        }
+        received += count
+    }
+    buffer.release()
+    peer.release()
+    running.close()
+    if passed && entries == 1 && received == total {
+        0
+    } else {
+        1
+    }
+}

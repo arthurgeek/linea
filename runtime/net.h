@@ -7,7 +7,8 @@
  * port in the low 16, so no socket extern takes a memory address. */
 long linea_net_listen(unsigned long address, unsigned long backlog);
 /* Inside a simulation (`sim.h`) every operation is answered by the
- * simulation; otherwise every socket is nonblocking and an operation waits by polling. A deadline
+ * simulation; otherwise every socket is nonblocking and waits through its
+ * execution backend. A deadline
  * is the monotonic clock's reading in nanoseconds, 0 for none. A deadline that
  * has passed answers -ETIMEDOUT without attempting the operation. */
 long linea_net_accept(int listener, unsigned long deadline_ns);

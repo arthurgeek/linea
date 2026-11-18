@@ -60,6 +60,7 @@ fn report(title: Str, found: Measure) -> Result[(), io.IoError] {
 // starts, so a preparation that fails cancels the ones before it and hands
 // its reason on with no task left running.
 fn measure_all(harbour: Str, library: Str, weather: Str) -> Result[(Measure, Measure, Measure), task.PrepareError] {
+    // These prepared tasks use separate OS threads through io.system().
     // Each body reads its article. A `Str` is `Shareable`, so the tasks and
     // their creator may all read the texts at once, and none may change them
     // until every task is joined.
@@ -72,12 +73,12 @@ fn measure_all(harbour: Str, library: Str, weather: Str) -> Result[(Measure, Mea
     let measure_weather = sink [read weather] |sink me: Chan[Send[Measure, End]]| {
         me.send(measure(weather)).close()
     }
-    let harbour_slot = task.prepare(measure_harbour).settled()?
-    let library_slot = task.prepare(measure_library).settled() else |reason| {
+    let harbour_slot = task.prepare(measure_harbour, on: io.system()).settled()?
+    let library_slot = task.prepare(measure_library, on: io.system()).settled() else |reason| {
         let _unrun = harbour_slot.cancel()
         return .Err(reason)
     }
-    let weather_slot = task.prepare(measure_weather).settled() else |reason| {
+    let weather_slot = task.prepare(measure_weather, on: io.system()).settled() else |reason| {
         let _unrun = harbour_slot.cancel()
         let _also_unrun = library_slot.cancel()
         return .Err(reason)

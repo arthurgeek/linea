@@ -14,6 +14,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_foreign_enter()
   func.func private @linea_foreign_leave()
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;published"(%a0: i64) -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -36,6 +37,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
     %tl1 = arith.constant 10 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
     %tc1 = arith.constant 18 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
   ^c1:
@@ -47,6 +49,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
     %tl2 = arith.constant 10 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
     %tc2 = arith.constant 18 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":10:18)
   ^c2:
@@ -73,6 +76,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
     %tl1 = arith.constant 14 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
     %tc1 = arith.constant 9 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
   ^c1:
@@ -84,6 +88,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
     %tl2 = arith.constant 14 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
     %tc2 = arith.constant 9 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":14:9)
   ^c2:
@@ -111,6 +116,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
     %tl1 = arith.constant 6 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
     %tc1 = arith.constant 17 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
   ^c1:
@@ -122,6 +128,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
     %tl2 = arith.constant 6 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
     %tc2 = arith.constant 17 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":6:17)
   ^c2:
@@ -148,6 +155,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
     %tl1 = arith.constant 2 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
     %tc1 = arith.constant 9 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
   ^c1:
@@ -159,6 +167,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
     %tl2 = arith.constant 2 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
     %tc2 = arith.constant 9 : i32 loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
     llvm.unreachable loc("tests/library/the_four_modifiers_are_two_questions/main.lin":2:9)
   ^c2:

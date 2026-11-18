@@ -1,0 +1,50 @@
+import std.env
+import std.io
+import std.session
+import std.task
+import std.time
+import std.uuid
+
+use session.Chan
+use session.End
+use uuid.Uuid
+
+fn changed_carrier(before: task.Carrier, failure: Str) {
+    var attempts = UInt64(0)
+    while attempts < 65536 && before == task.current_carrier().unwrap() {
+        time.sleep(time.Duration.from_nanoseconds(0))
+        attempts += 1
+    }
+    if before == task.current_carrier().unwrap() {
+        panic(failure)
+    }
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[End]| {
+        let before_process = task.current_carrier().unwrap()
+        let arguments = env.args()
+        if arguments.count() == 0 || arguments.at(0).unwrap().length() == 0 || arguments.bytes_at(0).unwrap().length() == 0 || env.available_parallelism() == 0 {
+            panic("a process observation lost its value")
+        }
+        for entry in env.variables() {
+            if entry.name.length() == 0 {
+                panic("environment iteration lost a variable name")
+            }
+        }
+        let _path = env.variable("PATH")
+        changed_carrier(before_process, "process observations pinned their calling continuation")
+
+        let before_random = task.current_carrier().unwrap()
+        let random = Uuid.v4()
+        let timestamped = Uuid.v7()
+        if random.version() != 4 || timestamped.version() != 7 || timestamped.timestamp().is_none() {
+            panic("UUID generation lost its version or timestamp")
+        }
+        changed_carrier(before_random, "UUID generation pinned its calling continuation")
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    0
+}

@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/traits/a_trait_slot_is_not_an_argument_slot.lin\00") : !llvm.array<54 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -40,6 +41,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:19)
     %tl1 = arith.constant 38 : i32 loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:19)
     %tc1 = arith.constant 19 : i32 loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:19)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:19)
     llvm.unreachable loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:19)
   ^c1:
@@ -55,6 +57,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:30)
     %tl2 = arith.constant 38 : i32 loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:30)
     %tc2 = arith.constant 30 : i32 loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:30)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:30)
     llvm.unreachable loc("tests/traits/a_trait_slot_is_not_an_argument_slot.lin":38:30)
   ^c2:

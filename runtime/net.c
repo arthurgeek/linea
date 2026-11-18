@@ -87,8 +87,6 @@ static long attempt_accept(const struct linea_op *op) {
     int fd;
     do { fd = accept(op->fd, NULL, NULL); } while (fd < 0 && errno == EINTR);
     if (fd < 0) return failed();
-    const int error = configure(fd);
-    if (error != 0) { close(fd); return -(long)error; }
     return fd;
 }
 
@@ -127,7 +125,7 @@ static long attempt_connect(struct linea_op *op) {
     return connect_finished(op->fd);
 }
 
-static long attempt_read(const struct linea_op *op) {
+static long attempt_read(struct linea_op *op) {
     ssize_t count;
     do {
         count = read(op->fd, (void *)(uintptr_t)op->at, (size_t)op->len);
@@ -204,7 +202,7 @@ static long wait_ready(const struct linea_op *op, unsigned long remaining_ns, in
  * connection taken off the backlog would lose them, and an attempt that would
  * still wait answers -ETIMEDOUT. A connect's attempt reads SO_ERROR when the
  * socket is writable, and a socket still connecting at the deadline times out
- * and is closed here, since the caller never received it. */
+ * and is closed before returning, since the caller never received it. */
 static long perform_in_place(struct linea_op *op) {
     unsigned long now = 0;
     const int has_deadline = op->deadline_ns != 0;
@@ -227,7 +225,6 @@ static long perform_in_place(struct linea_op *op) {
         const long wait_error = wait_ready(op, remaining_ns, !has_deadline);
         if (wait_error != 0) { answer = wait_error; break; }
     }
-    if (op->kind == LINEA_OP_CONNECT && answer < 0 && op->fd >= 0) close(op->fd);
     return answer;
 }
 
@@ -238,8 +235,28 @@ static long perform_in_place(struct linea_op *op) {
 static long linea_io_perform(struct linea_op *op) {
     const int simulated = op->kind == LINEA_OP_CONNECT ? linea_sim_running() : linea_sim_takes(op->fd);
     if (simulated) return linea_sim_perform(op);
-    if (!linea_fiber_active()) return perform_in_place(op);
-    const long result = linea_fiber_perform(op, attempt);
+    /* Only this private producer supplies the canonical socket attempt.
+     * Unknown/custom callbacks must use ordinary linea_fiber_perform. */
+    long result = linea_fiber_active() ? linea_fiber_perform_net(op, attempt) : perform_in_place(op);
+    if (op->kind == LINEA_OP_ACCEPT && result >= 0) {
+        int error = configure((int)result);
+#if defined(LINEA_NET_ACCEPT_CONFIGURE_TEST)
+        if (error == 0) error = EPERM;
+#endif
+        if (error != 0) {
+            close((int)result);
+#if defined(LINEA_NET_ACCEPT_CONFIGURE_TEST)
+            if (fcntl((int)result, F_GETFD) != -1 || errno != EBADF) {
+                const char leaked[] = "linea: an unconfigured accepted descriptor remained open\n";
+                report_bytes(leaked, sizeof leaked - 1);
+                _exit(1);
+            }
+            const char message[] = "native completion: unconfigured accepted descriptor closed\n";
+            report_bytes(message, sizeof message - 1);
+#endif
+            result = -(long)error;
+        }
+    }
     if (op->kind == LINEA_OP_CONNECT && result < 0 && op->fd >= 0) close(op->fd);
     return result;
 }

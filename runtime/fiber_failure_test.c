@@ -277,7 +277,7 @@ static void refuse(enum failure kind, unsigned nth) {
 }
 static void startup_unwinds(void) {
     const struct { enum failure kind; unsigned count; long error; } cases[] = {
-        { allocation_failure, 2, ENOMEM }, { mutex_failure, 3, EAGAIN },
+        { allocation_failure, 2, ENOMEM }, { mutex_failure, 4, EAGAIN },
         { condition_failure, 1, EAGAIN }, { claim_failure, 1, ENOMEM },
 #if defined(__linux__)
         { poller_failure, 4, EMFILE },
@@ -307,6 +307,7 @@ static void fiber_preparation_unwinds(void) {
     memset(&loop, 0, sizeof loop);
     loop.count = 1; loop.carriers = &carrier;
     assert(pthread_mutex_init(&loop.startup_lock, NULL) == 0);
+    assert(pthread_mutex_init(&loop.metadata, NULL) == 0);
     const unsigned long identity = linea_loop_claim_kind(&loop, LINEA_LOOP_FIBERS);
     assert(identity != 0);
     const enum failure cases[] = { allocation_failure, mapping_failure, protection_failure };
@@ -325,6 +326,7 @@ static void fiber_preparation_unwinds(void) {
     balanced();
     linea_loop_retire(identity);
     assert(pthread_mutex_destroy(&loop.startup_lock) == 0);
+    assert(pthread_mutex_destroy(&loop.metadata) == 0);
 }
 
 static unsigned operation_attempts;
@@ -357,7 +359,7 @@ static void stale_events_do_not_complete_reused_slots(void) {
     operation.kind = LINEA_OP_READ; operation.fd = pair[0];
     struct pending_operation pending;
     memset(&pending, 0, sizeof pending);
-    pending.operation = &operation; pending.fiber = &fiber;
+    pending.operation = &operation; pending.fiber = &fiber; pending.owner = &carrier;
     pending.attempt = completes_once; pending.state = operation_armed;
     assert(arm_operation(&pending) == 0);
     const uint64_t stale = cookie_of(&carrier, &pending);
@@ -405,7 +407,7 @@ static void rejected_add_preserves_its_error_and_existing_watch(int error) {
     operation.kind = LINEA_OP_READ; operation.fd = pair[0];
     struct pending_operation existing, rejected;
     memset(&existing, 0, sizeof existing);
-    existing.operation = &operation; existing.fiber = &fiber;
+    existing.operation = &operation; existing.fiber = &fiber; existing.owner = &carrier;
     existing.attempt = completes_once; existing.state = operation_armed;
     rejected = existing;
     if (error == EEXIST) assert(arm_operation(&existing) == 0);
@@ -440,7 +442,7 @@ static void duplicate_failure_releases_only_its_slot(void) {
     operation.kind = LINEA_OP_READ; operation.fd = pair[0];
     struct pending_operation pending;
     memset(&pending, 0, sizeof pending);
-    pending.operation = &operation; pending.fiber = &fiber;
+    pending.operation = &operation; pending.fiber = &fiber; pending.owner = &carrier;
     pending.attempt = completes_once; pending.state = operation_armed;
     const int errors[] = { EMFILE, EBADF };
     for (size_t i = 0; i < sizeof errors / sizeof errors[0]; i += 1) {

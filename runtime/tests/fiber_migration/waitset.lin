@@ -1,0 +1,53 @@
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.Recv
+use session.End
+use task.WaitSet
+
+enum Woke {
+    Arrived(Chan[Recv[UInt64, End]]),
+    Kept(UInt64),
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    var passed = false
+    let body = sink [inout entries, inout passed] |sink me: Chan[Recv[UInt64, End]]| {
+        entries += 1
+        let first = task.current_carrier().unwrap()
+        var waiting: WaitSet[Woke] = WaitSet.open()
+        let _arrival = &waiting.received(me, |sink ready| Woke.Arrived(ready))
+        let _retained = &waiting.after(time.Duration.from_seconds(60), UInt64(73), |sink n| Woke.Kept(n))
+        let ready = match &waiting.next().unwrap() {
+            Arrived(ready) => ready,
+            Kept(_) => panic("the retained timer fired before the session"),
+        }
+        if first == task.current_carrier().unwrap() {
+            panic("a completed wait set did not migrate its continuation")
+        }
+        let (number, done) = ready.recv()
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first != task.current_carrier().unwrap() {
+            panic("the wait-set continuation did not return to its first carrier")
+        }
+        var left = waiting.close()
+        let retained = match &left.pop().unwrap() {
+            Kept(n) => n,
+            Arrived(_) => panic("the delivered session remained registered"),
+        }
+        left.finish().unwrap()
+        passed = number == 91 && retained == 73
+        done.close()
+    }
+    task.start(body, on: execution).unwrap().send(91).close()
+    if passed && entries == 1 {
+        0
+    } else {
+        1
+    }
+}

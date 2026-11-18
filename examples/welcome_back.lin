@@ -145,11 +145,16 @@ fn serving_router() -> Result[http.Router[()], http.RouteError] {
 }
 
 fn serve(port: UInt16) -> UInt8 {
+    // Idle connections park their fibers while other requests use the carriers.
+    let execution = io.Loop.open(carriers: env.available_parallelism()) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
     io.eprintln("listening on http://127.0.0.1:{port}")
     // Each serving task builds its own router with `serving_router`, and a
     // task whose router is refused ends serving before a connection is
     // accepted.
-    let _ = http.listen_and_serve(net.loopback(port), serving_router) else |error| {
+    let _ = http.listen_and_serve(net.loopback(port), serving_router, on: execution) else |error| {
         io.eprintln("{error}")
         return 1
     }

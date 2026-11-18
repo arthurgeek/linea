@@ -1,0 +1,69 @@
+import std.fmt
+import std.fs
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.time
+import std.uuid
+
+use session.Chan
+use session.End
+
+fn changed_carrier(before: task.Carrier, failure: Str) {
+    var attempts = UInt64(0)
+    while attempts < 65536 && before == task.current_carrier().unwrap() {
+        time.sleep(time.Duration.from_nanoseconds(0))
+        attempts += 1
+    }
+    if before == task.current_carrier().unwrap() {
+        panic(failure)
+    }
+}
+
+fn main() -> UInt8 {
+    let identifier = uuid.Uuid.v4()
+    let name = fmt.render_owned("/tmp/linea-migration-{identifier}").unwrap()
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [sink name] |sink me: Chan[End]| {
+        let before_files = task.current_carrier().unwrap()
+        let path = fs.Path.from_str(name.view()).unwrap()
+        fs.save_atomic(path, "first".as_bytes(), policy: .CreateNew, permissions: .Exact(384)).unwrap()
+        if fs.save_atomic(path, "conflict".as_bytes(), policy: .CreateNew).is_ok() {
+            panic("an atomic create replaced a live file")
+        }
+        fs.save_atomic(path, "second".as_bytes(), policy: .Replace).unwrap()
+        let reader = fs.File.open(path).unwrap()
+        var buffer = mem.system().acquire(8).unwrap()
+        let count = reader.read_at(&buffer, 0, 6, 0).unwrap()
+        if count != 6 || buffer.load_byte(0) != 115 || buffer.load_byte(5) != 100 {
+            panic("a positional read lost file bytes")
+        }
+        buffer.release()
+        reader.close().unwrap()
+        let writer = fs.File.create(path, policy: .Replace).unwrap()
+        if writer.write_at("third".as_bytes(), 0).unwrap() != 5 {
+            panic("a positional write lost file bytes")
+        }
+        writer.close().unwrap()
+        let content = fs.read_text(path, max_bytes: 8).unwrap()
+        if content.view() != "third" {
+            panic("file reading lost its contents")
+        }
+        content.release()
+        fs.remove_file(path).unwrap()
+        match fs.File.open(path) {
+            Ok(file) => {
+                file.close().unwrap()
+                panic("a removed file remained readable")
+            },
+            Err(_) => {},
+        }
+        changed_carrier(before_files, "file operations pinned their calling continuation")
+        name.release()
+        me.close()
+    }
+    let slot = task.prepare(body, on: execution).unwrap()
+    slot.start().close()
+    0
+}

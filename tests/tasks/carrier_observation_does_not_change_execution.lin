@@ -1,0 +1,57 @@
+import std.io
+import std.task
+import std.time
+import std.session
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    if task.current_carrier().is_some() {
+        return 1
+    }
+    let execution = io.Loop.open(carriers: 1).unwrap()
+    var observed = false
+    var original: Option[task.Carrier] = .None
+    let body = sink [inout observed, inout original] |sink me: Chan[End]| {
+        let before = task.current_carrier().unwrap()
+        time.sleep(time.Duration.from_nanoseconds(0))
+        observed = before == task.current_carrier().unwrap()
+        original = .Some(before)
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    let other_loop = io.Loop.open(carriers: 1).unwrap()
+    let earlier = original.unwrap()
+    var distinct = false
+    let other_body = sink [earlier, inout distinct] |sink me: Chan[End]| {
+        distinct = earlier != task.current_carrier().unwrap()
+        me.close()
+    }
+    task.start(other_body, on: other_loop).unwrap().close()
+    var system_seen = false
+    let system_body = sink [inout system_seen] |sink me: Chan[End]| {
+        system_seen = task.current_carrier().is_none()
+        me.close()
+    }
+    task.start(system_body, on: io.system()).unwrap().close()
+    var simulation = io.Simulation.open(seed: 3).unwrap()
+    let simulated = &simulation.run(
+        |inout _world| {
+            var none_seen = false
+            let simulated_body = sink [inout none_seen] |sink me: Chan[End]| {
+                time.sleep(time.Duration.from_nanoseconds(0))
+                none_seen = task.current_carrier().is_none()
+                me.close()
+            }
+            task.start(simulated_body).unwrap().close()
+            none_seen && task.current_carrier().is_none()
+        },
+    )
+    simulation.close()
+    if observed && distinct && system_seen && simulated && task.current_carrier().is_none() {
+        0
+    } else {
+        2
+    }
+}

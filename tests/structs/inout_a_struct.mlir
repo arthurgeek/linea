@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/structs/inout_a_struct.lin\00") : !llvm.array<33 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -46,6 +47,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/structs/inout_a_struct.lin":19:9)
     %tl1 = arith.constant 19 : i32 loc("tests/structs/inout_a_struct.lin":19:9)
     %tc1 = arith.constant 9 : i32 loc("tests/structs/inout_a_struct.lin":19:9)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/structs/inout_a_struct.lin":19:9)
     llvm.unreachable loc("tests/structs/inout_a_struct.lin":19:9)
   ^c1:
@@ -73,6 +75,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/structs/inout_a_struct.lin":8:15)
     %tl1 = arith.constant 8 : i32 loc("tests/structs/inout_a_struct.lin":8:15)
     %tc1 = arith.constant 15 : i32 loc("tests/structs/inout_a_struct.lin":8:15)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/structs/inout_a_struct.lin":8:15)
     llvm.unreachable loc("tests/structs/inout_a_struct.lin":8:15)
   ^c1:

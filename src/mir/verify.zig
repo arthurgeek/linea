@@ -1232,6 +1232,10 @@ const Function = struct {
                     try self.report(span, "%{d} does not produce a code pointer", .{id.index()});
                     return false;
                 }
+                if (mir.tagOf(id) == .function_addr and self.module.isExternal(function)) {
+                    try self.report(span, "%{d} ordinary callable names an external function {d}", .{ id.index(), function.index() });
+                    return false;
+                }
                 const target = self.module.functionOf(function).signature;
                 const fits = self.module.types.callableConverts(target, mir.typeOf(id)) or
                     (mir.tagOf(id) == .foreign_function_addr and sameForeignEntry(&self.module.types, target, mir.typeOf(id)));
@@ -3411,6 +3415,20 @@ test "a function address produces a code pointer" {
     const checked = try h.run();
     try testing.expect(!checked.ok);
     try expectSaid(checked.said, "does not produce a code pointer");
+}
+
+test "an ordinary callable cannot point directly at a native entry" {
+    const gpa = testing.allocator;
+    const functions = try gpa.dupe(Mir, &.{
+        try indirectCaller(gpa, Harness.nullary_callable, FunctionId.at(1), &.{}, .u8, .value),
+        try pointerTarget(gpa, Harness.nullary_callable, null),
+    });
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+    @constCast(h.module.external)[1] = true;
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "ordinary callable names an external function");
 }
 
 test "a function address has the target signature" {

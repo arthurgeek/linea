@@ -13,6 +13,7 @@ module {
   llvm.mlir.global internal constant @linea_file0("tests/codegen/a_never_local_occupies_no_slot.lin\00") : !llvm.array<49 x i8>
   llvm.mlir.global internal constant @linea_str0("stop") : !llvm.array<4 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -37,6 +38,7 @@ module {
     %pf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/codegen/a_never_local_occupies_no_slot.lin":2:25)
     %tl1 = arith.constant 2 : i32 loc("tests/codegen/a_never_local_occupies_no_slot.lin":2:25)
     %tc1 = arith.constant 25 : i32 loc("tests/codegen/a_never_local_occupies_no_slot.lin":2:25)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_panic(%pva1, %pvl1, %pf1, %tl1, %tc1) : (i64, i64, !llvm.ptr, i32, i32) -> () loc("tests/codegen/a_never_local_occupies_no_slot.lin":2:25)
     llvm.unreachable loc("tests/codegen/a_never_local_occupies_no_slot.lin":2:25)
   }

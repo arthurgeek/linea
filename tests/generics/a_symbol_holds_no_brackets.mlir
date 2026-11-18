@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/generics/a_symbol_holds_no_brackets.lin\00") : !llvm.array<46 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -60,6 +61,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
     %tl1 = arith.constant 16 : i32 loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
     %tc1 = arith.constant 5 : i32 loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
     llvm.unreachable loc("tests/generics/a_symbol_holds_no_brackets.lin":16:5)
   ^b5:

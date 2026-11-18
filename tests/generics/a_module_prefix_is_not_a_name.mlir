@@ -13,6 +13,7 @@ module {
   llvm.mlir.global internal constant @linea_file0("tests/generics/a_module_prefix_is_not_a_name/main.lin\00") : !llvm.array<54 x i8>
   llvm.mlir.global internal constant @linea_file1("tests/generics/a_module_prefix_is_not_a_name/sub/sub.lin\00") : !llvm.array<57 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -51,6 +52,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:20)
     %tl1 = arith.constant 35 : i32 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:20)
     %tc1 = arith.constant 20 : i32 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:20)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:20)
     llvm.unreachable loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:20)
   ^c1:
@@ -66,6 +68,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:31)
     %tl2 = arith.constant 35 : i32 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:31)
     %tc2 = arith.constant 31 : i32 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:31)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:31)
     llvm.unreachable loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:31)
   ^c2:
@@ -81,6 +84,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:46)
     %tl3 = arith.constant 35 : i32 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:46)
     %tc3 = arith.constant 46 : i32 loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:46)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:46)
     llvm.unreachable loc("tests/generics/a_module_prefix_is_not_a_name/main.lin":35:46)
   ^c3:

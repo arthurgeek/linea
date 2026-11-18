@@ -7,11 +7,15 @@
 // plan without starting a task.
 import std.io
 import std.mem
+import std.session
 import std.task
 import std.testing
 
 use io.IoError
 use io.println
+use session.Chan
+use session.End
+use session.Send
 
 // A stop is a place on the city's grid, in kilometres east and north of its
 // south-west corner.
@@ -170,11 +174,23 @@ fn report(policy: task.Policy) -> Result[(), IoError] {
     .Ok(())
 }
 
-fn main() -> Result[UInt8, IoError] {
+fn report_day() -> Result[UInt8, IoError] {
     report(.Threads(4))?
     // The same plan with `.Sequential` runs every van on this task, one
     // after another, and arrives at the same distance.
     let whole_day = fleet_kilometres(.Sequential, fleet(1, 12))
     println("the whole day planned without tasks: {whole_day} km")?
     .Ok(0)
+}
+
+fn main() -> Result[UInt8, IoError] {
+    // The task combinators inherit this loop. Their concurrency limit still
+    // comes from Policy, independently of the number of carrier threads.
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[Send[Result[UInt8, IoError], End]]| {
+        me.send(report_day()).close()
+    }
+    let (result, done) = task.start(body, on: execution).unwrap().recv()
+    done.close()
+    result
 }

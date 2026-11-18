@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* A task runs on a thread or pinned fiber, with one session to its creator. A task
+/* A task runs on a thread or fiber, with one session to its creator. A task
  * and an endpoint are named by an unsigned long the runtime hands out. Each
  * session holds one slot, so a send returns only once its peer has taken
  * the value, and a choice is a send of its branch number.
@@ -24,7 +24,7 @@ typedef void (*linea_task_entry)(unsigned long endpoint, unsigned long at, unsig
 typedef void (*linea_task_release)(unsigned long at, unsigned long len);
 
 /* Prepare a task with a stack of `stack_bytes`, without running its body.
- * Identity zero selects a system thread; a loop selects a pinned fiber.
+ * Identity zero selects a system thread; a loop selects a fiber.
  * The result is the task or a negated errno. A failure leaves no record,
  * stack or execution resource behind. */
 long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity);
@@ -35,6 +35,10 @@ long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity);
  * endpoint, the task's handle. */
 unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
                                unsigned long len, unsigned long release_at);
+
+/* Compiler-only body proof; it applies to the prepared task, not its caller. */
+unsigned long linea_task_start_migratable(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
+                                          unsigned long len, unsigned long release_at);
 
 /* Cancel prepared execution without running its body and
  * free what `linea_task_prepare_on` made. */

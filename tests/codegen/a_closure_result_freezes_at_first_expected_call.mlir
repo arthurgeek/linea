@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin\00") : !llvm.array<66 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -46,6 +47,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
     %tl1 = arith.constant 5 : i32 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
     %tc1 = arith.constant 11 : i32 loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
     llvm.unreachable loc("tests/codegen/a_closure_result_freezes_at_first_expected_call.lin":5:11)
   ^c1:

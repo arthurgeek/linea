@@ -78,9 +78,11 @@ Reading input that may be malformed or never ends, and recovering from bad recor
 
 Work on several tasks at once, through sessions the compiler checks or through combinators that start and join the tasks for you.
 
-- [party_guest_list.lin](party_guest_list.lin): collects a party's guest list from friends who each decide on a task of their own; `task.start`, gathering answers in invitation order over sessions before `close` joins each task, and a guest list owned by the party alone.
-- [reading_times.lin](reading_times.lin): estimates how long each article of a newsletter takes to read, measuring all three at once on tasks of their own; `task.prepare`, gathering each result over a session before `close` joins the task, and texts every task reads.
-- [delivery_routes.lin](delivery_routes.lin): plans each delivery van's route in parallel and finds the first van that cannot finish within a shift; `task.map`, `task.lazy_map` stopped early with `defer var`, `task.join`, and one `task.Policy` switching between `.Threads(4)` and `.Sequential`.
+- [party_guest_list.lin](party_guest_list.lin): collects a party's guest list from explicit system-thread tasks; `task.start`, gathering answers in invitation order over sessions before `close` joins each task, and a guest list owned by the party alone.
+- [reading_times.lin](reading_times.lin): estimates how long each article of a newsletter takes to read on explicit system-thread tasks; `task.prepare`, gathering each result over a session before `close` joins the task, and texts every task reads.
+- [delivery_routes.lin](delivery_routes.lin): plans each delivery van's route on a shared fiber loop and finds the first van that cannot finish within a shift; `task.map`, `task.lazy_map` stopped early with `defer var`, `task.join`, and one `task.Policy` switching between `.Threads(4)` and `.Sequential`.
+- [chat_room.lin](chat_room.lin): hears every member through one wait set; sessions and timer waits share two fiber carriers.
+- [race_against_a_timeout.lin](race_against_a_timeout.lin): races two quote services against a timer on a fiber loop, then collects late replies and joins every task.
 
 ## TCP servers
 
@@ -97,7 +99,7 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 - [hello_http.lin](hello_http.lin): an HTTP service with two routes; routing and JSON bodies.
 - [party_rsvp.lin](party_rsvp.lin): collects party replies from a web form; a handler run as a CGI program with `http.serve_cgi`.
 - [site-icon](site-icon/main.lin): serves a page and the icon a browser shows on its tab, as a CGI program; files embedded with `embed` and `embed_bytes`, and bytes answered with `http.bytes`.
-- [countdown-server](countdown-server/main.lin): streams a countdown one line a second; path values and streamed responses.
+- [countdown-server](countdown-server/main.lin): streams a countdown one line a second; path values, streamed responses, and timer waits on a shared fiber loop.
 - [welcome_back.lin](welcome_back.lin): greets a visitor by name and counts visits in a cookie; reading and setting cookies, and escaping user text in HTML.
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.
 - [http-json-echo](http-json-echo/main.lin): a JSON service with headers, forms, and shared counters; the largest example.
@@ -106,4 +108,4 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 
 A complete program combining a C library wrapper, embedded assets, and HTTP routing.
 
-- [guest-book](guest-book/main.lin): signs and lists a guest book stored in SQLite, served by its own HTTP server; a library trusted with C, linear statements, embedded templates, a cookie and escaped HTML.
+- [guest-book](guest-book/main.lin): HTTP fibers call a restricted system-thread SQLite owner to sign and list a guest book; a library trusted with C, linear statements, embedded templates, a cookie and escaped HTML.

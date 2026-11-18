@@ -27,7 +27,9 @@ typedef void (*linea_context_entry)(void *argument);
 /* The supplied stack remains owned by the caller. bytes must provide enough
  * space for the entry's frames after rounding the stack top down to 16 bytes.
  * entry(argument) must never return. Initial floating control is inherited
- * from the calling thread. Contexts stay pinned to that thread. */
+ * from the calling thread. The register image does not carry OS-thread-local
+ * state: the scheduler owns eligibility, guards and sanitizer transitions for
+ * any validated cross-thread resumption. */
 void linea_context_init(struct linea_context *context, void *stack,
                         unsigned long bytes, linea_context_entry entry, void *argument);
 void linea_context_switch(struct linea_context *from, struct linea_context *to);

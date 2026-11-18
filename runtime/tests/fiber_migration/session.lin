@@ -1,0 +1,39 @@
+import std.io
+import std.task
+import std.time
+import std.session
+
+use session.Chan
+use session.Recv
+use session.End
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    var result = UInt64(0)
+    var migrated = false
+    let body = sink [inout entries, inout result, inout migrated] |sink me: Chan[Recv[UInt64, End]]| {
+        entries += 1
+        let first = task.current_carrier().unwrap()
+        let (number, done) = me.recv()
+        let second = task.current_carrier().unwrap()
+        if first == second {
+            panic("first suspension did not move the continuation")
+        }
+        var value = number * 3 + 7
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first != task.current_carrier().unwrap() {
+            panic("second suspension did not return to the first carrier")
+        }
+        migrated = true
+        value += 11
+        result = value
+        done.close()
+    }
+    task.start(body, on: execution).unwrap().send(91).close()
+    if migrated && entries == 1 && result == 291 {
+        0
+    } else {
+        1
+    }
+}

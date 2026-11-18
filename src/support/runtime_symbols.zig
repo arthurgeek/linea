@@ -187,6 +187,19 @@ pub const DeclaredBy = union(enum) {
     }
 };
 
+/// Migration behavior of a compiler-owned native boundary. Conditional
+/// callbacks still require invocation-level coverage; a symbol alone cannot
+/// certify its callbacks or the suspension paths reached by an invocation.
+pub const MigrationContract = enum {
+    neutral,
+    /// The runtime checks each invocation before any native effects. This
+    /// does not certify every path through the symbol as migration-neutral.
+    runtime_guarded,
+    conditional_callbacks,
+    bound_by_context,
+    unknown,
+};
+
 /// One function in the `linea_` namespace and the signature it has.
 pub const Signature = struct {
     symbol: []const u8,
@@ -204,6 +217,7 @@ pub const Signature = struct {
     /// The runtime calls back into Linea code in a task it starts, so a
     /// body handed to it runs while its caller goes on ([T-ThreadStart]).
     starts_task: bool = false,
+    migration_contract: MigrationContract = .unknown,
 };
 
 fn p(scalar: Scalar) Parameter {
@@ -296,6 +310,8 @@ pub const thread_end_signature: Signature = .{
     .result = .unit,
 };
 
+pub const fiber_restrict_signature: Signature = .{ .symbol = "linea_fiber_restrict_current", .declared_by = .compiler, .parameters = &.{}, .result = .unit };
+
 pub const foreign_enter = "linea_foreign_enter";
 pub const foreign_leave = "linea_foreign_leave";
 pub const foreign_depth = "linea_foreign_depth";
@@ -313,20 +329,39 @@ pub const math_functions = math: {
             .parameters = if (operation.arity() == 2) &.{ p(.f64), p(.f64) } else &.{p(.f64)},
             .result = .f64,
             .declared_by = .compiler,
+            // The runtime restores errno, rounding, exception state and
+            // architecture control words before returning numeric results.
+            .migration_contract = .neutral,
         };
     }
     break :math table;
 };
 
-/// What the runtime's own files call between themselves: the park routine
-/// every wait goes through (`runtime/park.h`), what a source calls to signal
-/// a wait set's registration and what a set calls to watch a session, a
-/// signal or a simulated descriptor, and, to run a simulation, the
-/// loop table (`runtime/loop.h`) and the simulated backend that the socket
-/// and clock entries hand an operation to (`runtime/sim.h`). No Linea
-/// declaration names them; they are owned so that no `export` takes their
-/// names.
+/// Both start paths publish the same body, release callback and typed storage.
+pub const task_start_signature: Signature = .{
+    .symbol = "linea_task_start",
+    .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes },
+    .result = .u64,
+    .starts_task = true,
+    // The callbacks run in the child or on its later join. Starting publishes
+    // the child's logical execution record without borrowing the caller's TLS.
+    .migration_contract = .neutral,
+    .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } },
+};
+
+pub const task_start_migratable_signature: Signature = blk: {
+    var signature = task_start_signature;
+    signature.symbol = "linea_task_start_migratable";
+    signature.declared_by = .compiler;
+    break :blk signature;
+};
+
+/// What the runtime's own files call between themselves: park and registration
+/// operations, execution contexts and simulated backends. No Linea declaration
+/// names them; they are owned so that no `export` takes their names.
 pub const internal_functions = [_]Signature{
+    task_start_migratable_signature,
+    .{ .symbol = "linea_fiber_metadata_held", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_fiber_sim_create", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_fiber_sim_switch", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
     .{ .symbol = "linea_fiber_sim_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
@@ -335,10 +370,20 @@ pub const internal_functions = [_]Signature{
     .{ .symbol = "linea_sim_carrier", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_sim_choice", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .u64 },
     .{ .symbol = "linea_sim_attempt", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i64 },
+    fiber_restrict_signature,
     foreign_enter_signature,
     foreign_leave_signature,
     foreign_depth_signature,
     .{ .symbol = "linea_fiber_perform", .declared_by = .compiler, .parameters = &.{ p(.ptr), cb(&.{.ptr}, .i64, 0) }, .result = .i64 },
+    .{ .symbol = "linea_fiber_perform_net", .declared_by = .compiler, .parameters = &.{ p(.ptr), cb(&.{.ptr}, .i64, 0) }, .result = .i64 },
+    .{ .symbol = "linea_completion_open", .declared_by = .compiler, .parameters = &.{p(.i32)}, .result = .ptr },
+    .{ .symbol = "linea_completion_close", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_completion_submit", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr), p(.ptr) }, .result = .u64 },
+    .{ .symbol = "linea_completion_cancel", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .unit },
+    .{ .symbol = "linea_completion_next", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr) }, .result = .i32 },
+    .{ .symbol = "linea_completion_flush", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_completion_retry", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .i32 },
+    .{ .symbol = "linea_completion_replay_stale", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
     .{ .symbol = "linea_fiber_wait_descriptor", .declared_by = .compiler, .parameters = &.{ p(.i32), p(.u8), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_fiber_sleep", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .i64 },
     .{ .symbol = "linea_context_init", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr), p(.u64), cb(&.{.ptr}, .unit, 0), p(.ptr) }, .result = .unit },
@@ -348,6 +393,7 @@ pub const internal_functions = [_]Signature{
     .{ .symbol = "linea_thread_guard_commit", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
     .{ .symbol = "linea_fiber_create", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64), cb(&.{.ptr}, .unit, 0), cb(&.{.ptr}, .unit, 0), p(.ptr), .{ .scalar = .i32, .passing = .inout } }, .result = .ptr },
     .{ .symbol = "linea_fiber_start", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
+    .{ .symbol = "linea_fiber_start_compiled", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_fiber_destroy", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_fiber_active", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_fiber_park", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.u64) }, .result = .i32 },
@@ -462,95 +508,149 @@ const io_simulation = heldBy("io", "`io.Simulation` and the `io.World` its run l
 /// float-math operations -- are owned by the compiler and refused by name
 /// ([T-Extern]), so they are not repeated here.
 pub const runtime_functions = [_]Signature{
-    .{ .symbol = "linea_alloc", .parameters = &.{ p(.u64), p(.u64) }, .result = .u64, .answers = .allocation, .declared_by = mem_allocation },
-    .{ .symbol = "linea_free", .parameters = &.{ allocation, p(.u64), p(.u64) }, .result = .unit, .declared_by = mem_release },
-    .{ .symbol = "linea_arg_count", .parameters = &.{}, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_arg_at", .parameters = &.{p(.u64)}, .result = .u64, .answers = .bytes, .declared_by = mem_arguments },
-    .{ .symbol = "linea_arg_len", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_env_count", .parameters = &.{}, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_env_at", .parameters = &.{p(.u64)}, .result = .u64, .answers = .bytes, .declared_by = mem_environment },
-    .{ .symbol = "linea_env_len", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_io_category", .parameters = &.{p(.i32)}, .result = .u8, .declared_by = .granted },
-    .{ .symbol = "linea_errno", .parameters = &.{}, .result = .i32, .declared_by = .granted },
-    .{ .symbol = "linea_read_some", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_transfer },
-    .{ .symbol = "linea_write_some", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_transfer },
-    .{ .symbol = "linea_net_read", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
-    .{ .symbol = "linea_net_write", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
-    .{ .symbol = "linea_read_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
-    .{ .symbol = "linea_write_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer },
-    .{ .symbol = "linea_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = mem_close },
-    .{ .symbol = "linea_random_bytes", .parameters = &.{ bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files },
-    .{ .symbol = "linea_random_words", .parameters = &.{ written, written }, .result = .i64, .declared_by = .granted },
-    .{ .symbol = "linea_open_parent", .parameters = &.{ bytes_at, p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = mem_files },
-    .{ .symbol = "linea_open_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u8), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = mem_files },
-    .{ .symbol = "linea_mode_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files },
-    .{ .symbol = "linea_set_mode", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .declared_by = fs_mode },
-    .{ .symbol = "linea_publish_at", .parameters = &.{ descriptor, bytes_at, p(.u64), bytes_at, p(.u64), p(.u8) }, .result = .i64, .declared_by = mem_files },
-    .{ .symbol = "linea_unlink_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files },
-    .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted },
-    .{ .symbol = "linea_net_listen", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
-    .{ .symbol = "linea_net_accept", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener },
-    .{ .symbol = "linea_net_connect", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_connection },
-    .{ .symbol = "linea_net_local_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_listener },
-    .{ .symbol = "linea_net_peer_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
-    .{ .symbol = "linea_net_shutdown_write", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
-    .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection },
-    .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close },
+    .{ .symbol = "linea_alloc", .parameters = &.{ p(.u64), p(.u64) }, .result = .u64, .answers = .allocation, .declared_by = mem_allocation, .migration_contract = .neutral },
+    .{ .symbol = "linea_free", .parameters = &.{ allocation, p(.u64), p(.u64) }, .result = .unit, .declared_by = mem_release, .migration_contract = .neutral },
+    // Startup records these process-lifetime views before any task starts.
+    // Querying them neither changes native state nor retains a thread identity.
+    .{ .symbol = "linea_arg_count", .parameters = &.{}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_arg_at", .parameters = &.{p(.u64)}, .result = .u64, .answers = .bytes, .declared_by = mem_arguments, .migration_contract = .neutral },
+    .{ .symbol = "linea_arg_len", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_env_count", .parameters = &.{}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_env_at", .parameters = &.{p(.u64)}, .result = .u64, .answers = .bytes, .declared_by = mem_environment, .migration_contract = .neutral },
+    .{ .symbol = "linea_env_len", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_io_category", .parameters = &.{p(.i32)}, .result = .u8, .declared_by = .granted, .migration_contract = .neutral },
+    // errno reads the current OS thread's native error slot.
+    .{ .symbol = "linea_errno", .parameters = &.{}, .result = .i32, .declared_by = .granted, .migration_contract = .bound_by_context },
+    // Descriptor I/O captures native errors before return. Writes restore
+    // their temporary SIGPIPE mask and consume only the signal they raised.
+    // These entries may block, but retain no caller-thread dependency.
+    .{ .symbol = "linea_read_some", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_transfer, .migration_contract = .neutral },
+    .{ .symbol = "linea_write_some", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_transfer, .migration_contract = .neutral },
+    .{ .symbol = "linea_net_read", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer, .migration_contract = .runtime_guarded },
+    .{ .symbol = "linea_net_write", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer, .migration_contract = .runtime_guarded },
+    // File offsets, anchors, permissions and directory entries belong to
+    // descriptors or the filesystem. Each operation captures its native error
+    // before returning and retains no carrier. These operations may block.
+    .{ .symbol = "linea_read_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer, .migration_contract = .neutral },
+    .{ .symbol = "linea_write_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_transfer, .migration_contract = .neutral },
+    .{ .symbol = "linea_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = mem_close, .migration_contract = .neutral },
+    .{ .symbol = "linea_random_bytes", .parameters = &.{ bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    // getentropy fills stack-local words and returns a captured error. No
+    // generator state or native thread identity survives the call.
+    .{ .symbol = "linea_random_words", .parameters = &.{ written, written }, .result = .i64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_open_parent", .parameters = &.{ bytes_at, p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_open_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u8), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_mode_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_set_mode", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .declared_by = fs_mode, .migration_contract = .neutral },
+    .{ .symbol = "linea_publish_at", .parameters = &.{ descriptor, bytes_at, p(.u64), bytes_at, p(.u64), p(.u8) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_unlink_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    // The descriptor limit is process-wide; errors are captured before return.
+    .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted, .migration_contract = .neutral },
+    // Socket setup and endpoint queries return descriptors or captured errors.
+    // Descriptor state belongs to the socket, independently of the caller's
+    // OS thread; only the async operations need invocation-level guards.
+    .{ .symbol = "linea_net_listen", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener, .migration_contract = .neutral },
+    .{ .symbol = "linea_net_accept", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener, .migration_contract = .runtime_guarded },
+    .{ .symbol = "linea_net_connect", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_connection, .migration_contract = .runtime_guarded },
+    .{ .symbol = "linea_net_local_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_listener, .migration_contract = .neutral },
+    // Accept's synchronous endpoint lookup retains no OS-thread dependency.
+    .{ .symbol = "linea_net_peer_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection, .migration_contract = .neutral },
+    .{ .symbol = "linea_net_shutdown_write", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection, .migration_contract = .neutral },
+    .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection, .migration_contract = .neutral },
+    .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close, .migration_contract = .neutral },
     // The loop table and the simulations in it.
-    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution },
-    .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop },
-    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_execution },
-    .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation },
-    .{ .symbol = "linea_sim_advance", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = io_simulation },
-    .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation },
-    .{ .symbol = "linea_sim_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = io_simulation },
-    .{ .symbol = "linea_clock_read", .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, written }, .result = .i64, .declared_by = .granted },
-    .{ .symbol = "linea_clock_sleep", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .granted },
+    .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution, .migration_contract = .neutral },
+    // A simulation run replaces carrier TLS and invokes arbitrary Linea on
+    // that OS thread. Bind the outer fiber before entering the context;
+    // nested simulated callbacks need not have a current real fiber.
+    .{ .symbol = "linea_io_switch", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_loop, .migration_contract = .bound_by_context },
+    .{ .symbol = "linea_io_is_simulated", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = io_execution, .migration_contract = .neutral },
+    // Creating, inspecting and closing an inactive simulation uses owned
+    // records and the registry locks without installing caller-thread TLS.
+    .{ .symbol = "linea_sim_open", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .u64, .declared_by = io_simulation, .migration_contract = .neutral },
+    .{ .symbol = "linea_sim_advance", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = io_simulation, .migration_contract = .bound_by_context },
+    .{ .symbol = "linea_sim_fingerprint", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = io_simulation, .migration_contract = .neutral },
+    .{ .symbol = "linea_sim_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = io_simulation, .migration_contract = .neutral },
+    // Only wall and monotonic clocks are supported; values and native errors
+    // are captured before return, with no surviving thread-specific state.
+    .{ .symbol = "linea_clock_read", .parameters = &.{ p(.u8), .{ .scalar = .i64, .passing = .inout }, written }, .result = .i64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_clock_sleep", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = .granted, .migration_contract = .runtime_guarded },
     // A wait set, which a linear `task.WaitSet` keeps; a share of a signal's
     // disposition, which a linear `io.SignalShare` keeps.
-    .{ .symbol = "linea_waitset_open", .parameters = &.{}, .result = .u64, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_identity", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_reserve", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_unreserve", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_received", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_returned", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_descriptor", .parameters = &.{ p(.u64), p(.u64), descriptor, p(.u8) }, .result = .i64, .declared_by = heldBy("core", "`readable` and `writable` on a `task.WaitSet`") },
-    .{ .symbol = "linea_waitset_ready", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_timer", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_signal", .parameters = &.{ p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .i64, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_next", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_take", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u8) }, .result = .u8, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_withdraw", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_rehome", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_waitset_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = task_wait_set },
-    .{ .symbol = "linea_signal_acquire", .parameters = &.{p(.u8)}, .result = .i64, .declared_by = io_signal },
-    .{ .symbol = "linea_signal_release", .parameters = &.{ p(.u8), p(.u64) }, .result = .unit, .declared_by = io_signal },
-    .{ .symbol = "linea_signal_deliver_simulated", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = io_simulation },
+    // These records belong to a logical loop/task, not an OS thread. Native
+    // next invokes no Linea callback; its resumed source cleanup stays in the
+    // logical frame after completed-park normalization. Registration retirement
+    // disarms sources under their locks before releasing slots; rehome validates
+    // logical loop boundaries without retaining a carrier. Descriptor waits
+    // still enforce their attempt contract in fiber_perform.
+    .{ .symbol = "linea_waitset_open", .parameters = &.{}, .result = .u64, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_identity", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_reserve", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_unreserve", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_received", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_returned", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_descriptor", .parameters = &.{ p(.u64), p(.u64), descriptor, p(.u8) }, .result = .i64, .declared_by = heldBy("core", "`readable` and `writable` on a `task.WaitSet`"), .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_ready", .parameters = &.{ p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_timer", .parameters = &.{ p(.u64), p(.u64), p(.u64) }, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_signal", .parameters = &.{ p(.u64), p(.u64), p(.u8), p(.u64) }, .result = .i64, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_next", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_take", .parameters = &.{ p(.u64), p(.u64), p(.u64), p(.u8) }, .result = .u8, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_withdraw", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_rehome", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    .{ .symbol = "linea_waitset_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = task_wait_set, .migration_contract = .neutral },
+    // Signal shares lease a process-wide disposition under the router lock.
+    // Their registrations retain a logical loop, never the acquiring thread.
+    .{ .symbol = "linea_signal_acquire", .parameters = &.{p(.u8)}, .result = .i64, .declared_by = io_signal, .migration_contract = .neutral },
+    .{ .symbol = "linea_signal_release", .parameters = &.{ p(.u8), p(.u64) }, .result = .unit, .declared_by = io_signal, .migration_contract = .neutral },
+    .{ .symbol = "linea_signal_deliver_simulated", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = io_simulation, .migration_contract = .bound_by_context },
     // A task's thread and the rendezvous channel of its session.
-    .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } } },
-    .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = io_execution },
-    .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } } },
-    .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
-    .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } } },
-    .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`task.own`" } } },
-    .{ .symbol = "linea_owner_answer", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } } },
-    .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } } },
-    .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
-    .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } } },
-    .{ .symbol = "linea_task_start", .parameters = &.{ p(.u64), cb(&.{ .u64, .u64, .u64 }, .unit, 1), cb(&.{ .u64, .u64 }, .unit, 0), typed_bytes, p(.u64), typed_bytes }, .result = .u64, .starts_task = true, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`start` on a `task.Slot`" } } },
-    .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } } },
-    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } } },
-    .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } } },
-    .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`choose_left` and `choose_right` on a `session.Chan`" } } },
-    .{ .symbol = "linea_chan_offer", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`offer` on a `session.Chan`" } } },
-    .{ .symbol = "linea_chan_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`close` on a `session.Chan`" } } },
-    .{ .symbol = "linea_chan_recv_until", .parameters = &.{ p(.u64), typed_bytes, p(.u64), p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv_until` on a `session.Chan`" } } },
-    .{ .symbol = "linea_float64_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse },
-    .{ .symbol = "linea_float64_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_float64_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_float32_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse },
-    .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted },
-    .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted },
+    .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_fiber_current_carrier", .declared_by = heldBy("task", "`task.current_carrier`"), .parameters = &.{}, .result = .u64, .migration_contract = .neutral },
+    // New carriers install their own TLS. The preparing thread only waits
+    // for startup and receives a process-lifetime logical loop identity.
+    .{ .symbol = "linea_loop_open", .parameters = &.{p(.u64)}, .result = .i64, .declared_by = io_execution, .migration_contract = .neutral },
+    // Preparation owns the new task's stack and logical Io. Its latch wait
+    // retains only the task record; neither success nor failure retains the
+    // preparing carrier. Cancellation joins that same unstarted record.
+    .{ .symbol = "linea_task_prepare_on", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.prepare` and `task.prepare_in`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_open", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } }, .migration_contract = .neutral },
+    // The caller only exchanges fixed-stack request/result storage under the
+    // queue's park lock. The owner executes the job in its own task; no callback
+    // runs here. Completed-park normalization retires carrier-local state before
+    // the caller resumes and reacquires the queue lock on another carrier.
+    .{ .symbol = "linea_owner_call", .parameters = &.{ p(.u64), typed_bytes, p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } }, .migration_contract = .neutral },
+    // The owning task invokes jobs in Linea after next returns. These entries
+    // exchange bytes under the queue's source lock and retain logical loop
+    // identities, never carrier TLS. Job-side native guards still bind an
+    // owner that actually acquires a thread-dependent foreign resource.
+    .{ .symbol = "linea_owner_next", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`task.own`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_answer", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`call` on a `task.Client`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_done", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`task.own`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_owner_free", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`close` on a `task.Owner`" } }, .migration_contract = .neutral },
+    task_start_signature,
+    .{ .symbol = "linea_task_cancel", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "task", .reached_through = "`cancel` on a `task.Slot`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } }, .migration_contract = .neutral },
+    // Branch operations send or receive one stack-local byte through the
+    // same logical rendezvous as payload transfers, with no carrier state.
+    .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`choose_left` and `choose_right` on a `session.Chan`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_chan_offer", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`offer` on a `session.Chan`" } }, .migration_contract = .neutral },
+    // Task.start installs the compiler-confined release_kept_bytes callback;
+    // the child consumes its body. A resumed join retains only child-owned
+    // task/storage pointers. Callback-side foreign effects retain their own
+    // entry guards and can monotonically restrict the joining fiber.
+    .{ .symbol = "linea_chan_close", .parameters = &.{p(.u64)}, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`close` on a `session.Chan`" } }, .migration_contract = .neutral },
+    .{ .symbol = "linea_chan_recv_until", .parameters = &.{ p(.u64), typed_bytes, p(.u64), p(.u64) }, .result = .u8, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv_until` on a `session.Chan`" } }, .migration_contract = .neutral },
+    // Decimal conversion uses caller-owned buffers and stack-local integer
+    // algorithms with immutable tables. No allocator, callback, locale or
+    // thread-specific error state survives these synchronous calls.
+    .{ .symbol = "linea_float64_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse, .migration_contract = .neutral },
+    .{ .symbol = "linea_float64_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_float64_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_float32_parse", .parameters = &.{ bytes_at, p(.u64), written, written }, .result = .u64, .declared_by = mem_parse, .migration_contract = .neutral },
+    .{ .symbol = "linea_float32_debug", .parameters = &.{ p(.u64), written, written, written, written }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_float32_shortest", .parameters = &.{ p(.u64), .{ .scalar = .i64, .passing = .inout } }, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
     .{ .symbol = "linea_raw_load", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u64, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
     .{ .symbol = "linea_raw_load8", .parameters = &.{ bytes_at, p(.u64), p(.u64) }, .result = .u8, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
     .{ .symbol = "linea_raw_store", .parameters = &.{ bytes_at, p(.u64), p(.u64), p(.u64) }, .result = .unit, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the standard library's checked storage operations" } } },
@@ -572,6 +672,30 @@ pub fn signatureOf(name: []const u8) ?*const Signature {
         if (std.mem.eql(u8, signature.symbol, name)) return signature;
     }
     return null;
+}
+
+/// Emitted code also calls compiler-owned entries, which ordinary extern
+/// declarations cannot name. Their contracts use the same registry without
+/// granting declarations access to those privileged signatures.
+pub fn migrationContractOf(name: []const u8) MigrationContract {
+    if (signatureOf(name)) |signature| return signature.migration_contract;
+    for (internal_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, name)) return signature.migration_contract;
+    }
+    for (math_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, name)) return signature.migration_contract;
+    }
+    return .unknown;
+}
+
+test "migration contracts include audited compiler entries without exposing extern declarations" {
+    try testing.expect(signatureOf(task_start_migratable_signature.symbol) == null);
+    try testing.expectEqual(MigrationContract.neutral, migrationContractOf(task_start_migratable_signature.symbol));
+    for (math_functions) |signature| {
+        try testing.expect(signatureOf(signature.symbol) == null);
+        try testing.expectEqual(MigrationContract.neutral, migrationContractOf(signature.symbol));
+    }
+    try testing.expectEqual(MigrationContract.unknown, migrationContractOf("unclassified_user_ffi"));
 }
 
 test "a runtime function is found by its whole symbol" {
@@ -618,4 +742,13 @@ test "an allocation, a descriptor and an address of bytes are confined to the mo
     try testing.expectEqualStrings("fs", signatureOf("linea_set_mode").?.declared_by.home().?);
     try testing.expectEqualStrings("net", signatureOf("linea_net_accept").?.declared_by.home().?);
     try testing.expect(signatureOf("linea_clock_sleep").?.declared_by == .granted);
+}
+
+test "unclassified native boundaries have unknown migration behavior" {
+    for (internal_functions) |signature| {
+        if (std.mem.eql(u8, signature.symbol, task_start_migratable_signature.symbol)) {
+            try testing.expectEqual(MigrationContract.neutral, signature.migration_contract);
+        } else try testing.expectEqual(MigrationContract.unknown, signature.migration_contract);
+    }
+    try testing.expect(signatureOf("unclassified_user_ffi") == null);
 }

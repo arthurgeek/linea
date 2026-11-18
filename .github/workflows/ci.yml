@@ -331,7 +331,7 @@ jobs:
         # runtime linked, so the C the corpus reaches only through programs is
         # also driven directly: the task tests' threads, sessions and
         # concurrent allocation included.
-        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task -Dsanitize=${{ matrix.sanitizer }}
+        run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task test-fiber-completion-backend -Dsanitize=${{ matrix.sanitizer }}
 
       # The conformance suite's recorded outcomes live outside Zig's build
       # cache: their own key covers the emitted IR, runtime, commands and Nix
@@ -938,8 +938,8 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Contexts, parks, socket waits and fault recovery
-        run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-clock -Drelease
+      - name: Contexts, parks, kernel completions and fault recovery
+        run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-clock test-fiber-completion-backend -Drelease
 
       - name: Public execution APIs and foreign callbacks
         run: |
@@ -951,6 +951,26 @@ jobs:
         run: |
           nix develop --command zig build conformance -Drelease -- tests/ffi/thread_bound_owner
           nix develop --command zig build conformance -Drelease -- tests/cmd/foreign_owner
+
+      - name: Collect matched scheduler observations
+        run: |
+          mkdir -p zig-out
+          { git rev-parse HEAD; uname -srm; getconf _NPROCESSORS_ONLN; } > zig-out/fiber-measurement-host.txt
+          nix develop --command zig build measure-fiber-scheduling -Drelease
+          nix develop --command zig build measure-fiber-handoff -Drelease
+
+      - name: Keep scheduler observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fiber-observations-${{ runner.arch }}-${{ github.run_attempt }}
+          path: |
+            zig-out/fiber-measurement-host.txt
+            zig-out/fiber-scheduling-populations.tsv
+            zig-out/fiber-scheduling-measurements.tsv
+            zig-out/fiber-handoff-measurements.tsv
+          if-no-files-found: error
+          retention-days: 14
 
   # Every run and attempt of a lane saves its cache under a key of its own,
   # and a cache stays until the repository's 10 GB are spent and the least

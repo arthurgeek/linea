@@ -1,0 +1,64 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+
+fn changed_carrier(before: task.Carrier, failure: Str) {
+    var attempts = UInt64(0)
+    while attempts < 65536 && before == task.current_carrier().unwrap() {
+        time.sleep(time.Duration.from_nanoseconds(0))
+        attempts += 1
+    }
+    if before == task.current_carrier().unwrap() {
+        panic(failure)
+    }
+}
+
+fn increment(sink item: UInt64) -> UInt64 {
+    // The last item waits after workers have been reused; other jobs finish
+    // immediately, leaving an idle carrier able to resume this continuation.
+    if item != 15 {
+        return item + 1
+    }
+    let before = task.current_carrier().unwrap()
+    changed_carrier(before, "the task combinator pinned its worker")
+    item + 1
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[End]| {
+        let before_map = task.current_carrier().unwrap()
+        var inputs: mem.Vec[UInt64] = mem.Vec.new()
+        for item in UInt64(0)..16 {
+            &inputs.push(item).unwrap()
+        }
+        defer let answers = task.map(.Threads(2), inputs, increment)
+        if answers.length() != 16 || answers[0] != 1 || answers[15] != 16 {
+            panic("task.map changed its ordered results")
+        }
+        changed_carrier(before_map, "task.map pinned its caller")
+
+        let before_lazy = task.current_carrier().unwrap()
+        var mapped = task.lazy_map(.Threads(2), UInt64(0)..16, increment)
+        var expected = UInt64(1)
+        for answer in &mapped {
+            if answer != expected {
+                panic("task.lazy_map changed its ordered results")
+            }
+            expected += 1
+        }
+        mapped.release()
+        if expected != 17 {
+            panic("task.lazy_map changed its ordered results")
+        }
+        changed_carrier(before_lazy, "task.lazy_map pinned its caller")
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    0
+}

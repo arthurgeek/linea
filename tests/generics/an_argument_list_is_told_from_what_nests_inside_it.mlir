@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin\00") : !llvm.array<70 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -107,6 +108,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:7)
     %tl1 = arith.constant 56 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:7)
     %tc1 = arith.constant 7 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:7)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:7)
     llvm.unreachable loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:7)
   ^c1:
@@ -123,6 +125,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:11)
     %tl2 = arith.constant 56 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:11)
     %tc2 = arith.constant 11 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:11)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:11)
     llvm.unreachable loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:11)
   ^c2:
@@ -139,6 +142,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:15)
     %tl3 = arith.constant 56 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:15)
     %tc3 = arith.constant 15 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:15)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:15)
     llvm.unreachable loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:15)
   ^c3:
@@ -155,6 +159,7 @@ module {
     %tf4 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:19)
     %tl4 = arith.constant 56 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:19)
     %tc4 = arith.constant 19 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:19)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk4, %tf4, %tl4, %tc4) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:19)
     llvm.unreachable loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:19)
   ^c4:
@@ -171,6 +176,7 @@ module {
     %tf5 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:23)
     %tl5 = arith.constant 56 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:23)
     %tc5 = arith.constant 23 : i32 loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:23)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk5, %tf5, %tl5, %tc5) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:23)
     llvm.unreachable loc("tests/generics/an_argument_list_is_told_from_what_nests_inside_it.lin":56:23)
   ^c5:

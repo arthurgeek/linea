@@ -1,5 +1,9 @@
 # 265. Waits go through the runtime's poller, and a loop runs tasks as fibers
 
+The fixed-carrier requirement in §7 is superseded by
+[0282](0282-clean-fiber-continuations-can-change-carriers.md), which also
+implements the proposed migration and Linux completion phases of §13.
+
 Status: Phases 1 to 5 accepted and built; phase 5 correctness, platform
 validation and measurement closeout recorded in §§9.5–9.6; phases 6 and 7
 proposed — 2026-11-13. The delivery and host-handler clauses of §4.5, and its

@@ -15,6 +15,7 @@ module {
   func.func private @linea_set_args(i32, !llvm.ptr)
   func.func private @linea_foreign_enter()
   func.func private @linea_foreign_leave()
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_clock_sleep(i64) -> i64

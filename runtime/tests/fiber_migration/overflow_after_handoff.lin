@@ -1,0 +1,33 @@
+import std.io
+import std.session
+import std.task
+import std.time
+
+use session.Chan
+use session.End
+
+// Reading the frame after recursion keeps each large stack frame live.
+fn descend(depth: UInt64) -> UInt64 {
+    let row = [UInt64(0), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let block = [copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), copy(row), row]
+    let slab = [copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), copy(block), block]
+    var frame = [copy(slab), copy(slab), copy(slab), slab]
+    frame[depth % 4][depth % 16][depth % 16][depth % 16] = depth
+    frame[(depth + 1) % 4][depth % 16][0][0] + descend(depth + 1)
+}
+
+fn main() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var reached = UInt64(0)
+    let body = sink [inout reached] |sink me: Chan[End]| {
+        let first = task.current_carrier().unwrap()
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first == task.current_carrier().unwrap() {
+            panic("overflow probe did not resume on another carrier")
+        }
+        reached = descend(0)
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    UInt8(reached % 256)
+}

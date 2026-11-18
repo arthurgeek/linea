@@ -1,0 +1,31 @@
+import std.io
+import std.task
+import std.time
+import std.session
+
+use session.Chan
+use session.End
+
+export fn object_task_entry() -> UInt8 {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    let body = sink [inout entries] |sink me: Chan[End]| {
+        entries += 1
+        let first = task.current_carrier().unwrap()
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first != task.current_carrier().unwrap() {
+            panic("object entry acquired migration eligibility")
+        }
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first != task.current_carrier().unwrap() {
+            panic("object entry acquired eligibility after resumption")
+        }
+        me.close()
+    }
+    task.start(body, on: execution).unwrap().close()
+    if entries == 1 {
+        0
+    } else {
+        1
+    }
+}

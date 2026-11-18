@@ -16,6 +16,7 @@ module {
   llvm.mlir.global internal constant @linea_str0("Ol\C3\A1") : !llvm.array<4 x i8>
   llvm.mlir.global internal constant @linea_str1("a\22b") : !llvm.array<3 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -61,6 +62,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:31)
     %tl1 = arith.constant 10 : i32 loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:31)
     %tc1 = arith.constant 31 : i32 loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:31)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:31)
     llvm.unreachable loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:31)
   ^c1:
@@ -75,6 +77,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:53)
     %tl2 = arith.constant 10 : i32 loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:53)
     %tc2 = arith.constant 53 : i32 loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:53)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:53)
     llvm.unreachable loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:53)
   ^c2:
@@ -88,6 +91,7 @@ module {
     %tf3 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:5)
     %tl3 = arith.constant 10 : i32 loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:5)
     %tc3 = arith.constant 5 : i32 loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk3, %tf3, %tl3, %tc3) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:5)
     llvm.unreachable loc("tests/text/a_literal_holds_what_its_escapes_mean.lin":10:5)
   ^c3:

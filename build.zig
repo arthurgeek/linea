@@ -16,6 +16,30 @@ fn decimalProvider(b: *std.Build) std.Build.LazyPath {
     return root;
 }
 
+// The C backend calls these two conversion helpers even on targets with
+// hardware floating point. Supply only those helpers, not compiler-rt's
+// unrelated weak libm implementations.
+fn floatConversion(b: *std.Build, name: []const u8) std.Build.LazyPath {
+    const directory = b.graph.zig_lib_directory.path orelse @panic("Zig library directory is required");
+    const files = b.addWriteFiles();
+    const root = files.addCopyFile(.{ .cwd_relative = b.pathJoin(&.{ directory, "compiler_rt", name }) }, name);
+    const tests = b.fmt("{s}_test.zig", .{std.fs.path.stem(name)});
+    _ = files.addCopyFile(.{ .cwd_relative = b.pathJoin(&.{ directory, "compiler_rt", tests }) }, tests);
+    _ = files.addCopyFile(b.path("runtime/zig-float-LICENSE"), "LICENSE");
+    return root;
+}
+
+fn migrationFixture(b: *std.Build, files: *std.Build.Step.WriteFile, fixture_name: []const u8) std.Build.LazyPath {
+    for ([_][]const u8{ "stealing.lin", "pinned.lin", "unknown_pinned.lin", "scheduling_workload.lin" }) |foreign_source| {
+        if (std.mem.eql(u8, fixture_name, foreign_source)) {
+            _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/native_process/native_process.lin"), "native_process/native_process.lin");
+            _ = files.add("linea.json", "{ \"extern\": [\"native_process\"], \"headers\": [\"unistd.h\"] }\n");
+            break;
+        }
+    }
+    return files.addCopyFile(b.path(b.fmt("runtime/tests/fiber_migration/{s}", .{fixture_name})), "main.lin");
+}
+
 /// What a test run's binaries are watched by.
 ///
 /// A sanitizer works by instrumenting code as it is compiled -- redzones
@@ -239,7 +263,7 @@ const NativeTests = struct {
             if (std.mem.eql(u8, input.file, "runtime/loop.c")) execution_flags = input.flags;
             if (std.mem.eql(u8, input.file, "runtime/loop.c") or std.mem.eql(u8, input.file, "runtime/park.c")) has_execution = true;
         }
-        if (has_execution) for ([_][]const u8{ "runtime/fiber.c", "runtime/context.c", "runtime/foreign.c", "runtime/park.c", "runtime/loop.c", "runtime/linea_rt.c" }) |file| {
+        if (has_execution) for ([_][]const u8{ "runtime/fiber.c", "runtime/completion.c", "runtime/context.c", "runtime/foreign.c", "runtime/park.c", "runtime/loop.c", "runtime/linea_rt.c" }) |file| {
             var found = false;
             for (linked.items) |input| {
                 if (std.mem.eql(u8, input.file, file)) found = true;
@@ -973,10 +997,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{"source_test.zig"},
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
     },
     .{
         .dir = "runtime",
@@ -1519,6 +1543,10 @@ pub fn build(b: *std.Build) void {
         "Build the runtime library with a sanitizer and link every program with it; generated code is not instrumented",
     ) orelse .none;
 
+    const migration_supported = (target.result.os.tag == .linux and
+        (target.result.cpu.arch == .aarch64 or target.result.cpu.arch == .x86_64)) or
+        (target.result.os.tag == .macos and target.result.cpu.arch == .aarch64 and sanitize == .none);
+
     const update_goldens = b.option(
         bool,
         "update",
@@ -1861,6 +1889,21 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
         .{ .file = "runtime/fiber_test.c", .flags = runtime_flags.items },
     });
+    const native_migration_step = b.step("test-native-fiber-migration", "Check scheduler authority and native migration safety");
+    native_task_step.dependOn(native_migration_step);
+    native.add(native_migration_step, "native-fiber-migration-tests", &.{
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/fiber_migration_test.c", .flags = runtime_flags.items, .includes = &.{"runtime/fiber.c"} },
+    });
     native.add(native_task_step, "native-fiber-failure-tests", &.{
         .{ .file = "runtime/net.c", .flags = runtime_flags.items },
         .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
@@ -2084,6 +2127,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "signals", .file = "runtime/signals.c", .flags = runtime_flags.items },
             .{ .name = "loop", .file = "runtime/loop.c", .flags = runtime_flags.items },
             .{ .name = "fiber", .file = "runtime/fiber.c", .flags = runtime_flags.items },
+            .{ .name = "completion", .file = "runtime/completion.c", .flags = runtime_flags.items },
             .{ .name = "foreign", .file = "runtime/foreign.c", .flags = runtime_flags.items },
             .{ .name = "parallelism", .file = "runtime/parallelism.c", .flags = runtime_flags.items },
             .{ .name = "context", .file = "runtime/context.c", .flags = runtime_flags.items },
@@ -2159,9 +2203,15 @@ pub fn build(b: *std.Build) void {
         runtime_target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM"),
         "--dep",
         "decimal_provider",
+        "--dep",
+        "float_truncate",
+        "--dep",
+        "float_extend",
     });
     float_source.addPrefixedFileArg("-Mroot=", b.path("runtime/float.zig"));
     float_source.addPrefixedFileArg("-Mdecimal_provider=", decimalProvider(b));
+    float_source.addPrefixedFileArg("-Mfloat_truncate=", floatConversion(b, "truncf.zig"));
+    float_source.addPrefixedFileArg("-Mfloat_extend=", floatConversion(b, "extendf.zig"));
     float_source.addArgs(&.{ "--cache-dir", b.cache_root.path orelse ".", "--global-cache-dir", b.graph.global_cache_root.path orelse "." });
     const float_c = float_source.addPrefixedOutputFileArg("-femit-bin=", "linea_float.c");
     var float_flags: std.ArrayList([]const u8) = .empty;
@@ -2174,6 +2224,10 @@ pub fn build(b: *std.Build) void {
         "-Wno-conversion",
         "-Wno-sign-conversion",
         "-fno-sanitize=unsigned-integer-overflow",
+        // Zig's integer conversion provider intentionally shifts high bits
+        // out while computing subnormal sticky bits. This is defined unsigned
+        // C arithmetic; retain checks for invalid shift counts and signed UB.
+        "-fno-sanitize=unsigned-shift-base",
     }) catch @panic("OOM");
     // Archive basenames in source order. Compiler-generated archives include
     // cache paths, which change outcome-cache keys without changing code.
@@ -2185,6 +2239,8 @@ pub fn build(b: *std.Build) void {
     const runtime_archive = runtime.addOutputFileArg(runtime_symbols.archive_name);
     const checked_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
     const checked_runtime_archive = checked_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
+    var ordinary_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
+    var checked_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
     for ([_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
         .{ .name = "linea_rt", .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items, .checked_flags = checked_flags.items },
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
@@ -2196,6 +2252,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "signals", .file = b.path("runtime/signals.c"), .flags = runtime_flags.items },
         .{ .name = "loop", .file = b.path("runtime/loop.c"), .flags = runtime_flags.items },
         .{ .name = "fiber", .file = b.path("runtime/fiber.c"), .flags = runtime_flags.items },
+        .{ .name = "completion", .file = b.path("runtime/completion.c"), .flags = runtime_flags.items },
         .{ .name = "foreign", .file = b.path("runtime/foreign.c"), .flags = runtime_flags.items },
         .{ .name = "parallelism", .file = b.path("runtime/parallelism.c"), .flags = runtime_flags.items },
         .{ .name = "context", .file = b.path("runtime/context.c"), .flags = runtime_flags.items },
@@ -2205,7 +2262,12 @@ pub fn build(b: *std.Build) void {
     }) |input| {
         const object = runtimeObject(b, runtime_target, input.name, input.file, input.flags);
         runtime.addArtifactArg(object);
-        checked_runtime.addArtifactArg(if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object);
+        const checked_object = if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object;
+        checked_runtime.addArtifactArg(checked_object);
+        if (!std.mem.eql(u8, input.name, "fiber")) {
+            ordinary_nonfiber_objects.append(b.allocator, object) catch @panic("OOM");
+            checked_nonfiber_objects.append(b.allocator, checked_object) catch @panic("OOM");
+        }
     }
     const runtime_installs = [_]*std.Build.Step{
         &b.addInstallLibFile(runtime_archive, runtime_symbols.archive_name).step,
@@ -2269,6 +2331,527 @@ pub fn build(b: *std.Build) void {
     };
     const exe = heavy.compiler();
     b.installArtifact(exe);
+
+    const call_coverage_module = b.createModule(.{
+        .root_source_file = b.path("build/fiber_call_coverage.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    call_coverage_module.addAnonymousImport("runtime_symbols", .{ .root_source_file = b.path("src/support/runtime_symbols.zig") });
+    const call_coverage_tests = b.addTest(.{ .root_module = call_coverage_module });
+    const run_coverage_tests = b.addRunArtifact(call_coverage_tests);
+    const call_coverage_step = b.step("test-fiber-call-coverage", "Check emitted native-call coverage and omission refusals");
+    call_coverage_step.dependOn(&run_coverage_tests.step);
+    native_task_step.dependOn(call_coverage_step);
+    const call_coverage_tool = b.addExecutable(.{ .name = "fiber-call-coverage", .root_module = call_coverage_module });
+
+    const migration_metrics_module = b.createModule(.{
+        .root_source_file = b.path("build/fiber_migration_metrics.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+        .link_libc = true,
+    });
+    const migration_metrics_tool = b.addExecutable(.{ .name = "fiber-migration-metrics", .root_module = migration_metrics_module });
+    const migration_metrics_tests = b.addRunArtifact(b.addTest(.{ .root_module = migration_metrics_module }));
+    const migration_metrics_step = b.step("test-fiber-migration-metrics", "Validate bounded R/N/C/X observations of actual Linea continuation transfers");
+    migration_metrics_step.dependOn(&migration_metrics_tests.step);
+    native_task_step.dependOn(&migration_metrics_tests.step);
+
+    const scheduling_module = b.createModule(.{
+        .root_source_file = b.path("build/fiber_scheduling_measurements.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+    });
+    const scheduling_tool = b.addExecutable(.{ .name = "fiber-scheduling-measurements", .root_module = scheduling_module });
+    const scheduling_tests = b.addRunArtifact(b.addTest(.{ .root_module = scheduling_module }));
+    native_task_step.dependOn(&scheduling_tests.step);
+
+    const owner_watchdog_step = b.step("test-foreign-owner-watchdog", "Check foreign-owner watchdog deadlines and refusal paths");
+    const owner_watchdog_module = b.createModule(.{
+        .root_source_file = b.path("tests/cmd/foreign_owner/watchdog.zig"),
+        .target = b.graph.host,
+        .optimize = .Debug,
+        .link_libc = true,
+    });
+    const owner_watchdog_tests = b.addTest(.{ .root_module = owner_watchdog_module });
+    owner_watchdog_step.dependOn(&b.addRunArtifact(owner_watchdog_tests).step);
+    native_task_step.dependOn(owner_watchdog_step);
+
+    const handoff_proof = b.step("test-fiber-handoff-proof", "Compile and force one started Linea continuation across two carriers");
+    const completed_wait_proof = b.step("test-fiber-completed-waits", "Force started Linea continuations across completed session and timer waits");
+    const completed_io_proof = b.step("test-fiber-completed-io", "Force a started Linea continuation across completed socket I/O");
+    const waitset_proof = b.step("test-fiber-waitset-migration", "Migrate a Linea wait-set continuation with retained registrations");
+    const join_proof = b.step("test-fiber-completed-joins", "Migrate a Linea continuation after a structured child join");
+    const handoff_measurement = b.step("measure-fiber-handoff", "Collect matched plain/traced forced-handoff observations on an idle host");
+    const platform_proof = b.step("test-fiber-platform-state", "Check FP, signal and protected-frame state across actual Linea handoffs");
+    const task_entry_proof = b.step("test-fiber-task-entry", "Migrate a Linea task through compiler-owned entry eligibility");
+    const stealing_proof = b.step("test-fiber-work-stealing", "Resume started Linea continuations through normal idle-carrier stealing");
+    const busy_stealing_proof = b.step("test-fiber-busy-stealing", "Steal an already-started Linea continuation while its source runs another Linea task");
+    const new_work_proof = b.step("test-fiber-new-work-stealing", "Start queued Linea work on an idle carrier while its source runs another task");
+    const completion_proof = b.step("test-fiber-completion-backend", "Run actual Linux completion I/O and timeout retirement before migration");
+    const scheduling_proof = b.step("test-fiber-scheduling-controls", "Check matched pinned, placement, forced and stealing Linea workloads without recording measurements");
+    const scheduling_measurement = b.step("measure-fiber-scheduling", "Compare scheduling controls on an idle host with matched Linea workloads");
+    if (target.result.os.tag != .linux) {
+        const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'io_uring completion proof requires Linux' >&2; exit 1" });
+        completion_proof.dependOn(&unavailable.step);
+    }
+    if (migration_supported) {
+        if (sanitize == .none) {
+            native_task_step.dependOn(scheduling_proof);
+            const files = b.addWriteFiles();
+            const scheduling_source = migrationFixture(b, files, "scheduling_workload.lin");
+            var binaries: [4]std.Build.LazyPath = undefined;
+            var diagnostics: [4]std.Build.LazyPath = undefined;
+            var manifests: [6]std.Build.LazyPath = undefined;
+            for ([_]bool{ false, true }, 0..) |diagnostic, variant| {
+                for ([_][]const u8{ "pinned", "forced", "stealing" }, 0..) |policy, i| {
+                    var flags: std.ArrayList([]const u8) = .empty;
+                    flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+                    if (diagnostic) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1", "-DLINEA_FIBER_SCHEDULING_COUNTS_TEST=1" }) catch @panic("OOM");
+                    if (i == 0) flags.append(b.allocator, "-DLINEA_FIBER_SCHEDULING_PINNED_TEST=1") catch @panic("OOM");
+                    if (i == 1) flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
+                    const archive = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+                    const scheduling_archive = archive.addOutputFileArg(runtime_symbols.archive_name);
+                    for (ordinary_nonfiber_objects.items) |object| archive.addArtifactArg(object);
+                    archive.addArtifactArg(runtimeObject(b, runtime_target, b.fmt("fiber_scheduling_{s}_{d}", .{ policy, variant }), b.path("runtime/fiber.c"), flags.items));
+                    const compile = b.addSystemCommand(&.{"env"});
+                    compile.addPrefixedFileArg("LINEA_RUNTIME=", scheduling_archive);
+                    compile.addFileArg(exe.getEmittedBin());
+                    compile.addArgs(&.{ "build", "--keep" });
+                    compile.addFileArg(scheduling_source);
+                    compile.addArg("-o");
+                    const binary = compile.addOutputFileArg("scheduling-workload");
+                    const selected = if (diagnostic) &diagnostics else &binaries;
+                    selected[if (i == 0) 0 else i + 1] = binary;
+                    if (i == 0) selected[1] = binary;
+                    const coverage = b.addRunArtifact(call_coverage_tool);
+                    coverage.addFileArg(binary.dirname().path(b, "scheduling-workload.mlir"));
+                    coverage.step.dependOn(&compile.step);
+                    coverage.step.dependOn(&run_coverage_tests.step);
+                    manifests[variant * 3 + i] = coverage.captureStdOut(.{});
+                }
+            }
+            const populations = b.addRunArtifact(scheduling_tool);
+            populations.addArg("--populations");
+            for (diagnostics) |binary| populations.addFileArg(binary);
+            for (manifests[3..]) |manifest| populations.addFileInput(manifest);
+            populations.step.dependOn(&scheduling_tests.step);
+            populations.has_side_effects = true;
+            const population_report = populations.captureStdOut(.{});
+            scheduling_proof.dependOn(&populations.step);
+            scheduling_measurement.dependOn(&b.addInstallFile(population_report, "fiber-scheduling-populations.tsv").step);
+            for ([_]bool{ false, true }) |measure| {
+                const run = b.addRunArtifact(scheduling_tool);
+                run.addArg(if (measure) "--measure" else "--check");
+                for (binaries) |binary| run.addFileArg(binary);
+                for (manifests) |manifest| run.addFileInput(manifest);
+                run.step.dependOn(&scheduling_tests.step);
+                run.has_side_effects = true;
+                if (measure) {
+                    run.step.dependOn(&populations.step);
+                    const observations = run.captureStdOut(.{});
+                    scheduling_measurement.dependOn(&b.addInstallFile(observations, "fiber-scheduling-measurements.tsv").step);
+                } else scheduling_proof.dependOn(&run.step);
+            }
+        } else {
+            const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'scheduling comparison requires an unsanitized runtime' >&2; exit 1" });
+            scheduling_proof.dependOn(&unavailable.step);
+            scheduling_measurement.dependOn(&unavailable.step);
+        }
+        native_task_step.dependOn(stealing_proof);
+        native_task_step.dependOn(busy_stealing_proof);
+        native_task_step.dependOn(new_work_proof);
+        const busy_files = b.addWriteFiles();
+        const busy_source = busy_files.addCopyFile(b.path("runtime/tests/fiber_migration/busy_source.lin"), "main.lin");
+        var busy_flags: std.ArrayList([]const u8) = .empty;
+        busy_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        busy_flags.append(b.allocator, "-DLINEA_FIBER_BUSY_SOURCE_TEST=1") catch @panic("OOM");
+        const busy_fiber = runtimeObject(b, runtime_target, "fiber_busy_source", b.path("runtime/fiber.c"), busy_flags.items);
+        const new_files = b.addWriteFiles();
+        const new_source = new_files.addCopyFile(b.path("runtime/tests/fiber_migration/new_work.lin"), "main.lin");
+        var new_flags: std.ArrayList([]const u8) = .empty;
+        new_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+        new_flags.append(b.allocator, "-DLINEA_FIBER_NEW_WORK_TEST=1") catch @panic("OOM");
+        const new_fiber = runtimeObject(b, runtime_target, "fiber_new_work", b.path("runtime/fiber.c"), new_flags.items);
+        const AllocationMode = struct {
+            name: []const u8,
+            archive: std.Build.LazyPath,
+            objects: []const *std.Build.Step.Compile,
+        };
+        for ([_]AllocationMode{
+            .{ .name = runtime_symbols.archive_name, .archive = runtime_archive, .objects = ordinary_nonfiber_objects.items },
+            .{ .name = runtime_symbols.checked_archive_name, .archive = checked_runtime_archive, .objects = checked_nonfiber_objects.items },
+        }) |allocation| {
+            const stealing_archive = allocation.archive;
+            for ([_]bool{ false, true }) |new_work| {
+                const busy_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+                const busy_archive = busy_runtime.addOutputFileArg(allocation.name);
+                for (allocation.objects) |object| busy_runtime.addArtifactArg(object);
+                busy_runtime.addArtifactArg(if (new_work) new_fiber else busy_fiber);
+                const compile_busy = b.addSystemCommand(&.{"env"});
+                compile_busy.addPrefixedFileArg("LINEA_RUNTIME=", busy_archive);
+                if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile_busy.setEnvironmentVariable(variable.name, variable.value);
+                compile_busy.addFileArg(exe.getEmittedBin());
+                compile_busy.addArg("build");
+                compile_busy.addFileArg(if (new_work) new_source else busy_source);
+                compile_busy.addArg("-o");
+                const busy_binary = compile_busy.addOutputFileArg("busy-stealing");
+                const run_busy = b.addRunArtifact(migration_metrics_tool);
+                run_busy.addArg(if (new_work) "--check-new-work-run" else "--check-busy-run");
+                run_busy.addFileArg(busy_binary);
+                if (sanitize == .address) run_busy.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+                if (sanitize == .thread) run_busy.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
+                run_busy.has_side_effects = true;
+                run_busy.expectExitCode(0);
+                (if (new_work) new_work_proof else busy_stealing_proof).dependOn(&run_busy.step);
+            }
+            for ([_][]const u8{ "stealing.lin", "stealing_owner.lin", "stdlib_tasks.lin", "stdlib_values.lin", "stdlib_io.lin", "stdlib_combinators.lin", "stdlib_process.lin", "stdlib_files.lin", "stdlib_signals.lin", "stdlib_contexts.lin", "pinned.lin", "unknown_pinned.lin" }) |fixture| {
+                const files = b.addWriteFiles();
+                const main_source = migrationFixture(b, files, fixture);
+                if (std.mem.eql(u8, fixture, "stealing_owner.lin")) {
+                    _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
+                }
+                const compile = b.addSystemCommand(&.{"env"});
+                compile.addPrefixedFileArg("LINEA_RUNTIME=", stealing_archive);
+                if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile.setEnvironmentVariable(variable.name, variable.value);
+                compile.addFileArg(exe.getEmittedBin());
+                compile.addArg("build");
+                compile.addFileArg(main_source);
+                compile.addArg("-o");
+                const binary = compile.addOutputFileArg("fiber-stealing");
+                const run = b.addRunArtifact(migration_metrics_tool);
+                run.addArg("--check-run");
+                run.addFileArg(binary);
+                if (sanitize == .address) run.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+                if (sanitize == .thread) run.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
+                run.has_side_effects = true;
+                run.expectExitCode(0);
+                stealing_proof.dependOn(&run.step);
+            }
+        }
+        native_task_step.dependOn(handoff_proof);
+        native_task_step.dependOn(completed_wait_proof);
+        native_task_step.dependOn(completed_io_proof);
+        native_task_step.dependOn(waitset_proof);
+        native_task_step.dependOn(join_proof);
+        native_task_step.dependOn(migration_metrics_step);
+        native_task_step.dependOn(platform_proof);
+        native_task_step.dependOn(task_entry_proof);
+        var measurement_binaries: [2]?std.Build.LazyPath = .{ null, null };
+        var measurement_manifests: [2]?std.Build.LazyPath = .{ null, null };
+        var entry_archive: ?std.Build.LazyPath = null;
+        const ProofCase = struct {
+            source: []const u8,
+            completed_wait: bool = true,
+            delay_notifier: bool = false,
+            stale_cookie: bool = false,
+            trace: bool = false,
+            refusal_probes: bool = false,
+            platform: bool = false,
+            entry_provenance: bool = false,
+            pinned_start: bool = false,
+            keep: bool = true,
+            guard_fault: bool = false,
+            sanitizer_fault: bool = false,
+            normal_execution: bool = false,
+            checked: bool = true,
+            ring: enum { none, ordinary, own_first, cancel_first, partial_submit, interrupted, shortage, unsupported, unavailable, cancel_retry, capacity, stale_reuse, accept_failure, accept_tie, counter_wrap, generation_limit } = .none,
+            completion: enum { ordinary, rearm, timer_tie, rearm_failure } = .ordinary,
+        };
+        for ([_]ProofCase{
+            .{ .source = "continuation.lin", .completed_wait = false },
+            .{ .source = "continuation.lin", .completed_wait = false, .entry_provenance = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .entry_provenance = true, .keep = false },
+            .{ .source = "unproven.lin", .completed_wait = false, .entry_provenance = true, .pinned_start = true },
+            .{ .source = "pinned.lin", .completed_wait = false, .entry_provenance = true },
+            .{ .source = "unknown_pinned.lin", .completed_wait = false, .entry_provenance = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .platform = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .platform = true, .sanitizer_fault = true },
+            .{ .source = "overflow_after_handoff.lin", .completed_wait = false, .platform = true, .guard_fault = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .trace = true },
+            .{ .source = "continuation.lin", .completed_wait = false, .trace = true, .refusal_probes = true },
+            .{ .source = "pinned.lin", .completed_wait = false },
+            .{ .source = "unknown_pinned.lin", .completed_wait = false, .trace = true },
+            .{ .source = "unproven.lin", .completed_wait = false, .trace = true },
+            .{ .source = "session.lin" },
+            .{ .source = "timer.lin" },
+            .{ .source = "owner.lin" },
+            .{ .source = "io.lin" },
+            .{ .source = "io.lin", .ring = .ordinary },
+            .{ .source = "io_timeout.lin", .ring = .ordinary },
+            .{ .source = "io_buffer_reuse.lin", .ring = .ordinary },
+            .{ .source = "io_failure.lin", .ring = .ordinary },
+            .{ .source = "io_eof.lin", .ring = .ordinary },
+            .{ .source = "io_accept.lin", .ring = .ordinary },
+            .{ .source = "io_connect.lin", .ring = .ordinary },
+            .{ .source = "io_connect_timeout.lin", .ring = .ordinary },
+            .{ .source = "io_write.lin", .ring = .ordinary },
+            .{ .source = "io_capacity.lin", .ring = .capacity },
+            .{ .source = "io_stale_reuse.lin", .ring = .stale_reuse },
+            .{ .source = "io_accept_failure.lin", .ring = .accept_failure },
+            .{ .source = "io_accept.lin", .ring = .accept_tie },
+            .{ .source = "io.lin", .ring = .counter_wrap },
+            .{ .source = "io_stale_reuse.lin", .ring = .generation_limit },
+            .{ .source = "io_normal.lin", .ring = .ordinary, .normal_execution = true },
+            .{ .source = "io_normal.lin", .ring = .ordinary, .normal_execution = true, .checked = false },
+            .{ .source = "io_timeout.lin", .ring = .own_first },
+            .{ .source = "io_timeout.lin", .ring = .cancel_first },
+            .{ .source = "io_timeout.lin", .ring = .partial_submit },
+            .{ .source = "io.lin", .ring = .interrupted },
+            .{ .source = "io.lin", .ring = .shortage },
+            .{ .source = "io.lin", .ring = .unsupported },
+            .{ .source = "io.lin", .ring = .unavailable },
+            .{ .source = "io_timeout.lin", .ring = .cancel_retry },
+            .{ .source = "io.lin", .trace = true },
+            .{ .source = "io.lin", .stale_cookie = true },
+            .{ .source = "io.lin", .completion = .rearm },
+            .{ .source = "io.lin", .completion = .timer_tie },
+            .{ .source = "io_timeout.lin" },
+            .{ .source = "io_failure.lin" },
+            .{ .source = "io_rearm_failure.lin", .completion = .rearm_failure },
+            .{ .source = "join.lin" },
+            .{ .source = "waitset.lin" },
+            .{ .source = "waitset.lin", .delay_notifier = true },
+            .{ .source = "waitset_io.lin" },
+            .{ .source = "timed_session.lin" },
+            .{ .source = "session.lin", .delay_notifier = true },
+            .{ .source = "session.lin", .delay_notifier = true, .trace = true },
+        }) |proof_case| {
+            // Sanitizers own stack-fault reporting. This case observes the
+            // unsanitized runtime's exact handler and is tested in that mode.
+            if (proof_case.guard_fault and sanitize != .none) continue;
+            if (proof_case.sanitizer_fault and sanitize == .none) continue;
+            if (proof_case.ring != .none and target.result.os.tag != .linux) continue;
+            const completed_wait = proof_case.completed_wait;
+            const files = b.addWriteFiles();
+            const main_source = migrationFixture(b, files, proof_case.source);
+            if (std.mem.eql(u8, proof_case.source, "owner.lin")) {
+                _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/owner_resource/owner_resource.lin"), "owner_resource/owner_resource.lin");
+            }
+            if (std.mem.startsWith(u8, proof_case.source, "io_")) {
+                _ = files.addCopyFile(b.path("runtime/tests/fiber_migration/io_errors/io_errors.lin"), "io_errors/io_errors.lin");
+            }
+            // The application is entirely Linea. Link canonical checked runtime
+            // objects with an internal deterministic scheduling configuration;
+            // no project-native files replace runtime definitions.
+            var handoff_flags: std.ArrayList([]const u8) = .empty;
+            handoff_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+            handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_MIGRATION_TEST=1", "-DLINEA_FIBER_FORCED_HANDOFF_TEST=1", "-DLINEA_FIBER_PAUSES=1" }) catch @panic("OOM");
+            if (completed_wait) handoff_flags.append(b.allocator, "-DLINEA_FIBER_WAIT_FOR_PARK_TEST=1") catch @panic("OOM");
+            if (proof_case.delay_notifier) handoff_flags.append(b.allocator, "-DLINEA_FIBER_DELAY_NOTIFIER_TEST=1") catch @panic("OOM");
+            if (proof_case.stale_cookie) handoff_flags.append(b.allocator, "-DLINEA_FIBER_STALE_COOKIE_TEST=1") catch @panic("OOM");
+            if (proof_case.trace) handoff_flags.append(b.allocator, "-DLINEA_FIBER_MIGRATION_TRACE_TEST=1") catch @panic("OOM");
+            if (proof_case.refusal_probes) handoff_flags.append(b.allocator, "-DLINEA_FIBER_REFUSAL_PROBES_TEST=1") catch @panic("OOM");
+            if (proof_case.platform) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_PLATFORM_STATE_TEST=1", "-fstack-protector-all" }) catch @panic("OOM");
+            if (proof_case.sanitizer_fault) handoff_flags.append(b.allocator, "-DLINEA_FIBER_SANITIZER_FAULT_TEST=1") catch @panic("OOM");
+            if (proof_case.ring != .none) handoff_flags.append(b.allocator, "-DLINEA_FIBER_RING_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .none) handoff_flags.append(b.allocator, "-DLINEA_FIBER_READINESS_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .own_first) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_OWN_FIRST_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .cancel_first) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_CANCEL_FIRST_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .partial_submit) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_PARTIAL_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .interrupted) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_INTERRUPTED_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .shortage) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_SHORTAGE_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .unsupported) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_UNSUPPORTED_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .unavailable) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_COMPLETION_DENIED_TEST=1", "-DLINEA_FIBER_RING_FALLBACK_TEST=1" }) catch @panic("OOM");
+            if (proof_case.ring == .cancel_retry) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_CANCEL_RETRY_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .capacity) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_CAPACITY_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .stale_reuse) handoff_flags.appendSlice(b.allocator, &.{ "-DLINEA_FIBER_STALE_COOKIE_TEST=1", "-DLINEA_COMPLETION_STALE_COOKIE_TEST=1" }) catch @panic("OOM");
+            if (proof_case.ring == .accept_failure) handoff_flags.append(b.allocator, "-DLINEA_NET_ACCEPT_CONFIGURE_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .accept_tie) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_ACCEPT_TIE_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .counter_wrap) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_COUNTER_TEST=1") catch @panic("OOM");
+            if (proof_case.ring == .generation_limit) handoff_flags.append(b.allocator, "-DLINEA_COMPLETION_GENERATION_TEST=1") catch @panic("OOM");
+            if (proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_ENTRY_PROVENANCE_TEST=1") catch @panic("OOM");
+            if (std.mem.eql(u8, proof_case.source, "unproven.lin") and !proof_case.entry_provenance) handoff_flags.append(b.allocator, "-DLINEA_FIBER_UNPROVEN_ENTRY_TEST=1") catch @panic("OOM");
+            switch (proof_case.completion) {
+                .ordinary => {},
+                .rearm => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_REARM_TEST=1") catch @panic("OOM"),
+                .timer_tie => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_TIMER_TIE_TEST=1") catch @panic("OOM"),
+                .rearm_failure => handoff_flags.append(b.allocator, "-DLINEA_FIBER_FORCE_REARM_FAILURE_TEST=1") catch @panic("OOM"),
+            }
+            const handoff_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+            const handoff_archive = handoff_runtime.addOutputFileArg(if (proof_case.checked) runtime_symbols.checked_archive_name else runtime_symbols.archive_name);
+            for (if (proof_case.checked) checked_nonfiber_objects.items else ordinary_nonfiber_objects.items) |object| {
+                if (proof_case.ring != .none and std.mem.eql(u8, object.name, "completion")) {
+                    handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "completion_order", b.path("runtime/completion.c"), handoff_flags.items));
+                } else if (proof_case.ring == .accept_failure and std.mem.eql(u8, object.name, "net")) {
+                    handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "net_accept_failure", b.path("runtime/net.c"), handoff_flags.items));
+                } else if (proof_case.pinned_start and std.mem.eql(u8, object.name, "task")) {
+                    var pinned_flags: std.ArrayList([]const u8) = .empty;
+                    pinned_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+                    pinned_flags.append(b.allocator, "-Dlinea_task_start_migratable=linea_task_start_unavailable_test") catch @panic("OOM");
+                    handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "task_pinned_start", b.path("runtime/task.c"), pinned_flags.items));
+                } else handoff_runtime.addArtifactArg(object);
+            }
+            handoff_runtime.addArtifactArg(runtimeObject(b, runtime_target, "fiber_handoff", b.path("runtime/fiber.c"), if (proof_case.normal_execution) runtime_flags.items else handoff_flags.items));
+            if (proof_case.entry_provenance and !proof_case.pinned_start and proof_case.keep and std.mem.eql(u8, proof_case.source, "continuation.lin")) entry_archive = handoff_archive;
+            const compile = b.addSystemCommand(&.{"env"});
+            compile.addPrefixedFileArg("LINEA_RUNTIME=", handoff_archive);
+            if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile.setEnvironmentVariable(variable.name, variable.value);
+            compile.addFileArg(exe.getEmittedBin());
+            compile.addArg("build");
+            if (proof_case.keep) compile.addArg("--keep");
+            compile.addFileArg(main_source);
+            compile.addArg("-o");
+            const binary = compile.addOutputFileArg("fiber-handoff");
+            const manifest: ?std.Build.LazyPath = if (proof_case.keep) blk: {
+                const check_calls = b.addRunArtifact(call_coverage_tool);
+                check_calls.addFileArg(binary.dirname().path(b, "fiber-handoff.mlir"));
+                if (sanitize.flag()) |name| check_calls.addArg(name);
+                check_calls.step.dependOn(&compile.step);
+                check_calls.step.dependOn(&run_coverage_tests.step);
+                break :blk check_calls.captureStdOut(.{});
+            } else null;
+            if (std.mem.eql(u8, proof_case.source, "continuation.lin") and !proof_case.refusal_probes and !proof_case.platform and !proof_case.entry_provenance) {
+                const index: usize = @intFromBool(proof_case.trace);
+                measurement_binaries[index] = binary;
+                measurement_manifests[index] = manifest;
+            }
+            const run_proof = b.addSystemCommand(&.{"env"});
+            if (sanitize == .address) run_proof.setEnvironmentVariable("ASAN_OPTIONS", "detect_stack_use_after_return=1:detect_leaks=1:halt_on_error=1");
+            if (sanitize == .thread) run_proof.setEnvironmentVariable("TSAN_OPTIONS", "halt_on_error=1:exitcode=66");
+            run_proof.addFileArg(binary);
+            if (manifest) |coverage| run_proof.addFileInput(coverage);
+            run_proof.has_side_effects = true;
+            if (proof_case.sanitizer_fault) {
+                run_proof.expectExitCode(if (sanitize == .thread) 66 else 1);
+                run_proof.expectStdErrMatch("native migration: injecting a sanitizer fault after transfer");
+                run_proof.expectStdErrMatch(if (sanitize == .thread) "ThreadSanitizer: data race" else "AddressSanitizer: stack-buffer-overflow");
+            } else if (proof_case.guard_fault) {
+                run_proof.addCheck(.{ .expect_term = .{ .signal = .ABRT } });
+                run_proof.expectStdErrEqual("linea: a stack overflowed\n");
+            } else {
+                run_proof.expectExitCode(0);
+                if (proof_case.platform) run_proof.expectStdErrEqual("native migration: FP control, carrier signals and protected frames passed\n");
+            }
+            if (proof_case.stale_cookie) run_proof.expectStdErrEqual("native migration: stale poll cookie rejected after reclamation\n");
+            if (proof_case.normal_execution) {
+                run_proof.expectStdErrMatch("native completion: kernel connect readiness canceled");
+            } else if (proof_case.ring != .none and proof_case.ring != .unavailable) run_proof.expectStdErrMatch("native completion: own and control requests retired before migration");
+            if (proof_case.ring == .own_first) run_proof.expectStdErrMatch("native completion: own CQE retired before cancel CQE");
+            if (proof_case.ring == .cancel_first) run_proof.expectStdErrMatch("native completion: cancel CQE retired before own CQE");
+            if (proof_case.ring == .partial_submit) run_proof.expectStdErrMatch("native completion: partial submission retained the unconsumed control");
+            if (proof_case.ring == .interrupted) run_proof.expectStdErrMatch("native completion: interrupted submission retained its request");
+            if (proof_case.ring == .shortage) run_proof.expectStdErrMatch("native completion: submission shortage retained its request");
+            if (proof_case.ring == .unsupported) run_proof.expectStdErrMatch("native completion: unsupported operation retired before readiness fallback");
+            if (proof_case.ring == .unavailable) run_proof.expectStdErrMatch("native completion: unavailable kernel used readiness fallback");
+            if (proof_case.ring == .cancel_retry) run_proof.expectStdErrMatch("native completion: transient cancellation failure retained its original");
+            if (proof_case.ring == .capacity) {
+                run_proof.expectStdErrMatch("native completion: admission preserved its live original");
+                run_proof.expectStdErrMatch("native completion: both rings drained after overflow");
+            }
+            if (proof_case.ring == .stale_reuse) run_proof.expectStdErrMatch("native completion: reclaimed cookie rejected during slot reuse");
+            if (proof_case.ring == .accept_failure) {
+                run_proof.expectStdErrMatch("native completion: kernel accept retired");
+                run_proof.expectStdErrMatch("native completion: unconfigured accepted descriptor closed");
+            }
+            if (proof_case.ring == .accept_tie) run_proof.expectStdErrMatch("native completion: accepted descriptor won its expired deadline");
+            if (proof_case.ring == .counter_wrap) run_proof.expectStdErrMatch("native completion: ring counter wrap preserves distances");
+            if (proof_case.ring == .generation_limit) run_proof.expectStdErrMatch("native completion: exhausted generation refused slot reuse");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_accept.lin")) run_proof.expectStdErrMatch("native completion: kernel accept retired");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_connect.lin")) run_proof.expectStdErrMatch("native completion: kernel connect readiness completed");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_connect_timeout.lin")) run_proof.expectStdErrMatch("native completion: kernel connect readiness canceled");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_write.lin")) run_proof.expectStdErrMatch("native completion: kernel send retired");
+            if ((proof_case.ring == .ordinary or proof_case.ring == .interrupted or proof_case.ring == .shortage) and std.mem.eql(u8, proof_case.source, "io.lin")) run_proof.expectStdErrMatch("native completion: kernel receive completed");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_eof.lin")) run_proof.expectStdErrMatch("native completion: kernel receive completed");
+            if (proof_case.ring != .none and std.mem.eql(u8, proof_case.source, "io_failure.lin")) run_proof.expectStdErrMatch("native completion: kernel receive reported reset");
+            switch (proof_case.completion) {
+                .ordinary => {},
+                .rearm => run_proof.expectStdErrEqual("native migration: spurious readiness rearmed with a new cookie\n"),
+                .timer_tie => run_proof.expectStdErrEqual("native migration: timer-first readiness tie completed\n"),
+                .rearm_failure => run_proof.expectStdErrEqual("native migration: rearm failure propagated after retirement\n"),
+            }
+            if (proof_case.trace) {
+                const trace = run_proof.captureStdErr(.{});
+                const inspect_trace = b.addRunArtifact(migration_metrics_tool);
+                inspect_trace.addFileArg(trace);
+                if (proof_case.refusal_probes) inspect_trace.addArg("refusal_probes");
+                if (proof_case.delay_notifier) inspect_trace.addArg("source_busy");
+                if (std.mem.eql(u8, proof_case.source, "unknown_pinned.lin")) inspect_trace.addArg("pinned");
+                if (std.mem.eql(u8, proof_case.source, "unproven.lin")) inspect_trace.addArg("unproven");
+                inspect_trace.step.dependOn(&migration_metrics_tests.step);
+                migration_metrics_step.dependOn(&inspect_trace.step);
+            } else if (proof_case.ring != .none) {
+                completion_proof.dependOn(&run_proof.step);
+            } else if (proof_case.entry_provenance) {
+                task_entry_proof.dependOn(&run_proof.step);
+            } else if (proof_case.platform) {
+                platform_proof.dependOn(&run_proof.step);
+            } else {
+                (if (std.mem.eql(u8, proof_case.source, "join.lin")) join_proof else if (std.mem.startsWith(u8, proof_case.source, "waitset")) waitset_proof else if (std.mem.startsWith(u8, proof_case.source, "io")) completed_io_proof else if (completed_wait) completed_wait_proof else handoff_proof).dependOn(&run_proof.step);
+            }
+        }
+        const object_files = b.addWriteFiles();
+        const object_source = object_files.addCopyFile(b.path("runtime/tests/fiber_migration/entry_object.lin"), "main.lin");
+        _ = object_files.add("linea.json", "{\"kind\":\"library\"}\n");
+        const compile_object = b.addSystemCommand(&.{"env"});
+        if (toolchain.sanitizeVariable(sanitize.flag())) |variable| compile_object.setEnvironmentVariable(variable.name, variable.value);
+        compile_object.addFileArg(exe.getEmittedBin());
+        compile_object.addArgs(&.{ "build", "--keep" });
+        compile_object.addFileArg(object_source);
+        compile_object.addArg("-o");
+        const entry_object = compile_object.addOutputFileArg("entry.o");
+        const check_object_calls = b.addRunArtifact(call_coverage_tool);
+        check_object_calls.addFileArg(entry_object.dirname().path(b, "entry.o.mlir"));
+        if (sanitize.flag()) |name| check_object_calls.addArg(name);
+        check_object_calls.step.dependOn(&compile_object.step);
+        check_object_calls.step.dependOn(&run_coverage_tests.step);
+        const object_manifest = check_object_calls.captureStdOut(.{});
+        const object_test_module = b.createModule(.{
+            .root_source_file = b.path("build/fiber_object_entry.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .link_libc = true,
+        });
+        object_test_module.addAnonymousImport("object_ir", .{ .root_source_file = entry_object.dirname().path(b, "entry.o.mlir") });
+        const run_object_test = if (sanitize.flag()) |sanitizer| sanitized: {
+            // Let the C toolchain supply its matching sanitizer runtime. The
+            // Zig harness only calls the separately compiled Linea entry.
+            const harness = b.addTest(.{ .root_module = object_test_module, .emit_object = true });
+            const link = b.addSystemCommand(&.{ "cc", b.fmt("-fsanitize={s}", .{sanitizer}), "-fsanitize=undefined", "-fno-sanitize-recover=all" });
+            link.addArtifactArg(harness);
+            link.addFileArg(entry_object);
+            link.addFileArg(entry_archive.?);
+            link.addArgs(&.{ "-lm", "-lpthread", "-o" });
+            const binary = link.addOutputFileArg("object-entry");
+            const run = b.addSystemCommand(&.{"env"});
+            run.addFileArg(binary);
+            break :sanitized run;
+        } else ordinary: {
+            object_test_module.addObjectFile(entry_object);
+            object_test_module.addObjectFile(entry_archive.?);
+            break :ordinary b.addRunArtifact(b.addTest(.{ .root_module = object_test_module }));
+        };
+        run_object_test.addFileInput(object_manifest);
+        run_object_test.has_side_effects = true;
+        task_entry_proof.dependOn(&run_object_test.step);
+        const measure = b.addRunArtifact(migration_metrics_tool);
+        measure.addArg("--measure");
+        for (measurement_binaries, measurement_manifests) |binary, manifest| {
+            measure.addFileArg(binary.?);
+            measure.addFileInput(manifest.?);
+        }
+        measure.step.dependOn(&migration_metrics_tests.step);
+        measure.has_side_effects = true;
+        const measurements = measure.captureStdOut(.{});
+        handoff_measurement.dependOn(&b.addInstallFile(measurements, "fiber-handoff-measurements.tsv").step);
+    } else {
+        const unavailable = b.addSystemCommand(&.{ "sh", "-c", "echo 'forced handoff proof is unavailable on this target or sanitizer' >&2; exit 1" });
+        handoff_proof.dependOn(&unavailable.step);
+        completed_io_proof.dependOn(&unavailable.step);
+        waitset_proof.dependOn(&unavailable.step);
+        join_proof.dependOn(&unavailable.step);
+        migration_metrics_step.dependOn(&unavailable.step);
+        completed_wait_proof.dependOn(&unavailable.step);
+        handoff_measurement.dependOn(&unavailable.step);
+        platform_proof.dependOn(&unavailable.step);
+        task_entry_proof.dependOn(&unavailable.step);
+        stealing_proof.dependOn(&unavailable.step);
+        busy_stealing_proof.dependOn(&unavailable.step);
+        new_work_proof.dependOn(&unavailable.step);
+        completion_proof.dependOn(&unavailable.step);
+        scheduling_proof.dependOn(&unavailable.step);
+        scheduling_measurement.dependOn(&unavailable.step);
+    }
 
     const run_step = b.step("run", "Run the compiler");
     const run_cmd = b.addRunArtifact(exe);
@@ -2648,6 +3231,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }));
+    runtime_tests.root_module.addAnonymousImport("float_truncate", .{ .root_source_file = floatConversion(b, "truncf.zig") });
+    runtime_tests.root_module.addAnonymousImport("float_extend", .{ .root_source_file = floatConversion(b, "extendf.zig") });
     runtime_tests.root_module.link_libc = true;
     if (target.result.os.tag == .linux) runtime_tests.root_module.linkSystemLibrary("m", .{});
     const run_runtime_tests = b.addRunArtifact(runtime_tests);

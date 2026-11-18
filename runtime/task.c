@@ -284,8 +284,8 @@ long linea_task_prepare_on(unsigned long stack_bytes, unsigned long identity) {
     return (long)t;
 }
 
-unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
-                               unsigned long len, unsigned long release_at) {
+static unsigned long start_task(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
+                                unsigned long len, unsigned long release_at, int compiled) {
     struct task *t = task_of(task);
     execution_context(t->loop);
     linea_park_lock(&t->park);
@@ -297,8 +297,21 @@ unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea
     t->state = started;
     linea_unpark(&t->park);
     linea_park_unlock(&t->park);
-    if (t->fiber != NULL) linea_fiber_start(t->fiber);
+    if (t->fiber != NULL) {
+        if (compiled) linea_fiber_start_compiled(t->fiber);
+        else linea_fiber_start(t->fiber);
+    }
     return task;
+}
+
+unsigned long linea_task_start(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
+                               unsigned long len, unsigned long release_at) {
+    return start_task(task, entry, release, at, len, release_at, 0);
+}
+
+unsigned long linea_task_start_migratable(unsigned long task, linea_task_entry entry, linea_task_release release, unsigned long at,
+                                          unsigned long len, unsigned long release_at) {
+    return start_task(task, entry, release, at, len, release_at, 1);
 }
 
 void linea_task_cancel(unsigned long task) {

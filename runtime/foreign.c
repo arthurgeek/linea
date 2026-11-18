@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define _DARWIN_C_SOURCE
 #include "foreign.h"
+#include "fiber.h"
 #include <limits.h>
 #include "pipe_signal.h"
 #include <stdlib.h>
@@ -10,6 +11,7 @@
 static __thread unsigned long foreign_depth;
 
 void linea_foreign_enter(void) {
+    linea_fiber_restrict_current();
     if (foreign_depth == ULONG_MAX) {
         report_bytes("linea: foreign frame depth overflow\n", sizeof "linea: foreign frame depth overflow\n" - 1);
         abort();

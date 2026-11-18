@@ -1,0 +1,242 @@
+import book
+import std.io
+import std.session
+import std.task
+import std.testing
+import std.time
+
+use book.Book
+use book.BookError
+use book.Entry
+use session.Chan
+use session.End
+use session.Send
+use task.Unowned
+
+// One system task owns the database for the server's lifetime. Clients only
+// submit the operations below; none can extract a connection or submit SQL.
+@(opaque, linear)
+struct Store {
+    owner: task.Owner[Option[Book]],
+}
+
+@(opaque, copyable)
+struct Client {
+    raw: task.Client[Option[Book]],
+}
+
+@derive(Debug, Release)
+pub enum OpenError {
+    Task(task.PrepareError),
+    Book(BookError),
+}
+
+impl Display for OpenError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Task(error) => "cannot start database owner: {error}".fmt(&w),
+            Book(error) => error.fmt(&w),
+        }
+    }
+}
+
+// Preserve the previous value's dependencies while replacing the whole
+// linear option. Even an empty option must be matched and settled.
+fn exchange(inout slot: Option[Book], sink next: Option[Book]) -> Option[Book] where carries(slot), retains(slot: next) {
+    let previous = slot
+    slot = next
+    previous
+}
+
+fn restore(inout slot: Option[Book], sink book: Book) where retains(slot: book) {
+    match exchange(&slot, .Some(book)) {
+        None => (),
+        Some(_) => panic("database initialization overwrote live state"),
+    }
+}
+
+fn empty(sink state: Option[Book]) {
+    match state {
+        None => (),
+        Some(_) => panic("database owner returned an unsettled connection"),
+    }
+}
+
+fn open_store(name: Str, memory: Bool) -> Result[Store, OpenError] {
+    let owned_name = name.to_owned() else |_| {
+        return .Err(.Book(.OutOfMemory))
+    }
+    let initial: Option[Book] = .None
+    let owner = task.own(initial, on: io.system()) else |failure| {
+        let Unowned { state, reason } = failure
+        empty(state)
+        owned_name.release()
+        return .Err(.Task(reason))
+    }
+    let opened: Result[(), BookError] = owner.client().call(
+        [sink owned_name, sink memory] |inout state: Option[Book]| {
+            let connected = if memory {
+                Book.open_in_memory(owned_name.view())
+            } else {
+                Book.initialize(owned_name.view()).and_then([owned_name] |sink _initialized| Book.connect(owned_name.view()))
+            }
+            match connected {
+                Ok(book) => {
+                    restore(&state, book)
+                    .Ok(())
+                },
+                Err(error) => .Err(error),
+            }
+        },
+    )
+    match opened {
+        Ok(_) => .Ok(Store { owner }),
+        Err(error) => {
+            empty(owner.close())
+            .Err(.Book(error))
+        },
+    }
+}
+
+impl Store {
+    pub fn open(path: Str) -> Result[Store, OpenError] {
+        open_store(path, memory: false)
+    }
+
+    pub fn in_memory(name: Str) -> Result[Store, OpenError] {
+        open_store(name, memory: true)
+    }
+
+    pub fn client(self: Self) -> Client where borrows(self) {
+        .{ raw = self.owner.client() }
+    }
+
+    // All client users must be joined before consuming the store. Closing
+    // the connection is a final owner job; Owner.close only returns None.
+    pub fn close(sink self: Self) {
+        let Store { owner } = self
+        owner.client().call(
+            |inout state: Option[Book]| {
+                match exchange(&state, .None) {
+                    Some(book) => book.close(),
+                    None => (),
+                }
+            },
+        )
+        empty(owner.close())
+    }
+}
+
+impl Release for Store {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+
+impl Client {
+    pub fn newest(self: Self, limit: Int64) -> Result[Vec[Entry], BookError] {
+        self.raw.call(
+            [sink limit] |inout state: Option[Book]| {
+                var book = exchange(&state, .None).unwrap()
+                let result = &book.newest(limit)
+                restore(&state, book)
+                result
+            },
+        )
+    }
+
+    // Request views cannot cross the owner boundary. Copy the small form
+    // fields into the job; the owner releases those copies after the call.
+    pub fn sign(self: Self, name: Str, message: Str) -> Result[(), BookError] {
+        defer let owned_name = name.to_owned() else |_| {
+            return .Err(.OutOfMemory)
+        }
+        let owned_message = message.to_owned() else |_| {
+            return .Err(.OutOfMemory)
+        }
+        self.raw.call(
+            [sink owned_name, sink owned_message] |inout state: Option[Book]| {
+                var book = exchange(&state, .None).unwrap()
+                let result = &book.sign(owned_name.view(), owned_message.view())
+                restore(&state, book)
+                result
+            },
+        )
+    }
+}
+
+test "fiber clients sign and read without acquiring the database thread" {
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[Send[Bool, End]]| {
+        let before = task.current_carrier().unwrap()
+        defer let store = Store.in_memory("fiber_clients_sign_and_read").unwrap()
+        let client = store.client()
+        let system_owner = store.owner.client().call(|inout _state: Option[Book]| task.current_carrier().is_none())
+        client.sign("Ada", "Hello from a fiber").unwrap()
+        defer let entries = client.newest(10).unwrap()
+        let correct = entries.length() == 1 && entries[0].name.view() == "Ada" && entries[0].message.view() == "Hello from a fiber"
+        var attempts = UInt64(0)
+        while attempts < 65536 && before == task.current_carrier().unwrap() {
+            time.sleep(time.Duration.from_nanoseconds(0))
+            attempts += 1
+        }
+        me.send(system_owner && correct && before != task.current_carrier().unwrap()).close()
+    }
+    let (correct, done) = task.prepare(body, on: execution).unwrap().start().recv()
+    done.close()
+    testing.assert(correct, "the database owner used a carrier, lost a result, or pinned its calling fiber")?
+}
+
+test "database startup reports its error and releases the empty owner" {
+    let opened = Store.open("/linea-no-such-directory/guest-book.db")
+    let refused = match opened {
+        Ok(store) => {
+            store.close()
+            false
+        },
+        Err(error) => {
+            let native = match read error { Book(_) => true, _ => false }
+            error.release()
+            native
+        },
+    }
+    testing.assert(refused, "an unavailable database lost its startup error")?
+}
+
+test "two fiber clients share the connection and an error leaves it usable" {
+    defer let store = Store.in_memory("two_fiber_clients_share_the_connection").unwrap()
+    let client = store.client()
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let first = task.prepare(
+        sink [sink client = copy(client)] |sink me: Chan[End]| {
+            client.sign("Ada", "First client").unwrap()
+            me.close()
+        },
+        on: execution,
+    ).unwrap()
+    let second = task.prepare(
+        sink [sink client] |sink me: Chan[End]| {
+            client.sign("Grace", "Second client").unwrap()
+            me.close()
+        },
+        on: execution,
+    ).unwrap()
+    let first_done = first.start()
+    let second_done = second.start()
+    first_done.close()
+    second_done.close()
+    let refused = match store.client().newest(-1) {
+        Ok(entries) => {
+            entries.release()
+            false
+        },
+        Err(error) => {
+            let expected = match read error { NegativeLimit(limit) => limit == -1, _ => false }
+            error.release()
+            expected
+        },
+    }
+    testing.assert(refused, "a failed query lost its error")?
+    defer let entries = store.client().newest(10).unwrap()
+    testing.assert_eq(entries.length(), UInt64(2), "a client or failed query lost stored signatures")?
+}

@@ -53,6 +53,7 @@ void linea_park_destroy(struct linea_park *p) {
 }
 
 void linea_park_lock(struct linea_park *p) {
+    if (linea_fiber_metadata_held()) fail("linea: a source lock followed scheduler metadata\n");
     must(pthread_mutex_lock(&p->lock));
 }
 

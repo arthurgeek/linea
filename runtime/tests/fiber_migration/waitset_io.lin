@@ -1,0 +1,71 @@
+import std.io
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.time
+
+use io.Reader
+use net.Acceptor
+use net.Accepted
+use session.Chan
+use session.End
+use task.WaitSet
+
+enum Woke {
+    Readable(net.Connection),
+    Kept(UInt64),
+}
+
+fn main() -> UInt8 {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    var peer = net.connect(listener.local_address().unwrap()).unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    listener.release()
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    var entries = UInt64(0)
+    var passed = false
+    let body = sink [sink connection, inout entries, inout passed] |sink me: Chan[End]| {
+        entries += 1
+        let first = task.current_carrier().unwrap()
+        var waiting: WaitSet[Woke] = WaitSet.open()
+        let _retained = &waiting.after(time.Duration.from_seconds(60), UInt64(73), |sink n| Woke.Kept(n))
+        let _readable = &waiting.readable(connection, |sink ready| Woke.Readable(ready)).unwrap()
+        let ready = match &waiting.next().unwrap() {
+            Readable(ready) => ready,
+            Kept(_) => panic("the retained timer fired before the socket"),
+        }
+        if first == task.current_carrier().unwrap() {
+            panic("a kernel-backed wait set did not migrate its continuation")
+        }
+        var stream = ready
+        var buffer = mem.system().acquire(1).unwrap()
+        let received = &stream.read_some(&buffer, offset: 0, count: 1).unwrap()
+        if received != 1 || buffer.as_slice()[0] != 120 {
+            panic("readiness delivery consumed or lost its socket bytes")
+        }
+        time.sleep(time.Duration.from_nanoseconds(0))
+        if first != task.current_carrier().unwrap() {
+            panic("the kernel wait-set continuation did not return to its first carrier")
+        }
+        buffer.release()
+        stream.release()
+        var left = waiting.close()
+        let retained = match &left.pop().unwrap() {
+            Kept(n) => n,
+            Readable(_) => panic("the delivered socket remained registered"),
+        }
+        left.finish().unwrap()
+        passed = retained == 73
+        me.close()
+    }
+    let running = task.prepare(body, on: execution).unwrap().start()
+    let _sent = io.write_all(&peer, "x".as_bytes()).unwrap()
+    running.close()
+    peer.release()
+    if passed && entries == 1 {
+        0
+    } else {
+        1
+    }
+}

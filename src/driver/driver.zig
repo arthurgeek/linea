@@ -430,14 +430,34 @@ fn compileArtifact(
         defer file.close(io);
 
         var out: Out = .{};
+        const writer = out.open(io, file);
+        const callable_proof = req.keep and req.artifact == .executable and req.native.len == 0 and req.link.len == 0;
+        var hash_buffer: [4096]u8 = undefined;
+        var hashed = writer.hashed(std.crypto.hash.sha2.Sha256.init(.{}), &hash_buffer);
         // A module the backend refuses leaves an empty file rather than half a
         // program: it wrote nothing, and what it wrote nothing about is in the
         // sink for the renderer at the end of the run.
-        if (!try emitMlir(gpa, out.open(io, file), req.mir, req.table, req.sink, .{
+        if (!try emitMlir(gpa, if (callable_proof) &hashed.writer else writer, req.mir, req.table, req.sink, .{
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
+            .migratable_task_entries = req.artifact == .executable,
             .foreign_symbols = req.foreign_symbols,
         })) return exit_defect;
+        if (callable_proof) try hashed.writer.flush();
         try out.flush();
+        if (callable_proof) {
+            // Bind full-source callable/type checks to this exact emitted
+            // module. These debug comments neither activate migration nor
+            // certify arbitrary native code. The independent coverage checker
+            // still scans every compatible target and every native boundary.
+            var coverage = std.Io.Writer.Allocating.init(gpa);
+            defer coverage.deinit();
+            try mlir_backend.writeCallableCoverage(&coverage.writer, req.mir);
+            hashed.hasher.update(coverage.written());
+            var digest: [32]u8 = undefined;
+            hashed.hasher.final(&digest);
+            try writer.print("// linea-callable-proof-v1 {s}\n{s}", .{ std.fmt.bytesToHex(digest, .lower), coverage.written() });
+            try out.flush();
+        }
     }
 
     // Intermediates are removed on success only. A failed build leaves them

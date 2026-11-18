@@ -106,7 +106,7 @@ test "the room hears every line of every member" {
     testing.assert_eq(lines, (UInt64(3), UInt64(2), UInt64(4)), "the room lost or doubled a line")?
 }
 
-fn main() -> Result[UInt8, io.IoError] {
+fn room_report() -> Result[UInt8, io.IoError] {
     let names = ["ada", "grace", "linus"]
     defer let heard = run_room(
         member(3, time.Duration.from_milliseconds(30)),
@@ -119,4 +119,16 @@ fn main() -> Result[UInt8, io.IoError] {
         number += 1
     }
     .Ok(0)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Child tasks inherit this loop, so waiting sessions and timers share
+    // two carriers instead of reserving one OS thread for each participant.
+    let execution = io.Loop.open(carriers: 2).unwrap()
+    let body = sink [] |sink me: Chan[Send[Result[UInt8, io.IoError], End]]| {
+        me.send(room_report()).close()
+    }
+    let (result, done) = task.start(body, on: execution).unwrap().recv()
+    done.close()
+    result
 }

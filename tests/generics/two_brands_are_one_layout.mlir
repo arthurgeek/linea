@@ -12,6 +12,7 @@ module {
   }
   llvm.mlir.global internal constant @linea_file0("tests/generics/two_brands_are_one_layout.lin\00") : !llvm.array<45 x i8>
   func.func private @linea_set_args(i32, !llvm.ptr)
+  func.func private @linea_fiber_restrict_current()
   func.func private @linea_trap(i32, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @linea_panic(i64, i64, !llvm.ptr, i32, i32) attributes {passthrough = ["noreturn"]}
   func.func private @"lin.;main"() -> i64 attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -48,6 +49,7 @@ module {
     %tf1 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/two_brands_are_one_layout.lin":16:18)
     %tl1 = arith.constant 16 : i32 loc("tests/generics/two_brands_are_one_layout.lin":16:18)
     %tc1 = arith.constant 18 : i32 loc("tests/generics/two_brands_are_one_layout.lin":16:18)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/two_brands_are_one_layout.lin":16:18)
     llvm.unreachable loc("tests/generics/two_brands_are_one_layout.lin":16:18)
   ^c1:
@@ -61,6 +63,7 @@ module {
     %tf2 = llvm.mlir.addressof @linea_file0 : !llvm.ptr loc("tests/generics/two_brands_are_one_layout.lin":16:5)
     %tl2 = arith.constant 16 : i32 loc("tests/generics/two_brands_are_one_layout.lin":16:5)
     %tc2 = arith.constant 5 : i32 loc("tests/generics/two_brands_are_one_layout.lin":16:5)
+    func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_trap(%tk2, %tf2, %tl2, %tc2) : (i32, !llvm.ptr, i32, i32) -> () loc("tests/generics/two_brands_are_one_layout.lin":16:5)
     llvm.unreachable loc("tests/generics/two_brands_are_one_layout.lin":16:5)
   ^c2:

@@ -288,8 +288,8 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
 // every job on the caller, one after another, and starts no task.
 // `.Threads(max)` runs at most `max` jobs at once, on tasks started on the
 // caller's Io (a join runs one of them on the caller itself): each is an
-// operating-system thread of its own under `io.system()`, a fiber pinned to
-// one of the loop's carriers under a loop, so no more jobs run
+// operating-system thread of its own under `io.system()`, a fiber that can
+// change carriers when eligible under a loop, so no more jobs run
 // simultaneously than the loop has carriers, and a fiber scheduled from the
 // seed inside a simulation. `.Threads(1)` runs the jobs on the caller.
 @(copyable, derive(Equatable, Equivalent, Display, Debug))

@@ -1,6 +1,6 @@
-The guest book budgets two SQLite files per serving task, plus a socket and
-readiness duplicate per allowed connection, and fixed runtime descriptors.
-Its 128 tasks and 128 active-or-idle connections need an allowance of 544 open
+The guest book budgets two SQLite files for its system-thread owner, plus a socket and
+readiness duplicate per allowed connection, three descriptors per carrier, and fixed runtime descriptors.
+Its 128 HTTP fibers and 128 active-or-idle connections need an allowance of 296 open
 files. It raises its soft limit toward the hard one before serving, so it
 serves when started with a soft limit of 256, the default of a macOS shell.
 
@@ -19,5 +19,5 @@ When the hard limit is below its serving budget, the program says
 how many files it needs and exits 1 before it listens.
 
   $ (ulimit -n 200; GUEST_BOOK_DATABASE=guests.db ./book 0)
-  guest-book: serving needs 544 open files, and this process may open 200; raise the hard limit with `ulimit -H -n`
+  guest-book: serving needs 296 open files, and this process may open 200; raise the hard limit with `ulimit -H -n`
   [1]

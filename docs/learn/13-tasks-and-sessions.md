@@ -641,9 +641,23 @@ A task started on `io.system()` runs on its own operating-system thread, as
 Rust's `std::thread::spawn` does. A task started on an `io.Loop` runs as a
 **fiber**: it keeps its own stack, but shares a carrier thread with other
 fibers. A socket, timer or session wait lets the carrier run another ready
-fiber. Each fiber stays on the carrier that first runs it. A computation that
-never waits keeps that carrier; regular files and blocking foreign calls also
-hold it while they run.
+fiber. An idle carrier can steal eligible work from another carrier, including
+a fiber whose saved continuation is ready to resume. A task keeps its identity,
+stack and owned values when it changes carriers; its OS-thread identity may
+change. Unknown foreign calls bind the calling fiber to its current carrier
+before entering native code, and returning from the call does not undo that
+restriction. Thread-bound foreign resources belong in an owning task explicitly
+started on `io.system()`; clients can use that owner from fibers. Create, use
+and close the resource inside that task. Moving a resource created on another
+thread into an owner does not establish its thread affinity.
+
+Execution is cooperative. A computation that never waits keeps its carrier;
+work stealing cannot interrupt it. Regular files and blocking foreign calls
+also hold the carrier while they run. Choose system-thread tasks for that work.
+Migration is supported on unsanitized macOS arm64 and Linux arm64/x86-64;
+other runtime variants keep fibers on their original carriers. Socket waits
+work on both systems: kqueue on macOS, io_uring where available on Linux, and
+epoll otherwise. Applications use the same network APIs on either system.
 
 Open a loop once and state its carrier count. This loop has one carrier, yet
 the task uses the same session operations as a task on its own thread:
@@ -709,6 +723,48 @@ its loop. `io.current()` captures the concrete Io now, so it can be kept and
 passed later; `on: io.system()` explicitly starts a thread. The constant
 default selects execution at use time without changing how parameter defaults
 are evaluated.
+
+### Observing the current carrier
+
+`task.current_carrier()` answers `.Some(Carrier)` inside a real fiber and
+`.None` on system tasks or inside a simulation. Observing it neither waits
+nor pins the fiber. This program observes both kinds of execution:
+
+`observing_execution.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+fn main() -> Result[UInt8, io.IoError] {
+    let system_has_carrier = task.current_carrier().is_some()
+    let execution = io.Loop.open(carriers: 2)?
+    let body = sink [] |sink me: Chan[Send[Bool, End]]| {
+        me.send(task.current_carrier().is_some()).close()
+    }
+    let (fiber_has_carrier, done) = task.start(body, on: execution).unwrap().recv()
+    done.close()
+    io.println("system carrier: {system_has_carrier}")?
+    io.println("fiber carrier: {fiber_has_carrier}")?
+    .Ok(0)
+}
+```
+
+```
+system carrier: false
+fiber carrier: true
+```
+
+A `Carrier` is opaque and can be compared for equality. It identifies a
+carrier, not a task: several tasks can use the same carrier, and a task can
+change carriers after waiting. Two observations can also match after a task
+moves away and back. Keeping a carrier identifier reserves no execution
+resources and gives no permission to move a thread-bound native resource.
 
 ## What may cross to a task
 
@@ -1497,8 +1553,9 @@ operating-system thread. Every job is a task started on the caller's Io, as
 
 - under `io.system()`, the default, each job is a thread of its own, so up to
   `max` run in parallel;
-- inside a task running on an `io.Loop`, each job is a fiber pinned to one of
-  that loop's carriers, so no more jobs run simultaneously than the loop has
+- inside a task running on an `io.Loop`, each job is a fiber on one of
+  that loop's carriers, and eligible fibers can change carriers as work is
+  stolen, so no more jobs run simultaneously than the loop has
   carriers. `.Threads(2)` inside a one-carrier loop runs two fibers on one
   thread, which overlap only where they wait;
 - inside a simulation, each job is a fiber of the simulation, scheduled from
