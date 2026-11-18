@@ -553,9 +553,21 @@ fn insideText(ast: *const Ast, file: FileId, offset: u32) bool {
     if (before == .none or ast.tokenSpan(before).end != offset) return false;
     const text = ast.tokenText(before);
     return switch (ast.tokenTag(before)) {
-        .comment, .string_line => true,
-        .string_literal => text.len < 2 or text[text.len - 1] != '"',
-        .invalid => text.len > 0 and text[0] == '"',
+        .comment, .string_line, .format_spec => true,
+        // A literal's text ends at its closing `"`, or where an
+        // interpolation's `{` opens an expression; one ending elsewhere was
+        // never closed and runs to the end of its line.
+        .string_literal, .str_close => text.len < 2 or text[text.len - 1] != '"',
+        .str_open, .str_mid => text[text.len - 1] != '{',
+        // A literal never closed is one token from its `"`, or from the `}`
+        // that ends its last interpolation, to the end of its line.
+        .invalid => text.len > 0 and (text[0] == '"' or text[0] == '}'),
+        // The `:` of an interpolation begins its format spec, which names
+        // nothing.
+        .colon => next < part.token_end and switch (ast.tokenTag(TokenId.at(next))) {
+            .format_spec, .str_mid, .str_close => true,
+            else => false,
+        },
         else => false,
     };
 }
@@ -564,7 +576,7 @@ fn insideText(ast: *const Ast, file: FileId, offset: u32) bool {
 fn isText(tag: Tag, text: []const u8) bool {
     return switch (tag) {
         .comment, .string_literal, .string_line, .str_open, .str_mid, .str_close, .format_spec => true,
-        .invalid => text.len > 0 and text[0] == '"',
+        .invalid => text.len > 0 and (text[0] == '"' or text[0] == '}'),
         else => false,
     };
 }
@@ -1640,14 +1652,6 @@ fn appendOperations(
     defer applicable.deinit(gpa);
     const reach = typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner);
     try reach.each(gpa, held, &applicable);
-    // A conversion that settles on no result is not one a call can make.
-    var kept: usize = 0;
-    for (applicable.items) |a| {
-        if (!try reach.settlesSomewhere(gpa, held, a)) continue;
-        applicable.items[kept] = a;
-        kept += 1;
-    }
-    applicable.shrinkRetainingCapacity(kept);
 
     // The range a rewrite replaces, and whether one may be offered at all.
     // Where the call spans lines, an item is written in at the cursor like
@@ -1664,6 +1668,10 @@ fn appendOperations(
     }
 
     for (applicable.items) |a| {
+        // Counted above, since the checker counts it when a call names it,
+        // but not offered: a conversion that settles on no result is not one
+        // a call can make.
+        if (!try reach.settlesSomewhere(gpa, held, a)) continue;
         // `&` lends the receiver of the postfix call it marks, so once it is
         // written the offer is only what it can lend: an operation whose own
         // receiver is `read` or `sink` cannot be reached through it, and
@@ -2640,6 +2648,8 @@ test "nothing is offered inside a string or a comment" {
         "/// do|c\nfn main() -> UInt8 {\n    0\n}\n",
         "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"{n} a|b\"\n    0\n}\n",
         "fn main() -> UInt8 {\n    0\n}\n\nlet _s = \"open|",
+        "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"v {n} wor|\n    0\n}\n",
+        "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"{n:|>5}\"\n    0\n}\n",
     }) |marked| {
         const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
         const text = marked[0..at] ++ marked[at + 1 ..];
@@ -2680,6 +2690,94 @@ test "a conversion is offered only where something converts from the value" {
     defer releaseAll(gpa, stays);
     try testing.expect(!holds(stays, "into"));
     try testing.expect(!holds(stays, "try_into"));
+}
+
+test "a conversion is offered where a generic or a bound one converts from the value" {
+    const gpa = testing.allocator;
+    const text =
+        \\struct Box[T] { item: T }
+        \\struct Wrap[T] { item: T }
+        \\
+        \\impl[T] From[Box[T]] for Wrap[T] {
+        \\    fn from(source: Box[T]) -> Wrap[T] {
+        \\        .{ item = source.item }
+        \\    }
+        \\}
+        \\
+        \\struct Count { n: UInt8 }
+        \\
+        \\fn conv[T: Into[Count]](sink t: T) -> UInt8 {
+        \\    let c: Count = t.into()
+        \\    c.n
+        \\}
+        \\
+        \\impl From[UInt8] for Count {
+        \\    fn from(source: UInt8) -> Count {
+        \\        .{ n = source }
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let b: Box[UInt8] = .{ item = 3 }
+        \\    let w: Wrap[UInt8] = b.into()
+        \\    w.item + conv(UInt8(1))
+        \\}
+        \\
+    ;
+    const boxed = std.mem.lastIndexOf(u8, text, "b.").? + "b.".len;
+    const from_box = try offeredAt(gpa, text, boxed);
+    defer releaseAll(gpa, from_box);
+    try testing.expect(holds(from_box, "into"));
+    const bounded = std.mem.indexOf(u8, text, "t.into").? + "t.".len;
+    const from_bound = try offeredAt(gpa, text, bounded);
+    defer releaseAll(gpa, from_bound);
+    try testing.expect(holds(from_bound, "into"));
+}
+
+test "an operation two traits answer is offered written out, the conversion only where it converts" {
+    const gpa = testing.allocator;
+    // `lone.into()` is [N-Ambiguous]: `Conv` and `Into` both declare `into`.
+    // Only `Conv`'s can be written, and it is written out.
+    const text =
+        \\trait Conv {
+        \\    fn into(self: Self) -> UInt8
+        \\}
+        \\
+        \\struct Lone { n: UInt8 }
+        \\
+        \\impl Conv for Lone {
+        \\    fn into(self: Self) -> UInt8 {
+        \\        self.n
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let lone = Lone { n = 2 }
+        \\    Conv.into(lone)
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const edited = try std.mem.replaceOwned(u8, gpa, text, "    Conv.into(lone)", "    lone.");
+    defer gpa.free(edited);
+    var typed = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = edited }}, "main.lin");
+    defer typed.deinit();
+    const offset = std.mem.indexOf(u8, edited, "lone.\n").? + "lone.".len;
+    const items = try offeredReading(gpa, &typed, typed.fileNamed("main.lin").?, offset, .unsupported);
+    defer free(gpa, items);
+    var offered: ?Item = null;
+    for (items) |item| {
+        if (!std.mem.eql(u8, item.label, "into")) continue;
+        try testing.expect(offered == null);
+        offered = item;
+    }
+    const conv = offered orelse return error.TestExpectedCompletion;
+    try testing.expectEqualStrings("Conv", conv.labelDetails.?.description.?);
+    const written = switch (conv.textEdit.?) {
+        inline else => |e| e.newText,
+    };
+    try testing.expectEqualStrings("Conv.into(lone)", written);
 }
 
 test "a local is offered from the statement after the one that declares it" {

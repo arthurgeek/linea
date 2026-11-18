@@ -4198,6 +4198,13 @@ pub const Reach = struct {
     /// operation `Reach` lists can.
     pub fn settlesSomewhere(self: Reach, gpa: std.mem.Allocator, held: TypeId, a: Applicable) std.mem.Allocator.Error!bool {
         if (a.trait == node.DeclId.none) return true;
+        // A bound promising the trait answers for it, whatever implements it.
+        var bounds: std.ArrayList(types_mod.BoundTrait) = .empty;
+        defer bounds.deinit(gpa);
+        try self.typing.appendBoundsWithin(gpa, self.scope, held, &bounds);
+        for (bounds.items) |bound| {
+            if (bound.trait == a.trait) return true;
+        }
         const pairs = [_][2][]const u8{ .{ "Into", "From" }, .{ "TryInto", "TryFrom" } };
         for (pairs) |pair| {
             const blanket = self.source_program.libraryDeclIn("convert", pair[0]) orelse continue;
@@ -4209,8 +4216,10 @@ pub const Reach = struct {
     }
 
     /// Whether an implementation of the conversion trait `from` (`From`,
-    /// `TryFrom`) converts from `held`: one written at `held` itself, or at a
-    /// type parameter of the implementation whose bounds `held` answers.
+    /// `TryFrom`) converts from `held`: one whose source matches `held` by
+    /// the checker's own key match (`ImplIndex.bindKey`), `Box[T]` matching
+    /// `Box[UInt8]`, and where the source is the implementation's parameter
+    /// itself, one whose bounds `held` answers.
     ///
     /// **Bound:** the implementations of `from`, and for a generic one the
     /// bounds of its parameter.
@@ -4223,6 +4232,10 @@ pub const Reach = struct {
             if (row.trait != trait or !row.valid_key or row.args.len == 0) continue;
             const source = row.args[0];
             if (source == held) return true;
+            const bindings = try gpa.alloc(TypeId, row.parameters);
+            defer gpa.free(bindings);
+            @memset(bindings, .poison);
+            if (!types_mod.ImplIndex.bindKey(self.typing, held, source, row.decl.index(), bindings)) continue;
             switch (self.typing.get(source)) {
                 .parameter => |parameter| {
                     const integer = switch (self.typing.get(held)) {
@@ -4236,7 +4249,7 @@ pub const Reach = struct {
                     } else true;
                     if (met) return true;
                 },
-                else => {},
+                else => return true,
             }
         }
         return false;
