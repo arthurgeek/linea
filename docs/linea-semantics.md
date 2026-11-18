@@ -4037,9 +4037,19 @@ applied bases such as `Wrapper[S].Item`. An unresolved projection stands an
 unknown height above what it is selected from: it is bounded wherever its base
 and trait arguments are. `S.Item` inside `drain[S]` reached only as
 `drain[Tap]` is selected from a fixed type and leaves a recursion it joins
-bounded, while a projection of a recurring argument is an increase that no
-later descent undoes. A directly recurring projection remains rejected even
-when an implementation would settle it to a smaller type.
+bounded, while a projection of a recurring argument counts as an increase that
+no later descent undoes. That is not a claim that every projection grows: a
+projection the check cannot resolve is treated as no smaller than its base,
+because what a declaration states cannot prove that it decreases for every
+implementation the program may hold. So a directly recurring projection
+remains rejected even when every implementation in sight settles it to a
+smaller type. `drain[S: Source]` recurring at `S.Item` is refused beside
+`impl[T: Source] Source for Tap[T] { type Item = T }`, whose item shrinks,
+because a later `impl[T: Source] Source for Grow[T] { type Item =
+Grow[Grow[T]] }` would make `drain` instantiate without end. The route to
+accepting such a recursion is a decreasing measure the trait states and each
+implementation is checked against, not reasoning over the whole program or a
+limit on instantiation depth.
 
 Generic type parts retain the structural non-growth rule: each argument on a
 recurring part must contain none of the declaration's parameters or be exactly
