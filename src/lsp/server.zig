@@ -399,28 +399,30 @@ pub const Handler = struct {
         try handler.report(arena, path);
     }
 
-    /// Full-text sync only, so `contentChanges` holds exactly one whole
-    /// document per notification -- the shape `initialize` advertised is the
-    /// only one a compliant client sends.
+    /// Full-text sync only, so `contentChanges` holds whole documents -- the
+    /// shape `initialize` advertised is the only one a compliant client sends.
+    /// Applied in order, the last whole document is the text.
     ///
-    /// A change naming the region it replaces is one this server cannot apply,
-    /// and it stops the notification. Dropped instead, the text the server
-    /// held was no longer the text the editor held, and everything below
-    /// republished diagnostics about a document nobody was looking at --
-    /// confidently wrong rather than absent.
+    /// The notification is validated before anything changes, and refused
+    /// whole: a document `didOpen` never opened is `error.DocumentNotOpen`, and
+    /// a change naming the region it replaces is `error.PartialChangeUnsupported`,
+    /// which this server cannot apply. Applied in part, or to a document opened
+    /// by the change itself, the text the server held would no longer be the
+    /// text the editor held, and everything below would republish diagnostics
+    /// about a document nobody was looking at.
     pub fn @"textDocument/didChange"(
         handler: *Handler,
         arena: std.mem.Allocator,
         params: lsp.types.TextDocument.DidChangeParams,
     ) !void {
         const path = try uri_mod.pathOf(arena, params.textDocument.uri);
-        var changed = false;
+        if (!handler.documents.open.contains(path)) return error.DocumentNotOpen;
+        var last: ?[]const u8 = null;
         for (params.contentChanges) |change| switch (change) {
-            .text_document_content_change_whole_document => |whole| {
-                changed = (try handler.documents.set(path, whole.text)) != .unchanged or changed;
-            },
+            .text_document_content_change_whole_document => |whole| last = whole.text,
             .text_document_content_change_partial => return error.PartialChangeUnsupported,
         };
+        const changed = if (last) |whole| (try handler.documents.set(path, whole)) != .unchanged else false;
         const text = handler.documents.open.get(path).?;
         if (!handler.cachedTextMatches(path, text)) try handler.invalidate(arena, path);
         if (changed) try handler.freshen(arena, path);
@@ -1924,6 +1926,82 @@ test "a change the server cannot apply leaves the document as it was" {
     // What the server holds is what it held. Applied as nothing and reported
     // anyway, it would have published diagnostics about a document the editor
     // had already replaced.
+    try std.testing.expectEqualStrings(held, handler.documents.open.get("main.lin").?);
+}
+
+test "a change to a document nobody opened opens nothing" {
+    const gpa = std.testing.allocator;
+
+    var handler: Handler = .{
+        .gpa = gpa,
+        .region_backing = gpa,
+        .library = test_library.get(),
+        .io = std.testing.io,
+        // The notification is refused before anything is published.
+        .transport = undefined,
+        .documents = .{ .gpa = gpa },
+    };
+    defer handler.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    try std.testing.expectError(error.DocumentNotOpen, handler.@"textDocument/didChange"(
+        arena.allocator(),
+        .{
+            .textDocument = .{ .uri = "main.lin", .version = 2 },
+            .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
+                .text = "fn main() -> UInt8 { 0 }\n",
+            } }},
+        },
+    ));
+    try std.testing.expectError(error.DocumentNotOpen, handler.@"textDocument/didChange"(
+        arena.allocator(),
+        .{ .textDocument = .{ .uri = "main.lin", .version = 3 }, .contentChanges = &.{} },
+    ));
+
+    // Only `didOpen` makes a buffer the server reads instead of the disk.
+    try std.testing.expectEqual(@as(u32, 0), handler.documents.open.count());
+}
+
+test "a whole change followed by a partial one applies neither" {
+    const gpa = std.testing.allocator;
+
+    var handler: Handler = .{
+        .gpa = gpa,
+        .region_backing = gpa,
+        .library = test_library.get(),
+        .io = std.testing.io,
+        .transport = undefined,
+        .documents = .{ .gpa = gpa },
+    };
+    defer handler.deinit();
+
+    const held = "fn main() -> UInt8 {\n    0\n}\n";
+    _ = try handler.documents.set("main.lin", held);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    try std.testing.expectError(error.PartialChangeUnsupported, handler.@"textDocument/didChange"(
+        arena.allocator(),
+        .{
+            .textDocument = .{ .uri = "main.lin", .version = 2 },
+            .contentChanges = &.{
+                .{ .text_document_content_change_whole_document = .{ .text = "fn main() -> UInt8 { 1 }\n" } },
+                .{ .text_document_content_change_partial = .{
+                    .range = .{
+                        .start = .{ .line = 0, .character = 0 },
+                        .end = .{ .line = 0, .character = 2 },
+                    },
+                    .text = "fun",
+                } },
+            },
+        },
+    ));
+
+    // The notification is one transition: refused as a whole, the buffer and
+    // every answer computed from it stay as they were.
     try std.testing.expectEqualStrings(held, handler.documents.open.get("main.lin").?);
 }
 
