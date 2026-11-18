@@ -58,7 +58,9 @@ pub struct Exchange[P: Allocator = mem.SystemAllocator] {
 // - `Refused` holds the message of the error the handler answered with, or
 //   `None` when it gave none; that error was written as the answer.
 // - `Unread` holds why the request could not be read: it was refused, with
-//   the status in the exchange, or the connection failed while it was read.
+//   the status in the exchange, or the connection failed while it was read,
+//   including while serving drained the body the handler left unread after
+//   the answer was written.
 // - `Memory` means the request's arena or the response buffer could not be
 //   had, and the request was answered 503 or 500 without the handler.
 // - `Write` holds why writing the answer failed; the connection was reset if

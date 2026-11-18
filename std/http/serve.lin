@@ -308,6 +308,26 @@ test "a refused body left unread does not lose the answer" {
     .Ok(())
 }
 
+// The handler answers without reading the body, so serving drains it; the
+// client ends its side after 3 of the 10 bytes it declared, and the exchange
+// is observed with that failure.
+test "a body cut short after the answer is observed as unread" {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 10\r\n\r\nabc")
+    let shut = &client.shutdown_write().is_ok()
+    let owner = task.own(Recorded.new()).unwrap()
+    let recorder = owner.client()
+    let made = [sink recorder] || -> Reporter where carries(recorder) Reporter { recorded = copy(recorder) }
+    let served = serve(listener, made, limits: serving(1), policy: .Sequential)
+    let recorded = owner.close()
+    defer let _received = read_to_end(client)
+    testing.assert(shut, "the client could not end its side")?
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(recorded.exchanges, UInt64(1), "the exchange was not observed")?
+    testing.assert_eq(recorded.cut_short, UInt64(1), "the body cut short was not observed")?
+    .Ok(())
+}
+
 test "a handler error before headers answers its status" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
@@ -1696,25 +1716,30 @@ fn system_exchanges_router() -> Router[()] {
 
 // `Recorded` answers every request with "ok" and records what `serve` tells
 // it: how many exchanges ended, how many of them failed to read the request
-// because it timed out, and how many accept retries it was told of, with the
+// because it timed out or its body ended before its length, and how many accept retries it was told of, with the
 // first four pauses in milliseconds.
 struct Recorded {
     exchanges: UInt64,
     timed_out: UInt64,
+    cut_short: UInt64,
     retries: UInt64,
     pauses_ms: [UInt64; 4],
 }
 
 impl Recorded {
     fn new() -> Recorded {
-        Recorded { exchanges = 0, timed_out = 0, retries = 0, pauses_ms = [0, 0, 0, 0] }
+        Recorded { exchanges = 0, timed_out = 0, cut_short = 0, retries = 0, pauses_ms = [0, 0, 0, 0] }
     }
 
-    // Count an exchange that ended, and whether reading its request timed out.
-    fn exchanged(inout self: Self, timed_out: Bool) {
+    // Count an exchange that ended, whether reading its request timed out, and
+    // whether its body ended before its length.
+    fn exchanged(inout self: Self, timed_out: Bool, cut_short: Bool) {
         self.exchanges += 1
         if timed_out {
             self.timed_out += 1
+        }
+        if cut_short {
+            self.cut_short += 1
         }
     }
 
@@ -1724,6 +1749,14 @@ impl Recorded {
             self.pauses_ms[self.retries] = pause_ms
         }
         self.retries += 1
+    }
+}
+
+// Whether the body of `exchange` ended before the length its request declared.
+fn cut_short_reading[P: Allocator](exchange: Exchange[P]) -> Bool {
+    match read exchange.failure {
+        Some(Unread(Status(BadRequest))) => true,
+        _ => false,
     }
 }
 
@@ -1747,7 +1780,7 @@ impl[P: Allocator] Handler[(), P] for Recorded {
 impl Observer for Recorded {
     fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match read event {
-            Exchanged(exchange) => &self.exchanged(timed_out_reading(exchange)),
+            Exchanged(exchange) => &self.exchanged(timed_out_reading(exchange), cut_short_reading(exchange)),
             Listening(_) => {},
             AcceptRetried(retry) => &self.retried(retry.pause.nanoseconds() / 1000000),
         }
@@ -1773,7 +1806,8 @@ impl Observer for Reporter {
         match read event {
             Exchanged(exchange) => {
                 let timed_out = timed_out_reading(exchange)
-                self.recorded.call([sink timed_out] |inout recorded: Recorded| &recorded.exchanged(timed_out))
+                let cut_short = cut_short_reading(exchange)
+                self.recorded.call([sink timed_out, sink cut_short] |inout recorded: Recorded| &recorded.exchanged(timed_out, cut_short))
             },
             Listening(_) => {},
             AcceptRetried(retry) => {
@@ -1842,23 +1876,36 @@ fn answer_message[H: Handler[(), P] + Observer, P: Allocator](sink reader: Readi
     let (answered, kept) = answer_body(&handler, request, &incoming, &note, closing, stopping)
     let duration = start.elapsed()
     let aborted = match read answered.sent.delivery { Whole => false, Memory => false, _ => true }
-    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, duration = .Some(duration), failure = answer_failure(answered, note) })
-    &handler.observe(event)
-    let drained = if aborted {
-        false
+    let drained: Result[(), RequestError] = if aborted {
+        .Ok(())
     } else {
-        &incoming.drain(&refusal).is_ok()
+        &incoming.drain(&refusal)
     }
     let recovered = incoming.into_reader().unwrap()
-    if aborted {
+    let next: ExchangeRead = if aborted {
         reset_connection(recovered.abandon())
-        return .Closed
+        .Closed
+    } else if kept && drained.is_ok() && !closing {
+        .Idle(recovered)
+    } else {
+        close_connection(recovered.abandon())
+        .Closed
     }
-    if kept && drained && !closing {
-        return .Idle(recovered)
+    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, duration = .Some(duration), failure = exchange_failure(answered, note, drained) })
+    &handler.observe(event)
+    next
+}
+
+// `exchange_failure` is what went wrong with an exchange: how the answer
+// failed, or else why the unread body could not be drained after it.
+fn exchange_failure[A: Allocator](answered: Answered, note: String[A], drained: Result[(), RequestError]) -> Option[Failure] where borrows(.Some: note) {
+    match answer_failure(answered, note) {
+        Some(failure) => .Some(failure),
+        None => match read drained {
+            Ok(_) => .None,
+            Err(error) => .Some(.Unread(copy(error))),
+        },
     }
-    close_connection(recovered.abandon())
-    .Closed
 }
 
 // The response may observe the handler and cached input; this call settles
