@@ -1,0 +1,8 @@
+error[T-Bound]: `R.Error` requires `Isolated`, and `Desk` is not `Isolated`: `line` is a `Chan[Send[Bool, Recv[UInt64, End]], ()]`, an end of a session, through which a call could wait on another task
+  --> tests/http/a_factory_error_holding_a_session_end_is_refused.lin:34:24
+   |
+34 |     let _served = http.listen_and_serve(net.loopback(8080), routes) else |failed| {
+   |                        ^^^^^^^^^^^^^^^^ `Desk` is not `Isolated`; pass a value that holds no end of a session
+  ::: std/http/serve.lin
+L  | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Isolated + Release {
+   |                                                                 ------- required by this `where` clause

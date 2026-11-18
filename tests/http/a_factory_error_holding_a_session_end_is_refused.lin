@@ -1,0 +1,39 @@
+import std.http
+import std.net
+import std.session
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// A desk holds one end of a session. Releasing it sends a ready signal and
+// waits for a number from the other end.
+struct Desk {
+    line: Chan[Send[Bool, Recv[UInt64, End]]],
+}
+
+impl Release for Desk {
+    fn release(sink self: Self) {
+        let Desk { line } = self
+        let (_, done) = line.send(true).recv()
+        done.close()
+    }
+}
+
+// The server releases the error of each handler factory that failed after the
+// first, while the serving tasks wait for it to finish starting, so a factory
+// error cannot hold a desk: releasing it could wait on a task that is itself
+// waiting.
+fn routes() -> Result[http.Router[()], Desk] {
+    let router: http.Router[()] = http.Router.new()
+    .Ok(router)
+}
+
+fn main() -> UInt8 {
+    let _served = http.listen_and_serve(net.loopback(8080), routes) else |failed| {
+        failed.release()
+        return 1
+    }
+    0
+}

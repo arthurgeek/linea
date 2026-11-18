@@ -2,7 +2,10 @@
 
 Status: Accepted — 2026-11-07; extends
 [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
-(a handler per serving task).
+(a handler per serving task). The bound on the factory's error in §2 is
+superseded by
+[0290](0290-a-handler-factory-error-holds-no-end-of-a-session.md), which adds
+`Isolated`.
 
 ## Context
 

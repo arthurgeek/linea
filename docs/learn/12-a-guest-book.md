@@ -642,8 +642,8 @@ guest-book: unable to open database file (SQLite code 14)
 Each HTTP worker then builds its own router around a borrowed client. Registering
 a route can fail, so the factory returns a `Result`. The HTTP server accepts
 nothing until all its handlers are ready and releases the others if one fails.
-Factory errors cross task boundaries: they must be `Owned`, `Shareable` and
-`Release`. A borrowed `Str` error is refused:
+Factory errors cross task boundaries: they must be `Owned`, `Shareable`,
+`Isolated` and `Release`. A borrowed `Str` error is refused:
 
 `routes_from_a_file.lin`:
 
@@ -670,7 +670,7 @@ error[T-Bound]: `R.Error` requires `Owned`, and `Str` can carry a borrow: it hol
 9   |     let _ = http.listen_and_serve(net.loopback(8080), routes) else |_| {
     |                  ^^^^^^^^^^^^^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds
    ::: std/http/serve.lin
-923 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+923 | ... ler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Isolated + Release {
     |                                                                 ------- required by this `where` clause
 ```
 

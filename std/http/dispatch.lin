@@ -286,7 +286,7 @@ fn restart_request_arena[P: Allocator](inout arena: mem.Arena[P], parent: P, lim
 }
 
 // A worker's loop owns its handler and request arena for the whole serving run.
-fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]], parent: P, make_handler: M, limits: Limits, stopping: task.Client[Bool]) where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]], parent: P, make_handler: M, limits: Limits, stopping: task.Client[Bool]) where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Isolated + Release {
     defer var refusal = parent.acquire(request_buffer_bytes) else |reason| {
         dispatch_failed_worker(me.send(.Err(.Memory(reason))))
         return
@@ -331,7 +331,7 @@ fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: sessi
     }
 }
 
-fn dispatch_put_worker[E: Owned + Shareable + Release](inout slot: Option[session.Chan[DispatchServing[E]]], sink next: session.Chan[DispatchServing[E]]) {
+fn dispatch_put_worker[E: Owned + Shareable + Isolated + Release](inout slot: Option[session.Chan[DispatchServing[E]]], sink next: session.Chan[DispatchServing[E]]) {
     match mem.exchange(&slot, .Some(next)) {
         Some(previous) => dispatch_failed_worker(previous),
         None => {},
@@ -339,7 +339,7 @@ fn dispatch_put_worker[E: Owned + Shareable + Release](inout slot: Option[sessio
 }
 
 // A failed startup still settles the session when the dispatcher cancels it.
-fn dispatch_failed_worker[E: Owned + Shareable + Release](sink me: session.Chan[DispatchServing[E]]) {
+fn dispatch_failed_worker[E: Owned + Shareable + Isolated + Release](sink me: session.Chan[DispatchServing[E]]) {
     match me.enter().offer() {
         Left(job) => {
             let (work, answer) = job.recv()
@@ -856,7 +856,7 @@ fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R
     dispatch_finish(state)
 }
 
-fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown, on: io.Io) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown, on: io.Io) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Isolated + Release {
     let metadata_bytes = smallest_arena(limits)
     if metadata_bytes == UInt64.max || limits.request_arena_bytes < metadata_bytes {
         let _closed = listener.close()
