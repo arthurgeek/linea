@@ -1,0 +1,10 @@
+// A byte no token begins, written after an operand, is reported by the
+// lexer and nothing else: the expression reads on past it, on its line or
+// on the next line opening with an operator no expression begins with.
+fn main() -> UInt8 {
+    let x: UInt8 = 1
+    let same_line = x é + 1
+    let next_line = x é
+        + x
+    same_line + next_line
+}

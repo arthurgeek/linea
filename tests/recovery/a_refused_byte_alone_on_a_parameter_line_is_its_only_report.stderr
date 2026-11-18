@@ -1,0 +1,5 @@
+error[S-Char]: unexpected character 'é'
+ --> tests/recovery/a_refused_byte_alone_on_a_parameter_line_is_its_only_report.lin:6:5
+  |
+6 |     é
+  |     ^ not a valid token

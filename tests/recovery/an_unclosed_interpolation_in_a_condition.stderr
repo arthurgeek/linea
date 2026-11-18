@@ -18,11 +18,6 @@ error[S-Separator]: expected `;` or a newline
   |
 3 |     if "{x}{" == "1" { return 0 }
   |                        ^^^^^^ this statement ends here
-error[S-Separator]: expected `;` or a newline
- --> tests/recovery/an_unclosed_interpolation_in_a_condition.lin:3:33
-  |
-3 |     if "{x}{" == "1" { return 0 }
-  |                                 ^ this statement ends here
 error[T-Condition]: expected `Bool`, found `{interpolation <unknown>, <unknown>}`
  --> tests/recovery/an_unclosed_interpolation_in_a_condition.lin:3:8
   |

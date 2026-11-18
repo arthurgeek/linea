@@ -1,0 +1,15 @@
+// A byte no token begins, written after an argument, is reported by the
+// lexer and is that argument's only report: the call still closes at its
+// `)`, on the byte's line or on the line an operator carries it to, and
+// the arguments around the byte are checked as written.
+fn twice(x: UInt8) -> UInt8 {
+    x * 2
+}
+
+fn main() -> UInt8 {
+    let x: UInt8 = 1
+    let closed = twice(x é)
+    let carried = twice(x é
+        + x)
+    closed + carried
+}

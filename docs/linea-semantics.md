@@ -485,7 +485,12 @@ contents; standard error carries the description.
 `Result` refers to the prelude's declaration, as it does for `?` and
 [T-DiscardFailure].
 
-**[S-Char]** A byte that cannot begin a token is invalid source.
+**[S-Char]** A byte that cannot begin a token is invalid source. It is that
+byte's only report: written after an operand, it is stepped over and the
+expression reads on as written, on its line or, where it ends its line, on a
+next line opening with an operator no expression begins with (`+`, `/`, `%`,
+a comparison, `&&` or `||`), since the byte may stand for an operator
+that carried the line on; and where a parameter or a list element begins, it stands for none.
 
 **[S-String]** A string literal must close before the end of its line. This
 holds for a raw literal too, and an unclosed raw literal is reported as
@@ -498,7 +503,9 @@ follows it is read as written. An unclosed
 literal holds the rest of its line, and a byte no token begins may stand for
 anything, so a call, an array, a tuple, a structure literal, a tuple pattern
 or a `match` with either
-as the last token of an element's line is not reported for the comma or the
+as the last token of an element's line, and a function's or lambda's parameter
+list with one as the last token of a parameter's line, is not reported for the
+comma or the
 closing bracket that line may have held. The list reads on to the next line
 unless that line begins a statement or a declaration; a separator missing
 anywhere else is reported, and so is a closing bracket missing where the list
