@@ -1,5 +1,5 @@
-error[M-Dependency]: the source of `lib` leaves the directory that holds its manifest
+error[M-Dependency]: the source of `lib` is not a path down from the directory that holds its manifest
  --> tests/dependencies/a_dependency_source_stays_inside_its_library/linea.json:3:9
   |
 3 |         "lib": { "path": "lib" }
-  |         ^^^^^ a library's `source` names a directory inside the one holding its manifest
+  |         ^^^^^ a library's `source` names a directory inside the one holding its manifest, by a path down from it without `..`

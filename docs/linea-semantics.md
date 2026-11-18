@@ -1817,7 +1817,7 @@ only by naming them too. A library two manifests name is one root, so a type it
 declares is one type wherever it is named; a library is identified by the
 directory it sits in as the filesystem resolves it, however a manifest spells
 the path to it. A library's `source` names a directory inside the one holding
-its manifest. A dependency and its consumer are compiled together from source,
+its manifest, as any root's does. A dependency and its consumer are compiled together from source,
 and testing a root runs that root's tests alone.
 
 **[M-Dependency]** An entry under `dependencies` names a library this root may
@@ -1827,7 +1827,8 @@ when the library's own `"name"` is absent or differs from the entry's name;
 when the name is `std`, or is written twice in one manifest; when the name
 already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
-when the library's `source` leaves the directory holding its manifest, or
+when the library's `source` is not a path down from the directory holding its
+manifest, or
 shares modules with another root's source (they are one directory, or one holds
 the other without the inner root's manifest between them); or when the library's manifest grants `extern` to any of its modules and the
 entry does not consent with `"extern": true`, or the entry consents and the
@@ -1988,6 +1989,12 @@ access for unloaded roots. Private and internal aliases are checked.
 a library and which declares `main` is refused where the `main` is written,
 `pub fn main` included; so is a dependency whose root module declares one. This differs from [S-Entry], which requires a program
 entry point.
+
+A manifest's `"source"` names the directory its root's modules sit in, relative
+to the manifest, by a path down from it: not absolute and with no `..`
+component, so the spelling and the filesystem name one directory. Absent or
+empty, it is the manifest's own directory. A source of another shape stops the
+command before anything is checked.
 
 A manifest says what its root is: `"kind"` is `"program"` (the default) or
 `"library"`; `"name"` names a library, and the name `std` makes the root the

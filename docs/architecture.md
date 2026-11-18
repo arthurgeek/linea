@@ -471,9 +471,13 @@ Which root is the standard library, and which roots may declare `extern`, is rea
 from each root's manifest (`Declared`) and recorded on its modules (`library`,
 `externs`); no pass decides it from a directory's spelling. A root whose manifest
 names it `std` is loaded as the library itself, with no embedded copy beside it.
-`rootOf` finds a root and the manifest that identified it in one walk, and
-`pathsOfRoot` gives the command line and the language server the same files,
-manifest included. A module's symbols are spelled from its import route
+`rootOf` finds a root and the manifest that identified it in one walk, reading
+the manifest's text once for every consumer of that root (`Root.manifest_text`),
+and `pathsOfRoot` gives the command line and the language server the same
+files, manifest included, with each file an editor holds unsaved listed where
+the root's source directory holds it. A manifest's `source` is a path down from
+its directory (ADR 0279), and `manifest_source.directory` spells the directory
+it names for a program root, a library and the build's example check alike. A module's symbols are spelled from its import route
 (`Program.modulePath`), never from its directory. A function's symbol ends
 that route with `;`, the root's empty route included, and brackets the
 arguments an implementation supplies its trait, so no two declarations share

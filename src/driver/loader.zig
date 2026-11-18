@@ -952,17 +952,15 @@ fn loadFromDiskWith(
 
     var files: std.ArrayList(InMemoryFile) = .empty;
     defer files.deinit(gpa);
-    var manifest_text: ?[]u8 = null;
-    defer if (manifest_text) |text| gpa.free(text);
 
-    // Sources are read when their module is reached. The manifest is read
-    // now: what it declares decides how the first module is loaded.
+    // Sources are read when their module is reached. The manifest's text is
+    // the one `rootOf` read: what it declares decides how the first module is
+    // loaded.
     for (paths) |rel| {
         const is_manifest = if (found.manifest) |m| std.mem.eql(u8, rel, m) else false;
-        if (is_manifest) manifest_text = try source_mod.readFileAlloc(io, gpa, rel);
         try files.append(gpa, .{
             .path = rel,
-            .text = if (is_manifest) manifest_text.? else "",
+            .text = if (is_manifest) found.manifest_text.? else "",
         });
     }
 
@@ -1250,6 +1248,11 @@ pub const Root = struct {
     /// null where no manifest did. Its keys decide how the root is loaded, so
     /// it is found by the walk that found the root and never by another.
     manifest: ?[]u8 = null,
+    /// The text of `manifest`, read once by the walk that found it. Where the
+    /// source begins, which libraries the root names and what a load of it
+    /// declares are all read from this text, so a manifest rewritten during a
+    /// load cannot give one load two answers.
+    manifest_text: ?[]u8 = null,
     /// The directory of the module a named `.lin` file belongs to, when that
     /// module is the entry rather than the source root's own module. Import
     /// paths still resolve from `entry`.
@@ -1258,6 +1261,7 @@ pub const Root = struct {
     pub fn deinit(self: Root, gpa: std.mem.Allocator) void {
         gpa.free(self.entry);
         if (self.manifest) |path| gpa.free(path);
+        if (self.manifest_text) |text| gpa.free(text);
         if (self.module) |dir| gpa.free(dir);
     }
 };
@@ -1299,7 +1303,9 @@ pub fn rootOf(
     const marked = programRootOf(io, trimmed, bound);
     if (std.mem.endsWith(u8, marked, ".lin")) return .{ .entry = try canonical(gpa, marked) };
 
-    const root = try sourceRootOf(gpa, io, marked);
+    const text = try manifestTextOf(gpa, io, marked);
+    errdefer if (text) |held| gpa.free(held);
+    const root = try sourceRootOf(gpa, marked, text);
     defer gpa.free(root);
     const settled = try canonical(gpa, root);
     errdefer gpa.free(settled);
@@ -1313,18 +1319,22 @@ pub fn rootOf(
         const named = try canonical(gpa, trimmed);
         defer gpa.free(named);
         if (!within(dirOfEntry(named), settled)) {
+            // Spelled before anything is freed, so a refused allocation
+            // leaves the `errdefer`s above each a value still held.
+            const alone = try canonical(gpa, named);
             gpa.free(settled);
-            return .{ .entry = try canonical(gpa, named) };
+            if (text) |held| gpa.free(held);
+            return .{ .entry = alone };
         }
         if (naming == .as_named and is_file and !std.mem.eql(u8, dirOfEntry(named), settled)) {
             module = try gpa.dupe(u8, dirOfEntry(named));
         }
     }
-    const manifest = if (holdsManifest(io, marked))
+    const manifest = if (text != null)
         try std.fs.path.join(gpa, &.{ if (marked.len == 0) "." else marked, manifest_name })
     else
         null;
-    return .{ .entry = settled, .manifest = manifest, .module = module };
+    return .{ .entry = settled, .manifest = manifest, .manifest_text = text, .module = module };
 }
 
 test "a file inside a program's source is that program's entry module, with its manifest" {
@@ -1374,6 +1384,7 @@ pub fn entryOf(
 ) ![]u8 {
     const found = try rootOf(gpa, io, path, naming, bound);
     if (found.manifest) |manifest| gpa.free(manifest);
+    if (found.manifest_text) |text| gpa.free(text);
     if (found.module) |module| gpa.free(module);
     return found.entry;
 }
@@ -1415,7 +1426,8 @@ pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root, unsaved: []co
         const where = std.Io.Dir.cwd().realPathFileAlloc(io, root_dir, arena.allocator()) catch root_dir;
         try seen.put(gpa, try gpa.dupe(u8, where), {});
     }
-    try appendDependencyPaths(gpa, io, dirOf(manifest), unsaved, &all, &listed, &seen);
+    const text = root.manifest_text orelse return all.toOwnedSlice(gpa);
+    try appendDependencyPaths(gpa, io, dirOf(manifest), text, unsaved, &all, &listed, &seen);
     return all.toOwnedSlice(gpa);
 }
 
@@ -1464,10 +1476,14 @@ fn appendPaths(gpa: std.mem.Allocator, all: *std.ArrayList([]const u8), listed: 
 /// The manifests and sources of the libraries the manifest in `manifest_dir`
 /// names under `dependencies`, and theirs. A library that cannot be read is
 /// left for the load to report against the manifest that names it.
+///
+/// `text` is the manifest in `manifest_dir`; each library's manifest is read
+/// once, for its source directory and for the libraries it names in turn.
 fn appendDependencyPaths(
     gpa: std.mem.Allocator,
     io: std.Io,
     manifest_dir: []const u8,
+    text: []const u8,
     unsaved: []const []const u8,
     all: *std.ArrayList([]const u8),
     listed: *std.StringHashMapUnmanaged(void),
@@ -1476,8 +1492,6 @@ fn appendDependencyPaths(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
-    const path = try std.fs.path.join(a, &.{ manifest_dir, manifest_name });
-    const text = source_mod.readFileAlloc(io, a, path) catch return;
     const written = (try dependencies.read(a, text)) orelse return;
     // In the order the loader reads them, so the spelling a library's sources
     // are listed under is the one the loader reaches it by first.
@@ -1486,7 +1500,7 @@ fn appendDependencyPaths(
     for (entries) |entry| {
         const named = entry.path orelse continue;
         const dir = try joinedDir(a, manifest_dir, named);
-        if (!holdsManifest(io, dir)) continue;
+        const library_text = (try manifestTextOf(a, io, dir)) orelse continue;
         // The manifest under every spelling a manifest uses, whatever it
         // holds, so a load from these files finds and reports it as a load
         // from disk does; the sources once, under the first.
@@ -1494,12 +1508,15 @@ fn appendDependencyPaths(
         const where = std.Io.Dir.cwd().realPathFileAlloc(io, dir, a) catch dir;
         if (seen.contains(where)) continue;
         try seen.put(gpa, try gpa.dupe(u8, where), {});
-        const manifest = readManifest(a, io, dir) catch continue;
-        const source = try librarySourceDir(a, dir, if (manifest) |m| m.source else null);
+        const manifest = parseManifest(a, library_text) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => continue,
+        };
+        const source = try manifest_source.directory(a, dir, manifest.source);
         const sources = pathsOfModule(gpa, io, source) catch continue;
         try appendPaths(gpa, all, listed, sources);
         try appendHeld(gpa, io, source, unsaved, all, listed);
-        try appendDependencyPaths(gpa, io, dir, unsaved, all, listed, seen);
+        try appendDependencyPaths(gpa, io, dir, library_text, unsaved, all, listed, seen);
     }
 }
 
@@ -1643,15 +1660,15 @@ fn within(dir: []const u8, bound: []const u8) bool {
 /// submodules exactly as they would be one level up -- so this decides one
 /// thing only, and nothing downstream learns that `src` was involved.
 ///
-/// The caller owns the result.
-fn sourceRootOf(gpa: std.mem.Allocator, io: std.Io, root: []const u8) ![]const u8 {
-    const manifest = try readManifest(gpa, io, root);
-    defer if (manifest) |m| freeManifest(gpa, m);
-
-    const named = (manifest orelse return gpa.dupe(u8, root)).source orelse
-        return gpa.dupe(u8, root);
-    if (root.len == 0) return gpa.dupe(u8, named);
-    return std.fs.path.join(gpa, &.{ root, named });
+/// `text` is the manifest `root` holds, or null where it holds none. The
+/// directory is `manifest_source.directory`'s spelling, the one a library's
+/// source directory takes, so a program and the same directory loaded as a
+/// library name the same files. The caller owns the result.
+fn sourceRootOf(gpa: std.mem.Allocator, root: []const u8, text: ?[]const u8) ![]const u8 {
+    const written = text orelse return gpa.dupe(u8, root);
+    const manifest = try parseManifest(gpa, written);
+    defer freeManifest(gpa, manifest);
+    return manifest_source.directory(gpa, root, manifest.source);
 }
 
 /// What a directory's manifest names as its source root, if it names one.
@@ -1901,7 +1918,9 @@ test "a manifest names the C a program builds and links" {
     try testing.expectError(error.ManifestLinksWithoutExtern, declaredFromText(gpa, "{ \"headers\": [\"sqlite3.h\"] }"));
 }
 
-fn readManifest(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?Manifest {
+/// The text of the manifest `dir` holds, or null where it holds none that
+/// can be read. The caller owns the result.
+fn manifestTextOf(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) std.mem.Allocator.Error!?[]u8 {
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
     const path = std.fmt.bufPrint(&buffer, "{s}{s}{s}", .{
         dir,
@@ -1909,9 +1928,10 @@ fn readManifest(gpa: std.mem.Allocator, io: std.Io, dir: []const u8) !?Manifest 
         manifest_name,
     }) catch return null;
 
-    const text = source_mod.readFileAlloc(io, gpa, path) catch return null;
-    defer gpa.free(text);
-    return try parseManifest(gpa, text);
+    return source_mod.readFileAlloc(io, gpa, path) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => null,
+    };
 }
 
 /// A manifest's text read into the keys this compiler reads: the one reader
@@ -1928,10 +1948,11 @@ fn parseManifest(gpa: std.mem.Allocator, text: []const u8) !Manifest {
 
     const declared = try declaredFrom(gpa, parsed.value);
     errdefer declared.deinit(gpa);
-    // A `source` leaving the directory holding the manifest is refused here,
-    // for a root and for a library alike: the one check either takes.
+    // A `source` that is not a path down from the directory holding the
+    // manifest is refused here, for a root and for a library alike: the one
+    // check either takes.
     const written = manifest_source.named(parsed.value.source);
-    if (written) |named| if (!try manifest_source.staysInside(gpa, named)) return error.ManifestSourceLeavesRoot;
+    if (written) |named| if (!manifest_source.staysInside(named)) return error.ManifestSourceLeavesRoot;
     const source: ?[]const u8 = if (written) |named| try gpa.dupe(u8, named) else null;
     errdefer if (source) |named| gpa.free(named);
     const name: ?[]const u8 = if (parsed.value.name) |named| try gpa.dupe(u8, named) else null;
@@ -1942,13 +1963,6 @@ fn freeManifest(gpa: std.mem.Allocator, manifest: Manifest) void {
     if (manifest.source) |named| gpa.free(named);
     if (manifest.name) |named| gpa.free(named);
     manifest.declared.deinit(gpa);
-}
-
-/// The directory a library's modules sit in: the one holding its manifest,
-/// or the one its manifest's `source` names beneath it.
-fn librarySourceDir(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]const u8 {
-    const named = source orelse return dir;
-    return joinedDir(gpa, dir, named);
 }
 
 /// The keys a manifest may write. Unknown ones are ignored, so a manifest may
@@ -3626,7 +3640,7 @@ const Loader = struct {
             },
             error.ManifestNamesTheLibrary => Manifest{ .source = null, .declared = .{} },
             error.ManifestSourceLeavesRoot => {
-                try self.reportManifest(manifest_path, text, entry.key, "a library's `source` names a directory inside the one holding its manifest", "the source of `{s}` leaves the directory that holds its manifest", .{entry.name}, &.{});
+                try self.reportManifest(manifest_path, text, entry.key, "a library's `source` names a directory inside the one holding its manifest, by a path down from it without `..`", "the source of `{s}` is not a path down from the directory that holds its manifest", .{entry.name}, &.{});
                 return true;
             },
         };
@@ -3652,9 +3666,11 @@ const Loader = struct {
         // A library's modules are the ones beneath its own source directory,
         // which sits inside the directory holding its manifest and shares no
         // module with another root.
-        const source_dir = try librarySourceDir(a, dir, parsed.source);
-        // `parseManifest` refused a `source` leaving the library's directory.
-        const source_identity = try librarySourceDir(a, identity, parsed.source);
+        const source_dir = try manifest_source.directory(a, dir, parsed.source);
+        // `parseManifest` refused a `source` that is not a path down from the
+        // library's directory, so the same path beneath its identity is where
+        // the filesystem finds its source.
+        const source_identity = try manifest_source.directory(a, identity, parsed.source);
         if (self.sourceOverlapping(source_identity, identity)) |other| {
             const note = try std.fmt.allocPrint(self.sink.arena, "keep each library's source apart; `{s}` reads modules from `{s}`", .{ self.rootLabel(other), self.graph.items[other.index()].source_dir });
             try self.reportManifest(manifest_path, text, entry.key, "two roots may not read the same modules", "the source of `{s}` overlaps the source of `{s}`", .{ name, self.rootLabel(other) }, &.{note});
@@ -4114,8 +4130,6 @@ test "a manifest outside the workspace is not the opened file's program" {
 }
 
 test "a manifest's source key narrows the files a root reaches" {
-    // `reachOf` in `build/source.zig` applies this rule to the examples with the
-    // same manifest text; the two must agree.
     const gpa = testing.allocator;
 
     var tmp = testing.tmpDir(.{});
@@ -4125,13 +4139,12 @@ test "a manifest's source key narrows the files a root reaches" {
 
     const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
     defer gpa.free(root);
-    const named = try sourceRootOf(gpa, testing.io, root);
-    defer gpa.free(named);
-    const settled = try canonical(gpa, named);
-    defer gpa.free(settled);
+    const found = try rootOf(gpa, testing.io, root, .as_named, "");
+    defer found.deinit(gpa);
     const expected = try std.fmt.allocPrint(gpa, "{s}/src", .{root});
     defer gpa.free(expected);
-    try testing.expectEqualStrings(expected, settled);
+    try testing.expectEqualStrings(expected, found.entry);
+    try testing.expectEqualStrings("{\"source\": \"./src/\"}", found.manifest_text.?);
 }
 
 test "a source root written as this directory names the files the walk found" {

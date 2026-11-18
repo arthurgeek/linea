@@ -727,7 +727,7 @@ pub fn run(process: std.process.Init) !u8 {
             ),
             error.ManifestSourceLeavesRoot => try std.fmt.allocPrint(
                 gpa,
-                "the `source` in its {s} leaves the directory holding it; name a directory inside that one",
+                "the `source` in its {s} is not a path down from the directory holding it; name a directory inside that one, without `..`",
                 .{loader.manifest_name},
             ),
             error.ManifestExternNotModules => try std.fmt.allocPrint(

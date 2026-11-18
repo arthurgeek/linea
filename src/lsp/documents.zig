@@ -121,10 +121,15 @@ pub const Documents = struct {
             const is_manifest = std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name);
             const buffer = self.open.get(disk_path);
             const deferred = buffer == null and !is_manifest and reading == .open_and_manifests;
+            // The root's manifest is the text the walk that found the root
+            // read, so the load and the root agree on what it says.
+            const walked = if (root.manifest) |m| std.mem.eql(u8, m, disk_path) else false;
             const text = if (buffer) |held|
                 try gpa.dupe(u8, held)
             else if (deferred)
                 try gpa.dupe(u8, "")
+            else if (walked)
+                try gpa.dupe(u8, root.manifest_text.?)
             else
                 try source_mod.readFileAlloc(io, gpa, path);
             errdefer gpa.free(text);

@@ -3644,14 +3644,11 @@ pub const Unreached = struct {
 /// root itself, or its manifest's `source` directory. A manifest that cannot
 /// be read, or whose `source` leaves the root, is a problem and has no reach.
 ///
-/// Which `source` a manifest names and whether it stays inside the manifest's
-/// directory are `manifest_source`'s answers, the ones the loader reads. The
-/// directory is then spelled by joining and removing `.` segments, where
-/// `sourceRootOf` in `src/driver/loader.zig` joins alone: the loader's test "a
-/// manifest's source key narrows the files a root reaches" and the case "a
-/// source no root reaches belongs to no example root" in
-/// `build/source_test.zig` use the same manifest text and fail when the two
-/// disagree.
+/// Which `source` a manifest names, whether it stays inside the manifest's
+/// directory, and how the directory it names is spelled are
+/// `manifest_source`'s answers, the ones the loader reads. The membership
+/// check stays this gate's own: it reads the example entries and not the
+/// loader's file discovery, which is what it checks.
 fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEntry, problems: *std.ArrayList([]const u8)) ?[]const u8 {
     const manifest = for (entries) |entry| {
         if (entry.directory or !std.mem.eql(u8, std.fs.path.basenamePosix(entry.path), manifest_name)) continue;
@@ -3666,15 +3663,14 @@ fn reachOf(gpa: std.mem.Allocator, root: []const u8, entries: []const ExampleEnt
             return null;
         };
         if (manifest_source.named(parsed.source)) |source| {
-            if (!(manifest_source.staysInside(gpa, source) catch @panic("out of memory"))) {
-                problems.append(gpa, std.fmt.allocPrint(gpa, "{s} names a source, \"{s}\", outside its directory", .{ found.path, source }) catch @panic("out of memory")) catch @panic("out of memory");
+            if (!manifest_source.staysInside(source)) {
+                problems.append(gpa, std.fmt.allocPrint(gpa, "{s} names a source, \"{s}\", that is not a path down from its directory", .{ found.path, source }) catch @panic("out of memory")) catch @panic("out of memory");
                 return null;
             }
             named = source;
         }
     }
-    const resolved = std.fs.path.resolvePosix(gpa, &.{ "/", root, named }) catch @panic("out of memory");
-    return resolved[1..];
+    return manifest_source.directory(gpa, root, named) catch @panic("out of memory");
 }
 
 /// The `.lin` files beneath `examples/` that no root reaches, so that no run of
