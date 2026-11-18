@@ -1534,17 +1534,27 @@ pub const Phase = struct {
     /// storage, so a move that emptied its root is no reason to refuse it: a
     /// part that covers every byte of a record moves the record out, and the
     /// zero-sized fields beside it are still the program's to read.
-    fn use(self: *Phase, at: InstId, b: Base, ty: TypeId, whole: bool) !void {
+    ///
+    /// A zero-sized value that must be settled is a value with no bytes to
+    /// find it by, so whether it was moved is asked of the value itself
+    /// (`settledAlone`), and moving any other part of its root says nothing
+    /// about it.
+    fn use(self: *Phase, at: InstId, address: InstId, b: Base, ty: TypeId, whole: bool) !void {
         if (b.carrier != no_entity and self.stale[b.carrier] != empty_set and self.mayCarry(ty)) {
             const a: Access = if (whole) Access.whole(held_whole - 1) else self.accessOf(b, ty);
             if (self.staleWithin(self.stale[b.carrier], a)) |d| try self.refuse(.stale, at, b.carrier, self.causeOf(d));
+        }
+        if (self.settledAlone(ty)) {
+            const e = self.settledThrough(address);
+            if (self.moved[e]) try self.refuse(.moved, at, e, self.moved_at[e]);
+            return;
         }
         if (b.root != no_entity and self.moved[b.root] and !self.occupiesNothing(ty)) try self.refuse(.moved, at, b.root, self.moved_at[b.root]);
     }
 
     fn useValue(self: *Phase, at: InstId, v: InstId) !void {
         const b = self.base[v.index()];
-        try self.use(at, b, self.mir.typeOf(v), b.carrier == self.instEntity(v));
+        try self.use(at, v, b, self.mir.typeOf(v), b.carrier == self.instEntity(v));
     }
 
     /// Records the change as one of the root's events, and marks, in every
@@ -1670,10 +1680,11 @@ pub const Phase = struct {
 
     /// Whether taking `src` as a whole `ty` moves its root out: a whole owned
     /// root or returned temporary. A lent root stays its lender's. Taking a
-    /// value of no bytes that owes nothing empties no storage, so of a record
-    /// whose every field is such a value, each field is taken on its own.
+    /// value of no bytes empties no storage, so of a record whose every field
+    /// is such a value, each field is taken on its own; one that must be
+    /// settled is held to its one move by `moveOut`.
     fn movesOut(self: *const Phase, src: Base, ty: TypeId) bool {
-        return !self.occupiesNothing(ty) and self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
+        return self.layoutSize(ty) != 0 and self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
     }
 
     /// Whether a value of `ty` has no bytes and owes no settlement. Such a
@@ -1684,7 +1695,29 @@ pub const Phase = struct {
         return self.layoutSize(ty) == 0 and !self.module.types.mustConsume(ty);
     }
 
-    fn moveOut(self: *Phase, at: InstId, src: Base, ty: TypeId) !void {
+    /// Whether a value of `ty` has no bytes and must be settled: one value,
+    /// taken once on a path, whose move is tracked by the value rather than
+    /// by bytes of its root.
+    fn settledAlone(self: *const Phase, ty: TypeId) bool {
+        return self.layoutSize(ty) == 0 and self.module.types.mustConsume(ty);
+    }
+
+    /// What a zero-sized value that must be settled is moved through: the
+    /// slot an address names whole, or else the address itself, so two
+    /// fields of one root are two values and one address taken twice is one.
+    fn settledThrough(self: *const Phase, address: InstId) Entity {
+        return if (self.mir.tagOf(address) == .addr_of) slotEntity(self.mir.localOf(address)) else self.instEntity(address);
+    }
+
+    fn moveOut(self: *Phase, at: InstId, address: InstId, src: Base, ty: TypeId) !void {
+        if (self.settledAlone(ty)) {
+            if (src.root != no_entity and self.root_kind[src.root] == .lent) return;
+            const e = self.settledThrough(address);
+            var v = self.valuesOf(e);
+            v.moved = true;
+            v.moved_at = at;
+            return self.set(e, v);
+        }
         if (!self.movesOut(src, ty)) return;
         try self.invalidate(src.root, Access.whole(self.root_extent[src.root]), at);
         var v = self.valuesOf(src.root);
@@ -1695,6 +1728,15 @@ pub const Phase = struct {
 
     fn step(self: *Phase, id: InstId) !void {
         const mir = self.mir;
+        // An instruction run again makes a new value, so what was moved out
+        // of the one it made last time is not moved out of this one.
+        const made = self.instEntity(id);
+        if (self.moved[made]) {
+            var v = self.valuesOf(made);
+            v.moved = false;
+            v.moved_at = .none;
+            try self.set(made, v);
+        }
         switch (mir.tagOf(id)) {
             .load => {
                 const local = mir.localOf(id);
@@ -1710,7 +1752,7 @@ pub const Phase = struct {
             .borrow, .address_bits => {
                 const a = mir.unaryOf(id);
                 const b = self.base[a.index()];
-                try self.use(id, b, mir.typeOf(a), false);
+                try self.use(id, a, b, mir.typeOf(a), false);
                 // The address's type is what sits there: the referent a
                 // borrow observes, or the array a view spans. The pointer
                 // holds what those bytes hold, relative to them, and observes
@@ -1728,7 +1770,7 @@ pub const Phase = struct {
             .load_indirect => {
                 const a = mir.unaryOf(id);
                 const b = self.base[a.index()];
-                try self.use(id, b, mir.typeOf(id), false);
+                try self.use(id, a, b, mir.typeOf(id), false);
                 if (mir.resultRoleOf(id) == .managed_address) return;
                 if (self.isDataPointer(mir.typeOf(id)) and b.carrier != no_entity) {
                     const window = self.accessOf(b, mir.typeOf(id));
@@ -1753,7 +1795,7 @@ pub const Phase = struct {
                 const ty = mir.typeOf(id);
                 const src = self.base[p.rhs.index()];
                 const dst = self.base[p.lhs.index()];
-                try self.use(id, src, ty, false);
+                try self.use(id, p.rhs, src, ty, false);
                 // The source is taken before the destination is written, so
                 // a self-assignment leaves its place holding the value. The
                 // parts the source holds in the copied bytes land at the same
@@ -1767,7 +1809,7 @@ pub const Phase = struct {
                     carried = try self.project(self.deps[src.carrier], from, placement, viewsRead(src));
                     carried_marks = try self.projectMarks(self.stale[src.carrier], from, placement, viewsRead(src));
                 }
-                if (mir.tagOf(id) == .move_value) try self.moveOut(id, src, ty);
+                if (mir.tagOf(id) == .move_value) try self.moveOut(id, p.rhs, src, ty);
                 try self.writeFrom(id, dst, ty, carried, carried_marks);
             },
             .call, .call_noreturn => {
@@ -1921,7 +1963,7 @@ pub const Phase = struct {
         for (args, params) |a, param| {
             const b = self.base[a.index()];
             switch (param.convention) {
-                .sink => try self.moveOut(id, b, param.ty),
+                .sink => try self.moveOut(id, a, b, param.ty),
                 .inout => if (b.root != no_entity) try self.invalidate(b.root, self.accessOf(b, param.ty), id),
                 .read => {},
             }

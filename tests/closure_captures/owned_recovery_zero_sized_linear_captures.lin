@@ -1,0 +1,23 @@
+// Tokens that take no bytes but must be settled are recovered one by one,
+// beside one another and beside a capture that fills every byte, and each
+// is settled once.
+@linear
+struct Token {}
+
+impl Token {
+    fn settle(sink self: Self) {
+        let {} = self
+    }
+}
+
+fn main() -> UInt8 {
+    let pair = [sink _first = Token {}, sink _second = Token {}] || {}
+    let { _first: first, _second: second } = pair.into_captures()
+    first.settle()
+    second.settle()
+
+    let held = [sink _count = UInt8(3), sink _token = Token {}] || {}
+    let { _count: count, _token: token } = held.into_captures()
+    token.settle()
+    count
+}
