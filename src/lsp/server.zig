@@ -1484,6 +1484,17 @@ const Rooted = struct {
         self.dir.cleanup();
     }
 
+    /// Opens the main file with `text`, as a client does before it sends a
+    /// change to it.
+    fn open(self: *Rooted, text: []const u8) !void {
+        try self.handler.@"textDocument/didOpen"(self.arena.allocator(), .{ .textDocument = .{
+            .uri = try self.main(),
+            .languageId = .{ .custom_value = "linea" },
+            .version = 1,
+            .text = text,
+        } });
+    }
+
     /// The one file of the program, named the way a client names it.
     fn main(self: *Rooted) ![]const u8 {
         return self.pathAt("main.lin");
@@ -1784,6 +1795,7 @@ test "an edit to an open buffer changes what the index offers before the file is
     try std.testing.expectEqualStrings("before", (try ws.offered())[0]);
 
     const a = ws.arena.allocator();
+    try ws.open("pub fn before() -> UInt8 { 1 }\n");
     try ws.handler.@"textDocument/didChange"(a, .{
         .textDocument = .{ .uri = try ws.main(), .version = 2 },
         .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
@@ -1810,6 +1822,7 @@ test "an index built while a buffer is open holds what the buffer says" {
     // manifest drops an index that was built: either way the next ask walks
     // the files on disk, which still say `before`.
     const a = ws.arena.allocator();
+    try ws.open("pub fn before() -> UInt8 { 1 }\n");
     try ws.handler.@"textDocument/didChange"(a, .{
         .textDocument = .{ .uri = try ws.main(), .version = 2 },
         .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
@@ -1872,6 +1885,7 @@ test "a client granting no file watching is asked for none, and its buffers are 
 
     try std.testing.expectEqualStrings("before", (try ws.offered())[0]);
 
+    try ws.open("pub fn before() -> UInt8 { 1 }\n");
     try ws.handler.@"textDocument/didChange"(a, .{
         .textDocument = .{ .uri = try ws.main(), .version = 2 },
         .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
