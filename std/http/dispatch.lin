@@ -50,9 +50,13 @@ impl[E] session.Protocol for DispatchAccepting[E] {
     type Step = session.Choose[session.Send[DispatchWork, session.Recv[DispatchResult, DispatchAccepting[E]]], session.Recv[Result[(), ServeError[E]], session.End]]
 }
 
+// What the dispatcher hands a serving worker: a connection with a request to
+// read, whether serving is stopping, an accept failure to observe before it
+// is retried, or the bound address to observe once every worker has started.
 enum DispatchWork {
     Read(Reading, Bool),
     Retry(net.AcceptRetry),
+    Listening(net.Address),
 }
 
 enum DispatchResult {
@@ -316,6 +320,11 @@ fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: sessi
                         &handler.observe(event)
                         .Observed
                     },
+                    Listening(address) => {
+                        let event: Event[P] = .Listening(address)
+                        &handler.observe(event)
+                        .Observed
+                    },
                 }
                 dispatch_put_worker(&next, answer.send(result))
             },
@@ -346,6 +355,7 @@ fn dispatch_failed_worker[E: Owned + Release](sink me: session.Chan[DispatchServ
             match work {
                 Read(reading, _) => dispatch_close_reader(reading),
                 Retry(_) => {},
+                Listening(_) => {},
             }
             dispatch_failed_worker(answer.send(.Answered(.Closed)))
         },
@@ -551,6 +561,19 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
             Ok(key) => self.interrupt = .Some(key),
             Err(Ignored) => {},
             Err(Unavailable(reason)) => &self.fail(.Accept(.Io(reason))),
+        }
+    }
+
+    // Tell one serving worker the address the listener is bound to, and wait
+    // until its handler has observed it, so `Listening` reaches a handler
+    // before anything is accepted and after every worker has started.
+    fn announce(inout self: Self, sink address: net.Address) {
+        let worker = &self.free.pop().unwrap()
+        let (result, free) = worker.enter().choose_left().send(.Listening(address)).recv()
+        &self.free.push(free).unwrap()
+        match result {
+            Observed => {},
+            Answered(_) => panic("an announcement answered as a request"),
         }
     }
 
@@ -841,6 +864,7 @@ fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R
                         &handler.observe(event)
                         .Observed
                     },
+                    Listening(_) => panic("a sequential dispatcher announces on its own handler"),
                 }
             }
             dispatch_run(&state, &local, limits, true, .None)
@@ -876,19 +900,6 @@ fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Share
         return .Err(.Task(reason))
     }
     let stopping = owner.client()
-    match copy(announce) {
-        Some(address) => {
-            var announcer = make_handler().made() else |reason| {
-                let _stopped = owner.close()
-                let _closed = listener.close()
-                return .Err(.Handler(reason))
-            }
-            let event: Event[P] = .Listening(address)
-            &announcer.observe(event)
-            announcer.release()
-        },
-        None => {},
-    }
     let body = sink [sink parent = copy(parent), sink make_handler = copy(make_handler), limits, sink stopping = copy(stopping)] |sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]]| {
         dispatch_worker[P, R, M](me, parent, make_handler, limits, stopping)
     }
@@ -932,11 +943,16 @@ fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Share
         }
     }
     if state.failed.is_none() {
+        match copy(announce) {
+            Some(address) => &state.announce(address),
+            None => {},
+        }
         &state.register_signals(shutdown)
         var unreachable_local = |sink work: DispatchWork| -> DispatchResult {
             match work {
                 Read(reader, _) => dispatch_close_reader(reader),
                 Retry(_) => {},
+                Listening(_) => {},
             }
             panic("threaded serving dispatched inline work")
         }

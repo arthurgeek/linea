@@ -933,14 +933,14 @@ test "a listen_and_serve error displays its cause" {
 // whose routes share state serves through `listen_and_serve_with`, and one
 // that serves one connection at a time passes `policy: .Sequential`.
 //
-// The listener is closed on every exit. Once the limits and the parent have
-// been accepted, and before anything is accepted, a handler `make_handler`
-// builds for the purpose is told the address the listener is bound to as
-// `Event.Listening`, which is how a program that asked for port 0 learns its
-// port. That handler is made before any serving
-// task starts, so a factory that cannot make one is asked once and serving
-// ends with `Serve(.Handler(E))`. A program that opens its own listener calls
-// `serve`.
+// The listener is closed on every exit. Once every serving task has made its
+// handler, and before anything is accepted, the handler of one serving task
+// is told the address the listener is bound to as `Event.Listening`, which is
+// how a program that asked for port 0 learns its port. `make_handler` is
+// called once per serving task and never for anything else, so a factory
+// that always fails is asked once, by the first task, and serving ends with
+// `Serve(.Handler(E))` without announcing anything. A program that opens its
+// own listener calls `serve`.
 pub fn listen_and_serve[R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Release {
     listen_and_serve_in(mem.system(), address, make_handler, limits, policy, shutdown, on)
 }
@@ -951,9 +951,8 @@ test "a listening server answers on every task it serves with" {
     .Ok(())
 }
 
-// `listen_and_serve` makes the handler that announces the bound address
-// before it starts a serving task, so a factory that always fails is asked
-// once.
+// The first serving task's failure stops the others from starting, so a
+// factory that always fails is asked once.
 test "a listening server whose handler cannot be made asks its factory once" {
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
@@ -965,6 +964,49 @@ test "a listening server whose handler cannot be made asks its factory once" {
     let tally = owner.close()
     testing.assert_eq(served, .Err(.Serve(.Handler(.NoDatabase))), "a handler that could not be made did not end serving")?
     testing.assert_eq(tally.visits, UInt64(1), "the factory was asked again after it failed")?
+    .Ok(())
+}
+
+// Each serving task makes the one handler it serves with, and one of them is
+// told the bound address once every task has made its handler.
+test "a listening server makes one handler per serving task and announces once" {
+    let file = log.capture()
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let made = [file, sink counter] || -> Announcer where carries(file, counter) {
+        let _asked = counted(counter)
+        Announcer { report = file.logger(minimum: .Info) }
+    }
+    let served = listen_and_serve(net.loopback(0), made, limits: serving(0), policy: .Threads(2))
+    let tally = owner.close()
+    defer let lines = file.finish()
+    testing.assert_ok_eq(served, (), "serving nothing failed")?
+    testing.assert_eq(tally.visits, UInt64(2), "the factory was not asked once per serving task")?
+    testing.assert_eq(lines.view(), "INFO announced bound=true\n", "the bound address was not announced once")?
+    .Ok(())
+}
+
+// The address is announced only once every serving task has its handler, so
+// a factory that fails on a later task leaves nothing announced.
+test "a listening server whose second handler cannot be made announces nothing" {
+    let file = log.capture()
+    // The capture exists even when no handler writes to it.
+    let primed = file.logger(minimum: .Info)
+    primed.release()
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let made = [file, sink counter] || -> Result[Announcer, Unopened] where carries(file, counter) {
+        if counted(counter) == 2 {
+            return .Err(.NoDatabase)
+        }
+        .Ok(Announcer { report = file.logger(minimum: .Info) })
+    }
+    let served = listen_and_serve(net.loopback(0), made, limits: serving(0), policy: .Threads(2))
+    let tally = owner.close()
+    defer let lines = file.finish()
+    testing.assert_eq(served, .Err(.Serve(.Handler(.NoDatabase))), "a handler that could not be made did not end serving")?
+    testing.assert_eq(tally.visits, UInt64(2), "the factory was not asked once per serving task")?
+    testing.assert_eq(lines.view(), "", "a server whose second task could not start announced its address")?
     .Ok(())
 }
 
