@@ -1193,10 +1193,13 @@ whatever else logs, such as a closure that keeps its copy with
 owns a file: it moves, and releasing it closes the file. Anything that
 implements `log.Sink` can take the lines.
 
-Each line is built in a buffer from the logger's allocator and handed to the
-sink whole, so lines never interleave within a line. A line the allocator
-cannot hold or the sink refuses is not written: `log` returns a
-`log.LogError` saying which, and the level methods drop it, since a program
+Each line is built whole in a buffer from the logger's allocator before any of
+it is written, and handed to the sink in one call. A descriptor or file sink
+writes it with as few writes as the system takes, so lines logged at once
+through one pipe do not interleave when each fits in one write of at most
+`PIPE_BUF` bytes (512 or more on every POSIX system); a longer line may. A
+line the allocator cannot hold is not written, and a line the sink fails on
+may have been written in part: `log` returns a `log.LogError` saying which, and the level methods drop it, since a program
 whose log has failed has nowhere better to say so. A type of your own
 implements `log.Fields` to be logged as the fields it chooses.
 

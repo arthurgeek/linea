@@ -47,7 +47,8 @@ test "a level displays in capitals" {
 pub trait Sink {
     type Error
 
-    // Write `line` whole, or report why it could not be written.
+    // Write `line`, or report why it could not be written in full. A sink
+    // that fails may have written part of the line before it failed.
     fn write_line(self: Self, line: Str) -> Result[(), Self.Error] where carries()
 }
 
@@ -71,8 +72,11 @@ test "a descriptor sink reports a refused line" {
     .Ok(())
 }
 
-// A `LogError` says why a line was not written: the allocator could not hold
-// it, or the sink refused it. Nothing of such a line is written.
+// A `LogError` says why a line was not written whole. `Memory` means the
+// allocator could not hold it, and nothing of it was written. `Sink` means the
+// sink failed while writing it, and part of it may have reached the sink
+// first: a descriptor writes until the system refuses, so a line cut short
+// can be followed by the next one.
 @copyable
 pub enum LogError[E] {
     Memory(mem.Oom),
@@ -98,9 +102,14 @@ impl[E] LogError[E] {
 // logger that owns its sink, such as a file, moves and is released once.
 //
 // A line below the minimum level costs one comparison: it reads no clock,
-// formats nothing and allocates nothing. A line at or above it is built in a
-// buffer from the allocator the caller gave and handed to the sink in one
-// write, so lines from one program never interleave within a line.
+// formats nothing and allocates nothing. A line at or above it is built whole
+// in a buffer from the allocator the caller gave before any of it is written,
+// and handed to the sink in one call, so a line that cannot be built writes
+// nothing. A descriptor or file sink writes the line with as few writes as the
+// system takes: lines that tasks log at once through one pipe do not
+// interleave when each reaches it in one write of at most `PIPE_BUF` bytes
+// (512 or more on every POSIX system), and a longer line, or one the system
+// takes in parts, may be interleaved with another task's.
 // Releasing a logger releases its sink: a file is closed, and standard error,
 // which the logger does not own, is left open. The derived `Release` requires
 // only `S: Release`, and discards the allocator and the level.
