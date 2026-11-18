@@ -1,0 +1,30 @@
+@linear
+struct Key { id: UInt8 }
+
+fn peek(key: Key) -> UInt8 {
+    key.id
+}
+
+fn take(sink key: Key) -> UInt8 {
+    let Key { id } = key
+    id
+}
+
+// On the early path `key` is already taken when the `defer` would run, so the
+// whole deferred block is cancelled: it neither reads `key` nor takes it.
+fn run(early: Bool) -> UInt8 {
+    let key: Key = .{ id = 1 }
+    defer {
+        let _seen = peek(key)
+        let _gone = take(key)
+    }
+    if early {
+        let _taken = take(key)
+        return 1
+    }
+    2
+}
+
+fn main() -> UInt8 {
+    run(true) + run(false)
+}
