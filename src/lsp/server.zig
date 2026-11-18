@@ -117,14 +117,16 @@ pub const Handler = struct {
     /// outside the editor, which the client's watch reports and which drops
     /// the analysis of the module that holds it.
     cached: ?Cached = null,
-    /// The files each program was last published with something wrong in,
-    /// by the program's entry. An editor shows a file's diagnostics until
-    /// others are published for it, so a file the program no longer holds is
-    /// published once more, with none.
+    /// What each check last reported for each file it reached, by the
+    /// check's key: a program's entry, or the module a file no import reaches
+    /// was checked as. A file is published with the union of what every key
+    /// reaching it reported, so a check that stops reaching a file takes back
+    /// only its own diagnostics, and what an editor shows for a file is what
+    /// every check of it reports, whichever ran last.
     ///
-    /// **Bound:** the files that had a diagnostic when their program was
-    /// last published, over the programs the session has published.
-    flagged: std.StringHashMapUnmanaged(std.ArrayList([]u8)) = .empty,
+    /// **Bound:** the files each key last reached, over the keys the session
+    /// has published; publishing one file reads each key once.
+    reported: std.StringArrayHashMapUnmanaged(Reported) = .empty,
     /// What every program under the workspace exports, held for the session.
     ///
     /// Built on the first request that reads it, so a session that never asks
@@ -177,6 +179,15 @@ pub const Handler = struct {
     const embeds_registration = "linea.embeddedFiles";
 
     /// One module's analysis with the module it is of.
+    /// One check's last report: its program's entry, and for each file it
+    /// reached, the diagnostics it reported there as the JSON a client is
+    /// sent. Everything, the key it is held under included, lives in `arena`.
+    const Reported = struct {
+        arena: std.heap.ArenaAllocator,
+        entry: []const u8,
+        files: std.StringArrayHashMapUnmanaged([]const []const u8) = .empty,
+    };
+
     const Cached = struct {
         /// The entry the analysis was checked from. Owned, because the
         /// resolution it was copied from lives on a message's arena.
@@ -185,11 +196,6 @@ pub const Handler = struct {
         /// no import of its program reaches; null for the program itself.
         /// Owned, as `entry` is.
         module: ?[]u8 = null,
-        /// For a module's analysis, the files its program's check holds. That
-        /// check owns what is published for them, so a file both checks reach
-        /// shows one check's diagnostics, and dropping an import here clears
-        /// nothing the program still reports. Keys owned.
-        program_files: std.StringHashMapUnmanaged(void) = .empty,
         of: analysis.Analysis,
     };
 
@@ -446,9 +452,11 @@ pub const Handler = struct {
         const path = try uri_mod.pathOf(arena, params.textDocument.uri);
         handler.documents.close(path);
         // The buffer is gone, so the module now reads that file from disk, and
-        // so does what the index holds for it.
+        // so does what the index holds for it. What the disk's text reports is
+        // published, since an editor still shows what the buffer's did.
         try handler.invalidate(arena, path);
         try handler.freshen(arena, path);
+        try handler.report(arena, path);
     }
 
     /// The kind the lexer gave every token of a document.
@@ -807,46 +815,22 @@ pub const Handler = struct {
                     if (module != null and std.mem.eql(u8, checked_module, module.?)) return &held.of;
                 } else {
                     if (module == null or held.of.fileNamed(path) != null) return &held.of;
-                    return handler.checkModule(arena, root, module.?, &held.of);
+                    return handler.checkAs(arena, root, module);
                 }
             }
         }
 
-        const program = try handler.checkAs(arena, root, null, .empty);
+        const program = try handler.checkAs(arena, root, null);
         if (module == null or program.fileNamed(path) != null) return program;
-        return handler.checkModule(arena, root, module.?, program);
-    }
-
-    /// Checks `root` with `module` as the entry, holding with it the files
-    /// `program`, the check of the root itself, holds.
-    fn checkModule(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: []const u8, program: *const analysis.Analysis) !*const analysis.Analysis {
-        var owned: std.StringHashMapUnmanaged(void) = .empty;
-        errdefer freeKeys(handler.gpa, &owned);
-        var it = publish.files(&program.program);
-        while (it.next()) |file| {
-            const file_path = program.table.get(file).path;
-            if (owned.contains(file_path)) continue;
-            const key = try handler.gpa.dupe(u8, file_path);
-            errdefer handler.gpa.free(key);
-            try owned.put(handler.gpa, key, {});
-        }
-        return handler.checkAs(arena, root, module, owned);
-    }
-
-    fn freeKeys(gpa: std.mem.Allocator, set: *std.StringHashMapUnmanaged(void)) void {
-        var keys = set.keyIterator();
-        while (keys.next()) |key| gpa.free(key.*);
-        set.deinit(gpa);
+        return handler.checkAs(arena, root, module);
     }
 
     /// Checks `root`, with `module` as the entry where one is named, and
-    /// holds the answer in place of what was held, taking `program_files`.
-    fn checkAs(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: ?[]const u8, program_files: std.StringHashMapUnmanaged(void)) !*const analysis.Analysis {
+    /// holds the answer in place of what was held.
+    fn checkAs(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: ?[]const u8) !*const analysis.Analysis {
         // Everything below is released here until the held analysis owns it,
         // and by `drop` after.
         var held = false;
-        var taken = program_files;
-        errdefer if (!held) freeKeys(handler.gpa, &taken);
         const files = try handler.documents.filesFor(arena, handler.io, root, .open_and_manifests);
 
         // The analysis copies what it was given, so the buffers above are the
@@ -859,7 +843,7 @@ pub const Handler = struct {
         const held_module: ?[]u8 = if (module) |dir| try handler.gpa.dupe(u8, dir) else null;
 
         handler.drop();
-        handler.cached = .{ .entry = key, .module = held_module, .program_files = taken, .of = fresh };
+        handler.cached = .{ .entry = key, .module = held_module, .of = fresh };
         held = true;
         try handler.watchEmbeds(arena, &handler.cached.?.of);
         return &handler.cached.?.of;
@@ -885,13 +869,8 @@ pub const Handler = struct {
     /// now does once per case.
     pub fn deinit(handler: *Handler) void {
         handler.drop();
-        var flagged = handler.flagged.iterator();
-        while (flagged.next()) |kept| {
-            for (kept.value_ptr.items) |path| handler.gpa.free(path);
-            kept.value_ptr.deinit(handler.gpa);
-            handler.gpa.free(kept.key_ptr.*);
-        }
-        handler.flagged.deinit(handler.gpa);
+        for (handler.reported.values()) |*kept| kept.arena.deinit();
+        handler.reported.deinit(handler.gpa);
         for (handler.embeds_watched.items) |path| handler.gpa.free(path);
         handler.embeds_watched.deinit(handler.gpa);
         handler.documents.deinit();
@@ -1082,7 +1061,6 @@ pub const Handler = struct {
             held.of.deinit();
             handler.gpa.free(held.entry);
             if (held.module) |dir| handler.gpa.free(dir);
-            freeKeys(handler.gpa, &held.program_files);
             handler.cached = null;
         }
     }
@@ -1135,23 +1113,23 @@ pub const Handler = struct {
         // last published with is taken down. One no document is open in,
         // that its files still resolve to, keeps what it showed.
         var gone: std.ArrayList([]const u8) = .empty;
-        var remembered = handler.flagged.iterator();
-        while (remembered.next()) |kept| {
-            const entry = kept.key_ptr.*;
-            if (published.contains(entry)) continue;
-            const now = handler.rootFor(arena, kept.value_ptr.items[0]) catch null;
-            if (now) |root| if (std.mem.eql(u8, root.entry, entry)) continue;
-            try gone.append(arena, try arena.dupe(u8, entry));
+        var kept = handler.reported.iterator();
+        while (kept.next()) |held| {
+            const key = held.key_ptr.*;
+            if (published.contains(key)) continue;
+            const files = held.value_ptr.files.keys();
+            if (files.len != 0) {
+                const now = handler.rootFor(arena, files[0]) catch null;
+                if (now) |root| if (std.mem.eql(u8, root.entry, held.value_ptr.entry)) continue;
+            }
+            try gone.append(arena, try arena.dupe(u8, key));
         }
         std.mem.sort([]const u8, gone.items, {}, struct {
             fn before(_: void, a: []const u8, b: []const u8) bool {
                 return std.mem.lessThan(u8, a, b);
             }
         }.before);
-        for (gone.items) |entry| {
-            try handler.clearLeft(arena, entry, null);
-            try handler.remember(entry, &.{});
-        }
+        for (gone.items) |key| try handler.withdraw(arena, key);
     }
 
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
@@ -1253,26 +1231,75 @@ pub const Handler = struct {
     /// diagnostics.
     fn report(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !void {
         const checked = try handler.check(arena, path);
+        const entry = (try handler.rootFor(arena, path)).entry;
+        const key = handler.cached.?.module orelse entry;
+
+        var fresh: Reported = .{ .arena = .init(handler.gpa), .entry = undefined };
+        errdefer fresh.arena.deinit();
+        const keep = fresh.arena.allocator();
+        fresh.entry = try keep.dupe(u8, entry);
+        const owned_key = try keep.dupe(u8, key);
 
         const publication = try publish.Publication.init(arena, checked);
-        var held: std.StringHashMapUnmanaged(void) = .empty;
-        var wrong: std.ArrayList([]const u8) = .empty;
         var it = publish.files(&checked.program);
         while (it.next()) |file| {
             const diagnostics = try publication.forFile(arena, file, handler.offset_encoding);
+            const texts = try keep.alloc([]const u8, diagnostics.len);
+            for (diagnostics, texts) |d, *text| text.* = try std.json.Stringify.valueAlloc(keep, d, .{ .emit_null_optional_fields = false });
             const file_path = checked.table.get(file).path;
-            try held.put(arena, file_path, {});
-            // What the program's own check reports for this file is what an
-            // editor shows; a module's check reaching it publishes nothing.
-            if (handler.cached.?.program_files.contains(file_path)) continue;
-            if (diagnostics.len != 0) try wrong.append(arena, file_path);
-            try handler.publishFor(arena, file_path, diagnostics);
+            if (fresh.files.contains(file_path)) continue;
+            try fresh.files.put(keep, try keep.dupe(u8, file_path), texts);
         }
-        // A file checked as its own module's entry is published under that
-        // module, so clearing what it left does not clear its program's files.
-        const entry = handler.cached.?.module orelse (try handler.rootFor(arena, path)).entry;
-        try handler.clearLeft(arena, entry, &held);
-        try handler.remember(entry, wrong.items);
+
+        // What this key reported before for a file it no longer reaches is
+        // taken back; a file it reported nothing for shows the same as before.
+        var left: std.ArrayList([]const u8) = .empty;
+        if (handler.reported.get(key)) |before| {
+            for (before.files.keys(), before.files.values()) |file_path, texts| {
+                if (texts.len == 0 or fresh.files.contains(file_path)) continue;
+                try left.append(arena, try arena.dupe(u8, file_path));
+            }
+        }
+        try handler.hold(owned_key, fresh);
+
+        for (handler.reported.get(key).?.files.keys()) |file_path| try handler.publishUnion(arena, file_path);
+        for (left.items) |file_path| try handler.publishUnion(arena, file_path);
+    }
+
+    /// Holds `report` under `key` in place of what was held there.
+    fn hold(handler: *Handler, key: []const u8, report_held: Reported) !void {
+        if (handler.reported.fetchOrderedRemove(key)) |old| {
+            var released = old.value;
+            released.arena.deinit();
+        }
+        try handler.reported.put(handler.gpa, key, report_held);
+    }
+
+    /// Withdraws everything `key` reported, publishing each file it reported
+    /// something for with what the keys left still report.
+    fn withdraw(handler: *Handler, arena: std.mem.Allocator, key: []const u8) !void {
+        var removed = handler.reported.fetchOrderedRemove(key) orelse return;
+        defer removed.value.arena.deinit();
+        for (removed.value.files.keys(), removed.value.files.values()) |file_path, texts| {
+            if (texts.len != 0) try handler.publishUnion(arena, file_path);
+        }
+    }
+
+    /// Publishes `file` with the union of what every key reports for it, in
+    /// the order the keys were last reported, a diagnostic another key
+    /// already reported written once.
+    fn publishUnion(handler: *Handler, arena: std.mem.Allocator, file: []const u8) !void {
+        var seen: std.StringHashMapUnmanaged(void) = .empty;
+        var out: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        for (handler.reported.values()) |*kept| {
+            const texts = kept.files.get(file) orelse continue;
+            for (texts) |text| {
+                if (seen.contains(text)) continue;
+                try out.append(arena, try std.json.parseFromSliceLeaky(lsp.types.Diagnostic, arena, text, .{ .ignore_unknown_fields = true }));
+            }
+            for (texts) |text| try seen.put(arena, text, {});
+        }
+        try handler.publishFor(arena, file, out.items);
     }
 
     fn publishFor(handler: *Handler, arena: std.mem.Allocator, path: []const u8, diagnostics: []const lsp.types.Diagnostic) !void {
@@ -1287,44 +1314,6 @@ pub const Handler = struct {
             },
             .{ .emit_null_optional_fields = false },
         );
-    }
-
-    /// Publishes no diagnostics for each file the program at `entry` was
-    /// last published with something wrong in and no longer holds. `held`
-    /// is every file just published, or null where the program itself is
-    /// gone.
-    ///
-    /// **Bound:** the files remembered for this one program.
-    fn clearLeft(handler: *Handler, arena: std.mem.Allocator, entry: []const u8, held: ?*const std.StringHashMapUnmanaged(void)) !void {
-        const before = handler.flagged.getPtr(entry) orelse return;
-        for (before.items) |old| {
-            if (held) |now| if (now.contains(old)) continue;
-            try handler.publishFor(arena, old, &.{});
-        }
-    }
-
-    /// Replaces what is remembered for the program at `entry` with `wrong`,
-    /// the files just published with a diagnostic.
-    fn remember(handler: *Handler, entry: []const u8, wrong: []const []const u8) !void {
-        const gpa = handler.gpa;
-        if (handler.flagged.getPtr(entry)) |before| {
-            for (before.items) |old| gpa.free(old);
-            before.clearRetainingCapacity();
-            if (wrong.len == 0) {
-                var removed = handler.flagged.fetchRemove(entry).?;
-                removed.value.deinit(gpa);
-                gpa.free(removed.key);
-                return;
-            }
-        } else {
-            if (wrong.len == 0) return;
-            const key = try gpa.dupe(u8, entry);
-            errdefer gpa.free(key);
-            try handler.flagged.put(gpa, key, .empty);
-        }
-        const list = handler.flagged.getPtr(entry).?;
-        try list.ensureTotalCapacity(gpa, wrong.len);
-        for (wrong) |file_path| list.appendAssumeCapacity(try gpa.dupe(u8, file_path));
     }
 };
 

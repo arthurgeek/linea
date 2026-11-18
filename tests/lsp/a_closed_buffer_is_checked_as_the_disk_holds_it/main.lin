@@ -1,0 +1,7 @@
+// Closing a buffer hands the file back to the disk, and what the disk's text
+// reports is published again: `util.lin` on disk returns `true`.
+import util
+
+fn main() -> UInt8 {
+    util.value()
+}

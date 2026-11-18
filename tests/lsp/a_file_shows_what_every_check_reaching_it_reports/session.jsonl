@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// What a file shows is what every check reaching it reports. The program\n// takes `util` after a file of `sub`, which nothing imports, already did, and\n// `sub` dropping it leaves the program's report of `util.lin` standing.\nfn main() -> UInt8 {\n    0\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"sub/x.lin","languageId":"linea","version":1,"text":"import util\n\npub fn twice() -> UInt8 {\n    util.value() + util.value()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"main.lin","version":2},"contentChanges":[{"text":"// What a file shows is what every check reaching it reports. The program\n// takes `util` after a file of `sub`, which nothing imports, already did, and\n// `sub` dropping it leaves the program's report of `util.lin` standing.\nimport util\n\nfn main() -> UInt8 {\n    util.value()\n}\n"}]}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"sub/x.lin","version":2},"contentChanges":[{"text":"pub fn twice() -> UInt8 {\n    2\n}\n"}]}}
+{"jsonrpc":"2.0","id":2,"method":"shutdown"}
