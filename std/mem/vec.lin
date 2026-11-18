@@ -1,4 +1,5 @@
 import std.mem.address
+import std.io.core
 import std.release
 import std.testing
 
@@ -165,6 +166,53 @@ internal fn vector_from_buffer[A: Allocator](sink buffer: Buffer[A], length: UIn
         panic("byte vector length exceeds its buffer")
     }
     return .{ storage = Storage.from_buffer(buffer), len = length }
+}
+
+impl[A: Allocator] Vec[UInt8, A] {
+    // Read up to the vector's length in bytes from `reader` over its
+    // elements, from the first, and answer how many arrived. The vector keeps
+    // its length and its backing buffer, which the reader fills in place.
+    internal fn read_from[R: core.Reader](inout self: Self, inout reader: R) -> Result[UInt64, R.Error] where carries(.Err: reader) {
+        let count = self.len
+        if count == 0 {
+            return .Ok(0)
+        }
+        &self.storage.read_from(&reader, count)
+    }
+
+    test "a byte vector reads from a reader into its own buffer" {
+        defer var bytes = vector_from_buffer(system().acquire(4).unwrap(), 4)
+        var source = VecTestSource { byte = 65, available = 3 }
+        let first = &bytes.read_from(&source)
+        let second = &bytes.read_from(&source)
+        testing.assert_eq(first, .Ok(UInt64(3)), "the read did not stop where the source did")?
+        testing.assert_eq(second, .Ok(UInt64(0)), "a drained source answered more bytes")?
+        testing.assert_eq(bytes.length(), UInt64(4), "reading changed the vector's length")?
+        testing.assert_eq(bytes[UInt64(2)], UInt8(65), "the bytes read did not reach the vector")?
+    }
+}
+
+// VecTestSource answers `available` copies of `byte`, then end of input.
+struct VecTestSource {
+    byte: UInt8,
+    available: UInt64,
+}
+
+impl core.Reader for VecTestSource {
+    type Error = ()
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, ()] {
+        let taken = if count < self.available {
+            count
+        } else {
+            self.available
+        }
+        for at in 0..taken {
+            &buffer.store_byte(offset + at, self.byte)
+        }
+        self.available -= taken
+        .Ok(taken)
+    }
 }
 
 // Return allocated backing, including initialized bytes beyond Vec.len.
