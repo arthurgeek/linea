@@ -44,8 +44,9 @@ Strings, collections, parsing, and files.
 - [frequency_report.lin](frequency_report.lin): counts how often each line appears in a file and lists them most frequent first; reading `lines()`, counting with a `Map`, and sorting with `Vec.sort_by`.
 - [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; `lines()`, `split_once`, and `let ... else`.
 - [form-letters](form-letters/main.lin): fills a letter template per order; files embedded with `embed`, `split_once`, JSON decoding and string building.
-- [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode`, `json.decode_file`, and `json.encode`.
+- [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode`, `json.decode_file`, and `json.encode_line`.
 - [json_inventory.lin](json_inventory.lin): totals an inventory and adds a summary; loading with `json.read_file` and editing a `json.Value` document.
+- [uptime_report.lin](uptime_report.lin): summarizes a log of health checks per service; reading JSON Lines lazily with `json.Lines` and writing them with `json.encode_line`.
 - [notes](notes/main.lin): manages personal tasks and notes with priority and tags; CLI argument parsing, subcommands, atomic JSON storage, tabular formatting, and JSON output.
 - [discounts](discounts/main.lin): applies a validated discount; newtypes with `where` checks and opaque types.
 

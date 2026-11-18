@@ -1,0 +1,199 @@
+// Summarize health checks recorded as JSON Lines: one check on each line,
+// such as `{"service":"checkout","ok":true,"ms":120}`. The program reads a
+// file named on the command line, or standard input when none is named, and
+// writes one summary line for each service, also as JSON Lines. A line that
+// is not a check is reported with its line number and skipped, so one bad
+// record does not hide the rest of the log.
+//
+//   linea run examples/uptime_report.lin -- checks.jsonl
+//   tail -n 1000 checks.jsonl | linea run examples/uptime_report.lin
+import std.env
+import std.fs
+import std.io
+import std.json
+import std.mem
+import std.testing
+
+// `json.Decode[A]` builds a `Check` from each line's document, and a line
+// missing a field or holding a field `Check` does not declare is refused.
+@derive(Release, json.Decode[A])
+struct Check[A: Allocator = mem.SystemAllocator] {
+    service: String[A],
+    ok: Bool,
+    ms: UInt64,
+}
+
+// Tally is what the report knows about one service so far.
+struct Tally {
+    service: String,
+    checks: UInt64,
+    failed: UInt64,
+    slowest_ms: UInt64,
+}
+
+derive Release for Tally
+
+// `json.Encode` writes a `Summary` as one JSON object, its fields in the order
+// they are declared.
+@derive(json.Encode)
+struct Summary {
+    service: Str,
+    checks: UInt64,
+    failed: UInt64,
+    slowest_ms: UInt64,
+}
+
+// Add `check` to its service's tally, starting a tally the first time a
+// service is seen, so the summaries come out in that order.
+fn record(inout tallies: Vec[Tally], check: Check) -> Result[(), mem.Oom] {
+    for inout tally in tallies {
+        if tally.service.view() == check.service.view() {
+            count(&tally, check)
+            return .Ok(())
+        }
+    }
+    var tally = Tally { service = check.service.view().to_owned()?, checks = 0, failed = 0, slowest_ms = 0 }
+    count(&tally, check)
+    // `settled()` releases a tally the vector had no room for and keeps the
+    // reason.
+    &tallies.push(tally).settled()?
+    .Ok(())
+}
+
+// Count one check in its service's tally.
+fn count(inout tally: Tally, check: Check) {
+    tally.checks += 1
+    if !check.ok {
+        tally.failed += 1
+    }
+    if check.ms > tally.slowest_ms {
+        tally.slowest_ms = check.ms
+    }
+}
+
+test "checks are tallied per service in the order services appear" {
+    defer var tallies: Vec[Tally] = Vec.new()
+    defer let first = Check { service = "search".to_owned().unwrap(), ok = true, ms = 40 }
+    defer let second = Check { service = "checkout".to_owned().unwrap(), ok = false, ms = 900 }
+    defer let third = Check { service = "search".to_owned().unwrap(), ok = false, ms = 75 }
+    record(&tallies, first).unwrap()
+    record(&tallies, second).unwrap()
+    record(&tallies, third).unwrap()
+    testing.assert_eq(tallies.length(), UInt64(2), "a service was tallied twice")?
+    let search = tallies.as_slice().get(0).unwrap()
+    testing.assert_eq(search.service.view(), "search", "the first service seen did not come first")?
+    testing.assert_eq(search.checks, UInt64(2), "a check was not counted")?
+    testing.assert_eq(search.failed, UInt64(1), "a failed check was not counted")?
+    testing.assert_eq(search.slowest_ms, UInt64(75), "the slowest check was not kept")?
+}
+
+// Read checks from `reader` as JSON Lines and tally them. Each line that is
+// not a check is reported on standard error with its number, and counted.
+// Reading stops early only when the input itself fails.
+fn tally_checks[R: io.Reader](sink reader: R, inout tallies: Vec[Tally]) -> Result[UInt64, mem.Oom] where R: Release, R.Error: Display + Release {
+    // `json.Lines.open` reads `reader` one line at a time, as the loop asks
+    // for checks; a log of any length takes the memory of one line.
+    // `decoded[Check]()` decodes each line's document into a `Check`.
+    let lines = json.Lines.open(reader) else |failure| {
+        failure.release()
+        return .Err(.Exhausted)
+    }
+    var checks = lines.decoded[Check]()
+    var refused: UInt64 = 0
+    var tallied: Result[(), mem.Oom] = .Ok(())
+    for item in &checks {
+        match item {
+            Ok(check) => {
+                tallied = record(&tallies, check)
+                check.release()
+                if tallied.is_err() {
+                    break
+                }
+            },
+            // The error names the line, such as `line 3: missing field at
+            // $["ms"]`. `release` settles the field path it holds.
+            Err(error) => {
+                io.eprintln("{error}")
+                error.release()
+                refused += 1
+            },
+        }
+    }
+    // `abandon` ends reading and hands the reader back to be released.
+    checks.abandon().release()
+    tallied?
+    .Ok(refused)
+}
+
+// ReportFailure says why the report could not be written.
+@copyable
+enum ReportFailure {
+    Memory,
+    Output,
+}
+
+// Write one summary line for each service. The buffered writer collects the
+// lines, and `finish` hands what it holds to standard output.
+fn write_report(tallies: Vec[Tally]) -> Result[(), ReportFailure] {
+    var output = io.BufferedWriter.open(capacity: 4096, writer: io.stdout()) else |_| {
+        return .Err(.Memory)
+    }
+    if write_summaries(&output, tallies).is_err() {
+        // `abort` drops the lines not yet written and hands back stdout.
+        let _stdout = output.abort()
+        return .Err(.Output)
+    }
+    // `settled()` drops what could not be written and keeps the reason.
+    let _stdout = output.finish().settled() else |_| {
+        return .Err(.Output)
+    }
+    .Ok(())
+}
+
+// Write each service's summary as one line of JSON.
+fn write_summaries[W: Writer](inout output: W, tallies: Vec[Tally]) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: output) {
+    for read tally in tallies {
+        let summary = Summary { service = tally.service.view(), checks = tally.checks, failed = tally.failed, slowest_ms = tally.slowest_ms }
+        // `encode_line` writes the summary as compact JSON and a line feed.
+        json.encode_line(&output, summary)?
+    }
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    let args = env.args()
+    if args.count() > 2 {
+        io.eprintln("usage: uptime_report [checks.jsonl]")
+        return 1
+    }
+    defer var tallies: Vec[Tally] = Vec.new()
+    let tallied = if args.count() == 1 {
+        tally_checks(io.stdin(), &tallies)
+    } else {
+        let path = fs.Path.from_arg(args, 1) else {
+            io.eprintln("usage: uptime_report [checks.jsonl]")
+            return 1
+        }
+        let file = fs.File.open(path) else |error| {
+            io.eprintln("cannot open the checks: {error}")
+            return 1
+        }
+        tally_checks(file, &tallies)
+    }
+    let refused = tallied else |_| {
+        io.eprintln("out of memory")
+        return 1
+    }
+    let _ = write_report(tallies) else |failure| {
+        match failure {
+            Memory => io.eprintln("out of memory"),
+            Output => io.eprintln("cannot write the report"),
+        }
+        return 1
+    }
+    if refused > 0 {
+        io.eprintln("{refused} lines were not checks")
+        return 1
+    }
+    0
+}

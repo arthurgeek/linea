@@ -190,6 +190,67 @@ This API pays for both representations; release and allocation refusal settle
 the temporary document on every outcome. Integer decoding requires an integer
 token and the target width's range. Float64 decoding uses `as_float64`.
 
+## JSON Lines
+
+JSON Lines, also called NDJSON, holds one JSON text on each line: a log, an
+event stream or an export written one record at a time.
+`json.Lines.open(reader)`, or `json.Lines.open_in(allocator, reader)`, reads
+one from any `io.Reader` through a 4 KiB read-ahead buffer and is an
+`Iterator` whose items are `Result[Value[A], LinesError[R.Error, A]]`, one for
+each line, read only as they are asked for. `lines.decoded[T]()` turns it
+into a `DecodedLines` whose items decode each line as a `T`, as `decode`
+would; the document is released once the value is built. Opening fails only
+when the read-ahead buffer is refused, and the `io.BufferOpenFailure` hands the
+reader back.
+
+```linea
+let lines = json.Lines.open(file) else |failure| {
+    failure.release()
+    return 1
+}
+var checks = lines.decoded[Check]()
+for item in &checks {
+    match item {
+        Ok(check) => {
+            record(check)
+            check.release()
+        },
+        Err(error) => {
+            io.eprintln("{error}")
+            error.release()
+        },
+    }
+}
+let file = checks.abandon()
+```
+
+A line ends at LF or CRLF, and the last line needs neither. A line holding
+only JSON whitespace is blank: it gives no item but is counted, so line
+numbers match the file. Each line is parsed within the `limits:` given, and
+`limits.max_input_bytes` (8 MiB by default) also bounds the line, so the
+reader holds at most one line of that length and its document whatever the
+stream's length; a longer line is read past without being stored.
+
+A line that fails gives an error and the walk continues at the next line. A
+`LinesError` holds the line's number, counted from one, and its
+`LineProblem`. `Document` holds the `DecodeError` the line alone would give
+`decode`: a syntax or limit error, a value that does not fit `T`, `input too
+long` for a line past `max_input_bytes` and `invalid UTF-8` for bytes that are
+not text. `Input` holds the `io.LineError` of a stream that could not be read
+past the line; it is the last item. An error displays as its line and
+problem, such as `line 3: missing field at $["units"]`, and owns the path of a
+`Value` failure, so release it. `line_number()` says how many lines have been
+read, blank and failed ones included. `Lines` and `DecodedLines` are linear:
+`abandon()` stops reading, drops what was read ahead and returns the reader.
+The [uptime report](../../examples/uptime_report.lin) summarizes a log of
+health checks this way.
+
+`json.write_line(&writer, document)` and `json.encode_line(&writer, value)`
+write one line: compact JSON, which escapes every line feed inside a string,
+and a line feed. They neither buffer nor flush; write through an
+`io.BufferedWriter` and call its `flush` when the reader at the other end
+should see the lines written so far.
+
 ## Record and custom codecs
 
 Struct-derived Encode emits field names in declaration order. Struct-derived

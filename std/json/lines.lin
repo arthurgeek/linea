@@ -1,0 +1,625 @@
+import std.fmt
+import std.io
+import std.mem
+import std.testing
+
+// The read-ahead buffer of a JSON Lines reader. A line longer than this is
+// collected in a separate record that grows up to the parse limits'
+// `max_input_bytes`.
+let lines_read_ahead_bytes: UInt64 = 4096
+
+// LineProblem says why one line of a JSON Lines stream gave no value. `Input`
+// holds the buffered reader's error when the stream could not be read past
+// the line: the byte reader failed, or reported more bytes than it was asked
+// for. Reading ends after it. `Document` says why the line holds no JSON text
+// the target accepts, as `decode` would report it for that line alone: a line
+// longer than `max_input_bytes` is `input too long`, and one that is not UTF-8
+// is `invalid UTF-8`. Reading continues at the next line.
+pub enum LineProblem[E, A: Allocator = mem.SystemAllocator] {
+    Input(io.LineError[E]),
+    Document(DecodeError[A]),
+}
+
+derive[E: Release, A: Allocator] Release for LineProblem[E, A]
+
+derive[E: Debug, A: Allocator] Debug for LineProblem[E, A]
+
+// A LinesError says which line of a JSON Lines stream failed, counted from
+// one with blank lines included, and why. It displays as the line and the
+// problem, such as `line 3: missing field at $["units"]`.
+pub struct LinesError[E, A: Allocator = mem.SystemAllocator] {
+    line: UInt64,
+    problem: LineProblem[E, A],
+}
+
+derive[E: Release, A: Allocator] Release for LinesError[E, A]
+
+derive[E: Debug, A: Allocator] Debug for LinesError[E, A]
+
+impl[E: Display, A: Allocator] Display for LinesError[E, A] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        "line {self.line}: ".fmt(&w)?
+        match read self.problem {
+            Input(error) => error.fmt(&w),
+            Document(error) => error.fmt(&w),
+        }
+    }
+}
+
+test "a lines error displays its line and its problem" {
+    defer let missing: LinesError[UInt8] = .{ line = 3, problem = .Document(DecodeError.failure(.MissingField).at_field("units")) }
+    defer let shown = fmt.render_owned(missing).unwrap()
+    testing.assert_eq(shown.view(), r#"line 3: missing field at $["units"]"#, "a decode failure lost its line")?
+    defer let stopped: LinesError[UInt8] = .{ line = 7, problem = .Input(.Input(.{ reason = 9, stream_offset = 40 })) }
+    defer let ended = fmt.render_owned(stopped).unwrap()
+    testing.assert_eq(ended.view(), "line 7: input failed at stream byte 40: 9", "an input failure lost its line")?
+}
+
+// Lines reads a JSON Lines stream, also called NDJSON: one JSON text on each
+// line, each line ended by LF or CRLF, the last one optionally. It is an
+// Iterator whose items are each line's document, read from `reader` only as
+// they are asked for, so a stream of any length takes the memory of one line
+// and its document. A line holds at most the parse limits' `max_input_bytes`.
+// A blank line, empty or holding only JSON whitespace, gives no item but is
+// counted. A line that fails gives a `LinesError` naming it, and the next item
+// comes from the line after it; when the stream itself fails, the error is the
+// last item. `decoded` turns the documents into typed values, and `abandon`
+// ends reading and hands `reader` back.
+@(opaque, linear)
+struct Lines[R: io.Reader, A: Allocator = mem.SystemAllocator] {
+    input: io.BufferedReader[R, A],
+    allocator: A,
+    limits: ParseLimits,
+    lines_read: UInt64,
+    ended: Bool,
+}
+
+impl[R: io.Reader] Lines[R, mem.SystemAllocator] {
+    // Read JSON Lines from `reader`, allocating from the system allocator.
+    // See `open_in`.
+    pub fn open(sink reader: R, limits: ParseLimits = standard_limits) -> Result[Self, io.BufferOpenFailure[R]] where carries(.Ok: reader), carries(.Err.resource: reader) {
+        Lines.open_in(mem.system(), reader, limits: limits)
+    }
+
+    test "open reads a document from each line" {
+        var lines = Lines.open(LinesSource.of("1\n[2]\n")).unwrap()
+        let first = &lines.next().unwrap().unwrap()
+        defer first.release()
+        let second = &lines.next().unwrap().unwrap()
+        defer second.release()
+        let ended = finished(&lines.next())
+        let _source = lines.abandon()
+        testing.assert_eq(first.as_uint64().unwrap(), UInt64(1), "the first line changed")?
+        testing.assert_eq(second.at(0).unwrap().as_uint64().unwrap(), UInt64(2), "the second line changed")?
+        testing.assert(ended, "a stream of two lines gave a third item")?
+    }
+}
+
+impl[R: io.Reader, A: Allocator] Lines[R, A] {
+    // Read JSON Lines from `reader` through a read-ahead buffer from
+    // `allocator`, which also holds each line and its document. Each line is
+    // parsed within `limits`, and `limits.max_input_bytes` bounds the line as
+    // it bounds a document. Refused storage hands `reader` back.
+    pub fn open_in(allocator: A, sink reader: R, limits: ParseLimits = standard_limits) -> Result[Self, io.BufferOpenFailure[R]] where carries(.Ok: allocator, reader), carries(.Err.resource: reader) {
+        let input = io.BufferedReader.open_in(allocator, capacity: lines_read_ahead_bytes, reader: reader)?
+        .Ok(.{ input, allocator = copy(allocator), limits = copy(limits), lines_read = 0, ended = false })
+    }
+
+    test "open_in holds each line and document in an arena" {
+        defer let arena = mem.Arena.open(mem.system(), 65536)
+        var lines = Lines.open_in(arena.handle(), LinesSource.of(r#"{"name":"tea"}"#)).unwrap()
+        let document = &lines.next().unwrap().unwrap()
+        defer document.release()
+        let _source = lines.abandon()
+        testing.assert_eq(document.get("name").unwrap().as_str().unwrap(), "tea", "a document read into an arena changed")?
+    }
+
+    test "open_in hands the reader back when no buffer is made" {
+        let arena = mem.Arena.open(mem.system(), size: 0)
+        let refused = match Lines.open_in(arena.handle(), LinesSource.of("1\n")) {
+            Ok(lines) => {
+                let _source = lines.abandon()
+                false
+            },
+            Err(failure) => failure.resource.position == 0,
+        }
+        arena.release()
+        testing.assert(refused, "a refused buffer kept or read its reader")?
+    }
+
+    // Return how many lines have been read, blank and failed ones included.
+    // After an item, it is the number of the line that item came from.
+    pub fn line_number(self: Self) -> UInt64 {
+        self.lines_read
+    }
+
+    test "line_number counts blank lines" {
+        var lines = Lines.open(LinesSource.of("\n  \r\n1\n")).unwrap()
+        let start = lines.line_number()
+        let document = &lines.next().unwrap().unwrap()
+        document.release()
+        let after = lines.line_number()
+        let _source = lines.abandon()
+        testing.assert_eq(start, UInt64(0), "a reader counted a line it had not read")?
+        testing.assert_eq(after, UInt64(3), "the line of the first document was not its number in the stream")?
+    }
+
+    // Decode each line's document as a T, allocated from the reader's
+    // allocator, instead of yielding the document. The document is released
+    // once its value is built, and a line that does not decode is a
+    // `Document` problem naming the line.
+    pub fn decoded[T: Decode[A]](sink self: Self) -> DecodedLines[T, R, A] where carries(self) {
+        .{ lines = self }
+    }
+
+    test "decoded yields typed values" {
+        let lines = Lines.open(LinesSource.of(two_stock_lines)).unwrap()
+        var stock = lines.decoded[LineStock[mem.SystemAllocator]]()
+        var units: UInt64 = 0
+        for item in &stock {
+            let entry = item.unwrap()
+            units += entry.units
+            entry.release()
+        }
+        let _source = stock.abandon()
+        testing.assert_eq(units, UInt64(15), "the decoded lines lost a value")?
+    }
+
+    // Stop reading, drop any input read ahead, and return the reader.
+    pub fn abandon(sink self: Self) -> R where carries(self) {
+        let Lines { input, allocator: _, limits: _, lines_read: _, ended: _ } = self
+        input.abandon()
+    }
+
+    test "abandon returns the reader past what was read ahead" {
+        var lines = Lines.open(LinesSource.of("1\n2\n")).unwrap()
+        let first = &lines.next().unwrap().unwrap()
+        first.release()
+        let source = lines.abandon()
+        // The source hands over three bytes a read, so reading the first line
+        // also read ahead the `2` that abandoning drops.
+        testing.assert_eq(source.position, UInt64(3), "the reader came back at another position")?
+    }
+
+    // Read the rest of a line the buffered reader refused and say why it
+    // failed. A line too long, not UTF-8, or refused storage for its record
+    // is a problem with that line alone, so reading continues after it; any
+    // other refusal is the stream's, and reading ends.
+    fn refused(inout self: Self, sink error: io.LineError[R.Error]) -> LinesError[R.Error, A] where carries(error, self) {
+        let line = self.lines_read + 1
+        let document: DecodeError[A] = match error {
+            Limit => .Parse(.{ kind = .InputLimit, offset = self.limits.max_input_bytes }),
+            Encoding(problem) => .Parse(.{ kind = .InvalidUtf8, offset = problem.offset }),
+            Allocation(_) => .Allocation,
+            Input(failure) => return &self.stopped(line, .Input(failure)),
+            RecoveryRequired => return &self.stopped(line, .RecoveryRequired),
+            ResumeUnavailable => return &self.stopped(line, .ResumeUnavailable),
+            InvalidProgress => return &self.stopped(line, .InvalidProgress),
+            PositionOverflow => return &self.stopped(line, .PositionOverflow),
+        }
+        match skip_line(&self.input, self.limits.max_input_bytes) {
+            Ok(_) => {
+                self.lines_read = line
+                .{ line, problem = .Document(document) }
+            },
+            Err(stream) => {
+                document.release()
+                &self.stopped(line, stream)
+            },
+        }
+    }
+
+    // End reading after the stream failed on `line`.
+    fn stopped(inout self: Self, line: UInt64, sink error: io.LineError[R.Error]) -> LinesError[R.Error, A] where carries(error) {
+        self.ended = true
+        .{ line, problem = .Input(error) }
+    }
+}
+
+// Discard the rest of the line `input` refused, `budget` bytes at a time,
+// until its end. Discarding stores nothing, so a line of any length is
+// skipped in the memory the reader already holds.
+fn skip_line[R: io.Reader, A: Allocator](inout input: io.BufferedReader[R, A], budget: UInt64) -> Result[(), io.LineError[R.Error]] where carries(.Err: input), retains(input: input) {
+    loop {
+        let progress = &input.discard_pending(max_bytes: budget)?
+        if progress.boundary {
+            return .Ok(())
+        }
+    }
+}
+
+impl[R: io.Reader, A: Allocator] Iterator for Lines[R, A] {
+    type Item = Result[Value[A], LinesError[R.Error, A]]
+
+    // Read lines until one that is not blank and parse it, or answer None at
+    // the end of the stream or after the stream failed.
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self), retains(self: self) {
+        loop {
+            if self.ended {
+                return .None
+            }
+            match &self.input.read_line_borrowed(max_bytes: self.limits.max_input_bytes) {
+                Ok(None) => {
+                    self.ended = true
+                    return .None
+                },
+                Ok(Some(text)) => {
+                    self.lines_read += 1
+                    if blank(text) {
+                        continue
+                    }
+                    return .Some(match parse_in(self.allocator, text, limits: self.limits) {
+                        Ok(document) => .Ok(document),
+                        Err(error) => .Err(.{ line = self.lines_read, problem = .Document(.Parse(error)) }),
+                    })
+                },
+                Err(error) => return .Some(.Err(&self.refused(error))),
+            }
+        }
+    }
+}
+
+test "a malformed line names its line and reading continues" {
+    let input =
+        \\1
+        \\{"a":
+        \\3
+    var lines = Lines.open(LinesSource.of(input)).unwrap()
+    let first = &lines.next().unwrap().unwrap()
+    first.release()
+    let failed = match &lines.next().unwrap() {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(error) => {
+            defer error.release()
+            error.line == 2 && match read error.problem {
+                Document(Parse(parse)) => match parse.kind { Syntax => true, _ => false },
+                _ => false,
+            }
+        },
+    }
+    let last = &lines.next().unwrap().unwrap()
+    defer last.release()
+    let ended = finished(&lines.next())
+    let _source = lines.abandon()
+    testing.assert(failed, "a malformed line was not a syntax error on line 2")?
+    testing.assert_eq(last.as_uint64().unwrap(), UInt64(3), "the line after a malformed one was lost")?
+    testing.assert(ended, "the stream did not end after its last line")?
+}
+
+test "crlf and a missing final newline end lines" {
+    var lines = Lines.open(LinesSource.of("true\r\nfalse")).unwrap()
+    let first = &lines.next().unwrap().unwrap()
+    defer first.release()
+    let second = &lines.next().unwrap().unwrap()
+    defer second.release()
+    let ended = finished(&lines.next())
+    let _source = lines.abandon()
+    testing.assert(first.as_bool().unwrap() && !second.as_bool().unwrap() && ended, "line endings changed the documents")?
+}
+
+test "a line past the input limit is skipped and reported" {
+    let limits = ParseLimits { max_input_bytes = 4, ..ParseLimits.default() }
+    var lines = Lines.open(LinesSource.of("[1,2,3,4,5,6,7,8,9]\n12\n"), limits: limits).unwrap()
+    let refused = match &lines.next().unwrap() {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(error) => {
+            defer error.release()
+            error.line == 1 && match read error.problem {
+                Document(Parse(parse)) => match parse.kind { InputLimit => parse.offset == 4, _ => false },
+                _ => false,
+            }
+        },
+    }
+    let next = &lines.next().unwrap().unwrap()
+    defer next.release()
+    let _source = lines.abandon()
+    testing.assert(refused, "a line past the limit was not an input limit error on line 1")?
+    testing.assert_eq(next.as_uint64().unwrap(), UInt64(12), "the line after a long one was lost")?
+}
+
+test "a line that is not utf8 is skipped and reported" {
+    // `"`, a byte no UTF-8 text holds, `"`, a line feed, then `5`.
+    let bytes: [UInt8; _] = [34, 255, 34, 10, 53]
+    var lines = Lines.open(LinesSource.holding(bytes.as_slice())).unwrap()
+    let refused = match &lines.next().unwrap() {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(error) => {
+            defer error.release()
+            error.line == 1 && match read error.problem {
+                Document(Parse(parse)) => match parse.kind { InvalidUtf8 => parse.offset == 1, _ => false },
+                _ => false,
+            }
+        },
+    }
+    let next = &lines.next().unwrap().unwrap()
+    defer next.release()
+    let _source = lines.abandon()
+    testing.assert(refused, "a line that is not UTF-8 was not reported at its byte")?
+    testing.assert_eq(next.as_uint64().unwrap(), UInt64(5), "the line after one that is not UTF-8 was lost")?
+}
+
+test "a failing stream ends reading with the line it was reading" {
+    var lines = Lines.open(LinesSource.failing("1\n2\n3\n", at: 3)).unwrap()
+    let first = &lines.next().unwrap().unwrap()
+    first.release()
+    let stopped = match &lines.next().unwrap() {
+        Ok(document) => {
+            document.release()
+            false
+        },
+        Err(error) => {
+            defer error.release()
+            error.line == 2 && match read error.problem {
+                Input(Input(failure)) => failure.reason == 9 && failure.stream_offset == 3,
+                _ => false,
+            }
+        },
+    }
+    let ended = finished(&lines.next())
+    let _source = lines.abandon()
+    testing.assert(stopped, "a failed read was not reported at the line being read")?
+    testing.assert(ended, "reading went on after the stream failed")?
+}
+
+test "each allocation failure is reported or read" -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        // A run fails with `true` when a line ran out of memory, and with
+        // `false` when it failed for any other reason.
+        |allocator| -> Result[(), Bool] {
+            let input =
+                \\{"tea":[1,2,3]}
+                \\"a long enough line to grow the record"
+            var lines = Lines.open_in(allocator, LinesSource.of(input)) else |_| {
+                return .Err(true)
+            }
+            var outcome: Result[(), Bool] = .Ok(())
+            for item in &lines {
+                match item {
+                    Ok(document) => document.release(),
+                    Err(error) => {
+                        let refused = match read error.problem {
+                            Document(failure) => failure.ran_out_of_memory(),
+                            Input(_) => false,
+                        }
+                        error.release()
+                        if outcome.is_ok() || !refused {
+                            outcome = .Err(refused)
+                        }
+                    },
+                }
+            }
+            let _source = lines.abandon()
+            outcome
+        },
+        |refused| refused,
+    )
+    testing.assert(checked.is_ok(), "a refused allocation was reported as another failure")?
+    .Ok(())
+}
+
+// A DecodedLines reads a JSON Lines stream as `Lines` does and decodes each
+// line's document as a T. Make one with `Lines.decoded`.
+@(opaque, linear)
+struct DecodedLines[phantom T, R: io.Reader, A: Allocator = mem.SystemAllocator] {
+    lines: Lines[R, A],
+}
+
+impl[T: Decode[A], R: io.Reader, A: Allocator] DecodedLines[T, R, A] {
+    // Return how many lines have been read, as `Lines.line_number` does.
+    pub fn line_number(self: Self) -> UInt64 {
+        self.lines.lines_read
+    }
+
+    test "a decoded reader counts the lines it read" {
+        let lines = Lines.open(LinesSource.of("\n7\n")).unwrap()
+        var numbers = lines.decoded[UInt8]()
+        let seven = &numbers.next().unwrap().unwrap()
+        let line = numbers.line_number()
+        let _source = numbers.abandon()
+        testing.assert_eq(seven, UInt8(7), "the decoded value changed")?
+        testing.assert_eq(line, UInt64(2), "the decoded value's line changed")?
+    }
+
+    // Stop reading, drop any input read ahead, and return the reader.
+    pub fn abandon(sink self: Self) -> R where carries(self) {
+        let DecodedLines { lines } = self
+        lines.abandon()
+    }
+
+    test "a decoded reader hands its reader back" {
+        let lines = Lines.open(LinesSource.of("1\n")).unwrap()
+        let numbers = lines.decoded[UInt8]()
+        let source = numbers.abandon()
+        testing.assert_eq(source.position, UInt64(0), "abandoning read from the reader")?
+    }
+}
+
+impl[T: Decode[A], R: io.Reader, A: Allocator] Iterator for DecodedLines[T, R, A] {
+    type Item = Result[T, LinesError[R.Error, A]]
+
+    // Read the next document and decode it as a T.
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self), retains(self: self) {
+        let parsed = &self.lines.next()?
+        defer let document = parsed else |error| {
+            return .Some(.Err(error))
+        }
+        .Some(match T.decode(document, self.lines.allocator) {
+            Ok(value) => .Ok(value),
+            Err(error) => .Err(.{ line = self.lines.lines_read, problem = .Document(error) }),
+        })
+    }
+}
+
+test "a line that does not decode names its line and the field" {
+    let input =
+        \\{"name":"tea","units":3}
+        \\{"name":"rice"}
+        \\{"name":"oats","units":1}
+    let lines = Lines.open(LinesSource.of(input)).unwrap()
+    var stock = lines.decoded[LineStock[mem.SystemAllocator]]()
+    var names = String.new()
+    var problems = String.new()
+    for item in &stock {
+        match item {
+            Ok(entry) => {
+                &names.append(entry.name.view()).unwrap()
+                entry.release()
+            },
+            Err(error) => {
+                error.fmt(&problems).unwrap()
+                error.release()
+            },
+        }
+    }
+    let _source = stock.abandon()
+    defer names.release()
+    defer problems.release()
+    testing.assert_eq(names.view(), "teaoats", "the lines around a failure were lost")?
+    testing.assert_eq(problems.view(), r#"line 2: missing field at $["units"]"#, "a decode failure lost its line or field")?
+}
+
+// Write `value` as compact JSON and a line feed: one line of a JSON Lines
+// stream. Compact JSON writes a line feed inside a string as `\n`, so the
+// value takes exactly one line. The writer is not flushed; a buffered writer
+// hands lines on when its buffer fills or when it is flushed.
+pub fn write_line[A: Allocator, W: Writer](inout writer: W, value: Value[A]) -> Result[(), W.Error] where carries(.Err: writer) {
+    write(&writer, value)?
+    &writer.write_str("\n")
+}
+
+test "write_line writes one document on one line" {
+    defer let document = parse(r#"{"note":"two\nlines"}"#).unwrap()
+    defer var output = String.new()
+    write_line(&output, document).unwrap()
+    write_line(&output, document).unwrap()
+    let expected =
+        \\{"note":"two\nlines"}
+        \\{"note":"two\nlines"}
+        \\
+    testing.assert_eq(output.view(), expected, "a document took more than its line")?
+}
+
+// Encode `value` as compact JSON and a line feed, as `write_line` does for a
+// document. The writer is not flushed.
+pub fn encode_line[T: Encode, W: Writer](inout writer: W, value: T) -> Result[(), EncodeError[W.Error]] where carries(.Err: writer) {
+    encode(&writer, value)?
+    &writer.write_str("\n")?
+    .Ok(())
+}
+
+test "encoded lines read back as the values written" {
+    defer var output = String.new()
+    defer let tea = LineStock[mem.SystemAllocator] { name = "tea".to_owned().unwrap(), units = 3 }
+    defer let rice = LineStock[mem.SystemAllocator] { name = "rice".to_owned().unwrap(), units = 12 }
+    encode_line(&output, tea).unwrap()
+    encode_line(&output, rice).unwrap()
+    let lines = Lines.open(LinesSource.of(output.view())).unwrap()
+    var stock = lines.decoded[LineStock[mem.SystemAllocator]]()
+    var units: UInt64 = 0
+    for item in &stock {
+        let entry = item.unwrap()
+        units += entry.units
+        entry.release()
+    }
+    let _source = stock.abandon()
+    testing.assert_eq(output.view(), two_stock_lines, "the encoded lines changed")?
+    testing.assert_eq(units, UInt64(15), "the encoded lines did not read back")?
+}
+
+// Return whether `line` holds only JSON whitespace, so it holds no document.
+fn blank(line: Str) -> Bool {
+    var cursor: Cursor = .{ offset = 0, nodes = 0 }
+    whitespace(line, &cursor)
+    cursor.offset == line.length()
+}
+
+// Two stock records as JSON Lines, each line ended by a line feed.
+let two_stock_lines =
+    \\{"name":"tea","units":3}
+    \\{"name":"rice","units":12}
+    \\
+
+// LineStock is a record the line tests decode and encode.
+@derive(Release, Decode[A], Encode)
+struct LineStock[A: Allocator] {
+    name: String[A],
+    units: UInt64,
+}
+
+// Return whether a reader answered no item, settling the item it answered.
+fn finished[T: Release, E: Release](sink item: Option[Result[T, E]]) -> Bool {
+    match item {
+        None => true,
+        Some(Ok(value)) => {
+            value.release()
+            false
+        },
+        Some(Err(error)) => {
+            error.release()
+            false
+        },
+    }
+}
+
+// LinesSource delivers `bytes` three at a time, so lines arrive split across
+// reads, and fails with 9 on reaching `fail_at`.
+struct LinesSource {
+    bytes: mem.Slice[UInt8],
+    position: UInt64,
+    fail_at: UInt64,
+}
+
+impl LinesSource {
+    // Deliver `text` and then end.
+    fn of(text: Str) -> Self where carries(text) {
+        LinesSource.holding(text.as_bytes())
+    }
+
+    // Deliver `bytes` and then end.
+    fn holding(sink bytes: mem.Slice[UInt8]) -> Self where carries(bytes) {
+        .{ bytes, position = 0, fail_at = UInt64.max }
+    }
+
+    // Deliver the first `at` bytes of `text` and then fail.
+    fn failing(text: Str, at: UInt64) -> Self where carries(text) {
+        .{ bytes = text.as_bytes(), position = 0, fail_at = at }
+    }
+}
+
+impl io.Reader for LinesSource {
+    type Error = UInt8
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, UInt8] where carries() {
+        if count == 0 {
+            return .Ok(0)
+        }
+        if self.position == self.fail_at {
+            return .Err(9)
+        }
+        var amount = self.bytes.length() - self.position
+        if amount > count {
+            amount = count
+        }
+        if amount > 3 {
+            amount = 3
+        }
+        if amount > self.fail_at - self.position {
+            amount = self.fail_at - self.position
+        }
+        for i in 0..amount {
+            &buffer.store_byte(offset + i, self.bytes[self.position + i])
+        }
+        self.position += amount
+        .Ok(amount)
+    }
+}

@@ -4,7 +4,10 @@ import std.num
 
 // An Iterator transfers ownership of one Item at a time, updating its
 // position. Item may be linear, so the caller must settle each one. After next
-// returns None, every later call also returns None.
+// returns None, every later call also returns None. An item may carry what
+// the iterator carries. Advancing may move what one part of the iterator holds
+// into another, as a reader refilling its buffer from its own allocator does,
+// so `next` retains from `self`; the iterator as a whole holds nothing new.
 //
 // Every iterator also offers the searches below, which run in place: the
 // iterator stays with the caller, positioned just after the last item a search
@@ -12,7 +15,7 @@ import std.num
 pub trait Iterator {
     type Item
 
-    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self)
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self), retains(self: self)
 
     test "counted find reports empty absent first and last matches" {
         var empty = UInt64(0)..0

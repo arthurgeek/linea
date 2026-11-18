@@ -156,14 +156,6 @@ fn load_inventory() -> Result[json.Value, InventoryError] {
     .Ok(json.read_file(path)?)
 }
 
-// `json.write` writes the whole document, the members this program never read
-// included. An object's members may come back in another order than they
-// were read in; an array keeps its order.
-fn write_inventory[A: Allocator, W: Writer](inout writer: W, document: json.Value[A]) -> Result[(), W.Error] where carries(.Err: writer) {
-    json.write(&writer, document)?
-    &writer.write_str("\n")
-}
-
 @copyable
 enum DiskFailure { Full }
 
@@ -192,7 +184,7 @@ test "inventory output propagates failure without consuming the inventory" {
     attach_summary(mem.system(), &document).unwrap()
     // One byte of room takes the opening `{`, and the next write does not fit.
     var disk = Disk { free = 1, attempts = 0 }
-    testing.assert(write_inventory(&disk, document).is_err(), "output failure was hidden")?
+    testing.assert(json.write_line(&disk, document).is_err(), "output failure was hidden")?
     testing.assert_eq(disk.attempts, 2, "output continued after its first failure")?
     testing.assert_eq(inventory_total(document).unwrap(), 5, "failed output changed the inventory")?
 }
@@ -201,7 +193,10 @@ fn summarize() -> Result[(), InventoryError] {
     defer var document = load_inventory()?
     attach_summary(mem.system(), &document)?
     var output = io.stdout()
-    write_inventory(&output, document)?
+    // `json.write_line` writes the whole document on one line, the members
+    // this program never read included. An object's members may come back in
+    // another order than they were read in; an array keeps its order.
+    json.write_line(&output, document)?
     .Ok(())
 }
 
