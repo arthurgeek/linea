@@ -1423,7 +1423,13 @@ pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root, unsaved: []co
     var texts: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer freeTexts(gpa, &texts);
 
-    try appendPaths(gpa, &all, &listed, try pathsOfModule(gpa, io, dirOfEntry(root.entry)));
+    const own = pathsOfModule(gpa, io, dirOfEntry(root.entry)) catch |err| switch (err) {
+        // A source that is a symbolic link leading back to itself names no
+        // directory, and the manifest naming it is the mistake.
+        error.SymLinkLoop => return if (root.manifest != null) error.ManifestSourceLoops else err,
+        else => return err,
+    };
+    try appendPaths(gpa, &all, &listed, own);
     try appendHeld(gpa, io, dirOfEntry(root.entry), unsaved, &all, &listed);
     const manifest = root.manifest orelse return listedOf(gpa, &all, &texts);
     try appendPaths(gpa, &all, &listed, try gpa.dupe([]const u8, &.{try gpa.dupe(u8, manifest)}));
@@ -3840,7 +3846,10 @@ const Loader = struct {
     /// Two sources share modules when they are one directory, or when one
     /// holds the other without the inner root's manifest standing between
     /// them: a directory holding a manifest below a root's source is another
-    /// root, which the walk of the outer one stops at.
+    /// root, which the walk of the outer one stops at. The manifest stands
+    /// between only where its directory holds the inner source; a source
+    /// reached through a link out of its manifest's directory is read by the
+    /// outer walk wherever the manifest sits.
     ///
     /// **Bound:** the roots the graph holds.
     fn sourceOverlapping(self: *const Loader, source_identity: []const u8, manifest_identity: []const u8) ?RootId {
@@ -3857,7 +3866,8 @@ const Loader = struct {
     fn swallows(outer: []const u8, inner: []const u8, inner_manifest: []const u8) bool {
         if (std.mem.eql(u8, outer, inner)) return true;
         if (!within(inner, outer)) return false;
-        return !(within(inner_manifest, outer) and !std.mem.eql(u8, inner_manifest, outer));
+        const stands_between = within(inner_manifest, outer) and !std.mem.eql(u8, inner_manifest, outer) and within(inner, inner_manifest);
+        return !stands_between;
     }
 
     /// [M-Dependency] where the library's own manifest and its consumer's
