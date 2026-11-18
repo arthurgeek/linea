@@ -3,8 +3,8 @@
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"vault/vault.lin","diagnostics":[]}}
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[{"range":{"start":{"line":11,"character":0},"end":{"line":11,"character":1}},"severity":1,"code":"S-Name","source":"linea","message":"expected a name after `.`"}]}}
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"vault/vault.lin","diagnostics":[]}}
-{"jsonrpc":"2.0","id":2,"result":{"isIncomplete":false,"items":[{"label":"into","labelDetails":{"description":"Into"},"kind":2},{"label":"try_into","labelDetails":{"description":"TryInto"},"kind":2}]}}
+{"jsonrpc":"2.0","id":2,"result":{"isIncomplete":false,"items":[]}}
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"main.lin","diagnostics":[{"range":{"start":{"line":10,"character":39},"end":{"line":10,"character":40}},"severity":1,"code":"S-Name","source":"linea","message":"expected a name after `.`"},{"range":{"start":{"line":9,"character":8},"end":{"line":9,"character":13}},"severity":1,"code":"N-Unused","source":"linea","message":"`shade` is never used"}]}}
 {"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"vault/vault.lin","diagnostics":[]}}
-{"jsonrpc":"2.0","id":3,"result":{"isIncomplete":false,"items":[{"label":"into","labelDetails":{"description":"Into"},"kind":2},{"label":"try_into","labelDetails":{"description":"TryInto"},"kind":2}]}}
+{"jsonrpc":"2.0","id":3,"result":{"isIncomplete":false,"items":[]}}
 {"jsonrpc":"2.0","id":4,"result":null}

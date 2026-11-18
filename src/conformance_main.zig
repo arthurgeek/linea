@@ -12928,10 +12928,14 @@ fn checkCompletionOffers(
             if (res.kindOf(qualifier) != .trait) {
                 var through: std.ArrayList(typecheck_mod.Applicable) = .empty;
                 defer through.deinit(gpa);
-                try typecheck_mod.reachIn(ast, program, res, typing, res.moduleOfFile(file), functions.items[holder])
-                    .namespaced(gpa, typing.exprType(receiver), null, true, &through, null);
+                const reach = typecheck_mod.reachIn(ast, program, res, typing, res.moduleOfFile(file), functions.items[holder]);
+                try reach.namespaced(gpa, typing.exprType(receiver), null, true, &through, null);
                 try typecheck_mod.keepReached(gpa, ast, &through);
-                for (through.items) |a| try reachable.put(gpa, ast.tokenText(ast.declName(a.sig)), {});
+                for (through.items) |a| {
+                    // A conversion nothing converts from settles on no result.
+                    if (!try reach.settlesSomewhere(gpa, typing.exprType(receiver), a)) continue;
+                    try reachable.put(gpa, ast.tokenText(ast.declName(a.sig)), {});
+                }
             }
             try checkNamespaceOffers(gpa, failures, display_path, ast.tokenText(ast.exprMain(receiver)), &reachable, offered);
         }

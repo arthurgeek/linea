@@ -4190,6 +4190,57 @@ pub const Reach = struct {
         if (rendersDisplayItself(self.typing, self.display, held, declared)) return true;
         return self.index.any(gpa, self.impls, self.typing, declared.index(), held, self.scope, .forward);
     }
+
+    /// Whether a postfix call of `a` on a value of `held` can settle on some
+    /// result. `Into.into` and `TryInto.try_into` reach every value through
+    /// blanket implementations that hold only where an implementation of
+    /// `From` or `TryFrom` converts from `held` (`convertsFrom`); every other
+    /// operation `Reach` lists can.
+    pub fn settlesSomewhere(self: Reach, gpa: std.mem.Allocator, held: TypeId, a: Applicable) std.mem.Allocator.Error!bool {
+        if (a.trait == node.DeclId.none) return true;
+        const pairs = [_][2][]const u8{ .{ "Into", "From" }, .{ "TryInto", "TryFrom" } };
+        for (pairs) |pair| {
+            const blanket = self.source_program.libraryDeclIn("convert", pair[0]) orelse continue;
+            if (blanket != a.trait) continue;
+            const source = self.source_program.libraryDeclIn("convert", pair[1]) orelse return true;
+            return self.convertsFrom(gpa, held, source);
+        }
+        return true;
+    }
+
+    /// Whether an implementation of the conversion trait `from` (`From`,
+    /// `TryFrom`) converts from `held`: one written at `held` itself, or at a
+    /// type parameter of the implementation whose bounds `held` answers.
+    ///
+    /// **Bound:** the implementations of `from`, and for a generic one the
+    /// bounds of its parameter.
+    pub fn convertsFrom(self: Reach, gpa: std.mem.Allocator, held: TypeId, from: node.DeclId) std.mem.Allocator.Error!bool {
+        if (held == .poison) return false;
+        const trait: u32 = @intCast(from.index());
+        var rows = self.index.membersOfTrait(trait);
+        while (rows.next()) |at| {
+            const row = self.impls[at];
+            if (row.trait != trait or !row.valid_key or row.args.len == 0) continue;
+            const source = row.args[0];
+            if (source == held) return true;
+            switch (self.typing.get(source)) {
+                .parameter => |parameter| {
+                    const integer = switch (self.typing.get(held)) {
+                        .integer => true,
+                        .parameter => |promised| promised.integer,
+                        else => false,
+                    };
+                    if (parameter.integer and !integer) continue;
+                    const met = for (parameter.traits) |bound| {
+                        if (!try self.answers(gpa, held, bound.trait)) break false;
+                    } else true;
+                    if (met) return true;
+                },
+                else => {},
+            }
+        }
+        return false;
+    }
 };
 
 // Makes every test build compile the tests `Reach` holds, including a build

@@ -272,6 +272,7 @@ pub fn atOffset(
     snippets: Snippets,
 ) ![]const Item {
     const ast = &program.ast;
+    if (insideText(ast, file, offset)) return &.{};
     const in = res.moduleOfFile(file);
     const attribute = attributeContext(ast, file, offset);
     if (attribute == .trait_arguments) return &.{};
@@ -528,6 +529,44 @@ fn significantAfter(ast: *const Ast, t: TokenId) TokenId {
     var at = TokenId.at(t.index() + 1);
     while (ast.tokenTag(at).isTrivia()) at = TokenId.at(at.index() + 1);
     return at;
+}
+
+/// Whether `offset` falls inside a comment or the text of a string literal,
+/// where no name is written. A cursor straight after a closed string is
+/// outside it; one at the end of a comment, or of a string never closed, is
+/// still inside. An interpolation's expression is ordinary tokens, and a
+/// cursor among them is outside the text.
+fn insideText(ast: *const Ast, file: FileId, offset: u32) bool {
+    const part = ast.partOfFile(file) orelse return false;
+    var before = positions.tokenBefore(ast, file, offset);
+    const next: u32 = if (before == .none) part.token_start else before.index() + 1;
+    if (next < part.token_end) {
+        const t = TokenId.at(next);
+        const span = ast.tokenSpan(t);
+        if (span.start < offset and offset < span.end) return isText(ast.tokenTag(t), ast.tokenText(t));
+    }
+    // The file's `eof` ends where its last token does, and stands for none.
+    if (before != .none and ast.tokenTag(before) == .eof) {
+        before = if (before.index() > part.token_start) TokenId.at(before.index() - 1) else .none;
+    }
+    // A token ending before the cursor's line holds nothing written on it.
+    if (before == .none or ast.tokenSpan(before).end != offset) return false;
+    const text = ast.tokenText(before);
+    return switch (ast.tokenTag(before)) {
+        .comment, .string_line => true,
+        .string_literal => text.len < 2 or text[text.len - 1] != '"',
+        .invalid => text.len > 0 and text[0] == '"',
+        else => false,
+    };
+}
+
+/// Whether a token of this tag and text is text a name is never written in.
+fn isText(tag: Tag, text: []const u8) bool {
+    return switch (tag) {
+        .comment, .string_literal, .string_line, .str_open, .str_mid, .str_close, .format_spec => true,
+        .invalid => text.len > 0 and text[0] == '"',
+        else => false,
+    };
 }
 
 /// Where a cursor sits inside a declaration attribute. A derive entry takes no
@@ -1335,9 +1374,11 @@ fn appendOperationsThroughType(
     for (offered.items) |item| try own.put(gpa, item.label, {});
 
     try typecheck.keepReached(gpa, ast, &applicable);
+    const reach = typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner);
     for (applicable.items) |a| {
         // The type's own operations were offered with its namespace.
         if (a.trait == node.DeclId.none) continue;
+        if (!try reach.settlesSomewhere(gpa, held, a)) continue;
         const name = ast.tokenText(ast.declName(a.sig));
         if (own.contains(name)) continue;
         const call = if (snippets == .supported) try callWritten(gpa, ast, name, a.sig) else null;
@@ -1597,8 +1638,16 @@ fn appendOperations(
 
     var applicable: std.ArrayList(typecheck.Applicable) = .empty;
     defer applicable.deinit(gpa);
-    try typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner)
-        .each(gpa, held, &applicable);
+    const reach = typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner);
+    try reach.each(gpa, held, &applicable);
+    // A conversion that settles on no result is not one a call can make.
+    var kept: usize = 0;
+    for (applicable.items) |a| {
+        if (!try reach.settlesSomewhere(gpa, held, a)) continue;
+        applicable.items[kept] = a;
+        kept += 1;
+    }
+    applicable.shrinkRetainingCapacity(kept);
 
     // The range a rewrite replaces, and whether one may be offered at all.
     // Where the call spans lines, an item is written in at the cursor like
@@ -2580,6 +2629,57 @@ test "what the reader wrote stays as written when a stop is added beside it" {
     const plain = try offeredReading(gpa, &checked, checked.fileNamed("main.lin").?, at, .unsupported);
     defer free(gpa, plain);
     try testing.expect((try requireItem(plain, "plus")).textEdit == null);
+}
+
+test "nothing is offered inside a string or a comment" {
+    const gpa = testing.allocator;
+    inline for (.{
+        "fn main() -> UInt8 {\n    let _s = \"ab|c\"\n    0\n}\n",
+        "fn main() -> UInt8 {\n    // a com|ment\n    0\n}\n",
+        "fn main() -> UInt8 {\n    // a comment|\n    0\n}\n",
+        "/// do|c\nfn main() -> UInt8 {\n    0\n}\n",
+        "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"{n} a|b\"\n    0\n}\n",
+        "fn main() -> UInt8 {\n    0\n}\n\nlet _s = \"open|",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const text = marked[0..at] ++ marked[at + 1 ..];
+        const offered = try offeredAt(gpa, text, at);
+        defer releaseAll(gpa, offered);
+        try testing.expectEqual(@as(usize, 0), offered.len);
+    }
+}
+
+test "a conversion is offered only where something converts from the value" {
+    const gpa = testing.allocator;
+    const text =
+        \\struct Plain { n: UInt8 }
+        \\struct Wrapped { n: UInt8 }
+        \\
+        \\impl From[Plain] for Wrapped {
+        \\    fn from(source: Plain) -> Wrapped {
+        \\        .{ n = source.n }
+        \\    }
+        \\}
+        \\
+        \\struct Lone { n: UInt8 }
+        \\
+        \\fn main() -> UInt8 {
+        \\    let plain = Plain { n = 1 }
+        \\    let lone = Lone { n = 2 }
+        \\    let w: Wrapped = plain.into()
+        \\    w.n + lone.n
+        \\}
+        \\
+    ;
+    const plain = std.mem.lastIndexOf(u8, text, "plain.").? + "plain.".len;
+    const converts = try offeredAt(gpa, text, plain);
+    defer releaseAll(gpa, converts);
+    try testing.expect(holds(converts, "into"));
+    const lone = std.mem.lastIndexOf(u8, text, "lone.").? + "lone.".len;
+    const stays = try offeredAt(gpa, text, lone);
+    defer releaseAll(gpa, stays);
+    try testing.expect(!holds(stays, "into"));
+    try testing.expect(!holds(stays, "try_into"));
 }
 
 test "a local is offered from the statement after the one that declares it" {
