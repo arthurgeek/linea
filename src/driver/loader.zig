@@ -532,7 +532,7 @@ fn loadInputs(
     const declared = try declaredGiven(gpa, sorted, dir);
     defer declared.deinit(gpa);
     l.program_is_library = declared.standard;
-    if (rootManifestOf(sorted, dir)) |manifest| {
+    if (try rootManifestOf(gpa, sorted, dir)) |manifest| {
         l.bound = try rootDir(gpa, dirOf(manifest.path));
         l.bound_kind = if (declared.kind == .library) .library else .program;
     } else {
@@ -748,7 +748,7 @@ pub fn declaredGiven(gpa: std.mem.Allocator, files: []const InMemoryFile, root_d
     // whatever is being typed and a half-written manifest is a normal state for
     // a file to be in. A root read as a program is what one without a manifest
     // already is.
-    const manifest = rootManifestOf(files, root_dir) orelse return .{};
+    const manifest = (try rootManifestOf(gpa, files, root_dir)) orelse return .{};
     var declared = declaredFromText(gpa, manifest.text) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{},
@@ -775,9 +775,15 @@ pub fn declaredGiven(gpa: std.mem.Allocator, files: []const InMemoryFile, root_d
 }
 
 /// The manifest that marks the root among `files`: the nearest one at or above
-/// `root_dir`, or, where the caller names no directory, the shallowest. One
-/// below the root marks a library of its own, which a root may depend on.
-pub fn rootManifestOf(files: []const InMemoryFile, root_dir: ?[]const u8) ?InMemoryFile {
+/// `root_dir` whose `source` holds `root_dir`, or, where the caller names no
+/// directory, the shallowest. One below the root marks a library of its own,
+/// which a root may depend on, and so does one above it whose source is
+/// elsewhere: a program whose source holds a library's directory is marked by
+/// its own manifest, not the library's. A manifest that will not parse holds
+/// its own directory, as the root it then reads as does. This is the
+/// containment `rootOf` asks of the path it was given, so a load from these
+/// files is marked by the manifest `rootOf` found.
+pub fn rootManifestOf(gpa: std.mem.Allocator, files: []const InMemoryFile, root_dir: ?[]const u8) std.mem.Allocator.Error!?InMemoryFile {
     var chosen: ?InMemoryFile = null;
     var depth: usize = 0;
     for (files) |f| {
@@ -785,16 +791,31 @@ pub fn rootManifestOf(files: []const InMemoryFile, root_dir: ?[]const u8) ?InMem
         const at = std.mem.count(u8, f.path, "/");
         if (root_dir) |root| {
             if (!spelledWithin(root, dirOf(f.path))) continue;
-            if (chosen == null or at > depth) {
-                chosen = f;
-                depth = at;
-            }
+            if (chosen != null and at <= depth) continue;
+            if (!try sourceHolds(gpa, f, root)) continue;
+            chosen = f;
+            depth = at;
         } else if (chosen == null or at < depth) {
             chosen = f;
             depth = at;
         }
     }
     return chosen;
+}
+
+/// Whether the source the manifest `file` names holds the directory `dir`.
+fn sourceHolds(gpa: std.mem.Allocator, file: InMemoryFile, dir: []const u8) std.mem.Allocator.Error!bool {
+    const Named = struct { source: ?[]const u8 = null };
+    const parsed = std.json.parseFromSlice(Named, gpa, file.text, .{ .ignore_unknown_fields = true }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return true,
+    };
+    defer parsed.deinit();
+    const named = manifest_source.named(parsed.value.source) orelse return true;
+    if (!manifest_source.staysInside(named)) return true;
+    const source = try manifest_source.directory(gpa, dirOf(file.path), named);
+    defer gpa.free(source);
+    return spelledWithin(dir, source);
 }
 
 /// Whether `dir` is `bound` or beneath it, read the way `canonical` spells a
@@ -834,12 +855,24 @@ test "the manifest at or above the root declares it, and one below it does not" 
         .{ .path = "app/lib/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"lib\" }" },
         .{ .path = "app/main.lin", .text = "" },
     };
-    try testing.expectEqualStrings("app/linea.json", rootManifestOf(files, "app").?.path);
-    try testing.expectEqualStrings("app/linea.json", rootManifestOf(files, "app/src").?.path);
-    try testing.expect(rootManifestOf(files[1..], "app") == null);
-    try testing.expectEqualStrings("app/linea.json", rootManifestOf(files, null).?.path);
+    const gpa = testing.allocator;
+    try testing.expectEqualStrings("app/linea.json", (try rootManifestOf(gpa, files, "app")).?.path);
+    try testing.expectEqualStrings("app/linea.json", (try rootManifestOf(gpa, files, "app/src")).?.path);
+    try testing.expect((try rootManifestOf(gpa, files[1..], "app")) == null);
+    try testing.expectEqualStrings("app/linea.json", (try rootManifestOf(gpa, files, null)).?.path);
     const dotted: []const InMemoryFile = &.{.{ .path = "./std/linea.json", .text = "{}" }};
-    try testing.expect(rootManifestOf(dotted, "std") != null);
+    try testing.expect((try rootManifestOf(gpa, dotted, "std")) != null);
+}
+
+test "a library's manifest in a program's source does not mark the program" {
+    const gpa = testing.allocator;
+    const files: []const InMemoryFile = &.{
+        .{ .path = "app/linea.json", .text = "{ \"source\": \"code\" }" },
+        .{ .path = "app/code/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"lib\", \"source\": \"x\" }" },
+        .{ .path = "app/code/main.lin", .text = "" },
+    };
+    try testing.expectEqualStrings("app/linea.json", (try rootManifestOf(gpa, files, "app/code")).?.path);
+    try testing.expectEqualStrings("app/code/linea.json", (try rootManifestOf(gpa, files, "app/code/x")).?.path);
 }
 
 test "the shallowest manifest among the files declares the root" {
@@ -2224,14 +2257,25 @@ test "a root's paths list a library's manifest that will not parse" {
 }
 
 test "two sources share modules unless a manifest stands between them" {
+    const Manifests = struct {
+        dirs: []const []const u8,
+        fn holdsAManifest(self: @This(), dir: []const u8) bool {
+            for (self.dirs) |held| if (std.mem.eql(u8, held, dir)) return true;
+            return false;
+        }
+    };
     // One directory read twice.
-    try testing.expect(Loader.swallows("/w/lib", "/w/lib", "/w/lib"));
+    try testing.expect(Loader.swallows("/w/lib", "/w/lib", Manifests{ .dirs = &.{"/w/lib"} }));
     // A library nested below another's source, with its manifest below it.
-    try testing.expect(!Loader.swallows("/w/outer", "/w/outer/inner", "/w/outer/inner"));
+    try testing.expect(!Loader.swallows("/w/outer", "/w/outer/inner", Manifests{ .dirs = &.{ "/w/outer", "/w/outer/inner" } }));
+    // A library's source beneath its manifest, which stands between.
+    try testing.expect(!Loader.swallows("/w", "/w/lib/src", Manifests{ .dirs = &.{ "/w", "/w/lib" } }));
     // A source reaching into a library whose manifest sits at that source.
-    try testing.expect(Loader.swallows("/w", "/w/lib/src", "/w"));
+    try testing.expect(Loader.swallows("/w", "/w/lib/src", Manifests{ .dirs = &.{"/w"} }));
+    // A source the program reads, whatever manifest is elsewhere.
+    try testing.expect(Loader.swallows("/w", "/w/util", Manifests{ .dirs = &.{ "/w", "/w/lib" } }));
     // Apart.
-    try testing.expect(!Loader.swallows("/w/a", "/w/b", "/w/b"));
+    try testing.expect(!Loader.swallows("/w/a", "/w/b", Manifests{ .dirs = &.{} }));
 }
 
 test "a dependency's directory is spelled from its manifest's directory" {
@@ -3500,7 +3544,7 @@ const Loader = struct {
             if (!std.mem.eql(u8, std.fs.path.basename(f.path), manifest_name)) continue;
             try self.manifest_dirs.put(a, dirOf(f.path), {});
         }
-        const shallowest = rootManifestOf(self.files, self.primary_dir);
+        const shallowest = try rootManifestOf(a, self.files, self.primary_dir);
         const manifest = shallowest orelse InMemoryFile{ .path = "", .text = "" };
         const manifest_dir = if (manifest.path.len == 0) self.primary_dir else dirOf(manifest.path);
         try self.graph.append(a, .{
@@ -3796,7 +3840,7 @@ const Loader = struct {
         // module with another root.
         const source_dir = try manifest_source.directory(a, dir, parsed.source);
         const source_identity = try self.sourceIdentityOf(dir, source_dir);
-        if (self.sourceOverlapping(source_identity, identity)) |other| {
+        if (self.sourceOverlapping(source_identity)) |other| {
             const note = try std.fmt.allocPrint(self.sink.arena, "keep each library's source apart; `{s}` reads modules from `{s}`", .{ self.rootLabel(other), self.graph.items[other.index()].source_dir });
             try self.reportManifest(manifest_path, text, entry.key, "two roots may not read the same modules", "the source of `{s}` overlaps the source of `{s}`", .{ name, self.rootLabel(other) }, &.{note});
             return true;
@@ -3843,31 +3887,43 @@ const Loader = struct {
     /// `source_identity` and whose manifest sits at `manifest_identity`, in
     /// either direction, or null where none does.
     ///
-    /// Two sources share modules when they are one directory, or when one
-    /// holds the other without the inner root's manifest standing between
-    /// them: a directory holding a manifest below a root's source is another
-    /// root, which the walk of the outer one stops at. The manifest stands
-    /// between only where its directory holds the inner source; a source
-    /// reached through a link out of its manifest's directory is read by the
-    /// outer walk wherever the manifest sits.
+    /// Two sources share modules when both roots would read one module
+    /// file: they are one directory, or one holds the other and no directory
+    /// below the outer source, down to the inner source itself, holds a
+    /// manifest. The walk of a source stops at every directory holding a
+    /// manifest, whichever root it marks, so beneath one the outer root reads
+    /// nothing.
     ///
-    /// **Bound:** the roots the graph holds.
-    fn sourceOverlapping(self: *const Loader, source_identity: []const u8, manifest_identity: []const u8) ?RootId {
+    /// **Bound:** the roots the graph holds, and for each one `stat` per
+    /// directory between two nested sources.
+    fn sourceOverlapping(self: *const Loader, source_identity: []const u8) ?RootId {
         for (self.graph.items, 0..) |held, i| {
             if (i == standard_root.index() or held.source_identity.len == 0) continue;
-            if (swallows(held.source_identity, source_identity, manifest_identity) or
-                swallows(source_identity, held.source_identity, held.identity)) return .from(i);
+            if (swallows(held.source_identity, source_identity, self) or
+                swallows(source_identity, held.source_identity, self)) return .from(i);
         }
         return null;
     }
 
-    /// Whether the source `outer` reads the modules of a root whose source is
-    /// `inner` and whose manifest sits at `inner_manifest`.
-    fn swallows(outer: []const u8, inner: []const u8, inner_manifest: []const u8) bool {
+    /// Whether the walk of the source `outer` reads modules of the source
+    /// `inner`, where `manifests.holdsAManifest(dir)` says which directories
+    /// hold a manifest.
+    fn swallows(outer: []const u8, inner: []const u8, manifests: anytype) bool {
         if (std.mem.eql(u8, outer, inner)) return true;
         if (!within(inner, outer)) return false;
-        const stands_between = within(inner_manifest, outer) and !std.mem.eql(u8, inner_manifest, outer) and within(inner, inner_manifest);
-        return !stands_between;
+        var at = inner;
+        while (at.len > outer.len) : (at = dirOf(at)) {
+            if (manifests.holdsAManifest(at)) return false;
+        }
+        return true;
+    }
+
+    /// Whether the directory a source identity names holds a manifest: asked
+    /// of the disk where the load can read it, since those identities are
+    /// real paths, and of the files supplied otherwise.
+    fn holdsAManifest(self: *const Loader, dir: []const u8) bool {
+        if (self.diskReader()) |io| return holdsManifest(io, dir);
+        return self.manifest_dirs.contains(dir);
     }
 
     /// [M-Dependency] where the library's own manifest and its consumer's

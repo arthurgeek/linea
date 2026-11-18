@@ -35,10 +35,22 @@ reaches.
 
 **A source directory's identity is the directory itself.** Where a load can
 read the disk, the real path of the source directory tells one root's source
-from another's, for the program and every library, so a `source` that is a
-link into another root's source overlaps it ([M-Dependency]). A load from
-memory alone has only spellings, and uses the identity of the manifest's
-directory with the source's path beneath it.
+from another's, for the program and every library. A load from memory alone has
+only spellings, and uses the identity of the manifest's directory with the
+source's path beneath it.
+
+**Two roots overlap where both would read one module file.** A root's walk of
+its source stops at every directory holding a manifest, whichever root it
+marks, so one source holding another overlaps it ([M-Dependency]) only where
+no directory below the outer source, down to the inner source itself, holds a
+manifest. A `source` that links into another root's modules overlaps it; one
+that links to a directory holding a manifest of its own shares nothing with a
+program around it, wherever the link sits.
+
+**A root is marked by the manifest whose source holds it.** A load from files,
+as an editor's is, finds a root's manifest as the nearest one above the root
+whose `source` holds it, the containment `rootOf` asks of a path on disk. A
+library's manifest inside a program's source does not mark the program.
 
 **One routine spells it.** `manifest_source.directory` joins each component of
 the `source` beneath the manifest's directory, `.` and empty components taken

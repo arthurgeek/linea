@@ -1829,8 +1829,10 @@ already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
 when the library's `source` is not a path down from the directory holding its
 manifest, or
-shares modules with another root's source (they are one directory, or one holds
-the other without the inner root's manifest between them); or when the library's manifest grants `extern` to any of its modules and the
+shares modules with another root's source (both would read one module file:
+they are one directory, or one holds the other and no directory below the outer
+source, down to the inner one, holds a manifest, since a root's walk stops at
+every directory holding one); or when the library's manifest grants `extern` to any of its modules and the
 entry does not consent with `"extern": true`, or the entry consents and the
 manifest grants nothing. The program links every root's `extern`
 declarations, so the primary root's manifest also names every library in the
