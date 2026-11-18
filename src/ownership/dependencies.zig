@@ -2854,9 +2854,10 @@ const Analysis = struct {
         // A lambda a call checked as its own signature takes context from a
         // `fn` type written where its value is bound, under which its result
         // may carry what its captures carry. That permits no more than the
-        // clause, so it is not offered where part of the value is one no
-        // clause permits.
-        if (found.captured and fixed == null and !partial and self.function.own_signature) try notes.append(arena, "or write the type the call's result is kept as where it is bound, such as `let name: mem.Closure[fn(…) -> …] = …`: the `fn` type in it gives the lambda its context, under which its result may carry what its captures carry");
+        // clause, so it is offered beside the clause help alone: where that
+        // help is written, and not where part of the value is one no clause
+        // permits.
+        if (sources.len > 0 and found.captured and fixed == null and !partial and self.function.own_signature) try notes.append(arena, "or write the type the call's result is kept as where it is bound, such as `let name: mem.Closure[fn(…) -> …] = …`: the `fn` type in it gives the lambda its context, under which its result may carry what its captures carry");
         if (found.unnamed != null) try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from a parameter written as a pattern, and a clause names a parameter by its name: bind it to a name, and take it apart in {s}'s body", .{try self.functionName()}));
         if (consumed) |owner| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is consumed by {s} and ends when it returns, so no clause lets anything observe it past the return", .{
             self.ast.tokenText(self.res.declaringToken(owner)),
