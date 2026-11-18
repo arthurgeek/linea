@@ -711,9 +711,11 @@ fn programsUnder(
 
     std.mem.sort([]const u8, found.items, {}, lessByPath);
 
+    // A duplicate is compared with the last root kept, which is live; the
+    // entry before it may be a duplicate already freed.
     var kept: usize = 0;
-    for (found.items, 0..) |p, i| {
-        if (i > 0 and std.mem.eql(u8, p, found.items[i - 1])) {
+    for (found.items) |p| {
+        if (kept > 0 and std.mem.eql(u8, p, found.items[kept - 1])) {
             gpa.free(p);
             continue;
         }
@@ -929,6 +931,23 @@ test "a manifest inside a program marks a program of its own" {
     defer testing.allocator.free(from_inner);
     try testing.expectEqual(@as(usize, 1), from_inner.len);
     try testing.expectEqualStrings("inner", from_inner[0]);
+}
+
+test "three manifests naming one source root are one program" {
+    // The outer manifest's source is `a/inner`, the middle one's is `inner`,
+    // and the innermost marks `a/inner` itself: each names the same directory.
+    var ws = try Scratch.init(&.{
+        .{ .at = "linea.json", .text = "{\"source\": \"a/inner\"}" },
+        .{ .at = "a/linea.json", .text = "{\"source\": \"inner\"}" },
+        .{ .at = "a/inner/linea.json", .text = "{}" },
+        .{ .at = "a/inner/main.lin", .text = "pub fn only() -> UInt8 { 1 }\n" },
+    });
+    defer ws.deinit();
+
+    var index = try Index.build(testing.allocator, testing.io, ws.root);
+    defer index.deinit();
+
+    try testing.expectEqual(@as(usize, 1), index.programs.len);
 }
 
 test "a prefix matching a name two modules export answers both" {
