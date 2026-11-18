@@ -6,7 +6,8 @@ implements the proposed migration and Linux completion phases of §13.
 
 Status: Phases 1 to 5 accepted and built; phase 5 correctness, platform
 validation and measurement closeout recorded in §§9.5–9.6; phases 6 and 7
-proposed — 2026-11-13. The delivery and host-handler clauses of §4.5, and its
+proposed — 2026-11-13, and implemented by
+[0282](0282-clean-fiber-continuations-can-change-carriers.md). The delivery and host-handler clauses of §4.5, and its
 sentence on the share a taken or closed registration answers, are
 superseded by
 [0281](0281-the-signal-router-chains-to-a-snapshot-of-the-hosts-action-as-the-system-would-call-it.md).

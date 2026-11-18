@@ -655,7 +655,7 @@ it.
 
 A router is a handler, so a test sends it a request. `http.new_request` builds a
 request in an arena you provide, exactly as `serve` would, and the test hands
-it to the router with a state of its own, which reads the extractors a
+it to the router with a context of its own, which reads the extractors a
 handler's parameters name and calls it. These tests are for the station
 server of [Networking](09-networking.md#reading-inputs-sharing-state-and-logging);
 add them to the end of `stations.lin`, with `import std.testing`,
@@ -663,64 +663,71 @@ add them to the end of `stations.lin`, with `import std.testing`,
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea
-// The tests hand the handlers a state whose logger writes only errors, so the
-// lines they log stay out of the test report.
-fn quiet() -> App {
-    .{ logger = log.to_stderr(minimum: .Error), readings = 0 }
+// The tests own an `App` of their own, and hand the handlers a context with a
+// client of it and a logger that writes only errors, so the lines the
+// handlers log stay out of the test report.
+fn quiet(owner: task.Owner[App]) -> Ctx where borrows(owner) {
+    .{ app = owner.client(), logger = log.to_stderr(minimum: .Error) }
 }
 
 // Build a request in an arena, as `serve` would, and send it through the routes.
 test "a reading is recorded and counted" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
     &sent.add_header("Authorization", "Bearer harbour").unwrap()
-    var app = quiet()
     defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&app, sent.request(), &incoming_1).unwrap()
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_1).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"station":"harbour","sky":"clear","count":1}"#, "the answer changed")?
-    testing.assert_eq(app.readings, 1, "the reading was not counted")?
+    let readings = ctx.app.call(|inout app: App| app.readings)
+    testing.assert_eq(readings, 1, "the reading was not counted")?
 }
 
 // A request that names no station is refused before anything is counted.
 test "a reading without a station is refused" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
-    var app = quiet()
     defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let refused = match &router.serve_http(&app, sent.request(), &incoming_2) {
+    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_2) {
         Ok(_) => return testing.assert(false, "a reading without a station was accepted"),
         Err(error) => error,
     }
     testing.assert_eq(refused.status(), http.Status.Unauthorized, "the status changed")?
-    testing.assert_eq(app.readings, 0, "a refused reading was counted")?
+    let readings = ctx.app.call(|inout app: App| app.readings)
+    testing.assert_eq(readings, 0, "a refused reading was counted")?
 }
 
 // `recorded_body` runs a streamed body into the request's arena, so a test
 // reads what a client would receive.
 test "the outlook streams one line a day" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/outlook?days=2", body: "").unwrap()
-    var app = quiet()
     defer var incoming_3 = http.RequestBody.from_request(sent.request())
-    let body = &router.serve_http(&app, sent.request(), &incoming_3).unwrap().recorded_body().unwrap()
+    let body = &router.serve_http(&ctx, sent.request(), &incoming_3).unwrap().recorded_body().unwrap()
     testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "day 1: sunny\nday 2: sunny\n", "the outlook changed")?
 }
 
 // A route that is a closure is reached the same way.
 test "the root answers with the greeting" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var app = quiet()
     defer var incoming_4 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&app, sent.request(), &incoming_4).unwrap()
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_4).unwrap()
     testing.assert_ok_eq(response.text(), "Weather stations report here.\n", "the greeting changed")?
 }
 ```
@@ -736,13 +743,16 @@ ok    the root answers with the greeting
 
 A few things to notice:
 
-- `quiet()` builds the state the tests share, with a logger that writes only
-  errors, so the lines the handlers log do not clutter the test report.
+- Each test owns an `App` of its own with `task.own`, and `quiet(owner)`
+  builds the `Ctx` the routes take: a client of that owner, and a logger that
+  writes only errors, so the lines the handlers log do not clutter the test
+  report. Both are `defer`red, so the context is released before the owner
+  closes.
 - `&sent.add_header(name, value)` adds a header to a built request, and
   `content_type:` sets its `Content-Type`.
-- `&router.serve_http(&app, request, &incoming)` runs the router as `serve` does: it reads
-  the extractors `record` names and calls it, and the test then reads
-  `app.readings` to see what it changed.
+- `&router.serve_http(&ctx, request, &incoming)` runs the router as `serve` does: it reads
+  the extractors `record` names and calls it, and the test then asks the
+  owning task for `readings` with `ctx.app.call` to see what it changed.
 - `response.text()` reads a held body as text, and answers an error instead
   for a streamed body or for bytes that are not UTF-8; `testing.assert_ok_eq`
   compares it with the text a client should see.
