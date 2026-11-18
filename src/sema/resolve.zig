@@ -10410,11 +10410,34 @@ const Resolver = struct {
 
                 var type_references: std.ArrayList(reflection.TypeParameterReference) = .empty;
                 defer type_references.deinit(self.gpa);
+                var member_type_references: std.ArrayList(reflection.MemberTypeParameterReference) = .empty;
+                defer member_type_references.deinit(self.gpa);
+                // The member's type parameters shadow every other name they
+                // spell inside it, so each identifier of the member written as
+                // one of them, and not selected after a `.`, names it.
+                const member_type_params = self.program.ast.declTypeParams(member_plan.member);
+                if (member_type_params.len != 0) {
+                    var previous: token.Tag = .invalid;
+                    for (member_tokens.start.index()..member_tokens.end.index()) |token_at| {
+                        const at = TokenId.at(@intCast(token_at));
+                        const tag = self.program.ast.tokenTag(at);
+                        if (tag.isTrivia()) continue;
+                        defer previous = tag;
+                        if (tag != .identifier or previous == .dot) continue;
+                        for (member_type_params, 0..) |parameter, position| {
+                            if (std.mem.eql(u8, self.program.ast.tokenText(at), self.program.ast.tokenText(parameter.name))) {
+                                try member_type_references.append(self.gpa, .{ .at = at, .parameter = @intCast(position) });
+                                break;
+                            }
+                        }
+                    }
+                }
                 var member_references: std.ArrayList(TemplateFreeReference) = .empty;
                 defer member_references.deinit(self.gpa);
                 for (validation.references, validation.token_start..) |binding, token_index| {
                     if (binding == .none) continue;
                     const held = self.bindings.items[binding.index()];
+                    if (held.kind == .type_parameter and held.decl == member_plan.member) continue;
                     if (binding.index() >= validation.binding_floor) continue;
                     if (held.kind == .parameter and held.decl == member_plan.member) continue;
                     if (held.kind == .type_parameter and held.decl == template) {
@@ -10450,11 +10473,17 @@ const Resolver = struct {
                     return err;
                 };
                 const owned_type_references = try type_references.toOwnedSlice(self.gpa);
-                var reflection_plan = reflection_context.finish(self.gpa, parameter_plans) catch |err| {
+                const owned_member_type_references = member_type_references.toOwnedSlice(self.gpa) catch |err| {
                     self.gpa.free(owned_type_references);
                     return err;
                 };
+                var reflection_plan = reflection_context.finish(self.gpa, parameter_plans) catch |err| {
+                    self.gpa.free(owned_type_references);
+                    self.gpa.free(owned_member_type_references);
+                    return err;
+                };
                 reflection_plan.type_parameters = owned_type_references;
+                reflection_plan.member_type_parameters = owned_member_type_references;
                 parameters_handed_off = true;
                 reflection_plans.append(self.gpa, reflection_plan) catch |err| {
                     reflection_plan.deinit(self.gpa);

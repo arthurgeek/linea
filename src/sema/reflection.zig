@@ -214,6 +214,10 @@ pub const FreeReference = struct {
 
 pub const TypeParameterReference = struct { at: token.TokenId, parameter: u32, selection_base: bool = false };
 
+/// Where a template member names one of its own type parameters: the
+/// parameter's declaration or a use of it, and the parameter's position.
+pub const MemberTypeParameterReference = struct { at: token.TokenId, parameter: u32 };
+
 pub const ParameterReference = struct { at: token.TokenId, contract: bool = false };
 
 pub const ParameterPlan = struct {
@@ -254,6 +258,10 @@ pub const ReflectionMemberPlan = struct {
     wraps: []const WrapPlan = &.{},
     parameters: []const ParameterPlan,
     type_parameters: []const TypeParameterReference = &.{},
+    /// The member's own type parameters, renamed where the target or the
+    /// derive spells the same name, so a component type naming the target's
+    /// parameter is not captured by the member's.
+    member_type_parameters: []const MemberTypeParameterReference = &.{},
     constructions: []const ConstructionPlan = &.{},
     component_types: []const ComponentTypePlan = &.{},
     locals: []const LocalRename = &.{},
@@ -273,6 +281,7 @@ pub const ReflectionMemberPlan = struct {
         for (self.parameters) |parameter| gpa.free(parameter.references);
         gpa.free(self.parameters);
         gpa.free(self.type_parameters);
+        gpa.free(self.member_type_parameters);
         gpa.free(self.constructions);
         gpa.free(self.component_types);
         gpa.free(self.locals);
@@ -321,7 +330,7 @@ const Operation = struct {
     kind: Kind,
     index: u32,
 
-    const Kind = enum { case, same_case, loop, place, metadata, text, decision, erasable_declaration, erasable_use, ordinal, free_reference, parameter_declaration, parameter_reference, parameter_contract_reference, type_parameter, construction, component_type, local, wrap };
+    const Kind = enum { case, same_case, loop, place, metadata, text, decision, erasable_declaration, erasable_use, ordinal, free_reference, parameter_declaration, parameter_reference, parameter_contract_reference, type_parameter, member_type_parameter, construction, component_type, local, wrap };
 
     fn before(_: void, lhs: Operation, rhs: Operation) bool {
         if (lhs.span.start != rhs.span.start) return lhs.span.start < rhs.span.start;
@@ -367,6 +376,9 @@ const Renderer = struct {
     /// The identifiers the member spells and the names this rendering made.
     occupied: std.StringHashMapUnmanaged(void) = .empty,
     parameter_used: []bool,
+    /// The name each of the member's own type parameters is written with,
+    /// made on first use.
+    member_type_names: [][]const u8,
     parameter_positions: std.ArrayList(struct { parameter: u32, offset: u32 }) = .empty,
     /// Each copy of an erasable local the output declares, in output order.
     local_copies: std.ArrayList(struct { local: u32, offset: u32, used: bool = false }) = .empty,
@@ -381,6 +393,8 @@ const Renderer = struct {
         self.local_copies.deinit(self.gpa);
         for (self.bindings.items) |name| self.gpa.free(name);
         self.bindings.deinit(self.gpa);
+        for (self.member_type_names) |name| if (name.len != 0) self.gpa.free(name);
+        self.gpa.free(self.member_type_names);
         self.binding_index.deinit(self.gpa);
         self.occupied.deinit(self.gpa);
     }
@@ -417,6 +431,31 @@ const Renderer = struct {
     /// spells, or one this rendering already made.
     fn taken(self: *const Renderer, name: []const u8) bool {
         return self.spelled.contains(name) or self.occupied.contains(name);
+    }
+
+    /// The name a member's own type parameter is written with: its own, unless
+    /// the target or the derive spells it, which would make a component type
+    /// or a template argument naming the target's parameter name the
+    /// member's instead.
+    fn memberTypeName(self: *Renderer, reference: MemberTypeParameterReference) RenderError![]const u8 {
+        const made = self.member_type_names[reference.parameter];
+        if (made.len != 0) return made;
+        const written = self.ast.tokenText(reference.at);
+        if (!self.spelled.contains(written)) return written;
+        var suffix: u32 = 0;
+        while (true) : (suffix = try std.math.add(u32, suffix, 1)) {
+            const candidate = try std.fmt.allocPrint(self.gpa, "_Linea{s}{d}", .{ written, suffix });
+            if (self.taken(candidate)) {
+                self.gpa.free(candidate);
+                continue;
+            }
+            self.occupied.put(self.gpa, candidate, {}) catch |err| {
+                self.gpa.free(candidate);
+                return err;
+            };
+            self.member_type_names[reference.parameter] = candidate;
+            return candidate;
+        }
     }
 
     fn buildBindings(self: *Renderer, derive: DeclId) RenderError!void {
@@ -550,6 +589,7 @@ const Renderer = struct {
                 .decision => try self.renderDecision(self.plan.decisions[operation.index], state),
                 .ordinal => try self.renderOrdinal(self.plan.ordinals[operation.index]),
                 .wrap => try self.renderWrap(self.plan.wraps[operation.index]),
+                .member_type_parameter => try self.append(try self.memberTypeName(self.plan.member_type_parameters[operation.index])),
                 .type_parameter => {
                     const reference = self.plan.type_parameters[operation.index];
                     if (reference.selection_base) try self.append("(");
@@ -1155,7 +1195,7 @@ pub fn renderMember(
         try std.math.add(usize, plan.component_types.len, plan.locals.len),
     );
     const reflection_operations = try std.math.add(usize, existing_reflection_operations, construction_operations);
-    var parameter_operations = try std.math.add(usize, plan.parameters.len, plan.type_parameters.len);
+    var parameter_operations = try std.math.add(usize, try std.math.add(usize, plan.parameters.len, plan.type_parameters.len), plan.member_type_parameters.len);
     for (plan.parameters) |parameter| {
         parameter_operations = try std.math.add(usize, parameter_operations, parameter.references.len);
     }
@@ -1234,6 +1274,10 @@ pub fn renderMember(
         operations[at] = .{ .span = ast.tokenSpan(reference.at), .kind = .type_parameter, .index = @intCast(i) };
         at += 1;
     }
+    for (plan.member_type_parameters, 0..) |reference, i| {
+        operations[at] = .{ .span = ast.tokenSpan(reference.at), .kind = .member_type_parameter, .index = @intCast(i) };
+        at += 1;
+    }
     for (plan.wraps, 0..) |wrap, i| {
         operations[at] = .{ .span = ast.exprSpan(wrap.callee), .kind = .wrap, .index = @intCast(i) };
         at += 1;
@@ -1260,6 +1304,8 @@ pub fn renderMember(
     const current_copy = try gpa.alloc(u32, plan.erasable_locals.len);
     defer gpa.free(current_copy);
     @memset(current_copy, no_copy);
+    const member_type_names = try gpa.alloc([]const u8, ast.declTypeParams(plan.member).len);
+    @memset(member_type_names, "");
     var renderer: Renderer = .{
         .gpa = gpa,
         .ast = ast,
@@ -1273,6 +1319,7 @@ pub fn renderMember(
         .component_types = component_types,
         .operations = operations,
         .parameter_used = parameter_used,
+        .member_type_names = member_type_names,
         .current_copy = current_copy,
     };
     defer renderer.deinit();

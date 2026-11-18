@@ -1,0 +1,45 @@
+// A template member's own type parameter belongs to the member: where a
+// component's type spells the same name, it names the target's parameter.
+// `Pair[W]` derives `Repeat`, whose `repeat[W]` takes a count of any type.
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> UInt64 {
+        0
+    }
+}
+
+trait Repeat {
+    fn repeat[W: Copyable](times: W) -> Self
+}
+
+template impl Repeat where reflect.target: struct, reflect.components: Zero {
+    fn repeat[W: Copyable](_times: W) -> Self {
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Zero.zero()
+                value
+            },
+            {},
+        )
+    }
+}
+
+struct Pair[W: Zero] {
+    left: W,
+    right: UInt64,
+}
+
+derive[W: Zero] Repeat for Pair[W]
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt64] = Repeat.repeat(true)
+    if pair.left == 0 && pair.right == 0 {
+        0
+    } else {
+        1
+    }
+}
