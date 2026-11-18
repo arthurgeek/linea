@@ -14,6 +14,7 @@ const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
 const ast_mod = @import("../syntax/ast.zig");
 const TokenId = @import("../lexer/token.zig").TokenId;
 const resolve = @import("../sema/resolve.zig");
+const typecheck = @import("../sema/typecheck.zig");
 const BindingId = resolve.BindingId;
 const Kind = resolve.Kind;
 const DeclId = @import("../syntax/node.zig").DeclId;
@@ -216,9 +217,10 @@ pub fn forPositionReporting(
 /// compute something else.
 ///
 /// A use is any name written bare where a name is looked up: in an
-/// expression, a written type, a pattern, or at the head of a path. A name
-/// after a dot is selected from what is before it, and no spelling changes
-/// what it reaches. Each use is asked which binding the new spelling would
+/// expression, a written type, a pattern, the head of a path, or a field
+/// written by its own name. A name after a dot is selected from what is
+/// before it, and the operation a call of it reaches is asked of the
+/// checker's selection (`refuseReselection`). Each use is asked which binding the new spelling would
 /// reach where it is written: a type parameter of a declaration around it,
 /// which is in scope across that declaration, signature included, and then
 /// what the scope query completion lists names from (`completion.reachableAt`)
@@ -263,8 +265,13 @@ fn refuseRebinding(
             // change what it reaches.
             const text = ast.tokenText(token);
             if (!std.mem.eql(u8, text, new_name) and !spelledLike(ast, res, renamed, text)) continue;
-            if (followsDot(ast, part.token_start, token)) continue;
-            if (checked.uses.declaredAt(token) != BindingId.none) continue;
+            if (followsDot(ast, part.token_start, token)) {
+                try refuseReselection(gpa, checked, file, token, renamed, new_name);
+                continue;
+            }
+            // A field written by its own name both declares the field's
+            // value and reads the local of that name.
+            if (checked.uses.declaredAt(token) != BindingId.none and checked.uses.initializerBindingAt(token) == null) continue;
             const start = ast.tokenSpan(token).start;
             const use = useAt(checked, file, token) orelse continue;
             const current = use.binding;
@@ -285,6 +292,89 @@ fn appendOnce(gpa: std.mem.Allocator, files: *std.ArrayList(FileId), file: FileI
     try files.append(gpa, file);
 }
 
+/// Refuses a rename under which the operation a call written after a dot,
+/// `p.name()`, reaches would change: a rewritten call reaching another
+/// operation (`ANewNameWouldBeCapturedByAnotherBinding`), or a call of
+/// another operation reaching a renamed one
+/// (`ANewNameWouldShadowAnotherBinding`). Which operation a call reaches
+/// is the checker's selection, `typecheck.NameReach`, over what
+/// `typecheck.Reach.each` says applies to the receiver: the type's own
+/// before a trait's. The operations are asked under their spellings
+/// before and after the rename.
+fn refuseReselection(
+    gpa: std.mem.Allocator,
+    checked: *const Analysis,
+    file: FileId,
+    token: TokenId,
+    renamed: []const BindingId,
+    new_name: []const u8,
+) !void {
+    const program = &checked.program;
+    const ast = &program.ast;
+    const res = &checked.semantics.res;
+    const typing = &checked.semantics.typing;
+    const start = ast.tokenSpan(token).start;
+    var chain = checked.cursors.enclosing(ast, file, start);
+    const selected = switch (chain.next() orelse return) {
+        .expr => |e| e,
+        else => return,
+    };
+    if (ast.exprTag(selected) != .field or ast.exprMain(selected) != token) return;
+    const receiver = ast.withoutGroups(ast.unaryOperand(selected));
+    const qualifier = res.targetOf(receiver);
+    if (qualifier != BindingId.none and resolve.namesANamespace(res.kindOf(qualifier))) return;
+    const held = typing.exprType(receiver);
+    if (held == .poison) return;
+
+    var applicable: std.ArrayList(typecheck.Applicable) = .empty;
+    defer applicable.deinit(gpa);
+    const owner = checked.cursors.declarationAt(ast, file, start);
+    try typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner).each(gpa, held, &applicable);
+
+    const text = ast.tokenText(token);
+    const before = selectedAs(ast, res, applicable.items, &.{}, new_name, text);
+    const was_renamed = before != DeclId.none and declaresOneOf(res, renamed, before);
+    const after = selectedAs(ast, res, applicable.items, renamed, new_name, if (was_renamed) new_name else text);
+    if (after == DeclId.none) return;
+    const now_renamed = declaresOneOf(res, renamed, after);
+    if (was_renamed and !now_renamed) return Refused.ANewNameWouldBeCapturedByAnotherBinding;
+    if (!was_renamed and now_renamed) return Refused.ANewNameWouldShadowAnotherBinding;
+}
+
+/// The operation a call written `.name` reaches among `applicable`, with
+/// each operation one of `renamed` declares spelled `new_name`, by the
+/// checker's selection; `.none` where none or two traits' would.
+fn selectedAs(
+    ast: *const ast_mod.Ast,
+    res: *const resolve.Resolution,
+    applicable: []const typecheck.Applicable,
+    renamed: []const BindingId,
+    new_name: []const u8,
+    name: []const u8,
+) DeclId {
+    var reach: typecheck.NameReach = .{};
+    for (applicable) |a| {
+        if (std.mem.eql(u8, spellingOf(ast, res, renamed, new_name, a.sig), name)) reach.note(a);
+    }
+    for (applicable) |a| {
+        if (!std.mem.eql(u8, spellingOf(ast, res, renamed, new_name, a.sig), name)) continue;
+        if (reach.reaches(a)) return a.sig;
+    }
+    return DeclId.none;
+}
+
+fn spellingOf(ast: *const ast_mod.Ast, res: *const resolve.Resolution, renamed: []const BindingId, new_name: []const u8, d: DeclId) []const u8 {
+    return if (declaresOneOf(res, renamed, d)) new_name else ast.tokenText(ast.declName(d));
+}
+
+/// Whether `d` is the declaration of one of `bindings`.
+fn declaresOneOf(res: *const resolve.Resolution, bindings: []const BindingId, d: DeclId) bool {
+    for (bindings) |b| {
+        if (res.declIfDeclared(b) == d) return true;
+    }
+    return false;
+}
+
 /// A bare name and the binding it reaches now, and whether it is written in
 /// an expression rather than in a type, a pattern or a path's head.
 const Use = struct { binding: BindingId, in_expression: bool };
@@ -296,10 +386,12 @@ fn useAt(checked: *const Analysis, file: FileId, token: TokenId) ?Use {
     if (chain.next()) |n| switch (n) {
         .expr => |e| if (ast.exprTag(e) == .name_ref and ast.exprMain(e) == token) {
             const b = res.targetOf(e);
-            return if (b == BindingId.none) null else .{ .binding = b, .in_expression = true };
+            if (b != BindingId.none) return .{ .binding = b, .in_expression = true };
         },
         .decl, .stmt => {},
     };
+    // A field written by its own name, `P { x }`, reads the local `x`.
+    if (checked.uses.initializerBindingAt(token)) |b| return .{ .binding = b, .in_expression = true };
     const written = checked.uses.writesAt(res, token);
     return if (written == BindingId.none) null else .{ .binding = written, .in_expression = false };
 }
@@ -1123,6 +1215,79 @@ test "a new name that would change which type a written type names is refused" {
     try testing.expectError(
         Refused.ANewNameWouldBeCapturedByAnotherBinding,
         forPosition(gpa, testing.io, &checked, file, at(text, declared + 1), .@"utf-16", "", "T"),
+    );
+}
+
+test "a new name that would change which operation a call reaches is refused" {
+    const gpa = testing.allocator;
+
+    // A call reaches the type's own operation before a trait's. Renaming the
+    // own `bonus` to `score` would take `p.score()` from the trait, and
+    // renaming the trait's `score` to `bonus` would hand its call to the
+    // type's own `bonus`. Either program checks, and computes something else.
+    const text =
+        \\trait Score {
+        \\    fn score(self: Self) -> UInt8
+        \\}
+        \\
+        \\struct P { x: UInt8 }
+        \\
+        \\impl Score for P {
+        \\    fn score(self: Self) -> UInt8 {
+        \\        self.x - 2
+        \\    }
+        \\}
+        \\
+        \\impl P {
+        \\    fn bonus(self: Self) -> UInt8 {
+        \\        self.x + 2
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p = P { x = 3 }
+        \\    p.score() + p.bonus() + p.x
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    const bonus = std.mem.indexOf(u8, text, "fn bonus").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, bonus + 1), .@"utf-16", "", "score"),
+    );
+    const score = std.mem.indexOf(u8, text, "fn score").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldBeCapturedByAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, score + 1), .@"utf-16", "", "bonus"),
+    );
+}
+
+test "a new name that a field written by its own name would reach is refused" {
+    const gpa = testing.allocator;
+
+    // `P { x, y = q }` writes the field `x` from the local `x`. Renamed to
+    // `x`, the later `q` would be the local the shorthand reads.
+    const text =
+        \\struct P { x: UInt8, y: UInt8 }
+        \\
+        \\fn main() -> UInt8 {
+        \\    let x: UInt8 = 1
+        \\    let q: UInt8 = 2
+        \\    let p = P { x, y = q }
+        \\    p.x + p.y
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const q = std.mem.indexOf(u8, text, "let q").? + "let ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, q), .@"utf-16", "", "x"),
     );
 }
 
