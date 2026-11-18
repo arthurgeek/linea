@@ -10,12 +10,14 @@
  * While a share of a signal exists, the router's handler is installed for
  * it. The handler counts the delivery with an atomic increment, writes a
  * byte to the router's wake descriptor, calls the handler a host installed
- * before the first share, if any, and restores `errno`. Every wait set
+ * before the first share, if any, under the host action's mask and flags
+ * (an SA_RESETHAND handler for the first delivery only), and restores
+ * `errno`. Every wait set
  * holding a signal registration watches the wake descriptor; the first to
  * see it readable drains it, reads each signal's count, and signals every
  * registration whose signal was delivered after it was made. When the last
  * share of a signal is released, the action saved by the first share is
- * restored.
+ * restored, or the default action once an SA_RESETHAND handler has run.
  *
  * Inside a simulation a share installs nothing, and a signal is delivered
  * only by `linea_signal_deliver_simulated`, which signals the registrations

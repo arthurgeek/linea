@@ -958,6 +958,102 @@ static void a_route_races_a_new_first_share(void) {
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
+/* What the masked host action saw of the thread's mask while it ran. */
+static int masked_host_calls;
+static int masked_host_saw_user1_blocked;
+static int masked_host_saw_user2_blocked;
+static void masked_host(int number) {
+    (void)number;
+    sigset_t now;
+    assert(pthread_sigmask(SIG_BLOCK, 0, &now) == 0);
+    masked_host_saw_user1_blocked = sigismember(&now, SIGUSR1) == 1;
+    masked_host_saw_user2_blocked = sigismember(&now, SIGUSR2) == 1;
+    masked_host_calls += 1;
+}
+
+/* Install `masked_host` for SIGUSR1 with `flags` and SIGUSR2 in its mask,
+ * take a share, raise SIGUSR1 and release the share. */
+static int raise_under_masked_host(int flags) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = masked_host;
+    action.sa_flags = flags;
+    sigemptyset(&action.sa_mask);
+    sigaddset(&action.sa_mask, SIGUSR2);
+    if (sigaction(SIGUSR1, &action, 0) != 0) return 10;
+    if (linea_signal_acquire(3) != 0) return 11;
+    if (raise(SIGUSR1) != 0) return 12;
+    linea_signal_release(3, 0);
+    if (masked_host_calls != 1) return 13;
+    sigset_t after;
+    if (pthread_sigmask(SIG_BLOCK, 0, &after) != 0 || sigismember(&after, SIGUSR1) == 1 || sigismember(&after, SIGUSR2) == 1) return 14;
+    return 0;
+}
+
+/* The router chains to a host action under the mask the system would have
+ * given it: the thread's mask, the action's `sa_mask` and the signal itself,
+ * and without the signal under SA_NODEFER. The thread's mask is as it was
+ * once the router returns. */
+static void a_routed_host_action_runs_under_its_own_mask(void) {
+    for (int nodefer = 0; nodefer < 2; nodefer += 1) {
+        const pid_t child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            const int answer = raise_under_masked_host(nodefer ? SA_NODEFER : 0);
+            if (answer != 0) _exit(answer);
+            if (!masked_host_saw_user2_blocked) _exit(15);
+            if (masked_host_saw_user1_blocked == nodefer) _exit(16);
+            _exit(0);
+        }
+        int status = 0;
+        assert(waitpid(child, &status, 0) == child);
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+}
+
+static int one_shot_host_calls;
+static void one_shot_host(int number) {
+    (void)number;
+    one_shot_host_calls += 1;
+}
+
+/* A host action installed with SA_RESETHAND is chained to for the first
+ * delivery only, as the system would have run it once and reset the signal
+ * to its default action; the deliveries after it are counted alone while a
+ * share lives, and releasing the last share leaves the default action. A
+ * system that does not report SA_RESETHAND through `sigaction`, as macOS
+ * does not, gives the router nothing to honour. */
+static void a_one_shot_host_action_is_chained_to_once(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = one_shot_host;
+        action.sa_flags = (int)SA_RESETHAND;
+        sigemptyset(&action.sa_mask);
+        if (sigaction(SIGUSR1, &action, 0) != 0) _exit(10);
+        struct sigaction reported;
+        if (sigaction(SIGUSR1, 0, &reported) != 0) _exit(11);
+        if (((unsigned)reported.sa_flags & (unsigned)SA_RESETHAND) == 0) _exit(0);
+        if (linea_signal_acquire(3) != 0) _exit(12);
+        if (raise(SIGUSR1) != 0 || raise(SIGUSR1) != 0) _exit(13);
+        if (one_shot_host_calls != 1) _exit(14);
+        linea_signal_release(3, 0);
+        struct sigaction restored;
+        if (sigaction(SIGUSR1, 0, &restored) != 0 || restored.sa_handler != SIG_DFL) _exit(15);
+        /* A first share taken after that saves the default action. */
+        if (linea_signal_acquire(3) != 0) _exit(16);
+        if (raise(SIGUSR1) != 0) _exit(17);
+        linea_signal_release(3, 0);
+        if (one_shot_host_calls != 1) _exit(18);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 /* Run `body` in a child process and check that it stops the program with
  * `message`. */
 static void traps_with(void (*body)(void), const char *message) {
@@ -1125,10 +1221,12 @@ int main(void) {
     a_set_of_endpoints_keeps_its_signals_when_it_moves();
     a_set_watching_more_than_endpoints_does_not_move();
     a_route_races_a_new_first_share();
+    a_routed_host_action_runs_under_its_own_mask();
+    a_one_shot_host_action_is_chained_to_once();
 #if defined(LINEA_WAITSET_PAUSES)
     a_retired_slot_is_replaced_by_a_new_number();
     a_route_chains_to_the_action_saved_when_it_began();
 #endif
-    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; the signal router chains each delivery to the host action saved when it began, while a new first share saves another; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
+    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; the signal router chains each delivery to the host action saved when it began, while a new first share saves another, under that action's mask, and an SA_RESETHAND action once; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
     return 0;
 }
