@@ -355,7 +355,7 @@ pub fn atOffset(
 
     var visible: std.ArrayList(BindingId) = .empty;
     defer visible.deinit(gpa);
-    try res.visibleIn(gpa, scopeAt(program, res, cursors, file, offset), &visible);
+    try reachableAt(gpa, program, res, cursors, file, offset, &visible);
 
     var offered: std.ArrayList(Item) = .empty;
     errdefer offered.deinit(gpa);
@@ -368,11 +368,7 @@ pub fn atOffset(
     defer already.deinit(gpa);
 
     for (visible.items) |b| {
-        if (res.kindOf(b) == .module and !importedIn(ast, res, b, file)) continue;
         if (attribute == .traits and res.kindOf(b) != .trait and res.kindOf(b) != .module) continue;
-        // Asked before the spelling is taken, so a local declared further
-        // down does not stand in for the one a name here reaches.
-        if (!declaredBy(ast, res, b, file, offset)) continue;
         const name = nameOf(ast, res, b) orelse continue;
         if ((try already.getOrPut(gpa, name)).found_existing) continue;
         try offered.append(gpa, try itemFor(gpa, ast, res, typing, snippets, name, b));
@@ -455,6 +451,35 @@ fn namesShadowingImports(
     }
 }
 
+/// The bindings a bare name written at `offset` may reach, innermost first,
+/// so the first of a spelling is the one that name reaches: what the scope
+/// chain there makes visible, less a local whose statement has not ended
+/// before `offset` and a module another file of the module imported.
+///
+/// Completion lists them and rename asks which one a new spelling would reach,
+/// so both read one answer about what is in scope at a point. Costs the chain's
+/// size, and nothing about the program. `out` is emptied first.
+pub fn reachableAt(
+    gpa: std.mem.Allocator,
+    program: *const program_mod.Program,
+    res: *const Resolution,
+    cursors: *const positions.Index,
+    file: FileId,
+    offset: u32,
+    out: *std.ArrayList(BindingId),
+) !void {
+    const ast = &program.ast;
+    try res.visibleIn(gpa, scopeAt(program, res, cursors, file, offset), out);
+    var kept: usize = 0;
+    for (out.items) |b| {
+        if (res.kindOf(b) == .module and !importedIn(ast, res, b, file)) continue;
+        if (!declaredBy(ast, res, b, file, offset)) continue;
+        out.items[kept] = b;
+        kept += 1;
+    }
+    out.shrinkRetainingCapacity(kept);
+}
+
 /// Whether a name written at `offset` could reach `b`. A scope lists every
 /// local its block declares, but a local is in scope only from the end of
 /// the statement that declares it: not above it, and not inside the
@@ -477,7 +502,8 @@ fn declaredBy(ast: *const Ast, res: *const Resolution, b: BindingId, file: FileI
 /// recovered from, has no extent that holds the cursor.
 fn endedBefore(ast: *const Ast, statement: node.StmtId, file: FileId, offset: u32) bool {
     const extent = ast.stmtSpan(statement);
-    if (offset <= extent.end) return false;
+    // A `;` is the statement's last byte, so a cursor at its end is past it.
+    if (offset < extent.end) return false;
 
     // The statement's last token says whether it can have ended, by the rule
     // the parser reads: a `;` ends it where it stands, and a line break ends
@@ -977,7 +1003,7 @@ fn afterADot(
     if (held == .poison) return offered.toOwnedSlice(gpa);
 
     const owner = cursors.declarationAt(ast, file, offset);
-    try appendFields(gpa, typing, held, &offered);
+    try appendFields(gpa, program, typing, res.moduleOfFile(file), held, &offered);
     if (typing.arrayViewReceiver(held)) |adjustment| {
         const element = typing.get(adjustment.receiver).array.element;
         const label = try gpa.dupe(u8, types.array_view_name);
@@ -1246,7 +1272,12 @@ fn appendSelectable(
 
     var reaches: std.ArrayList(resolve.Selectable) = .empty;
     defer reaches.deinit(gpa);
-    try resolve.selectableUnder(gpa, ast, program, res, res.moduleOfFile(file), b, &reaches);
+    const writing = res.moduleOfFile(file);
+    try resolve.selectableUnder(gpa, ast, program, res, writing, b, &reaches);
+    // An opaque enum's variants are its representation: the resolver finds
+    // `Shade.Dim` outside its module, and the checker refuses it [M-Opaque].
+    const declared = res.declaredBy(res.throughAlias(b));
+    const sealed = typecheck.representationSealed(ast, program, if (declared == DeclId.none) null else declared, writing);
 
     for (reaches.items) |written| switch (written) {
         .member => |m| {
@@ -1255,7 +1286,7 @@ fn appendSelectable(
             const name = nameOf(ast, res, m) orelse continue;
             try offered.append(gpa, try itemFor(gpa, ast, res, typing, snippets, name, m));
         },
-        .variant => |at| try offered.append(gpa, .{
+        .variant => |at| if (!sealed) try offered.append(gpa, .{
             .label = try gpa.dupe(u8, ast.tokenText(at)),
             .kind = .EnumMember,
             // What a variant is worth is the enum, which is written to the
@@ -1331,11 +1362,16 @@ fn appendOperationsThroughType(
 /// program.
 fn appendFields(
     gpa: std.mem.Allocator,
+    program: *const program_mod.Program,
     typing: *const Typing,
+    from: program_mod.ModuleId,
     held: types.TypeId,
     offered: *std.ArrayList(Item),
 ) !void {
     const receiver = typing.observedReceiver(held).receiver;
+    // An opaque type's fields are named only in its own module; elsewhere a
+    // selection of one is [M-Opaque].
+    if (typecheck.representationSealed(&program.ast, program, typing.declOfType(receiver), from)) return;
     for (0..typing.fieldCount(receiver)) |i| {
         const at: u32 = @intCast(i);
         try appendField(gpa, typing, typing.fieldName(receiver, at), typing.fieldType(receiver, at), offered);
@@ -2546,6 +2582,7 @@ test "what the reader wrote stays as written when a stop is added beside it" {
 }
 
 test "a local is offered from the statement after the one that declares it" {
+    @setEvalBranchQuota(4000);
     const gpa = testing.allocator;
 
     const text =
@@ -2602,6 +2639,8 @@ test "a local is offered from the statement after the one that declares it" {
     inline for (.{
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;\n    |\n    2\n}\n",
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true; |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;|\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;|x\n    2\n}\n",
     }) |marked| {
         const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
         const ended = marked[0..at] ++ marked[at + 1 ..];

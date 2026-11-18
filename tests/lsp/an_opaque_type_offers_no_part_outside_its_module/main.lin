@@ -1,0 +1,12 @@
+// A dot on a value of an opaque type, outside the module that declares it,
+// offers the operations the value takes and none of its fields; a dot on the
+// opaque enum's name offers none of its variants. Each would be [M-Opaque].
+import vault
+
+use vault.Shade
+
+fn main() -> UInt8 {
+    let held = vault.seal(3)
+    let shade: Shade = vault.dim()
+    vault.peek(held) + vault.lit(shade)
+}

@@ -4198,6 +4198,20 @@ comptime {
     _ = Reach;
 }
 
+/// Whether code in module `from` is refused the representation of a type
+/// declared by `declared`: its fields, its variants, its construction. An
+/// `opaque` declaration hides them outside the module that declares it; a
+/// type no declaration declared hides nothing. The checker refuses a reach
+/// by this answer and the editor offers only what it allows.
+///
+/// `program` is the loaded `Program` or the `ExpandedProgram` built over it;
+/// a source declaration belongs to one module in both.
+pub fn representationSealed(ast: *const Ast, program: anytype, declared: ?node.DeclId, from: ModuleId) bool {
+    const d = declared orelse return false;
+    if (ast.declVisibility(d) != .opaque_) return false;
+    return program.moduleOf(d) != from;
+}
+
 /// What a postfix call written in `from` may reach, over a finished check.
 ///
 /// The other end of what the checker builds mid-pass, so a reader asking an
@@ -23186,9 +23200,7 @@ const Checker = struct {
     }
 
     fn sealedHere(self: *const Checker, ty: TypeId) bool {
-        const d = self.declaringType(ty) orelse return false;
-        if (self.ast.declVisibility(d) != .opaque_) return false;
-        return self.program.moduleOf(d) != self.current;
+        return representationSealed(self.ast, self.program, self.declaringType(ty), self.current);
     }
 
     /// The declaration a type came from, whether it is the type that
