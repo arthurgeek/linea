@@ -1,7 +1,8 @@
 #ifndef LINEA_WAITSET_PAUSE_H
 #define LINEA_WAITSET_PAUSE_H
 
-/* The linearization points of the wait set's protocol. A build for the race
+/* The linearization points of the wait set's protocol, and the signal
+ * router's handler before it chains to the host's action. A build for the race
  * tests defines `LINEA_WAITSET_PAUSES` and the tests supply
  * `waitset_test_pause`, which stops the thread reaching a point until the
  * test lets it go, so each interleaving is forced rather than hoped for. Any
@@ -17,6 +18,7 @@ enum linea_pause_point {
     linea_pause_send_filled,
     linea_pause_body_finished,
     linea_pause_rehome_before_lock,
+    linea_pause_route_before_chain,
     linea_pause_points
 };
 

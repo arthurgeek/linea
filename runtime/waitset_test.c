@@ -852,6 +852,112 @@ static void a_delivered_share_keeps_the_handler_until_it_is_released(void) {
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
 }
 
+/* The host actions the router tests chain to, each counting its calls. */
+static int first_host_calls;
+static int second_host_calls;
+static void first_host(int number, siginfo_t *info, void *context) {
+    (void)number;
+    (void)info;
+    (void)context;
+    __atomic_add_fetch(&first_host_calls, 1, __ATOMIC_SEQ_CST);
+}
+static void second_host(int number) {
+    (void)number;
+    __atomic_add_fetch(&second_host_calls, 1, __ATOMIC_SEQ_CST);
+}
+
+/* Install a host action for `number`: `informed` with SA_SIGINFO when it is
+ * given, `handler` otherwise. */
+static int install_host(int number, void (*handler)(int), void (*informed)(int, siginfo_t *, void *)) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    if (informed != 0) {
+        action.sa_sigaction = informed;
+        action.sa_flags = SA_SIGINFO;
+    } else {
+        action.sa_handler = handler;
+    }
+    sigemptyset(&action.sa_mask);
+    return sigaction(number, &action, 0);
+}
+
+#if defined(LINEA_WAITSET_PAUSES)
+static void *raise_user1(void *unused) {
+    (void)unused;
+    assert(pthread_kill(pthread_self(), SIGUSR1) == 0);
+    return 0;
+}
+
+/* A delivery the router began handling while the first share's host action
+ * was saved chains to that action, though the last share is released and a
+ * new first share saves another host action while it runs. */
+static void a_route_chains_to_the_action_saved_when_it_began(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (install_host(SIGUSR1, 0, first_host) != 0) _exit(10);
+        if (linea_signal_acquire(3) != 0) _exit(11);
+        arm(linea_pause_route_before_chain);
+        pthread_t raiser;
+        if (pthread_create(&raiser, 0, raise_user1, 0) != 0) _exit(12);
+        await_arrival(linea_pause_route_before_chain);
+        linea_signal_release(3, 0);
+        if (install_host(SIGUSR1, second_host, 0) != 0) _exit(13);
+        if (linea_signal_acquire(3) != 0) _exit(14);
+        release_pause(linea_pause_route_before_chain);
+        if (pthread_join(raiser, 0) != 0) _exit(15);
+        linea_signal_release(3, 0);
+        if (__atomic_load_n(&first_host_calls, __ATOMIC_SEQ_CST) != 1) _exit(16);
+        if (__atomic_load_n(&second_host_calls, __ATOMIC_SEQ_CST) != 0) _exit(17);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+#endif
+
+/* How many SIGUSR2 deliveries `raise_user2_repeatedly` makes. */
+enum { racing_deliveries = 4000 };
+static int raising_done;
+
+static void *raise_user2_repeatedly(void *unused) {
+    (void)unused;
+    for (int i = 0; i < racing_deliveries; i += 1) assert(pthread_kill(pthread_self(), SIGUSR2) == 0);
+    __atomic_store_n(&raising_done, 1, __ATOMIC_SEQ_CST);
+    return 0;
+}
+
+/* One thread takes SIGUSR2 over and over while another releases the last
+ * share and takes a first share again, each time under another host action,
+ * so the router saves an action while handlers on the other thread read the
+ * one saved before. Every delivery reaches a host action once, through the
+ * router or directly. */
+static void a_route_races_a_new_first_share(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (install_host(SIGUSR2, 0, first_host) != 0) _exit(10);
+        if (linea_signal_acquire(4) != 0) _exit(11);
+        pthread_t raiser;
+        if (pthread_create(&raiser, 0, raise_user2_repeatedly, 0) != 0) _exit(12);
+        for (unsigned long round = 0; !__atomic_load_n(&raising_done, __ATOMIC_SEQ_CST); round += 1) {
+            linea_signal_release(4, 0);
+            const int installed = round % 2 == 0 ? install_host(SIGUSR2, second_host, 0) : install_host(SIGUSR2, 0, first_host);
+            if (installed != 0) _exit(13);
+            if (linea_signal_acquire(4) != 0) _exit(14);
+        }
+        if (pthread_join(raiser, 0) != 0) _exit(15);
+        linea_signal_release(4, 0);
+        const int calls = __atomic_load_n(&first_host_calls, __ATOMIC_SEQ_CST) + __atomic_load_n(&second_host_calls, __ATOMIC_SEQ_CST);
+        if (calls != racing_deliveries) _exit(16);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 /* Run `body` in a child process and check that it stops the program with
  * `message`. */
 static void traps_with(void (*body)(void), const char *message) {
@@ -1018,9 +1124,11 @@ int main(void) {
     a_second_terminate_after_the_last_share_ends_the_process();
     a_set_of_endpoints_keeps_its_signals_when_it_moves();
     a_set_watching_more_than_endpoints_does_not_move();
+    a_route_races_a_new_first_share();
 #if defined(LINEA_WAITSET_PAUSES)
     a_retired_slot_is_replaced_by_a_new_number();
+    a_route_chains_to_the_action_saved_when_it_began();
 #endif
-    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
+    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; the signal router chains each delivery to the host action saved when it began, while a new first share saves another; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
     return 0;
 }

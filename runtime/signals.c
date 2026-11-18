@@ -5,6 +5,7 @@
 #include "loop.h"
 #include "pipe_signal.h"
 #include "waitset.h"
+#include "waitset_pause.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -23,14 +24,64 @@ static const int numbers[linea_signal_kinds] = { SIGTERM, SIGINT, SIGHUP, SIGUSR
  * handler. */
 static unsigned long counts[linea_signal_kinds];
 
-/* Shares of each signal on the system, the action its first share replaced,
- * and the registrations the router signals, all under `router_lock`. The
- * handler reads `saved` without the lock: it is written only while no share
- * exists, so while the handler is installed nothing writes it. */
+/* Shares of each signal on the system and the registrations the router
+ * signals, under `router_lock`. */
 static unsigned long shares[linea_signal_kinds];
-static struct sigaction saved[linea_signal_kinds];
 static struct linea_signal_watch *watches;
 static pthread_mutex_t router_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* The action each signal's first share replaced, as the handler reads it.
+ *
+ * The handler runs on any thread and cannot take `router_lock`, and a
+ * delivery the router began handling before the last share was released may
+ * still be reading the action when a new first share saves another. So the
+ * action is published with a sequence count, and read as a snapshot: the
+ * writer, under `router_lock`, makes the count odd, stores the action's words,
+ * and makes it even again, and a reader copies the words between two reads of
+ * the same even count. Every access is atomic, so a read that overlaps a write
+ * is retried, never torn. A write happens only while no share of the signal
+ * exists, when the router's handler is not installed, so no handler spins on
+ * the thread whose write it waits for. */
+enum { action_words = (sizeof(struct sigaction) + sizeof(unsigned long) - 1) / sizeof(unsigned long) };
+
+union action_copy {
+    struct sigaction action;
+    unsigned long words[action_words];
+};
+
+struct published_action {
+    unsigned long sequence;
+    union action_copy saved;
+};
+
+static struct published_action published[linea_signal_kinds];
+
+/* Publish `action` as `signal`'s saved action. Called locked, while no share
+ * of `signal` exists. */
+static void publish_action(uint8_t signal, const struct sigaction *action) {
+    struct published_action *p = &published[signal];
+    union action_copy copy;
+    memset(&copy, 0, sizeof copy);
+    copy.action = *action;
+    const unsigned long sequence = __atomic_load_n(&p->sequence, __ATOMIC_RELAXED);
+    __atomic_store_n(&p->sequence, sequence + 1, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    for (size_t i = 0; i < action_words; i += 1) __atomic_store_n(&p->saved.words[i], copy.words[i], __ATOMIC_RELAXED);
+    __atomic_store_n(&p->sequence, sequence + 2, __ATOMIC_RELEASE);
+}
+
+/* Copy the saved action of signal `which` into `out`, as one published
+ * write left it. */
+static void snapshot_action(int which, union action_copy *out) {
+    struct published_action *p = &published[which];
+    for (;;) {
+        const unsigned long before = __atomic_load_n(&p->sequence, __ATOMIC_ACQUIRE);
+        if ((before & 1UL) != 0) continue;
+        for (size_t i = 0; i < action_words; i += 1) out->words[i] = __atomic_load_n(&p->saved.words[i], __ATOMIC_RELAXED);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (__atomic_load_n(&p->sequence, __ATOMIC_RELAXED) == before) return;
+    }
+}
 
 /* The wake descriptor: an eventfd on Linux, a pipe's two ends on macOS. Made
  * by the first share and never closed, so the handler can always write it. */
@@ -54,9 +105,6 @@ static void check(uint8_t signal) {
     if (signal >= linea_signal_kinds) fail("linea: a signal the router does not offer was named\n");
 }
 
-/* The handler: count, wake, chain to the host's handler, and leave `errno`
- * as the interrupted code had it. Only async-signal-safe calls are made. A
- * full pipe is already awake, so a failed write is ignored. */
 /* Whether an action calls a handler, and neither ignores its signal nor
  * leaves it its default. `SIG_IGN` and `SIG_DFL` are read first: SA_SIGINFO
  * says how a handler is called and may be set beside either, and the two
@@ -65,11 +113,19 @@ static int names_a_handler(const struct sigaction *action) {
     return action->sa_handler != SIG_DFL && action->sa_handler != SIG_IGN;
 }
 
+/* The handler: take a snapshot of the saved action, count, wake, chain to
+ * the snapshot's handler, and leave `errno` as the interrupted code had it.
+ * A delivery chains to the action saved when the handler began, even when the
+ * last share is released and a new first share saves another while it runs.
+ * Only async-signal-safe calls are made. A full pipe is already awake, so a
+ * failed write is ignored. */
 static void route(int number, siginfo_t *info, void *context) {
     const int interrupted_errno = errno;
     int which = 0;
     while (which < linea_signal_kinds && numbers[which] != number) which += 1;
     if (which == linea_signal_kinds) return;
+    union action_copy host;
+    snapshot_action(which, &host);
     __atomic_add_fetch(&counts[which], 1UL, __ATOMIC_SEQ_CST);
 #if defined(__linux__)
     const uint64_t one = 1;
@@ -79,10 +135,10 @@ static void route(int number, siginfo_t *info, void *context) {
     ssize_t written = write(wake_write, &one, sizeof one);
 #endif
     (void)written;
-    const struct sigaction *host = &saved[which];
-    if (names_a_handler(host)) {
-        if ((host->sa_flags & SA_SIGINFO) != 0) host->sa_sigaction(number, info, context);
-        else host->sa_handler(number);
+    linea_waitset_pause(linea_pause_route_before_chain);
+    if (names_a_handler(&host.action)) {
+        if ((host.action.sa_flags & SA_SIGINFO) != 0) host.action.sa_sigaction(number, info, context);
+        else host.action.sa_handler(number);
     }
     errno = interrupted_errno;
 }
@@ -133,7 +189,7 @@ long linea_signal_acquire(uint8_t signal) {
             unlock();
             return 1;
         }
-        saved[signal] = old;
+        publish_action(signal, &old);
         struct sigaction installed;
         memset(&installed, 0, sizeof installed);
         installed.sa_sigaction = route;
@@ -156,7 +212,7 @@ void linea_signal_release(uint8_t signal, unsigned long loop) {
     lock();
     if (shares[signal] == 0) fail("linea: a signal's share was released twice\n");
     shares[signal] -= 1;
-    if (shares[signal] == 0 && sigaction(numbers[signal], &saved[signal], 0) != 0) {
+    if (shares[signal] == 0 && sigaction(numbers[signal], &published[signal].saved.action, 0) != 0) {
         fail("linea: a signal's saved action could not be restored\n");
     }
     unlock();
