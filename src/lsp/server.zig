@@ -181,6 +181,10 @@ pub const Handler = struct {
         /// The entry the analysis was checked from. Owned, because the
         /// resolution it was copied from lives on a message's arena.
         entry: []u8,
+        /// The module checked as the entry, where the analysis is of a file
+        /// no import of its program reaches; null for the program itself.
+        /// Owned, as `entry` is.
+        module: ?[]u8 = null,
         of: analysis.Analysis,
     };
 
@@ -776,30 +780,66 @@ pub const Handler = struct {
 
     /// The module a document belongs to, checked.
     ///
-    /// Costs one check of the module, or nothing where the module held is
-    /// already the one asked about. The result is borrowed from the handler
-    /// and stays valid until the next document changes; `arena` carries only
-    /// what the resolution needed.
+    /// The program its root makes, wherever that program holds the document.
+    /// A file the root's source holds that no import of the program reaches
+    /// is checked as `linea check` checks it when named: from the program's
+    /// root, with the file's module as the entry. Analysed only with the
+    /// program, it would be analysed by nothing, and an editor would show no
+    /// diagnostic for it.
+    ///
+    /// Costs one check of the program, one more for such a file, or nothing
+    /// where the analysis held is already the one asked about. The result is
+    /// borrowed from the handler and stays valid until the next document
+    /// changes; `arena` carries only what the resolution needed.
     fn check(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !*const analysis.Analysis {
         const root = try handler.rootFor(arena, path);
         const entry = root.entry;
+        const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        const module: ?[]const u8 = if (sourceHolds(entry, named)) std.fs.path.dirname(named) orelse "" else null;
         if (handler.cached) |*held| {
-            if (std.mem.eql(u8, held.entry, entry)) return &held.of;
+            if (std.mem.eql(u8, held.entry, entry)) {
+                if (held.module) |checked_module| {
+                    if (module != null and std.mem.eql(u8, checked_module, module.?)) return &held.of;
+                } else {
+                    if (module == null or held.of.fileNamed(path) != null) return &held.of;
+                    return handler.checkAs(arena, root, module);
+                }
+            }
         }
 
+        const program = try handler.checkAs(arena, root, null);
+        if (module == null or program.fileNamed(path) != null) return program;
+        return handler.checkAs(arena, root, module);
+    }
+
+    /// Checks `root`, with `module` as the entry where one is named, and
+    /// holds the answer in place of what was held.
+    fn checkAs(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: ?[]const u8) !*const analysis.Analysis {
         const files = try handler.documents.filesFor(arena, handler.io, root, .open_and_manifests);
 
         // The analysis copies what it was given, so the buffers above are the
         // caller's business from here and the message's arena may reclaim
         // them whenever it likes.
-        var fresh = try analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, entry, handler.io);
+        var fresh = try analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, root.entry, module, handler.io);
         errdefer fresh.deinit();
-        const key = try handler.gpa.dupe(u8, entry);
+        const key = try handler.gpa.dupe(u8, root.entry);
+        errdefer handler.gpa.free(key);
+        const held_module: ?[]u8 = if (module) |dir| try handler.gpa.dupe(u8, dir) else null;
 
         handler.drop();
-        handler.cached = .{ .entry = key, .of = fresh };
+        handler.cached = .{ .entry = key, .module = held_module, .of = fresh };
         try handler.watchEmbeds(arena, &handler.cached.?.of);
         return &handler.cached.?.of;
+    }
+
+    /// Whether `file`, spelled canonically, is a `.lin` file inside the source
+    /// root `entry` names; an entry that is a file holds nothing else.
+    fn sourceHolds(entry: []const u8, file: []const u8) bool {
+        if (std.mem.endsWith(u8, entry, ".lin") or !std.mem.endsWith(u8, file, ".lin")) return false;
+        const dir = std.fs.path.dirname(file) orelse "";
+        if (entry.len == 0) return true;
+        if (!std.mem.startsWith(u8, dir, entry)) return false;
+        return dir.len == entry.len or dir[entry.len] == '/';
     }
 
     /// Releases everything the session holds: the workspace it was told about,
@@ -1008,6 +1048,7 @@ pub const Handler = struct {
         if (handler.cached) |*held| {
             held.of.deinit();
             handler.gpa.free(held.entry);
+            if (held.module) |dir| handler.gpa.free(dir);
             handler.cached = null;
         }
     }
@@ -1190,7 +1231,9 @@ pub const Handler = struct {
             if (diagnostics.len != 0) try wrong.append(arena, file_path);
             try handler.publishFor(arena, file_path, diagnostics);
         }
-        const entry = (try handler.rootFor(arena, path)).entry;
+        // A file checked as its own module's entry is published under that
+        // module, so clearing what it left does not clear its program's files.
+        const entry = handler.cached.?.module orelse (try handler.rootFor(arena, path)).entry;
         try handler.clearLeft(arena, entry, &held);
         try handler.remember(entry, wrong.items);
     }

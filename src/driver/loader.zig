@@ -333,7 +333,25 @@ pub const CheckedLibrary = struct {
         purpose: Purpose,
         ownership: MemoryOwnership,
     ) !Program {
-        return self.loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, null, files, purpose);
+        return self.loadModuleFromMemory(gpa, table, sink, interner, entry, null, files, purpose, ownership);
+    }
+
+    /// `loadFromMemory` with `module`, a directory inside the source root
+    /// `entry` names, as the entry module, as a command line names a file of
+    /// it: imports still resolve from `entry`.
+    pub fn loadModuleFromMemory(
+        self: *const CheckedLibrary,
+        gpa: std.mem.Allocator,
+        table: *FileTable,
+        sink: *Sink,
+        interner: *Interner,
+        entry: []const u8,
+        module: ?[]const u8,
+        files: []const InMemoryFile,
+        purpose: Purpose,
+        ownership: MemoryOwnership,
+    ) !Program {
+        return self.loadInputs(gpa, .{ .memory = ownership }, table, sink, interner, entry, module, files, purpose);
     }
 
     /// `loader.loadFromDisk`, with the library's sources in place of

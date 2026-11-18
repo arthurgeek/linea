@@ -93,21 +93,26 @@ pub fn of(
     files: []const loader.InMemoryFile,
     entry: []const u8,
 ) !Analysis {
-    return analyze(gpa, region_backing, library, files, entry, null);
+    return analyze(gpa, region_backing, library, files, entry, null, null);
 }
 
 /// As `of`, reading every file the program embeds from disk through `io`. An
 /// editor holds the program's own buffers and never a template or an image the
 /// program embeds, so this is how a server checks what a command line would.
+///
+/// `module`, where given, is a directory inside the source root `entry`
+/// names, checked as the entry module as a command line checks a file of it
+/// that is named: imports still resolve from `entry`.
 pub fn onDisk(
     gpa: std.mem.Allocator,
     region_backing: std.mem.Allocator,
     library: *const loader.CheckedLibrary,
     files: []const loader.InMemoryFile,
     entry: []const u8,
+    module: ?[]const u8,
     io: std.Io,
 ) !Analysis {
-    return analyze(gpa, region_backing, library, files, entry, io);
+    return analyze(gpa, region_backing, library, files, entry, module, io);
 }
 
 fn analyze(
@@ -116,6 +121,7 @@ fn analyze(
     library: *const loader.CheckedLibrary,
     files: []const loader.InMemoryFile,
     entry: []const u8,
+    module: ?[]const u8,
     embeds_from: ?std.Io,
 ) !Analysis {
     var arena = std.heap.ArenaAllocator.init(region_backing);
@@ -140,7 +146,7 @@ fn analyze(
         .{ .copy_reading_disk = .{ .allocator = source_arena.allocator(), .io = io } }
     else
         .{ .copy = source_arena.allocator() };
-    source_program.* = try library.loadFromMemory(a, &table, &sink, &interner, entry, files, .program, ownership);
+    source_program.* = try library.loadModuleFromMemory(a, &table, &sink, &interner, entry, module, files, .program, ownership);
     const program = source_program.*;
     z_load.end();
     const z_check = tracy.beginZone(@src(), "check");
