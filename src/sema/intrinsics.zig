@@ -313,16 +313,15 @@ pub const RawAccesses = struct {
     view: DeclId = .none,
     view_place: DeclId = .none,
     /// `argument_span` and `environment_span` view text the process was
-    /// started with; each lowers to the runtime's count, address and length
-    /// for its source, which `processText` names.
+    /// started with; each lowers to the runtime's count for its source and
+    /// one call answering an entry's address and writing its length, which
+    /// `processText` names.
     argument_span: DeclId = .none,
     argument_count: DeclId = .none,
-    argument_at: DeclId = .none,
-    argument_len: DeclId = .none,
+    argument_entry: DeclId = .none,
     environment_span: DeclId = .none,
     environment_count: DeclId = .none,
-    environment_at: DeclId = .none,
-    environment_len: DeclId = .none,
+    environment_entry: DeclId = .none,
     stride: DeclId = DeclId.none,
     take: DeclId = DeclId.none,
     put: DeclId = DeclId.none,
@@ -509,11 +508,9 @@ pub const RawAccesses = struct {
     pub fn withCheckedScalars(self: RawAccesses, program: *const ExpandedProgram, ast: *const Ast, typing: *const Typing) RawAccesses {
         var checked = self;
         checked.argument_count = libraryExternDecl(program, ast, typing, "linea_arg_count");
-        checked.argument_at = libraryExternDecl(program, ast, typing, "linea_arg_at");
-        checked.argument_len = libraryExternDecl(program, ast, typing, "linea_arg_len");
+        checked.argument_entry = libraryExternDecl(program, ast, typing, "linea_arg_span");
         checked.environment_count = libraryExternDecl(program, ast, typing, "linea_env_count");
-        checked.environment_at = libraryExternDecl(program, ast, typing, "linea_env_at");
-        checked.environment_len = libraryExternDecl(program, ast, typing, "linea_env_len");
+        checked.environment_entry = libraryExternDecl(program, ast, typing, "linea_env_span");
         checked.errno_read = libraryExternDecl(program, ast, typing, "linea_errno");
         checked.store = libraryExternDecl(program, ast, typing, "linea_raw_store");
         checked.load = libraryExternDecl(program, ast, typing, "linea_raw_load");
@@ -809,15 +806,16 @@ pub const RawAccesses = struct {
     }
 
     /// The runtime declarations a process-text span reads: how many entries
-    /// its source holds, and one entry's address and length.
-    pub const ProcessText = struct { count: DeclId, at: DeclId, len: DeclId };
+    /// its source holds, and the call answering one entry's address and
+    /// writing its length.
+    pub const ProcessText = struct { count: DeclId, entry: DeclId };
 
     /// The runtime source `d` views when it is `argument_span` or
     /// `environment_span`, or null for any other declaration.
     pub fn processText(self: RawAccesses, d: DeclId) ?ProcessText {
         if (d == DeclId.none) return null;
-        if (d == self.argument_span) return .{ .count = self.argument_count, .at = self.argument_at, .len = self.argument_len };
-        if (d == self.environment_span) return .{ .count = self.environment_count, .at = self.environment_at, .len = self.environment_len };
+        if (d == self.argument_span) return .{ .count = self.argument_count, .entry = self.argument_entry };
+        if (d == self.environment_span) return .{ .count = self.environment_count, .entry = self.environment_entry };
         return null;
     }
 

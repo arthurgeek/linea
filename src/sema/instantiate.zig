@@ -1768,7 +1768,7 @@ const Discovery = struct {
         // replaces their calls with checked accesses before asking `Mono` for
         // an id, so they contribute no instance to the ordered set.
         if (self.raw_accesses.processText(decl)) |source| {
-            for ([_]DeclId{ source.count, source.at, source.len }) |runtime_decl| {
+            for ([_]DeclId{ source.count, source.entry }) |runtime_decl| {
                 if (runtime_decl == .none) continue;
                 _ = try self.table.intern(.{ .body = .{ .declaration = runtime_decl }, .args = &.{}, .self_ty = .poison }, self.program, self.pool);
             }

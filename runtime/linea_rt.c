@@ -1270,56 +1270,46 @@ unsigned long linea_arg_count(void) {
     return (unsigned long)linea_argc;
 }
 
-/* Where one argument starts, and how many bytes it holds.
- *
- * Two calls rather than one answering both, because a declaration in the
- * language names scalars and has no way to spell a value written through. The
- * cost is a second walk of a string that is a handful of bytes long.
- *
- * Both answer zero for an index at or past the end. What absence means is the
- * library's to say and not this file's: a trap here would have nowhere to
- * report where the mistake was, which is the same reason reading a byte out of
- * text is checked above this line rather than below it.
- *
- * The length is measured because the process supplies none, and the only
- * property read of the bytes is where the terminator is. Nothing else is
- * examined, so an argument that is not valid UTF-8 arrives exactly as it was
- * given. */
-unsigned long linea_arg_at(unsigned long i) {
-    if (i >= linea_arg_count()) return 0UL;
-    return (unsigned long)linea_argv[i];
-}
-
-unsigned long linea_arg_len(unsigned long i) {
-    if (i >= linea_arg_count()) return 0UL;
-
-    const char *s = linea_argv[i];
+/* The bytes of `text`, a terminated string, up to its terminator. The length
+ * is measured because the process supplies none, and the terminator is the
+ * only byte examined, so text that is not valid UTF-8 arrives exactly as it
+ * was given. */
+static unsigned long terminated_length(const char *text) {
     unsigned long n = 0UL;
-    while (s[n] != '\0') n += 1UL;
+    while (text[n] != '\0') n += 1UL;
     return n;
 }
 
+/* Where argument `i` starts, with its length in bytes written through
+ * `length`.
+ *
+ * An index at or past the end answers zero and writes a length of zero. What
+ * absence means is the library's to say and not this file's: a trap here
+ * would have nowhere to report where the mistake was, which is the same reason
+ * reading a byte out of text is checked above this line rather than below
+ * it. */
+unsigned long linea_arg_span(unsigned long i, unsigned long *length) {
+    *length = 0UL;
+    if (i >= linea_arg_count()) return 0UL;
+    *length = terminated_length(linea_argv[i]);
+    return (unsigned long)linea_argv[i];
+}
+
 /* How many entries the environment held at startup, and where entry `i`
- * starts and how many bytes it holds. Like the argument calls above, an index
- * at or past the end answers zero, and the bytes are passed on unexamined.
- * The count was taken once at startup, so a walk over every entry reads each
- * string once: its cost is the environment's size in bytes. */
+ * starts, with its length in bytes written through `length`. Like an
+ * argument, an index at or past the end answers zero and writes zero, and the
+ * bytes are passed on unexamined. The count was taken once at startup, so a
+ * walk over every entry reads each string once: its cost is the
+ * environment's size in bytes. */
 unsigned long linea_env_count(void) {
     return linea_envc;
 }
 
-unsigned long linea_env_at(unsigned long i) {
+unsigned long linea_env_span(unsigned long i, unsigned long *length) {
+    *length = 0UL;
     if (i >= linea_envc) return 0UL;
+    *length = terminated_length(linea_envp[i]);
     return (unsigned long)linea_envp[i];
-}
-
-unsigned long linea_env_len(unsigned long i) {
-    if (i >= linea_envc) return 0UL;
-
-    const char *s = linea_envp[i];
-    unsigned long n = 0UL;
-    while (s[n] != '\0') n += 1UL;
-    return n;
 }
 
 /* Reports where a trap or a panic happened, " at FILE:LINE:COL" and a

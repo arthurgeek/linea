@@ -4599,8 +4599,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\extern fn slice_place[T](owner: Slice[T], i: UInt64) -> T where carries(owner)
         \\extern fn argument_span(i: UInt64) -> Slice[UInt8]
         \\extern fn linea_arg_count() -> UInt64
-        \\extern fn linea_arg_at(i: UInt64) -> UInt64
-        \\extern fn linea_arg_len(i: UInt64) -> UInt64
+        \\extern fn linea_arg_span(i: UInt64, inout length: UInt64) -> UInt64
         \\trait Index[I] { type Elem; proj at(self: Self, i: I) -> Elem where carries(self) }
         \\impl[T] Index[UInt64] for Slice[T] {
         \\    type Elem = T
@@ -4609,8 +4608,8 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\fn first(owner: Slice[UInt8]) -> borrow UInt8 where carries(owner) { borrow owner[0] }
         \\fn main() -> UInt8 {
         \\    let _count = linea_arg_count()
-        \\    let _at = linea_arg_at(0)
-        \\    let _len = linea_arg_len(0)
+        \\    var length: UInt64 = 0
+        \\    let _at = linea_arg_span(0, &length)
         \\    let owner = argument_span(0)
         \\    let item = first(owner)
         \\    return *item
