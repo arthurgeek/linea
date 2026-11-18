@@ -467,58 +467,101 @@ pub enum ProxyTrust {
     All,
 }
 
+// RFC 7239 separates the elements of a `Forwarded` value with `,`, the
+// parameters of an element with `;`, and quotes a value with `"`, inside which
+// `\` escapes the byte after it.
+let ascii_quote: UInt8 = 34
+
+let ascii_comma: UInt8 = 44
+
+let ascii_semicolon: UInt8 = 59
+
+let ascii_backslash: UInt8 = 92
+
+// `separator_at` returns the offset of the first `separator` byte at or after
+// `from` that sits outside a quoted string, or `text.length()` when there is
+// none. It returns `.None` when a quoted string is still open at the end of
+// `text`, which makes the whole value malformed.
+fn separator_at(text: Str, from: UInt64, separator: UInt8) -> Option[UInt64] {
+    var quoted = false
+    var at = from
+    while at < text.length() {
+        let byte = text.byte(at).unwrap()
+        if quoted {
+            if byte == ascii_backslash {
+                at += 1
+            } else if byte == ascii_quote {
+                quoted = false
+            }
+        } else if byte == ascii_quote {
+            quoted = true
+        } else if byte == separator {
+            return .Some(at)
+        }
+        at += 1
+    }
+    if quoted {
+        return .None
+    }
+    .Some(text.length())
+}
+
 // Determine whether the immediate reverse-proxy hop indicates HTTPS from RFC 7239 `Forwarded`.
 // Inspects the last comma-separated element across all `Forwarded` header lines.
+// Separators inside a quoted value belong to the value. A malformed value, or
+// a hop naming `proto` twice with different values, reads as not HTTPS. A
+// quoted `proto` value is compared as written, so one holding an escape never
+// reads as `https`.
 fn forwarded_proto_is_https(stored: Str, sink fields: mem.Slice[Field]) -> Option[Bool] {
     var last_element: Option[Str] = .None
     for field in fields {
         if stored_part(stored, field.name).equals_ascii_folded("Forwarded") {
             let val = stored_part(stored, field.value)
-            let elements = match val.split(",") {
-                Ok(elts) => elts,
-                Err(_) => return .Some(false),
-            }
-            for elt in elements {
-                let trimmed = elt.trim_ascii()
+            var at: UInt64 = 0
+            while at <= val.length() {
+                let end = separator_at(val, at, ascii_comma) else {
+                    return .Some(false)
+                }
+                let trimmed = val.slice(at, end).unwrap().trim_ascii()
                 if trimmed.length() > 0 {
                     last_element = .Some(trimmed)
                 }
+                at = end + 1
             }
         }
     }
-    match last_element {
-        Some(target_hop) => {
-            let params = match target_hop.split(";") {
-                Ok(p) => p,
-                Err(_) => return .Some(false),
-            }
-            var found_proto: Option[Str] = .None
-            for param in params {
-                let trimmed = param.trim_ascii()
-                if trimmed.length() >= 6 && trimmed.slice(0, 6).unwrap().equals_ascii_folded("proto=") {
-                    let val = trimmed.slice(6, trimmed.length()).unwrap().trim_ascii()
-                    let unquoted = if val.starts_with("\"") && val.ends_with("\"") && val.length() >= 2 {
-                        val.slice(1, val.length() - 1).unwrap().trim_ascii()
-                    } else {
-                        val
-                    }
-                    match read found_proto {
-                        Some(earlier) => {
-                            if !earlier.equals_ascii_folded(unquoted) {
-                                return .Some(false)
-                            }
-                        },
-                        None => found_proto = .Some(unquoted),
-                    }
+    let target_hop = last_element?
+    var found_proto: Option[Str] = .None
+    var at: UInt64 = 0
+    while at <= target_hop.length() {
+        let end = separator_at(target_hop, at, ascii_semicolon) else {
+            return .Some(false)
+        }
+        let param = target_hop.slice(at, end).unwrap()
+        at = end + 1
+        let (name, raw_value) = param.split_once("=") else {
+            continue
+        }
+        if !name.trim_ascii().equals_ascii_folded("proto") {
+            continue
+        }
+        let value = raw_value.trim_ascii()
+        let unquoted = if value.length() >= 2 && value.starts_with("\"") && value.ends_with("\"") {
+            value.slice(1, value.length() - 1).unwrap()
+        } else {
+            value
+        }
+        match read found_proto {
+            Some(earlier) => {
+                if !earlier.equals_ascii_folded(unquoted) {
+                    return .Some(false)
                 }
-            }
-            match found_proto {
-                Some(proto) => .Some(proto.equals_ascii_folded("https")),
-                None => .None,
-            }
-        },
-        None => .None,
+            },
+            None => found_proto = .Some(unquoted),
+        }
     }
+    let proto = found_proto?
+    .Some(proto.equals_ascii_folded("https"))
 }
 
 // Determine whether the immediate reverse-proxy hop indicates HTTPS from `X-Forwarded-Proto`.
@@ -786,6 +829,41 @@ impl[P: Allocator] Request[P] {
         // Mismatched trust policy ignores other headers.
         testing.assert(!xfp_https.request().is_https(trust: .Forwarded), "Forwarded trust policy accepted X-Forwarded-Proto")?
         testing.assert(!fwd_https.request().is_https(trust: .XForwardedProto), "XForwardedProto trust policy accepted Forwarded")?
+        .Ok(())
+    }
+
+    test "request is_https reads a quoted Forwarded value whole" {
+        defer let arena = mem.Arena.open(mem.system(), size: 8192)
+
+        // A `;` inside a quoted value does not start a parameter.
+        var semicolon = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &semicolon.add_header("Forwarded", "for=\"a;proto=https;b\"").unwrap()
+        testing.assert(!semicolon.request().is_https(trust: .Forwarded), "a proto inside a quoted value was read")?
+
+        // A `,` inside a quoted value does not start an element.
+        var comma = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &comma.add_header("Forwarded", "for=1;proto=http, for=\"x,proto=https;y\"").unwrap()
+        testing.assert(!comma.request().is_https(trust: .Forwarded), "a quoted comma split the immediate hop")?
+
+        // A quoted value holding both separators still ends at its closing quote.
+        var whole = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &whole.add_header("Forwarded", "for=1;proto=http, for=\"[2001:db8::1]:4711;a,b\";proto=https").unwrap()
+        testing.assert(whole.request().is_https(trust: .Forwarded), "a proto after a quoted value was refused")?
+
+        // An escaped quote does not end a quoted value.
+        var escaped = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &escaped.add_header("Forwarded", "for=\"a\\\";proto=https\"").unwrap()
+        testing.assert(!escaped.request().is_https(trust: .Forwarded), "an escaped quote ended the quoted value")?
+
+        // An unterminated quoted value is malformed and makes no claim.
+        var open_quote = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &open_quote.add_header("Forwarded", "proto=https;for=\"a").unwrap()
+        testing.assert(!open_quote.request().is_https(trust: .Forwarded), "an unterminated quoted value was accepted")?
+
+        // A parameter named only like `proto` is not `proto`.
+        var other_name = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        &other_name.add_header("Forwarded", "xproto=https").unwrap()
+        testing.assert(!other_name.request().is_https(trust: .Forwarded), "a longer parameter name was read as proto")?
         .Ok(())
     }
 
