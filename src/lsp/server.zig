@@ -2,6 +2,7 @@ const std = @import("std");
 const lsp = @import("lsp");
 const Documents = @import("documents.zig").Documents;
 const loader = @import("../driver/loader.zig");
+const slow_tests = @import("../support/slow_tests.zig");
 const analysis = @import("analysis.zig");
 const publish = @import("publish.zig");
 const tokens = @import("tokens.zig");
@@ -185,6 +186,11 @@ pub const Handler = struct {
     const Reported = struct {
         arena: std.heap.ArenaAllocator,
         entry: []const u8,
+        /// The path the check is run again from: the entry for a program's
+        /// check, and the open document it was made for for a module's.
+        asked: []const u8,
+        /// Whether this is a module's check rather than its program's.
+        module: bool,
         files: std.StringArrayHashMapUnmanaged([]const []const u8) = .empty,
     };
 
@@ -398,7 +404,13 @@ pub const Handler = struct {
             try handler.freshen(arena, path);
         }
         if (manifest_changed) return handler.reportOpen(arena);
-        if (republish) |entry| try handler.report(arena, entry);
+        if (republish) |entry| try handler.refresh(arena, entry, true);
+        // A source changed on disk is what every check that read it reads
+        // again.
+        for (params.changes) |change| {
+            const path = try uri_mod.pathOf(arena, change.uri);
+            if (std.mem.endsWith(u8, path, ".lin")) try handler.refresh(arena, path, false);
+        }
     }
 
     pub fn @"textDocument/didOpen"(
@@ -411,7 +423,7 @@ pub const Handler = struct {
         const change = try handler.documents.set(path, document.text);
         if (!handler.cachedTextMatches(path, document.text)) try handler.invalidate(arena, path);
         if (change != .unchanged) try handler.freshen(arena, path);
-        try handler.report(arena, path);
+        try handler.refresh(arena, path, true);
     }
 
     /// Full-text sync only, so `contentChanges` holds whole documents -- the
@@ -441,7 +453,7 @@ pub const Handler = struct {
         const text = handler.documents.open.get(path).?;
         if (!handler.cachedTextMatches(path, text)) try handler.invalidate(arena, path);
         if (changed) try handler.freshen(arena, path);
-        try handler.report(arena, path);
+        try handler.refresh(arena, path, true);
     }
 
     pub fn @"textDocument/didClose"(
@@ -456,7 +468,7 @@ pub const Handler = struct {
         // published, since an editor still shows what the buffer's did.
         try handler.invalidate(arena, path);
         try handler.freshen(arena, path);
-        try handler.report(arena, path);
+        try handler.refresh(arena, path, true);
     }
 
     /// The kind the lexer gave every token of a document.
@@ -1104,7 +1116,7 @@ pub const Handler = struct {
         for (paths.items) |path| {
             const entry = (try handler.rootFor(arena, path)).entry;
             if ((try published.getOrPut(arena, entry)).found_existing) continue;
-            try handler.report(arena, path);
+            try handler.refresh(arena, path, true);
         }
 
         // A manifest decides which program a file belongs to. A program
@@ -1129,7 +1141,7 @@ pub const Handler = struct {
                 return std.mem.lessThan(u8, a, b);
             }
         }.before);
-        for (gone.items) |key| try handler.withdraw(arena, key);
+        for (gone.items) |key| _ = try handler.withdraw(arena, key, true);
     }
 
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
@@ -1229,15 +1241,72 @@ pub const Handler = struct {
     /// Costs one check of the module, which is what the answer being right
     /// across files costs, plus one pass over each published file's
     /// diagnostics.
-    fn report(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !void {
+    /// Brings what is published up to date after `path` changed, so each
+    /// file shows the union of what every check currently reaching it reports
+    /// as of that check's latest run.
+    ///
+    /// Where `own`, the check `path` belongs to runs, then every check whose
+    /// last report reached `path`, then the check of every open document of
+    /// the same root, so each open document has the check it belongs to as
+    /// its files now stand. A program's check that now loads a module
+    /// withdraws that module's own check; one that stops reaching an open
+    /// document leaves it to its module's check, which runs. A module's check
+    /// exists only for an open document no program reaches.
+    ///
+    /// **Bound:** each check key once, over the keys that reached `path` and
+    /// the open documents of its root.
+    fn refresh(handler: *Handler, arena: std.mem.Allocator, path: []const u8, own: bool) !void {
+        var asked: std.ArrayList([]const u8) = .empty;
+        if (own) try asked.append(arena, path);
+        for (handler.reported.values()) |*kept| {
+            if (kept.files.contains(path)) try asked.append(arena, try arena.dupe(u8, kept.asked));
+        }
+        const entry = (try handler.rootFor(arena, path)).entry;
+        var open: std.ArrayList([]const u8) = .empty;
+        var documents = handler.documents.open.keyIterator();
+        while (documents.next()) |document| try open.append(arena, document.*);
+        std.mem.sort([]const u8, open.items, {}, struct {
+            fn before(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.before);
+        for (open.items) |document| {
+            if (std.mem.eql(u8, (try handler.rootFor(arena, document)).entry, entry)) try asked.append(arena, document);
+        }
+        var ran: std.StringHashMapUnmanaged(void) = .empty;
+        var i: usize = 0;
+        while (i < asked.items.len) : (i += 1) try handler.report(arena, asked.items[i], &ran, &asked);
+    }
+
+    /// Runs the check `path` belongs to and publishes what changed, once per
+    /// key in `ran`, adding to `asked` each open document it lets go.
+    fn report(
+        handler: *Handler,
+        arena: std.mem.Allocator,
+        path: []const u8,
+        ran: *std.StringHashMapUnmanaged(void),
+        asked: *std.ArrayList([]const u8),
+    ) !void {
         const checked = try handler.check(arena, path);
         const entry = (try handler.rootFor(arena, path)).entry;
-        const key = handler.cached.?.module orelse entry;
+        const module = handler.cached.?.module;
+        const key = try arena.dupe(u8, module orelse entry);
+        if ((try ran.getOrPut(arena, key)).found_existing) return;
 
-        var fresh: Reported = .{ .arena = .init(handler.gpa), .entry = undefined };
+        // A module's check of a document no longer open is nobody's, and
+        // what it reported is taken back; another open document of the module
+        // asks for it again.
+        if (module != null and !handler.documents.open.contains(path)) {
+            const reopened = try handler.withdraw(arena, key, true);
+            for (reopened) |other| if (handler.documents.open.contains(other)) try asked.append(arena, other);
+            return;
+        }
+
+        var fresh: Reported = .{ .arena = .init(handler.gpa), .entry = undefined, .asked = undefined, .module = module != null };
         errdefer fresh.arena.deinit();
         const keep = fresh.arena.allocator();
         fresh.entry = try keep.dupe(u8, entry);
+        fresh.asked = try keep.dupe(u8, if (module != null) path else entry);
         const owned_key = try keep.dupe(u8, key);
 
         const publication = try publish.Publication.init(arena, checked);
@@ -1253,17 +1322,42 @@ pub const Handler = struct {
 
         // What this key reported before for a file it no longer reaches is
         // taken back; a file it reported nothing for shows the same as before.
+        // An open document it let go is its module's to check.
         var left: std.ArrayList([]const u8) = .empty;
         if (handler.reported.get(key)) |before| {
             for (before.files.keys(), before.files.values()) |file_path, texts| {
-                if (texts.len == 0 or fresh.files.contains(file_path)) continue;
-                try left.append(arena, try arena.dupe(u8, file_path));
+                if (fresh.files.contains(file_path)) continue;
+                if (module == null and handler.documents.open.contains(file_path)) try asked.append(arena, try arena.dupe(u8, file_path));
+                if (texts.len != 0) try left.append(arena, try arena.dupe(u8, file_path));
             }
         }
-        try handler.hold(owned_key, fresh);
 
+        // A module's check exists while no program reaches the module: the
+        // program's check that now loads it takes it back before publishing.
+        var gone: std.ArrayList([]const u8) = .empty;
+        if (module == null) {
+            for (handler.reported.keys(), handler.reported.values()) |other, *kept| {
+                if (!kept.module or !std.mem.eql(u8, kept.entry, entry)) continue;
+                if (loadsModule(checked, other)) try gone.append(arena, try arena.dupe(u8, other));
+            }
+        }
+        var withdrawn: std.ArrayList([]const u8) = .empty;
+        for (gone.items) |other| try withdrawn.appendSlice(arena, try handler.withdraw(arena, other, false));
+
+        try handler.hold(owned_key, fresh);
         for (handler.reported.get(key).?.files.keys()) |file_path| try handler.publishUnion(arena, file_path);
         for (left.items) |file_path| try handler.publishUnion(arena, file_path);
+        for (withdrawn.items) |file_path| {
+            if (!handler.reported.get(key).?.files.contains(file_path)) try handler.publishUnion(arena, file_path);
+        }
+    }
+
+    /// Whether `checked` loads the module in directory `dir`.
+    fn loadsModule(checked: *const analysis.Analysis, dir: []const u8) bool {
+        for (checked.program.modules) |m| {
+            if (std.mem.eql(u8, m.dir, dir)) return true;
+        }
+        return false;
     }
 
     /// Holds `report` under `key` in place of what was held there.
@@ -1275,14 +1369,18 @@ pub const Handler = struct {
         try handler.reported.put(handler.gpa, key, report_held);
     }
 
-    /// Withdraws everything `key` reported, publishing each file it reported
-    /// something for with what the keys left still report.
-    fn withdraw(handler: *Handler, arena: std.mem.Allocator, key: []const u8) !void {
-        var removed = handler.reported.fetchOrderedRemove(key) orelse return;
+    /// Withdraws everything `key` reported, and returns every file it reached.
+    /// Where `publish_now`, each file it reported something for is published
+    /// with what the keys left still report.
+    fn withdraw(handler: *Handler, arena: std.mem.Allocator, key: []const u8, publish_now: bool) ![]const []const u8 {
+        var removed = handler.reported.fetchOrderedRemove(key) orelse return &.{};
         defer removed.value.arena.deinit();
+        var reached: std.ArrayList([]const u8) = .empty;
         for (removed.value.files.keys(), removed.value.files.values()) |file_path, texts| {
-            if (texts.len != 0) try handler.publishUnion(arena, file_path);
+            try reached.append(arena, try arena.dupe(u8, file_path));
+            if (publish_now and texts.len != 0) try handler.publishUnion(arena, file_path);
         }
+        return reached.items;
     }
 
     /// Publishes `file` with the union of what every key reports for it, in
@@ -2190,4 +2288,217 @@ test "a file the program never reaches is not read, and one it reaches is read o
     try std.testing.expect(listed < reached.len);
     try std.testing.expect(checked.source_arena.queryCapacity() < 2 * reached.len);
     try std.testing.expect(checked.source_arena.queryCapacity() >= reached.len);
+}
+
+/// A small program held to the rule for what an editor is shown: each file's
+/// published diagnostics are the union of what every check reaching it
+/// reports, each as of its latest run. The checks are the program's, from its
+/// root, and for each open document no import of the program reaches, its
+/// module's, as `linea check` checks a file named alone.
+const Workspace = struct {
+    /// The program, a module the program may import, and a module only the
+    /// program or `sub` may import. Each file's text is one of its variants.
+    const paths = [_][]const u8{ "main.lin", "sub/x.lin", "util/util.lin" };
+    const variant_count = [_]u8{ 8, 4, 2 };
+
+    /// `main.lin`: bit 0 imports `util`, bit 1 imports `sub`, bit 2 is wrong.
+    /// `sub/x.lin`: bit 0 imports `util`, bit 1 is wrong. `util/util.lin`:
+    /// bit 0 is wrong.
+    fn text(gpa: std.mem.Allocator, file: usize, variant: u8) ![]u8 {
+        const wrong = switch (file) {
+            0 => variant & 4 != 0,
+            1 => variant & 2 != 0,
+            else => variant & 1 != 0,
+        };
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        errdefer out.deinit();
+        const w = &out.writer;
+        switch (file) {
+            0 => {
+                if (variant & 1 != 0) try w.writeAll("import util\n");
+                if (variant & 2 != 0) try w.writeAll("import sub\n");
+                try w.writeAll("\nfn main() -> UInt8 {\n    ");
+                if (wrong) try w.writeAll("true") else {
+                    if (variant & 1 != 0) try w.writeAll("util.value() + ");
+                    if (variant & 2 != 0) try w.writeAll("sub.twice() + ");
+                    try w.writeAll("0");
+                }
+                try w.writeAll("\n}\n");
+            },
+            1 => {
+                if (variant & 1 != 0) try w.writeAll("import util\n\n");
+                try w.writeAll("pub fn twice() -> UInt8 {\n    ");
+                try w.writeAll(if (wrong) "true" else if (variant & 1 != 0) "util.value()" else "2");
+                try w.writeAll("\n}\n");
+            },
+            else => try w.writeAll(if (wrong) "pub fn value() -> UInt8 {\n    true\n}\n" else "pub fn value() -> UInt8 {\n    1\n}\n"),
+        }
+        return out.toOwnedSlice();
+    }
+
+    const Op = enum { open, change, close, save, disk };
+    const Step = struct { op: Op, file: usize, variant: u8 };
+};
+
+/// Each diagnostic the server last published for each file, by URI, as text.
+fn lastPublished(gpa: std.mem.Allocator, written: []const u8) !std.StringHashMapUnmanaged([]const []const u8) {
+    var last: std.StringHashMapUnmanaged([]const []const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, written, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const parsed = try std.json.parseFromSliceLeaky(std.json.Value, gpa, line, .{});
+        const method = parsed.object.get("method") orelse continue;
+        if (!std.mem.eql(u8, method.string, "textDocument/publishDiagnostics")) continue;
+        const params = parsed.object.get("params").?.object;
+        const listed = params.get("diagnostics").?.array.items;
+        const texts = try gpa.alloc([]const u8, listed.len);
+        for (listed, texts) |d, *t| t.* = try std.json.Stringify.valueAlloc(gpa, d, .{});
+        try last.put(gpa, params.get("uri").?.string, texts);
+    }
+    return last;
+}
+
+/// What the rule says each file shows, by URI: the union over the program's
+/// check and each open document's module check where the program does not
+/// reach it, computed afresh from the texts the editor and the disk hold.
+///
+/// The program's check counts once an open document it holds has been seen,
+/// `program_seen`, which this sets: a check, once it ran, keeps what it
+/// reported after its documents close, and none runs before one is open.
+fn expectedPublished(
+    gpa: std.mem.Allocator,
+    root: []const u8,
+    texts: []const []const u8,
+    open: []const bool,
+    program_seen: *bool,
+) !std.StringHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) {
+    var files: std.ArrayList(loader.InMemoryFile) = .empty;
+    try files.append(gpa, .{ .path = try std.fs.path.join(gpa, &.{ root, loader.manifest_name }), .text = "{}" });
+    for (Workspace.paths, texts) |at, t| try files.append(gpa, .{ .path = try std.fs.path.join(gpa, &.{ root, at }), .text = t });
+
+    var program = try analysis.onDisk(gpa, gpa, test_library.get(), files.items, root, null, std.testing.io);
+    for (Workspace.paths, open) |at, is_open| {
+        if (is_open and program.fileNamed(try std.fs.path.join(gpa, &.{ root, at })) != null) program_seen.* = true;
+    }
+    var checks: std.ArrayList(analysis.Analysis) = .empty;
+    if (program_seen.*) try checks.append(gpa, program) else program.deinit();
+    var modules: std.StringHashMapUnmanaged(void) = .empty;
+    for (Workspace.paths, open) |at, is_open| {
+        if (!is_open) continue;
+        const path = try std.fs.path.join(gpa, &.{ root, at });
+        if (program_seen.* and checks.items[0].fileNamed(path) != null) continue;
+        const dir = std.fs.path.dirname(path).?;
+        if ((try modules.getOrPut(gpa, dir)).found_existing) continue;
+        try checks.append(gpa, try analysis.onDisk(gpa, gpa, test_library.get(), files.items, root, dir, std.testing.io));
+    }
+
+    var expected: std.StringHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) = .empty;
+    for (checks.items) |*checked| {
+        defer checked.deinit();
+        const publication = try publish.Publication.init(gpa, checked);
+        var it = publish.files(&checked.program);
+        while (it.next()) |file| {
+            const uri = try uri_mod.uriOf(gpa, checked.table.get(file).path);
+            const set = try expected.getOrPut(gpa, uri);
+            if (!set.found_existing) set.value_ptr.* = .empty;
+            for (try publication.forFile(gpa, file, .@"utf-16")) |d| {
+                const once = try std.json.Stringify.valueAlloc(gpa, d, .{ .emit_null_optional_fields = false });
+                const value = try std.json.parseFromSliceLeaky(std.json.Value, gpa, once, .{});
+                try set.value_ptr.put(gpa, try std.json.Stringify.valueAlloc(gpa, value, .{}), {});
+            }
+        }
+    }
+    return expected;
+}
+
+test "slow: every file shows what each check reaching it reports, after any sequence of edits" {
+    try slow_tests.skipUnlessRun();
+    const gpa = std.testing.allocator;
+    const sequences = 8;
+    const steps_each = 10;
+
+    for (0..sequences) |seed| {
+        var initial: [Workspace.paths.len]Rooted.File = undefined;
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        defer scratch.deinit();
+        const s = scratch.allocator();
+        var disk: [Workspace.paths.len][]const u8 = undefined;
+        var buffer: [Workspace.paths.len]?[]const u8 = .{null} ** Workspace.paths.len;
+        for (Workspace.paths, &initial, &disk, 0..) |at, *f, *held, file| {
+            held.* = try Workspace.text(s, file, 0);
+            f.* = .{ .at = at, .text = held.* };
+        }
+        var ws = try Rooted.initFiles(gpa, &initial);
+        defer ws.deinit();
+        var recorder = Recorder.init(gpa);
+        defer recorder.deinit();
+        ws.handler.transport = &recorder.transport;
+
+        var program_seen = false;
+        var prng = std.Random.DefaultPrng.init(seed);
+        const random = prng.random();
+        var steps: std.ArrayList(Workspace.Step) = .empty;
+        for (0..steps_each) |_| {
+            const file = random.uintLessThan(usize, Workspace.paths.len);
+            const variant = random.uintLessThan(u8, Workspace.variant_count[file]);
+            const op: Workspace.Op = if (buffer[file] != null)
+                ([_]Workspace.Op{ .change, .close, .save })[random.uintLessThan(usize, 3)]
+            else
+                ([_]Workspace.Op{ .open, .disk })[random.uintLessThan(usize, 2)];
+            try steps.append(s, .{ .op = op, .file = file, .variant = variant });
+
+            var step_arena = std.heap.ArenaAllocator.init(gpa);
+            defer step_arena.deinit();
+            const a = step_arena.allocator();
+            const path = try ws.pathAt(Workspace.paths[file]);
+            const written = try Workspace.text(s, file, variant);
+            switch (op) {
+                .open => {
+                    buffer[file] = written;
+                    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{ .uri = path, .languageId = .{ .custom_value = "linea" }, .version = 1, .text = written } });
+                },
+                .change => {
+                    buffer[file] = written;
+                    try ws.handler.@"textDocument/didChange"(a, .{ .textDocument = .{ .uri = path, .version = 2 }, .contentChanges = &.{.{ .text_document_content_change_whole_document = .{ .text = written } }} });
+                },
+                .close => {
+                    buffer[file] = null;
+                    try ws.handler.@"textDocument/didClose"(a, .{ .textDocument = .{ .uri = path } });
+                },
+                .save, .disk => {
+                    const saved = if (op == .save) buffer[file].? else written;
+                    disk[file] = saved;
+                    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = Workspace.paths[file], .data = saved });
+                    try ws.handler.@"workspace/didChangeWatchedFiles"(a, .{ .changes = &.{.{ .uri = path, .type = .Changed }} });
+                },
+            }
+
+            var texts: [Workspace.paths.len][]const u8 = undefined;
+            var open: [Workspace.paths.len]bool = undefined;
+            for (&texts, &open, buffer, disk) |*t, *o, held, on_disk| {
+                t.* = held orelse on_disk;
+                o.* = held != null;
+            }
+            const expected = try expectedPublished(a, ws.handler.root, &texts, &open, &program_seen);
+            const got = try lastPublished(a, recorder.written.items);
+            for (Workspace.paths) |at| {
+                const uri = try uri_mod.uriOf(a, try ws.pathAt(at));
+                const want = if (expected.get(uri)) |set| set.keys() else &.{};
+                const have = got.get(uri) orelse &.{};
+                var same = want.len == have.len;
+                if (same) for (have) |h| {
+                    const found = for (want) |w| {
+                        if (std.mem.eql(u8, w, h)) break true;
+                    } else false;
+                    if (!found) same = false;
+                };
+                if (same) continue;
+                std.debug.print("seed {d}: after {d} step(s), `{s}` shows {d} diagnostic(s) where its checks report {d}\n", .{ seed, steps.items.len, at, have.len, want.len });
+                for (steps.items) |st| std.debug.print("  {t} {s} variant {d}\n", .{ st.op, Workspace.paths[st.file], st.variant });
+                for (want) |w| std.debug.print("  expected {s}\n", .{w});
+                for (have) |h| std.debug.print("  published {s}\n", .{h});
+                return error.TestExpectedEqual;
+            }
+        }
+    }
 }
