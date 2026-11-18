@@ -170,6 +170,20 @@ static void route(int number, siginfo_t *info, void *context) {
     errno = interrupted_errno;
 }
 
+/* While a share of `signal` lives, the router's handler is the signal's
+ * action, and a host that installs another in its place takes every delivery
+ * from the shares and is replaced again when the last share restores the
+ * action it saved. Neither can be undone, so a share taken or released
+ * finding the router gone ends the process with a report. Called locked,
+ * while a share exists. */
+static void require_router(uint8_t signal) {
+    struct sigaction now;
+    if (sigaction(numbers[signal], 0, &now) != 0) fail("linea: a signal's action could not be read\n");
+    if ((now.sa_flags & SA_SIGINFO) == 0 || now.sa_sigaction != route) {
+        fail("linea: the host replaced the signal router's handler for a signal Linea watches\n");
+    }
+}
+
 /* Make the wake descriptor, nonblocking and closed on exec. Zero or an
  * errno. Called locked. */
 static int make_wake(void) {
@@ -227,6 +241,8 @@ long linea_signal_acquire(uint8_t signal) {
             unlock();
             return -(long)error;
         }
+    } else {
+        require_router(signal);
     }
     shares[signal] += 1;
     unlock();
@@ -238,6 +254,7 @@ void linea_signal_release(uint8_t signal, unsigned long loop) {
     if (linea_io_is_simulated(loop) != 0) return;
     lock();
     if (shares[signal] == 0) fail("linea: a signal's share was released twice\n");
+    require_router(signal);
     shares[signal] -= 1;
     if (shares[signal] == 0) {
         /* A spent SA_RESETHAND handler leaves the default action, as the

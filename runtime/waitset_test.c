@@ -481,6 +481,67 @@ static void a_signal_wakes_every_set_that_waits_for_it(void) {
     signal(SIGUSR1, SIG_DFL);
 }
 
+/* Runs `body` in a child and answers whether it aborted after writing
+ * `expected` to stderr. */
+static int aborts_saying(void (*body)(void), const char *expected) {
+    int err_pipe[2];
+    if (pipe(err_pipe) != 0) return 0;
+    const pid_t child = fork();
+    if (child < 0) return 0;
+    if (child == 0) {
+        dup2(err_pipe[1], 2);
+        body();
+        _exit(0);
+    }
+    close(err_pipe[1]);
+    char said[512] = {0};
+    size_t have = 0;
+    ssize_t n;
+    while ((n = read(err_pipe[0], said + have, sizeof said - 1 - have)) > 0) have += (size_t)n;
+    close(err_pipe[0]);
+    int status = 0;
+    if (waitpid(child, &status, 0) != child) return 0;
+    return WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT && strcmp(said, expected) == 0;
+}
+
+static const char router_replaced[] = "linea: the host replaced the signal router's handler for a signal Linea watches\n";
+
+/* The host installs its own handler for `SIGUSR1` while a share lives. */
+static void replace_the_router(void) {
+    struct sigaction host;
+    memset(&host, 0, sizeof host);
+    host.sa_handler = host_handler;
+    sigemptyset(&host.sa_mask);
+    if (sigaction(SIGUSR1, &host, 0) != 0) _exit(20);
+}
+
+static void release_after_the_host_replaced_the_router(void) {
+    if (linea_signal_acquire(3) != 0) _exit(10);
+    replace_the_router();
+    linea_signal_release(3, 0);
+}
+
+static void share_after_the_host_replaced_the_router(void) {
+    if (linea_signal_acquire(3) != 0) _exit(10);
+    replace_the_router();
+    if (linea_signal_acquire(3) != 0) _exit(11);
+}
+
+/* A host handler installed in place of the router while a share of its signal
+ * lives is found when a share is next taken or released, and the process
+ * ends with a report rather than losing every delivery to the shares and
+ * having the host's handler replaced by the action the router saved. A host
+ * that leaves the router in place takes and releases shares as before. */
+static void a_host_replacing_the_router_is_reported(void) {
+    assert(aborts_saying(release_after_the_host_replaced_the_router, router_replaced));
+    assert(aborts_saying(share_after_the_host_replaced_the_router, router_replaced));
+    assert(linea_signal_acquire(3) == 0);
+    assert(linea_signal_acquire(3) == 0);
+    linea_signal_release(3, 0);
+    linea_signal_release(3, 0);
+    signal(SIGUSR1, SIG_DFL);
+}
+
 /* An ignored signal is refused, and its action is left as it was. */
 static void an_ignored_signal_is_refused(void) {
     signal(SIGUSR2, SIG_IGN);
@@ -1280,10 +1341,11 @@ int main(void) {
     a_signal_before_a_take_is_answered_signalled();
     a_routed_host_action_runs_under_its_own_mask();
     a_one_shot_host_action_is_chained_to_once();
+    a_host_replacing_the_router_is_reported();
 #if defined(LINEA_WAITSET_PAUSES)
     a_retired_slot_is_replaced_by_a_new_number();
     a_route_chains_to_the_action_saved_when_it_began();
 #endif
-    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; the signal router chains each delivery to the host action saved when it began, while a new first share saves another, under that action's mask, and an SA_RESETHAND action once; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
+    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; the signal router chains each delivery to the host action saved when it began, while a new first share saves another, under that action's mask, and an SA_RESETHAND action once, and a host handler installed in its place while a share lives is reported; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
     return 0;
 }
