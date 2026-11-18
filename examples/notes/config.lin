@@ -57,7 +57,7 @@ impl json.Encode for OutputFormat {
 }
 
 impl[A: Allocator] json.Decode[A] for OutputFormat {
-    fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] {
+    fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] {
         let text = value.as_str() else {
             return .Err(json.DecodeError.failure_in(allocator, .WrongKind))
         }
