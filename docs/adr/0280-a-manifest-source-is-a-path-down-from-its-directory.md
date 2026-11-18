@@ -1,4 +1,4 @@
-# 279. A manifest's source is a path down from its directory
+# 280. A manifest's source is a path down from its directory
 
 Status: Accepted — 2026-11-17; extends 0075 and 0229
 

@@ -476,7 +476,7 @@ the manifest's text once for every consumer of that root (`Root.manifest_text`),
 and `pathsOfRoot` gives the command line and the language server the same
 files, manifest included, with each file an editor holds unsaved listed where
 the root's source directory holds it. A manifest's `source` is a path down from
-its directory (ADR 0279), and `manifest_source.directory` spells the directory
+its directory (ADR 0280), and `manifest_source.directory` spells the directory
 it names for a program root, a library and the build's example check alike. A module's symbols are spelled from its import route
 (`Program.modulePath`), never from its directory. A function's symbol ends
 that route with `;`, the root's empty route included, and brackets the

@@ -115,7 +115,7 @@ true of a different implementation.
 | [0072](0072-a-declaration-only-generated-code-calls-is-named-by-its-module.md) | A declaration only generated code calls is named by its module | Accepted; refines 0060, refined by 0106 |
 | [0073](0073-a-scope-exit-names-a-stretch-of-the-live-stack.md) | A scope exit names a stretch of the live stack | Accepted; refines 0066 |
 | [0074](0074-a-module-is-emitted-as-several-compilation-units.md) | A module is emitted as several compilation units | Superseded by 0094 |
-| [0075](0075-a-program-root-is-a-directory-holding-a-manifest.md) | A program root is a directory holding a manifest | Accepted; command-line-file clause superseded by 0171; extended by 0227 and 0279 |
+| [0075](0075-a-program-root-is-a-directory-holding-a-manifest.md) | A program root is a directory holding a manifest | Accepted; command-line-file clause superseded by 0171; extended by 0227 and 0280 |
 | [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) | An array is a value of a fixed-size type | Accepted; extended by 0083, 0137, 0149, 0166, 0172, 0198 and 0207 |
 | [0062](0062-an-indexed-place-is-a-place-and-every-index-is-checked.md) | An indexed place is a place, and every index is checked | Accepted; bracket clause, never implemented, replaced by 0181 |
 | [0063](0063-disposal-is-scheduled-never-inserted.md) | Disposal is scheduled, never inserted | Accepted; extends 0034, extended by 0104 and 0208, refined by 0114 |
@@ -150,8 +150,8 @@ true of a different implementation.
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
 | [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
 | [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted; extended by 0229 |
-| [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171; extended by 0228 and 0279 |
-| [0279](0279-a-manifest-source-is-a-path-down-from-its-directory.md) | A manifest's source is a path down from its directory | Accepted; extends 0075 and 0229 |
+| [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171; extended by 0228 and 0280 |
+| [0280](0280-a-manifest-source-is-a-path-down-from-its-directory.md) | A manifest's source is a path down from its directory | Accepted; extends 0075 and 0229 |
 | [0109](0109-text-io-and-formatting-have-separate-modules.md) | Text, I/O and formatting have separate modules | Accepted |
 | [0110](0110-a-trait-reference-may-be-qualified.md) | A trait reference may be qualified | Accepted; supersedes ADR 0080's bare trait-slot clause |
 | [0112](0112-comparable-carries-equality-compatible-order.md) | Comparable carries an equality-compatible order | Accepted; extends 0082 |
