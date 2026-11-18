@@ -1276,8 +1276,9 @@ fn appendSelectable(
     try resolve.selectableUnder(gpa, ast, program, res, writing, b, &reaches);
     // An opaque enum's variants are its representation: the resolver finds
     // `Shade.Dim` outside its module, and the checker refuses it [M-Opaque].
-    const declared = res.declaredBy(res.throughAlias(b));
-    const sealed = typecheck.representationSealed(ast, program, if (declared == DeclId.none) null else declared, writing);
+    const named = res.throughAlias(b);
+    const sealed = named != BindingId.none and res.kindOf(named) == .declared_type and
+        typecheck.representationSealed(ast, program, res.declaredBy(named), writing);
 
     for (reaches.items) |written| switch (written) {
         .member => |m| {
