@@ -61,6 +61,7 @@ const Walk = struct {
 pub fn main(init: std.process.Init) !u8 {
     const gpa = init.arena.allocator();
     const io = init.io;
+    pool.killCommandsOnInterrupt();
     const args = try init.minimal.args.toSlice(gpa);
     if (args.len < 3) {
         std.debug.print("usage: example-tests <examples directory> <linea> [workers]\n", .{});

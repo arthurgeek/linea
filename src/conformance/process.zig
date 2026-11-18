@@ -19,6 +19,56 @@ pub const Options = struct {
     partial: ?*[]u8 = null,
 };
 
+/// The leaders of the process groups runs started and have not finished,
+/// so a runner stopped by a signal can kill what it started. A slot holds a
+/// leader's pid, or 0 where it is free; more groups at once than slots are
+/// run but not listed.
+var live_groups: [256]std.atomic.Value(std.posix.pid_t) = @splat(.init(0));
+
+/// Lists `pid` as a live group's leader, answering its slot.
+fn enlist(pid: std.posix.pid_t) ?usize {
+    for (&live_groups, 0..) |*slot, i| {
+        if (slot.cmpxchgStrong(0, pid, .acq_rel, .acquire) == null) return i;
+    }
+    return null;
+}
+
+/// How many groups are listed.
+fn liveGroups() usize {
+    var count: usize = 0;
+    for (&live_groups) |*slot| count += @intFromBool(slot.load(.acquire) != 0);
+    return count;
+}
+
+/// Kills every listed group. Only `kill` is called, so a signal handler may
+/// call this.
+pub fn killLiveGroups() void {
+    for (&live_groups) |*slot| {
+        const pid = slot.load(.acquire);
+        if (pid != 0) std.posix.kill(-pid, .KILL) catch {};
+    }
+}
+
+/// Makes an interrupt, a termination request or a hangup kill every listed
+/// group before the runner stops as that signal stops it, so the commands it
+/// started in groups of their own do not run on after it.
+pub fn killGroupsOnInterrupt() void {
+    const handler = struct {
+        fn handle(sig: std.posix.SIG) callconv(.c) void {
+            killLiveGroups();
+            // `RESETHAND` has restored the default action, which raising the
+            // signal again now takes.
+            std.posix.raise(sig) catch {};
+        }
+    }.handle;
+    const action: std.posix.Sigaction = .{
+        .handler = .{ .handler = handler },
+        .mask = std.posix.sigemptyset(),
+        .flags = std.posix.SA.RESETHAND,
+    };
+    for ([_]std.posix.SIG{ .INT, .TERM, .HUP }) |sig| std.posix.sigaction(sig, &action, null);
+}
+
 /// Capture both output streams of a child whose standard input is empty.
 /// Both pipes are drained together, so a child filling one while the runner
 /// waits on the other cannot deadlock. Answers `error.Timeout` once
@@ -62,6 +112,8 @@ pub fn run(
     });
     defer child.kill(io);
     defer if (options.process_group) if (child.id) |pid| std.posix.kill(-pid, .KILL) catch {};
+    const listed = if (options.process_group) enlist(child.id.?) else null;
+    defer if (listed) |slot| live_groups[slot].store(0, .release);
 
     // One deadline for every read and the wait, so output arriving in time
     // does not extend the run.
@@ -222,4 +274,29 @@ test "a child killed at the deadline is reaped" {
     const pid = try std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, partial, "\n"), 10);
     // A zombie still answers a signal; a reaped child is gone.
     try testing.expectError(error.ProcessNotFound, std.posix.kill(pid, @enumFromInt(0)));
+}
+
+test "a group a run started is killed with every live group" {
+    const testing = std.testing;
+    const io = testing.io;
+    const Running = struct {
+        fn go(result: *std.process.RunError!std.process.RunResult) void {
+            result.* = run(std.heap.page_allocator, testing.io, .{
+                .argv = &.{ "/bin/sh", "-c", "sleep 30" },
+                .process_group = true,
+                .timeout = .{ .duration = .{ .raw = .fromSeconds(60), .clock = .awake } },
+            });
+        }
+    };
+    var result: std.process.RunError!std.process.RunResult = error.Timeout;
+    const started = std.Io.Clock.awake.now(io);
+    const thread = try std.Thread.spawn(.{}, Running.go, .{&result});
+    // Until the group is listed there is nothing to kill.
+    while (liveGroups() == 0) try std.Io.Clock.Duration.sleep(.{ .raw = .fromMilliseconds(10), .clock = .awake }, io);
+    killLiveGroups();
+    thread.join();
+    const finished = try result;
+    try testing.expect(finished.term == .signal);
+    try testing.expect(started.durationTo(std.Io.Clock.awake.now(io)).toSeconds() < 20);
+    try testing.expectEqual(@as(usize, 0), liveGroups());
 }

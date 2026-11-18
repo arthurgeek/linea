@@ -71,6 +71,7 @@ const Walk = struct {
 pub fn main(init: std.process.Init) !u8 {
     const gpa = init.arena.allocator();
     const io = init.io;
+    pool.killCommandsOnInterrupt();
     const args = try init.minimal.args.toSlice(gpa);
     if (args.len < 6) {
         std.debug.print("usage: guide-gate <guide directory> <linea> <scratch directory> <tests directory> <repository root> [walkers]\n", .{});

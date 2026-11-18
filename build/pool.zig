@@ -102,6 +102,11 @@ test "every index is worked once, however many threads the host starts" {
     }
 }
 
+/// Makes a signal that stops a gate kill every command `runMerged` started
+/// first, since each runs in a process group of its own that the terminal's
+/// interrupt does not reach.
+pub const killCommandsOnInterrupt = process.killGroupsOnInterrupt;
+
 pub const Finished = struct {
     succeeded: bool,
     /// Standard output and standard error, interleaved as the child wrote them.
