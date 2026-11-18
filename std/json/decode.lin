@@ -26,11 +26,11 @@ template impl[A: Allocator] Decode[A] where
         let result: Self = reflect.construct(
             reflect.product,
             |component| {
-                defer let field: component.Type = ObjectDecoder.field(&fields, component.name)?
+                defer let field: component.Type = ObjectDecoder.field(&fields, value, component.name)?
                 field
             },
             {
-                fields.finish()?
+                fields.finish(value)?
             },
         )
         .Ok(result)
@@ -401,29 +401,31 @@ test "typed collections keep owned values and nested error paths" {
     }, "nested error lost its owned root-first path")?
 }
 
-// An ObjectDecoder reads the members of one object in allocator `B`, decoding
-// them into `A` and recording each name it read in `used`, so `finish` can
-// refuse members no field read. A derived `Release` releases `used`, and
-// discards the borrowed object and the allocator.
+// An ObjectDecoder decodes the members of one object into `A`, recording
+// each name it read in `used`, so `finish` can refuse members no field read.
+// Each call is given the object, in any allocator, rather than the decoder
+// keeping a view of it: a call lends the decoder `inout`, after which any part
+// of it may hold what any other part held, and a decoder holding the document
+// could then return nothing independent of it. A derived `Release` releases
+// `used` and discards the allocator.
 @(opaque, derive(Release))
-struct ObjectDecoder[A: Allocator, B: Allocator] {
-    object: borrow Value[B],
+struct ObjectDecoder[A: Allocator] {
     allocator: A,
     used: Map[String[A], Bool, A],
 }
 
-impl[B: Allocator] ObjectDecoder[mem.SystemAllocator, B] {
+impl ObjectDecoder[mem.SystemAllocator] {
     // Start decoding the members of `value`, which must be an object,
     // recording the names read in the system allocator.
-    pub fn open(value: Value[B]) -> Result[Self, DecodeError[mem.SystemAllocator]] where borrows(.Ok.object: value) {
+    pub fn open[B: Allocator](value: Value[B]) -> Result[Self, DecodeError[mem.SystemAllocator]] where carries() {
         ObjectDecoder.open_in(mem.system(), value)
     }
 
     test "open reads an object with the system allocator" {
         defer let object = parse(r#"{"tea":2}"#).unwrap()
         defer var fields = ObjectDecoder.open(object).unwrap()
-        let tea: UInt8 = ObjectDecoder.required(&fields, "tea").unwrap()
-        fields.finish().unwrap()
+        let tea: UInt8 = ObjectDecoder.required(&fields, object, "tea").unwrap()
+        fields.finish(object).unwrap()
         testing.assert_eq(tea, UInt8(2), "the member did not decode")?
     }
 
@@ -447,19 +449,20 @@ impl[B: Allocator] ObjectDecoder[mem.SystemAllocator, B] {
     }
 }
 
-impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
+impl[A: Allocator] ObjectDecoder[A] {
     // Start decoding the members of `value`, which must be an object,
     // recording the names read in storage from `allocator`.
-    pub fn open_in(allocator: A, value: Value[B]) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
+    pub fn open_in[B: Allocator](allocator: A, value: Value[B]) -> Result[Self, DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
         if value.kind() != .Object {
             return .Err(DecodeError.failure_in(allocator, .WrongKind))
         }
-        .Ok(.{ object = borrow value, allocator = copy(allocator), used = Map.new_in(allocator) })
+        .Ok(.{ allocator = copy(allocator), used = Map.new_in(allocator) })
     }
 
-    // Decode the member `name` when it is present, and record that it was read.
-    fn present[T: Decode[A]](inout self: Self, name: Str) -> Result[Option[T], DecodeError[A]] where carries(.Ok: self.allocator), carries(.Err: self.allocator), retains(self.used: self.allocator) {
-        let child = self.object.get(name) else {
+    // Decode the member `name` of `object` when it is present, and record
+    // that it was read.
+    fn present[T: Decode[A], B: Allocator](inout self: Self, object: Value[B], name: Str) -> Result[Option[T], DecodeError[A]] where carries(.Ok: self), carries(.Err: self) {
+        let child = object.get(name) else {
             return .Ok(.None)
         }
         if self.used.get(name).is_none() {
@@ -473,10 +476,10 @@ impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
         .Ok(.Some(decoded))
     }
 
-    // Decode the member `name`. An absent member takes T's missing value, which
-    // is an error for a required type.
-    pub fn field[T: Decode[A]](inout self: Self, name: Str) -> Result[T, DecodeError[A]] where carries(.Ok: self.allocator), carries(.Err: self.allocator), retains(self.used: self.allocator) {
-        let present: Option[T] = &self.present(name)?
+    // Decode the member `name` of `object`. An absent member takes T's missing
+    // value, which is an error for a required type.
+    pub fn field[T: Decode[A], B: Allocator](inout self: Self, object: Value[B], name: Str) -> Result[T, DecodeError[A]] where carries(.Ok: self), carries(.Err: self) {
+        let present: Option[T] = &self.present(object, name)?
         match present {
             Some(value) => .Ok(value),
             None => {
@@ -491,36 +494,36 @@ impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
     test "field takes the missing value of an absent member" {
         defer let document = parse(r#"{"present":null}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
-        let missing_result: Result[Option[String], DecodeError] = &fields.field("missing")
+        let missing_result: Result[Option[String], DecodeError] = &fields.field(document, "missing")
         let missing = missing_result.unwrap()
         let absent = missing.is_none()
         missing.release()
-        let present_result: Result[Option[String], DecodeError] = &fields.field("present")
+        let present_result: Result[Option[String], DecodeError] = &fields.field(document, "present")
         let present = present_result.unwrap()
         let null = present.is_none()
         present.release()
         testing.assert(absent && null, "Option did not handle null and absence")?
-        fields.finish().unwrap()
+        fields.finish(document).unwrap()
     }
 
     test "object decoder copies queries and decoded results outlive document" {
         let document = parse(r#"{"name":"tea"}"#).unwrap()
         var fields = ObjectDecoder.open(document).unwrap()
         let query = "name".to_owned().unwrap()
-        let name_result: Result[String, DecodeError] = &fields.field(query.view())
+        let name_result: Result[String, DecodeError] = &fields.field(document, query.view())
         let name = name_result.unwrap()
         query.release()
-        fields.finish().unwrap()
+        fields.finish(document).unwrap()
         fields.release()
         document.release()
         defer name.release()
         testing.assert_eq(name.view(), "tea", "field decode retained its document or query")?
     }
 
-    // Decode the member `name`, refusing its absence even for a type whose
-    // missing value would allow it, such as Option.
-    pub fn required[T: Decode[A]](inout self: Self, name: Str) -> Result[T, DecodeError[A]] where carries(.Ok: self.allocator), carries(.Err: self.allocator), retains(self.used: self.allocator) {
-        let present: Option[T] = &self.present(name)?
+    // Decode the member `name` of `object`, refusing its absence even for a
+    // type whose missing value would allow it, such as Option.
+    pub fn required[T: Decode[A], B: Allocator](inout self: Self, object: Value[B], name: Str) -> Result[T, DecodeError[A]] where carries(.Ok: self), carries(.Err: self) {
+        let present: Option[T] = &self.present(object, name)?
         match present {
             Some(value) => .Ok(value),
             None => {
@@ -533,7 +536,7 @@ impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
     test "required refuses an absent member even for an option" {
         defer let document = parse(r#"{"present":null}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
-        let required: Result[Option[String], DecodeError] = &fields.required("required")
+        let required: Result[Option[String], DecodeError] = &fields.required(document, "required")
         defer let error = match required {
             Err(error) => error,
             Ok(value) => {
@@ -544,17 +547,17 @@ impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
         testing.assert(match read error { Value(failure) => failure.reason() == .MissingField, _ => false }, "required absence lost its reason")?
     }
 
-    // Decode the member `name`, or None when it is absent.
-    pub fn optional[T: Decode[A]](inout self: Self, name: Str) -> Result[Option[T], DecodeError[A]] where carries(.Ok: self.allocator), carries(.Err: self.allocator), retains(self.used: self.allocator) {
-        &self.present(name)
+    // Decode the member `name` of `object`, or None when it is absent.
+    pub fn optional[T: Decode[A], B: Allocator](inout self: Self, object: Value[B], name: Str) -> Result[Option[T], DecodeError[A]] where carries(.Ok: self), carries(.Err: self) {
+        &self.present(object, name)
     }
 
     test "optional decodes a present member and answers none for an absent one" {
         defer let document = parse(r#"{"retries":5}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
-        let present: Result[Option[UInt8], DecodeError] = &fields.optional("retries")
+        let present: Result[Option[UInt8], DecodeError] = &fields.optional(document, "retries")
         let retries = present.unwrap()
-        let absent: Result[Option[UInt8], DecodeError] = &fields.optional("delay")
+        let absent: Result[Option[UInt8], DecodeError] = &fields.optional(document, "delay")
         let delay = absent.unwrap()
         testing.assert_eq(retries, Option.Some(UInt8(5)), "a present member was not decoded")?
         testing.assert(delay.is_none(), "an absent member was not None")?
@@ -565,19 +568,20 @@ impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
         let allocator = arena.handle()
         defer let document = parse_in(allocator, r#"{"name":"tea","size":2}"#).unwrap()
         defer var fields = ObjectDecoder.open_in(allocator, document).unwrap()
-        let name: Result[String[mem.Handle], DecodeError[mem.Handle]] = &fields.required("name")
-        let size: Result[Option[UInt8], DecodeError[mem.Handle]] = &fields.optional("size")
-        let colour: Result[Option[String[mem.Handle]], DecodeError[mem.Handle]] = &fields.field("colour")
+        let name: Result[String[mem.Handle], DecodeError[mem.Handle]] = &fields.required(document, "name")
+        let size: Result[Option[UInt8], DecodeError[mem.Handle]] = &fields.optional(document, "size")
+        let colour: Result[Option[String[mem.Handle]], DecodeError[mem.Handle]] = &fields.field(document, "colour")
         defer let name = name.unwrap()
         testing.assert_eq(name.view(), "tea", "a required field decoded into an arena lost its text")?
         testing.assert_eq(size.unwrap(), Option.Some(UInt8(2)), "an optional field decoded into an arena was lost")?
         testing.assert(colour.unwrap().is_none(), "an absent field decoded into an arena was present")?
-        fields.finish().unwrap()
+        fields.finish(document).unwrap()
     }
 
-    // Refuse the first member no field read, as UnknownField at that member.
-    pub fn finish(self: Self) -> Result[(), DecodeError[A]] where carries(.Err: self.allocator) {
-        for entry in self.object.members().unwrap() {
+    // Refuse the first member of `object` no field read, as UnknownField at
+    // that member.
+    pub fn finish[B: Allocator](self: Self, object: Value[B]) -> Result[(), DecodeError[A]] where carries(.Err: self) {
+        for entry in object.members().unwrap() {
             if self.used.get(entry.key.view()).is_none() {
                 let error = DecodeError.failure_in(self.allocator, .UnknownField)
                 return .Err(DecodeError.at_field_in(error, self.allocator, entry.key.view()))
@@ -589,9 +593,9 @@ impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
     test "finish refuses a member no field read" {
         defer let document = parse(r#"{"name":"tea","extra":true}"#).unwrap()
         defer var fields = ObjectDecoder.open(document).unwrap()
-        let name: Result[String, DecodeError] = &fields.field("name")
+        let name: Result[String, DecodeError] = &fields.field(document, "name")
         name.unwrap().release()
-        let refused = match fields.finish() {
+        let refused = match fields.finish(document) {
             Ok(_) => false,
             Err(error) => {
                 let unknown = match read error { Value(failure) => failure.reason() == .UnknownField && failure.path_length() == 1, _ => false }
@@ -616,11 +620,11 @@ derive[A: Allocator] Release for DecodeSettings[A]
 impl[A: Allocator] Decode[A] for DecodeSettings[A] {
     fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         defer var fields = ObjectDecoder.open_in(allocator, value)?
-        defer let name: String[A] = &fields.field("name")?
-        defer let labels: Vec[String[A], A] = &fields.field("labels")?
-        let supplied: Option[UInt8] = &fields.optional("retries")?
-        let retries = match supplied { Some(value) => value, None => 3 }
-        fields.finish()?
+        defer let name: String[A] = &fields.field(value, "name")?
+        defer let labels: Vec[String[A], A] = &fields.field(value, "labels")?
+        let supplied: Option[UInt8] = &fields.optional(value, "retries")?
+        let retries = match supplied { Some(count) => count, None => 3 }
+        fields.finish(value)?
         if retries > 10 {
             let error = DecodeError.failure_in(allocator, .InvalidValue)
             return .Err(DecodeError.at_field_in(error, allocator, "retries"))

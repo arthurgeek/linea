@@ -1,0 +1,31 @@
+// Each wrapper passes the lend on, and the outermost caller still takes `a`
+// to hold what `b` held.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn swap(inout s: Swap) where retains(s: s) {
+    s.a = copy(s.b)
+}
+
+fn inner(inout s: Swap) {
+    swap(&s)
+}
+
+fn outer(inout s: Swap) {
+    inner(&s)
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    outer(&s)
+    owned.release()
+    let _ = io.println(s.a) else |_| {
+        return 1
+    }
+    0
+}

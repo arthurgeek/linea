@@ -1,0 +1,29 @@
+// The parts of a place lent `inout` may hold each other's owners, so a part
+// is read while every owner the place held is still alive.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn swap(inout s: Swap) where retains(s: s) {
+    s.a = copy(s.b)
+}
+
+fn advance(inout s: Swap) {
+    swap(&s)
+}
+
+fn main() -> UInt8 {
+    let owned = "moved owner".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    advance(&s)
+    let printed = io.println(s.a).is_ok()
+    owned.release()
+    if printed {
+        0
+    } else {
+        1
+    }
+}

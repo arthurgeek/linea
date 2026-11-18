@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/borrows/inout_lend/a_wrapper_hides_no_retention_from_its_caller.lin:24:5
+   |
+24 |     owned.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+25 |     let _ = io.println(a) else |_| {
+   |                        - the observation is still used here

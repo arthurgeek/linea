@@ -208,14 +208,18 @@ A handwritten `Decode[A]` writes
 `fn decode[B: Allocator](value: json.Value[B], allocator: A)`: the document
 may be in any allocator, and what it returns is allocated from `allocator`.
 For a handwritten record decoder, `ObjectDecoder.open(document)`, or
-`ObjectDecoder.open_in(allocator, document)`,
-borrows the object and owns its used-name tracking. Settle it with Release.
-Its field helpers accept borrowed names and return independently owned results:
+`ObjectDecoder.open_in(allocator, document)`, checks that the document is an
+object and owns its used-name tracking. Settle it with Release. Each helper is
+given the object again, `&fields.field(document, "name")`, rather than the
+decoder keeping a view of it: a call lends the decoder `inout`, after which
+any part of it may hold what another part held, so a decoder holding the
+document could return nothing independent of it. The helpers accept borrowed
+names and return independently owned results:
 
 - `field` uses the target's `Decode.missing` policy for absence.
 - `required` rejects absence even when the target is an Option.
 - `optional` returns None for absence and decodes a present value normally.
-- `finish` rejects every field the decoder did not read.
+- `finish(document)` rejects every member the decoder did not read.
 
 Place a `defer field.release()` after acquiring each owning field. Returning
 the completed record moves those fields and cancels their deferred release;

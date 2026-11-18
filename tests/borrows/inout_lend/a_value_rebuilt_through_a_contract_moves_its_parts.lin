@@ -1,0 +1,30 @@
+// Rebuilding a parameter lent `inout` from a call that carries it may put
+// what one part held into another: after `advance`, `a` views `owned`.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn swapped(sink s: Swap) -> Swap where carries(s) {
+    let Swap { a: _, b } = s
+    Swap { a = copy(b), b = b }
+}
+
+fn advance(inout s: Swap) {
+    let current = s
+    s = swapped(current)
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    advance(&s)
+    let Swap { a, b: _ } = s
+    owned.release()
+    let _ = io.println(a) else |_| {
+        return 1
+    }
+    0
+}

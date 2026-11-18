@@ -1,0 +1,32 @@
+// After `advance(&s)`, `s.a` may hold what `s.b` held, so returning it
+// carries `b`'s owner and the contract must name all of `s`.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn swap(inout s: Swap) where retains(s: s) {
+    s.a = copy(s.b)
+}
+
+fn advance(inout s: Swap) {
+    swap(&s)
+}
+
+fn first(inout s: Swap) -> Str where carries(s.a) {
+    advance(&s)
+    copy(s.a)
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    let a = first(&s)
+    owned.release()
+    let _ = io.println(a) else |_| {
+        return 1
+    }
+    0
+}

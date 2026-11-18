@@ -13,13 +13,13 @@ impl[A: Allocator] json.Decode[A] for Preferences[A] {
     fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
         var fields = json.ObjectDecoder.open_in(allocator, value)?
         defer fields.release()
-        let title: String[A] = json.ObjectDecoder.field(&fields, "title")?
+        let title: String[A] = json.ObjectDecoder.field(&fields, value, "title")?
         defer title.release()
-        let tags: Vec[String[A], A] = json.ObjectDecoder.field(&fields, "tags")?
+        let tags: Vec[String[A], A] = json.ObjectDecoder.field(&fields, value, "tags")?
         defer tags.release()
-        let supplied: Option[UInt8] = json.ObjectDecoder.optional(&fields, "retries")?
+        let supplied: Option[UInt8] = json.ObjectDecoder.optional(&fields, value, "retries")?
         let retries = match supplied { Some(count) => count, None => 3 }
-        fields.finish()?
+        fields.finish(value)?
         if retries > 10 {
             let failure = json.DecodeError.failure_in(allocator, .InvalidValue)
             return .Err(json.DecodeError.at_field_in(failure, allocator, "retries"))
