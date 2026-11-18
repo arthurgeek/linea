@@ -482,10 +482,10 @@ test "serving in the system allocator answers a request" {
 test "a handler one task cannot make ends serving before anything is accepted" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink counter, sink routes] || -> Result[LoggedRouter, Unopened] where carries(counter, routes) {
         if counted(counter) == 3 {
             .Err(.NoDatabase)
@@ -493,7 +493,7 @@ test "a handler one task cannot make ends serving before anything is accepted" {
             .Ok(exchanges_router(routes))
         }
     }
-    let served = serve_in(tables.allocator(), listener, made, policy: .Threads(4))
+    let served = serve_in(tables.handle(), listener, made, policy: .Threads(4))
     let tally = owner.close()
     defer let answer = read_or_reset(client)
     testing.assert_eq(served, .Err(.Handler(.NoDatabase)), "a handler that could not be made did not end serving")?
@@ -509,10 +509,10 @@ test "a handler one task cannot make ends serving before anything is accepted" {
 // was made is released.
 test "two tasks failing with owned reasons report one and release the other" {
     let listener = net.listen(net.loopback(0)).unwrap()
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink counter, sink routes] || -> Result[LoggedRouter, Unreadable] where carries(counter, routes) {
         if counted(counter) % 2 == 0 {
             .Err(Unreadable { reason = "the routes could not be read".to_owned().unwrap() })
@@ -520,7 +520,7 @@ test "two tasks failing with owned reasons report one and release the other" {
             .Ok(exchanges_router(routes))
         }
     }
-    let served = serve_in(tables.allocator(), listener, made, policy: .Threads(4))
+    let served = serve_in(tables.handle(), listener, made, policy: .Threads(4))
     let tally = owner.close()
     let reported = match served {
         Err(Handler(error)) => {
@@ -566,8 +566,8 @@ test "every exchange returns its arena to the parent" {
     for request in requests {
         &clients.push(send(bound, request)).unwrap()
     }
-    let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = Limits {
         first_byte_timeout_ms = 50,
         read_timeout_ms = 100,
@@ -577,9 +577,9 @@ test "every exchange returns its arena to the parent" {
         request_arena_bytes = 98304,
         ..serving(10),
     }
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Sequential)
     let settled = parent.all_disposed()
     let acquired = parent.acquired()
     let tables_settled = tables.all_disposed()
@@ -610,12 +610,12 @@ test "a refused arena is answered 503" {
     let bound = listener.local_address().unwrap()
     let refused = send(bound, health_request)
     let valid = send(bound, health_request)
-    let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = serving(2)
-    parent.refuse_size_attempt(mem.arena_first_chunk_bytes, 1)
-    let routes = parent.allocator()
+    parent.fail_size_at(mem.arena_first_chunk_bytes, 1)
+    let routes = parent.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Sequential)
     let settled = parent.all_disposed()
     parent.release()
     defer let unavailable = read_to_end(refused)
@@ -635,7 +635,7 @@ test "every connection is answered 503 while the parent refuses the arena" {
     let bound = listener.local_address().unwrap()
     let first = send(bound, health_request)
     let second = send(bound, health_request)
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = Limits {
         read_timeout_ms = 100,
         max_line_bytes = 1024,
@@ -644,10 +644,10 @@ test "every connection is answered 503 while the parent refuses the arena" {
         request_arena_bytes = 98304,
         ..serving(2),
     }
-    parent.refuse_size_from(mem.arena_first_chunk_bytes, 1)
-    let routes = parent.allocator()
+    parent.fail_size_from(mem.arena_first_chunk_bytes, 1)
+    let routes = parent.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Threads(2))
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Threads(2))
     let settled = parent.all_disposed()
     defer let answered_first = read_or_reset(first)
     defer let answered_second = read_or_reset(second)
@@ -660,11 +660,11 @@ test "every connection is answered 503 while the parent refuses the arena" {
 
 test "a parent that refuses the discard buffer ends serving before accepting" {
     let listener = net.listen(net.loopback(0)).unwrap()
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    parent.refuse_size_from(request_buffer_bytes, 1)
-    let routes = parent.allocator()
+    defer let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    parent.fail_size_from(request_buffer_bytes, 1)
+    let routes = parent.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, serving(1), policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, serving(1), policy: .Sequential)
     testing.assert_eq(served, .Err(.Memory(.Exhausted)), "serving began without a buffer to discard refused input into")?
     .Ok(())
 }
@@ -700,16 +700,16 @@ test "a serving task refused its discard buffer ends serving with memory" {
 fn served_refusing_discard_buffers(first: UInt64, from: UInt64) -> Result[(), testing.Failure] {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     if first != 0 {
-        parent.refuse_size_attempt(request_buffer_bytes, first)
+        parent.fail_size_at(request_buffer_bytes, first)
     } else {
-        parent.refuse_size_from(request_buffer_bytes, from)
+        parent.fail_size_from(request_buffer_bytes, from)
     }
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits: serving(1), policy: .Threads(8))
+    let served = serve_in(parent.handle(), listener, made, limits: serving(1), policy: .Threads(8))
     defer let _answer = read_or_reset(client)
     testing.assert_eq(served, .Err(.Memory(.Exhausted)), "a serving task's refused discard buffer did not end serving")?
     testing.assert(parent.all_disposed(), "serving kept an allocation from the parent")?
@@ -778,23 +778,23 @@ fn items_router() -> Router[()] {
 // refused discard buffer ends serving before it accepts, and every other run
 // answers 503. Every run gives back everything it took.
 test "each allocation failure covers every acquisition from the parent" {
-    let attempts = served_refusing_arenas(0)?
+    let attempts = served_refusing_arenas(.None)?
     testing.assert_eq(attempts, UInt64(3), "serving took more from the parent than its discard buffer and two arenas")?
     for refused in UInt64(1)..attempts + 1 {
-        let _attempted = served_refusing_arenas(refused)?
+        let _attempted = served_refusing_arenas(.Some(refused))?
     }
 }
 
 // Serve one request through a parent that refuses every request arena and
-// the acquisition numbered `refuse_at`, check what the client read, and
-// return how many acquisitions serving attempted from the parent.
-fn served_refusing_arenas(refuse_at: UInt64) -> Result[UInt64, testing.Failure] {
+// the acquisition numbered `refuse_at`, or none, check what the client read,
+// and return how many acquisitions serving attempted from the parent.
+fn served_refusing_arenas(refuse_at: Option[UInt64]) -> Result[UInt64, testing.Failure] {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), refuse_at).unwrap()
+    defer let parent = testing.SharedTestAllocator.open(mem.system(), fail_at: refuse_at).unwrap()
     // The router's tables come from a log of their own, so only the parent's
     // acquisitions are refused.
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = Limits {
         read_timeout_ms = 100,
         max_line_bytes = 1024,
@@ -803,14 +803,14 @@ fn served_refusing_arenas(refuse_at: UInt64) -> Result[UInt64, testing.Failure] 
         request_arena_bytes = 98304,
         ..serving(1),
     }
-    parent.refuse_size_from(mem.arena_first_chunk_bytes, 1)
-    let routes = tables.allocator()
+    parent.fail_size_from(mem.arena_first_chunk_bytes, 1)
+    let routes = tables.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Sequential)
     defer let answer = read_or_reset(client)
     testing.assert(parent.all_disposed(), "serving kept an allocation from the parent")?
     if served == .Err(.Memory(.Exhausted)) {
-        testing.assert_eq(refuse_at, UInt64(1), "serving ended when an arena was refused")?
+        testing.assert_eq(refuse_at, Option.Some(UInt64(1)), "serving ended when an arena was refused")?
     } else {
         testing.assert_ok_eq(served, (), "serving failed")?
         testing.assert_eq(answer.view(), unavailable_answer, "a parent that refused the arena was not answered 503")?
@@ -1465,11 +1465,11 @@ test "a rewound request arena keeps only its first chunk" {
     var listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), "GET /fill HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    defer let log = testing.AllocationLog.open(mem.system(), 0).unwrap()
-    var router = exchanges_router(log.allocator())
-    var refusal = log.allocator().acquire(request_buffer_bytes).unwrap()
+    defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var router = exchanges_router(log.handle())
+    var refusal = log.handle().acquire(request_buffer_bytes).unwrap()
     let before = log.live_bytes()
-    var arena = mem.Arena.open(log.allocator(), 1048576)
+    var arena = mem.Arena.open(log.handle(), 1048576)
     let opened = log.live_bytes() - before
     answer_one(connection, &router, arena.handle(), &refusal, Limits { read_timeout_ms = 2000, ..serving(1) })
     let peak = log.peak_bytes()
@@ -1749,7 +1749,7 @@ fn exchanges_router[A: Allocator](allocator: A) -> Router[(), A] where carries(a
 // A `LoggedRouter` is an `exchanges_router` whose tables, and the responses
 // it builds, come from a shared allocation log, so a test can count or refuse
 // what serving takes from its parent.
-alias LoggedRouter = Router[(), testing.SharedRefusingAllocator[mem.SystemAllocator]]
+alias LoggedRouter = Router[(), testing.SharedTestHandle[mem.SystemAllocator]]
 
 // `system_exchanges_router` builds an `exchanges_router` whose tables come
 // from the system allocator.

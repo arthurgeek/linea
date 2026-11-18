@@ -213,8 +213,8 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
     // allocator for nothing.
     test "a line below the minimum level is not written" {
         let file = capture()
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Warn)
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
+        let logger = Logger.open_in(log.handle(), file.open(), minimum: .Warn)
         let ignored = logger.log(.Info, "ignored", field("count", 3).and("path", "/items")).is_ok()
         let attempts_below = log.attempts()
         let kept = logger.log(.Error, "kept", ()).is_ok()
@@ -231,9 +231,9 @@ impl[S: Sink, A: Allocator] Logger[S, A] {
     // the next line is written whole, and every line's buffer is released.
     test "a line the allocator refuses is reported and not written" {
         let file = capture()
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let logger = Logger.open_in(log.allocator(), file.open(), minimum: .Info)
-        log.refuse_attempt(log.attempts() + 1)
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
+        let logger = Logger.open_in(log.handle(), file.open(), minimum: .Info)
+        log.fail_at(.Some(log.attempts() + 1))
         let refused = match logger.log(.Info, "refused", ()) {
             Err(Memory(_)) => true,
             Err(Sink(_)) => false,

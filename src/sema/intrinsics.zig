@@ -235,11 +235,11 @@ pub const RawAccesses = struct {
     /// The test allocators that build a buffer of their backing allocator,
     /// which they hand out and take back on its behalf, and the members of an
     /// allocation log and a release log that read or write the log's words.
-    allocation_log_refuse_attempt: DeclId = .none,
-    refusing_acquire: DeclId = .none,
-    refusing_dispose: DeclId = .none,
-    shared_refusing_acquire: DeclId = .none,
-    shared_refusing_dispose: DeclId = .none,
+    test_allocator_fail_at: DeclId = .none,
+    test_acquire: DeclId = .none,
+    test_dispose: DeclId = .none,
+    shared_test_acquire: DeclId = .none,
+    shared_test_dispose: DeclId = .none,
     vec_test_acquire: DeclId = .none,
     vec_test_dispose: DeclId = .none,
     release_log_words: DeclId = .none,
@@ -431,11 +431,11 @@ pub const RawAccesses = struct {
             .storage_from_buffer = memberOf(program, ast, "mem", "Storage", "from_buffer"),
             .storage_dispose = memberOf(program, ast, "mem", "Storage", "dispose"),
             .storage_into_buffer = memberOf(program, ast, "mem", "Storage", "into_buffer"),
-            .allocation_log_refuse_attempt = memberOf(program, ast, "mem", "AllocationLog", "refuse_attempt"),
-            .refusing_acquire = memberOf(program, ast, "mem", "RefusingAllocator", "acquire"),
-            .refusing_dispose = memberOf(program, ast, "mem", "RefusingAllocator", "dispose"),
-            .shared_refusing_acquire = memberOf(program, ast, "mem", "SharedRefusingAllocator", "acquire"),
-            .shared_refusing_dispose = memberOf(program, ast, "mem", "SharedRefusingAllocator", "dispose"),
+            .test_allocator_fail_at = memberOf(program, ast, "mem", "TestAllocator", "fail_at"),
+            .test_acquire = memberOf(program, ast, "mem", "TestHandle", "acquire"),
+            .test_dispose = memberOf(program, ast, "mem", "TestHandle", "dispose"),
+            .shared_test_acquire = memberOf(program, ast, "mem", "SharedTestHandle", "acquire"),
+            .shared_test_dispose = memberOf(program, ast, "mem", "SharedTestHandle", "dispose"),
             .vec_test_acquire = memberOf(program, ast, "mem", "VecTestAllocator", "acquire"),
             .vec_test_dispose = memberOf(program, ast, "mem", "VecTestAllocator", "dispose"),
             .release_log_words = memberOf(program, ast, "mem", "ReleaseLog", "words"),
@@ -618,12 +618,12 @@ pub const RawAccesses = struct {
     /// `Buffer`'s members: an arena's bookkeeping, which reads where its
     /// chunks lie and writes its words, and the members of the library's test
     /// logs that read or write their words.
-    const buffer_numbers = [_][]const u8{ "arena_open", "arena_rewind", "arena_table_of", "arena_reserve", "arena_write", "allocation_log_refuse_attempt", "release_log_words" };
+    const buffer_numbers = [_][]const u8{ "arena_open", "arena_rewind", "arena_table_of", "arena_reserve", "arena_write", "test_allocator_fail_at", "release_log_words" };
 
     /// The test allocators that build a buffer of their backing allocator,
     /// which they hand out and take back on its behalf, and an arena's handle,
     /// which takes apart a buffer it handed out.
-    const backing_buffer_builders = [_][]const u8{ "refusing_acquire", "refusing_dispose", "shared_refusing_acquire", "shared_refusing_dispose", "vec_test_acquire", "vec_test_dispose", "handle_dispose" };
+    const backing_buffer_builders = [_][]const u8{ "test_acquire", "test_dispose", "shared_test_acquire", "shared_test_dispose", "vec_test_acquire", "vec_test_dispose", "handle_dispose" };
 
     /// The raw types, with where else each one's fields are named. A
     /// storage's are named where a task body is kept and where a closure
@@ -729,7 +729,7 @@ pub const RawAccesses = struct {
     /// bytes ([T-RawAddress]).
     pub const byte_operations: Confinement = .{
         .decls = &.{},
-        .allowed = &.{ "arena_write", "system_allocator_dispose", "runtime_byte_callers", "call_owner", "next_owner_request", "send_payload", "receive_payload", "receive_payload_until", "allocation_log_refuse_attempt", "refusing_acquire", "refusing_dispose", "record_release", "foreign_byte", "foreign_word", "vec_test_log_store", "task_slot_start" },
+        .allowed = &.{ "arena_write", "system_allocator_dispose", "runtime_byte_callers", "call_owner", "next_owner_request", "send_payload", "receive_payload", "receive_payload_until", "test_allocator_fail_at", "test_acquire", "test_dispose", "record_release", "foreign_byte", "foreign_word", "vec_test_log_store", "task_slot_start" },
         .types = &.{ "buffer", "storage", "endpoint" },
         .message = "trusts the extent beside its address, so only the declarations the table names pass one",
         .help = "use the operation of what owns the bytes",

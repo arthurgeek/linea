@@ -715,7 +715,7 @@ impl[T, A: Allocator] Vec[T, A] {
         let checked = testing.each_allocation_failure(
             system(),
             |allocator| -> Result[(), PushFailure[UInt64]] {
-                defer var values: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(allocator)
+                defer var values: Vec[UInt64, TestHandle[SystemAllocator]] = Vec.new_in(allocator)
                 for item in UInt64(0)..20 {
                     &values.push(item)?
                 }
@@ -1082,7 +1082,7 @@ impl[T: Copyable + Owned, A: Allocator] Vec[T, A] {
         let checked = testing.each_allocation_failure(
             system(),
             [items] |allocator| -> Result[(), Oom] {
-                defer var values: Vec[UInt8, RefusingAllocator[SystemAllocator]] = Vec.new_in(allocator)
+                defer var values: Vec[UInt8, TestHandle[SystemAllocator]] = Vec.new_in(allocator)
                 &values.append_slice(items.as_slice())?
                 &values.append_slice(items.as_slice())?
                 return .Ok(())

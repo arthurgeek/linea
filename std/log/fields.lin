@@ -213,12 +213,12 @@ fn write_value[T: Display, A: Allocator](inout line: Line[A], value: T) -> Resul
 // A value that renders `plain` the first time it is asked and a line feed
 // after that, counting how often it is asked in `asked`.
 struct Changing {
-    asked: borrow testing.AllocationLog[mem.SystemAllocator],
+    asked: borrow testing.TestAllocator[mem.SystemAllocator],
 }
 
 impl Display for Changing {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        defer let counted = self.asked.allocator().acquire(1).unwrap()
+        defer let counted = self.asked.handle().acquire(1).unwrap()
         let text = if self.asked.acquired() == 1 {
             "plain"
         } else {
@@ -229,7 +229,7 @@ impl Display for Changing {
 }
 
 test "a value is rendered once and written as rendered" {
-    defer let asked = testing.AllocationLog.open(mem.system(), 0).unwrap()
+    defer let asked = testing.TestAllocator.open(mem.system()).unwrap()
     defer let text = fields_text(field("value", Changing { asked = borrow asked }))
     testing.assert_eq(text.view(), " value=plain", "a value was written from another rendering than the one checked")?
     testing.assert_eq(asked.acquired(), UInt64(1), "a value was rendered more than once")?

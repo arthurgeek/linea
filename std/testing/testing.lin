@@ -6,13 +6,14 @@ use mem.Buffer
 use mem.Oom
 use mem.Lender
 
-// Tests that walk every allocation-failure path reach the refusing allocator
-// through testing, without importing mem. The shared log and its allocator do
-// the same for code that hands its allocator to other tasks.
-pub use mem.AllocationLog
-pub use mem.RefusingAllocator
-pub use mem.SharedAllocationLog
-pub use mem.SharedRefusingAllocator
+// `TestAllocator` counts what a test allocates through its handle and fails a
+// chosen acquisition, and `SharedTestAllocator` does the same for code that
+// hands its allocator to other tasks. Both build buffers, so `mem` declares
+// them, and tests reach them here.
+pub use mem.TestAllocator
+pub use mem.TestHandle
+pub use mem.SharedTestAllocator
+pub use mem.SharedTestHandle
 
 // A Failure is a failed assertion carrying the caller's message, or a
 // refused allocation a test reports with `refused`. Its representation is
@@ -257,11 +258,11 @@ test "an error is accepted and a success is reported" -> Result[(), Failure] {
 // Every run's log and allocations come from `backing`; a backing that refuses
 // a log is reported as a Failure. `body` and `is_refusal` are lent `inout`,
 // so they may change what they own or a place they are lent.
-pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocator: RefusingAllocator[H]) -> Result[(), E], R: inout fn(error: E) -> Bool](backing: H, inout body: F, inout is_refusal: R) -> Result[UInt64, Failure] where carries() {
-    let counting = AllocationLog.open(backing, 0) else |_| {
+pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocator: TestHandle[H]) -> Result[(), E], R: inout fn(error: E) -> Bool](backing: H, inout body: F, inout is_refusal: R) -> Result[UInt64, Failure] where carries() {
+    let counting = TestAllocator.open(backing) else |_| {
         return .Err(.{ said = "the backing refused the allocation log", refusal = false })
     }
-    let succeeded = match &body(counting.allocator()) {
+    let succeeded = match &body(counting.handle()) {
         Ok(_) => true,
         Err(_) => false,
     }
@@ -279,10 +280,10 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
     }
 
     for attempt in 1..=attempts {
-        let log = AllocationLog.open(backing, attempt) else |_| {
+        let log = TestAllocator.open(backing, fail_at: .Some(attempt)) else |_| {
             return .Err(.{ said = "the backing refused the allocation log", refusal = false })
         }
-        let outcome = &body(log.allocator())
+        let outcome = &body(log.handle())
         let accepted = match read outcome {
             Ok(_) => true,
             Err(error) => &is_refusal(error),

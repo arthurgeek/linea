@@ -662,11 +662,11 @@ test "typed records apply missing policy and settle early owners" {
     }
 }
 
-// JsonDecodedRecord allocates through a RefusingAllocator, so a test can
+// JsonDecodedRecord allocates through a TestHandle, so a test can
 // refuse each allocation decoding makes.
 struct JsonDecodedRecord {
-    name: String[mem.RefusingAllocator[mem.SystemAllocator]],
-    labels: Vec[String[mem.RefusingAllocator[mem.SystemAllocator]], mem.RefusingAllocator[mem.SystemAllocator]],
+    name: String[testing.TestHandle[mem.SystemAllocator]],
+    labels: Vec[String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]],
     retries: UInt8,
 }
 
@@ -678,7 +678,7 @@ impl Release for JsonDecodedRecord {
     }
 }
 
-derive Decode[mem.RefusingAllocator[mem.SystemAllocator]] for JsonDecodedRecord
+derive Decode[testing.TestHandle[mem.SystemAllocator]] for JsonDecodedRecord
 
 // This walk refuses each attempt by hand rather than through
 // `testing.each_allocation_failure`, which accepts a refused run that
@@ -697,9 +697,9 @@ test "json typed decode disposes records and error paths on each refusal" {
     let reasons = [DecodeReason.WrongKind, DecodeReason.WrongKind, DecodeReason.WrongKind, DecodeReason.MissingField, DecodeReason.MissingField, DecodeReason.MissingField, DecodeReason.UnknownField]
     let fields = ["", "retries", "labels", "name", "labels", "retries", "extra"]
     for index in 0..inputs.length() {
-        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = baseline.allocator()
-        let result: Result[JsonDecodedRecord, DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = decode_in(allocator, inputs[index])
+        defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+        let allocator = baseline.handle()
+        let result: Result[JsonDecodedRecord, DecodeError[testing.TestHandle[mem.SystemAllocator]]] = decode_in(allocator, inputs[index])
         let expected = match result {
             Ok(record) => {
                 let correct = index == 0 && record.name.view() == "tea" && record.labels.length() == 2
@@ -737,9 +737,9 @@ test "json typed decode disposes records and error paths on each refusal" {
         testing.assert(baseline.peak_bytes() > 0, "allocation log lost its live-byte peak")?
         testing.assert(baseline.all_disposed(), "typed decode lost or repeated owned fields or paths")?
         for refusal in UInt64(1)..(attempts + 1) {
-            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-            let failing = log.allocator()
-            let failed: Result[JsonDecodedRecord, DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = decode_in(failing, inputs[index])
+            defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+            let failing = log.handle()
+            let failed: Result[JsonDecodedRecord, DecodeError[testing.TestHandle[mem.SystemAllocator]]] = decode_in(failing, inputs[index])
             let refused = match failed {
                 Ok(record) => {
                     record.release()
@@ -766,7 +766,7 @@ test "json typed decode disposes records and error paths on each refusal" {
 // JsonOwnedDecodeKey owns its decoded name, folds "TEA" into "tea", refuses
 // the name "invalid" after allocating, and hashes every name alike, so keys
 // collide.
-struct JsonOwnedDecodeKey { name: String[mem.RefusingAllocator[mem.SystemAllocator]] }
+struct JsonOwnedDecodeKey { name: String[testing.TestHandle[mem.SystemAllocator]] }
 
 impl Release for JsonOwnedDecodeKey {
     fn release(sink self: Self) {
@@ -791,8 +791,8 @@ impl hash.Hash for JsonOwnedDecodeKey {
     }
 }
 
-impl DecodeKey[mem.RefusingAllocator[mem.SystemAllocator]] for JsonOwnedDecodeKey {
-    fn from_name(name: Str, allocator: mem.RefusingAllocator[mem.SystemAllocator]) -> Result[Self, DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] {
+impl DecodeKey[testing.TestHandle[mem.SystemAllocator]] for JsonOwnedDecodeKey {
+    fn from_name(name: Str, allocator: testing.TestHandle[mem.SystemAllocator]) -> Result[Self, DecodeError[testing.TestHandle[mem.SystemAllocator]]] {
         let normalized = if name == "TEA" {
             "tea"
         } else {
@@ -820,8 +820,8 @@ test "json typed map settles owned keys values and collisions on each refusal" {
     let reasons = [DecodeReason.InvalidValue, DecodeReason.WrongKind, DecodeReason.InvalidValue, DecodeReason.DuplicateKey]
     let fields = ["", "leaf", "invalid", ""]
     for index in 0..inputs.length() {
-        defer let document_log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let document_allocator = document_log.allocator()
+        defer let document_log = testing.TestAllocator.open(mem.system()).unwrap()
+        let document_allocator = document_log.handle()
         defer let document = parse_in(document_allocator, inputs[index]).unwrap()
         var duplicate_is_upper = false
         if index == 3 {
@@ -839,9 +839,9 @@ test "json typed map settles owned keys values and collisions on each refusal" {
         } else {
             copy(fields[index])
         }
-        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = baseline.allocator()
-        let result: Result[collections.Map[JsonOwnedDecodeKey, String[mem.RefusingAllocator[mem.SystemAllocator]], mem.RefusingAllocator[mem.SystemAllocator]], DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = from_value_in(allocator, document)
+        defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+        let allocator = baseline.handle()
+        let result: Result[collections.Map[JsonOwnedDecodeKey, String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]], DecodeError[testing.TestHandle[mem.SystemAllocator]]] = from_value_in(allocator, document)
         let expected = match result {
             Ok(values) => {
                 var found = false
@@ -868,9 +868,9 @@ test "json typed map settles owned keys values and collisions on each refusal" {
         testing.assert(attempts > 0, "owning map decode performed no allocations")?
         testing.assert(baseline.all_disposed(), "owning map decode lost or repeated a key, value or path allocation")?
         for refusal in UInt64(1)..(attempts + 1) {
-            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-            let failing = log.allocator()
-            let failed: Result[collections.Map[JsonOwnedDecodeKey, String[mem.RefusingAllocator[mem.SystemAllocator]], mem.RefusingAllocator[mem.SystemAllocator]], DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = from_value_in(failing, document)
+            defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+            let failing = log.handle()
+            let failed: Result[collections.Map[JsonOwnedDecodeKey, String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]], DecodeError[testing.TestHandle[mem.SystemAllocator]]] = from_value_in(failing, document)
             let refused = match failed {
                 Ok(values) => {
                     values.release()

@@ -97,7 +97,7 @@ test "each allocation failure covers every growth step of an extension" -> Resul
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), mem.PushFailure[UInt64]] {
-            defer var values: Vec[UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = Vec.new_in(allocator)
+            defer var values: Vec[UInt64, testing.TestHandle[mem.SystemAllocator]] = Vec.new_in(allocator)
             var source = UInt64(0)..40
             extend(&values, &source)?
             return .Ok(())

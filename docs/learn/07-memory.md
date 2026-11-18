@@ -577,7 +577,7 @@ less. A piece never spans two chunks. An arena opened over another arena's
 handle takes its whole size at once, since memory given back to an arena is
 not used again until that arena is rewound. `rewind` gives every
 chunk but the first back, so an arena that once held a large piece holds 64
-KiB again afterwards. `mem.AllocationLog` counts what the arena takes from the
+KiB again afterwards. `testing.TestAllocator` counts what the arena takes from the
 system allocator, and `live_bytes` answers how much of it the arena holds:
 
 `arena_growth.lin`:
@@ -585,13 +585,15 @@ system allocator, and `live_bytes` answers how much of it the arena holds:
 ```linea
 import std.io
 import std.mem
+import std.testing
 
 use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
-    // The log hands the arena the system allocator and counts what it takes.
-    defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    defer var arena = mem.Arena.open(log.allocator(), size: 4194304)
+    // The test allocator hands the arena the system allocator and counts what
+    // it takes.
+    defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+    defer var arena = mem.Arena.open(log.handle(), size: 4194304)
     let opened = log.live_bytes()
     io.println("opened: {opened} bytes held")?
     // A million bytes do not fit in the first chunk, so the arena takes a
@@ -959,7 +961,7 @@ drives these steps with a real handler once handlers have been introduced.
 | many values that die together: one request, one line of input, one pass of a loop | a `mem.Arena`, released once, or rewound between passes |
 | a library function that allocates | take `A: Allocator` as a parameter and let the caller choose; name it `x_in`, and add `x` whose signature writes `mem.SystemAllocator` ([below](#a-library-lets-its-caller-choose-the-allocator)) |
 | a closure kept for later | `mem.Closure.open(closure)`, or `mem.Closure.open_in(allocator, closure)`, settled like that allocator's memory |
-| a test that must check every allocation failure is handled | `mem.AllocationLog`, which refuses a chosen allocation; [Testing](10-testing.md#every-allocation-can-fail) shows it |
+| a test that must check every allocation failure is handled | `testing.TestAllocator`, which refuses a chosen allocation; [Testing](10-testing.md#every-allocation-can-fail) shows it |
 
 Collections follow the same rules. `Vec[T, A]` is a growable list that
 allocates from `A`; `collections.Map` is a hash map that does too. Their

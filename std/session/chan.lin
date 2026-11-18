@@ -106,12 +106,12 @@ impl[P: Protocol, F: Owned, A] Chan[P, (F, A)] {
     }
 
     test "a handle keeps its allocator without its body" {
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
         let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
             me.send(7).close()
         }
-        let handle = task.prepare_in(log.allocator(), body, stack: task.default_stack_bytes).unwrap().start()
-        let kept: Chan[Recv[UInt64, End], mem.RefusingAllocator[mem.SystemAllocator]] = handle.detach_body()
+        let handle = task.prepare_in(log.handle(), body, stack: task.default_stack_bytes).unwrap().start()
+        let kept: Chan[Recv[UInt64, End], testing.TestHandle[mem.SystemAllocator]] = handle.detach_body()
         let (number, done) = kept.recv()
         done.close()
         let settled = log.all_disposed()

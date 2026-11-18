@@ -630,7 +630,7 @@ impl[K: Hash, V, A: Allocator] Map[K, V, A] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), InsertFailure[UInt64, UInt64]] {
-                defer var values: Map[UInt64, UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = Map.new_in(allocator)
+                defer var values: Map[UInt64, UInt64, testing.TestHandle[mem.SystemAllocator]] = Map.new_in(allocator)
                 for key in UInt64(0)..20 {
                     match &values.insert(key, key * 2) {
                         Ok(_) => {},
@@ -803,7 +803,7 @@ impl[K: Hash, V, A: Allocator] Map[K, V, A] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), InsertFailure[UInt64, UInt64]] {
-                defer var totals: Map[UInt64, UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = Map.new_in(allocator)
+                defer var totals: Map[UInt64, UInt64, testing.TestHandle[mem.SystemAllocator]] = Map.new_in(allocator)
                 for amount in UInt64(0)..30 {
                     &totals.merge(amount % 17, amount, |sink current, sink incoming| current + incoming)?
                 }
@@ -1034,8 +1034,8 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
         let checked = testing.each_allocation_failure(
             mem.system(),
             |allocator| -> Result[(), UpsertFailure[UInt64, UInt64, mem.Oom]] {
-                defer var counts: Map[UInt64, UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = Map.new_in(allocator)
-                var first = |query: UInt64, _allocator: mem.RefusingAllocator[mem.SystemAllocator]| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
+                defer var counts: Map[UInt64, UInt64, testing.TestHandle[mem.SystemAllocator]] = Map.new_in(allocator)
+                var first = |query: UInt64, _allocator: testing.TestHandle[mem.SystemAllocator]| -> Result[Entry[UInt64, UInt64], mem.Oom] where carries() {
                     .Ok(.{ key = query, value = 1 })
                 }
                 for word in UInt64(0)..30 {

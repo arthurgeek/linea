@@ -6206,7 +6206,7 @@ takes the handle by `read`, advances the arena's cursor and may record a
 chunk it acquired from the arena's parent; `mem.Handle`
 borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
 not Shareable;
-`mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
+`testing.TestAllocator` is `@unshareable` too, since its handle writes the counts
 under a `read`. A handle to a C object is unshareable because its reads reach
 C, which may keep state inside the object (an error message, a cache, a
 cursor) that a call taking it `read` rewrites: the compiler cannot see C, so

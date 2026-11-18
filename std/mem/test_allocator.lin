@@ -1,0 +1,268 @@
+import std.mem.address
+import std.testing
+
+// A test allocator keeps its counts in one buffer of UInt64 words: attempts,
+// acquisitions, disposals, the attempt to fail (zero for none), live bytes and
+// peak bytes.
+let log_attempts: UInt64 = 0
+
+let log_acquired: UInt64 = 8
+
+let log_disposed: UInt64 = 16
+
+let log_fail_at: UInt64 = 24
+
+let log_live_bytes: UInt64 = 32
+
+let log_peak_bytes: UInt64 = 40
+
+let log_words_bytes: UInt64 = 48
+
+// A TestAllocator hands out buffers from a backing allocator through its
+// handle, counts every acquisition and disposal, and can refuse a chosen
+// acquisition, so a test can walk every allocation-failure path and check that
+// each allocation was disposed. Every buffer a handle acquires carries the
+// backing's linear obligation, so it is disposed exactly once, and the counts
+// need no record per allocation: a test makes as many as it likes. Its handle
+// writes the counts through a `read` of the allocator, so a TestAllocator is
+// `@unshareable`, and so is every handle that borrows it; a test whose code
+// allocates from several tasks uses `SharedTestAllocator`. It is declared in
+// `mem`, which builds buffers, and reached as `testing.TestAllocator`.
+@(opaque, linear, unshareable)
+struct TestAllocator[H: Allocator] {
+    words: Buffer[H],
+    backing: H,
+}
+
+impl[H: Allocator] TestAllocator[H] {
+    // Return a handle that allocates through the backing allocator and counts
+    // in this allocator. It borrows the allocator, so the allocator outlives
+    // every handle and every buffer a handle acquired.
+    pub fn handle(self: Self) -> TestHandle[H] where borrows(self) {
+        .{ log = borrow self }
+    }
+
+    test "a test allocator counts past a thousand acquisitions" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        for _ in 0..2000 {
+            log.handle().acquire(8).unwrap().release()
+        }
+        testing.assert_eq(log.acquired(), UInt64(2000), "an acquisition past the first thousand was not counted")?
+        testing.assert(log.all_disposed(), "a release past the first thousand was not counted")?
+    }
+
+    test "a handle hands out buffers the allocator counts" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        let buffer = log.handle().acquire(16).unwrap()
+        let length = buffer.length()
+        buffer.release()
+        testing.assert_eq(length, UInt64(16), "a counted buffer was not the size asked for")?
+        testing.assert_eq(log.acquired(), UInt64(1), "the acquisition was not counted")?
+        testing.assert(log.all_disposed(), "the release was not counted")?
+    }
+
+    // Allocate through `backing`, failing the acquisition numbered `fail_at`,
+    // counting from one, or none when it is `.None`. The allocator's own words
+    // come from `backing` too; a backing that refuses them is reported as Oom.
+    pub fn open(backing: H, fail_at: Option[UInt64] = .None) -> Result[TestAllocator[H], Oom] where carries(.Ok: backing) {
+        let first = counted_from_one(fail_at)
+        var words = backing.acquire(log_words_bytes)?
+        &words.store(log_fail_at, first)
+        .Ok(.{ words, backing = copy(backing) })
+    }
+
+    test "open records into the backing the caller chooses" {
+        // The allocator's 48 bytes and both allocations fit in one kilobyte.
+        defer let arena = Arena.open(system(), 1024)
+        defer let log = TestAllocator.open(arena.handle(), fail_at: .Some(2)).unwrap()
+        let first = log.handle().acquire(16)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.handle().acquire(8)
+        let refused = second.is_err()
+        second.release()
+        testing.assert(accepted, "the first attempt over an arena was refused")?
+        testing.assert(refused, "the second attempt over an arena was not refused")?
+        testing.assert(log.all_disposed(), "an arena-backed release was not recorded")?
+    }
+
+    test "open refuses the acquisition it names" {
+        defer let log = TestAllocator.open(system(), fail_at: .Some(2)).unwrap()
+        let first = log.handle().acquire(16)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.handle().acquire(8)
+        let refused = second.is_err()
+        second.release()
+        testing.assert(accepted, "the first attempt was refused")?
+        testing.assert(refused, "the second attempt was not refused")?
+    }
+
+    // Return how many acquisitions were requested, including a refused one.
+    pub fn attempts(self: Self) -> UInt64 {
+        self.words.load(log_attempts)
+    }
+
+    test "attempts count refused acquisitions too" {
+        defer let log = TestAllocator.open(system(), fail_at: .Some(1)).unwrap()
+        let refused = log.handle().acquire(8)
+        refused.release()
+        let accepted = log.handle().acquire(8)
+        accepted.release()
+        testing.assert_eq(log.attempts(), UInt64(2), "a refused attempt was not counted")?
+    }
+
+    // Return how many acquisitions succeeded.
+    pub fn acquired(self: Self) -> UInt64 {
+        self.words.load(log_acquired)
+    }
+
+    test "acquired counts only successful acquisitions" {
+        defer let log = TestAllocator.open(system(), fail_at: .Some(2)).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8)
+        second.release()
+        first.release()
+        testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
+    }
+
+    // Return the most bytes live at once.
+    pub fn peak_bytes(self: Self) -> UInt64 {
+        self.words.load(log_peak_bytes)
+    }
+
+    test "peak_bytes remembers the most bytes live at once" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8).unwrap()
+        second.release()
+        first.release()
+        let third = log.handle().acquire(8).unwrap()
+        third.release()
+        testing.assert(log.peak_bytes() >= 24, "the peak lost the two live allocations")?
+    }
+
+    // Return how many bytes the log's allocations hold now: what was acquired
+    // and not yet disposed.
+    pub fn live_bytes(self: Self) -> UInt64 {
+        self.words.load(log_live_bytes)
+    }
+
+    test "live_bytes counts what is acquired and not disposed" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8).unwrap()
+        let both = log.live_bytes()
+        first.release()
+        let one = log.live_bytes()
+        second.release()
+        testing.assert_eq(both, UInt64(24), "two live allocations were not counted")?
+        testing.assert_eq(one, UInt64(8), "a disposed allocation was still counted")?
+        testing.assert_eq(log.live_bytes(), UInt64(0), "bytes stayed live after every release")?
+    }
+
+    // Fail the acquisition numbered `attempt`, counting from the allocator's
+    // first, in place of the one `open` named, or none when it is `.None`. It
+    // writes the words the handles write, so handles may be live.
+    pub fn fail_at(self: Self, attempt: Option[UInt64]) {
+        linea_raw_store(address.raw(bytes_in(self.words, 0)), self.words.len, log_fail_at, counted_from_one(attempt))
+    }
+
+    test "fail_at refuses a later acquisition through live handles" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        let allocator = log.handle()
+        allocator.acquire(8).unwrap().release()
+        log.fail_at(.Some(3))
+        let second = allocator.acquire(8)
+        let accepted = second.is_ok()
+        second.release()
+        let third = allocator.acquire(8)
+        let refused = third.is_err()
+        third.release()
+        log.fail_at(.None)
+        let fourth = allocator.acquire(8)
+        let cleared = fourth.is_ok()
+        fourth.release()
+        testing.assert(accepted, "an attempt before the failed one was refused")?
+        testing.assert(refused, "a later failure was not applied")?
+        testing.assert(cleared, "an attempt after the failure was cleared was refused")?
+    }
+
+    // Return whether every successful acquisition was disposed and no bytes
+    // remain live.
+    pub fn all_disposed(self: Self) -> Bool {
+        self.words.load(log_disposed) == self.words.load(log_acquired) && self.words.load(log_live_bytes) == 0
+    }
+
+    test "all_disposed is false while an allocation is live" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        let buffer = log.handle().acquire(16).unwrap()
+        let settled_while_live = log.all_disposed()
+        buffer.release()
+        testing.assert(!settled_while_live, "a live allocation reads as settled")?
+        testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
+    }
+}
+
+// The attempt numbered by `attempt`, counting from one, as the allocator's
+// words hold it: zero for none.
+fn counted_from_one(attempt: Option[UInt64]) -> UInt64 {
+    match read attempt {
+        Some(0) => panic("acquisitions are counted from one, so there is no acquisition 0 to fail"),
+        Some(number) => number,
+        None => 0,
+    }
+}
+
+// Releasing a test allocator checks that every buffer its handles acquired
+// was disposed, and stops the program when one was not.
+impl[H: Allocator] Release for TestAllocator[H] {
+    fn release(sink self: Self) {
+        if !self.all_disposed() {
+            panic("a test allocator was released with an allocation it handed out still live")
+        }
+        let TestAllocator { words, backing: _ } = self
+        words.release()
+    }
+}
+
+// A TestHandle allocates through a test allocator. It owns nothing, so it can
+// be copied freely while the allocator it borrows is live.
+@(opaque, copyable)
+struct TestHandle[H: Allocator] {
+    log: borrow TestAllocator[H],
+}
+
+impl[H: Allocator] Allocator for TestHandle[H] {
+    // A counted buffer carries the backing's obligation, so it is disposed
+    // into the backing exactly once.
+    type Obligation = H.Obligation
+
+    // A counted buffer is disposed into the backing, which decides.
+    fn reclaims(self: Self) -> Bool {
+        self.log.backing.reclaims()
+    }
+
+    fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
+        let attempt = self.log.words.load(log_attempts) + 1
+        linea_raw_store(address.raw(bytes_in(self.log.words, 0)), self.log.words.len, log_attempts, attempt)
+        if attempt == self.log.words.load(log_fail_at) {
+            return .Err(.Exhausted)
+        }
+        let Buffer { at, len, allocated, allocator: _, obligation } = self.log.backing.acquire(size)?
+        linea_raw_store(address.raw(bytes_in(self.log.words, 0)), self.log.words.len, log_acquired, self.log.words.load(log_acquired) + 1)
+        let live = self.log.words.load(log_live_bytes) + allocated
+        linea_raw_store(address.raw(bytes_in(self.log.words, 0)), self.log.words.len, log_live_bytes, live)
+        if live > self.log.words.load(log_peak_bytes) {
+            linea_raw_store(address.raw(bytes_in(self.log.words, 0)), self.log.words.len, log_peak_bytes, live)
+        }
+        .Ok(.{ at, len, allocated, allocator = copy(self), obligation })
+    }
+
+    fn dispose(sink b { at, len, allocated, allocator, obligation }: Buffer[Self]) {
+        linea_raw_store(address.raw(bytes_in(allocator.log.words, 0)), allocator.log.words.len, log_disposed, allocator.log.words.load(log_disposed) + 1)
+        linea_raw_store(address.raw(bytes_in(allocator.log.words, 0)), allocator.log.words.len, log_live_bytes, allocator.log.words.load(log_live_bytes) - allocated)
+        let buffer: Buffer[H] = .{ at, len, allocated, allocator = copy(allocator.log.backing), obligation }
+        buffer.release()
+    }
+}

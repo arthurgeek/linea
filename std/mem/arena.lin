@@ -181,8 +181,8 @@ impl[H: Allocator] Arena[H] {
 
     test "an arena the backing refused refuses everything" {
         // The log refuses its first acquisition, the arena's first chunk.
-        defer let log = AllocationLog.open(system(), 1).unwrap()
-        let arena = Arena.open(log.allocator(), 64)
+        defer let log = TestAllocator.open(system(), fail_at: .Some(1)).unwrap()
+        let arena = Arena.open(log.handle(), 64)
         let a = arena.handle()
 
         var handed = false
@@ -231,8 +231,8 @@ impl[H: Allocator] Arena[H] {
     }
 
     test "a reservation larger than the first chunk is handed out whole" {
-        defer let log = AllocationLog.open(system(), 0).unwrap()
-        defer let arena = Arena.open(log.allocator(), 1048576)
+        defer let log = TestAllocator.open(system()).unwrap()
+        defer let arena = Arena.open(log.handle(), 1048576)
         var large = arena.handle().acquire(200000).unwrap()
         let fresh = large.load(0) == 0 && large.load(199992) == 0
         &large.store(0, 5)
@@ -248,8 +248,8 @@ impl[H: Allocator] Arena[H] {
 
     test "a parent refusing a chunk refuses the reservation that needed it" {
         // The log accepts the first chunk and refuses the next acquisition.
-        defer let log = AllocationLog.open(system(), 2).unwrap()
-        defer let arena = Arena.open(log.allocator(), 1048576)
+        defer let log = TestAllocator.open(system(), fail_at: .Some(2)).unwrap()
+        defer let arena = Arena.open(log.handle(), 1048576)
         let refused = arena.handle().acquire(131072).is_err()
         let small = arena.handle().acquire(64).is_ok()
         testing.assert(refused, "a reservation the parent refused a chunk for was handed out")?
@@ -271,8 +271,8 @@ impl[H: Allocator] Arena[H] {
     }
 
     test "a buffer from a later chunk is disposed into its arena" {
-        defer let log = AllocationLog.open(system(), 0).unwrap()
-        defer let arena = Arena.open(log.allocator(), 1048576)
+        defer let log = TestAllocator.open(system()).unwrap()
+        defer let arena = Arena.open(log.handle(), 1048576)
         let small = arena.handle().acquire(16).unwrap()
         let large = arena.handle().acquire(131072).unwrap()
         let middle = arena.handle().acquire(300000).unwrap()
@@ -422,8 +422,8 @@ impl[H: Allocator] Arena[H] {
     }
 
     test "rewinding gives back every chunk but the first" {
-        defer let log = AllocationLog.open(system(), 0).unwrap()
-        var arena = Arena.open(log.allocator(), 1048576)
+        defer let log = TestAllocator.open(system()).unwrap()
+        var arena = Arena.open(log.handle(), 1048576)
         let opened = log.live_bytes()
         var large = arena.handle().acquire(524288).unwrap()
         &large.store(0, 3)
