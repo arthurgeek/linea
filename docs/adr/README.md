@@ -291,7 +291,8 @@ ones most likely to be superseded as the compiler grows.
 | [0097](0097-release-is-named-never-scheduled.md) | Release is named, never scheduled | Superseded by 0104 |
 | [0098](0098-a-container-names-its-allocator-in-its-type.md) | A container names its allocator in its type | Accepted; extended by 0133, 0173, 0191, 0206 and 0215 |
 | [0191](0191-the-caller-chooses-every-allocator.md) | The caller chooses every allocator, a test instrument's included | Accepted; extends 0095 and 0098; every-allocating-API clause superseded by 0220; instrument superseded by 0287 |
-| [0287](0287-tests-allocate-through-a-test-allocator.md) | Tests allocate through `testing.TestAllocator` and `testing.SharedTestAllocator` | Accepted; supersedes the instrument of 0191 |
+| [0287](0287-tests-allocate-through-a-test-allocator.md) | Tests allocate through `testing.TestAllocator` and `testing.SharedTestAllocator` | Accepted; supersedes the instrument of 0191; release check and `close()` superseded by 0293 |
+| [0293](0293-a-test-allocator-counts-and-the-compiler-decides-what-must-be-disposed.md) | A test allocator counts, and the compiler decides what must be disposed | Accepted; supersedes the release check of 0287 |
 | [0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md) | A constructor or function that allocates pairs a system form with an `_in` form | Accepted; supersedes the every-allocating-API clause of 0191; server-parent clause superseded by 0225 |
 | [0225](0225-a-library-signature-states-its-allocator.md) | A library's public signature states its allocator | Accepted; extends 0215 and 0219; supersedes the server-parent clause of 0220 |
 | [0206](0206-allocator-spelling-is-shortened-by-alias-never-by-default.md) | Allocator spelling is shortened by an alias, never by a default type argument | Superseded by 0215; extends 0098 and 0194; extended by 0211 |

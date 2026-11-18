@@ -268,8 +268,10 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
     }
     if !succeeded {
         // The run's failure is the walk's answer; an allocation it left live
-        // is told beside it rather than stopping the program in its place.
-        if !counting.close() {
+        // is told beside it.
+        let left_live = counting.outstanding() != 0
+        counting.release()
+        if left_live {
             return .Err(.{ said = "the run with nothing refused did not succeed, and left an allocation live", refusal = false })
         }
         return .Err(.{ said = "the run with nothing refused did not succeed", refusal = false })

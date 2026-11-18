@@ -4,7 +4,9 @@ Status: Accepted — 2026-11-18. Supersedes the instrument
 [0191](0191-the-caller-chooses-every-allocator.md) declares,
 `AllocationLog.open(backing, refuse_at)` with its `allocator()` handing out a
 `RefusingAllocator[H]`; 0191's decision that the caller chooses the
-instrument's backing allocator stands.
+instrument's backing allocator stands. The clause that releasing either
+checks `all_disposed()` and stops the program, and `close()`, are superseded by
+[0293](0293-a-test-allocator-counts-and-the-compiler-decides-what-must-be-disposed.md).
 
 ## Context
 

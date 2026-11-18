@@ -76,9 +76,11 @@ impl SharedLogState {
     }
 }
 
-// A SharedTestAllocator counts every acquisition made through its handles,
-// from any number of tasks at once, fails the ones its rules name, and checks
-// afterwards that each allocation was disposed. An owning task keeps its
+// A SharedTestAllocator counts every acquisition and disposal made through
+// its handles, from any number of tasks at once, and fails the ones its rules
+// name. Like `TestAllocator`, it records what happened and leaves to the
+// compiler which buffers must be disposed; a test that wants every buffer
+// given back asserts `outstanding()` is zero. An owning task keeps its
 // counts, so its handle is `Shareable` whenever its backing allocator is: a
 // test can hand it to `http.serve_in` or to tasks it starts, and fail an
 // acquisition whichever task makes it. `TestAllocator` does the same for one
@@ -168,6 +170,30 @@ impl[H: Allocator] SharedTestAllocator[H] {
         second.release()
         first.release()
         testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
+    }
+
+    // Return how many acquired buffers were disposed.
+    pub fn disposed(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.disposed)
+    }
+
+    test "a shared log counts the buffers given back" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        log.handle().acquire(16).unwrap().release()
+        testing.assert_eq(log.disposed(), UInt64(1), "a disposal was not counted")?
+    }
+
+    // Return how many acquired buffers were not disposed: held now, or dropped
+    // where the backing let a test drop them.
+    pub fn outstanding(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.acquired - state.disposed)
+    }
+
+    test "a shared log counts a dropped arena buffer as outstanding" {
+        defer let arena = Arena.open(system(), 1024)
+        defer let log = SharedTestAllocator.open(arena.handle()).unwrap()
+        let _dropped = log.handle().acquire(8).unwrap()
+        testing.assert_eq(log.outstanding(), UInt64(1), "a dropped buffer was not counted as outstanding")?
     }
 
     // Return the most bytes live at once.
@@ -331,38 +357,30 @@ impl[H: Allocator] SharedTestAllocator[H] {
         testing.assert(!settled_while_live, "a live allocation reads as settled")?
         testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
     }
+}
 
-    // End the shared test allocator and answer whether every allocation it
-    // handed out was disposed, without stopping the program when one was
-    // not: a test that has already failed reports its own failure first.
-    // Releasing it stops the program instead.
-    pub fn close(sink self: Self) -> Bool {
-        let settled = self.all_disposed()
+// Releasing a shared test allocator ends its counts, as releasing a
+// `TestAllocator` does: a buffer live then is one an arena-like backing let a
+// test drop, and over a backing whose buffers owe their disposal it is a
+// broken invariant of the compiler or the runtime.
+impl[H: Allocator] Release for SharedTestAllocator[H] {
+    fn release(sink self: Self) {
+        let broken = !self.all_disposed() && self.backing.reclaims()
         let SharedTestAllocator { owner, backing: _ } = self
         owner.release()
-        settled
-    }
-
-    test "a shared test allocator closes answering whether it is settled" {
-        defer let arena = Arena.open(system(), 1024)
-        let settled = SharedTestAllocator.open(system()).unwrap()
-        settled.handle().acquire(8).unwrap().release()
-        testing.assert(settled.close(), "a shared test allocator with nothing live did not close settled")?
-        let unsettled = SharedTestAllocator.open(arena.handle()).unwrap()
-        // A buffer from an arena carries no obligation, so it may be dropped live.
-        let _dropped = unsettled.handle().acquire(8).unwrap()
-        testing.assert(!unsettled.close(), "a shared test allocator with an allocation live closed settled")?
+        if broken {
+            panic(invariant_broken)
+        }
     }
 }
 
-// Releasing a shared test allocator checks that every buffer its handles
-// acquired was disposed, and stops the program when one was not.
-impl[H: Allocator] Release for SharedTestAllocator[H] {
-    fn release(sink self: Self) {
-        if !self.close() {
-            panic("a shared test allocator was released with an allocation it handed out still live")
-        }
-    }
+test "a shared test allocator over an arena is released with a dropped buffer" {
+    defer let arena = Arena.open(system(), 1024)
+    let log = SharedTestAllocator.open(arena.handle()).unwrap()
+    let _dropped = log.handle().acquire(8).unwrap()
+    let outstanding = log.outstanding()
+    log.release()
+    testing.assert_eq(outstanding, UInt64(1), "the dropped buffer was not counted")?
 }
 
 // Acquire and release `count` buffers through `allocator` on a task of its

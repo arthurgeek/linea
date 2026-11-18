@@ -550,8 +550,8 @@ the program; the `unwrap` to look for is the one in `banner_in`.
 directly to refuse one chosen allocation. `testing.TestAllocator.open(backing)`
 makes a test allocator whose `handle()` passes requests on to `backing` and
 counts them, and `open(backing, fail_at: .Some(n))` also refuses the `n`th;
-`attempts()` counts the requests it saw, and `all_disposed()` checks that
-everything it handed out was given back. It keeps its counts in memory from
+`attempts()` counts the requests it saw, and `outstanding()` counts what it
+handed out and was not given back. It keeps its counts in memory from
 `backing` too, so `open` answers a `Result`. Add this test to `banner.lin`:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
@@ -570,7 +570,7 @@ test "a refused second allocation leaves nothing behind" {
     }
     testing.assert(refused, "the banner was built without its second allocation")?
     testing.assert_eq(log.attempts(), 2, "the banner went on after the refusal")?
-    testing.assert(log.all_disposed(), "the first allocation was not given back")?
+    testing.assert_eq(log.outstanding(), 0, "the first allocation was not given back")?
 }
 ```
 
@@ -582,11 +582,13 @@ ok    every allocation the banner asks for can fail
 3 passed, 0 failed
 ```
 
-The test allocator is linear, so it is released like any other owner, and
-releasing it checks `all_disposed()` once more: a test that leaves an
-allocation live stops there. `close()` ends it without stopping, and answers
-whether everything was given back, for a test that would rather report its
-own failure first. It counts however many allocations a test makes.
+The test allocator is linear, so it is released like any other owner. It
+records what happened and leaves the judging to the compiler: a buffer from
+`mem.system()` must be given back, and a test that returns while one is still
+live is refused before it runs, while a buffer from an arena may be dropped,
+because the arena takes it back. A test that wants everything given back says
+so, as this one does with `outstanding()`. It counts however many allocations
+a test makes.
 The result of `banner_in` is matched rather than tested with `is_err()`,
 because on success it holds a `String` that must be released.
 
@@ -601,9 +603,9 @@ gives you one. It keeps its counts in an owning task of its own, which every
 task reaches one call at a time, so its handle is `Shareable` whenever the
 allocator under it is.
 
-It opens with the same `fail_at:`, answers `attempts()`, `acquired()` and
-`all_disposed()` like the other, checks `all_disposed()` when it is released,
-and refuses on request: `fail_at(.Some(n))` refuses the `n`th attempt,
+It opens with the same `fail_at:`, answers `attempts()`, `acquired()`,
+`outstanding()` and `all_disposed()` like the other, and refuses on request:
+`fail_at(.Some(n))` refuses the `n`th attempt,
 `fail_from(.Some(n))` every attempt from the `n`th on, `fail_size_at(size, n)`
 the `n`th acquisition of exactly `size` bytes made after the call, and
 `fail_size_from(size, n)` every such acquisition from the `n`th on.
@@ -849,8 +851,8 @@ ok    1\.5 rounds up to 2
 - `testing.each_allocation_failure(allocator, body, is_refusal)` refuses each
   allocation in turn and checks that every one is handled.
 - `testing.TestAllocator.open(backing, fail_at: .Some(n))` counts what its
-  `handle()` hands out, refuses the `n`th request, and checks when it is
-  released that everything was given back.
+  `handle()` hands out and refuses the `n`th request; `outstanding()` says
+  what was not given back.
 - `testing.SharedTestAllocator` counts and refuses allocations made from many
   tasks at once, so a server under test can be refused the memory it asks for.
 - A handler is tested by calling it with a request from `http.new_request`,
