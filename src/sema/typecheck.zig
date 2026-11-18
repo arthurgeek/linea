@@ -1964,19 +1964,31 @@ fn typecheckInternal(
         for (constant_texts) |bytes| gpa.free(bytes);
         gpa.free(constant_texts);
     };
+    // Each part of the seed is guarded until the seed holds it, and the
+    // seed as a whole until the check returns it to the caller.
     if (captured_seed) |seed| {
-        const parameters = try gpa.alloc([]const TypeId, param_types.len);
-        for (param_types, parameters) |row, *saved| saved.* = try gpa.dupe(TypeId, row);
+        const parameters = try copyRetained(gpa, param_types);
+        errdefer freeRetained(gpa, parameters);
+        const declared_types = try gpa.dupe(TypeId, type_of_decl.entries);
+        errdefer gpa.free(declared_types);
+        const expression_owners = try gpa.dupe(DeclId, c.expression_owners);
+        errdefer gpa.free(expression_owners);
+        const binding_owners = try gpa.dupe(DeclId, c.binding_owners);
+        errdefer gpa.free(binding_owners);
+        const declarations = try gpa.alloc(bool, ast.declCount());
+        errdefer gpa.free(declarations);
+        @memset(declarations, true);
+        const call_impls = try copyRetained(gpa, @as([]const types_mod.CallImpl, c.call_impls.items));
         seed.* = .{
             .parameters = parameters,
-            .declared_types = try gpa.dupe(TypeId, type_of_decl.entries),
-            .expression_owners = try gpa.dupe(DeclId, c.expression_owners),
-            .binding_owners = try gpa.dupe(DeclId, c.binding_owners),
-            .declarations = try gpa.alloc(bool, ast.declCount()),
-            .call_impls = try copyRetained(gpa, @as([]const types_mod.CallImpl, c.call_impls.items)),
+            .declared_types = declared_types,
+            .expression_owners = expression_owners,
+            .binding_owners = binding_owners,
+            .declarations = declarations,
+            .call_impls = call_impls,
         };
-        @memset(@constCast(seed.declarations), true);
     }
+    errdefer if (captured_seed) |seed| freeRetained(gpa, seed.*);
     // The checker transfers its graph below; reopened builders clone borrowed graphs.
     c.builder.constant_pool = &.{};
     var typing = try c.builder.finish(c.binding_types);
@@ -39663,12 +39675,27 @@ fn copyRetained(gpa: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!
         .pointer => |pointer| {
             if (pointer.size != .slice) @compileError("retained semantic records must not contain pointers");
             const result = try gpa.alloc(pointer.child, value.len);
-            for (value, result) |item, *target| target.* = try copyRetained(gpa, item);
+            var filled: usize = 0;
+            errdefer {
+                for (result[0..filled]) |item| freeRetained(gpa, item);
+                gpa.free(result);
+            }
+            for (value, result) |item, *target| {
+                target.* = try copyRetained(gpa, item);
+                filled += 1;
+            }
             return result;
         },
         .@"struct" => |record| {
             var result: T = undefined;
-            inline for (record.fields) |field| @field(result, field.name) = try copyRetained(gpa, @field(value, field.name));
+            var copied: usize = 0;
+            errdefer inline for (record.fields, 0..) |field, i| {
+                if (i < copied) freeRetained(gpa, @field(result, field.name));
+            };
+            inline for (record.fields) |field| {
+                @field(result, field.name) = try copyRetained(gpa, @field(value, field.name));
+                copied += 1;
+            }
             return result;
         },
         .@"union" => {
@@ -39678,6 +39705,23 @@ fn copyRetained(gpa: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!
         },
         .optional => return if (value) |item| try copyRetained(gpa, item) else null,
         else => return value,
+    }
+}
+
+/// Releases what `copyRetained` copied, field by field.
+fn freeRetained(gpa: std.mem.Allocator, value: anytype) void {
+    switch (@typeInfo(@TypeOf(value))) {
+        .pointer => |pointer| {
+            if (pointer.size != .slice) @compileError("retained semantic records must not contain pointers");
+            for (value) |item| freeRetained(gpa, item);
+            gpa.free(value);
+        },
+        .@"struct" => |record| inline for (record.fields) |field| freeRetained(gpa, @field(value, field.name)),
+        .@"union" => switch (value) {
+            inline else => |payload| freeRetained(gpa, payload),
+        },
+        .optional => if (value) |item| freeRetained(gpa, item),
+        else => {},
     }
 }
 
@@ -43482,6 +43526,49 @@ test "slow: settling function values and closure calls gives back what it took o
     try testing.checkAllAllocationFailures(gpa, typecheckOnly, .{.{
         .resolved = &res,
     }});
+}
+
+/// Checks a tree as a library prefix is checked, keeping the continuation
+/// seed, and releases what it returned. The seed's allocations are the
+/// caller's, so a check refused part-way through must give back every one.
+fn typecheckSeeded(gpa: std.mem.Allocator, ctx: struct {
+    resolved: *const resolve_mod.ResolvedTree,
+}) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    var seed: CheckSeed = undefined;
+    var typing = try typecheckInternal(gpa, &ctx.resolved.expanded, &ctx.resolved.resolution, &sink, &seed, null, false);
+    typing.deinit(gpa);
+    freeRetained(gpa, seed);
+}
+
+test "slow: checking that keeps a continuation seed gives back the seed when it fails part-way" {
+    try slow_tests.skipUnlessRun();
+    const gpa = testing.allocator;
+    const source: Source = .{ .path = "t.lin", .text =
+        \\trait Measure { fn of(x: Self) -> UInt8 }
+        \\struct Coins { count: UInt8 }
+        \\impl Measure for Coins {
+        \\    fn of(x: Self) -> UInt8 { x.count }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    let coins: Coins = .{ count = 1 }
+        \\    Measure.of(coins)
+        \\}
+    };
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    var interner: Interner = .empty;
+    defer interner.deinit(gpa);
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    defer ast.deinit(gpa);
+    var res = try resolveTree(gpa, &ast, &sink);
+    defer res.deinit(gpa);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+    try testing.checkAllAllocationFailures(gpa, typecheckSeeded, .{.{ .resolved = &res }});
 }
 
 test "an implementation the compiler provides names no declaration to call" {
