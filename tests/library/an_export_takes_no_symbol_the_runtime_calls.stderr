@@ -1,0 +1,10 @@
+error[M-Export]: `free` is a symbol the Linea runtime calls, so an export of it would replace the function the runtime calls
+ --> tests/library/an_export_takes_no_symbol_the_runtime_calls/main.lin:5:11
+  |
+5 | export fn free(address: Int64) -> Int64 {
+  |           ^^^^ publish it under a name of your own
+error[M-Export]: `calloc` is a symbol the Linea runtime calls, so an export of it would replace the function the runtime calls
+ --> tests/library/an_export_takes_no_symbol_the_runtime_calls/main.lin:9:11
+  |
+9 | export fn calloc(count: Int64, size: Int64) -> Int64 {
+  |           ^^^^^^ publish it under a name of your own

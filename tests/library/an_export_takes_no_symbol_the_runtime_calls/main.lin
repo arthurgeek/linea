@@ -1,0 +1,15 @@
+// The runtime calls the C library's `free` and `calloc`. A C host linking
+// this library beside the runtime links one definition of each name, so an
+// export of either would replace the function the runtime calls, and each is
+// refused. `release_slot` is a name of the library's own.
+export fn free(address: Int64) -> Int64 {
+    address
+}
+
+export fn calloc(count: Int64, size: Int64) -> Int64 {
+    count * size
+}
+
+export fn release_slot(address: Int64) -> Int64 {
+    address
+}

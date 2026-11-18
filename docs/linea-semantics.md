@@ -1262,7 +1262,7 @@ named but not offered, and so is one that would be declared twice where the name
 is (in its module, among its type's members, or in the list of fields, variants
 or type parameters it was written in), since accepting it would trade this error
 for [N-Duplicate], and so is an `export`'s respelling that names a symbol the
-runtime owns, which [M-Export] would refuse. A rename refuses a new name in the wrong case for the same
+runtime owns or calls, which [M-Export] would refuse. A rename refuses a new name in the wrong case for the same
 kind, with the same respelling.
 
 **[N-NotCallable]** Only a function or a value whose type carries a callable
@@ -2219,7 +2219,11 @@ declaration's name, matching the C header, and omits the prefix applied to
 other Linea-defined symbols, so it must not be a symbol the runtime owns:
 any name in the runtime's `linea_` namespace, its public functions and the
 version marker every program references included, or one it defines outside
-that namespace, such as `main`.
+that namespace, such as `main`. Nor may it be a symbol the runtime calls
+without defining, such as the C library's `free` or `calloc`: a C host links
+one definition of each name, so the export would replace the function the
+runtime calls. That set is read from the built runtime's own undefined
+symbols.
 
 A dependency's `export` is not exported. Only the root being built publishes C
 symbols, so an `export` in a library a program depends on gives that program's

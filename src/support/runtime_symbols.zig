@@ -89,6 +89,47 @@ test "a runtime symbol is refused and an ordinary name is not" {
     try testing.expect(!holds(""));
 }
 
+/// Whether the built runtime calls a symbol it does not define: a C library
+/// function such as `free`, or one of the runtime's own files calls in
+/// another. A C host linking a library beside the runtime links one
+/// definition of each name, so a library exporting one would replace the
+/// function the runtime calls. Read from the runtime archives' undefined
+/// symbols, as `nm -u` lists them, so a call the runtime gains is covered
+/// without a list to keep.
+pub fn imports(name: []const u8) bool {
+    return listingImports(@embedFile("runtime_imports"), name);
+}
+
+/// Whether an `nm -u` listing names `name`. Each symbol is the last word of
+/// its line; a line ending in `:` names the object the lines after it list.
+/// A Mach-O symbol carries a `_` before the name C spells.
+fn listingImports(listing: []const u8, name: []const u8) bool {
+    if (name.len == 0) return false;
+    const mangling = if (@import("builtin").target.os.tag.isDarwin()) "_" else "";
+    var lines = std.mem.tokenizeScalar(u8, listing, '\n');
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trimEnd(u8, line, " \t\r");
+        if (trimmed.len == 0 or trimmed[trimmed.len - 1] == ':') continue;
+        const start = if (std.mem.lastIndexOfAny(u8, trimmed, " \t")) |at| at + 1 else 0;
+        const symbol = trimmed[start..];
+        if (symbol.len == mangling.len + name.len and std.mem.startsWith(u8, symbol, mangling) and std.mem.eql(u8, symbol[mangling.len..], name)) return true;
+    }
+    return false;
+}
+
+test "the runtime calls the C library's allocator and nothing a program names" {
+    try testing.expect(imports("free"));
+    try testing.expect(imports("calloc"));
+    try testing.expect(!imports("square"));
+    try testing.expect(!imports(""));
+    const mangling = if (@import("builtin").target.os.tag.isDarwin()) "_" else "";
+    const listing = "\nlib.a(io.o):\n" ++ mangling ++ "free\n                 U " ++ mangling ++ "read\n";
+    try testing.expect(listingImports(listing, "free"));
+    try testing.expect(listingImports(listing, "read"));
+    try testing.expect(!listingImports(listing, "fre"));
+    try testing.expect(!listingImports(listing, "io.o"));
+}
+
 /// A scalar a runtime function's signature names, as C and Linea agree on it.
 /// `ptr` is an address the compiler passes as a pointer: no Linea declaration
 /// spells it, so only the symbols the compiler owns use it. `callback` is the

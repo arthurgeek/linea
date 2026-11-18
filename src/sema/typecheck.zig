@@ -22572,6 +22572,20 @@ const Checker = struct {
                 .{declared_name},
             );
         }
+        // Nor one the runtime calls without defining, such as the C
+        // library's `free`: a C host links one definition of the name, and
+        // the runtime would call the export in place of the function it
+        // means.
+        if (category == .t_export and runtime_symbols.imports(declared_name)) {
+            return self.sink.addErrorFmt(
+                .m_export,
+                self.ast.fileOf(self.ast.declName(d)),
+                self.ast.tokenSpan(self.ast.declName(d)),
+                "publish it under a name of your own",
+                "`{s}` is a symbol the Linea runtime calls, so an export of it would replace the function the runtime calls",
+                .{declared_name},
+            );
+        }
 
         // A callback an `extern` takes, and the context it hands back, are
         // checked as a pair ([T-ExternCallback]); what remains crosses alone.

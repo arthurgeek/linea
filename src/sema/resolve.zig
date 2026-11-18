@@ -12580,8 +12580,8 @@ const Resolver = struct {
                 const label = switch (try respelling(sink.arena, text, refusal.kind)) {
                     .offered => |respelled| if (self.clashes(interner, refusal.namespace, &list_names, respelled))
                         try std.fmt.allocPrint(sink.arena, "rename it: `{s}` would be declared twice", .{respelled})
-                    else if (refusal.exported and symbol_names.reservedForeign(respelled))
-                        try std.fmt.allocPrint(sink.arena, "rename it: `{s}` is a symbol the Linea runtime owns, which no export may take", .{respelled})
+                    else if (refusal.exported and symbol_names.exportTaken(respelled))
+                        try std.fmt.allocPrint(sink.arena, "rename it: `{s}` is a symbol the Linea runtime owns or calls, which no export may take", .{respelled})
                     else
                         try std.fmt.allocPrint(sink.arena, "rename it `{s}`", .{respelled}),
                     .unusable => |respelled| try std.fmt.allocPrint(sink.arena, "rename it: `{s}` is not a name a program declares", .{respelled}),

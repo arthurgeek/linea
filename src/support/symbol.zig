@@ -43,6 +43,22 @@ pub fn reservedForeign(name: []const u8) bool {
     return false;
 }
 
+/// Whether no `export` may define a symbol: one `reservedForeign` holds, or
+/// one the built runtime calls without defining (`runtime_symbols.imports`),
+/// which a library defining it would replace for the runtime in a C host that
+/// links both. An `extern` may name the second kind: it calls the function
+/// rather than defining it.
+pub fn exportTaken(name: []const u8) bool {
+    return reservedForeign(name) or @import("runtime_symbols.zig").imports(name);
+}
+
+test "an export takes no symbol the runtime owns or calls" {
+    try std.testing.expect(exportTaken("linea_close"));
+    try std.testing.expect(exportTaken("free"));
+    try std.testing.expect(!reservedForeign("free"));
+    try std.testing.expect(!exportTaken("square"));
+}
+
 test "a symbol the runtime, a definition or LLVM spells is reserved" {
     try std.testing.expect(reservedForeign("linea_close"));
     try std.testing.expect(reservedForeign("main"));
