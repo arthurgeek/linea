@@ -1254,7 +1254,8 @@ respelling that no program can declare, such as a reserved word or `Self`, is
 named but not offered, and so is one that would be declared twice where the name
 is (in its module, among its type's members, or in the list of fields, variants
 or type parameters it was written in), since accepting it would trade this error
-for [N-Duplicate]. A rename refuses a new name in the wrong case for the same
+for [N-Duplicate], and so is an `export`'s respelling that names a symbol the
+runtime owns, which [M-Export] would refuse. A rename refuses a new name in the wrong case for the same
 kind, with the same respelling.
 
 **[N-NotCallable]** Only a function or a value whose type carries a callable
