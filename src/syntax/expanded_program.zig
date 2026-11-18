@@ -34,6 +34,9 @@ pub const Origin = struct {
     template_expr: ExprId = .none,
     case_ordinal: ?CaseOrdinal = null,
     component_ordinal: ?ComponentOrdinal = null,
+    /// The span is copied into the generated member as the target or the
+    /// derive writes it: a component's type, or a template argument.
+    copied: bool = false,
 };
 
 pub const OriginId = enum(u32) {

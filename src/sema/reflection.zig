@@ -298,6 +298,9 @@ pub const OriginSegment = struct {
     template_expr: ExprId,
     case_ordinal: ?CaseOrdinal,
     component_ordinal: ?ComponentOrdinal,
+    /// The text is copied as the target or the derive writes it: a
+    /// component's type, or a template argument.
+    copied: bool = false,
 };
 
 /// The name the rendered `.wrap` placeholder spells. The checker reads the
@@ -366,6 +369,8 @@ const Renderer = struct {
     component_types: ComponentTypes,
     out: std.ArrayList(u8) = .empty,
     origins: std.ArrayList(OriginSegment) = .empty,
+    /// The origins begun and not yet ended, innermost last.
+    open_origins: std.ArrayList(usize) = .empty,
     wraps: std.ArrayList(RenderedWrap) = .empty,
     operations: []Operation,
     bindings: std.ArrayList([]const u8) = .empty,
@@ -388,6 +393,7 @@ const Renderer = struct {
     fn deinit(self: *Renderer) void {
         self.out.deinit(self.gpa);
         self.origins.deinit(self.gpa);
+        self.open_origins.deinit(self.gpa);
         self.wraps.deinit(self.gpa);
         self.parameter_positions.deinit(self.gpa);
         self.local_copies.deinit(self.gpa);
@@ -576,7 +582,7 @@ const Renderer = struct {
                     const at = self.component_types.offsets[ordinalIndex(case)] + ordinalIndex(component);
                     const plan = self.plan.component_types[operation.index];
                     if (plan.selection_base) try self.append("(");
-                    try self.append(self.component_types.text[at]);
+                    try self.appendCopied(self.component_types.text[at], state);
                     if (plan.selection_base) try self.append(")");
                 },
                 .local => try self.renderLocal(self.plan.locals[operation.index], state),
@@ -593,7 +599,7 @@ const Renderer = struct {
                 .type_parameter => {
                     const reference = self.plan.type_parameters[operation.index];
                     if (reference.selection_base) try self.append("(");
-                    try self.append(self.template_arguments[reference.parameter]);
+                    try self.appendCopied(self.template_arguments[reference.parameter], state);
                     if (reference.selection_base) try self.append(")");
                 },
                 .free_reference => try self.renderFreeReference(self.free_references[operation.index]),
@@ -633,11 +639,37 @@ const Renderer = struct {
             .case_ordinal = state.case,
             .component_ordinal = state.component,
         });
+        try self.open_origins.append(self.gpa, index);
         return index;
     }
 
     fn endOrigin(self: *Renderer, index: usize) RenderError!void {
         self.origins.items[index].end = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        if (self.open_origins.items.len != 0 and self.open_origins.items[self.open_origins.items.len - 1] == index) _ = self.open_origins.pop();
+    }
+
+    /// Write a component's type as the target spells it, or a template
+    /// argument as the derive does, recording that the text is theirs: a rule
+    /// about what a declaration writes holds it where the target or the derive
+    /// wrote it, not inside the member it was copied into. It keeps the
+    /// template expression of the origin it sits in.
+    fn appendCopied(self: *Renderer, text: []const u8, state: RenderState) RenderError!void {
+        // Text outside every template expression, such as the member's
+        // signature, is the member's whole origin, which the checker reads as
+        // copied too.
+        if (self.open_origins.items.len == 0 or text.len == 0) return self.append(text);
+        const start = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        try self.append(text);
+        const end = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        const enclosing = self.origins.items[self.open_origins.items[self.open_origins.items.len - 1]].template_expr;
+        try self.origins.append(self.gpa, .{
+            .start = start,
+            .end = end,
+            .template_expr = enclosing,
+            .case_ordinal = state.case,
+            .component_ordinal = state.component,
+            .copied = true,
+        });
     }
 
     fn appendOrdinal(self: *Renderer, value: usize) RenderError!void {

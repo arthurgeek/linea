@@ -4872,7 +4872,11 @@ return a system vector silently, where the declaration says it is generic over
 where memory comes from. The help says to write the parameter, or to write the
 default out where the system allocator is meant. A declaration with no allocator
 parameter writes the short form freely, unless it is a public signature of a
-library.
+library. A member a derive generates is held to the rule where each part of
+its text was written: a template's expressions in the template, a component's
+type in the target, a template argument in the derive, and its signature in
+the trait, so a record that is not generic may derive `json.Decode[mem.Handle]`
+with fields of `String[mem.Handle]`.
 
 A library's public signatures state their allocator. In a library root (the
 standard library, a dependency, or a primary root whose manifest says

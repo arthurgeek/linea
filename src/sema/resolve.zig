@@ -11753,6 +11753,7 @@ const Resolver = struct {
                                 .template_expr = origin.template_expr,
                                 .case_ordinal = origin.case_ordinal,
                                 .component_ordinal = origin.component_ordinal,
+                                .copied = origin.copied,
                             },
                         });
                     }
