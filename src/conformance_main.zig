@@ -12836,10 +12836,15 @@ fn checkCompletionOffers(
 
     var holds: std.ArrayList(resolve_mod.Selectable) = .empty;
     defer holds.deinit(gpa);
+    // Variants of an opaque enum named outside its module: the resolver
+    // selects them, and the checker refuses each [M-Opaque].
+    var sealed: std.StringHashMapUnmanaged(void) = .empty;
+    defer sealed.deinit(gpa);
 
     for (0..ast.exprCount()) |i| {
         const e: ExprId = .at(@intCast(i));
         if (ast.exprTag(e) != .field) continue;
+        sealed.clearRetainingCapacity();
 
         // A dot with nothing after it writes no name, so there is no first byte
         // of one to ask at and nothing the program wrote to look for.
@@ -12885,6 +12890,12 @@ fn checkCompletionOffers(
             );
 
             reachable.clearRetainingCapacity();
+            // Whether the namespace's representation is sealed here, by the
+            // rule the checker refuses a variant by.
+            const named = res.throughAlias(qualifier);
+            const representation_sealed = named != resolve_mod.BindingId.none and
+                res.kindOf(named) == .declared_type and
+                typecheck_mod.representationSealed(ast, program, res.declaredBy(named), res.moduleOfFile(file));
             for (holds.items) |written| switch (written) {
                 .member => |m| {
                     // What may stand here, which is not everything the
@@ -12896,7 +12907,7 @@ fn checkCompletionOffers(
                     const name = lsp_completion.nameOf(ast, res, m) orelse continue;
                     try reachable.put(gpa, name, {});
                 },
-                .variant => |v| try reachable.put(gpa, ast.tokenText(v), {}),
+                .variant => |v| try (if (representation_sealed) &sealed else &reachable).put(gpa, ast.tokenText(v), {}),
             };
 
             const integer_namespace = if (res.builtinOf(qualifier)) |primitive|
@@ -12938,6 +12949,9 @@ fn checkCompletionOffers(
         if (!resolve_mod.standsWhereAValueBelongs(res.kindOf(res.targetOf(e)))) continue;
 
         const written = ast.tokenText(at);
+        // A sealed variant is refused where it is written, so it is not
+        // offered there either.
+        if (sealed.contains(written)) continue;
         const found = for (offered) |item| {
             if (std.mem.eql(u8, item.label, written)) break true;
         } else false;
