@@ -214,16 +214,6 @@ impl[M] WaitSet[M] {
         ).unwrap()
     }
 
-    // Erase `wrap` into the callable that turns the bytes a `T` is kept in
-    // into an `M`, telling `wrap` whether the registration was delivered.
-    fn wrapping_by_delivery[T, W: Release + fn(sink ready: T, delivered: Bool) -> M](_self: Self, sink wrap: W) -> mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M] where carries(wrap) {
-        mem.Closure.open(
-            [sink wrap] |sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool| -> M {
-                wrap(mem.take_value[T](value), delivered)
-            },
-        ).unwrap()
-    }
-
     // Keep `value` in a reserved slot with the callable that delivers it.
     fn hold[T](inout self: Self, slot: UInt64, sink value: T, sink deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M]) where retains(self: value, deliver) {
         while self.held.length() <= slot {
@@ -489,16 +479,19 @@ impl[M] WaitSet[M] {
             return .Err(.{ value = share.undelivered(), reason = IoError.from_os(.Configure, Int32(0 - watched)) })
         }
         // The share is marked delivered as it leaves the set through `next`,
-        // and stays undelivered when `close` withdraws it.
-        let deliver = self.wrapping_by_delivery(
-            [sink wrap] |sink held: SignalShare, delivered: Bool| -> M {
+        // and stays undelivered when `close` withdraws it. The annotation
+        // gives the lambda the `fn` type it is kept as, under which its
+        // result may carry what `wrap` carries.
+        let deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M] = mem.Closure.open(
+            [sink wrap] |sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool| -> M {
+                let held = mem.take_value[SignalShare](value)
                 if delivered {
                     wrap(held.delivered_now())
                 } else {
                     wrap(held)
                 }
             },
-        )
+        ).unwrap()
         &self.hold(slot, share.undelivered(), deliver)
         .Ok(Registered.minted(self.identity, slot, generation))
     }
