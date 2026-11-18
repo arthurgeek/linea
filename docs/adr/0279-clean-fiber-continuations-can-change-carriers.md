@@ -1,4 +1,4 @@
-# 278. Clean fiber continuations can change carriers
+# 279. Clean fiber continuations can change carriers
 
 Status: Accepted — 2026-11-17. Supersedes 0265's fixed-carrier execution
 requirement in §7; implements its proposed phases 6 and 7. Final platform
