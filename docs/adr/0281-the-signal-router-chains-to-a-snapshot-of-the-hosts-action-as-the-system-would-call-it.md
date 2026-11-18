@@ -102,8 +102,11 @@ so its share is delivered. `take` and `close` answer whether the
 registration they withdrew had been signalled: `linea_waitset_take` answers 2
 for one its source had signalled and 1 for one still registered, and
 `linea_waitset_withdraw` answers twice the slot, plus 1 for a signalled one.
-Each looks at the sources that have fired first, whether or not `next` has,
-so a signal that arrived before `close` counts though no `next` ran. The set
+Before either withdraws a signal registration, it brings the registration
+up to date from the signal's delivery count, the same check the router's
+drain makes, with no system call: a signal that arrived before `take`, or
+between two withdrawals of one `close`, counts though nothing has read the
+wake descriptor since. The set
 marks a signal's share delivered as it leaves whenever its registration was
 signalled; every other value leaves as it went in. A share handed back
 before any delivery of its signal is undelivered, as before.

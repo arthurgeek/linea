@@ -290,6 +290,15 @@ void linea_signal_unwatch(struct linea_signal_watch *watch) {
     unlock();
 }
 
+/* Signal `watch`'s registration if its signal was delivered after the
+ * registration was made. A simulated watch is signalled only by its
+ * simulation. Called locked. */
+static void catch_up(struct linea_signal_watch *watch) {
+    if (!watch->simulated && __atomic_load_n(&counts[watch->signal], __ATOMIC_SEQ_CST) != watch->recorded) {
+        linea_registration_signal(watch->registration);
+    }
+}
+
 void linea_signal_drain(void) {
     lock();
     if (wake_read >= 0) {
@@ -297,11 +306,13 @@ void linea_signal_drain(void) {
         while (read(wake_read, sink, sizeof sink) > 0) {
         }
     }
-    unsigned long now[linea_signal_kinds];
-    for (int i = 0; i < linea_signal_kinds; i += 1) now[i] = __atomic_load_n(&counts[i], __ATOMIC_SEQ_CST);
-    for (struct linea_signal_watch *w = watches; w != 0; w = w->next) {
-        if (!w->simulated && now[w->signal] != w->recorded) linea_registration_signal(w->registration);
-    }
+    for (struct linea_signal_watch *w = watches; w != 0; w = w->next) catch_up(w);
+    unlock();
+}
+
+void linea_signal_catch_up(struct linea_signal_watch *watch) {
+    lock();
+    if (watch->listed) catch_up(watch);
     unlock();
 }
 

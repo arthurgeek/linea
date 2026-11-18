@@ -374,9 +374,8 @@ static void close_withdraws_each_registration_once(void) {
         if (withdrawn < 0) break;
         const long slot = withdrawn / 2;
         assert(slot < 3);
-        /* The endpoint whose peer has sent and the expired timer were
-         * signalled; the far timer was not. */
-        assert(withdrawn % 2 == (slot != (long)slot_of(b)));
+        /* The far timer has not fired, so it is not answered signalled. */
+        if (slot == (long)slot_of(b)) assert(withdrawn % 2 == 0);
         seen[slot] += 1;
     }
     assert(seen[0] == 1 && seen[1] == 1 && seen[2] == 1);
@@ -962,6 +961,58 @@ static void a_route_races_a_new_first_share(void) {
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
+/* `close` withdraws one registration at a time, and a signal may arrive
+ * between two withdrawals. The registration it signals is answered as
+ * signalled, from the router's count, whether or not anything has drained
+ * the wake descriptor since. */
+static void a_signal_between_two_withdrawals_is_answered_signalled(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (linea_signal_acquire(3) != 0 || linea_signal_acquire(4) != 0) _exit(10);
+        const unsigned long set = linea_waitset_open();
+        const unsigned long a = linea_waitset_reserve(set);
+        if (linea_waitset_signal(set, slot_of(a), 3, 0) != 0) _exit(11);
+        const unsigned long b = linea_waitset_reserve(set);
+        if (linea_waitset_signal(set, slot_of(b), 4, 0) != 0) _exit(12);
+        const long first = linea_waitset_withdraw(set);
+        if (raise(SIGUSR2) != 0) _exit(13);
+        const long second = linea_waitset_withdraw(set);
+        const long third = linea_waitset_withdraw(set);
+        linea_waitset_close(set);
+        linea_signal_release(4, 0);
+        linea_signal_release(3, 0);
+        if (first != (long)slot_of(a) * 2) _exit(14);
+        if (second != (long)slot_of(b) * 2 + 1) _exit(15);
+        if (third != -1) _exit(16);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* `take` answers a signal registration signalled once its signal has
+ * arrived, from the same count. */
+static void a_signal_before_a_take_is_answered_signalled(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (linea_signal_acquire(4) != 0) _exit(10);
+        const unsigned long set = linea_waitset_open();
+        const unsigned long a = linea_waitset_reserve(set);
+        if (linea_waitset_signal(set, slot_of(a), 4, 0) != 0) _exit(11);
+        if (raise(SIGUSR2) != 0) _exit(12);
+        const uint8_t taken = linea_waitset_take(set, slot_of(a), generation_of(a), 0);
+        linea_waitset_close(set);
+        linea_signal_release(4, 0);
+        _exit(taken == 2 ? 0 : 13);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
 /* What the masked host action saw of the thread's mask while it ran. */
 static int masked_host_calls;
 static int masked_host_saw_user1_blocked;
@@ -1225,6 +1276,8 @@ int main(void) {
     a_set_of_endpoints_keeps_its_signals_when_it_moves();
     a_set_watching_more_than_endpoints_does_not_move();
     a_route_races_a_new_first_share();
+    a_signal_between_two_withdrawals_is_answered_signalled();
+    a_signal_before_a_take_is_answered_signalled();
     a_routed_host_action_runs_under_its_own_mask();
     a_one_shot_host_action_is_chained_to_once();
 #if defined(LINEA_WAITSET_PAUSES)

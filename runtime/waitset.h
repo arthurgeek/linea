@@ -92,8 +92,9 @@ long linea_waitset_next(unsigned long set);
 uint8_t linea_waitset_take(unsigned long set, unsigned long slot, unsigned long generation, uint8_t only_registered);
 
 /* Withdraw any registration still held and answer twice its slot, plus 1
- * when its source has fired, whether or not `next` has looked, or -1 for an
- * empty set. */
+ * when its source had signalled it, or -1 for an empty set. A signal
+ * registration whose signal has arrived is answered signalled whether or
+ * not anything has read the router's wake descriptor. */
 long linea_waitset_withdraw(unsigned long set);
 
 /* Move a set to the calling task's Io, if it is not there already. Only a

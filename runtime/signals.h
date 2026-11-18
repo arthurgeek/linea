@@ -68,4 +68,9 @@ void linea_signal_unwatch(struct linea_signal_watch *watch);
  * delivered after it was made. */
 void linea_signal_drain(void);
 
+/* Signal `watch`'s registration if its signal was delivered after it was
+ * made, from the signal's count alone, without reading the wake
+ * descriptor. */
+void linea_signal_catch_up(struct linea_signal_watch *watch);
+
 #endif
