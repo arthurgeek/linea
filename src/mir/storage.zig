@@ -1530,16 +1530,16 @@ pub const Phase = struct {
     /// part read and what is read can hold a dependency. A value used whole
     /// -- passed, returned, or the carrier of the address being the value
     /// itself -- uses every part; a read through an address uses the bytes
-    /// the address covers. A value of no bytes reads no storage, so a move
-    /// that emptied its root is no reason to refuse it: a part that covers
-    /// every byte of a record moves the record out, and the zero-sized
-    /// fields beside it are still the program's to read.
+    /// the address covers. A value of no bytes that owes nothing reads no
+    /// storage, so a move that emptied its root is no reason to refuse it: a
+    /// part that covers every byte of a record moves the record out, and the
+    /// zero-sized fields beside it are still the program's to read.
     fn use(self: *Phase, at: InstId, b: Base, ty: TypeId, whole: bool) !void {
         if (b.carrier != no_entity and self.stale[b.carrier] != empty_set and self.mayCarry(ty)) {
             const a: Access = if (whole) Access.whole(held_whole - 1) else self.accessOf(b, ty);
             if (self.staleWithin(self.stale[b.carrier], a)) |d| try self.refuse(.stale, at, b.carrier, self.causeOf(d));
         }
-        if (b.root != no_entity and self.moved[b.root] and self.layoutSize(ty) != 0) try self.refuse(.moved, at, b.root, self.moved_at[b.root]);
+        if (b.root != no_entity and self.moved[b.root] and !self.occupiesNothing(ty)) try self.refuse(.moved, at, b.root, self.moved_at[b.root]);
     }
 
     fn useValue(self: *Phase, at: InstId, v: InstId) !void {
@@ -1670,10 +1670,18 @@ pub const Phase = struct {
 
     /// Whether taking `src` as a whole `ty` moves its root out: a whole owned
     /// root or returned temporary. A lent root stays its lender's. Taking a
-    /// value of no bytes empties no storage, so of a record whose every field
-    /// is zero-sized, each field is taken on its own.
+    /// value of no bytes that owes nothing empties no storage, so of a record
+    /// whose every field is such a value, each field is taken on its own.
     fn movesOut(self: *const Phase, src: Base, ty: TypeId) bool {
-        return self.layoutSize(ty) != 0 and self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
+        return !self.occupiesNothing(ty) and self.wholeRoot(src, ty) and self.root_kind[src.root] != .lent;
+    }
+
+    /// Whether a value of `ty` has no bytes and owes no settlement. Such a
+    /// value is all there is of nothing, so reading or taking it again is
+    /// no use of storage a move emptied. A zero-sized value that must be
+    /// settled is still one value, and taking it twice settles it twice.
+    fn occupiesNothing(self: *const Phase, ty: TypeId) bool {
+        return self.layoutSize(ty) == 0 and !self.module.types.mustConsume(ty);
     }
 
     fn moveOut(self: *Phase, at: InstId, src: Base, ty: TypeId) !void {
@@ -3339,6 +3347,32 @@ test "a moved slot written part by part holds a value again" {
     const k = try constant(&b, entry, 0);
     try ret(&b, entry, k);
     try expectAccepted(try Shapes.callees(gpa, try b.finish(entry, .from(0))));
+}
+
+test "a zero-sized value owing its settlement is not moved out twice, and one owing nothing may be" {
+    const gpa = testing.allocator;
+    for ([_]TypeId{ Harness.token, Harness.empty }) |ty| {
+        var b = Builder.init(gpa);
+        defer b.deinit();
+        b.return_type = .u64;
+        const from = try b.addLocal(ty, .value);
+        const first = try b.addLocal(ty, .value);
+        const second = try b.addLocal(ty, .value);
+        const entry = try b.addBlock();
+        const src = try addrOf(&b, entry, from);
+        const once = try addrOf(&b, entry, first);
+        _ = try b.addInst(entry, .{ .tag = .move_value, .ty = ty, .span = Span.empty, .data = .{ .binary = .{ .lhs = once, .rhs = src } } });
+        const twice = try addrOf(&b, entry, second);
+        _ = try b.addInst(entry, .{ .tag = .move_value, .ty = ty, .span = Span.empty, .data = .{ .binary = .{ .lhs = twice, .rhs = src } } });
+        const k = try constant(&b, entry, 0);
+        try ret(&b, entry, k);
+        const functions = try Shapes.callees(gpa, try b.finish(entry, .from(0)));
+        if (ty == Harness.token) {
+            try expectRefused(functions, "reads slot $0 after %2 moved it out");
+        } else {
+            try expectAccepted(functions);
+        }
+    }
 }
 
 test "a moved value is not read again, and a copied one is" {
