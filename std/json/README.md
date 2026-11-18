@@ -221,7 +221,8 @@ for item in &checks {
         },
     }
 }
-let file = checks.abandon()
+// `abandon` hands the file back to be closed.
+let _ = checks.abandon().close()
 ```
 
 A line ends at LF or CRLF, and the last line needs neither. A line holding

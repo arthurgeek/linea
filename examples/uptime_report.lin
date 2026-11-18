@@ -87,10 +87,18 @@ test "checks are tallied per service in the order services appear" {
     testing.assert_eq(search.slowest_ms, UInt64(75), "the slowest check was not kept")?
 }
 
+// Reading tells `main` how many lines were not checks, and whether the input
+// itself failed before its end.
+struct Reading {
+    not_checks: UInt64,
+    unreadable: Bool,
+}
+
 // Read checks from `reader` as JSON Lines and tally them. Each line that is
 // not a check is reported on standard error with its number, and counted.
-// Reading stops early only when the input itself fails.
-fn tally_checks[R: io.Reader](sink reader: R, inout tallies: Vec[Tally]) -> Result[UInt64, mem.Oom] where R: Release, R.Error: Display + Release {
+// Reading stops early when the input itself fails, and when there is no
+// memory for another service's tally.
+fn tally_checks[R: io.Reader](sink reader: R, inout tallies: Vec[Tally]) -> Result[Reading, mem.Oom] where R: Release, R.Error: Display + Release {
     // `json.Lines.open` reads `reader` one line at a time, as the loop asks
     // for checks; a log of any length takes the memory of one line.
     // `decoded[Check]()` decodes each line's document into a `Check`.
@@ -99,7 +107,7 @@ fn tally_checks[R: io.Reader](sink reader: R, inout tallies: Vec[Tally]) -> Resu
         return .Err(.Exhausted)
     }
     var checks = lines.decoded[Check]()
-    var refused: UInt64 = 0
+    var reading = Reading { not_checks = 0, unreadable = false }
     var tallied: Result[(), mem.Oom] = .Ok(())
     for item in &checks {
         match item {
@@ -111,18 +119,28 @@ fn tally_checks[R: io.Reader](sink reader: R, inout tallies: Vec[Tally]) -> Resu
                 }
             },
             // The error names the line, such as `line 3: missing field at
-            // $["ms"]`. `release` settles the field path it holds.
+            // $["ms"]`. A `Document` problem is a line that holds no check,
+            // and reading goes on; an `Input` problem is the last item.
+            // `release` settles the field path an error holds.
             Err(error) => {
-                io.eprintln("{error}")
+                match read error.problem {
+                    Document(_) => {
+                        io.eprintln("{error}")
+                        reading.not_checks += 1
+                    },
+                    Input(_) => {
+                        io.eprintln("cannot read the checks: {error}")
+                        reading.unreadable = true
+                    },
+                }
                 error.release()
-                refused += 1
             },
         }
     }
     // `abandon` ends reading and hands the reader back to be released.
     checks.abandon().release()
     tallied?
-    .Ok(refused)
+    .Ok(reading)
 }
 
 // ReportFailure says why the report could not be written.
@@ -180,7 +198,7 @@ fn main() -> UInt8 {
         }
         tally_checks(file, &tallies)
     }
-    let refused = tallied else |_| {
+    let reading = tallied else |_| {
         io.eprintln("out of memory")
         return 1
     }
@@ -191,9 +209,13 @@ fn main() -> UInt8 {
         }
         return 1
     }
-    if refused > 0 {
-        io.eprintln("{refused} lines were not checks")
+    if reading.not_checks > 0 {
+        io.eprintln("{reading.not_checks} lines were not checks")
         return 1
     }
-    0
+    if reading.unreadable {
+        1
+    } else {
+        0
+    }
 }

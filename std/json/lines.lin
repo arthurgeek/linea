@@ -197,7 +197,7 @@ impl[R: io.Reader, A: Allocator] Lines[R, A] {
             InvalidProgress => return &self.stopped(line, .InvalidProgress),
             PositionOverflow => return &self.stopped(line, .PositionOverflow),
         }
-        match skip_line(&self.input, self.limits.max_input_bytes) {
+        match skip_line(&self.input) {
             Ok(_) => {
                 self.lines_read = line
                 .{ line, problem = .Document(document) }
@@ -209,19 +209,21 @@ impl[R: io.Reader, A: Allocator] Lines[R, A] {
         }
     }
 
-    // End reading after the stream failed on `line`.
+    // End reading after the stream failed on `line`, which counts as read.
     fn stopped(inout self: Self, line: UInt64, sink error: io.LineError[R.Error]) -> LinesError[R.Error, A] where carries(error) {
         self.ended = true
+        self.lines_read = line
         .{ line, problem = .Input(error) }
     }
 }
 
-// Discard the rest of the line `input` refused, `budget` bytes at a time,
-// until its end. Discarding stores nothing, so a line of any length is
-// skipped in the memory the reader already holds.
-fn skip_line[R: io.Reader, A: Allocator](inout input: io.BufferedReader[R, A], budget: UInt64) -> Result[(), io.LineError[R.Error]] where carries(.Err: input), retains(input: input) {
+// Discard the rest of the line `input` refused, a read-ahead buffer's worth of
+// bytes at a time, until its end. Discarding stores nothing, so a line of any
+// length is skipped in the memory the reader already holds, whatever the line
+// limit was; a limit of zero still makes progress.
+fn skip_line[R: io.Reader, A: Allocator](inout input: io.BufferedReader[R, A]) -> Result[(), io.LineError[R.Error]] where carries(.Err: input), retains(input: input) {
     loop {
-        let progress = &input.discard_pending(max_bytes: budget)?
+        let progress = &input.discard_pending(max_bytes: lines_read_ahead_bytes)?
         if progress.boundary {
             return .Ok(())
         }
@@ -323,6 +325,24 @@ test "a line past the input limit is skipped and reported" {
     testing.assert_eq(next.as_uint64().unwrap(), UInt64(12), "the line after a long one was lost")?
 }
 
+test "a zero input limit reports every line that is not blank" {
+    let limits = ParseLimits { max_input_bytes = 0, ..ParseLimits.default() }
+    var lines = Lines.open(LinesSource.of("1\n\n22\n"), limits: limits).unwrap()
+    var refused = String.new()
+    for item in &lines {
+        match item {
+            Ok(document) => document.release(),
+            Err(error) => {
+                "{error};".fmt(&refused).unwrap()
+                error.release()
+            },
+        }
+    }
+    let _source = lines.abandon()
+    defer refused.release()
+    testing.assert_eq(refused.view(), "line 1: input too long at byte 0;line 3: input too long at byte 0;", "a zero limit did not refuse each line once")?
+}
+
 test "a line that is not utf8 is skipped and reported" {
     // `"`, a byte no UTF-8 text holds, `"`, a line feed, then `5`.
     let bytes: [UInt8; _] = [34, 255, 34, 10, 53]
@@ -364,9 +384,11 @@ test "a failing stream ends reading with the line it was reading" {
             }
         },
     }
+    let counted = lines.line_number()
     let ended = finished(&lines.next())
     let _source = lines.abandon()
     testing.assert(stopped, "a failed read was not reported at the line being read")?
+    testing.assert_eq(counted, UInt64(2), "the line a failed read was on was not counted")?
     testing.assert(ended, "reading went on after the stream failed")?
 }
 
