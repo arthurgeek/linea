@@ -2224,6 +2224,10 @@ pub fn build(b: *std.Build) void {
         "-Wno-conversion",
         "-Wno-sign-conversion",
         "-fno-sanitize=unsigned-integer-overflow",
+        // Zig's integer conversion provider intentionally shifts high bits
+        // out while computing subnormal sticky bits. This is defined unsigned
+        // C arithmetic; retain checks for invalid shift counts and signed UB.
+        "-fno-sanitize=unsigned-shift-base",
     }) catch @panic("OOM");
     // Archive basenames in source order. Compiler-generated archives include
     // cache paths, which change outcome-cache keys without changing code.
