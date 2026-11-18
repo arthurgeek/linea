@@ -1,0 +1,40 @@
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:28:16
+   |
+28 |     var held = keep(s.view())
+   |                ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-DeferLet]: `Box[Str]` implements no `Release`, so it has no single ending `defer let` may choose
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:30:5
+   |
+30 |     defer let from_var = held
+   |     ^^^^^^^^^^^^^^^^^^ write `let`, then `defer` the operation that ends it on every path
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:31:27
+   |
+31 |     let (_kept, built) = (keep(s.view()), Box[Str] { item = s.view() })
+   |                           ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-DeferLet]: `Box[Str]` implements no `Release`, so it has no single ending `defer let` may choose
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:32:5
+   |
+32 |     defer let from_tuple = built
+   |     ^^^^^^^^^^^^^^^^^^^^ write `let`, then `defer` the operation that ends it on every path
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:34:9
+   |
+34 |         keep(s.view())
+   |         ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-DeferLet]: `Box[Str]` implements no `Release`, so it has no single ending `defer let` may choose
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:33:5
+   |
+33 |     defer let from_if = if s.view().length() > 2 {
+   |     ^^^^^^^^^^^^^^^^^ write `let`, then `defer` the operation that ends it on every path
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:38:53
+   |
+38 |     defer let from_field = Pair[Box[Str]] { first = keep(s.view()), second = Box[Str] { item = s.view() } }.second
+   |                                                     ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-DeferLet]: `Box[Str]` implements no `Release`, so it has no single ending `defer let` may choose
+  --> tests/defer_let/a_refused_call_does_not_excuse_a_value_built_apart_from_it.lin:38:5
+   |
+38 |     defer let from_field = Pair[Box[Str]] { first = keep(s.view()), second = Box[Str] { item = s.view() } }.second
+   |     ^^^^^^^^^^^^^^^^^^^^ write `let`, then `defer` the operation that ends it on every path

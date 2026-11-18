@@ -805,6 +805,10 @@ pub const Resolution = struct {
     /// answer reads it here rather than walking for it again: a name a body
     /// never mentions is one question, and `[N-Unused]` already asks it.
     referenced: FinishedBindingBits,
+    /// Whether each binding is written after it is declared, indexed by
+    /// `BindingId`: assigned, lent `&`, captured `inout` or walked
+    /// `for inout`. Only a binding that may change is ever set.
+    rewritten: FinishedBindingBits,
     /// The reverse: which symbol a statement declared, indexed by StmtId, and
     /// `.none` for a statement that declares nothing. Stored rather than
     /// searched, because every consumer needs it once per statement and a scan
@@ -1171,6 +1175,7 @@ pub const Resolution = struct {
         self.writable_binders.deinit(gpa);
         gpa.free(self.reach);
         self.referenced.deinit(gpa);
+        self.rewritten.deinit(gpa);
         self.ambient.deinit(gpa);
         gpa.free(self.binding_of_stmt);
         gpa.free(self.param_starts);
@@ -2002,6 +2007,13 @@ pub const Resolution = struct {
     pub fn isReferenced(self: *const Resolution, b: BindingId) bool {
         if (b == BindingId.none or b.index() >= self.referenced.len()) return false;
         return self.referenced.get(b);
+    }
+
+    /// Whether anything writes this binding after it is declared, so the
+    /// value it holds may be another than the one it was declared with.
+    pub fn isRewritten(self: *const Resolution, b: BindingId) bool {
+        if (b == BindingId.none or b.index() >= self.rewritten.len()) return false;
+        return self.rewritten.get(b);
     }
 
     pub fn isReExport(self: *const Resolution, b: BindingId) bool {
@@ -3985,6 +3997,9 @@ const Binding = struct {
     /// The token to underline when reporting it.
     at: TokenId,
     used: bool,
+    /// Whether something writes the binding after its declaration: an
+    /// assignment, a `&` lend, an `inout` capture or a `for inout` walk.
+    rewritten: bool = false,
     /// Whether the name may be assigned again. A property of the binding
     /// rather than of its type, which is why assigning to a `let` is reported
     /// with the rules about what a name may do.
@@ -4810,6 +4825,8 @@ fn resolveInternal(
     errdefer ambient_names.deinit(gpa);
     var referenced = try BindingBits.initEmpty(gpa, r.bindings.items.len);
     errdefer referenced.deinit(gpa);
+    var rewritten = try BindingBits.initEmpty(gpa, r.bindings.items.len);
+    errdefer rewritten.deinit(gpa);
     const by_stmt = try gpa.alloc(BindingId, ast.stmtCount());
     errdefer gpa.free(by_stmt);
     // Where each declaration's parameters begin, counted one to the right so
@@ -4834,6 +4851,7 @@ fn resolveInternal(
         reaches[i] = b.reach;
         ambient_names.set(id, b.ambient);
         referenced.set(id, b.used);
+        rewritten.set(id, b.rewritten);
         if (b.stmt != StmtId.none) by_stmt[b.stmt.index()] = id;
         if (b.kind == .parameter and b.decl != DeclId.none and b.decl.index() < ast.declCount()) {
             param_starts[b.decl.index() + 1] += 1;
@@ -5054,6 +5072,8 @@ fn resolveInternal(
     errdefer finished_ambient.deinit(gpa);
     var finished_referenced = referenced.freeze();
     errdefer finished_referenced.deinit(gpa);
+    var finished_rewritten = rewritten.freeze();
+    errdefer finished_rewritten.deinit(gpa);
     const unwrapped_sources = try r.unwrapped_sources.toOwnedSlice(gpa);
     errdefer gpa.free(unwrapped_sources);
 
@@ -5107,6 +5127,7 @@ fn resolveInternal(
         .reach = reaches,
         .ambient = finished_ambient,
         .referenced = finished_referenced,
+        .rewritten = finished_rewritten,
         .binding_of_stmt = by_stmt,
         .entry = r.entry,
         .several_entry_points = several_entry_points,
@@ -14660,6 +14681,7 @@ const Resolver = struct {
         switch (use) {
             .read => self.bindings.items[i].used = true,
             .assigned => if (self.bindings.items[i].mutable) {
+                self.bindings.items[i].rewritten = true;
                 // Writes through parameters, lending binders, and mutable
                 // captures remain visible to their callers or owners. A local
                 // only assigned has no observer and remains unused.
@@ -14672,6 +14694,7 @@ const Resolver = struct {
             },
             .mutated => {
                 self.bindings.items[i].used = true;
+                if (self.bindings.items[i].mutable) self.bindings.items[i].rewritten = true;
                 if (!self.bindings.items[i].mutable) {
                     if (self.lending_mark != .none) {
                         try self.deferred_immutable.append(self.gpa, .{ .mark = self.lending_mark, .name = id, .binding = b });
@@ -17649,7 +17672,7 @@ fn bindingSpelled(ast: *const Ast, res: *const Resolution, name: []const u8, nth
 }
 
 test "resolution flags and reach are typed by bindings and preserve public answers" {
-    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced", "rewritten" }) |field| {
         const Field = @FieldType(Resolution, field);
         try testing.expect(Field == FinishedBindingBits);
         try testing.expect(!@hasDecl(Field, "set"));
@@ -17669,7 +17692,7 @@ test "resolution flags and reach are typed by bindings and preserve public answe
         \\}
     );
     try testing.expectEqual(@as(u32, 0), r.errors);
-    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced", "rewritten" }) |field| {
         try testing.expectEqual(@as(usize, r.res.bindingCount()), @field(r.res, field).len());
     }
     try testing.expectEqual(@as(usize, r.res.bindingCount()), r.res.reach.len);
@@ -17741,7 +17764,7 @@ test "resolution flags and reach are typed by bindings and preserve public answe
     const module_result = try resolve(arena.allocator(), &program, &interner, &sink, .program);
     const module_res = module_result.resolution;
     try testing.expectEqual(@as(u32, 0), sink.error_count - before);
-    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced" }) |field| {
+    inline for (.{ "reexported", "field_shorthand", "writable_binders", "ambient", "referenced", "rewritten" }) |field| {
         try testing.expectEqual(@as(usize, module_res.bindingCount()), @field(module_res, field).len());
     }
     try testing.expectEqual(@as(usize, module_res.bindingCount()), module_res.reach.len);

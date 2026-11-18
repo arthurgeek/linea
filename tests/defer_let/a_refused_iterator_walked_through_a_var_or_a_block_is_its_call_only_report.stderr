@@ -1,0 +1,10 @@
+error[T-Bound]: `F` requires `Owned`, and `<closure>` can carry a borrow: `label` is a `borrow String[mem.SystemAllocator]`, an observation of another value
+  --> tests/defer_let/a_refused_iterator_walked_through_a_var_or_a_block_is_its_call_only_report.lin:36:18
+   |
+36 |     var walked = lazy_map([read label] |sink k| k + label.view().length())
+   |                  ^^^^^^^^ `<closure>` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `F` requires `Owned`, and `<closure>` can carry a borrow: `label` is a `borrow String[mem.SystemAllocator]`, an observation of another value
+  --> tests/defer_let/a_refused_iterator_walked_through_a_var_or_a_block_is_its_call_only_report.lin:42:9
+   |
+42 |         lazy_map([read label] |sink k| k * label.view().length())
+   |         ^^^^^^^^ `<closure>` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
