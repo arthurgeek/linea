@@ -288,8 +288,8 @@ impl[M] WaitSet[M] {
     }
 
     // Register an endpoint whose next operation is `recv`: it is ready once
-    // the peer's `send` waits. The peer's send cannot be withdrawn, so the
-    // endpoint stays ready until it receives, whether `next` delivers it,
+    // a value the peer sent waits in the session. Only this endpoint's own
+    // `recv` takes it, so the endpoint stays ready until it receives, whether `next` delivers it,
     // `take` hands it back or `close` answers it. An endpoint at another
     // state is not one of these, and is refused.
     pub fn received[T: Owned, N: Protocol, H, W: Release + fn(sink ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[Recv[T, N], H]] where retains(self: chan, wrap) {
@@ -313,7 +313,7 @@ impl[M] WaitSet[M] {
     }
 
     // Register an endpoint whose next operation is `offer`: it is ready once
-    // the peer's `choose` waits, and stays ready as `received` says.
+    // the peer's choice waits in the session, and stays ready as `received` says.
     pub fn offered[L: Protocol, R: Protocol, H, W: Release + fn(sink ready: Chan[Offer[L, R], H]) -> M](inout self: Self, sink chan: Chan[Offer[L, R], H], sink wrap: W) -> Registered[Chan[Offer[L, R], H]] where retains(self: chan, wrap) {
         let (slot, generation) = &self.reserve()
         let endpoint = chan.number()
@@ -532,7 +532,7 @@ impl[M] WaitSet[M] {
         &self.withdraw(key, 0)
     }
 
-    test "a taken endpoint comes back with its peer still waiting" {
+    test "a taken endpoint comes back with its peer's value still queued" {
         var waiting: WaitSet[WaitTestWoke] = WaitSet.open()
         let key = &waiting.received(wait_test_sender(12), |sink ready| WaitTestWoke.Sent(ready))
         let chan = &waiting.take(key).unwrap()

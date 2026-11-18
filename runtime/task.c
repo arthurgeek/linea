@@ -1,12 +1,13 @@
-/* A task's execution and the rendezvous channel of its session.
+/* A task's execution and the queue of its session.
  *
  * A prepared task runs on a system thread or a pinned fiber. Its creator
  * shares one record with it, holding execution resources and the session's
- * one slot. A system task owns its mapped stack and alternate signal stack;
- * a fiber owns its guarded stack through the carrier scheduler. The slot is
- * guarded by the record's mutex and goes from empty to full to empty: a
- * sender fills it and waits until the receiver has copied the bytes and
- * emptied it, so a send returns only once its peer holds the value.
+ * queue. A system task owns its mapped stack and alternate signal stack;
+ * a fiber owns its guarded stack through the carrier scheduler. The queue is
+ * guarded by the record's mutex and holds at most `queue_values` values one
+ * end sent and the other has not received: a send copies its bytes in and
+ * returns, waiting only while the queue is full, and a receive copies the
+ * oldest value out, waiting while none from the peer is queued.
  *
  * The creator's endpoint is the record's address and the task's own endpoint
  * is that address with its lowest bit set, which an allocation's alignment
@@ -27,11 +28,16 @@
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
 
 #include "loop.h"
 #include "fiber.h"
@@ -78,6 +84,21 @@ static const unsigned long signal_stack_bytes = 65536;
  * request past it is refused before any system call sees it. */
 static const unsigned long largest_stack = 1UL << 40;
 
+/* The most values a session holds that its receiver has not taken. Two let
+ * a choice and the payload after it be sent without waiting for the
+ * receiver, and bound what a sender may run ahead of its peer. */
+enum { queue_values = 2 };
+
+/* A queued value of at most this many bytes is kept in the record; a larger
+ * one in bytes the runtime allocates. A branch, a scalar and a `Vec` fit. */
+enum { held_bytes = 32 };
+
+struct queued {
+    unsigned long len;
+    unsigned char *allocated;
+    unsigned char held[held_bytes];
+};
+
 /* A thread is `beginning` until it has installed its signal stack, then
  * `parked` until the task is started or cancelled, or `failed` where it could
  * not begin and has ended. A started or cancelled thread is `finished` once
@@ -87,6 +108,11 @@ enum { beginning, failed, parked, started, cancelled, finished };
 struct task {
     struct linea_park park;
     pthread_t thread;
+#if defined(__APPLE__)
+    /* A send right to a system task's kernel thread port, which the thread
+     * takes for its joiner before it publishes its first state. */
+    mach_port_t port;
+#endif
     struct linea_fiber *fiber;
     unsigned long loop;
     int state;
@@ -99,16 +125,13 @@ struct task {
     unsigned long len;
     unsigned long release_at;
 
-    /* The session's slot: whether a value waits in it, which endpoint put it
-     * there, and where its bytes are. `filled` and `emptied` count the values
-     * that have entered and left it, so a sender waits for its own value to
-     * be taken and not merely for the slot to be empty. */
-    int full;
+    /* The session's queue: `count` values starting at `oldest`, all sent by
+     * the endpoint `from`. Dual protocols send in one direction until the
+     * receiver has taken every value, so the queue never holds both ends'. */
+    struct queued queue[queue_values];
+    unsigned long oldest;
+    unsigned long count;
     unsigned long from;
-    unsigned long slot_at;
-    unsigned long slot_len;
-    unsigned long filled;
-    unsigned long emptied;
 
     /* The wait-set registration watching each end of the session, by the
      * endpoint's lowest bit, and whether the handle's watches for the body
@@ -159,6 +182,9 @@ static void destroy(struct task *t) {
 
 static void *run(void *arg) {
     struct task *t = arg;
+#if defined(__APPLE__)
+    t->port = mach_thread_self();
+#endif
     const unsigned long base = (unsigned long)t->stack;
     const int begun = linea_thread_begin((unsigned long)t->signal_stack, signal_stack_bytes, base, base + guard_bytes);
     linea_park_lock(&t->park);
@@ -183,12 +209,36 @@ static void *run(void *arg) {
     return 0;
 }
 
+/* Join a system task's thread, answering once the thread runs no more user
+ * code, so the stack the runtime mapped for it may be unmapped. macOS's
+ * `pthread_join` can return while the ending thread still runs the last
+ * instructions of its exit on that stack, when the join begins as the thread
+ * is ending; a stack unmapped then and mapped again for another task, zeroed,
+ * sends the ending thread to address zero. So on macOS the thread takes a
+ * send right to its own kernel port when it starts, and the joiner, after
+ * the join, waits until the kernel no longer answers for the thread, which
+ * it stops doing only once the thread has entered the kernel to terminate
+ * and will not return to user code. Linux's join already waits for the
+ * kernel to clear the thread's id once it has exited. */
+static void join_thread(struct task *t) {
+    if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
+#if defined(__APPLE__)
+    for (;;) {
+        struct thread_basic_info info;
+        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+        if (thread_info(t->port, THREAD_BASIC_INFO, (thread_info_t)&info, &count) != KERN_SUCCESS) break;
+        sched_yield();
+    }
+    (void)mach_port_deallocate(mach_task_self(), t->port);
+#endif
+}
+
 /* Park until the body has finished, then join a system thread if present. */
 static void join(struct task *t) {
     linea_park_lock(&t->park);
     while (t->state != finished) (void)linea_park(&t->park, 0);
     linea_park_unlock(&t->park);
-    if (t->fiber == NULL && pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
+    if (t->fiber == NULL) join_thread(t);
 }
 
 static long prepare_thread(unsigned long stack_bytes) {
@@ -239,7 +289,7 @@ static long prepare_thread(unsigned long stack_bytes) {
     status = t->begin_error;
     linea_park_unlock(&t->park);
     if (parked_now) return (long)t;
-    if (pthread_join(t->thread, 0) != 0) fail("linea: a task's thread could not be joined\n");
+    join_thread(t);
 
 destroy_park:
     linea_park_destroy(&t->park);
@@ -329,33 +379,51 @@ void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len
     struct task *t = task_of(endpoint);
     execution_context(t->loop);
     linea_storage_extent(at, len);
+    /* A value too large for the record gets bytes of its own before the
+     * lock is taken, so no other end waits on the allocation. */
+    unsigned char *allocated = 0;
+    if (len > held_bytes) {
+        allocated = malloc(len);
+        if (allocated == 0) fail("linea: a session could not hold the value it was sent\n");
+        memcpy(allocated, (const void *)at, len);
+    }
     linea_park_lock(&t->park);
-    while (t->full) (void)linea_park(&t->park, 0);
-    t->full = 1;
+    while (t->count == queue_values || (t->count != 0 && t->from != endpoint)) (void)linea_park(&t->park, 0);
+    struct queued *q = &t->queue[(t->oldest + t->count) % queue_values];
+    q->len = len;
+    q->allocated = allocated;
+    if (allocated == 0 && len != 0) memcpy(q->held, (const void *)at, len);
     t->from = endpoint;
-    t->slot_at = at;
-    t->slot_len = len;
-    t->filled += 1;
-    const unsigned long mine = t->filled;
+    t->count += 1;
     linea_unpark(&t->park);
     /* The peer's end is the other bit. A handle watched for its body's
      * return is at its end, so no send reaches it. */
     const unsigned long peer = (endpoint & 1UL) ^ 1UL;
     if (t->watching[peer] != 0 && !(peer == 0 && t->watching_return)) linea_registration_signal(t->watching[peer]);
     linea_waitset_pause(linea_pause_send_filled);
-    while (t->emptied != mine) (void)linea_park(&t->park, 0);
     linea_park_unlock(&t->park);
 }
 
-/* Copy the value waiting in the slot to the `len` bytes at `at` and empty
- * the slot, waking its sender. Called with the lock held and the slot full
- * from the other end. */
-static void take_slot(struct task *t, unsigned long at, unsigned long len) {
-    if (t->slot_len != len) fail("linea: the two ends of a session disagree about a payload's size\n");
-    if (len != 0) memcpy((void *)at, (const void *)t->slot_at, len);
-    t->full = 0;
-    t->emptied += 1;
+/* Whether a value from the peer of `endpoint` waits in the queue. */
+static int queued_for(const struct task *t, unsigned long endpoint) {
+    return t->count != 0 && t->from != endpoint;
+}
+
+/* Copy the oldest queued value to the `len` bytes at `at` and remove it,
+ * waking a sender that waits for room, then unlock. Called with the lock
+ * held and a value from the other end queued. Bytes allocated for the
+ * value are freed after the lock is released. */
+static void take_oldest(struct task *t, unsigned long at, unsigned long len) {
+    struct queued *q = &t->queue[t->oldest];
+    if (q->len != len) fail("linea: the two ends of a session disagree about a payload's size\n");
+    unsigned char *allocated = q->allocated;
+    if (len != 0) memcpy((void *)at, allocated != 0 ? allocated : q->held, len);
+    q->allocated = 0;
+    t->oldest = (t->oldest + 1) % queue_values;
+    t->count -= 1;
     linea_unpark(&t->park);
+    linea_park_unlock(&t->park);
+    free(allocated);
 }
 
 void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len) {
@@ -363,9 +431,8 @@ void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len
     execution_context(t->loop);
     linea_storage_extent(at, len);
     linea_park_lock(&t->park);
-    while (!t->full || t->from == endpoint) (void)linea_park(&t->park, 0);
-    take_slot(t, at, len);
-    linea_park_unlock(&t->park);
+    while (!queued_for(t, endpoint)) (void)linea_park(&t->park, 0);
+    take_oldest(t, at, len);
 }
 
 void linea_chan_choose(unsigned long endpoint, uint8_t branch) {
@@ -389,7 +456,7 @@ void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int 
     t->watching[side] = r;
     if (side == 0) t->watching_return = returned;
     linea_waitset_pause(linea_pause_watch_after_publish);
-    const int ready = returned ? t->state == finished : (t->full && t->from != endpoint);
+    const int ready = returned ? t->state == finished : queued_for(t, endpoint);
     if (ready) linea_registration_signal(r);
     linea_park_unlock(&t->park);
 }
@@ -410,6 +477,9 @@ void linea_chan_close(unsigned long endpoint) {
     if ((endpoint & 1UL) != 0) return;
     struct task *t = task_of(endpoint);
     join(t);
+    /* Dual protocols receive every value before both ends close, and the
+     * runtime cannot release what a value owns. */
+    if (t->count != 0) fail("linea: a session ended holding a value its receiver never took\n");
     t->release(t->release_at, t->len);
     destroy(t);
 }
@@ -529,13 +599,12 @@ uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned
      * it, so the receive waits until the peer sends. */
     const unsigned long deadline = linea_park_deadline_after(timeout_ns);
     linea_park_lock(&t->park);
-    while (!t->full || t->from == endpoint) {
-        if (linea_park(&t->park, deadline) && (!t->full || t->from == endpoint)) {
+    while (!queued_for(t, endpoint)) {
+        if (linea_park(&t->park, deadline) && !queued_for(t, endpoint)) {
             linea_park_unlock(&t->park);
             return 0;
         }
     }
-    take_slot(t, at, len);
-    linea_park_unlock(&t->park);
+    take_oldest(t, at, len);
     return 1;
 }

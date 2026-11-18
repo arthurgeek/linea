@@ -207,11 +207,11 @@ static void a_send_as_next_begins_to_wait_wakes_it(void) {
     linea_waitset_close(set);
 }
 
-/* `take` withdraws an endpoint whose peer waits in its send: the endpoint
- * comes back, the sender still waits, the set never delivers it, and a later
- * receive completes at once. `take_if_registered` refuses it, since it was
+/* `take` withdraws an endpoint whose peer's value waits in the session:
+ * the endpoint comes back, the value stays queued, the set never delivers
+ * it, and a later receive completes at once. `take_if_registered` refuses it, since it was
  * signalled. */
-static void take_of_a_signalled_endpoint_leaves_the_sender_waiting(void) {
+static void take_of_a_signalled_endpoint_leaves_the_value_queued(void) {
     const unsigned long set = linea_waitset_open();
     const unsigned long reserved = linea_waitset_reserve(set);
     const unsigned long handle = started_waiting();
@@ -355,8 +355,8 @@ static void a_reused_slot_refuses_an_old_key(void) {
     linea_waitset_close(set);
 }
 
-/* Closing a set withdraws each registration once, signalled or not, and a
- * sender whose endpoint was withdrawn still waits for its receive. */
+/* Closing a set withdraws each registration once, signalled or not, and the
+ * value queued for an endpoint it withdrew waits for its receive. */
 static void close_withdraws_each_registration_once(void) {
     const unsigned long set = linea_waitset_open();
     arm(linea_pause_send_filled);
@@ -632,8 +632,8 @@ static void *call_withdraw(void *arg) {
 
 /* `close` withdraws a registration its source has swapped to signalled and
  * not yet queued: the withdrawal waits for the source's post, takes the
- * registration out of the queue, and the set closes empty with the sender
- * still waiting. */
+ * registration out of the queue, and the set closes empty with the value
+ * still queued. */
 static void close_between_a_sources_swap_and_its_post(void) {
     const unsigned long set = linea_waitset_open();
     const unsigned long reserved = linea_waitset_reserve(set);
@@ -1248,7 +1248,7 @@ int main(void) {
     a_send_before_registration_is_found();
     a_send_during_registration_signals_once();
     a_send_as_next_begins_to_wait_wakes_it();
-    take_of_a_signalled_endpoint_leaves_the_sender_waiting();
+    take_of_a_signalled_endpoint_leaves_the_value_queued();
     take_between_a_sources_swap_and_its_post();
     take_before_a_sources_swap();
     a_return_is_delivered_once_either_way();

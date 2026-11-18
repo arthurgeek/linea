@@ -1,0 +1,36 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+
+// On a loop with one carrier a task runs only while the others wait, so the
+// order of the lines shows where each one waits. A session holds two values
+// its receiver has not taken: the first two sends return before the receiver
+// has run, and the third waits until the receiver has taken one.
+fn main() -> Result[UInt8, io.IoError] {
+    let one_carrier = io.Loop.open(carriers: 1)?
+    let sender = sink [] |sink me: Chan[End]| {
+        let receiver = sink [] |sink from: Chan[Recv[UInt64, Recv[UInt64, Recv[UInt64, End]]]]| {
+            io.println("receiver runs").unwrap()
+            let (first, rest) = from.recv()
+            io.println("received {first}").unwrap()
+            let (second, last) = rest.recv()
+            io.println("received {second}").unwrap()
+            let (third, done) = last.recv()
+            io.println("received {third}").unwrap()
+            done.close()
+        }
+        let handle = task.start(receiver).unwrap()
+        let after_two = handle.send(1).send(2)
+        io.println("sent two").unwrap()
+        let finished = after_two.send(3)
+        io.println("sent three").unwrap()
+        finished.close()
+        me.close()
+    }
+    task.start(sender, on: one_carrier).unwrap().close()
+    .Ok(0)
+}

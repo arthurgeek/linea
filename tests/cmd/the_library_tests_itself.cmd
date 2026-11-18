@@ -1437,6 +1437,7 @@ The library tests itself.
   ok    session.entering a protocol keeps the endpoint
   ok    session.the dual of a protocol is what its peer does
   ok    session.the dual of the dual is the protocol
+  ok    session.values sent in a row arrive in the order they were sent
   ok    task.a cancelled slot runs nothing and gives the body back
   ok    task.a client reaches the state its owner holds
   ok    task.a copied key names the same registration
@@ -1463,7 +1464,7 @@ The library tests itself.
   ok    task.a started task answers its handle
   ok    task.a stopped map yields only what it started
   ok    task.a system task has no carrier
-  ok    task.a taken endpoint comes back with its peer still waiting
+  ok    task.a taken endpoint comes back with its peer's value still queued
   ok    task.a task started in one call runs its body
   ok    task.a task that cannot start answers the reason
   ok    task.a thread that cannot be made hands the body back
@@ -1677,4 +1678,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1674 passed, 0 failed
+  1675 passed, 0 failed

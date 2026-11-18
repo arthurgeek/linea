@@ -601,7 +601,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_signal_acquire", .parameters = &.{p(.u8)}, .result = .i64, .declared_by = io_signal, .migration_contract = .neutral },
     .{ .symbol = "linea_signal_release", .parameters = &.{ p(.u8), p(.u64) }, .result = .unit, .declared_by = io_signal, .migration_contract = .neutral },
     .{ .symbol = "linea_signal_deliver_simulated", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = io_simulation, .migration_contract = .bound_by_context },
-    // A task's thread and the rendezvous channel of its session.
+    // A task's thread and the queue of its session.
     .{ .symbol = "linea_available_parallelism", .parameters = &.{}, .result = .u64, .declared_by = .{ .library = .{ .module = "env", .reached_through = "`env.available_parallelism`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_fiber_current_carrier", .declared_by = heldBy("task", "`task.current_carrier`"), .parameters = &.{}, .result = .u64, .migration_contract = .neutral },
     // New carriers install their own TLS. The preparing thread only waits
@@ -631,7 +631,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_chan_send", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`send` on a `session.Chan`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_recv", .parameters = &.{ p(.u64), typed_bytes, p(.u64) }, .result = .unit, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "`recv` on a `session.Chan`" } }, .migration_contract = .neutral },
     // Branch operations send or receive one stack-local byte through the
-    // same logical rendezvous as payload transfers, with no carrier state.
+    // same session queue as payload transfers, with no carrier state.
     .{ .symbol = "linea_chan_choose", .parameters = &.{ p(.u64), p(.u8) }, .result = .unit, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`choose_left` and `choose_right` on a `session.Chan`" } }, .migration_contract = .neutral },
     .{ .symbol = "linea_chan_offer", .parameters = &.{p(.u64)}, .result = .u8, .declared_by = .{ .library = .{ .module = "session", .reached_through = "`offer` on a `session.Chan`" } }, .migration_contract = .neutral },
     // Task.start installs the compiler-confined release_kept_bytes callback;
