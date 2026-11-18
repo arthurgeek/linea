@@ -4032,8 +4032,13 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
         // distinct guarded thunk, even when the runtime also calls it.
         names[0] = "foreign_call";
         @constCast(mir.extra)[0] = .at(0);
-        for ([_]bool{ false, true }) |trusted| {
-            names[0] = if (trusted) "linea_available_parallelism" else "foreign_call";
+        for ([_]struct { symbol: []const u8, trusted: bool, pins: bool }{
+            .{ .symbol = "foreign_call", .trusted = false, .pins = false },
+            .{ .symbol = "linea_errno", .trusted = true, .pins = true },
+            .{ .symbol = "linea_available_parallelism", .trusted = true, .pins = false },
+        }) |boundary| {
+            const trusted = boundary.trusted;
+            names[0] = boundary.symbol;
             var out: std.Io.Writer.Allocating = .init(gpa);
             defer out.deinit();
             var emitter: FunctionEmitter = .{
@@ -4048,10 +4053,10 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
             try emitter.call(call, ty == .never);
             try testing.expectEqual(@as(usize, if (trusted) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_enter()"));
             try testing.expectEqual(@as(usize, if (trusted or ty == .never) 0 else 1), std.mem.count(u8, out.written(), "func.call @linea_foreign_leave()"));
-            try testing.expectEqual(@as(usize, if (trusted) 1 else 0), std.mem.count(u8, out.written(), "func.call @linea_fiber_restrict_current()"));
-            if (trusted) {
+            try testing.expectEqual(@as(usize, if (boundary.pins) 1 else 0), std.mem.count(u8, out.written(), "func.call @linea_fiber_restrict_current()"));
+            if (boundary.pins) {
                 const guard_at = std.mem.indexOf(u8, out.written(), "func.call @linea_fiber_restrict_current()").?;
-                const native_at = std.mem.indexOf(u8, out.written(), "func.call @linea_available_parallelism(").?;
+                const native_at = std.mem.indexOf(u8, out.written(), "func.call @linea_errno(").?;
                 try testing.expect(guard_at < native_at);
             }
             if (ty == .never) try testing.expect(std.mem.indexOf(u8, out.written(), "llvm.unreachable") != null);

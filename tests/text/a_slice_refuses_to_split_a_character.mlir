@@ -4340,7 +4340,6 @@ module {
     %v6 = llvm.load %s0 : !llvm.ptr -> !llvm.ptr loc("std/mem/fd.lin":L:C)
     %v7 = func.call @"lin.std.mem;Slice[UInt8].length"(%v6) : (!llvm.ptr) -> i64 loc("std/mem/fd.lin":L:C)
     %va8_0 = arith.trunci %v0 : i64 to i32 loc("std/mem/fd.lin":L:C)
-    func.call @linea_fiber_restrict_current() : () -> ()
     %v8 = func.call @linea_write_some(%va8_0, %v5, %v7) : (i32, i64, i64) -> i64 loc("std/mem/fd.lin":L:C)
     func.return %v8 : i64 loc("std/mem/fd.lin":L:C)
   }

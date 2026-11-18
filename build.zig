@@ -16,6 +16,19 @@ fn decimalProvider(b: *std.Build) std.Build.LazyPath {
     return root;
 }
 
+// The C backend calls these two conversion helpers even on targets with
+// hardware floating point. Supply only those helpers, not compiler-rt's
+// unrelated weak libm implementations.
+fn floatConversion(b: *std.Build, name: []const u8) std.Build.LazyPath {
+    const directory = b.graph.zig_lib_directory.path orelse @panic("Zig library directory is required");
+    const files = b.addWriteFiles();
+    const root = files.addCopyFile(.{ .cwd_relative = b.pathJoin(&.{ directory, "compiler_rt", name }) }, name);
+    const tests = b.fmt("{s}_test.zig", .{std.fs.path.stem(name)});
+    _ = files.addCopyFile(.{ .cwd_relative = b.pathJoin(&.{ directory, "compiler_rt", tests }) }, tests);
+    _ = files.addCopyFile(b.path("runtime/zig-float-LICENSE"), "LICENSE");
+    return root;
+}
+
 fn migrationFixture(b: *std.Build, files: *std.Build.Step.WriteFile, fixture_name: []const u8) std.Build.LazyPath {
     for ([_][]const u8{ "stealing.lin", "pinned.lin", "unknown_pinned.lin", "scheduling_workload.lin" }) |foreign_source| {
         if (std.mem.eql(u8, fixture_name, foreign_source)) {
@@ -2190,9 +2203,15 @@ pub fn build(b: *std.Build) void {
         runtime_target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM"),
         "--dep",
         "decimal_provider",
+        "--dep",
+        "float_truncate",
+        "--dep",
+        "float_extend",
     });
     float_source.addPrefixedFileArg("-Mroot=", b.path("runtime/float.zig"));
     float_source.addPrefixedFileArg("-Mdecimal_provider=", decimalProvider(b));
+    float_source.addPrefixedFileArg("-Mfloat_truncate=", floatConversion(b, "truncf.zig"));
+    float_source.addPrefixedFileArg("-Mfloat_extend=", floatConversion(b, "extendf.zig"));
     float_source.addArgs(&.{ "--cache-dir", b.cache_root.path orelse ".", "--global-cache-dir", b.graph.global_cache_root.path orelse "." });
     const float_c = float_source.addPrefixedOutputFileArg("-femit-bin=", "linea_float.c");
     var float_flags: std.ArrayList([]const u8) = .empty;
@@ -3208,6 +3227,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     }));
+    runtime_tests.root_module.addAnonymousImport("float_truncate", .{ .root_source_file = floatConversion(b, "truncf.zig") });
+    runtime_tests.root_module.addAnonymousImport("float_extend", .{ .root_source_file = floatConversion(b, "extendf.zig") });
     runtime_tests.root_module.link_libc = true;
     if (target.result.os.tag == .linux) runtime_tests.root_module.linkSystemLibrary("m", .{});
     const run_runtime_tests = b.addRunArtifact(runtime_tests);

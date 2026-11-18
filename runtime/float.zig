@@ -1,6 +1,32 @@
 const std = @import("std");
 const decimal_provider = @import("decimal_provider");
 
+// Zig's C backend emits calls to these compiler-rt helpers. Linux AArch64's
+// system toolchain need not provide them; keep the generated object complete
+// using the pinned Zig implementations, which manipulate IEEE encodings.
+export fn __truncdfsf2(value: f64) callconv(.c) f32 {
+    return @import("float_truncate").truncf(f32, f64, value);
+}
+
+export fn __extendsfdf2(value: f32) callconv(.c) f64 {
+    return @import("float_extend").extendf(f64, f32, @as(u32, @bitCast(value)));
+}
+
+test "C backend float conversion helpers preserve IEEE values and round ties to even" {
+    for ([_]struct { wide: f64, narrow: u32 }{
+        .{ .wide = 0.0, .narrow = 0 },
+        .{ .wide = -0.0, .narrow = 0x80000000 },
+        .{ .wide = 0x1p-149, .narrow = 1 },
+        .{ .wide = 1.0 + 0x1p-24, .narrow = 0x3f800000 },
+        .{ .wide = 1.0 + 0x1.8p-23, .narrow = 0x3f800002 },
+        .{ .wide = std.math.inf(f64), .narrow = 0x7f800000 },
+    }) |case| {
+        try std.testing.expectEqual(case.narrow, @as(u32, @bitCast(__truncdfsf2(case.wide))));
+        const narrow: f32 = @bitCast(case.narrow);
+        try std.testing.expectEqual(@as(u64, @bitCast(@as(f64, narrow))), @as(u64, @bitCast(__extendsfdf2(narrow))));
+    }
+}
+
 const parse_token_limit = 65536;
 const ParseStatus = enum(u64) { ok, syntax, out_of_range, token_limit };
 
