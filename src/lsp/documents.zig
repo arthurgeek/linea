@@ -96,10 +96,7 @@ pub const Documents = struct {
         var keys = self.open.keyIterator();
         for (buffers) |*path| path.* = keys.next().?.*;
         const paths = try loader.pathsOfRoot(gpa, io, root, buffers);
-        defer {
-            for (paths) |p| gpa.free(p);
-            gpa.free(paths);
-        }
+        defer loader.freeListed(gpa, paths);
 
         var files: std.ArrayList(loader.InMemoryFile) = .empty;
         errdefer {
@@ -107,7 +104,8 @@ pub const Documents = struct {
             files.deinit(gpa);
         }
 
-        for (paths) |disk_path| {
+        for (paths) |listed| {
+            const disk_path = listed.path;
             const path = try gpa.dupe(u8, disk_path);
             errdefer gpa.free(path);
 
@@ -121,15 +119,14 @@ pub const Documents = struct {
             const is_manifest = std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name);
             const buffer = self.open.get(disk_path);
             const deferred = buffer == null and !is_manifest and reading == .open_and_manifests;
-            // The root's manifest is the text the walk that found the root
-            // read, so the load and the root agree on what it says.
-            const walked = if (root.manifest) |m| std.mem.eql(u8, m, disk_path) else false;
+            // A manifest the walk read is the text it read, so the load and
+            // the walk that listed its files agree on what each one says.
             const text = if (buffer) |held|
                 try gpa.dupe(u8, held)
             else if (deferred)
                 try gpa.dupe(u8, "")
-            else if (walked)
-                try gpa.dupe(u8, root.manifest_text.?)
+            else if (listed.text) |read|
+                try gpa.dupe(u8, read)
             else
                 try source_mod.readFileAlloc(io, gpa, path);
             errdefer gpa.free(text);

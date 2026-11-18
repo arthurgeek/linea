@@ -945,23 +945,16 @@ fn loadFromDiskWith(
     }
 
     const paths = try pathsOfRoot(gpa, io, found, &.{});
-    defer {
-        for (paths) |q| gpa.free(q);
-        gpa.free(paths);
-    }
+    defer freeListed(gpa, paths);
 
     var files: std.ArrayList(InMemoryFile) = .empty;
     defer files.deinit(gpa);
 
-    // Sources are read when their module is reached. The manifest's text is
-    // the one `rootOf` read: what it declares decides how the first module is
-    // loaded.
-    for (paths) |rel| {
-        const is_manifest = if (found.manifest) |m| std.mem.eql(u8, rel, m) else false;
-        try files.append(gpa, .{
-            .path = rel,
-            .text = if (is_manifest) found.manifest_text.? else "",
-        });
+    // Sources are read when their module is reached. Each manifest carries
+    // the text the walk read, the root's from `rootOf`: what they declare
+    // decides how the first module is loaded and which libraries it reaches.
+    for (paths) |listed| {
+        try files.append(gpa, .{ .path = listed.path, .text = listed.text orelse "" });
     }
 
     if (resumed_from) |checked| return checked.loadInputs(gpa, .{ .disk = io }, table, sink, interner, given, found.module, files.items, purpose);
@@ -1396,19 +1389,27 @@ pub fn entryOf(
 /// `unsaved` names files an editor holds that may not be on disk yet. Each one
 /// a root's source directory holds (`holdsSource`) is listed with that root's
 /// files, as it will be once it is written; the command line names none.
-pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root, unsaved: []const []const u8) ![][]const u8 {
+///
+/// Each manifest the walk read is listed with its text: the root's, as `rootOf`
+/// read it, and each library's, read once. A load given these files reads
+/// every manifest from that text, so one load reads each manifest once.
+/// Release the result with `freeListed`.
+pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root, unsaved: []const []const u8) ![]Listed {
     var all: std.ArrayList([]const u8) = .empty;
-    errdefer {
+    defer {
         for (all.items) |p| gpa.free(p);
         all.deinit(gpa);
     }
     var listed: std.StringHashMapUnmanaged(void) = .empty;
     defer listed.deinit(gpa);
+    var texts: std.StringHashMapUnmanaged([]const u8) = .empty;
+    defer freeTexts(gpa, &texts);
 
     try appendPaths(gpa, &all, &listed, try pathsOfModule(gpa, io, dirOfEntry(root.entry)));
     try appendHeld(gpa, io, dirOfEntry(root.entry), unsaved, &all, &listed);
-    const manifest = root.manifest orelse return all.toOwnedSlice(gpa);
+    const manifest = root.manifest orelse return listedOf(gpa, &all, &texts);
     try appendPaths(gpa, &all, &listed, try gpa.dupe([]const u8, &.{try gpa.dupe(u8, manifest)}));
+    if (root.manifest_text) |text| try keepText(gpa, &texts, manifest, text);
 
     // Every library the manifest names, and every one theirs name, once each:
     // a load reads a dependency's sources from the same list it reads the
@@ -1426,9 +1427,58 @@ pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root, unsaved: []co
         const where = std.Io.Dir.cwd().realPathFileAlloc(io, root_dir, arena.allocator()) catch root_dir;
         try seen.put(gpa, try gpa.dupe(u8, where), {});
     }
-    const text = root.manifest_text orelse return all.toOwnedSlice(gpa);
-    try appendDependencyPaths(gpa, io, dirOf(manifest), text, unsaved, &all, &listed, &seen);
-    return all.toOwnedSlice(gpa);
+    const text = root.manifest_text orelse return listedOf(gpa, &all, &texts);
+    try appendDependencyPaths(gpa, io, dirOf(manifest), text, unsaved, &all, &listed, &seen, &texts);
+    return listedOf(gpa, &all, &texts);
+}
+
+/// A file `pathsOfRoot` lists: its path, and for a manifest the walk read, the
+/// text it read.
+pub const Listed = struct {
+    path: []const u8,
+    text: ?[]const u8 = null,
+};
+
+/// Releases what `pathsOfRoot` returned.
+pub fn freeListed(gpa: std.mem.Allocator, files: []const Listed) void {
+    for (files) |f| {
+        gpa.free(f.path);
+        if (f.text) |text| gpa.free(text);
+    }
+    gpa.free(files);
+}
+
+/// Moves each listed path, with the text read for it, into one slice, leaving
+/// `all` and `texts` empty.
+fn listedOf(gpa: std.mem.Allocator, all: *std.ArrayList([]const u8), texts: *std.StringHashMapUnmanaged([]const u8)) ![]Listed {
+    const out = try gpa.alloc(Listed, all.items.len);
+    for (all.items, out) |path, *o| {
+        o.* = .{ .path = path, .text = if (texts.fetchRemove(path)) |held| text: {
+            gpa.free(held.key);
+            break :text held.value;
+        } else null };
+    }
+    all.clearRetainingCapacity();
+    return out;
+}
+
+/// Records the text read for the manifest at `path`, once.
+fn keepText(gpa: std.mem.Allocator, texts: *std.StringHashMapUnmanaged([]const u8), path: []const u8, text: []const u8) !void {
+    if (texts.contains(path)) return;
+    const key = try gpa.dupe(u8, path);
+    errdefer gpa.free(key);
+    const value = try gpa.dupe(u8, text);
+    errdefer gpa.free(value);
+    try texts.put(gpa, key, value);
+}
+
+fn freeTexts(gpa: std.mem.Allocator, texts: *std.StringHashMapUnmanaged([]const u8)) void {
+    var it = texts.iterator();
+    while (it.next()) |e| {
+        gpa.free(e.key_ptr.*);
+        gpa.free(e.value_ptr.*);
+    }
+    texts.deinit(gpa);
 }
 
 /// Appends each of `unsaved` that the source directory `dir` holds and that is
@@ -1488,6 +1538,7 @@ fn appendDependencyPaths(
     all: *std.ArrayList([]const u8),
     listed: *std.StringHashMapUnmanaged(void),
     seen: *std.StringHashMapUnmanaged(void),
+    texts: *std.StringHashMapUnmanaged([]const u8),
 ) !void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -1504,7 +1555,9 @@ fn appendDependencyPaths(
         // The manifest under every spelling a manifest uses, whatever it
         // holds, so a load from these files finds and reports it as a load
         // from disk does; the sources once, under the first.
-        try appendPaths(gpa, all, listed, try gpa.dupe([]const u8, &.{try std.fs.path.join(gpa, &.{ dir, manifest_name })}));
+        const manifest_path = try std.fs.path.join(a, &.{ dir, manifest_name });
+        try appendPaths(gpa, all, listed, try gpa.dupe([]const u8, &.{try gpa.dupe(u8, manifest_path)}));
+        try keepText(gpa, texts, manifest_path, library_text);
         const where = std.Io.Dir.cwd().realPathFileAlloc(io, dir, a) catch dir;
         if (seen.contains(where)) continue;
         try seen.put(gpa, try gpa.dupe(u8, where), {});
@@ -1516,7 +1569,7 @@ fn appendDependencyPaths(
         const sources = pathsOfModule(gpa, io, source) catch continue;
         try appendPaths(gpa, all, listed, sources);
         try appendHeld(gpa, io, source, unsaved, all, listed);
-        try appendDependencyPaths(gpa, io, dir, library_text, unsaved, all, listed, seen);
+        try appendDependencyPaths(gpa, io, dir, library_text, unsaved, all, listed, seen, texts);
     }
 }
 
@@ -1533,13 +1586,12 @@ test "a root's paths are its sources and the manifest that identified it" {
     const found = try rootOf(gpa, testing.io, root, .as_named, "");
     defer found.deinit(gpa);
     const paths = try pathsOfRoot(gpa, testing.io, found, &.{});
-    defer {
-        for (paths) |q| gpa.free(q);
-        gpa.free(paths);
-    }
+    defer freeListed(gpa, paths);
     try testing.expectEqual(@as(usize, 2), paths.len);
-    try testing.expect(std.mem.endsWith(u8, paths[0], "src/main.lin"));
-    try testing.expect(std.mem.endsWith(u8, paths[1], manifest_name));
+    try testing.expect(std.mem.endsWith(u8, paths[0].path, "src/main.lin"));
+    try testing.expect(paths[0].text == null);
+    try testing.expect(std.mem.endsWith(u8, paths[1].path, manifest_name));
+    try testing.expectEqualStrings("{\"source\": \"src\"}", paths[1].text.?);
 }
 
 /// A path with the spellings that name one file written one way: `.` segments,
@@ -2116,12 +2168,9 @@ test "a root's paths hold every library its manifest names" {
     const found = try rootOf(gpa, testing.io, guests, .as_named, "");
     defer found.deinit(gpa);
     const paths = try pathsOfRoot(gpa, testing.io, found, &.{});
-    defer {
-        for (paths) |q| gpa.free(q);
-        gpa.free(paths);
-    }
+    defer freeListed(gpa, paths);
     var holds = false;
-    for (paths) |q| holds = holds or std.mem.eql(u8, q, names);
+    for (paths) |q| holds = holds or std.mem.eql(u8, q.path, names);
     try testing.expect(holds);
 }
 
@@ -2142,13 +2191,12 @@ test "a root's paths list a library's manifest that will not parse" {
     const found = try rootOf(gpa, testing.io, app, .as_named, "");
     defer found.deinit(gpa);
     const paths = try pathsOfRoot(gpa, testing.io, found, &.{});
-    defer {
-        for (paths) |q| gpa.free(q);
-        gpa.free(paths);
-    }
-    var holds = false;
-    for (paths) |q| holds = holds or std.mem.eql(u8, q, broken);
-    try testing.expect(holds);
+    defer freeListed(gpa, paths);
+    // Listed with the text the walk read, which is what a load reads it from.
+    const listed = for (paths) |q| {
+        if (std.mem.eql(u8, q.path, broken)) break q;
+    } else return error.TestExpectedListed;
+    try testing.expectEqualStrings("{ not json", listed.text.?);
 }
 
 test "two sources share modules unless a manifest stands between them" {
@@ -3436,12 +3484,12 @@ const Loader = struct {
             .manifest_dir = manifest_dir,
             .source_dir = self.primary_dir,
             .identity = try self.identityOf(manifest_dir),
-            .source_identity = try self.identityOf(self.primary_dir),
+            .source_identity = try self.sourceIdentityOf(manifest_dir, self.primary_dir),
         });
         try self.graph.append(a, .{ .name = standard_dependency, .manifest_dir = library.prelude_dir, .source_dir = library.prelude_dir });
         if (manifest.path.len == 0 or self.program_is_library) return;
         try self.graph_dirs.put(a, self.graph.items[0].identity, .primary);
-        const text = if (manifest.text.len > 0 or self.input == .memory) manifest.text else (try self.manifestTextAt(manifest_dir)) orelse return;
+        const text = (try self.manifestTextAt(manifest_dir)) orelse return;
         var stack: std.ArrayList(RootId) = .empty;
         try stack.append(a, .primary);
         try self.readDependencies(.primary, manifest.path, text, &stack);
@@ -3456,14 +3504,32 @@ const Loader = struct {
         switch (self.input) {
             .memory => {
                 const path = try std.fs.path.join(self.scratch.allocator(), &.{ dir, manifest_name });
-                for (self.files) |f| if (f.identity.len > 0 and std.mem.eql(u8, f.path, path)) return f.identity;
-                return dir;
+                const supplied = self.suppliedAt(path) orelse return dir;
+                return if (supplied.identity.len > 0) supplied.identity else dir;
             },
             .disk => |io| return std.Io.Dir.cwd().realPathFileAlloc(io, if (dir.len == 0) "." else dir, self.scratch.allocator()) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => return dir,
             },
         }
+    }
+
+    /// Where a root's source directory is, for telling two roots' sources
+    /// apart: the identity of the directory holding the root's manifest
+    /// (`identityOf`), with the path down from it to `source_dir` beneath.
+    /// One answer for the program and every library, from disk and from
+    /// memory, because a `source` is a path down with no `..` (ADR 0280), so
+    /// the filesystem finds beneath the identity what the spelling names. A
+    /// root with no manifest has `manifest_dir` equal to `source_dir`.
+    fn sourceIdentityOf(self: *Loader, manifest_dir: []const u8, source_dir: []const u8) LoadError![]const u8 {
+        const a = self.scratch.allocator();
+        const spelled = try canonical(a, manifest_dir);
+        const base = if (std.mem.eql(u8, spelled, ".")) "" else spelled;
+        const under = try canonical(a, source_dir);
+        const identity = try self.identityOf(manifest_dir);
+        if (std.mem.eql(u8, base, under)) return identity;
+        if (!within(under, base)) return self.identityOf(source_dir);
+        return manifest_source.directory(a, identity, under[base.len..]);
     }
 
     /// [M-Dependency] for a library whose manifest grants it `extern` and
@@ -3527,19 +3593,36 @@ const Loader = struct {
     }
 
     /// The text of the manifest in `dir`, or null where there is none.
+    ///
+    /// The text the load was given where it was given one: a load from
+    /// memory holds nothing else, and a load from disk is given the text the
+    /// walk that listed its files read (`pathsOfRoot`), so the graph reads
+    /// that snapshot rather than the disk again. Disk is read only for a
+    /// manifest no walk listed.
     fn manifestTextAt(self: *Loader, dir: []const u8) LoadError!?[]const u8 {
         const a = self.scratch.allocator();
         const path = try std.fs.path.join(a, &.{ dir, manifest_name });
+        const supplied = self.suppliedAt(path);
         switch (self.input) {
-            .memory => {
-                for (self.files) |f| if (std.mem.eql(u8, f.path, path)) return f.text;
-                return null;
-            },
-            .disk => |io| return source_mod.readFileAlloc(io, a, path) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                else => return null,
+            .memory => return if (supplied) |f| f.text else null,
+            .disk => |io| {
+                if (supplied) |f| if (f.text.len > 0) return f.text;
+                return source_mod.readFileAlloc(io, a, path) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    else => return null,
+                };
             },
         }
+    }
+
+    /// The file supplied at `path`, found by its place in the sorted list.
+    fn suppliedAt(self: *const Loader, path: []const u8) ?InMemoryFile {
+        const at = std.sort.binarySearch(InMemoryFile, self.files, path, struct {
+            fn order(wanted: []const u8, file: InMemoryFile) std.math.Order {
+                return std.mem.order(u8, wanted, file.path);
+            }
+        }.order) orelse return null;
+        return self.files[at];
     }
 
     /// The entries one manifest writes under `dependencies`, each checked and
@@ -3667,10 +3750,7 @@ const Loader = struct {
         // which sits inside the directory holding its manifest and shares no
         // module with another root.
         const source_dir = try manifest_source.directory(a, dir, parsed.source);
-        // `parseManifest` refused a `source` that is not a path down from the
-        // library's directory, so the same path beneath its identity is where
-        // the filesystem finds its source.
-        const source_identity = try manifest_source.directory(a, identity, parsed.source);
+        const source_identity = try self.sourceIdentityOf(dir, source_dir);
         if (self.sourceOverlapping(source_identity, identity)) |other| {
             const note = try std.fmt.allocPrint(self.sink.arena, "keep each library's source apart; `{s}` reads modules from `{s}`", .{ self.rootLabel(other), self.graph.items[other.index()].source_dir });
             try self.reportManifest(manifest_path, text, entry.key, "two roots may not read the same modules", "the source of `{s}` overlaps the source of `{s}`", .{ name, self.rootLabel(other) }, &.{note});
