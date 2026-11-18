@@ -2,7 +2,12 @@
 
 Status: Accepted — 2026-11-07; extends
 [0253](0253-independent-work-runs-through-an-explicit-executor-policy.md)
-(a handler per serving task).
+(a handler per serving task). Its clause in §2 that the factory's error
+must be `Shareable` is superseded by
+[0284](0284-serving-moves-a-factory-error-and-keeps-its-listener.md).
+§4, that `listen_and_serve` makes an extra handler to announce the bound
+address, is superseded by
+[0285](0285-a-serving-task-announces-the-bound-address.md).
 
 ## Context
 

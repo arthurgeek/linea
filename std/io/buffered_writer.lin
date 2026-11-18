@@ -329,8 +329,8 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
     }
 
     test "a preallocated write buffer needs no further allocation" {
-        defer let log = mem.AllocationLog.open(mem.system(), 2).unwrap()
-        let bytes = log.allocator().acquire(4).unwrap()
+        defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(2)).unwrap()
+        let bytes = log.handle().acquire(4).unwrap()
         let output = BufferedOutputProbe { bytes = [0, 0, 0, 0, 0, 0, 0, 0], length = 0, step = 2, stop = 8 }
         var writer = BufferedWriter.with_buffer(bytes, output)
         let accepted = &writer.write_some("tea".as_bytes()).unwrap()

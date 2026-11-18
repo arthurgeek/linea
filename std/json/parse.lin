@@ -305,8 +305,8 @@ test "parsing nested documents handles bounded allocation refusal" {
 // nothing may be allocated after it.
 test "json parser disposes every allocation on success and each refusal" {
     let input = r#"{"first":["tea",123,{"nested":"green\nleaf"}],"second":[true,false,null,"a longer owned string"],"last":{"price":1.25}}"#
-    defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let allocator = baseline.allocator()
+    defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+    let allocator = baseline.handle()
     let document = parse_in(allocator, input).unwrap()
     document.release()
     let attempts = baseline.attempts()
@@ -314,8 +314,8 @@ test "json parser disposes every allocation on success and each refusal" {
     testing.assert_eq(baseline.acquired(), attempts, "successful parse refused an acquisition")?
     testing.assert(baseline.all_disposed(), "successful document release lost or repeated an allocation")?
     for refusal in UInt64(1)..(attempts + 1) {
-        defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-        let failing = log.allocator()
+        defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+        let failing = log.handle()
         let allocation_error = match parse_in(failing, input) {
             Err(error) => error.kind == ParseErrorKind.Allocation,
             Ok(value) => {
@@ -344,8 +344,8 @@ test "json parser disposes completed siblings and partial tokens on invalid inpu
         r#"{"done":["tea",12]} trailing"#,
     ]
     for input in inputs {
-        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = baseline.allocator()
+        defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+        let allocator = baseline.handle()
         let invalid = match parse_in(allocator, input) {
             Err(error) => error.kind != ParseErrorKind.Allocation,
             Ok(value) => {
@@ -358,8 +358,8 @@ test "json parser disposes completed siblings and partial tokens on invalid inpu
         testing.assert(attempts > 0, "malformed input built no partial ownership")?
         testing.assert(baseline.all_disposed(), "syntax refusal lost or repeated partial ownership")?
         for refusal in UInt64(1)..(attempts + 1) {
-            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-            let failing = log.allocator()
+            defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+            let failing = log.handle()
             let refused = match parse_in(failing, input) {
                 Err(error) => error.kind == ParseErrorKind.Allocation,
                 Ok(value) => {

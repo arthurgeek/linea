@@ -1,3 +1,4 @@
+import std.io.core
 import std.testing
 
 // A SlotType names the element type the private typed-storage operations work
@@ -66,6 +67,21 @@ impl[T, A: Allocator] Storage[T, A] {
     fn into_buffer(sink self: Self) -> Option[Buffer[A]] where carries(self) {
         let Storage { buffer, allocator: _, at: _, len: _ } = self
         buffer
+    }
+
+    // Read up to `count` bytes from `reader` into the backing buffer from its
+    // first byte, lending the buffer to the reader where it is. A reader is
+    // handed no allocator, so it cannot leave another buffer in its place, and
+    // the storage's address stays the buffer's.
+    fn read_from[R: core.Reader](inout self: Self, inout reader: R, count: UInt64) -> Result[UInt64, R.Error] where carries(.Err: reader) {
+        var buffer = exchange(&self.buffer, .None) else {
+            panic("storage with no buffer was asked to read")
+        }
+        let outcome = &reader.read_some(&buffer, offset: 0, count: count)
+        // The slot was emptied above, so what the exchange hands back is
+        // `.None`, which releases nothing.
+        exchange(&self.buffer, .Some(buffer)).release()
+        outcome
     }
 
     // Dispose the backing buffer. Disposal settles no slot, so every live

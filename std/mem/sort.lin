@@ -124,8 +124,8 @@ impl[T, A: Allocator] Vec[T, A] {
     }
 
     test "sorting allocates nothing" {
-        defer let log = AllocationLog.open(system(), 0).unwrap()
-        defer var values: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
+        defer let log = TestAllocator.open(system()).unwrap()
+        defer var values: Vec[UInt64, TestHandle[SystemAllocator]] = Vec.new_in(log.handle())
         for value in UInt64(0)..500 {
             &values.push((value * 7919) % 500).unwrap()
         }

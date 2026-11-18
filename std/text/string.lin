@@ -185,6 +185,20 @@ impl[A: Allocator] String[A] {
         .Ok(())
     }
 
+    // Empty the text and keep its storage, so text written next reuses it.
+    pub fn clear(inout self: Self) {
+        &self.bytes.clear()
+    }
+
+    test "clear empties the text and keeps its storage" {
+        defer var text = "a long enough line".to_owned().unwrap()
+        &text.clear()
+        testing.assert_eq(text.view(), "", "cleared text still held bytes")?
+        &text.append("again").unwrap()
+        testing.assert_eq(text.view(), "again", "text written after clear changed")?
+        .Ok(())
+    }
+
     // Owned text answers the read operations of `Str` by forwarding to its view,
     // so the borrowed implementation stays the only one.
     // Copy the text into storage owned by `allocator`.

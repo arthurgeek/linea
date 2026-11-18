@@ -4,6 +4,7 @@
 // caller's to settle.
 import std.io
 import std.mem
+import std.testing
 
 use io.InputFailure
 
@@ -47,9 +48,9 @@ fn settled(sink error: io.ReadTextError[Ticket]) -> UInt64 {
 }
 
 fn main() -> UInt8 {
-    let log = mem.AllocationLog.open(mem.system(), 16).unwrap()
+    let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(16)).unwrap()
     var source = Source { position = 0 }
-    let answer = match io.read_text_in(log.allocator(), &source, max_bytes: 8) {
+    let answer = match io.read_text_in(log.handle(), &source, max_bytes: 8) {
         Ok(text) => {
             text.release()
             UInt64(0)

@@ -131,8 +131,9 @@ test "a serve error displays its cause" {
 // while the failure repeats; any other accept failure ends serving with
 // `Accept`. Serving ends with `Ok` after `limits.connections` connections, and
 // never ends when that is `.None`. Every task is joined and the listener is
-// closed on every exit.
-pub fn serve[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+// closed on every exit. The listener stays on the calling task, so it may
+// hold a borrow of the caller's or a value no two tasks may share.
+pub fn serve[L: net.Acceptor + io.Close + io.Pollable, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Release {
     serve_made(listener, mem.system(), make_handler, limits, policy, .None, shutdown, on)
 }
 
@@ -308,6 +309,26 @@ test "a refused body left unread does not lose the answer" {
     .Ok(())
 }
 
+// The handler answers without reading the body, so serving drains it; the
+// client ends its side after 3 of the 10 bytes it declared, and the exchange
+// is observed with that failure.
+test "a body cut short after the answer is observed as unread" {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = send(listener.local_address().unwrap(), "POST /health HTTP/1.1\r\nHost: loopback\r\nContent-Length: 10\r\n\r\nabc")
+    let shut = &client.shutdown_write().is_ok()
+    let owner = task.own(Recorded.new()).unwrap()
+    let recorder = owner.client()
+    let made = [sink recorder] || -> Reporter where carries(recorder) Reporter { recorded = copy(recorder) }
+    let served = serve(listener, made, limits: serving(1), policy: .Sequential)
+    let recorded = owner.close()
+    defer let _received = read_to_end(client)
+    testing.assert(shut, "the client could not end its side")?
+    testing.assert_ok_eq(served, (), "serving failed")?
+    testing.assert_eq(recorded.exchanges, UInt64(1), "the exchange was not observed")?
+    testing.assert_eq(recorded.cut_short, UInt64(1), "the body cut short was not observed")?
+    .Ok(())
+}
+
 test "a handler error before headers answers its status" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
@@ -440,7 +461,7 @@ test "limits beyond every arena are refused without overflowing" {
 // `serve_in` serves as `serve` does, carving each task's arenas, and the
 // buffer a refused request is discarded into, from `parent`, which every task
 // reads, so it must be `Shareable`.
-pub fn serve_in[P: Allocator + Shareable, L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+pub fn serve_in[P: Allocator + Shareable, L: net.Acceptor + io.Close + io.Pollable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, sink listener: L, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
     serve_made(listener, parent, make_handler, limits, policy, .None, shutdown, on)
 }
 
@@ -461,10 +482,10 @@ test "serving in the system allocator answers a request" {
 test "a handler one task cannot make ends serving before anything is accepted" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink counter, sink routes] || -> Result[LoggedRouter, Unopened] where carries(counter, routes) {
         if counted(counter) == 3 {
             .Err(.NoDatabase)
@@ -472,7 +493,7 @@ test "a handler one task cannot make ends serving before anything is accepted" {
             .Ok(exchanges_router(routes))
         }
     }
-    let served = serve_in(tables.allocator(), listener, made, policy: .Threads(4))
+    let served = serve_in(tables.handle(), listener, made, policy: .Threads(4))
     let tally = owner.close()
     defer let answer = read_or_reset(client)
     testing.assert_eq(served, .Err(.Handler(.NoDatabase)), "a handler that could not be made did not end serving")?
@@ -488,10 +509,10 @@ test "a handler one task cannot make ends serving before anything is accepted" {
 // was made is released.
 test "two tasks failing with owned reasons report one and release the other" {
     let listener = net.listen(net.loopback(0)).unwrap()
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink counter, sink routes] || -> Result[LoggedRouter, Unreadable] where carries(counter, routes) {
         if counted(counter) % 2 == 0 {
             .Err(Unreadable { reason = "the routes could not be read".to_owned().unwrap() })
@@ -499,7 +520,7 @@ test "two tasks failing with owned reasons report one and release the other" {
             .Ok(exchanges_router(routes))
         }
     }
-    let served = serve_in(tables.allocator(), listener, made, policy: .Threads(4))
+    let served = serve_in(tables.handle(), listener, made, policy: .Threads(4))
     let tally = owner.close()
     let reported = match served {
         Err(Handler(error)) => {
@@ -545,8 +566,8 @@ test "every exchange returns its arena to the parent" {
     for request in requests {
         &clients.push(send(bound, request)).unwrap()
     }
-    let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = Limits {
         first_byte_timeout_ms = 50,
         read_timeout_ms = 100,
@@ -556,9 +577,9 @@ test "every exchange returns its arena to the parent" {
         request_arena_bytes = 98304,
         ..serving(10),
     }
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Sequential)
     let settled = parent.all_disposed()
     let acquired = parent.acquired()
     let tables_settled = tables.all_disposed()
@@ -589,12 +610,12 @@ test "a refused arena is answered 503" {
     let bound = listener.local_address().unwrap()
     let refused = send(bound, health_request)
     let valid = send(bound, health_request)
-    let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = serving(2)
-    parent.refuse_size_attempt(mem.arena_first_chunk_bytes, 1)
-    let routes = parent.allocator()
+    parent.fail_size_at(mem.arena_first_chunk_bytes, 1)
+    let routes = parent.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Sequential)
     let settled = parent.all_disposed()
     parent.release()
     defer let unavailable = read_to_end(refused)
@@ -614,7 +635,7 @@ test "every connection is answered 503 while the parent refuses the arena" {
     let bound = listener.local_address().unwrap()
     let first = send(bound, health_request)
     let second = send(bound, health_request)
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = Limits {
         read_timeout_ms = 100,
         max_line_bytes = 1024,
@@ -623,10 +644,10 @@ test "every connection is answered 503 while the parent refuses the arena" {
         request_arena_bytes = 98304,
         ..serving(2),
     }
-    parent.refuse_size_from(mem.arena_first_chunk_bytes, 1)
-    let routes = parent.allocator()
+    parent.fail_size_from(mem.arena_first_chunk_bytes, 1)
+    let routes = parent.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Threads(2))
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Threads(2))
     let settled = parent.all_disposed()
     defer let answered_first = read_or_reset(first)
     defer let answered_second = read_or_reset(second)
@@ -639,17 +660,17 @@ test "every connection is answered 503 while the parent refuses the arena" {
 
 test "a parent that refuses the discard buffer ends serving before accepting" {
     let listener = net.listen(net.loopback(0)).unwrap()
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    parent.refuse_size_from(request_buffer_bytes, 1)
-    let routes = parent.allocator()
+    defer let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    parent.fail_size_from(request_buffer_bytes, 1)
+    let routes = parent.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, serving(1), policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, serving(1), policy: .Sequential)
     testing.assert_eq(served, .Err(.Memory(.Exhausted)), "serving began without a buffer to discard refused input into")?
     .Ok(())
 }
 
 // The caller owns the dispatcher; idle connections occupy registrations, not tasks.
-fn serve_made[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn serve_made[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
     if limits.open_connections == 0 {
         let _closed = listener.close()
         return .Err(.NoConnections)
@@ -679,16 +700,16 @@ test "a serving task refused its discard buffer ends serving with memory" {
 fn served_refusing_discard_buffers(first: UInt64, from: UInt64) -> Result[(), testing.Failure] {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let parent = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     if first != 0 {
-        parent.refuse_size_attempt(request_buffer_bytes, first)
+        parent.fail_size_at(request_buffer_bytes, first)
     } else {
-        parent.refuse_size_from(request_buffer_bytes, from)
+        parent.fail_size_from(request_buffer_bytes, from)
     }
-    let routes = tables.allocator()
+    let routes = tables.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits: serving(1), policy: .Threads(8))
+    let served = serve_in(parent.handle(), listener, made, limits: serving(1), policy: .Threads(8))
     defer let _answer = read_or_reset(client)
     testing.assert_eq(served, .Err(.Memory(.Exhausted)), "a serving task's refused discard buffer did not end serving")?
     testing.assert(parent.all_disposed(), "serving kept an allocation from the parent")?
@@ -757,23 +778,23 @@ fn items_router() -> Router[()] {
 // refused discard buffer ends serving before it accepts, and every other run
 // answers 503. Every run gives back everything it took.
 test "each allocation failure covers every acquisition from the parent" {
-    let attempts = served_refusing_arenas(0)?
+    let attempts = served_refusing_arenas(.None)?
     testing.assert_eq(attempts, UInt64(3), "serving took more from the parent than its discard buffer and two arenas")?
     for refused in UInt64(1)..attempts + 1 {
-        let _attempted = served_refusing_arenas(refused)?
+        let _attempted = served_refusing_arenas(.Some(refused))?
     }
 }
 
 // Serve one request through a parent that refuses every request arena and
-// the acquisition numbered `refuse_at`, check what the client read, and
-// return how many acquisitions serving attempted from the parent.
-fn served_refusing_arenas(refuse_at: UInt64) -> Result[UInt64, testing.Failure] {
+// the acquisition numbered `refuse_at`, or none, check what the client read,
+// and return how many acquisitions serving attempted from the parent.
+fn served_refusing_arenas(refuse_at: Option[UInt64]) -> Result[UInt64, testing.Failure] {
     let listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), health_request)
-    defer let parent = testing.SharedAllocationLog.open(mem.system(), refuse_at).unwrap()
+    defer let parent = testing.SharedTestAllocator.open(mem.system(), fail_at: refuse_at).unwrap()
     // The router's tables come from a log of their own, so only the parent's
     // acquisitions are refused.
-    defer let tables = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
+    defer let tables = testing.SharedTestAllocator.open(mem.system()).unwrap()
     let limits = Limits {
         read_timeout_ms = 100,
         max_line_bytes = 1024,
@@ -782,14 +803,14 @@ fn served_refusing_arenas(refuse_at: UInt64) -> Result[UInt64, testing.Failure] 
         request_arena_bytes = 98304,
         ..serving(1),
     }
-    parent.refuse_size_from(mem.arena_first_chunk_bytes, 1)
-    let routes = tables.allocator()
+    parent.fail_size_from(mem.arena_first_chunk_bytes, 1)
+    let routes = tables.handle()
     let made = [sink routes] || -> LoggedRouter where carries(routes) exchanges_router(routes)
-    let served = serve_in(parent.allocator(), listener, made, limits, policy: .Sequential)
+    let served = serve_in(parent.handle(), listener, made, limits, policy: .Sequential)
     defer let answer = read_or_reset(client)
     testing.assert(parent.all_disposed(), "serving kept an allocation from the parent")?
     if served == .Err(.Memory(.Exhausted)) {
-        testing.assert_eq(refuse_at, UInt64(1), "serving ended when an arena was refused")?
+        testing.assert_eq(refuse_at, Option.Some(UInt64(1)), "serving ended when an arena was refused")?
     } else {
         testing.assert_ok_eq(served, (), "serving failed")?
         testing.assert_eq(answer.view(), unavailable_answer, "a parent that refused the arena was not answered 503")?
@@ -912,15 +933,15 @@ test "a listen_and_serve error displays its cause" {
 // whose routes share state serves through `listen_and_serve_with`, and one
 // that serves one connection at a time passes `policy: .Sequential`.
 //
-// The listener is closed on every exit. Once the limits and the parent have
-// been accepted, and before anything is accepted, a handler `make_handler`
-// builds for the purpose is told the address the listener is bound to as
-// `Event.Listening`, which is how a program that asked for port 0 learns its
-// port. That handler is made before any serving
-// task starts, so a factory that cannot make one is asked once and serving
-// ends with `Serve(.Handler(E))`. A program that opens its own listener calls
-// `serve`.
-pub fn listen_and_serve[R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+// The listener is closed on every exit. Once every serving task has made its
+// handler, and before anything is accepted, the handler of one serving task
+// is told the address the listener is bound to as `Event.Listening`, which is
+// how a program that asked for port 0 learns its port. `make_handler` is
+// called once per serving task and never for anything else, so a factory
+// that always fails is asked once, by the first task, and serving ends with
+// `Serve(.Handler(E))` without announcing anything. A program that opens its
+// own listener calls `serve`.
+pub fn listen_and_serve[R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn() -> R](address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Release {
     listen_and_serve_in(mem.system(), address, make_handler, limits, policy, shutdown, on)
 }
 
@@ -930,9 +951,8 @@ test "a listening server answers on every task it serves with" {
     .Ok(())
 }
 
-// `listen_and_serve` makes the handler that announces the bound address
-// before it starts a serving task, so a factory that always fails is asked
-// once.
+// The first serving task's failure stops the others from starting, so a
+// factory that always fails is asked once.
 test "a listening server whose handler cannot be made asks its factory once" {
     let owner = task.own(Tally { visits = 0 }).unwrap()
     let counter = owner.client()
@@ -944,6 +964,49 @@ test "a listening server whose handler cannot be made asks its factory once" {
     let tally = owner.close()
     testing.assert_eq(served, .Err(.Serve(.Handler(.NoDatabase))), "a handler that could not be made did not end serving")?
     testing.assert_eq(tally.visits, UInt64(1), "the factory was asked again after it failed")?
+    .Ok(())
+}
+
+// Each serving task makes the one handler it serves with, and one of them is
+// told the bound address once every task has made its handler.
+test "a listening server makes one handler per serving task and announces once" {
+    let file = log.capture()
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let made = [file, sink counter] || -> Announcer where carries(file, counter) {
+        let _asked = counted(counter)
+        Announcer { report = file.logger(minimum: .Info) }
+    }
+    let served = listen_and_serve(net.loopback(0), made, limits: serving(0), policy: .Threads(2))
+    let tally = owner.close()
+    defer let lines = file.finish()
+    testing.assert_ok_eq(served, (), "serving nothing failed")?
+    testing.assert_eq(tally.visits, UInt64(2), "the factory was not asked once per serving task")?
+    testing.assert_eq(lines.view(), "INFO announced bound=true\n", "the bound address was not announced once")?
+    .Ok(())
+}
+
+// The address is announced only once every serving task has its handler, so
+// a factory that fails on a later task leaves nothing announced.
+test "a listening server whose second handler cannot be made announces nothing" {
+    let file = log.capture()
+    // The capture exists even when no handler writes to it.
+    let primed = file.logger(minimum: .Info)
+    primed.release()
+    let owner = task.own(Tally { visits = 0 }).unwrap()
+    let counter = owner.client()
+    let made = [file, sink counter] || -> Result[Announcer, Unopened] where carries(file, counter) {
+        if counted(counter) == 2 {
+            return .Err(.NoDatabase)
+        }
+        .Ok(Announcer { report = file.logger(minimum: .Info) })
+    }
+    let served = listen_and_serve(net.loopback(0), made, limits: serving(0), policy: .Threads(2))
+    let tally = owner.close()
+    defer let lines = file.finish()
+    testing.assert_eq(served, .Err(.Serve(.Handler(.NoDatabase))), "a handler that could not be made did not end serving")?
+    testing.assert_eq(tally.visits, UInt64(2), "the factory was not asked once per serving task")?
+    testing.assert_eq(lines.view(), "", "a server whose second task could not start announced its address")?
     .Ok(())
 }
 
@@ -988,7 +1051,7 @@ test "serving that cannot begin announces nothing" {
 // `listen_and_serve_in` listens and serves as `listen_and_serve` does, carving
 // each task's memory from `parent`, which every task reads, so it must be
 // `Shareable`.
-pub fn listen_and_serve_in[P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+pub fn listen_and_serve_in[P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](parent: P, address: net.Address, make_handler: M, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
     let listener = net.listen(address, backlog: net.Backlog(1024)) else |error| {
         return .Err(.Listen(error))
     }
@@ -1012,13 +1075,13 @@ test "listening in the system allocator serves nothing when told to" {
 // joined, the owning task is closed and the state is returned, so a program
 // reads what its routes changed and releases it. The state is released on
 // every failure.
-pub fn listen_and_serve_with[S: Owned + Isolated + Release, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Shareable + Release {
+pub fn listen_and_serve_with[S: Owned + Isolated + Release, R: MadeHandler[mem.SystemAllocator], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), mem.SystemAllocator] + Observer + Release, R.Error: Owned + Release {
     listen_and_serve_with_in(mem.system(), address, make_handler, state, limits, policy, shutdown, on)
 }
 
 // `listen_and_serve_with_in` listens and serves as `listen_and_serve_with`
 // does, carving each task's memory from `parent`.
-pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Isolated + Release, R: MadeHandler[P], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+pub fn listen_and_serve_with_in[P: Allocator + Shareable, S: Owned + Isolated + Release, R: MadeHandler[P], M: Shareable + Copyable + fn(client: task.Client[S]) -> R where carries(client)](parent: P, address: net.Address, make_handler: M, sink state: S, limits: Limits = standard_limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[S, ListenAndServeError[R.Error]] where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
     let owner = match task.own(state, on) {
         Ok(owner) => owner,
         Err(Unowned { state: kept, reason }) => {
@@ -1053,7 +1116,7 @@ test "the state comes back when serving with it ends" {
 // `listen_and_serve`, with handlers `make_handler` builds. A bound address
 // that could not be read is a `Listen` failure; the listener is closed, and a
 // failure to close it is dropped in favour of the reported one.
-fn serve_opened[L: net.Acceptor + io.Close + io.Pollable + Owned + Shareable + Isolated, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, sink bound: Result[net.Address, net.NetError], parent: P, make_handler: M, limits: Limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Shareable + Release {
+fn serve_opened[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, sink bound: Result[net.Address, net.NetError], parent: P, make_handler: M, limits: Limits, policy: task.Policy = .Threads(128), shutdown: Shutdown = .OnSignals, on: io.Io = io.inherited) -> Result[(), ListenAndServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
     let address = bound else |error| {
         let _closed = listener.close()
         return .Err(.Listen(error))
@@ -1402,11 +1465,11 @@ test "a rewound request arena keeps only its first chunk" {
     var listener = net.listen(net.loopback(0)).unwrap()
     let client = send(listener.local_address().unwrap(), "GET /fill HTTP/1.1\r\nHost: loopback\r\n\r\n")
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    defer let log = testing.AllocationLog.open(mem.system(), 0).unwrap()
-    var router = exchanges_router(log.allocator())
-    var refusal = log.allocator().acquire(request_buffer_bytes).unwrap()
+    defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var router = exchanges_router(log.handle())
+    var refusal = log.handle().acquire(request_buffer_bytes).unwrap()
     let before = log.live_bytes()
-    var arena = mem.Arena.open(log.allocator(), 1048576)
+    var arena = mem.Arena.open(log.handle(), 1048576)
     let opened = log.live_bytes() - before
     answer_one(connection, &router, arena.handle(), &refusal, Limits { read_timeout_ms = 2000, ..serving(1) })
     let peak = log.peak_bytes()
@@ -1686,7 +1749,7 @@ fn exchanges_router[A: Allocator](allocator: A) -> Router[(), A] where carries(a
 // A `LoggedRouter` is an `exchanges_router` whose tables, and the responses
 // it builds, come from a shared allocation log, so a test can count or refuse
 // what serving takes from its parent.
-alias LoggedRouter = Router[(), testing.SharedRefusingAllocator[mem.SystemAllocator]]
+alias LoggedRouter = Router[(), testing.SharedTestHandle[mem.SystemAllocator]]
 
 // `system_exchanges_router` builds an `exchanges_router` whose tables come
 // from the system allocator.
@@ -1696,25 +1759,30 @@ fn system_exchanges_router() -> Router[()] {
 
 // `Recorded` answers every request with "ok" and records what `serve` tells
 // it: how many exchanges ended, how many of them failed to read the request
-// because it timed out, and how many accept retries it was told of, with the
+// because it timed out or its body ended before its length, and how many accept retries it was told of, with the
 // first four pauses in milliseconds.
 struct Recorded {
     exchanges: UInt64,
     timed_out: UInt64,
+    cut_short: UInt64,
     retries: UInt64,
     pauses_ms: [UInt64; 4],
 }
 
 impl Recorded {
     fn new() -> Recorded {
-        Recorded { exchanges = 0, timed_out = 0, retries = 0, pauses_ms = [0, 0, 0, 0] }
+        Recorded { exchanges = 0, timed_out = 0, cut_short = 0, retries = 0, pauses_ms = [0, 0, 0, 0] }
     }
 
-    // Count an exchange that ended, and whether reading its request timed out.
-    fn exchanged(inout self: Self, timed_out: Bool) {
+    // Count an exchange that ended, whether reading its request timed out, and
+    // whether its body ended before its length.
+    fn exchanged(inout self: Self, timed_out: Bool, cut_short: Bool) {
         self.exchanges += 1
         if timed_out {
             self.timed_out += 1
+        }
+        if cut_short {
+            self.cut_short += 1
         }
     }
 
@@ -1724,6 +1792,14 @@ impl Recorded {
             self.pauses_ms[self.retries] = pause_ms
         }
         self.retries += 1
+    }
+}
+
+// Whether the body of `exchange` ended before the length its request declared.
+fn cut_short_reading[P: Allocator](exchange: Exchange[P]) -> Bool {
+    match read exchange.failure {
+        Some(Unread(Status(BadRequest))) => true,
+        _ => false,
     }
 }
 
@@ -1747,7 +1823,7 @@ impl[P: Allocator] Handler[(), P] for Recorded {
 impl Observer for Recorded {
     fn observe[P: Allocator](inout self: Self, event: Event[P]) {
         match read event {
-            Exchanged(exchange) => &self.exchanged(timed_out_reading(exchange)),
+            Exchanged(exchange) => &self.exchanged(timed_out_reading(exchange), cut_short_reading(exchange)),
             Listening(_) => {},
             AcceptRetried(retry) => &self.retried(retry.pause.nanoseconds() / 1000000),
         }
@@ -1773,7 +1849,8 @@ impl Observer for Reporter {
         match read event {
             Exchanged(exchange) => {
                 let timed_out = timed_out_reading(exchange)
-                self.recorded.call([sink timed_out] |inout recorded: Recorded| &recorded.exchanged(timed_out))
+                let cut_short = cut_short_reading(exchange)
+                self.recorded.call([sink timed_out, sink cut_short] |inout recorded: Recorded| &recorded.exchanged(timed_out, cut_short))
             },
             Listening(_) => {},
             AcceptRetried(retry) => {
@@ -1842,23 +1919,36 @@ fn answer_message[H: Handler[(), P] + Observer, P: Allocator](sink reader: Readi
     let (answered, kept) = answer_body(&handler, request, &incoming, &note, closing, stopping)
     let duration = start.elapsed()
     let aborted = match read answered.sent.delivery { Whole => false, Memory => false, _ => true }
-    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, duration = .Some(duration), failure = answer_failure(answered, note) })
-    &handler.observe(event)
-    let drained = if aborted {
-        false
+    let drained: Result[(), RequestError] = if aborted {
+        .Ok(())
     } else {
-        &incoming.drain(&refusal).is_ok()
+        &incoming.drain(&refusal)
     }
     let recovered = incoming.into_reader().unwrap()
-    if aborted {
+    let next: ExchangeRead = if aborted {
         reset_connection(recovered.abandon())
-        return .Closed
+        .Closed
+    } else if kept && drained.is_ok() && !closing {
+        .Idle(recovered)
+    } else {
+        close_connection(recovered.abandon())
+        .Closed
     }
-    if kept && drained && !closing {
-        return .Idle(recovered)
+    let event: Event[P] = .Exchanged(.{ request = .Some(request), status = .Some(copy(answered.status)), body_bytes = answered.sent.body_bytes, duration = .Some(duration), failure = exchange_failure(answered, note, drained) })
+    &handler.observe(event)
+    next
+}
+
+// `exchange_failure` is what went wrong with an exchange: how the answer
+// failed, or else why the unread body could not be drained after it.
+fn exchange_failure[A: Allocator](answered: Answered, note: String[A], drained: Result[(), RequestError]) -> Option[Failure] where borrows(.Some: note) {
+    match answer_failure(answered, note) {
+        Some(failure) => .Some(failure),
+        None => match read drained {
+            Ok(_) => .None,
+            Err(error) => .Some(.Unread(copy(error))),
+        },
     }
-    close_connection(recovered.abandon())
-    .Closed
 }
 
 // The response may observe the handler and cached input; this call settles

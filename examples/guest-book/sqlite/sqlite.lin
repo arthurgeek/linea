@@ -101,6 +101,12 @@ extern fn sqlite3_column_bytes(read statement: StatementHandle, column: Int32) -
 
 extern fn sqlite3_column_count(read statement: StatementHandle) -> Int32
 
+// `sqlite3_data_count` answers how many columns the current row holds, and 0
+// when no row is current: before the first `step`, and once `step` has
+// answered `false` or failed. SQLite defines a column read only while a row is
+// current, so every column read checks this first.
+extern fn sqlite3_data_count(read statement: StatementHandle) -> Int32
+
 extern fn sqlite3_column_int64(read statement: StatementHandle, column: Int32) -> Int64
 
 extern fn sqlite3_finalize(sink statement: StatementHandle) -> Int32
@@ -141,6 +147,7 @@ pub enum Error {
     TooLong,
     InvalidParameter(UInt32),
     InvalidColumn(UInt32),
+    NoRow,
     OutOfMemory,
     TrailingSql,
     EmptySql,
@@ -164,6 +171,7 @@ impl Display for Error {
             TooLong => "the text exceeds SQLite's 32-bit limit".fmt(&w),
             InvalidParameter(parameter) => "parameter {parameter} is out of bounds (parameter index must be in 1..2147483647)".fmt(&w),
             InvalidColumn(column) => "column {column} is out of bounds".fmt(&w),
+            NoRow => "no row is current: read a column after `step` answers `true`".fmt(&w),
             OutOfMemory => "out of memory".fmt(&w),
             TrailingSql => "prepare takes one statement, and text follows it".fmt(&w),
             EmptySql => "the SQL string contains no statement".fmt(&w),
@@ -653,18 +661,28 @@ impl Statement {
         .Ok(())
     }
 
+    // `current_column` checks that a row is current and holds 0-based
+    // `column`, and answers its index as SQLite takes it.
+    fn current_column(self: Self, column: UInt32) -> Result[Int32, Error] {
+        let count = sqlite3_data_count(self.handle)
+        if count <= 0 {
+            return .Err(.NoRow)
+        }
+        if column >= UInt32(count) {
+            return .Err(.InvalidColumn(column))
+        }
+        .Ok(Int32(column))
+    }
+
     // Copy the text at 0-based `column` of the current row into `allocator`,
-    // checking that it is UTF-8. Answers `InvalidColumn` if `column` is out of
-    // bounds, or `NullColumn` when the column is NULL.
+    // checking that it is UTF-8. Answers `NoRow` unless `step` last answered
+    // `true`, `InvalidColumn` if `column` is out of bounds, or `NullColumn`
+    // when the column is NULL.
     pub fn text_in[A: Allocator](self: Self, allocator: A, column: UInt32) -> Result[String[A], Error] where carries(.Ok: allocator) {
         if column > max_int32_index {
             return .Err(.TooLong)
         }
-        let count = sqlite3_column_count(self.handle)
-        if count <= 0 || column >= UInt32(count) {
-            return .Err(.InvalidColumn(column))
-        }
-        let index = Int32(column)
+        let index = self.current_column(column)?
         if sqlite3_column_type(self.handle, index) == null_type {
             return .Err(.NullColumn(column))
         }
@@ -747,17 +765,13 @@ impl Statement {
 
     // Read the 64-bit integer at 0-based `column` of the current row, converting
     // text or floating-point values according to SQLite's casting rules.
-    // Answers `InvalidColumn` if `column` is out of bounds, or `NullColumn`
-    // when the column is NULL.
+    // Answers `NoRow` unless `step` last answered `true`, `InvalidColumn` if
+    // `column` is out of bounds, or `NullColumn` when the column is NULL.
     pub fn integer(self: Self, column: UInt32) -> Result[Int64, Error] {
         if column > max_int32_index {
             return .Err(.TooLong)
         }
-        let count = sqlite3_column_count(self.handle)
-        if count <= 0 || column >= UInt32(count) {
-            return .Err(.InvalidColumn(column))
-        }
-        let index = Int32(column)
+        let index = self.current_column(column)?
         if sqlite3_column_type(self.handle, index) == null_type {
             return .Err(.NullColumn(column))
         }
@@ -821,6 +835,20 @@ impl Statement {
         .Ok(())
     }
 
+    test "a column is read only while a row is current" {
+        defer var database = Database.open_in_memory("a_column_is_read_only_while_a_row_is_current").unwrap()
+        &database.execute("CREATE TABLE t (n INTEGER, s TEXT); INSERT INTO t VALUES (1, 'one');").unwrap()
+        defer var select = database.prepare("SELECT n, s FROM t").unwrap()
+        testing.assert(no_row(select.integer(0)), "an integer was read before the first step")?
+        testing.assert(no_row_text(select.text(1)), "text was read before the first step")?
+        testing.assert(&select.step().unwrap(), "no row")?
+        testing.assert_eq(select.integer(0).unwrap(), Int64(1), "the current row's integer changed")?
+        testing.assert(!&select.step().unwrap(), "step did not end after the only row")?
+        testing.assert(no_row(select.integer(0)), "an integer was read after the last step")?
+        testing.assert(no_row_text(select.text(1)), "text was read after the last step")?
+        .Ok(())
+    }
+
     test "integer converts numeric text according to sqlite rules" {
         defer var database = Database.open_in_memory("integer_converts_numeric_text_according_to_sqlite_rules").unwrap()
         &database.execute("CREATE TABLE t (s TEXT); INSERT INTO t VALUES ('42');").unwrap()
@@ -850,5 +878,38 @@ impl Statement {
 impl Release for Statement {
     fn release(sink self: Self) {
         self.finish()
+    }
+}
+
+// `no_row` says whether `answer` was refused with `NoRow`.
+fn no_row(sink answer: Result[Int64, Error]) -> Bool {
+    match answer {
+        Ok(_) => false,
+        Err(error) => {
+            let refused = match read error {
+                NoRow => true,
+                _ => false,
+            }
+            error.release()
+            refused
+        },
+    }
+}
+
+// `no_row_text` says whether `answer` was refused with `NoRow`.
+fn no_row_text(sink answer: Result[String[mem.SystemAllocator], Error]) -> Bool {
+    match answer {
+        Ok(text) => {
+            text.release()
+            false
+        },
+        Err(error) => {
+            let refused = match read error {
+                NoRow => true,
+                _ => false,
+            }
+            error.release()
+            refused
+        },
     }
 }

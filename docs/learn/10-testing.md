@@ -480,7 +480,7 @@ ok    every allocation the banner asks for can fail
 - the body, a lambda ([Calling
   things](02-calling-things.md#closures-functions-that-capture)) that takes
   the allocator to use and answers a `Result`. It is handed a
-  `testing.RefusingAllocator`, which passes each request on to the first
+  `testing.TestHandle`, which passes each request on to the first
   argument and refuses the one the run is testing;
 - a function that says which errors count as a refusal. This body fails only
   with `mem.Oom`, so every error it returns is one, and
@@ -546,22 +546,22 @@ FAIL  every allocation the banner asks for can fail
 The location is the line inside the standard library's `unwrap` that stopped
 the program; the `unwrap` to look for is the one in `banner_in`.
 
-`each_allocation_failure` is built on `mem.AllocationLog`, which you can use
-directly to refuse one chosen allocation. `mem.AllocationLog.open(backing, n)`
-makes a log whose `allocator()` passes requests on to `backing` and refuses the
-`n`th; `attempts()` counts the requests it saw, and `all_disposed()` checks
-that everything it handed out was given back. The log keeps its records in
-memory from `backing` too, so `open` answers a `Result`. Add this test to
-`banner.lin`:
+`each_allocation_failure` is built on `testing.TestAllocator`, which you can use
+directly to refuse one chosen allocation. `testing.TestAllocator.open(backing)`
+makes a test allocator whose `handle()` passes requests on to `backing` and
+counts them, and `open(backing, fail_at: .Some(n))` also refuses the `n`th;
+`attempts()` counts the requests it saw, and `all_disposed()` checks that
+everything it handed out was given back. It keeps its counts in memory from
+`backing` too, so `open` answers a `Result`. Add this test to `banner.lin`:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea
-// `AllocationLog.open(mem.system(), 2)` refuses the second allocation its
-// allocator is asked for. The test checks that `banner_in` passes the refusal up,
-// and that the first allocation was given back on the way out.
+// `fail_at: .Some(2)` refuses the second allocation the handle is asked for.
+// The test checks that `banner_in` passes the refusal up, and that the first
+// allocation was given back on the way out.
 test "a refused second allocation leaves nothing behind" {
-    defer let log = mem.AllocationLog.open(mem.system(), 2).unwrap()
-    let refused = match banner_in(log.allocator(), "Daily report") {
+    defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(2)).unwrap()
+    let refused = match banner_in(log.handle(), "Daily report") {
         Ok(heading) => {
             heading.release()
             false
@@ -582,25 +582,31 @@ ok    every allocation the banner asks for can fail
 3 passed, 0 failed
 ```
 
-The log is linear, so it is released like any other owner, and the result of
-`banner_in` is matched rather than tested with `is_err()`, because on success it
-holds a `String` that must be released.
+The test allocator is linear, so it is released like any other owner, and
+releasing it checks `all_disposed()` once more: a test that leaves an
+allocation live stops there. `close()` ends it without stopping, and answers
+whether everything was given back, for a test that would rather report its
+own failure first. It counts however many allocations a test makes.
+The result of `banner_in` is matched rather than tested with `is_err()`,
+because on success it holds a `String` that must be released.
 
 ### Allocations from more than one task
 
-A log from `mem.AllocationLog` counts through a plain read of the log, so two
-tasks allocating through it at once would race on its counts. Linea refuses
-that: the log is `@unshareable`, and so is its allocator. Code that hands its
-allocator to other tasks, such as `http.serve_in`, asks for an allocator that
-is `Shareable`, and `testing.SharedAllocationLog` gives you one. It keeps its
-counts in an owning task of its own, which every task reaches one call at a
-time, so its allocator is `Shareable` whenever the allocator under it is.
+A `testing.TestAllocator`'s handle counts through a plain read of the test
+allocator, so two tasks allocating through it at once would race on its
+counts. Linea refuses that: the test allocator is `@unshareable`, and so is its
+handle. Code that hands its allocator to other tasks, such as `http.serve_in`,
+asks for an allocator that is `Shareable`, and `testing.SharedTestAllocator`
+gives you one. It keeps its counts in an owning task of its own, which every
+task reaches one call at a time, so its handle is `Shareable` whenever the
+allocator under it is.
 
-It answers `attempts()`, `acquired()` and `all_disposed()` like the other log,
-and refuses on request: `refuse_attempt(n)` refuses the `n`th attempt,
-`refuse_from(n)` every attempt from the `n`th on, `refuse_size_attempt(size, n)`
+It opens with the same `fail_at:`, answers `attempts()`, `acquired()` and
+`all_disposed()` like the other, checks `all_disposed()` when it is released,
+and refuses on request: `fail_at(.Some(n))` refuses the `n`th attempt,
+`fail_from(.Some(n))` every attempt from the `n`th on, `fail_size_at(size, n)`
 the `n`th acquisition of exactly `size` bytes made after the call, and
-`refuse_size_from(size, n)` every such acquisition from the `n`th on.
+`fail_size_from(size, n)` every such acquisition from the `n`th on.
 
 Each task a server runs takes a 4 KiB buffer from its parent allocator before it
 accepts anything, to answer 503 with when it runs out of memory later. This
@@ -614,17 +620,17 @@ import std.mem
 import std.net
 import std.testing
 
-// A router whose tables and answers come from the log's allocator.
-alias Routes = http.Router[(), testing.SharedRefusingAllocator[mem.SystemAllocator]]
+// A router whose tables and answers come from the test allocator's handle.
+alias Routes = http.Router[(), testing.SharedTestHandle[mem.SystemAllocator]]
 
 fn hello[P: mem.Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     http.text(request, "hello")
 }
 
 test "a server refused its buffers stops and gives everything back" {
-    defer let log = testing.SharedAllocationLog.open(mem.system(), 0).unwrap()
-    log.refuse_size_from(4096, 1)
-    let parent = log.allocator()
+    defer let log = testing.SharedTestAllocator.open(mem.system()).unwrap()
+    log.fail_size_from(4096, 1)
+    let parent = log.handle()
     // Each serving task calls `made` to build its own router. The closure
     // keeps its own copy of the allocator, which every task may read at once.
     let made = [sink routes = copy(parent)] || -> Routes where carries(routes) {
@@ -645,11 +651,11 @@ ok    a server refused its buffers stops and gives everything back
 1 passed, 0 failed
 ```
 
-Opening the log starts its task, so `open` answers a `Result`, which fails with
-`task.PrepareError` when the task cannot be started. Give the log an allocator
-`mem.AllocationLog` could not share, such as an arena's handle, and the log
-still works, but its allocator is not `Shareable`, and `http.serve_in` refuses
-it.
+Opening a shared test allocator starts its task, so `open` answers a
+`Result`, which fails with `task.PrepareError` when the task cannot be started.
+Give it a backing allocator that cannot be shared, such as an arena's handle,
+and it still works, but its handle is not `Shareable`, and `http.serve_in`
+refuses it.
 
 ## Testing a server
 
@@ -832,7 +838,10 @@ ok    1\.5 rounds up to 2
 - `linea test --filter TEXT` runs only the tests whose names hold `TEXT`.
 - `testing.each_allocation_failure(allocator, body, is_refusal)` refuses each
   allocation in turn and checks that every one is handled.
-- `testing.SharedAllocationLog` counts and refuses allocations made from many
+- `testing.TestAllocator.open(backing, fail_at: .Some(n))` counts what its
+  `handle()` hands out, refuses the `n`th request, and checks when it is
+  released that everything was given back.
+- `testing.SharedTestAllocator` counts and refuses allocations made from many
   tasks at once, so a server under test can be refused the memory it asks for.
 - A handler is tested by calling it with a request from `http.new_request`,
   or through the router with `&router.serve_http`.

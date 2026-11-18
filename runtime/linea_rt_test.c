@@ -19,11 +19,9 @@ unsigned long linea_alloc(unsigned long size, unsigned long align);
 void linea_free(unsigned long at, unsigned long size, unsigned long align);
 void linea_set_args(int argc, char **argv);
 unsigned long linea_arg_count(void);
-unsigned long linea_arg_at(unsigned long i);
-unsigned long linea_arg_len(unsigned long i);
+unsigned long linea_arg_span(unsigned long i, unsigned long *length);
 unsigned long linea_env_count(void);
-unsigned long linea_env_at(unsigned long i);
-unsigned long linea_env_len(unsigned long i);
+unsigned long linea_env_span(unsigned long i, unsigned long *length);
 void linea_trap(int kind, const char *file, int line, int col);
 void linea_panic(unsigned long at, unsigned long len, const char *file, int line, int col);
 void linea_storage_extent(unsigned long at, unsigned long len);
@@ -493,9 +491,10 @@ static void arguments(void) {
     char *argv[] = {a, b, NULL};
     linea_set_args(2, argv);
     assert(linea_arg_count() == 2);
-    assert(linea_arg_at(1) == (unsigned long)b);
-    assert(linea_arg_len(1) == 9);
-    assert(linea_arg_at(2) == 0 && linea_arg_len(2) == 0);
+    unsigned long length = 1;
+    assert(linea_arg_span(1, &length) == (unsigned long)b);
+    assert(length == 9);
+    assert(linea_arg_span(2, &length) == 0 && length == 0);
 }
 
 extern char **environ;
@@ -511,12 +510,14 @@ static void environment(void) {
     assert(linea_env_count() == count);
     int found = 0;
     for (unsigned long i = 0; i < count; i += 1) {
-        assert(linea_env_at(i) == (unsigned long)environ[i]);
-        assert(linea_env_len(i) == strlen(environ[i]));
+        unsigned long length = 0;
+        assert(linea_env_span(i, &length) == (unsigned long)environ[i]);
+        assert(length == strlen(environ[i]));
         if (strcmp(environ[i], "LINEA_RT_TEST=a=b") == 0) found = 1;
     }
     assert(found);
-    assert(linea_env_at(count) == 0 && linea_env_len(count) == 0);
+    unsigned long length = 1;
+    assert(linea_env_span(count, &length) == 0 && length == 0);
 }
 
 #if defined(LINEA_CHECK_STORAGE) && LINEA_CHECK_STORAGE

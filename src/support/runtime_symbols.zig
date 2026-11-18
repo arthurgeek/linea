@@ -513,11 +513,9 @@ pub const runtime_functions = [_]Signature{
     // Startup records these process-lifetime views before any task starts.
     // Querying them neither changes native state nor retains a thread identity.
     .{ .symbol = "linea_arg_count", .parameters = &.{}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
-    .{ .symbol = "linea_arg_at", .parameters = &.{p(.u64)}, .result = .u64, .answers = .bytes, .declared_by = mem_arguments, .migration_contract = .neutral },
-    .{ .symbol = "linea_arg_len", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_arg_span", .parameters = &.{ p(.u64), written }, .result = .u64, .answers = .bytes, .declared_by = mem_arguments, .migration_contract = .neutral },
     .{ .symbol = "linea_env_count", .parameters = &.{}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
-    .{ .symbol = "linea_env_at", .parameters = &.{p(.u64)}, .result = .u64, .answers = .bytes, .declared_by = mem_environment, .migration_contract = .neutral },
-    .{ .symbol = "linea_env_len", .parameters = &.{p(.u64)}, .result = .u64, .declared_by = .granted, .migration_contract = .neutral },
+    .{ .symbol = "linea_env_span", .parameters = &.{ p(.u64), written }, .result = .u64, .answers = .bytes, .declared_by = mem_environment, .migration_contract = .neutral },
     .{ .symbol = "linea_io_category", .parameters = &.{p(.i32)}, .result = .u8, .declared_by = .granted, .migration_contract = .neutral },
     // errno reads the current OS thread's native error slot.
     .{ .symbol = "linea_errno", .parameters = &.{}, .result = .i32, .declared_by = .granted, .migration_contract = .bound_by_context },

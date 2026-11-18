@@ -37,9 +37,10 @@ impl[P: Allocator] Handler[(), P] for fn(request: Request[P], inout body: Reques
 // that cannot fail returns its handler, which `made` answers as `.Ok`. One
 // that opens something for its task, such as a database connection, returns
 // `Result[H, E]`, and serving ends with `ServeError.Handler` carrying the `E`
-// when one of its tasks gets `.Err`. Serving takes an `E` that is `Owned`,
-// `Shareable` and implements `Release`: it is sent from the task that met it,
-// and when two tasks fail the second one's is released.
+// when one of its tasks gets `.Err`. Serving takes an `E` that is `Owned` and
+// implements `Release`: it is moved from the task that met it to the caller,
+// never read by two tasks, and when two tasks fail the second one's is
+// released.
 pub trait MadeHandler[phantom P: Allocator] {
     type Handler
     type Error

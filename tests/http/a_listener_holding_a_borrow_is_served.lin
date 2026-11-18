@@ -1,0 +1,68 @@
+// `http.serve` keeps its listener on the calling task and never sends it to
+// a serving task, so a listener that observes the caller's label is served
+// like any other, here on two serving tasks.
+import std.http
+import std.io
+import std.net
+
+use net.Acceptor
+
+@(linear, derive(Release))
+struct Labelled {
+    listener: net.Listener,
+    label: borrow Str,
+}
+
+impl net.Acceptor for Labelled {
+    fn accept(inout self: Self) -> Result[net.Accepted, net.NetError] {
+        &self.listener.accept()
+    }
+}
+
+impl io.Close for Labelled {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let Labelled { listener, label: _ } = self
+        listener.close()
+    }
+}
+
+impl io.Pollable for Labelled {
+    fn readiness(self: Self, interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        io.Pollable.readiness(self.listener, interest).within(self)
+    }
+}
+
+fn health[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.text(request, "ok")
+}
+
+fn router() -> http.Router[()] {
+    var routes = http.Router.new()
+    &routes.route_raw("GET /health", health).unwrap()
+    routes
+}
+
+fn main() -> UInt8 {
+    let label = "the health listener"
+    let listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let _sent = io.write_all(&client, "GET /health HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+    let labelled = Labelled { listener, label = borrow label }
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    let served = http.serve(labelled, router, limits: limits, policy: .Threads(2))
+    defer let answer = io.read_all(&client, max_bytes: 4096).unwrap()
+    client.close().unwrap()
+    match served {
+        Ok(_) => {},
+        Err(_) => return 1,
+    }
+    let text = Str.from_bytes(answer.as_slice()) else |_| {
+        return 2
+    }
+    if !text.starts_with("HTTP/1.1 200 OK") {
+        return 3
+    }
+    0
+}

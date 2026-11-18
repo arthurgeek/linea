@@ -1,11 +1,12 @@
 import std.mem
 import std.task
+import std.testing
 
 // The jobs a lazy map started keep bytes from the allocator it was given
 // until they are joined, so the allocator's owner outlives the map.
 fn main() -> UInt8 {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    var mapped = task.lazy_map_in(log.allocator(), .Threads(2), UInt64(1)..=4, |sink n| n + 1)
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var mapped = task.lazy_map_in(log.handle(), .Threads(2), UInt64(1)..=4, |sink n| n + 1)
     let first = &mapped.next()
     log.release()
     mapped.release()

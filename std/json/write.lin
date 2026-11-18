@@ -245,16 +245,16 @@ test "document output escapes every control byte" {
 // nothing may be allocated after it.
 test "json render disposes partial output on each allocation refusal" {
     defer let document = parse(r#"{"message":"a longer string with \n escapes and text","values":[1,2,3,4,5,6,7,8,9,10]}"#).unwrap()
-    defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let allocator = baseline.allocator()
+    defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+    let allocator = baseline.handle()
     let rendered = render_in(allocator, document).unwrap()
     rendered.release()
     let attempts = baseline.attempts()
     testing.assert(attempts > 0, "render did not exercise output allocation")?
     testing.assert(baseline.all_disposed(), "rendered text release lost or repeated an allocation")?
     for refusal in UInt64(1)..(attempts + 1) {
-        defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-        let failing = log.allocator()
+        defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+        let failing = log.handle()
         let refused = match render_in(failing, document) {
             Err(_) => true,
             Ok(value) => {

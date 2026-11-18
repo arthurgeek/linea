@@ -43,11 +43,13 @@ pub struct CliInvocation {
     config_path: Option[fs.Path],
 }
 
-// Helper to split comma-separated tags into a Vec[String].
-fn parse_tags(tags_str: Str) -> Vec[String] {
-    var tags: Vec[String] = Vec.new()
+// `parse_tags_in` splits comma-separated tags into owned strings from
+// `allocator`, trimming each and leaving out empty ones. A refused allocation
+// is returned, so a note is never added with fewer tags than were asked for.
+fn parse_tags_in[A: Allocator](allocator: A, tags_str: Str) -> Result[Vec[String[A], A], mem.Oom] where carries(.Ok: allocator) {
+    defer var tags: Vec[String[A], A] = Vec.new_in(allocator)
     var cursor = tags_str.split(",") else |_| {
-        return tags
+        return .Ok(tags)
     }
     while true {
         let part_opt = &cursor.next()
@@ -55,19 +57,31 @@ fn parse_tags(tags_str: Str) -> Vec[String] {
             Some(part) => {
                 let trimmed = part.trim_ascii()
                 if trimmed.length() > 0 {
-                    let owned_res = trimmed.to_owned()
-                    match owned_res {
-                        Ok(owned) => {
-                            &tags.push(owned).unwrap()
-                        },
-                        Err(_) => {},
-                    }
+                    let owned = trimmed.to_owned_in(allocator)?
+                    &tags.push(owned).settled()?
                 }
             },
             None => break,
         }
     }
-    tags
+    .Ok(tags)
+}
+
+test "parse_tags_in keeps every tag or reports the refusal" {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), testing.Failure] {
+            let tags = parse_tags_in(allocator, "home, ,work") else |_| {
+                return .Err(testing.refused("a tag was refused"))
+            }
+            let kept = tags.length()
+            tags.release()
+            testing.assert_eq(kept, UInt64(2), "a tag was lost")
+        },
+        |error| error.is_refusal(),
+    )
+    testing.assert(checked.is_ok(), "a refused allocation was not reported")?
+    .Ok(())
 }
 
 // Build the declarative CLI command schema for notes. A refused allocation
@@ -211,7 +225,7 @@ impl CliParser {
                 return .Err(cli.CliError.InvalidValue("invalid priority, expected 'low', 'normal', or 'high'"))
             }
             let tags = match sub.matches.option("tags") {
-                Some(t_str) => parse_tags(t_str),
+                Some(t_str) => parse_tags_in(mem.system(), t_str)?,
                 None => Vec.new(),
             }
             let title = title_str.to_owned() else |reason| {

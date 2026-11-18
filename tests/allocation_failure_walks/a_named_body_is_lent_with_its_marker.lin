@@ -4,7 +4,7 @@ import std.testing
 // `each_allocation_failure` is lent its callbacks and may change them. `body` and `refused`
 // are variables of `main`'s, so each is passed with `&`.
 fn main() -> UInt8 {
-    var body = |allocator: mem.RefusingAllocator[mem.SystemAllocator]| -> Result[(), mem.Oom] {
+    var body = |allocator: testing.TestHandle[mem.SystemAllocator]| -> Result[(), mem.Oom] {
         let held = allocator.acquire(8)?
         held.release()
         .Ok(())

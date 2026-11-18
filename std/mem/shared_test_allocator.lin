@@ -1,0 +1,420 @@
+import std.session
+import std.task
+import std.testing
+
+use session.Chan
+use session.End
+use task.Unowned
+
+// The counts and failure rules of a shared test allocator. An owning task
+// keeps them, so every task that allocates through it reaches them by a call
+// the owning task runs, one at a time, and none is written by two threads at
+// once. Zero names no attempt.
+@derive(Release)
+internal struct SharedLogState {
+    attempts: UInt64,
+    acquired: UInt64,
+    disposed: UInt64,
+    live_bytes: UInt64,
+    peak_bytes: UInt64,
+    fail_at: UInt64,
+    fail_from: UInt64,
+    // The rule about one size: whether there is one, the size, how many
+    // acquisitions of that size were attempted since it was set, the one of
+    // them to refuse and the one to refuse from on, numbered from one, where
+    // zero names none.
+    size_rule: Bool,
+    refused_size: UInt64,
+    size_seen: UInt64,
+    size_at: UInt64,
+    size_from: UInt64,
+}
+
+impl SharedLogState {
+    // Count an attempt to acquire `size` bytes, and answer whether a rule
+    // refuses it.
+    fn attempt(inout self: Self, size: UInt64) -> Bool {
+        self.attempts += 1
+        let attempt = self.attempts
+        var sized = false
+        if self.size_rule && self.refused_size == size {
+            self.size_seen += 1
+            sized = self.size_seen == self.size_at || (self.size_from != 0 && self.size_seen >= self.size_from)
+        }
+        attempt == self.fail_at || (self.fail_from != 0 && attempt >= self.fail_from) || sized
+    }
+
+    // Replace the rule about sizes: refuse the acquisition of `size` bytes
+    // numbered `at` and every one from the one numbered `from` on, counting
+    // from the next.
+    fn fail_size(inout self: Self, size: UInt64, at: UInt64, from: UInt64) {
+        self.size_rule = true
+        self.refused_size = size
+        self.size_seen = 0
+        self.size_at = at
+        self.size_from = from
+    }
+
+    // Record an acquisition of `allocated` bytes.
+    fn record(inout self: Self, allocated: UInt64) {
+        self.acquired += 1
+        self.live_bytes += allocated
+        if self.live_bytes > self.peak_bytes {
+            self.peak_bytes = self.live_bytes
+        }
+    }
+
+    // Record the disposal of an allocation of `allocated` bytes.
+    fn dispose(inout self: Self, allocated: UInt64) {
+        self.disposed += 1
+        self.live_bytes -= allocated
+    }
+
+    // Answer whether every acquisition was disposed and no bytes remain live.
+    fn all_disposed(self: Self) -> Bool {
+        self.disposed == self.acquired && self.live_bytes == 0
+    }
+}
+
+// A SharedTestAllocator counts every acquisition made through its handles,
+// from any number of tasks at once, fails the ones its rules name, and checks
+// afterwards that each allocation was disposed. An owning task keeps its
+// counts, so its handle is `Shareable` whenever its backing allocator is: a
+// test can hand it to `http.serve_in` or to tasks it starts, and fail an
+// acquisition whichever task makes it. `TestAllocator` does the same for one
+// task, without a thread of its own. It is declared in `mem`, which builds
+// buffers, and reached as `testing.SharedTestAllocator`.
+@(opaque, linear)
+struct SharedTestAllocator[H: Allocator] {
+    owner: task.Owner[SharedLogState],
+    backing: H,
+}
+
+impl[H: Allocator] SharedTestAllocator[H] {
+    // Return a handle that allocates through the backing allocator and counts
+    // in this allocator. It borrows the allocator, so the allocator outlives
+    // every handle and every buffer a handle acquired.
+    pub fn handle(self: Self) -> SharedTestHandle[H] where borrows(self) {
+        .{ log = self.owner.client(), backing = copy(self.backing) }
+    }
+
+    test "a shared log allocator is shared by tasks that allocate at once" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        allocate_on_two_tasks(log.handle(), 200)
+        testing.assert_eq(log.attempts(), UInt64(400), "an attempt from one of the tasks was lost")?
+        testing.assert_eq(log.acquired(), UInt64(400), "an acquisition from one of the tasks was lost")?
+        testing.assert(log.all_disposed(), "a release from one of the tasks was lost")?
+    }
+
+    // Allocate through `backing`, failing the acquisition numbered `fail_at`,
+    // counting from one, or none when it is `.None`. It fails when the owning
+    // task that keeps the counts cannot be started.
+    pub fn open(backing: H, fail_at: Option[UInt64] = .None) -> Result[SharedTestAllocator[H], task.PrepareError] where carries(.Ok: backing) {
+        let state = SharedLogState {
+            attempts = 0,
+            acquired = 0,
+            disposed = 0,
+            live_bytes = 0,
+            peak_bytes = 0,
+            fail_at = counted_from_one(fail_at),
+            fail_from = 0,
+            size_rule = false,
+            refused_size = 0,
+            size_seen = 0,
+            size_at = 0,
+            size_from = 0,
+        }
+        match task.own(state) {
+            Ok(owner) => .Ok(.{ owner, backing = copy(backing) }),
+            Err(Unowned { state: _, reason }) => .Err(reason),
+        }
+    }
+
+    test "a shared log refuses the acquisition open names" {
+        defer let log = SharedTestAllocator.open(system(), fail_at: .Some(2)).unwrap()
+        let first = log.handle().acquire(16)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.handle().acquire(8)
+        let refused = second.is_err()
+        second.release()
+        testing.assert(accepted, "the first attempt was refused")?
+        testing.assert(refused, "the second attempt was not refused")?
+    }
+
+    // Return how many acquisitions were requested, including refused ones.
+    pub fn attempts(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.attempts)
+    }
+
+    test "a shared log counts refused attempts too" {
+        defer let log = SharedTestAllocator.open(system(), fail_at: .Some(1)).unwrap()
+        let refused = log.handle().acquire(8)
+        refused.release()
+        let accepted = log.handle().acquire(8)
+        accepted.release()
+        testing.assert_eq(log.attempts(), UInt64(2), "a refused attempt was not counted")?
+    }
+
+    // Return how many acquisitions succeeded.
+    pub fn acquired(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.acquired)
+    }
+
+    test "a shared log counts only successful acquisitions" {
+        defer let log = SharedTestAllocator.open(system(), fail_at: .Some(2)).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8)
+        second.release()
+        first.release()
+        testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
+    }
+
+    // Return the most bytes live at once.
+    pub fn peak_bytes(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.peak_bytes)
+    }
+
+    test "a shared log remembers the most bytes live at once" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8).unwrap()
+        second.release()
+        first.release()
+        let third = log.handle().acquire(8).unwrap()
+        third.release()
+        testing.assert_eq(log.peak_bytes(), UInt64(24), "the peak lost the two live allocations")?
+    }
+
+    // Return how many bytes the log's allocations hold now: what was acquired
+    // and not yet disposed.
+    pub fn live_bytes(self: Self) -> UInt64 {
+        self.owner.client().call(|inout state: SharedLogState| state.live_bytes)
+    }
+
+    test "a shared log counts what is acquired and not disposed" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8).unwrap()
+        let both = log.live_bytes()
+        first.release()
+        let one = log.live_bytes()
+        second.release()
+        testing.assert_eq(both, UInt64(24), "two live allocations were not counted")?
+        testing.assert_eq(one, UInt64(8), "a disposed allocation was still counted")?
+        testing.assert_eq(log.live_bytes(), UInt64(0), "bytes stayed live after every release")?
+    }
+
+    // Fail the acquisition numbered `attempt`, counting from the allocator's
+    // first, in place of the one `open` named, or none when it is `.None`.
+    // Handles may be live and in use by other tasks.
+    pub fn fail_at(self: Self, attempt: Option[UInt64]) {
+        let number = counted_from_one(attempt)
+        self.owner.client().call([sink number] |inout state: SharedLogState| state.fail_at = number)
+    }
+
+    test "a shared log refuses a later attempt through live handles" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        let allocator = log.handle()
+        allocator.acquire(8).unwrap().release()
+        log.fail_at(.Some(3))
+        let second = allocator.acquire(8)
+        let accepted = second.is_ok()
+        second.release()
+        let third = allocator.acquire(8)
+        let refused = third.is_err()
+        third.release()
+        testing.assert(accepted, "an attempt before the refused one was refused")?
+        testing.assert(refused, "a later refusal was not applied")?
+    }
+
+    // Fail every acquisition from the one numbered `attempt` on, counting from
+    // the allocator's first, or none when it is `.None`.
+    pub fn fail_from(self: Self, attempt: Option[UInt64]) {
+        let number = counted_from_one(attempt)
+        self.owner.client().call([sink number] |inout state: SharedLogState| state.fail_from = number)
+    }
+
+    test "a shared log refuses every attempt from the one named" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        log.fail_from(.Some(2))
+        let first = log.handle().acquire(8)
+        let accepted = first.is_ok()
+        first.release()
+        var refused: UInt64 = 0
+        for _ in 0..3 {
+            let later = log.handle().acquire(8)
+            if later.is_err() {
+                refused += 1
+            }
+            later.release()
+        }
+        testing.assert(accepted, "an attempt before the first refused one was refused")?
+        testing.assert_eq(refused, UInt64(3), "an attempt after the first refused one was accepted")?
+        testing.assert(log.all_disposed(), "the accepted allocation was not recorded as released")?
+    }
+
+    // Fail the acquisition numbered `attempt` among those of exactly `size`
+    // bytes made after this call, counting from one, whichever attempt it is
+    // overall. It replaces any earlier rule about sizes; the rules about
+    // attempts still hold.
+    pub fn fail_size_at(self: Self, size: UInt64, attempt: UInt64) {
+        let number = counted_from_one(.Some(attempt))
+        self.owner.client().call([sink size, sink number] |inout state: SharedLogState| &state.fail_size(size, at: number, from: 0))
+    }
+
+    test "a shared log refuses one acquisition of the named size" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        log.fail_size_at(4096, 2)
+        let small = log.handle().acquire(16)
+        let other_size = small.is_ok()
+        small.release()
+        let first = log.handle().acquire(4096)
+        let accepted = first.is_ok()
+        first.release()
+        let second = log.handle().acquire(4096)
+        let refused = second.is_err()
+        second.release()
+        let third = log.handle().acquire(4096)
+        let accepted_after = third.is_ok()
+        third.release()
+        testing.assert(other_size, "an acquisition of another size was refused")?
+        testing.assert(accepted, "the acquisition of the size before the named one was refused")?
+        testing.assert(refused, "the named acquisition of the size was accepted")?
+        testing.assert(accepted_after, "an acquisition of the size after the named one was refused")?
+        testing.assert(log.all_disposed(), "an accepted allocation was not recorded as released")?
+    }
+
+    // Fail every acquisition of exactly `size` bytes from the one numbered
+    // `attempt` on, counting from one among those made after this call. One
+    // fails them all. It replaces any earlier rule about sizes; the rules
+    // about attempts still hold.
+    pub fn fail_size_from(self: Self, size: UInt64, attempt: UInt64) {
+        let number = counted_from_one(.Some(attempt))
+        self.owner.client().call([sink size, sink number] |inout state: SharedLogState| &state.fail_size(size, at: 0, from: number))
+    }
+
+    test "a shared log refuses every acquisition of the named size from one on" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        log.fail_size_from(4096, 2)
+        let first = log.handle().acquire(4096)
+        let accepted = first.is_ok()
+        first.release()
+        let small = log.handle().acquire(16)
+        let other_size = small.is_ok()
+        small.release()
+        var refused: UInt64 = 0
+        for _ in 0..3 {
+            let later = log.handle().acquire(4096)
+            if later.is_err() {
+                refused += 1
+            }
+            later.release()
+        }
+        testing.assert(accepted, "the acquisition of the size before the named one was refused")?
+        testing.assert(other_size, "an acquisition of another size was refused")?
+        testing.assert_eq(refused, UInt64(3), "an acquisition of the size after the named one was accepted")?
+        testing.assert_eq(log.attempts(), UInt64(5), "a refused acquisition was not counted as an attempt")?
+    }
+
+    // Return whether every successful acquisition was disposed and no bytes
+    // remain live.
+    pub fn all_disposed(self: Self) -> Bool {
+        self.owner.client().call(|inout state: SharedLogState| state.all_disposed())
+    }
+
+    test "a shared log is not all_disposed while an allocation is live" {
+        defer let log = SharedTestAllocator.open(system()).unwrap()
+        let buffer = log.handle().acquire(16).unwrap()
+        let settled_while_live = log.all_disposed()
+        buffer.release()
+        testing.assert(!settled_while_live, "a live allocation reads as settled")?
+        testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
+    }
+
+    // End the shared test allocator and answer whether every allocation it
+    // handed out was disposed, without stopping the program when one was
+    // not: a test that has already failed reports its own failure first.
+    // Releasing it stops the program instead.
+    pub fn close(sink self: Self) -> Bool {
+        let settled = self.all_disposed()
+        let SharedTestAllocator { owner, backing: _ } = self
+        owner.release()
+        settled
+    }
+
+    test "a shared test allocator closes answering whether it is settled" {
+        defer let arena = Arena.open(system(), 1024)
+        let settled = SharedTestAllocator.open(system()).unwrap()
+        settled.handle().acquire(8).unwrap().release()
+        testing.assert(settled.close(), "a shared test allocator with nothing live did not close settled")?
+        let unsettled = SharedTestAllocator.open(arena.handle()).unwrap()
+        // A buffer from an arena carries no obligation, so it may be dropped live.
+        let _dropped = unsettled.handle().acquire(8).unwrap()
+        testing.assert(!unsettled.close(), "a shared test allocator with an allocation live closed settled")?
+    }
+}
+
+// Releasing a shared test allocator checks that every buffer its handles
+// acquired was disposed, and stops the program when one was not.
+impl[H: Allocator] Release for SharedTestAllocator[H] {
+    fn release(sink self: Self) {
+        if !self.close() {
+            panic("a shared test allocator was released with an allocation it handed out still live")
+        }
+    }
+}
+
+// Acquire and release `count` buffers through `allocator` on a task of its
+// own while this task does the same. Its bound states that the allocator may
+// be read by two tasks at once.
+fn allocate_on_two_tasks[P: Allocator + Shareable](allocator: P, count: UInt64) {
+    let other = task.prepare(
+        sink [sink allocator = copy(allocator), sink count] |sink me: Chan[End]| {
+            for _ in 0..count {
+                allocator.acquire(8).unwrap().release()
+            }
+            me.close()
+        },
+    ).unwrap().start()
+    for _ in 0..count {
+        allocator.acquire(8).unwrap().release()
+    }
+    other.close()
+}
+
+// A SharedTestHandle allocates through a shared test allocator: a client of
+// the task that keeps the counts, and the backing allocator. It owns nothing,
+// so it can be copied freely while the allocator is live, and it is
+// `Shareable` exactly when the backing allocator is.
+@(opaque, copyable)
+struct SharedTestHandle[H: Allocator] {
+    log: task.Client[SharedLogState],
+    backing: H,
+}
+
+impl[H: Allocator] Allocator for SharedTestHandle[H] {
+    // A counted buffer carries the backing's obligation, so it is disposed
+    // into the backing exactly once.
+    type Obligation = H.Obligation
+
+    // A counted buffer is disposed into the backing, which decides.
+    fn reclaims(self: Self) -> Bool {
+        self.backing.reclaims()
+    }
+
+    fn acquire(self: Self, size: UInt64) -> Result[Buffer[Self], Oom] {
+        if self.log.call([sink size] |inout state: SharedLogState| &state.attempt(size)) {
+            return .Err(.Exhausted)
+        }
+        let Buffer { at, len, allocated, allocator: _, obligation } = self.backing.acquire(size)?
+        self.log.call([sink allocated] |inout state: SharedLogState| &state.record(allocated))
+        .Ok(.{ at, len, allocated, allocator = copy(self), obligation })
+    }
+
+    fn dispose(sink b { at, len, allocated, allocator, obligation }: Buffer[Self]) {
+        allocator.log.call([sink allocated] |inout state: SharedLogState| &state.dispose(allocated))
+        let buffer: Buffer[H] = .{ at, len, allocated, allocator = copy(allocator.backing), obligation }
+        buffer.release()
+    }
+}

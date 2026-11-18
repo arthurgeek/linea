@@ -10,7 +10,7 @@ struct Preferences[A: Allocator] {
 derive[A: Allocator] Release for Preferences[A]
 
 impl[A: Allocator] json.Decode[A] for Preferences[A] {
-    fn decode(value: json.Value[A], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+    fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
         var fields = json.ObjectDecoder.open_in(allocator, value)?
         defer fields.release()
         let title: String[A] = json.ObjectDecoder.field(&fields, "title")?

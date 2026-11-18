@@ -10861,6 +10861,17 @@ const Checker = struct {
         written: usize,
     ) std.mem.Allocator.Error!bool {
         const allocator = self.allocator_decl orelse return false;
+        // A derived member holds text of three authors. Its template
+        // expressions are the template's, held to this rule; a type copied
+        // into one, a component's type or a template argument, was written
+        // by the target or the derive, and is held to it where it was
+        // written; and its signature is the trait's, with the derive's
+        // arguments, both held to it where they are declared.
+        if (callee == ExprId.none) {
+            if (self.program.generatedOriginAt(self.ast.fileOf(tok), self.ast.tokenSpan(tok))) |origin| {
+                if (origin.copied or origin.template_expr == ExprId.none) return false;
+            }
+        }
         const parameters = self.ast.declTypeParams(decl);
         const omitted = for (parameters[written..], written..) |parameter, i| {
             if (try self.isAllocatorParameter(decl, parameter, allocator)) break i;

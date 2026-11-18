@@ -4,6 +4,7 @@ import std.io
 import std.json
 import std.mem
 import std.testing
+import std.time
 
 // Persistence error.
 @(copyable, derive(Debug, Release))
@@ -12,6 +13,7 @@ pub enum StorageError {
     WriteFailed,
     DecodeFailed,
     EncodeFailed,
+    Unreadable,
 }
 
 impl fmt.Display for StorageError {
@@ -21,6 +23,7 @@ impl fmt.Display for StorageError {
             WriteFailed => &w.write_str("failed to write data file"),
             DecodeFailed => &w.write_str("failed to parse notes JSON data"),
             EncodeFailed => &w.write_str("failed to serialize notes JSON data"),
+            Unreadable => &w.write_str("the notes would make a data file the next run could not read"),
         }
     }
 }
@@ -45,37 +48,21 @@ pub fn is_not_found(error: fs.ReadTextError) -> Bool {
     }
 }
 
-// Local wrapper for decoding a list of notes from a raw JSON array.
-pub struct NoteList {
-    notes: Vec[Note],
-}
+// The data file holds at most 4 MiB (4 * 1024 * 1024 bytes) of JSON.
+let max_store_bytes: UInt64 = 4194304
 
-impl Release for NoteList {
-    fn release(sink self: Self) {
-        let { notes } = self
-        notes.release()
-    }
-}
-
-impl json.Decode[mem.SystemAllocator] for NoteList {
-    fn decode(value: json.Value[mem.SystemAllocator], allocator: mem.SystemAllocator) -> Result[Self, json.DecodeError[mem.SystemAllocator]] {
-        let children = value.elements() else {
-            return .Err(json.DecodeError.failure_in(allocator, .WrongKind))
-        }
-        defer var notes: Vec[Note] = Vec.new_in(allocator)
-        for index in UInt64(0)..children.length() {
-            let decoded: Result[Note, json.DecodeError] = json.from_value(children[index])
-            let note = match decoded {
-                Ok(n) => n,
-                Err(error) => return .Err(json.DecodeError.at_index(error, index)),
-            }
-            &notes.push(note).settled().unwrap()
-        }
-        .Ok(.{ notes })
-    }
-
-    fn missing(allocator: mem.SystemAllocator) -> Result[Self, json.DecodeError[mem.SystemAllocator]] {
-        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+// `decode_notes` reads the data file's text as the notes it holds, within the
+// file's byte limit and the standard JSON limits. `open` reads the file with
+// it, and `save` checks with it that the next `open` can read what it writes.
+fn decode_notes(text: Str) -> Result[Vec[Note], StorageError] {
+    let limits = json.ParseLimits { max_input_bytes = max_store_bytes, ..json.ParseLimits.default() }
+    let decoded: Result[Vec[Note], json.DecodeError] = json.decode(text, limits: limits)
+    match decoded {
+        Ok(notes) => .Ok(notes),
+        Err(error) => {
+            error.release()
+            .Err(.DecodeFailed)
+        },
     }
 }
 
@@ -96,21 +83,11 @@ impl NoteStore {
     // Open storage from path. If file does not exist, starts empty.
     // If reading fails for any other reason (permission denied, I/O error), returns error.
     pub fn open(sink path: fs.Path) -> Result[Self, StorageError] {
-        let text_result = fs.read_text(path, max_bytes: 4194304)
+        let text_result = fs.read_text(path, max_bytes: max_store_bytes)
         let notes: Vec[Note] = match text_result {
             Ok(content) => {
                 defer content.release()
-                let decoded: Result[NoteList, json.DecodeError] = json.decode(content.view())
-                match decoded {
-                    Ok(list) => {
-                        let { notes: n } = list
-                        n
-                    },
-                    Err(error) => {
-                        error.release()
-                        return .Err(.DecodeFailed)
-                    },
-                }
+                decode_notes(content.view())?
             },
             Err(read_error) => {
                 if is_not_found(read_error) {
@@ -123,9 +100,19 @@ impl NoteStore {
         .Ok(.{ notes, path })
     }
 
-    // Save in-memory notes atomically to the file path.
+    // Save in-memory notes atomically to the file path. Notes the next `open`
+    // could not read are refused with `Unreadable`, and the file keeps what it
+    // held.
     pub fn save(inout self: Self) -> Result[(), StorageError] {
-        defer let output = TableFormatter.render_filtered_json(self.notes.as_slice(), .None, .None)
+        defer var output = String.new()
+        let encoded = json.encode(&output, self.notes).is_ok()
+        if !encoded {
+            return .Err(.EncodeFailed)
+        }
+        let readable = decode_notes(output.view()) else |_| {
+            return .Err(.Unreadable)
+        }
+        readable.release()
         let saved = fs.save_atomic(self.path, output.as_bytes(), .Replace)
         match saved {
             Ok(_) => .Ok(()),
@@ -189,6 +176,37 @@ impl NoteStore {
     // Return count of notes.
     pub fn count(self: Self) -> UInt64 {
         self.notes.length()
+    }
+
+    test "a saved store is one the next open can read" {
+        let stamp = time.now().nanoseconds()
+        defer let path_text = fmt.render_owned("/tmp/linea-notes-{stamp}.json").unwrap()
+        let path = fs.Path.from_str(path_text.view()).unwrap()
+        var store = NoteStore.open(copy(path)).unwrap()
+        defer store.release()
+        // One title of 1 MiB and one byte passes every limit but the longest string.
+        defer var title = String.new()
+        // 16,384 appends of 64 bytes make 1 MiB.
+        for _ in 0..16384 {
+            &title.append("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl").unwrap()
+        }
+        &title.append("!").unwrap()
+        let _id = &store.add(title.view(), .Normal, Vec.new()).unwrap()
+        let saved = &store.save().is_ok()
+        let reopened = if saved {
+            match NoteStore.open(copy(path)) {
+                Ok(again) => {
+                    again.release()
+                    true
+                },
+                Err(_) => false,
+            }
+        } else {
+            true
+        }
+        let _removed = fs.remove_file(path)
+        testing.assert(reopened, "save published notes the next open refused")?
+        .Ok(())
     }
 
     test "note store crud lifecycle" {

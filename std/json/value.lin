@@ -108,7 +108,7 @@ fn depth_test_value[A: Allocator](allocator: A, depth: UInt64) -> Value[A] where
 }
 
 // Build an array or an object holding eight strings.
-fn json_mutation_destination(allocator: mem.RefusingAllocator[mem.SystemAllocator], object: Bool) -> Value[mem.RefusingAllocator[mem.SystemAllocator]] where carries(allocator) {
+fn json_mutation_destination(allocator: testing.TestHandle[mem.SystemAllocator], object: Bool) -> Value[testing.TestHandle[mem.SystemAllocator]] where carries(allocator) {
     var destination = if object {
         Value.object_in(allocator)
     } else {
@@ -745,16 +745,16 @@ impl[A: Allocator] Value[A] {
             var mutation_attempts: UInt64 = 1
             var refusal: UInt64 = 0
             while refusal <= mutation_attempts {
-                defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-                let allocator = log.allocator()
+                defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+                let allocator = log.handle()
                 defer var destination = json_mutation_destination(allocator, object)
                 var incoming = Value.object_in(allocator)
                 &incoming.insert("child", Value.string_in(allocator, "returned").unwrap()).unwrap().release()
                 let before = log.attempts()
                 if refusal != 0 {
-                    log.refuse_attempt(before + refusal)
+                    log.fail_at(.Some(before + refusal))
                 }
-                let changed: Result[(), MutationFailure[mem.RefusingAllocator[mem.SystemAllocator]]] = if object {
+                let changed: Result[(), MutationFailure[testing.TestHandle[mem.SystemAllocator]]] = if object {
                     match &destination.insert("new", incoming) {
                         Ok(previous) => {
                             previous.release()
@@ -810,12 +810,12 @@ impl[A: Allocator] Value[A] {
     }
 
     test "json replacement and removal transfer owners without allocation" {
-        defer let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = log.allocator()
+        defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+        let allocator = log.handle()
         defer var destination = json_mutation_destination(allocator, true)
         let replacement = Value.string_in(allocator, "replacement").unwrap()
         let before = log.attempts()
-        log.refuse_attempt(before + 1)
+        log.fail_at(.Some(before + 1))
         defer let previous = &destination.insert("one", replacement).unwrap().unwrap()
         defer let removed = &destination.remove_member("one").unwrap().unwrap()
         testing.assert(destination.get("one").is_none(), "removed replacement remained visible")?

@@ -5,6 +5,9 @@ Status: Accepted — 2026-09-28. Extends
 [0098](0098-a-container-names-its-allocator-in-its-type.md). Its clause that
 every allocating API takes its allocator from its caller is superseded by
 [0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md).
+Its instrument, `AllocationLog` with its `RefusingAllocator` and a
+`refuse_at` count, is superseded by
+[0287](0287-tests-allocate-through-a-test-allocator.md).
 
 ## Context
 

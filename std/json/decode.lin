@@ -4,10 +4,13 @@ import std.collections
 import std.testing
 
 // A Decode type is one a JSON value decodes into, allocating any storage it
-// owns from `allocator`. `missing` gives the value a type takes when an object
-// has no member for it, or a MissingField error when the member is required.
+// owns from `allocator`. The value may live in any allocator `B`: the decoded
+// value and its error copy what they keep out of it, so neither depends on the
+// document, which may be released first. `missing` gives the value a type
+// takes when an object has no member for it, or a MissingField error when the
+// member is required.
 pub trait Decode[A: Allocator]: Release {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator)
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator)
 
     fn missing(allocator: A) -> Result[Self, DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator)
 }
@@ -18,7 +21,7 @@ template impl[A: Allocator] Decode[A] where
     reflect.target: struct,
     reflect.components: Decode[A],
 {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         defer var fields = ObjectDecoder.open_in(allocator, value)?
         let result: Self = reflect.construct(
             reflect.product,
@@ -107,14 +110,15 @@ test "decode allocates the record from an arena" {
     testing.assert_eq(profile.enabled, Option.Some(true), "a record decoded into an arena lost its optional field")?
 }
 
-// Decode an already parsed value as a T, leaving the value with the caller.
-pub fn from_value_in[A: Allocator, T: Decode[A]](allocator: A, value: Value[A]) -> Result[T, DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+// Decode an already parsed value as a T allocated from `allocator`, leaving
+// the value with the caller. The value may be in another allocator.
+pub fn from_value_in[A: Allocator, B: Allocator, T: Decode[A]](allocator: A, value: Value[B]) -> Result[T, DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
     T.decode(value, allocator)
 }
 
-// Decode an already parsed value as a T allocated from the system allocator,
-// leaving the value with the caller.
-pub fn from_value[T: Decode[mem.SystemAllocator]](value: Value[mem.SystemAllocator]) -> Result[T, DecodeError[mem.SystemAllocator]] where carries() {
+// Decode an already parsed value, in any allocator, as a T allocated from the
+// system allocator, leaving the value with the caller.
+pub fn from_value[B: Allocator, T: Decode[mem.SystemAllocator]](value: Value[B]) -> Result[T, DecodeError[mem.SystemAllocator]] where carries() {
     from_value_in(mem.system(), value)
 }
 
@@ -133,6 +137,15 @@ test "from_value decodes a parsed value and leaves it with the caller" {
     testing.assert_eq(document.get("tea").unwrap().as_uint64().unwrap(), UInt64(2), "decoding changed the document")?
 }
 
+test "from_value decodes a document held in an arena into system values" {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    let document = parse_in(arena.handle(), r#"{"tea":"green"}"#).unwrap()
+    let decoded: Result[Map[String, String], DecodeError] = from_value(document)
+    document.release()
+    defer let teas = decoded.unwrap()
+    testing.assert_eq(teas.get("tea").unwrap().view(), "green", "a value decoded out of an arena kept nothing")?
+}
+
 test "from_value decodes a value into an arena" {
     defer let arena = mem.Arena.open(mem.system(), 4096)
     let allocator = arena.handle()
@@ -144,7 +157,7 @@ test "from_value decodes a value into an arena" {
 }
 
 impl[A: Allocator] Decode[A] for Bool {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         match value.as_bool() {
             Some(value) => .Ok(value),
             None => .Err(DecodeError.failure_in(allocator, .WrongKind)),
@@ -164,7 +177,7 @@ fn number_decode_reason(reason: NumberAccessError) -> DecodeReason {
 // An integer decodes from a JSON number that is an integer inside the type's
 // range.
 impl[A: Allocator, T: Integer + Release] Decode[A] for T {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         if T.min < T(0) {
             let number = value.as_int64() else |error| {
                 return .Err(DecodeError.failure_in(allocator, number_decode_reason(error)))
@@ -189,7 +202,7 @@ impl[A: Allocator, T: Integer + Release] Decode[A] for T {
 }
 
 impl[A: Allocator] Decode[A] for Float64 {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         match value.as_float64() {
             Ok(number) => .Ok(number),
             Err(error) => .Err(DecodeError.failure_in(allocator, number_decode_reason(error))),
@@ -202,7 +215,7 @@ impl[A: Allocator] Decode[A] for Float64 {
 }
 
 impl[A: Allocator] Decode[A] for String[A] {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         let string = value.as_str() else {
             return .Err(DecodeError.failure_in(allocator, .WrongKind))
         }
@@ -262,7 +275,7 @@ impl[A: Allocator] DecodeKey[A] for String[A] {
 
 // An Option decodes null as None, and takes None when its member is missing.
 impl[A: Allocator, T: Decode[A]] Decode[A] for Option[T] {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         if value.kind() == .Null {
             return .Ok(.None)
         }
@@ -278,7 +291,7 @@ impl[A: Allocator, T: Decode[A]] Decode[A] for Option[T] {
 
 // A Vec decodes from an array. A failing element's error records its index.
 impl[T: Decode[A], A: Allocator] Decode[A] for Vec[T, A] {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         let children = value.elements() else {
             return .Err(DecodeError.failure_in(allocator, .WrongKind))
         }
@@ -300,7 +313,7 @@ impl[T: Decode[A], A: Allocator] Decode[A] for Vec[T, A] {
 // A Map decodes from an object, one entry per member. Two names that decode to
 // the same key are DuplicateKey.
 impl[K: DecodeKey[A], V: Decode[A], A: Allocator] Decode[A] for Map[K, V, A] {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         let members = value.members() else {
             return .Err(DecodeError.failure_in(allocator, .WrongKind))
         }
@@ -388,21 +401,21 @@ test "typed collections keep owned values and nested error paths" {
     }, "nested error lost its owned root-first path")?
 }
 
-// An ObjectDecoder reads the members of one object, recording each name it
-// read in `used`, so `finish` can refuse members no field read. A derived
-// `Release` releases `used`, and discards the borrowed object and the
-// allocator.
+// An ObjectDecoder reads the members of one object in allocator `B`, decoding
+// them into `A` and recording each name it read in `used`, so `finish` can
+// refuse members no field read. A derived `Release` releases `used`, and
+// discards the borrowed object and the allocator.
 @(opaque, derive(Release))
-struct ObjectDecoder[A: Allocator] {
-    object: borrow Value[A],
+struct ObjectDecoder[A: Allocator, B: Allocator] {
+    object: borrow Value[B],
     allocator: A,
     used: Map[String[A], Bool, A],
 }
 
-impl ObjectDecoder[mem.SystemAllocator] {
+impl[B: Allocator] ObjectDecoder[mem.SystemAllocator, B] {
     // Start decoding the members of `value`, which must be an object,
     // recording the names read in the system allocator.
-    pub fn open(value: Value[mem.SystemAllocator]) -> Result[Self, DecodeError[mem.SystemAllocator]] where borrows(.Ok.object: value) {
+    pub fn open(value: Value[B]) -> Result[Self, DecodeError[mem.SystemAllocator]] where borrows(.Ok.object: value) {
         ObjectDecoder.open_in(mem.system(), value)
     }
 
@@ -434,10 +447,10 @@ impl ObjectDecoder[mem.SystemAllocator] {
     }
 }
 
-impl[A: Allocator] ObjectDecoder[A] {
+impl[A: Allocator, B: Allocator] ObjectDecoder[A, B] {
     // Start decoding the members of `value`, which must be an object,
     // recording the names read in storage from `allocator`.
-    pub fn open_in(allocator: A, value: Value[A]) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
+    pub fn open_in(allocator: A, value: Value[B]) -> Result[Self, DecodeError[A]] where borrows(.Ok.object: value), carries(.Ok.allocator: allocator), carries(.Ok.used: allocator), carries(.Err: allocator) {
         if value.kind() != .Object {
             return .Err(DecodeError.failure_in(allocator, .WrongKind))
         }
@@ -601,7 +614,7 @@ struct DecodeSettings[A: Allocator] {
 derive[A: Allocator] Release for DecodeSettings[A]
 
 impl[A: Allocator] Decode[A] for DecodeSettings[A] {
-    fn decode(value: Value[A], allocator: A) -> Result[Self, DecodeError[A]] {
+    fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
         defer var fields = ObjectDecoder.open_in(allocator, value)?
         defer let name: String[A] = &fields.field("name")?
         defer let labels: Vec[String[A], A] = &fields.field("labels")?
@@ -649,11 +662,11 @@ test "typed records apply missing policy and settle early owners" {
     }
 }
 
-// JsonDecodedRecord allocates through a RefusingAllocator, so a test can
+// JsonDecodedRecord allocates through a TestHandle, so a test can
 // refuse each allocation decoding makes.
 struct JsonDecodedRecord {
-    name: String[mem.RefusingAllocator[mem.SystemAllocator]],
-    labels: Vec[String[mem.RefusingAllocator[mem.SystemAllocator]], mem.RefusingAllocator[mem.SystemAllocator]],
+    name: String[testing.TestHandle[mem.SystemAllocator]],
+    labels: Vec[String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]],
     retries: UInt8,
 }
 
@@ -665,7 +678,7 @@ impl Release for JsonDecodedRecord {
     }
 }
 
-derive Decode[mem.RefusingAllocator[mem.SystemAllocator]] for JsonDecodedRecord
+derive Decode[testing.TestHandle[mem.SystemAllocator]] for JsonDecodedRecord
 
 // This walk refuses each attempt by hand rather than through
 // `testing.each_allocation_failure`, which accepts a refused run that
@@ -684,9 +697,9 @@ test "json typed decode disposes records and error paths on each refusal" {
     let reasons = [DecodeReason.WrongKind, DecodeReason.WrongKind, DecodeReason.WrongKind, DecodeReason.MissingField, DecodeReason.MissingField, DecodeReason.MissingField, DecodeReason.UnknownField]
     let fields = ["", "retries", "labels", "name", "labels", "retries", "extra"]
     for index in 0..inputs.length() {
-        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = baseline.allocator()
-        let result: Result[JsonDecodedRecord, DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = decode_in(allocator, inputs[index])
+        defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+        let allocator = baseline.handle()
+        let result: Result[JsonDecodedRecord, DecodeError[testing.TestHandle[mem.SystemAllocator]]] = decode_in(allocator, inputs[index])
         let expected = match result {
             Ok(record) => {
                 let correct = index == 0 && record.name.view() == "tea" && record.labels.length() == 2
@@ -724,9 +737,9 @@ test "json typed decode disposes records and error paths on each refusal" {
         testing.assert(baseline.peak_bytes() > 0, "allocation log lost its live-byte peak")?
         testing.assert(baseline.all_disposed(), "typed decode lost or repeated owned fields or paths")?
         for refusal in UInt64(1)..(attempts + 1) {
-            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-            let failing = log.allocator()
-            let failed: Result[JsonDecodedRecord, DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = decode_in(failing, inputs[index])
+            defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+            let failing = log.handle()
+            let failed: Result[JsonDecodedRecord, DecodeError[testing.TestHandle[mem.SystemAllocator]]] = decode_in(failing, inputs[index])
             let refused = match failed {
                 Ok(record) => {
                     record.release()
@@ -753,7 +766,7 @@ test "json typed decode disposes records and error paths on each refusal" {
 // JsonOwnedDecodeKey owns its decoded name, folds "TEA" into "tea", refuses
 // the name "invalid" after allocating, and hashes every name alike, so keys
 // collide.
-struct JsonOwnedDecodeKey { name: String[mem.RefusingAllocator[mem.SystemAllocator]] }
+struct JsonOwnedDecodeKey { name: String[testing.TestHandle[mem.SystemAllocator]] }
 
 impl Release for JsonOwnedDecodeKey {
     fn release(sink self: Self) {
@@ -778,8 +791,8 @@ impl hash.Hash for JsonOwnedDecodeKey {
     }
 }
 
-impl DecodeKey[mem.RefusingAllocator[mem.SystemAllocator]] for JsonOwnedDecodeKey {
-    fn from_name(name: Str, allocator: mem.RefusingAllocator[mem.SystemAllocator]) -> Result[Self, DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] {
+impl DecodeKey[testing.TestHandle[mem.SystemAllocator]] for JsonOwnedDecodeKey {
+    fn from_name(name: Str, allocator: testing.TestHandle[mem.SystemAllocator]) -> Result[Self, DecodeError[testing.TestHandle[mem.SystemAllocator]]] {
         let normalized = if name == "TEA" {
             "tea"
         } else {
@@ -807,8 +820,8 @@ test "json typed map settles owned keys values and collisions on each refusal" {
     let reasons = [DecodeReason.InvalidValue, DecodeReason.WrongKind, DecodeReason.InvalidValue, DecodeReason.DuplicateKey]
     let fields = ["", "leaf", "invalid", ""]
     for index in 0..inputs.length() {
-        defer let document_log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let document_allocator = document_log.allocator()
+        defer let document_log = testing.TestAllocator.open(mem.system()).unwrap()
+        let document_allocator = document_log.handle()
         defer let document = parse_in(document_allocator, inputs[index]).unwrap()
         var duplicate_is_upper = false
         if index == 3 {
@@ -826,9 +839,9 @@ test "json typed map settles owned keys values and collisions on each refusal" {
         } else {
             copy(fields[index])
         }
-        defer let baseline = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        let allocator = baseline.allocator()
-        let result: Result[collections.Map[JsonOwnedDecodeKey, String[mem.RefusingAllocator[mem.SystemAllocator]], mem.RefusingAllocator[mem.SystemAllocator]], DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = from_value_in(allocator, document)
+        defer let baseline = testing.TestAllocator.open(mem.system()).unwrap()
+        let allocator = baseline.handle()
+        let result: Result[collections.Map[JsonOwnedDecodeKey, String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]], DecodeError[testing.TestHandle[mem.SystemAllocator]]] = from_value_in(allocator, document)
         let expected = match result {
             Ok(values) => {
                 var found = false
@@ -855,9 +868,9 @@ test "json typed map settles owned keys values and collisions on each refusal" {
         testing.assert(attempts > 0, "owning map decode performed no allocations")?
         testing.assert(baseline.all_disposed(), "owning map decode lost or repeated a key, value or path allocation")?
         for refusal in UInt64(1)..(attempts + 1) {
-            defer let log = mem.AllocationLog.open(mem.system(), refusal).unwrap()
-            let failing = log.allocator()
-            let failed: Result[collections.Map[JsonOwnedDecodeKey, String[mem.RefusingAllocator[mem.SystemAllocator]], mem.RefusingAllocator[mem.SystemAllocator]], DecodeError[mem.RefusingAllocator[mem.SystemAllocator]]] = from_value_in(failing, document)
+            defer let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refusal)).unwrap()
+            let failing = log.handle()
+            let failed: Result[collections.Map[JsonOwnedDecodeKey, String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]], DecodeError[testing.TestHandle[mem.SystemAllocator]]] = from_value_in(failing, document)
             let refused = match failed {
                 Ok(values) => {
                     values.release()

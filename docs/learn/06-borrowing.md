@@ -1238,7 +1238,7 @@ value points at anything; `Shareable` asks whether reading it writes anything:
 
 ### `@unshareable` — a type whose reads write
 
-`mem.Arena` and `mem.AllocationLog` are declared `@unshareable`, and that
+`mem.Arena` and `testing.TestAllocator` are declared `@unshareable`, and that
 attribute is what the compiler starts from. A `mem.Handle` is not shareable
 because it borrows its arena, and `@unshareable` never goes on a copyable
 type: a copy would share the state with no borrow to say so. Only code trusted with C can write memory while

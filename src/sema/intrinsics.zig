@@ -216,8 +216,8 @@ pub const RawAccesses = struct {
     arena_rewind: DeclId = .none,
     /// `mem.Handle` and the arena's free functions that trust the first chunk
     /// they are handed: `arena_give_back` is named only by `Arena`'s members,
-    /// `arena_reserve` and `arena_holds` only by `Handle`'s, `arena_table_of`
-    /// only by the three that read the table, and `arena_write`, which writes
+    /// `arena_reserve` only by `Handle`'s, `arena_table_of` only by the two
+    /// that read the table, and `arena_write`, which writes
     /// a word of the first chunk, only by `Arena`'s members and the two free
     /// functions that write its words.
     handle: DeclId = .none,
@@ -225,7 +225,6 @@ pub const RawAccesses = struct {
     arena_table_of: DeclId = .none,
     arena_give_back: DeclId = .none,
     arena_reserve: DeclId = .none,
-    arena_holds: DeclId = .none,
     arena_write: DeclId = .none,
     /// `Storage.from_buffer`, which takes a buffer apart into slot storage.
     storage_from_buffer: DeclId = .none,
@@ -236,11 +235,11 @@ pub const RawAccesses = struct {
     /// The test allocators that build a buffer of their backing allocator,
     /// which they hand out and take back on its behalf, and the members of an
     /// allocation log and a release log that read or write the log's words.
-    allocation_log_refuse_attempt: DeclId = .none,
-    refusing_acquire: DeclId = .none,
-    refusing_dispose: DeclId = .none,
-    shared_refusing_acquire: DeclId = .none,
-    shared_refusing_dispose: DeclId = .none,
+    test_allocator_fail_at: DeclId = .none,
+    test_acquire: DeclId = .none,
+    test_dispose: DeclId = .none,
+    shared_test_acquire: DeclId = .none,
+    shared_test_dispose: DeclId = .none,
     vec_test_acquire: DeclId = .none,
     vec_test_dispose: DeclId = .none,
     release_log_words: DeclId = .none,
@@ -313,16 +312,15 @@ pub const RawAccesses = struct {
     view: DeclId = .none,
     view_place: DeclId = .none,
     /// `argument_span` and `environment_span` view text the process was
-    /// started with; each lowers to the runtime's count, address and length
-    /// for its source, which `processText` names.
+    /// started with; each lowers to the runtime's count for its source and
+    /// one call answering an entry's address and writing its length, which
+    /// `processText` names.
     argument_span: DeclId = .none,
     argument_count: DeclId = .none,
-    argument_at: DeclId = .none,
-    argument_len: DeclId = .none,
+    argument_entry: DeclId = .none,
     environment_span: DeclId = .none,
     environment_count: DeclId = .none,
-    environment_at: DeclId = .none,
-    environment_len: DeclId = .none,
+    environment_entry: DeclId = .none,
     stride: DeclId = DeclId.none,
     take: DeclId = DeclId.none,
     put: DeclId = DeclId.none,
@@ -429,16 +427,15 @@ pub const RawAccesses = struct {
             .arena_table_of = moduleFunction(program, ast, "mem", "arena_table_of"),
             .arena_give_back = moduleFunction(program, ast, "mem", "arena_give_back"),
             .arena_reserve = moduleFunction(program, ast, "mem", "arena_reserve"),
-            .arena_holds = moduleFunction(program, ast, "mem", "arena_holds"),
             .arena_write = moduleFunction(program, ast, "mem", "arena_write"),
             .storage_from_buffer = memberOf(program, ast, "mem", "Storage", "from_buffer"),
             .storage_dispose = memberOf(program, ast, "mem", "Storage", "dispose"),
             .storage_into_buffer = memberOf(program, ast, "mem", "Storage", "into_buffer"),
-            .allocation_log_refuse_attempt = memberOf(program, ast, "mem", "AllocationLog", "refuse_attempt"),
-            .refusing_acquire = memberOf(program, ast, "mem", "RefusingAllocator", "acquire"),
-            .refusing_dispose = memberOf(program, ast, "mem", "RefusingAllocator", "dispose"),
-            .shared_refusing_acquire = memberOf(program, ast, "mem", "SharedRefusingAllocator", "acquire"),
-            .shared_refusing_dispose = memberOf(program, ast, "mem", "SharedRefusingAllocator", "dispose"),
+            .test_allocator_fail_at = memberOf(program, ast, "mem", "TestAllocator", "fail_at"),
+            .test_acquire = memberOf(program, ast, "mem", "TestHandle", "acquire"),
+            .test_dispose = memberOf(program, ast, "mem", "TestHandle", "dispose"),
+            .shared_test_acquire = memberOf(program, ast, "mem", "SharedTestHandle", "acquire"),
+            .shared_test_dispose = memberOf(program, ast, "mem", "SharedTestHandle", "dispose"),
             .vec_test_acquire = memberOf(program, ast, "mem", "VecTestAllocator", "acquire"),
             .vec_test_dispose = memberOf(program, ast, "mem", "VecTestAllocator", "dispose"),
             .release_log_words = memberOf(program, ast, "mem", "ReleaseLog", "words"),
@@ -509,11 +506,9 @@ pub const RawAccesses = struct {
     pub fn withCheckedScalars(self: RawAccesses, program: *const ExpandedProgram, ast: *const Ast, typing: *const Typing) RawAccesses {
         var checked = self;
         checked.argument_count = libraryExternDecl(program, ast, typing, "linea_arg_count");
-        checked.argument_at = libraryExternDecl(program, ast, typing, "linea_arg_at");
-        checked.argument_len = libraryExternDecl(program, ast, typing, "linea_arg_len");
+        checked.argument_entry = libraryExternDecl(program, ast, typing, "linea_arg_span");
         checked.environment_count = libraryExternDecl(program, ast, typing, "linea_env_count");
-        checked.environment_at = libraryExternDecl(program, ast, typing, "linea_env_at");
-        checked.environment_len = libraryExternDecl(program, ast, typing, "linea_env_len");
+        checked.environment_entry = libraryExternDecl(program, ast, typing, "linea_env_span");
         checked.errno_read = libraryExternDecl(program, ast, typing, "linea_errno");
         checked.store = libraryExternDecl(program, ast, typing, "linea_raw_store");
         checked.load = libraryExternDecl(program, ast, typing, "linea_raw_load");
@@ -623,12 +618,12 @@ pub const RawAccesses = struct {
     /// `Buffer`'s members: an arena's bookkeeping, which reads where its
     /// chunks lie and writes its words, and the members of the library's test
     /// logs that read or write their words.
-    const buffer_numbers = [_][]const u8{ "arena_open", "arena_rewind", "arena_table_of", "arena_reserve", "arena_holds", "arena_write", "allocation_log_refuse_attempt", "release_log_words" };
+    const buffer_numbers = [_][]const u8{ "arena_open", "arena_rewind", "arena_table_of", "arena_reserve", "arena_write", "test_allocator_fail_at", "release_log_words" };
 
     /// The test allocators that build a buffer of their backing allocator,
     /// which they hand out and take back on its behalf, and an arena's handle,
     /// which takes apart a buffer it handed out.
-    const backing_buffer_builders = [_][]const u8{ "refusing_acquire", "refusing_dispose", "shared_refusing_acquire", "shared_refusing_dispose", "vec_test_acquire", "vec_test_dispose", "handle_dispose" };
+    const backing_buffer_builders = [_][]const u8{ "test_acquire", "test_dispose", "shared_test_acquire", "shared_test_dispose", "vec_test_acquire", "vec_test_dispose", "handle_dispose" };
 
     /// The raw types, with where else each one's fields are named. A
     /// storage's are named where a task body is kept and where a closure
@@ -640,7 +635,7 @@ pub const RawAccesses = struct {
     /// is made from a buffer and taken back; a kept body's where
     /// `task.Slot.start` hands its addresses to the task it starts; an
     /// owner's where `task.own` builds one and `task.Client.call` reaches its queue; an
-    /// arena's where its free functions and its handle's release read it;
+    /// arena's where its free functions read it;
     /// a `ProbeTag`'s where `probe_tag` builds one; and a wait set's and a
     /// key's nowhere else, since the set's number and the key's slot and
     /// generation say which kept value a call takes and as what type.
@@ -654,7 +649,7 @@ pub const RawAccesses = struct {
         .{ .decl = "kept", .also = &.{ "keep_body", "task_slot_start" } },
         .{ .decl = "endpoint" },
         .{ .decl = "owner", .also = &.{ "client_call", "task_own" } },
-        .{ .decl = "arena", .also = &.{ "arena_table_of", "arena_give_back", "arena_reserve", "arena_holds", "handle_dispose" } },
+        .{ .decl = "arena", .also = &.{ "arena_table_of", "arena_give_back", "arena_reserve" } },
         .{ .decl = "probe_tag", .also = &.{"probe_tag_builder"} },
         .{ .decl = "wait_set" },
         .{ .decl = "registered" },
@@ -686,7 +681,7 @@ pub const RawAccesses = struct {
     /// payload's send and receive, an owning task's call and request, the
     /// release of a vector's elements, the byte vector given back as a
     /// buffer, whose bytes need no settling, and an arena's table of chunks.
-    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve", "arena_holds" };
+    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve" };
 
     const slots_message = "a slot is taken, put, placed or given up only by `Storage` and `Vec` and the declarations the table names, each of which settles or hands on every value it puts";
     const task_help = "start the task with `task.prepare(body)` and `start()`";
@@ -717,8 +712,8 @@ pub const RawAccesses = struct {
         .{ .decls = &.{"call_owner"}, .allowed = &.{"client_call"}, .message = queue_message, .help = queue_help },
         .{ .decls = &.{"next_owner_request"}, .allowed = &.{"run_owner"}, .message = queue_message, .help = queue_help },
         .{ .decls = &.{"arena_give_back"}, .types = &.{"arena"}, .message = arena_message, .help = arena_help },
-        .{ .decls = &.{ "arena_reserve", "arena_holds" }, .types = &.{"handle"}, .message = arena_message, .help = arena_help },
-        .{ .decls = &.{"arena_table_of"}, .allowed = &.{ "arena_give_back", "arena_reserve", "arena_holds" }, .message = arena_message, .help = arena_help },
+        .{ .decls = &.{"arena_reserve"}, .types = &.{"handle"}, .message = arena_message, .help = arena_help },
+        .{ .decls = &.{"arena_table_of"}, .allowed = &.{ "arena_give_back", "arena_reserve" }, .message = arena_message, .help = arena_help },
         .{ .decls = &.{"arena_write"}, .allowed = &.{ "arena_give_back", "arena_reserve" }, .types = &.{"arena"}, .message = arena_message, .help = arena_help },
         .{ .decls = &.{"record_release"}, .allowed = &.{ "release_tag_release", "probe_tag_release" }, .message = "`record_release` writes at the number it is given, so only the declarations the table names call it", .help = "release a `ReleaseTag`" },
         .{ .decls = &.{ "foreign_byte", "foreign_word" }, .allowed = &.{ "copied_in", "foreign_address_test", "foreign_byte_test", "foreign_word_test", "foreign_at_test" }, .types = &.{ "c_text", "c_text_list" }, .message = "C's memory has no extent to check a read against, so only a C view's own operations read it", .help = "read the view through its own operations" },
@@ -734,7 +729,7 @@ pub const RawAccesses = struct {
     /// bytes ([T-RawAddress]).
     pub const byte_operations: Confinement = .{
         .decls = &.{},
-        .allowed = &.{ "arena_write", "system_allocator_dispose", "runtime_byte_callers", "call_owner", "next_owner_request", "send_payload", "receive_payload", "receive_payload_until", "allocation_log_refuse_attempt", "refusing_acquire", "refusing_dispose", "record_release", "foreign_byte", "foreign_word", "vec_test_log_store", "task_slot_start" },
+        .allowed = &.{ "arena_write", "system_allocator_dispose", "runtime_byte_callers", "call_owner", "next_owner_request", "send_payload", "receive_payload", "receive_payload_until", "test_allocator_fail_at", "test_acquire", "test_dispose", "record_release", "foreign_byte", "foreign_word", "vec_test_log_store", "task_slot_start" },
         .types = &.{ "buffer", "storage", "endpoint" },
         .message = "trusts the extent beside its address, so only the declarations the table names pass one",
         .help = "use the operation of what owns the bytes",
@@ -809,15 +804,16 @@ pub const RawAccesses = struct {
     }
 
     /// The runtime declarations a process-text span reads: how many entries
-    /// its source holds, and one entry's address and length.
-    pub const ProcessText = struct { count: DeclId, at: DeclId, len: DeclId };
+    /// its source holds, and the call answering one entry's address and
+    /// writing its length.
+    pub const ProcessText = struct { count: DeclId, entry: DeclId };
 
     /// The runtime source `d` views when it is `argument_span` or
     /// `environment_span`, or null for any other declaration.
     pub fn processText(self: RawAccesses, d: DeclId) ?ProcessText {
         if (d == DeclId.none) return null;
-        if (d == self.argument_span) return .{ .count = self.argument_count, .at = self.argument_at, .len = self.argument_len };
-        if (d == self.environment_span) return .{ .count = self.environment_count, .at = self.environment_at, .len = self.environment_len };
+        if (d == self.argument_span) return .{ .count = self.argument_count, .entry = self.argument_entry };
+        if (d == self.environment_span) return .{ .count = self.environment_count, .entry = self.environment_entry };
         return null;
     }
 
