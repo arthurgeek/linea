@@ -5340,8 +5340,12 @@ const Lowerer = struct {
             const count = try self.directCall(.u64, span, self.mono.idFor(source.count, &.{}, .poison, &.{}), &.{});
             const fits = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = args[0], .rhs = count } });
             _ = try self.check(fits, .bool_, span, .index_out_of_bounds);
-            const address = try self.directCall(.u64, span, self.mono.idFor(source.at, &.{}, .poison, &.{}), args);
-            const len = try self.directCall(.u64, span, self.mono.idFor(source.len, &.{}, .poison, &.{}), args);
+            // One call answers the entry's address and writes its length
+            // into a slot of this function's own.
+            const length_slot = try self.b.addLocal(.u64, .value);
+            const length_at = try self.emit(.addr_of, .u64, span, .{ .local = length_slot });
+            const address = try self.directCall(.u64, span, self.mono.idFor(source.entry, &.{}, .poison, &.{}), &.{ args[0], length_at });
+            const len = try self.loadLocal(length_slot, .u64, span);
             return self.buildSpan(ty, address, len, span);
         }
         const element = if (d == raw.buffer_span) TypeId.u8 else type_args[0];

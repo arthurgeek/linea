@@ -1,0 +1,63 @@
+// Only the member's type parameter is renamed where the target spells its
+// name: a variant `W` the member matches on keeps its name, and a type the
+// member's body writes as `W` is the member's parameter.
+trait Zero {
+    fn zero() -> Self
+}
+
+impl Zero for UInt64 {
+    fn zero() -> UInt64 {
+        0
+    }
+}
+
+@copyable
+enum Side {
+    W,
+    E,
+}
+
+fn west() -> Side {
+    Side.W
+}
+
+trait Repeat {
+    fn repeat[W: Copyable](times: W) -> Self
+}
+
+template impl Repeat where reflect.target: struct, reflect.components: Zero {
+    fn repeat[W: Copyable](times: W) -> Self {
+        let _kept: W = copy(times)
+        let on_west = match west() {
+            W => true,
+            E => false,
+        }
+        if !on_west {
+            panic("the variant was read as something else")
+        }
+        reflect.construct(
+            reflect.product,
+            |component| {
+                let value: component.Type = Zero.zero()
+                value
+            },
+            {},
+        )
+    }
+}
+
+struct Pair[W: Zero] {
+    left: W,
+    right: UInt64,
+}
+
+derive[W: Zero] Repeat for Pair[W]
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt64] = Repeat.repeat(true)
+    if pair.left == 0 && pair.right == 0 {
+        0
+    } else {
+        1
+    }
+}

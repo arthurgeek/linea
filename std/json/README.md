@@ -172,8 +172,9 @@ success of the Result `decode` returns; `?`, `else` and a function's return
 type supply it the same way. The same
 `limits:` override used by `parse` applies to `decode`. Use
 `json.from_value(document)`, or `json.from_value_in(allocator, document)`, to
-decode an existing document; the allocator and document must use the same
-allocator type. Neither successful
+decode an existing document, which may be in an allocator other than the
+one decoded into: a document parsed into an arena decodes into system
+values, and the arena may be released before they are read. Neither successful
 values nor decoding errors borrow the document or input. They retain
 the supplied allocator's ownership dependencies. There is no owning Decode
 implementation for borrowed `Str`.
@@ -203,6 +204,9 @@ linea run examples/json_settings.lin
 linea run examples/json_settings.lin -- settings.json
 ```
 
+A handwritten `Decode[A]` writes
+`fn decode[B: Allocator](value: json.Value[B], allocator: A)`: the document
+may be in any allocator, and what it returns is allocated from `allocator`.
 For a handwritten record decoder, `ObjectDecoder.open(document)`, or
 `ObjectDecoder.open_in(allocator, document)`,
 borrows the object and owns its used-name tracking. Settle it with Release.

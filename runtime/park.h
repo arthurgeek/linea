@@ -4,7 +4,7 @@
 #include <pthread.h>
 
 /* The one place the runtime stops a task until another party wakes it, and
- * the one place it wakes one. A session's rendezvous, a handle's join, a
+ * the one place it wakes one. A session's queue, a handle's join, a
  * task's start latch and an owning task's call queue each keep a park in
  * the record they wait on, and every wait on that record is a park on it.
  *

@@ -482,11 +482,11 @@ impl Book {
     }
 
     test "a refused entry push settles the rejected entry and earlier rows" {
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        var entries: Vec[Entry, mem.RefusingAllocator[mem.SystemAllocator]] = Vec.new_in(log.allocator())
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
+        var entries: Vec[Entry, testing.TestHandle[mem.SystemAllocator]] = Vec.new_in(log.handle())
         let first = Entry { name = "Ada".to_owned().unwrap(), message = "First".to_owned().unwrap(), signed = time.now() }
         &entries.push(first).settled().unwrap()
-        log.refuse_attempt(log.attempts() + 1)
+        log.fail_at(.Some(log.attempts() + 1))
         var exhausted = false
         for _ in 0..16 {
             let next = Entry { name = "Grace".to_owned().unwrap(), message = "Second".to_owned().unwrap(), signed = time.now() }

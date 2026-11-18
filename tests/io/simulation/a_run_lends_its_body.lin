@@ -1,0 +1,28 @@
+// `Simulation.run` calls its body once and gives it back, so a named body is
+// lent to the run: it may own a linear `Ticket`, which the program settles
+// after the runs, and one body serves two runs.
+import std.io
+
+@linear
+struct Ticket {
+    number: UInt64,
+}
+
+fn main() -> UInt8 {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    var runs = UInt64(0)
+    var body = inout [sink ticket = Ticket { number = 7 }, inout runs] |inout _world: io.World| -> UInt64 {
+        runs += 1
+        ticket.number
+    }
+    let first = &sim.run(&body)
+    let second = &sim.run(&body)
+    sim.close()
+    let { ticket, runs: _ } = body.into_captures()
+    let Ticket { number } = ticket
+    if first == 7 && second == 7 && runs == 2 && number == 7 {
+        0
+    } else {
+        1
+    }
+}

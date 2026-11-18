@@ -1,0 +1,27 @@
+// A record's fields are checked where the record writes them: `mem.Handle`
+// leaves its arena's allocator to the system default, which a record that is
+// not generic writes freely, and the `json.Decode` it derives, whose `decode`
+// is generic over the document's allocator, takes those fields as written.
+import std.json
+import std.mem
+
+use mem.Lender
+
+@derive(Release, json.Decode[mem.Handle])
+struct Message {
+    text: String[mem.Handle],
+}
+
+fn main() -> UInt8 {
+    let arena = mem.Arena.open(mem.system(), 4096)
+    let decoded: Result[Message, json.DecodeError[mem.Handle]] = json.decode_in(arena.handle(), r#"{"text":"hello"}"#)
+    let message = decoded.unwrap()
+    let kept = message.text.view() == "hello"
+    message.release()
+    arena.release()
+    if kept {
+        0
+    } else {
+        1
+    }
+}

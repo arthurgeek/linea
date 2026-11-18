@@ -25,6 +25,7 @@
         "docs",
         "tests",
         "examples",
+        "bench",
         "editor-support",
         ".github",
         ".helix",

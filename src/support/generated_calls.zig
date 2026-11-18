@@ -29,11 +29,9 @@ pub const Call = struct {
 /// silently stops being checked for use.
 pub const table = [_]Call{
     .{ .module = "mem", .name = "linea_arg_count" },
-    .{ .module = "mem", .name = "linea_arg_at" },
-    .{ .module = "mem", .name = "linea_arg_len" },
+    .{ .module = "mem", .name = "linea_arg_span" },
     .{ .module = "mem", .name = "linea_env_count" },
-    .{ .module = "mem", .name = "linea_env_at" },
-    .{ .module = "mem", .name = "linea_env_len" },
+    .{ .module = "mem", .name = "linea_env_span" },
     .{ .module = "mem", .name = "linea_errno" },
     .{ .module = "core", .name = "report" },
     .{ .module = "core", .name = "ran" },

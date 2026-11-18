@@ -478,8 +478,9 @@ fn main() -> Result[UInt8, io.IoError] {
 Each operation takes the endpoint and answers it at the next step, so
 `send(12)` answers a `Chan` whose protocol is `Recv[UInt64, End]`, and
 `recv()` answers the value together with the endpoint at `End`. A `send`
-returns only once the other end has taken the value: a session has no queue,
-so the two tasks meet at every step. A Rust channel's type says only what
+leaves the value in the session and returns without waiting for the other
+end, which takes it with `recv()`; [the next section](#a-send-does-not-wait-for-its-receiver)
+shows when a `send` does wait. A Rust channel's type says only what
 travels through it, so either end may send or receive at any time. A
 session's type also says whose turn it is, and an operation out of turn is a
 compile error rather than a task waiting forever:
@@ -496,9 +497,80 @@ error[T-UnknownOperation]: `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, me
 20  |     let (square, done) = asking.recv()
     |                          ^^^^^^ this is `Chan[Send[UInt64, Recv[UInt64, End]], (<closure>, mem.SystemAllocator)]`, which `Chan[Recv[T, N], H]` does not match
    ::: std/session/chan.lin
-147 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
+160 | impl[T: Owned, N: Protocol, H] Chan[Recv[T, N], H] {
     |                                ------------------- `recv` is declared for `Chan[Recv[T, N], H]`
 ```
+
+## A send does not wait for its receiver
+
+A session holds up to two values that one end has sent and the other has not
+received yet. A `send` puts its value there and goes on, so a task can send
+and keep working while the other task is still busy; a third `send` in a
+row waits until the receiver has taken one. Values arrive in the order they
+were sent. Like a Rust `sync_channel(2)`, the session is a small bounded
+buffer, not an unbounded queue, so a sender never runs far ahead of its
+receiver.
+
+A loop with one carrier runs one task at a time, and switches only when the
+running task waits, so the order of the lines below shows exactly where each
+task waits:
+
+`queued_sends.lin`:
+
+```linea
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+
+fn main() -> Result[UInt8, io.IoError] {
+    let one_carrier = io.Loop.open(carriers: 1)?
+    let sender = sink [] |sink me: Chan[End]| {
+        let receiver = sink [] |sink from: Chan[Recv[UInt64, Recv[UInt64, Recv[UInt64, End]]]]| {
+            io.println("receiver runs").unwrap()
+            let (first, rest) = from.recv()
+            io.println("received {first}").unwrap()
+            let (second, last) = rest.recv()
+            io.println("received {second}").unwrap()
+            let (third, done) = last.recv()
+            io.println("received {third}").unwrap()
+            done.close()
+        }
+        let handle = task.start(receiver).unwrap()
+        // The first two values wait in the session, so these sends return
+        // before the receiver has run at all.
+        let after_two = handle.send(1).send(2)
+        io.println("sent two").unwrap()
+        // The session already holds two values, so this send waits until
+        // the receiver takes one.
+        let finished = after_two.send(3)
+        io.println("sent three").unwrap()
+        finished.close()
+        me.close()
+    }
+    task.start(sender, on: one_carrier).unwrap().close()
+    .Ok(0)
+}
+```
+
+```
+sent two
+receiver runs
+received 1
+received 2
+sent three
+received 3
+```
+
+The sender prints `sent two` before the receiver has printed anything. Its
+third `send` waits, which lets the receiver run: it takes `1`, which makes
+room, and takes `2` before it has to wait for `3`. A `send` returning tells
+the sender nothing about whether the value has been received yet; when a
+task needs to know, its protocol says so with an answer, as `squares.lin`
+does.
 
 ## A producer and a consumer
 
@@ -1077,9 +1149,11 @@ rule this out.
 A session is made only by starting a task, which joins the new task to its
 creator by exactly one session, so the tasks and sessions of a program always
 form a tree. The two ends of a session follow dual protocols, so when one
-end waits to receive, the other end's next step is to send, and the two
-meet. Follow the waits from any waiting task through the tree and you reach a
-task that waits on no one, which keeps going. So no group of tasks ever
+end waits to receive, the other end's next step is to send, which it can
+always do. A `send` waits only while two of its values are still in the
+session, and then the other end's next step is to receive one. Follow the
+waits from any waiting task through the tree and you reach a task that waits
+on no one, which keeps going. So no group of tasks ever
 waits on each other forever, provided the system runs every thread whose
 operation can complete, as an operating system does.
 
@@ -1252,7 +1326,7 @@ timed out; the reply came later: 8
 ```
 
 `received` registers an endpoint whose next step is `recv`. It is ready once
-the peer's `send` is waiting, and `next` then hands it back wrapped as
+a value the peer sent is waiting in the session, and `next` then hands it back wrapped as
 `Waited.Answer`. The set never receives for you: the value is still in the
 session, and `peer.recv()` takes it at once.
 
@@ -1476,7 +1550,7 @@ state.
 
 Not all parallel workloads need a stateful conversation between tasks. Many tasks
 compute independent, value-producing jobs: they take inputs, run to completion
-without back-and-forth rendezvous, and return owned results.
+without a back-and-forth conversation, and return owned results.
 
 Linea provides four combinators for independent work:
 - `task.all(policy, jobs)` runs a collection of homogeneous jobs (like `Promise.all` in JavaScript or `futures::future::join_all` in Rust) and returns a `Vec[T]` in job order.

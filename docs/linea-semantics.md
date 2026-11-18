@@ -4901,7 +4901,11 @@ return a system vector silently, where the declaration says it is generic over
 where memory comes from. The help says to write the parameter, or to write the
 default out where the system allocator is meant. A declaration with no allocator
 parameter writes the short form freely, unless it is a public signature of a
-library.
+library. A member a derive generates is held to the rule where each part of
+its text was written: a template's expressions in the template, a component's
+type in the target, a template argument in the derive, and its signature in
+the trait, so a record that is not generic may derive `json.Decode[mem.Handle]`
+with fields of `String[mem.Handle]`.
 
 A library's public signatures state their allocator. In a library root (the
 standard library, a dependency, or a primary root whose manifest says
@@ -6231,7 +6235,7 @@ takes the handle by `read`, advances the arena's cursor and may record a
 chunk it acquired from the arena's parent; `mem.Handle`
 borrows its arena, so it, `Vec[UInt8, mem.Handle]` and `borrow mem.Arena` are
 not Shareable;
-`mem.AllocationLog` is `@unshareable` too, since its allocator writes the log
+`testing.TestAllocator` is `@unshareable` too, since its handle writes the counts
 under a `read`. A handle to a C object is unshareable because its reads reach
 C, which may keep state inside the object (an error message, a cache, a
 cursor) that a call taking it `read` rewrites: the compiler cannot see C, so
@@ -6742,9 +6746,12 @@ effects, for the remainder of that fiber's execution. This preserves execution
 affinity; a thread-bound foreign resource instead stays in its owning execution
 context, such as a task selected with `io.system()`. Holding that owner's client
 does not itself bind a fiber. `start` orders everything its creator did before
-it before everything the body does; a `send` returns
-once the other end has received the value, and orders everything the sender
-did before it before everything the receiver does after the `recv`; `close`
+it before everything the body does; a `send` leaves the value in the session
+for the other end and returns, waiting first only while the session already
+holds two values the other end has not received, and orders everything the
+sender did before it before everything the receiver does after the `recv`
+that takes the value (values are received in the order they were sent, and a
+`choose` is a send of its branch); `close`
 on the handle returns once the body has returned and the task has been
 joined, and orders everything the body did before everything after the
 `close`. With [O-Borrow], [O-Cross] and the `Owned` payload bound, every
@@ -6822,7 +6829,11 @@ apart
    is the `send`, the `choose` or the return that makes the registration
    ready, and `next` then returns. A registration never performs the
    exchange, so withdrawing an endpoint with `take` or `close` leaves the
-   session where it was, the peer still waiting where it had begun to send.
+   session where it was, the peer's value still queued for the `recv` or
+   `offer` that takes it. A `send` waits only while two values from its end
+   are queued, and the other end's next operation is then the `recv` that
+   takes one, so a full queue is no wait on each other either
+   ([ADR 0288](adr/0288-a-session-send-leaves-its-value-queued-and-returns.md)).
    A timer, a descriptor and a signal wait on the world, not on a task. A
    wait set holds its values behind `mem.Closure`, so it is not Isolated, not
    Owned and not Shareable: it is never an owning task's state or part of a

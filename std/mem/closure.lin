@@ -92,15 +92,15 @@ impl[S, A: Allocator] Closure[S, A] {
     }
 
     test "a refused allocation releases the callback" {
-        let log = AllocationLog.open(system(), 0).unwrap()
-        var kept: Vec[UInt64, RefusingAllocator[SystemAllocator]] = Vec.new_in(log.allocator())
+        let log = TestAllocator.open(system()).unwrap()
+        var kept: Vec[UInt64, TestHandle[SystemAllocator]] = Vec.new_in(log.handle())
         let pushed = match &kept.push(7) {
             Ok(_) => true,
             Err(_) => false,
         }
-        log.refuse_attempt(2)
+        log.fail_at(.Some(2))
         let opened = Closure.open_in(
-            log.allocator(),
+            log.handle(),
             [sink kept] || -> UInt64 {
                 kept.length()
             },
@@ -176,9 +176,9 @@ impl[S] Closure[S, SystemAllocator] {
     }
 
     test "a lambda that captures nothing allocates nothing" {
-        let log = AllocationLog.open(system(), 0).unwrap()
+        let log = TestAllocator.open(system()).unwrap()
         let doubling = Closure.open_in(
-            log.allocator(),
+            log.handle(),
             |value: UInt64| -> UInt64 {
                 value * 2
             },
@@ -203,10 +203,10 @@ impl[S, A: Allocator] Release for Closure[S, A] {
 }
 
 test "releasing a closure returns its bytes" {
-    let log = AllocationLog.open(system(), 0).unwrap()
+    let log = TestAllocator.open(system()).unwrap()
     let offset: UInt64 = 5
     let shifted = Closure.open_in(
-        log.allocator(),
+        log.handle(),
         [sink offset] |value: UInt64| -> UInt64 {
             value + offset
         },

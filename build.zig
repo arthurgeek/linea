@@ -1878,7 +1878,7 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/interrupted_fault_test.c", .flags = runtime_flags.items },
     });
 
-    const native_task_step = b.step("test-native-task", "Check native task threads, rendezvous sessions, joins, stack overflow reports and concurrent allocation");
+    const native_task_step = b.step("test-native-task", "Check native task threads, queued session sends, joins, stack overflow reports and concurrent allocation");
     native.add(native_task_step, "native-fiber-tests", &.{
         .{ .file = "runtime/net.c", .flags = runtime_flags.items },
         .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
@@ -2872,6 +2872,51 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     run_step.dependOn(&run_cmd.step);
 
+    // Time `task.map` and `task.all` against fixed chunks of the same items,
+    // and a lazy map's handoff to a worker and back, on the system Io and on
+    // a loop, with the compiler this build makes. Build with -Drelease for figures worth comparing; each
+    // design is timed in turn in every round, so the machine's load moves
+    // them together.
+    const bench_tasks_step = b.step("bench-tasks", "Time task.map and task.all against fixed chunks, and a session handoff, over cheap items on threads and on a loop");
+    const bench_tasks = b.addRunArtifact(exe);
+    bench_tasks.step.dependOn(b.getInstallStep());
+    bench_tasks.addArg("run");
+    bench_tasks.addFileArg(b.path("bench/tasks.lin"));
+    bench_tasks.addArgs(&.{ "-O", "2" });
+    bench_tasks.has_side_effects = true;
+    bench_tasks_step.dependOn(&bench_tasks.step);
+
+    // `bench/` is not a corpus root, so nothing else compiles its programs
+    // or holds them to the formatter's layout; the suites that run the
+    // examples run these, so a benchmark cannot stop compiling between the
+    // measurements that use it.
+    const bench_checked = b.allocator.create(std.Build.Step) catch @panic("OOM");
+    bench_checked.* = .init(.{ .id = .custom, .name = "bench programs checked", .owner = b });
+    {
+        const io = b.graph.io;
+        var dir = b.build_root.handle.openDir(io, "bench", .{ .iterate = true }) catch @panic("the bench directory is missing");
+        defer dir.close(io);
+        var walker = dir.walk(b.allocator) catch @panic("OOM");
+        defer walker.deinit();
+        var bench_programs: usize = 0;
+        while (walker.next(io) catch @panic("walking bench failed")) |entry| {
+            if (entry.kind != .file or !std.mem.endsWith(u8, entry.basename, ".lin")) continue;
+            bench_programs += 1;
+            const path = b.path(b.pathJoin(&.{ "bench", entry.path }));
+            const checked = b.addRunArtifact(exe);
+            checked.addArg("check");
+            checked.addFileArg(path);
+            checked.expectExitCode(0);
+            const formatted = b.addRunArtifact(exe);
+            formatted.addArgs(&.{ "fmt", "--check" });
+            formatted.addFileArg(path);
+            formatted.expectExitCode(0);
+            bench_checked.dependOn(&checked.step);
+            bench_checked.dependOn(&formatted.step);
+        }
+        if (bench_programs == 0) @panic("the bench directory holds no program");
+    }
+
     // The editor grammar is generated rather than committed, so the gates read
     // real output and no stale artefact can exist. `grammar.js` is the only
     // source of it in the tree.
@@ -3287,6 +3332,7 @@ pub fn build(b: *std.Build) void {
             }
         }
         const narrowed = suite[0] == .conformance and narrowed_conformance != null;
+        if (selected.examples and !narrowed) step.dependOn(bench_checked);
         const properties = selected.corpus and (suite[0] == .full or suite[0] == .corpus) and test_filter == null;
         if (selected.selected == .fuzz) step.dependOn(&run_fuzz_tests.step);
         if (narrowed) step.dependOn(narrowed_conformance.?);
@@ -3446,7 +3492,7 @@ fn addCorpusPaths(b: *std.Build, run: *std.Build.Step.Run) void {
     // The library too. Its files are Linea, they are compiled into every
     // binary the compiler produces, and leaving them out meant the grammar was
     // never asked to parse the code every program depends on.
-    for ([_][]const u8{ "examples", "tests", "std" }) |root| {
+    for ([_][]const u8{ "examples", "tests", "std", "bench" }) |root| {
         var dir = b.build_root.handle.openDir(io, root, .{ .iterate = true }) catch continue;
         defer dir.close(io);
         var walker = dir.walk(b.allocator) catch @panic("OOM");

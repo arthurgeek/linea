@@ -10,7 +10,9 @@ import std.time
 // connection settled, and before it retries a failed accept; `serve_cgi`
 // calls it once its one answer has been written and flushed. Serving writes no
 // log of its own: `http.logged` turns events into log lines. `listen_and_serve`
-// also calls `observe` once with `Listening` when serving can begin.
+// also calls `observe` once with `Listening`, on the handler of one serving
+// task, once every serving task has its handler and before anything is
+// accepted.
 pub trait Observer {
     fn observe[P: Allocator](inout self: Self, event: Event[P])
 }
@@ -58,7 +60,9 @@ pub struct Exchange[P: Allocator = mem.SystemAllocator] {
 // - `Refused` holds the message of the error the handler answered with, or
 //   `None` when it gave none; that error was written as the answer.
 // - `Unread` holds why the request could not be read: it was refused, with
-//   the status in the exchange, or the connection failed while it was read.
+//   the status in the exchange, or the connection failed while it was read,
+//   including while serving drained the body the handler left unread after
+//   the answer was written.
 // - `Memory` means the request's arena or the response buffer could not be
 //   had, and the request was answered 503 or 500 without the handler.
 // - `Write` holds why writing the answer failed; the connection was reset if

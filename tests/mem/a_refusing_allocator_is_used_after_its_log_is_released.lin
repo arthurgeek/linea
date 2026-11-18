@@ -1,11 +1,12 @@
 import std.mem
+import std.testing
 
-use mem.AllocationLog
+use testing.TestAllocator
 
 fn main() -> UInt8 {
-    let log = AllocationLog.open(mem.system(), 0).unwrap()
-    let allocator = log.allocator()
-    // Releasing the log frees what the handle records into.
+    let log = TestAllocator.open(mem.system()).unwrap()
+    let allocator = log.handle()
+    // Releasing the test allocator frees what the handle counts into.
     log.release()
     match allocator.acquire(64) {
         Ok(buffer) => {

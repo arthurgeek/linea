@@ -2,8 +2,8 @@ import std.testing
 
 // The runtime writes the shortest text that reads back as the same Float64
 // into four integers, eight ASCII bytes each with the first byte least
-// significant, and returns the text's length. No temporary text view escapes
-// the call, and each byte reaches the caller's Writer through a literal.
+// significant, and returns the text's length. The call hands back only
+// integers, so no view of runtime storage escapes it.
 extern fn linea_float64_debug(bits: UInt64, inout first: UInt64, inout second: UInt64, inout third: UInt64, inout fourth: UInt64) -> UInt64
 
 // The same for a Float32, passed as the bits of the Float64 holding the same
@@ -27,32 +27,6 @@ fn is_negative(value: Float64) -> Bool {
     value < 0.0 || (value == 0.0 && 1.0 / value < 0.0)
 }
 
-// Return the one-character text for an ASCII byte the runtime emitted.
-// Writers receive slices of immutable literals, never a view of runtime storage.
-fn float_character(byte: UInt64) -> Str {
-    // The runtime emits ASCII: digits occupy codes 48 through 57.
-    if byte >= 48 && byte <= 57 {
-        let start = byte - 48
-        let digit = "0123456789".slice(start, start + 1) else {
-            panic("invalid float digit")
-        }
-        return digit
-    }
-    // The remaining ASCII codes cover signs, decimal points, exponents, and
-    // the letters of NaN and inf.
-    match read byte {
-        45 => "-",
-        46 => ".",
-        78 => "N",
-        97 => "a",
-        101 => "e",
-        102 => "f",
-        105 => "i",
-        110 => "n",
-        _ => panic("invalid character in float output"),
-    }
-}
-
 // Write the shortest text that reads back as `value` in the float type
 // `width` names.
 fn write_float_text[W: Writer](value: Float64, width: FloatWidth, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
@@ -61,31 +35,33 @@ fn write_float_text[W: Writer](value: Float64, width: FloatWidth, inout w: W) ->
     var third: UInt64 = 0
     var fourth: UInt64 = 0
     let bits = value.to_bits()
-    var remaining = match read width {
+    let length = match read width {
         Binary32 => linea_float32_debug(bits, &first, &second, &third, &fourth),
         Binary64 => linea_float64_debug(bits, &first, &second, &third, &fourth),
     }
     // Four UInt64 words hold at most 32 ASCII bytes, eight bytes per word.
-    if remaining == 0 || remaining > 32 {
+    if length == 0 || length > 32 {
         panic("invalid float output length")
     }
-    let words = [first, second, third, fourth]
-    for word in words {
+    // The words unpack into a local array, one base-256 digit per byte,
+    // least-significant byte first, and the text is written in one call.
+    var spelled: [UInt8; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    var at: UInt64 = 0
+    for word in [first, second, third, fourth] {
         var packed = word
-        var count = if remaining < 8 {
-            remaining
-        } else {
-            8
-        }
-        while count > 0 {
-            // Each base-256 digit is one byte, least-significant byte first.
-            &w.write_str(float_character(packed % 256))?
-            packed /= 256
-            count -= 1
-            remaining -= 1
+        for _ in 0..8 {
+            if at < length {
+                spelled[at] = UInt8(packed % 256)
+                packed /= 256
+                at += 1
+            }
         }
     }
-    .Ok(())
+    let written = spelled.as_slice().subspan(start: 0, count: length).unwrap()
+    let text = Str.from_bytes(written) else |_| {
+        panic("the runtime wrote a float that is not ASCII")
+    }
+    &w.write_str(text)
 }
 
 impl Debug for Float64 {

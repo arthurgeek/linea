@@ -1,0 +1,46 @@
+// A decoded value owns everything it holds in the allocator it was decoded
+// into, so the document may live in another allocator and be gone before the
+// value is read: here a document parsed into an arena decodes into the system
+// allocator, and one parsed by the system allocator decodes into an arena.
+import std.json
+import std.mem
+
+use mem.Lender
+
+@derive(Release, json.Decode[A])
+struct Shelf[A: Allocator = mem.SystemAllocator] {
+    name: String[A],
+    teas: Vec[String[A], A],
+    note: Option[String[A]],
+}
+
+fn main() -> UInt8 {
+    let input = r#"{"name":"top","teas":["green","black"],"note":"full"}"#
+    let arena = mem.Arena.open(mem.system(), 8192)
+    let document = json.parse_in(arena.handle(), input).unwrap()
+    let decoded: Result[Shelf, json.DecodeError] = json.from_value(document)
+    document.release()
+    arena.release()
+    let shelf = decoded.unwrap()
+    let kept = shelf.name.view() == "top" && shelf.teas.length() == 2 && shelf.teas[UInt64(1)].view() == "black"
+    shelf.release()
+    if !kept {
+        return 1
+    }
+
+    let system_document = json.parse(input).unwrap()
+    let target = mem.Arena.open(mem.system(), 8192)
+    let into_arena: Result[Shelf[mem.Handle], json.DecodeError[mem.Handle]] = json.from_value_in(target.handle(), system_document)
+    system_document.release()
+    let arena_shelf = into_arena.unwrap()
+    let note_kept = match read arena_shelf.note {
+        Some(note) => note.view() == "full",
+        None => false,
+    }
+    arena_shelf.release()
+    target.release()
+    if !note_kept {
+        return 2
+    }
+    0
+}

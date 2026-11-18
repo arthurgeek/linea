@@ -139,14 +139,14 @@ pub fn prepare_in[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator](alloc
 }
 
 test "a refused allocation hands the body back" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    log.refuse_attempt(1)
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    log.fail_at(.Some(1))
     var runs = UInt64(0)
     let body = sink [inout runs] |sink me: Chan[End]| {
         runs += 1
         me.close()
     }
-    let (refused, returned) = match prepare_in(log.allocator(), body, stack: default_stack_bytes) {
+    let (refused, returned) = match prepare_in(log.handle(), body, stack: default_stack_bytes) {
         Ok(slot) => (false, slot.cancel()),
         Err(failure) => {
             let Unstarted { body, reason } = failure
@@ -261,13 +261,13 @@ impl[P: Protocol, F: sink fn(sink me: Chan[P]), A: Allocator] Slot[P, F, A] {
     }
 
     test "a cancelled slot runs nothing and gives the body back" {
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
         var runs = UInt64(0)
         let body = sink [inout runs] |sink me: Chan[End]| {
             runs += 1
             me.close()
         }
-        let returned = match prepare_in(log.allocator(), body, stack: default_stack_bytes) {
+        let returned = match prepare_in(log.handle(), body, stack: default_stack_bytes) {
             Ok(slot) => slot.cancel(),
             Err(failure) => {
                 let Unstarted { body, reason: _ } = failure
@@ -342,8 +342,8 @@ pub fn join_in[T1: Owned, T2: Owned, F1: Owned + Discardable + sink fn() -> T1, 
 }
 
 test "join_in takes each task from its allocator" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let results = join_in(log.allocator(), Policy.Threads(2), sink [] || UInt64(3), sink [] || UInt64(4))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    let results = join_in(log.handle(), Policy.Threads(2), sink [] || UInt64(3), sink [] || UInt64(4))
     let attempts = log.attempts()
     let settled = log.all_disposed()
     log.release()
@@ -353,8 +353,8 @@ test "join_in takes each task from its allocator" {
 }
 
 test "join_in allocates nothing in sequence" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let results = join_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    let results = join_in(log.handle(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4))
     let attempts = log.attempts()
     log.release()
     testing.assert_eq(results, (UInt64(3), UInt64(4)), "the results came back out of order")?
@@ -435,8 +435,8 @@ pub fn join3_in[T1: Owned, T2: Owned, T3: Owned, F1: Owned + Discardable + sink 
 }
 
 test "join3_in takes each task from its allocator" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let results = join3_in(log.allocator(), Policy.Threads(3), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    let results = join3_in(log.handle(), Policy.Threads(3), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
     let attempts = log.attempts()
     let settled = log.all_disposed()
     log.release()
@@ -446,8 +446,8 @@ test "join3_in takes each task from its allocator" {
 }
 
 test "join3_in allocates nothing in sequence" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let results = join3_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    let results = join3_in(log.handle(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5))
     let attempts = log.attempts()
     log.release()
     testing.assert_eq(results, (UInt64(3), UInt64(4), UInt64(5)), "the results came back out of order")?
@@ -534,8 +534,8 @@ pub fn join4_in[T1: Owned, T2: Owned, T3: Owned, T4: Owned, F1: Owned + Discarda
 }
 
 test "join4_in takes each task from its allocator" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let results = join4_in(log.allocator(), Policy.Threads(4), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    let results = join4_in(log.handle(), Policy.Threads(4), sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
     let attempts = log.attempts()
     let settled = log.all_disposed()
     log.release()
@@ -545,8 +545,8 @@ test "join4_in takes each task from its allocator" {
 }
 
 test "join4_in allocates nothing in sequence" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    let results = join4_in(log.allocator(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    let results = join4_in(log.handle(), Policy.Sequential, sink [] || UInt64(3), sink [] || UInt64(4), sink [] || UInt64(5), sink [] || UInt64(6))
     let attempts = log.attempts()
     log.release()
     testing.assert_eq(results, (UInt64(3), UInt64(4), UInt64(5), UInt64(6)), "the results came back out of order")?
@@ -606,11 +606,12 @@ struct Busy[I: Iterator, R, A: Allocator] {
 // `places` keeps a place for every chunk handed out and not yet yielded, the
 // chunk handed out `n`th at `n % places.length()`, and `head` the results of
 // the chunk being yielded. `busy` holds a worker for each chunk being mapped
-// and `idle` the workers waiting for one, and `free` the busy entries not
-// in use, taken and given back from its end; each has room for
-// `running_at_most`. A runtime wait set, `set`, watches every busy worker
-// from when it takes a chunk until it answers, and `waiting` names the busy
-// entry each of the set's slots watches, so handing out a chunk and waiting
+// and `idle` the workers waiting for one, `free` the busy entries not
+// in use, taken and given back from its end, and `stopping` the workers told
+// to stop, from when the source is spent until `finish` joins them; each has
+// room for `running_at_most`. A runtime wait set, `set`, watches every busy
+// worker from when it takes a chunk until it answers, and `waiting` names the
+// busy entry each of the set's slots watches, so handing out a chunk and waiting
 // for an answer each cost the same however many workers there are. The set
 // watches only session endpoints, so when the map moves to a task on another
 // Io the set moves with it the next time it is used. All of these are
@@ -637,6 +638,7 @@ struct LazyMap[I: Iterator, R, F, A: Allocator = mem.SystemAllocator] {
     head: Option[mem.Drain[R, mem.SystemAllocator]],
     busy: mem.Vec[Option[Busy[I, R, A]], A],
     idle: mem.Vec[Chan[Assigning[I, R], A], A],
+    stopping: mem.Vec[Chan[End, A], A],
     free: mem.Vec[UInt64, A],
     set: UInt64,
     waiting: mem.Vec[UInt64, A],
@@ -784,6 +786,7 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
         head = .None,
         busy = mem.Vec.new_in(allocator),
         idle = mem.Vec.new_in(allocator),
+        stopping = mem.Vec.new_in(allocator),
         free = mem.Vec.new_in(allocator),
         set = 0,
         waiting = mem.Vec.new_in(allocator),
@@ -807,7 +810,7 @@ where I.Item: Owned {
     // instead, so the map yields the same results.
     fn open(inout self: Self) {
         self.opened = true
-        let reserved = &self.places.reserve(self.chunks_at_most).is_ok() && &self.busy.reserve(self.running_at_most).is_ok() && &self.idle.reserve(self.running_at_most).is_ok() && &self.free.reserve(self.running_at_most).is_ok() && &self.waiting.reserve(self.running_at_most).is_ok()
+        let reserved = &self.places.reserve(self.chunks_at_most).is_ok() && &self.busy.reserve(self.running_at_most).is_ok() && &self.idle.reserve(self.running_at_most).is_ok() && &self.stopping.reserve(self.running_at_most).is_ok() && &self.free.reserve(self.running_at_most).is_ok() && &self.waiting.reserve(self.running_at_most).is_ok()
         if !reserved {
             self.running_at_most = 0
             return
@@ -884,10 +887,30 @@ where I.Item: Owned {
                 break
             }
         }
+        // Once the source is spent, whether it ran out between chunks or
+        // partway through one, no free worker will be handed another.
         match holder {
-            Some(rest) => rest,
+            Some(rest) => if rest.pulling {
+                rest
+            } else {
+                rest.idle_stopped()
+            },
             None => panic("a lazy map was lost while it pulled"),
         }
+    }
+
+    // Tell every free worker to stop once the source is spent, so each ends
+    // while the busy ones finish their chunks rather than when the map is
+    // finished. `stopping` has room for every worker.
+    fn idle_stopped(sink self: Self) -> Self where carries(self) {
+        var me = self
+        loop {
+            let worker = &me.idle.pop() else {
+                break
+            }
+            &me.stopping.push(worker.enter().choose_right()).unwrap()
+        }
+        me
     }
 
     // Give `chunk` to a free worker, or start a new one that holds it from
@@ -1008,7 +1031,12 @@ where I.Item: Owned {
             None => panic("a lazy map lost a busy worker"),
         }
         let (results, free) = worker.recv()
-        &me.idle.push(free).unwrap()
+        // Once nothing is left to pull, the worker is told to stop at once.
+        if me.pulling {
+            &me.idle.push(free).unwrap()
+        } else {
+            &me.stopping.push(free.enter().choose_right()).unwrap()
+        }
         &me.free.push(spot).unwrap()
         me.running -= 1
         put_place(&me.places, chunk % me.chunks_at_most, .Done(results))
@@ -1164,8 +1192,8 @@ where I.Item: Owned {
     }
 
     test "a stopped map yields only what it started" {
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-        var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=100, |sink n| n * 10)
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
+        var mapped = lazy_map_in(log.handle(), Policy.Threads(2), UInt64(1)..=100, |sink n| n * 10)
         let first = &mapped.next()
         &mapped.stop()
         var rest = UInt64(0)
@@ -1194,7 +1222,7 @@ where I.Item: Owned {
         testing.assert(in_order, "a stopped map yielded out of order")?
         testing.assert(rest <= 4, "a stopped map started more than its window holds")?
         testing.assert_eq(next_item, rest + 2, "the source did not resume after the items the map pulled")?
-        testing.assert(attempts <= 5 + 2, "a stopped map started more workers than its bound")?
+        testing.assert(attempts <= 6 + 2, "a stopped map started more workers than its bound")?
         testing.assert(settled, "a finished map kept an allocation")?
     }
 
@@ -1206,7 +1234,7 @@ where I.Item: Owned {
         if self.pulled != self.yielded {
             return .Err(self)
         }
-        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, places, head, busy, idle, free: free_spots, set, waiting, visits: _, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
+        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, places, head, busy, idle, stopping, free: free_spots, set, waiting, visits: _, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
         match head {
             None => {},
             Some(results) => match results.finish() {
@@ -1214,14 +1242,28 @@ where I.Item: Owned {
                 Err(_) => panic("a lazy map finished holding a result"),
             },
         }
+        // Every worker is told to stop before the first is joined, so they
+        // end side by side rather than each waiting for the join before it.
+        // `stopping` has room for every worker, so the pushes cannot fail.
         var free = idle
+        var told = stopping
         loop {
             let worker = &free.pop() else {
                 break
             }
-            worker.enter().choose_right().close()
+            &told.push(worker.enter().choose_right()).unwrap()
         }
         match free.finish() {
+            Ok(_) => {},
+            Err(_) => panic("a lazy map kept a worker it stopped"),
+        }
+        loop {
+            let worker = &told.pop() else {
+                break
+            }
+            worker.close()
+        }
+        match told.finish() {
             Ok(_) => {},
             Err(_) => panic("a lazy map kept a worker it stopped"),
         }
@@ -1398,8 +1440,8 @@ test "a lazy_map yields every result in input order" {
 // sum with how many allocations the map attempted and whether it disposed of
 // every one.
 fn lazy_test_take(take: UInt64) -> (UInt64, UInt64, Bool) {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    var mapped = lazy_map_in(log.allocator(), Policy.Threads(3), UInt64(1)..=1000, |sink n| n)
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var mapped = lazy_map_in(log.handle(), Policy.Threads(3), UInt64(1)..=1000, |sink n| n)
     var sum = UInt64(0)
     for _ in 0..take {
         match &mapped.next() {
@@ -1421,8 +1463,8 @@ fn lazy_test_take(take: UInt64) -> (UInt64, UInt64, Bool) {
 // once the first result came back, the sum of its results, and whether it
 // disposed of every allocation.
 fn lazy_test_peak(count: UInt64) -> (UInt64, UInt64, UInt64, Bool) {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=count, |sink n| napping(n))
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var mapped = lazy_map_in(log.handle(), Policy.Threads(2), UInt64(1)..=count, |sink n| napping(n))
     var total = UInt64(0)
     var after_first = UInt64(0)
     for n in &mapped {
@@ -1448,8 +1490,8 @@ struct LazyReceipt {
 // Walk a lazy map whose allocation numbered `refused` is refused, and answer
 // the sum of its results with whether every allocation was disposed of.
 fn lazy_test_refusing(refused: UInt64) -> (UInt64, Bool) {
-    let log = mem.AllocationLog.open(mem.system(), refused).unwrap()
-    var mapped = lazy_map_in(log.allocator(), Policy.Threads(2), UInt64(1)..=5, |sink n| n * n)
+    let log = testing.TestAllocator.open(mem.system(), fail_at: .Some(refused)).unwrap()
+    var mapped = lazy_map_in(log.handle(), Policy.Threads(2), UInt64(1)..=5, |sink n| n * n)
     var sum = UInt64(0)
     for n in &mapped {
         sum += n
@@ -1596,16 +1638,16 @@ test "a lazy_map released early settles every job it started" {
     let (none, none_attempts, none_settled) = lazy_test_take(0)
     testing.assert_eq((none, none_attempts), (UInt64(0), UInt64(0)), "a map released before its first result started work")?
     testing.assert(none_settled, "a map released at once kept an allocation")?
-    // Five allocations hold the places, the room for the workers and the
-    // names of the wait set's slots; every other one is a started worker,
+    // Six allocations hold the places, the room for the workers, the room
+    // for stopping them and the names of the wait set's slots; every other one is a started worker,
     // at most three however many results were taken.
     let (one, one_attempts, one_settled) = lazy_test_take(1)
     testing.assert_eq(one, UInt64(1), "the first result was wrong")?
-    testing.assert(one_attempts <= 5 + 3, "a map released after one result started more workers than its bound")?
+    testing.assert(one_attempts <= 6 + 3, "a map released after one result started more workers than its bound")?
     testing.assert(one_settled, "a map released after one result kept an allocation")?
     let (some, some_attempts, some_settled) = lazy_test_take(10)
     testing.assert_eq(some, UInt64(55), "the first ten results were wrong")?
-    testing.assert(some_attempts <= 5 + 3, "a map released after ten results started more workers than its bound")?
+    testing.assert(some_attempts <= 6 + 3, "a map released after ten results started more workers than its bound")?
     testing.assert(some_settled, "a map released after ten results kept an allocation")?
 }
 
@@ -1613,18 +1655,18 @@ test "a lazy_map runs no more jobs at once than its bound" {
     let (peak, after_first, total, settled) = lazy_test_peak(12)
     let (two_items, _, _, _) = lazy_test_peak(2)
     testing.assert_eq(total, UInt64(78), "a result was lost")?
-    // Five allocations, then one for each worker: two workers map all
+    // Six allocations, then one for each worker: two workers map all
     // twelve items, so at most two jobs run at once, and a map of twelve
     // holds no more than a map of two.
-    testing.assert(after_first <= 5 + 2, "the map started more workers than its bound")?
+    testing.assert(after_first <= 6 + 2, "the map started more workers than its bound")?
     testing.assert(peak <= two_items, "a longer map held more workers than its bound")?
     testing.assert(settled, "a finished map kept an allocation")?
 }
 
 test "a sequential lazy_map starts no task and yields the same results" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
-    var sequential = lazy_map_in(log.allocator(), Policy.Sequential, UInt64(1)..=8, |sink n| n * 3)
-    var threaded = lazy_map_in(log.allocator(), Policy.Threads(1), UInt64(1)..=8, |sink n| n * 3)
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var sequential = lazy_map_in(log.handle(), Policy.Sequential, UInt64(1)..=8, |sink n| n * 3)
+    var threaded = lazy_map_in(log.handle(), Policy.Threads(1), UInt64(1)..=8, |sink n| n * 3)
     var same = true
     var count = UInt64(0)
     for result in &sequential {
@@ -1728,10 +1770,10 @@ test "a lazy_map keeps every result of a fallible function" {
 }
 
 test "a refused allocation moves work to the caller and keeps every result" {
-    // The first five allocations are the places, the room for the workers
-    // and the names of the wait set's slots; the rest are the workers, one
-    // each.
-    for refused in UInt64(1)..=8 {
+    // The first six allocations are the places, the room for the workers,
+    // the room for stopping them and the names of the wait set's slots; the
+    // rest are the workers, one each.
+    for refused in UInt64(1)..=9 {
         let (sum, settled) = lazy_test_refusing(refused)
         testing.assert_eq(sum, UInt64(55), "a refused allocation changed the results")?
         testing.assert(settled, "a refused allocation left another one undisposed")?
@@ -1877,12 +1919,12 @@ pub fn all_in[T: Owned, F: Owned + Discardable + fn() -> T, A: Allocator, B: All
 }
 
 test "all_in takes its results and tasks from its allocator" {
-    let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
     var jobs: mem.Vec[fn() -> UInt64, mem.SystemAllocator] = mem.Vec.new()
     &jobs.push(job10).unwrap()
     &jobs.push(job20).unwrap()
     &jobs.push(job30).unwrap()
-    let results: mem.Vec[UInt64, mem.RefusingAllocator[mem.SystemAllocator]] = all_in(log.allocator(), Policy.Threads(2), jobs)
+    let results: mem.Vec[UInt64, testing.TestHandle[mem.SystemAllocator]] = all_in(log.handle(), Policy.Threads(2), jobs)
     let same = results.as_slice() == [UInt64(10), 20, 30].as_slice()
     let attempts = log.attempts()
     results.release()
@@ -2023,19 +2065,19 @@ fn plus_hundred(sink n: UInt64) -> UInt64 {
     n + 100
 }
 
-// Map 1, 2 and 3 through `map_in` over a log that refuses its allocation
-// numbered `refused`, and answer whether the results were right and every
-// allocation was disposed of.
-fn map_test_refusing(refused: UInt64, named: Bool) -> (Bool, Bool) {
-    let log = mem.AllocationLog.open(mem.system(), refused).unwrap()
+// Map 1, 2 and 3 through `map_in` over a test allocator that fails its
+// allocation numbered `refused`, or none, and answer whether the results were
+// right and every allocation was disposed of.
+fn map_test_refusing(refused: Option[UInt64], named: Bool) -> (Bool, Bool) {
+    let log = testing.TestAllocator.open(mem.system(), fail_at: refused).unwrap()
     var items: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     for n in 1..=3 {
         &items.push(n).unwrap()
     }
     let results = if named {
-        map_in(log.allocator(), Policy.Threads(2), items, plus_hundred)
+        map_in(log.handle(), Policy.Threads(2), items, plus_hundred)
     } else {
-        map_in(log.allocator(), Policy.Threads(2), items, |sink n| n + 100)
+        map_in(log.handle(), Policy.Threads(2), items, |sink n| n + 100)
     }
     let same = results.as_slice() == [UInt64(101), 102, 103].as_slice()
     results.release()
@@ -2046,12 +2088,13 @@ fn map_test_refusing(refused: UInt64, named: Bool) -> (Bool, Bool) {
 
 test "map_in takes its results and tasks from its allocator" {
     // The first allocation is the results' vector, reserved whole, which
-    // stops the program when it is refused. The next five are the places,
-    // the room for the workers and the names of the wait set's slots, and a
-    // refusal of one maps every item on the caller; the seventh and eighth
-    // are the workers' bytes, and a refusal of one maps that worker's chunk
-    // on the caller.
-    for refused in [UInt64(0), 2, 3, 4, 5, 6, 7, 8] {
+    // stops the program when it is refused. The next six are the places,
+    // the room for the workers, the room for stopping them and the names of
+    // the wait set's slots, and a refusal of one maps every item on the
+    // caller; the eighth and ninth are the workers' bytes, and a refusal of
+    // one maps that worker's chunk on the caller.
+    let walked: [Option[UInt64]; 9] = [.None, .Some(2), .Some(3), .Some(4), .Some(5), .Some(6), .Some(7), .Some(8), .Some(9)]
+    for refused in walked {
         let (same, settled) = map_test_refusing(refused, false)
         testing.assert(same, "a refused allocation changed the results")?
         testing.assert(settled, "map_in kept an allocation")?

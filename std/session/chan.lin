@@ -22,8 +22,8 @@ struct Chan[phantom P: Protocol, H = ()] {
 }
 
 // Tell the peer of `endpoint` which continuation of a choice this end takes:
-// 0 for the left one, 1 for the right one. The call returns once the peer has
-// read it.
+// 0 for the left one, 1 for the right one. The branch is queued for the peer
+// as a sent value is.
 extern fn linea_chan_choose(endpoint: UInt64, branch: UInt8)
 
 // Wait until the peer of `endpoint` chooses, and answer 0 for the left
@@ -106,12 +106,12 @@ impl[P: Protocol, F: Owned, A] Chan[P, (F, A)] {
     }
 
     test "a handle keeps its allocator without its body" {
-        let log = mem.AllocationLog.open(mem.system(), 0).unwrap()
+        let log = testing.TestAllocator.open(mem.system()).unwrap()
         let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
             me.send(7).close()
         }
-        let handle = task.prepare_in(log.allocator(), body, stack: task.default_stack_bytes).unwrap().start()
-        let kept: Chan[Recv[UInt64, End], mem.RefusingAllocator[mem.SystemAllocator]] = handle.detach_body()
+        let handle = task.prepare_in(log.handle(), body, stack: task.default_stack_bytes).unwrap().start()
+        let kept: Chan[Recv[UInt64, End], testing.TestHandle[mem.SystemAllocator]] = handle.detach_body()
         let (number, done) = kept.recv()
         done.close()
         let settled = log.all_disposed()
@@ -122,10 +122,11 @@ impl[P: Protocol, F: Owned, A] Chan[P, (F, A)] {
 }
 
 impl[T: Owned, N: Protocol, H] Chan[Send[T, N], H] {
-    // Send `value` to the peer and answer this end at `N`. The send returns
-    // once the peer has taken the value. A payload is `Owned`, so it carries
-    // no observation and no lend, and the endpoint holds nothing after the
-    // send that it did not hold before.
+    // Send `value` to the peer and answer this end at `N`. The value waits in
+    // the session until the peer receives it, and the send returns at once,
+    // waiting first only while two values this end sent are still there. A
+    // payload is `Owned`, so it carries no observation and no lend, and the
+    // endpoint holds nothing after the send that it did not hold before.
     pub fn send(sink self: Self, sink value: T) -> Chan[N, H] {
         let Chan { endpoint, body } = self
         mem.send_payload(endpoint, value)
@@ -141,6 +142,18 @@ impl[T: Owned, N: Protocol, H] Chan[Send[T, N], H] {
         let (answer, done) = slot.start().send(41).recv()
         done.close()
         testing.assert_eq(answer, 42, "the peer did not receive what was sent")?
+    }
+
+    test "values sent in a row arrive in the order they were sent" {
+        let body = sink [] |sink me: Chan[Recv[UInt64, Recv[UInt64, Recv[UInt64, Send[UInt64, End]]]]]| {
+            let (first, second_next) = me.recv()
+            let (second, third_next) = second_next.recv()
+            let (third, answering) = third_next.recv()
+            answering.send(first * 100 + second * 10 + third).close()
+        }
+        let (digits, done) = task.start(body).unwrap().send(1).send(2).send(3).recv()
+        done.close()
+        testing.assert_eq(digits, 123, "the values arrived out of order")?
     }
 }
 

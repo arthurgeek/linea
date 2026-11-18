@@ -1,0 +1,43 @@
+// A handler factory's error is made on the serving task that met it and
+// moved to the caller once, never read by two tasks, so an error that owns
+// a C handle, which is not `Shareable`, is returned from `http.serve` and
+// released there.
+import std.http
+import std.net
+
+// The address of a C session object. As a handle it is not `Shareable`.
+@(opaque, linear)
+type Session = UInt64
+
+// `Unopened` keeps the session a serving task opened before its routes could
+// not be set up, so the caller decides what to do with it.
+struct Unopened {
+    session: Session,
+}
+
+impl Release for Unopened {
+    fn release(sink self: Self) {
+        let Unopened { session } = self
+        let Session(_) = session
+    }
+}
+
+fn unopened() -> Result[http.Router[()], Unopened] {
+    .Err(Unopened { session = Session(7) })
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let served = http.serve(listener, unopened, policy: .Threads(2))
+    match served {
+        Err(Handler(reason)) => {
+            reason.release()
+            0
+        },
+        Err(other) => {
+            other.release()
+            1
+        },
+        Ok(_) => 2,
+    }
+}

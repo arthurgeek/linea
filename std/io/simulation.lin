@@ -152,11 +152,12 @@ impl Simulation {
     // operation of its simulation. An instant read inside a run is on the
     // virtual clock and one read outside on the real clock, so neither means
     // anything to the other.
-    pub fn run[R, F: inout fn(inout world: World) -> R](inout self: Self, sink body: F) -> R where carries(body), F: Discardable {
+    // `body` is lent to the run and called once, so a named body may own
+    // what it captures, linear values included, and serve another run.
+    pub fn run[R, F: inout fn(inout world: World) -> R](inout self: Self, inout body: F) -> R where carries(body) {
         let outer = linea_io_switch(self.identity)
         var world = World { identity = self.identity }
-        var running = body
-        let answer = &running(&world)
+        let answer = &body(&world)
         let _restored = linea_io_switch(outer)
         answer
     }

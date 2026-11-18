@@ -214,6 +214,10 @@ pub const FreeReference = struct {
 
 pub const TypeParameterReference = struct { at: token.TokenId, parameter: u32, selection_base: bool = false };
 
+/// Where a template member names one of its own type parameters: the
+/// parameter's declaration or a use of it, and the parameter's position.
+pub const MemberTypeParameterReference = struct { at: token.TokenId, parameter: u32 };
+
 pub const ParameterReference = struct { at: token.TokenId, contract: bool = false };
 
 pub const ParameterPlan = struct {
@@ -254,6 +258,10 @@ pub const ReflectionMemberPlan = struct {
     wraps: []const WrapPlan = &.{},
     parameters: []const ParameterPlan,
     type_parameters: []const TypeParameterReference = &.{},
+    /// The member's own type parameters, renamed where the target or the
+    /// derive spells the same name, so a component type naming the target's
+    /// parameter is not captured by the member's.
+    member_type_parameters: []const MemberTypeParameterReference = &.{},
     constructions: []const ConstructionPlan = &.{},
     component_types: []const ComponentTypePlan = &.{},
     locals: []const LocalRename = &.{},
@@ -273,6 +281,7 @@ pub const ReflectionMemberPlan = struct {
         for (self.parameters) |parameter| gpa.free(parameter.references);
         gpa.free(self.parameters);
         gpa.free(self.type_parameters);
+        gpa.free(self.member_type_parameters);
         gpa.free(self.constructions);
         gpa.free(self.component_types);
         gpa.free(self.locals);
@@ -289,6 +298,9 @@ pub const OriginSegment = struct {
     template_expr: ExprId,
     case_ordinal: ?CaseOrdinal,
     component_ordinal: ?ComponentOrdinal,
+    /// The text is copied as the target or the derive writes it: a
+    /// component's type, or a template argument.
+    copied: bool = false,
 };
 
 /// The name the rendered `.wrap` placeholder spells. The checker reads the
@@ -321,7 +333,7 @@ const Operation = struct {
     kind: Kind,
     index: u32,
 
-    const Kind = enum { case, same_case, loop, place, metadata, text, decision, erasable_declaration, erasable_use, ordinal, free_reference, parameter_declaration, parameter_reference, parameter_contract_reference, type_parameter, construction, component_type, local, wrap };
+    const Kind = enum { case, same_case, loop, place, metadata, text, decision, erasable_declaration, erasable_use, ordinal, free_reference, parameter_declaration, parameter_reference, parameter_contract_reference, type_parameter, member_type_parameter, construction, component_type, local, wrap };
 
     fn before(_: void, lhs: Operation, rhs: Operation) bool {
         if (lhs.span.start != rhs.span.start) return lhs.span.start < rhs.span.start;
@@ -357,6 +369,8 @@ const Renderer = struct {
     component_types: ComponentTypes,
     out: std.ArrayList(u8) = .empty,
     origins: std.ArrayList(OriginSegment) = .empty,
+    /// The origins begun and not yet ended, innermost last.
+    open_origins: std.ArrayList(usize) = .empty,
     wraps: std.ArrayList(RenderedWrap) = .empty,
     operations: []Operation,
     bindings: std.ArrayList([]const u8) = .empty,
@@ -367,6 +381,9 @@ const Renderer = struct {
     /// The identifiers the member spells and the names this rendering made.
     occupied: std.StringHashMapUnmanaged(void) = .empty,
     parameter_used: []bool,
+    /// The name each of the member's own type parameters is written with,
+    /// made on first use.
+    member_type_names: [][]const u8,
     parameter_positions: std.ArrayList(struct { parameter: u32, offset: u32 }) = .empty,
     /// Each copy of an erasable local the output declares, in output order.
     local_copies: std.ArrayList(struct { local: u32, offset: u32, used: bool = false }) = .empty,
@@ -376,11 +393,14 @@ const Renderer = struct {
     fn deinit(self: *Renderer) void {
         self.out.deinit(self.gpa);
         self.origins.deinit(self.gpa);
+        self.open_origins.deinit(self.gpa);
         self.wraps.deinit(self.gpa);
         self.parameter_positions.deinit(self.gpa);
         self.local_copies.deinit(self.gpa);
         for (self.bindings.items) |name| self.gpa.free(name);
         self.bindings.deinit(self.gpa);
+        for (self.member_type_names) |name| if (name.len != 0) self.gpa.free(name);
+        self.gpa.free(self.member_type_names);
         self.binding_index.deinit(self.gpa);
         self.occupied.deinit(self.gpa);
     }
@@ -417,6 +437,31 @@ const Renderer = struct {
     /// spells, or one this rendering already made.
     fn taken(self: *const Renderer, name: []const u8) bool {
         return self.spelled.contains(name) or self.occupied.contains(name);
+    }
+
+    /// The name a member's own type parameter is written with: its own, unless
+    /// the target or the derive spells it, which would make a component type
+    /// or a template argument naming the target's parameter name the
+    /// member's instead.
+    fn memberTypeName(self: *Renderer, reference: MemberTypeParameterReference) RenderError![]const u8 {
+        const made = self.member_type_names[reference.parameter];
+        if (made.len != 0) return made;
+        const written = self.ast.tokenText(reference.at);
+        if (!self.spelled.contains(written)) return written;
+        var suffix: u32 = 0;
+        while (true) : (suffix = try std.math.add(u32, suffix, 1)) {
+            const candidate = try std.fmt.allocPrint(self.gpa, "_Linea{s}{d}", .{ written, suffix });
+            if (self.taken(candidate)) {
+                self.gpa.free(candidate);
+                continue;
+            }
+            self.occupied.put(self.gpa, candidate, {}) catch |err| {
+                self.gpa.free(candidate);
+                return err;
+            };
+            self.member_type_names[reference.parameter] = candidate;
+            return candidate;
+        }
     }
 
     fn buildBindings(self: *Renderer, derive: DeclId) RenderError!void {
@@ -537,7 +582,7 @@ const Renderer = struct {
                     const at = self.component_types.offsets[ordinalIndex(case)] + ordinalIndex(component);
                     const plan = self.plan.component_types[operation.index];
                     if (plan.selection_base) try self.append("(");
-                    try self.append(self.component_types.text[at]);
+                    try self.appendCopied(self.component_types.text[at], state);
                     if (plan.selection_base) try self.append(")");
                 },
                 .local => try self.renderLocal(self.plan.locals[operation.index], state),
@@ -550,10 +595,11 @@ const Renderer = struct {
                 .decision => try self.renderDecision(self.plan.decisions[operation.index], state),
                 .ordinal => try self.renderOrdinal(self.plan.ordinals[operation.index]),
                 .wrap => try self.renderWrap(self.plan.wraps[operation.index]),
+                .member_type_parameter => try self.append(try self.memberTypeName(self.plan.member_type_parameters[operation.index])),
                 .type_parameter => {
                     const reference = self.plan.type_parameters[operation.index];
                     if (reference.selection_base) try self.append("(");
-                    try self.append(self.template_arguments[reference.parameter]);
+                    try self.appendCopied(self.template_arguments[reference.parameter], state);
                     if (reference.selection_base) try self.append(")");
                 },
                 .free_reference => try self.renderFreeReference(self.free_references[operation.index]),
@@ -593,11 +639,37 @@ const Renderer = struct {
             .case_ordinal = state.case,
             .component_ordinal = state.component,
         });
+        try self.open_origins.append(self.gpa, index);
         return index;
     }
 
     fn endOrigin(self: *Renderer, index: usize) RenderError!void {
         self.origins.items[index].end = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        if (self.open_origins.items.len != 0 and self.open_origins.items[self.open_origins.items.len - 1] == index) _ = self.open_origins.pop();
+    }
+
+    /// Write a component's type as the target spells it, or a template
+    /// argument as the derive does, recording that the text is theirs: a rule
+    /// about what a declaration writes holds it where the target or the derive
+    /// wrote it, not inside the member it was copied into. It keeps the
+    /// template expression of the origin it sits in.
+    fn appendCopied(self: *Renderer, text: []const u8, state: RenderState) RenderError!void {
+        // Text outside every template expression, such as the member's
+        // signature, is the member's whole origin, which the checker reads as
+        // copied too.
+        if (self.open_origins.items.len == 0 or text.len == 0) return self.append(text);
+        const start = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        try self.append(text);
+        const end = std.math.cast(u32, self.out.items.len) orelse return error.GeneratedSourceTooLarge;
+        const enclosing = self.origins.items[self.open_origins.items[self.open_origins.items.len - 1]].template_expr;
+        try self.origins.append(self.gpa, .{
+            .start = start,
+            .end = end,
+            .template_expr = enclosing,
+            .case_ordinal = state.case,
+            .component_ordinal = state.component,
+            .copied = true,
+        });
     }
 
     fn appendOrdinal(self: *Renderer, value: usize) RenderError!void {
@@ -1155,7 +1227,7 @@ pub fn renderMember(
         try std.math.add(usize, plan.component_types.len, plan.locals.len),
     );
     const reflection_operations = try std.math.add(usize, existing_reflection_operations, construction_operations);
-    var parameter_operations = try std.math.add(usize, plan.parameters.len, plan.type_parameters.len);
+    var parameter_operations = try std.math.add(usize, try std.math.add(usize, plan.parameters.len, plan.type_parameters.len), plan.member_type_parameters.len);
     for (plan.parameters) |parameter| {
         parameter_operations = try std.math.add(usize, parameter_operations, parameter.references.len);
     }
@@ -1234,6 +1306,10 @@ pub fn renderMember(
         operations[at] = .{ .span = ast.tokenSpan(reference.at), .kind = .type_parameter, .index = @intCast(i) };
         at += 1;
     }
+    for (plan.member_type_parameters, 0..) |reference, i| {
+        operations[at] = .{ .span = ast.tokenSpan(reference.at), .kind = .member_type_parameter, .index = @intCast(i) };
+        at += 1;
+    }
     for (plan.wraps, 0..) |wrap, i| {
         operations[at] = .{ .span = ast.exprSpan(wrap.callee), .kind = .wrap, .index = @intCast(i) };
         at += 1;
@@ -1260,6 +1336,8 @@ pub fn renderMember(
     const current_copy = try gpa.alloc(u32, plan.erasable_locals.len);
     defer gpa.free(current_copy);
     @memset(current_copy, no_copy);
+    const member_type_names = try gpa.alloc([]const u8, ast.declTypeParams(plan.member).len);
+    @memset(member_type_names, "");
     var renderer: Renderer = .{
         .gpa = gpa,
         .ast = ast,
@@ -1273,6 +1351,7 @@ pub fn renderMember(
         .component_types = component_types,
         .operations = operations,
         .parameter_used = parameter_used,
+        .member_type_names = member_type_names,
         .current_copy = current_copy,
     };
     defer renderer.deinit();

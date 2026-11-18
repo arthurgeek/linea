@@ -79,6 +79,12 @@ and io_uring remain proposed until their phases land:
   where tasks start, and a descriptor owns its socket or file and no
   scheduler.
 
+The reason §4.1 gives for an endpoint's readiness being a reservation, that a
+sender waits until its value is taken, is superseded by
+[0288](0288-a-session-send-leaves-its-value-queued-and-returns.md): the value
+waits in the session's queue instead, and the reservation holds because only
+the endpoint's own `recv` or `offer` takes it.
+
 ## Builds on
 
 These points were settled before this record and are inherited, not reopened.

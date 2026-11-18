@@ -342,6 +342,7 @@ The library tests itself.
   ok    html.text that is already escaped is escaped again
   ok    html.text without special characters is written unchanged
   ok    http.a bare lf ends a line
+  ok    http.a body cut short after the answer is observed as unread
   ok    http.a body holds exactly its length
   ok    http.a body is text only when it is utf8
   ok    http.a body reader advances and stops at its boundary
@@ -402,7 +403,9 @@ The library tests itself.
   ok    http.a listen_and_serve error displays its cause
   ok    http.a listening server announces the port it bound before accepting
   ok    http.a listening server answers on every task it serves with
+  ok    http.a listening server makes one handler per serving task and announces once
   ok    http.a listening server whose handler cannot be made asks its factory once
+  ok    http.a listening server whose second handler cannot be made announces nothing
   ok    http.a literal beats a parameter at the same position
   ok    http.a logged router logs each exchange it serves
   ok    http.a malformed header is refused
@@ -627,6 +630,7 @@ The library tests itself.
   ok    http.remove_header drops every value of a name
   ok    http.removing a header drops every value
   ok    http.request is_https checks forwarded headers and env
+  ok    http.request is_https reads a quoted Forwarded value whole
   ok    http.running out of memory answers 500
   ok    http.same_origin policy validates requests
   ok    http.sequential routing with path parameters
@@ -987,6 +991,7 @@ The library tests itself.
   ok    json.from_uint makes a number value
   ok    json.from_uint makes a number value in the system allocator
   ok    json.from_uint uses the exact decimal text
+  ok    json.from_value decodes a document held in an arena into system values
   ok    json.from_value decodes a parsed value and leaves it with the caller
   ok    json.from_value decodes a value into an arena
   ok    json.from_value decodes into the system allocator
@@ -1105,6 +1110,7 @@ The library tests itself.
   ok    mem.a buffer disposes through its stored allocator
   ok    mem.a buffer from a later chunk is disposed into its arena
   ok    mem.a byte store reaches one byte
+  ok    mem.a byte vector reads from a reader into its own buffer
   ok    mem.a carried field keeps a lend until its holders last use
   ok    mem.a carried type that can carry nothing is owned
   ok    mem.a chunked arena hands out exactly its size less the cursor
@@ -1115,6 +1121,7 @@ The library tests itself.
   ok    mem.a foreign_address is where the bytes are
   ok    mem.a foreign_byte is read at its offset
   ok    mem.a foreign_word is read at its offset
+  ok    mem.a handle hands out buffers the allocator counts
   ok    mem.a handle written without a parent is a handle over the system
   ok    mem.a kept value comes back as it went in
   ok    mem.a lambda that captures nothing allocates nothing
@@ -1137,18 +1144,19 @@ The library tests itself.
   ok    mem.a shared log refuses one acquisition of the named size
   ok    mem.a shared log refuses the acquisition open names
   ok    mem.a shared log remembers the most bytes live at once
+  ok    mem.a shared test allocator closes answering whether it is settled
   ok    mem.a slice debugs as its elements in brackets
   ok    mem.a slice observes only its initialized extent
   ok    mem.a system drain stopped early is returned by finish with its storage
   ok    mem.a tag records its code when it is released
   ok    mem.a terminated copy ends with one zero byte
+  ok    mem.a test allocator counts past a thousand acquisitions
   ok    mem.a vec written without an allocator is the system vec
   ok    mem.a walk lent a drain may stop early and leave the rest with its owner
   ok    mem.acquired counts only successful acquisitions
   ok    mem.address.nowhere is the address of no bytes
   ok    mem.all_disposed is false while an allocation is live
   ok    mem.allocating again preserves a live buffer view
-  ok    mem.allocator hands out buffers the log records
   ok    mem.an address at a number names the bytes there
   ok    mem.an arena backs another arena
   ok    mem.an arena hands out storage and gives the slab back
@@ -1164,6 +1172,7 @@ The library tests itself.
   ok    mem.arena vector discard does not invoke optional element release
   ok    mem.as_slice views only the live elements
   ok    mem.attempts count refused acquisitions too
+  ok    mem.close answers whether every allocation was disposed
   ok    mem.closing a descriptor the process lacks reports an error
   ok    mem.derived oom equality compares its case
   ok    mem.derived oom release consumes its case
@@ -1174,6 +1183,7 @@ The library tests itself.
   ok    mem.each allocation failure covers every growth step in an append_slice sequence
   ok    mem.empty fd requests do not access a descriptor
   ok    mem.equal slices hash equally
+  ok    mem.fail_at refuses a later acquisition through live handles
   ok    mem.fd reads reject a count past the remaining buffer
   ok    mem.fd reads reject an offset past the buffer
   ok    mem.filled repeats a value in the system allocator
@@ -1193,7 +1203,6 @@ The library tests itself.
   ok    mem.open refuses the acquisition it names
   ok    mem.peak_bytes remembers the most bytes live at once
   ok    mem.random_words differ between reads
-  ok    mem.refuse_attempt refuses a later acquisition through live handles
   ok    mem.releasing a closure returns its bytes
   ok    mem.releasing a drain stopped early releases only what remains
   ok    mem.releasing a slice leaves its storage owned
@@ -1428,6 +1437,7 @@ The library tests itself.
   ok    session.entering a protocol keeps the endpoint
   ok    session.the dual of a protocol is what its peer does
   ok    session.the dual of the dual is the protocol
+  ok    session.values sent in a row arrive in the order they were sent
   ok    task.a cancelled slot runs nothing and gives the body back
   ok    task.a client reaches the state its owner holds
   ok    task.a copied key names the same registration
@@ -1454,7 +1464,7 @@ The library tests itself.
   ok    task.a started task answers its handle
   ok    task.a stopped map yields only what it started
   ok    task.a system task has no carrier
-  ok    task.a taken endpoint comes back with its peer still waiting
+  ok    task.a taken endpoint comes back with its peer's value still queued
   ok    task.a task started in one call runs its body
   ok    task.a task that cannot start answers the reason
   ok    task.a thread that cannot be made hands the body back
@@ -1503,6 +1513,7 @@ The library tests itself.
   ok    testing.byte reads a written byte and nothing past the end
   ok    testing.each_allocation_failure accepts a run that completes despite the refusal
   ok    testing.each_allocation_failure reports a body that allocates nothing
+  ok    testing.each_allocation_failure reports a failed run that left an allocation live
   ok    testing.each_allocation_failure reports a refused run that fails for another reason
   ok    testing.each_allocation_failure reports a run with nothing refused that failed
   ok    testing.each_allocation_failure returns the attempts it walked
@@ -1530,6 +1541,7 @@ The library tests itself.
   ok    text.as_bytes views the encoded bytes
   ok    text.ascii folding ignores case and nothing else
   ok    text.byte append grows text in an arena
+  ok    text.clear empties the text and keeps its storage
   ok    text.copied text outlives its source owner
   ok    text.copied text outlives the source allocation owner
   ok    text.each allocation failure covers every byte append
@@ -1666,4 +1678,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1663 passed, 0 failed
+  1675 passed, 0 failed

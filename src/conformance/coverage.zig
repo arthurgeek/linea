@@ -484,9 +484,10 @@ fn noteSpellings(ast: *const Ast, typing: *const Typing, seen: *Seen) void {
 pub const Operation = enum {
     /// `slot.start()`, which runs a task's body on a thread of its own.
     start,
-    /// `chan.send(value)`, a rendezvous with the other end of a session.
+    /// `chan.send(value)`, which queues a value for the other end of a
+    /// session.
     send,
-    /// `chan.recv()`, the other half of that rendezvous.
+    /// `chan.recv()`, which takes the oldest value the other end queued.
     recv,
 };
 

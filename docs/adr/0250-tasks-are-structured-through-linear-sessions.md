@@ -15,7 +15,11 @@ and the owning-task clause of §9 by
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Extended by
 [0260](0260-a-handle-to-a-c-object-is-not-shareable-unless-its-wrapper-vouches.md):
 a handle to a C object is not `Shareable` unless its declaration is marked
-`@shareable`.
+`@shareable`. §8 (communication is a synchronous rendezvous) and the clauses
+of §10 that build it (a send waits until the receiver's copy has emptied the
+slot) are superseded by
+[0288](0288-a-session-send-leaves-its-value-queued-and-returns.md): a session
+queues up to two values and a send returns once its value is queued.
 
 **What is built.** Stages 0 to 4 of §16 exist: `mem.Carried[H]` (§12), which
 every other clause rests on; the `Protocol` trait with its combinators in
