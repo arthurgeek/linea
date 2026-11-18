@@ -101,6 +101,12 @@ pub fn run(
         },
         else => {},
     }
+    // A process the group's leader started is reparented when the leader
+    // dies; on Linux it comes to this process, which `endGroup` reaps, rather
+    // than to an init that may never reap it.
+    if (options.process_group and @import("builtin").os.tag == .linux) {
+        _ = std.os.linux.prctl(@intFromEnum(std.os.linux.PR.SET_CHILD_SUBREAPER), 1, 0, 0, 0);
+    }
     var child = try std.process.spawn(io, .{
         .argv = options.argv,
         .cwd = options.cwd,
@@ -110,14 +116,17 @@ pub fn run(
         .stdout = .pipe,
         .stderr = .pipe,
     });
-    defer child.kill(io);
-    defer if (options.process_group) if (child.id) |pid| std.posix.kill(-pid, .KILL) catch {};
-    const listed = if (options.process_group) enlist(child.id.?) else null;
-    defer if (listed) |slot| live_groups[slot].store(0, .release);
-
-    // One deadline for every read and the wait, so output arriving in time
-    // does not extend the run.
+    // One deadline for every read, the wait and the group's end, so output
+    // arriving in time does not extend the run.
     const deadline = options.timeout.toDeadline(io);
+    const leader = child.id.?;
+    const listed = if (options.process_group) enlist(leader) else null;
+    defer {
+        child.kill(io);
+        if (options.process_group) endGroup(io, leader);
+        if (listed) |slot| live_groups[slot].store(0, .release);
+    }
+
     var buffers: std.Io.File.MultiReader.Buffer(2) = undefined;
     var reader: std.Io.File.MultiReader = undefined;
     reader.init(gpa, io, buffers.toStreams(), &.{ child.stdout.?, child.stderr.? });
@@ -143,6 +152,36 @@ pub fn run(
     errdefer gpa.free(stdout);
     const stderr = try reader.toOwnedSlice(1);
     return .{ .term = term, .stdout = stdout, .stderr = stderr };
+}
+
+/// How long the end of a group waits for its processes to be gone: a killed
+/// process is gone once it is reaped, which takes milliseconds, so this
+/// bounds only a process the kernel cannot kill.
+const group_end_seconds = 60;
+
+/// Kills the process group `leader` led and answers once no process in it is
+/// left, so a run answers only after everything it started is gone. On Linux
+/// each process the group leaves orphaned has been reparented to this one
+/// and is reaped here; elsewhere init reaps it. Gives up after
+/// `group_end_seconds`, whatever the run's deadline, since the group is
+/// killed when that deadline has passed too.
+fn endGroup(io: std.Io, leader: std.posix.pid_t) void {
+    const until = (std.Io.Timeout{ .duration = .{ .raw = .fromSeconds(group_end_seconds), .clock = .awake } }).toDeadline(io);
+    while (true) {
+        // A process that is gone or reaped is no longer in the group, and a
+        // zombie still is, so the group is gone once nothing answers.
+        std.posix.kill(-leader, .KILL) catch return;
+        if (@import("builtin").os.tag == .linux) {
+            var status: u32 = undefined;
+            while (true) {
+                const reaped = std.os.linux.waitpid(-leader, &status, std.os.linux.W.NOHANG);
+                if (std.os.linux.errno(reaped) != .SUCCESS or reaped == 0) break;
+            }
+        }
+        const left = until.toDurationFromNow(io) orelse return;
+        if (left.raw.nanoseconds <= 0) return;
+        io.sleep(.fromMilliseconds(1), .awake) catch return;
+    }
 }
 
 /// Hands what was read before the deadline to `partial`, where the caller
