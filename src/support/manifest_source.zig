@@ -26,11 +26,11 @@ test "an absent or empty source names the manifest's own directory" {
 
 /// Whether `source`, read from the directory holding the manifest, names a
 /// directory inside that one by a path down from it: not absolute, and with
-/// no `..` component. Such a path names one directory whether its spelling or
-/// the filesystem resolves it, so a root read from disk and one read from
-/// memory, a program and a library, name the same files. A `..` can climb out
-/// of the directory, and even one that stays inside names, through a symbolic
-/// link, a directory its spelling does not.
+/// no `..` component. Every reader joins such a path's components beneath the
+/// manifest's directory, so a root read from disk and one read from memory, a
+/// program and a library, name the same files. A `..` can climb out of the
+/// directory, and even one that stays inside resolves, after a symbolic link,
+/// to a directory its spelling does not name.
 pub fn staysInside(source: []const u8) bool {
     if (source.len > 0 and source[0] == '/') return false;
     var segments = std.mem.tokenizeScalar(u8, source, '/');
@@ -53,9 +53,10 @@ test "a manifest's source stays inside the directory holding it" {
 /// The directory a manifest held in `dir` names with `source`: `dir` itself
 /// where it names none, and otherwise each component of `source` beneath
 /// `dir`, with `.` and empty components taken out. Asked only of a source
-/// `staysInside` accepts, so the result is the directory the filesystem finds
-/// too. The loader spells a program's and a library's source directory here,
-/// and the build its example roots'. The caller owns the result.
+/// `staysInside` accepts, so the filesystem reaches the result by following
+/// the same components. The loader spells a program's and a library's source
+/// directory here, and the build its example roots'. The caller owns the
+/// result.
 pub fn directory(gpa: std.mem.Allocator, dir: []const u8, source: ?[]const u8) std.mem.Allocator.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);

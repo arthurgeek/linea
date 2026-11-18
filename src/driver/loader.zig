@@ -3515,14 +3515,23 @@ const Loader = struct {
     }
 
     /// Where a root's source directory is, for telling two roots' sources
-    /// apart: the identity of the directory holding the root's manifest
-    /// (`identityOf`), with the path down from it to `source_dir` beneath.
-    /// One answer for the program and every library, from disk and from
-    /// memory, because a `source` is a path down with no `..` (ADR 0280), so
-    /// the filesystem finds beneath the identity what the spelling names. A
+    /// apart, for the program and every library alike. Where the load can
+    /// read the disk it is the directory's own real path, so a `source` that
+    /// is a symbolic link is the directory the link names, as the filesystem
+    /// reads modules from it. A load from memory alone has only spellings:
+    /// the identity of the directory holding the root's manifest
+    /// (`identityOf`), with the path down from it to `source_dir` beneath. A
     /// root with no manifest has `manifest_dir` equal to `source_dir`.
     fn sourceIdentityOf(self: *Loader, manifest_dir: []const u8, source_dir: []const u8) LoadError![]const u8 {
         const a = self.scratch.allocator();
+        if (self.diskReader()) |io| {
+            if (std.Io.Dir.cwd().realPathFileAlloc(io, if (source_dir.len == 0) "." else source_dir, a)) |real| {
+                return real;
+            } else |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => {},
+            }
+        }
         const spelled = try canonical(a, manifest_dir);
         const base = if (std.mem.eql(u8, spelled, ".")) "" else spelled;
         const under = try canonical(a, source_dir);
@@ -3530,6 +3539,18 @@ const Loader = struct {
         if (std.mem.eql(u8, base, under)) return identity;
         if (!within(under, base)) return self.identityOf(source_dir);
         return manifest_source.directory(a, identity, under[base.len..]);
+    }
+
+    /// The disk this load may read, where it may read one: a load from disk,
+    /// and a load from memory given a reader for what it was not supplied.
+    fn diskReader(self: *const Loader) ?std.Io {
+        return switch (self.input) {
+            .disk => |io| io,
+            .memory => |ownership| switch (ownership) {
+                .copy_reading_disk, .borrow_reading_disk => |reading| reading.io,
+                .borrow, .copy => null,
+            },
+        };
     }
 
     /// [M-Dependency] for a library whose manifest grants it `extern` and

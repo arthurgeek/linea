@@ -27,8 +27,18 @@ file was analysed as a program of its own and lost its manifest.
 ## Decision
 
 **A `source` is a path down from the manifest's directory: not absolute, and
-with no `..` component.** Such a path names one directory whether its spelling
-or the filesystem resolves it, so the readers cannot disagree.
+with no `..` component.** Every reader then joins the same components beneath
+the manifest's directory, so a program and a library spelled alike read the
+same files: with no `..` to resolve first, the filesystem follows each
+component, a symbolic link included, to the directory the joined spelling
+reaches.
+
+**A source directory's identity is the directory itself.** Where a load can
+read the disk, the real path of the source directory tells one root's source
+from another's, for the program and every library, so a `source` that is a
+link into another root's source overlaps it ([M-Dependency]). A load from
+memory alone has only spellings, and uses the identity of the manifest's
+directory with the source's path beneath it.
 
 **One routine spells it.** `manifest_source.directory` joins each component of
 the `source` beneath the manifest's directory, `.` and empty components taken

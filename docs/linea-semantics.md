@@ -1992,7 +1992,8 @@ entry point.
 
 A manifest's `"source"` names the directory its root's modules sit in, relative
 to the manifest, by a path down from it: not absolute and with no `..`
-component, so the spelling and the filesystem name one directory. Absent or
+component, so every reader joins the same components and the filesystem
+follows them, links included, to one directory. Absent or
 empty, it is the manifest's own directory. A source of another shape stops the
 command before anything is checked.
 
