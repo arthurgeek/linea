@@ -97,8 +97,10 @@ impl SignalShare {
         SignalShare { signal, home, delivered = false }
     }
 
-    // Whether the share came from a delivery of its signal, rather than from
-    // a registration taken back or closed before one.
+    // Whether the share's signal arrived while its registration was held:
+    // true for a share `next` delivers, and for one `take` or `close` hands
+    // back after its signal arrived; false for one handed back before any
+    // delivery of its signal.
     pub fn delivered(self: Self) -> Bool {
         self.delivered
     }

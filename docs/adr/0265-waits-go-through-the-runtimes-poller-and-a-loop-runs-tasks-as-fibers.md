@@ -2,7 +2,11 @@
 
 Status: Phases 1 to 5 accepted and built; phase 5 correctness, platform
 validation and measurement closeout recorded in §§9.5–9.6; phases 6 and 7
-proposed — 2026-11-13. It builds on
+proposed — 2026-11-13. The delivery and host-handler clauses of §4.5, and its
+sentence on the share a taken or closed registration answers, are
+superseded by
+[0281](0281-the-signal-router-chains-to-a-snapshot-of-the-hosts-action-as-the-system-would-call-it.md).
+It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
 state what is built when. Phase 1 is built: nonblocking sockets with
 deadlines, `io.Io`, `io.system()`, `io.current()`, the loop table of §8 and

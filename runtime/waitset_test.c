@@ -220,7 +220,7 @@ static void take_of_a_signalled_endpoint_leaves_the_sender_waiting(void) {
     tell_to_send();
     pass(linea_pause_send_filled);
     assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 1) == 0);
-    assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 0) == 1);
+    assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 0) == 2);
     assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 0) == 0);
     assert(linea_waitset_next(set) == -1);
     finish_send_one(handle);
@@ -257,7 +257,7 @@ static void take_between_a_sources_swap_and_its_post(void) {
     pass(linea_pause_take_after_swap);
     release_pause(linea_pause_source_after_swap);
     assert(pthread_join(taker, 0) == 0);
-    assert(call.answer == 1);
+    assert(call.answer == 2);
     assert(linea_waitset_next(set) == -1);
     finish_send_one(handle);
     linea_waitset_close(set);
@@ -322,7 +322,7 @@ static void an_expired_timer_is_taken_or_delivered_once(void) {
     assert(pthread_create(&taker, 0, call_take, &call) == 0);
     pass(linea_pause_take_after_swap);
     assert(pthread_join(taker, 0) == 0);
-    assert(call.answer == 1);
+    assert(call.answer == 2);
     assert(linea_waitset_next(set) == -1);
 
     const unsigned long b = linea_waitset_reserve(set);
@@ -370,9 +370,12 @@ static void close_withdraws_each_registration_once(void) {
     linea_waitset_timer(set, slot_of(c), 0);
     int seen[3] = { 0, 0, 0 };
     for (;;) {
-        const long slot = linea_waitset_withdraw(set);
-        if (slot < 0) break;
+        const long withdrawn = linea_waitset_withdraw(set);
+        if (withdrawn < 0) break;
+        const long slot = withdrawn / 2;
         assert(slot < 3);
+        /* The far timer has not fired, so it is not answered signalled. */
+        if (slot == (long)slot_of(b)) assert(withdrawn % 2 == 0);
         seen[slot] += 1;
     }
     assert(seen[0] == 1 && seen[1] == 1 && seen[2] == 1);
@@ -646,7 +649,7 @@ static void close_between_a_sources_swap_and_its_post(void) {
     pass(linea_pause_take_after_swap);
     release_pause(linea_pause_source_after_swap);
     assert(pthread_join(closer, 0) == 0);
-    assert(call.answer == (long)slot_of(reserved));
+    assert(call.answer == (long)slot_of(reserved) * 2 + 1);
     assert(linea_waitset_withdraw(set) == -1);
     linea_waitset_close(set);
     finish_send_one(handle);
@@ -733,7 +736,7 @@ static void a_withdrawn_descriptor_leaves_its_reused_number_watched(void) {
     assert(second[0] == number);
     const unsigned long current = linea_waitset_reserve(set);
     assert(linea_waitset_descriptor(set, slot_of(current), second[0], 0) == 0);
-    assert(linea_waitset_take(set, slot_of(stale), generation_of(stale), 0) == 1);
+    assert(linea_waitset_take(set, slot_of(stale), generation_of(stale), 0) == 2);
     const unsigned long timer = linea_waitset_reserve(set);
     linea_waitset_timer(set, slot_of(timer), 2000000000UL);
     assert(write(second[1], "x", 1) == 1);
@@ -850,6 +853,260 @@ static void a_delivered_share_keeps_the_handler_until_it_is_released(void) {
     int status = 0;
     assert(waitpid(child, &status, 0) == child);
     assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);
+}
+
+/* The host actions the router tests chain to, each counting its calls. */
+static int first_host_calls;
+static int second_host_calls;
+static void first_host(int number, siginfo_t *info, void *context) {
+    (void)number;
+    (void)info;
+    (void)context;
+    __atomic_add_fetch(&first_host_calls, 1, __ATOMIC_SEQ_CST);
+}
+static void second_host(int number) {
+    (void)number;
+    __atomic_add_fetch(&second_host_calls, 1, __ATOMIC_SEQ_CST);
+}
+
+/* Install a host action for `number`: `informed` with SA_SIGINFO when it is
+ * given, `handler` otherwise. */
+static int install_host(int number, void (*handler)(int), void (*informed)(int, siginfo_t *, void *)) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    if (informed != 0) {
+        action.sa_sigaction = informed;
+        action.sa_flags = SA_SIGINFO;
+    } else {
+        action.sa_handler = handler;
+    }
+    sigemptyset(&action.sa_mask);
+    return sigaction(number, &action, 0);
+}
+
+#if defined(LINEA_WAITSET_PAUSES)
+static void *raise_user1(void *unused) {
+    (void)unused;
+    assert(pthread_kill(pthread_self(), SIGUSR1) == 0);
+    return 0;
+}
+
+/* A delivery the router began handling while the first share's host action
+ * was saved chains to that action, though the last share is released and a
+ * new first share saves another host action while it runs. */
+static void a_route_chains_to_the_action_saved_when_it_began(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (install_host(SIGUSR1, 0, first_host) != 0) _exit(10);
+        if (linea_signal_acquire(3) != 0) _exit(11);
+        arm(linea_pause_route_before_chain);
+        pthread_t raiser;
+        if (pthread_create(&raiser, 0, raise_user1, 0) != 0) _exit(12);
+        await_arrival(linea_pause_route_before_chain);
+        linea_signal_release(3, 0);
+        if (install_host(SIGUSR1, second_host, 0) != 0) _exit(13);
+        if (linea_signal_acquire(3) != 0) _exit(14);
+        release_pause(linea_pause_route_before_chain);
+        if (pthread_join(raiser, 0) != 0) _exit(15);
+        linea_signal_release(3, 0);
+        if (__atomic_load_n(&first_host_calls, __ATOMIC_SEQ_CST) != 1) _exit(16);
+        if (__atomic_load_n(&second_host_calls, __ATOMIC_SEQ_CST) != 0) _exit(17);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+#endif
+
+/* How many SIGUSR2 deliveries `raise_user2_repeatedly` makes. */
+enum { racing_deliveries = 4000 };
+static int raising_done;
+
+static void *raise_user2_repeatedly(void *unused) {
+    (void)unused;
+    for (int i = 0; i < racing_deliveries; i += 1) assert(pthread_kill(pthread_self(), SIGUSR2) == 0);
+    __atomic_store_n(&raising_done, 1, __ATOMIC_SEQ_CST);
+    return 0;
+}
+
+/* One thread takes SIGUSR2 over and over while another releases the last
+ * share and takes a first share again, each time under another host action,
+ * so the router saves an action while handlers on the other thread read the
+ * one saved before. Every delivery reaches a host action once, through the
+ * router or directly. */
+static void a_route_races_a_new_first_share(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (install_host(SIGUSR2, 0, first_host) != 0) _exit(10);
+        if (linea_signal_acquire(4) != 0) _exit(11);
+        pthread_t raiser;
+        if (pthread_create(&raiser, 0, raise_user2_repeatedly, 0) != 0) _exit(12);
+        for (unsigned long round = 0; !__atomic_load_n(&raising_done, __ATOMIC_SEQ_CST); round += 1) {
+            linea_signal_release(4, 0);
+            const int installed = round % 2 == 0 ? install_host(SIGUSR2, second_host, 0) : install_host(SIGUSR2, 0, first_host);
+            if (installed != 0) _exit(13);
+            if (linea_signal_acquire(4) != 0) _exit(14);
+        }
+        if (pthread_join(raiser, 0) != 0) _exit(15);
+        linea_signal_release(4, 0);
+        const int calls = __atomic_load_n(&first_host_calls, __ATOMIC_SEQ_CST) + __atomic_load_n(&second_host_calls, __ATOMIC_SEQ_CST);
+        if (calls != racing_deliveries) _exit(16);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* `close` withdraws one registration at a time, and a signal may arrive
+ * between two withdrawals. The registration it signals is answered as
+ * signalled, from the router's count, whether or not anything has drained
+ * the wake descriptor since. */
+static void a_signal_between_two_withdrawals_is_answered_signalled(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (linea_signal_acquire(3) != 0 || linea_signal_acquire(4) != 0) _exit(10);
+        const unsigned long set = linea_waitset_open();
+        const unsigned long a = linea_waitset_reserve(set);
+        if (linea_waitset_signal(set, slot_of(a), 3, 0) != 0) _exit(11);
+        const unsigned long b = linea_waitset_reserve(set);
+        if (linea_waitset_signal(set, slot_of(b), 4, 0) != 0) _exit(12);
+        const long first = linea_waitset_withdraw(set);
+        if (raise(SIGUSR2) != 0) _exit(13);
+        const long second = linea_waitset_withdraw(set);
+        const long third = linea_waitset_withdraw(set);
+        linea_waitset_close(set);
+        linea_signal_release(4, 0);
+        linea_signal_release(3, 0);
+        if (first != (long)slot_of(a) * 2) _exit(14);
+        if (second != (long)slot_of(b) * 2 + 1) _exit(15);
+        if (third != -1) _exit(16);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* `take` answers a signal registration signalled once its signal has
+ * arrived, from the same count. */
+static void a_signal_before_a_take_is_answered_signalled(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        if (linea_signal_acquire(4) != 0) _exit(10);
+        const unsigned long set = linea_waitset_open();
+        const unsigned long a = linea_waitset_reserve(set);
+        if (linea_waitset_signal(set, slot_of(a), 4, 0) != 0) _exit(11);
+        if (raise(SIGUSR2) != 0) _exit(12);
+        const uint8_t taken = linea_waitset_take(set, slot_of(a), generation_of(a), 0);
+        linea_waitset_close(set);
+        linea_signal_release(4, 0);
+        _exit(taken == 2 ? 0 : 13);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* What the masked host action saw of the thread's mask while it ran. */
+static int masked_host_calls;
+static int masked_host_saw_user1_blocked;
+static int masked_host_saw_user2_blocked;
+static void masked_host(int number) {
+    (void)number;
+    sigset_t now;
+    assert(pthread_sigmask(SIG_BLOCK, 0, &now) == 0);
+    masked_host_saw_user1_blocked = sigismember(&now, SIGUSR1) == 1;
+    masked_host_saw_user2_blocked = sigismember(&now, SIGUSR2) == 1;
+    masked_host_calls += 1;
+}
+
+/* Install `masked_host` for SIGUSR1 with `flags` and SIGUSR2 in its mask,
+ * take a share, raise SIGUSR1 and release the share. */
+static int raise_under_masked_host(int flags) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = masked_host;
+    action.sa_flags = flags;
+    sigemptyset(&action.sa_mask);
+    sigaddset(&action.sa_mask, SIGUSR2);
+    if (sigaction(SIGUSR1, &action, 0) != 0) return 10;
+    if (linea_signal_acquire(3) != 0) return 11;
+    if (raise(SIGUSR1) != 0) return 12;
+    linea_signal_release(3, 0);
+    if (masked_host_calls != 1) return 13;
+    sigset_t after;
+    if (pthread_sigmask(SIG_BLOCK, 0, &after) != 0 || sigismember(&after, SIGUSR1) == 1 || sigismember(&after, SIGUSR2) == 1) return 14;
+    return 0;
+}
+
+/* The router chains to a host action under the mask the system would have
+ * given it: the thread's mask, the action's `sa_mask` and the signal itself,
+ * and without the signal under SA_NODEFER. The thread's mask is as it was
+ * once the router returns. */
+static void a_routed_host_action_runs_under_its_own_mask(void) {
+    for (int nodefer = 0; nodefer < 2; nodefer += 1) {
+        const pid_t child = fork();
+        assert(child >= 0);
+        if (child == 0) {
+            const int answer = raise_under_masked_host(nodefer ? SA_NODEFER : 0);
+            if (answer != 0) _exit(answer);
+            if (!masked_host_saw_user2_blocked) _exit(15);
+            if (masked_host_saw_user1_blocked == nodefer) _exit(16);
+            _exit(0);
+        }
+        int status = 0;
+        assert(waitpid(child, &status, 0) == child);
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+}
+
+static int one_shot_host_calls;
+static void one_shot_host(int number) {
+    (void)number;
+    one_shot_host_calls += 1;
+}
+
+/* A host action installed with SA_RESETHAND is chained to for the first
+ * delivery only, as the system would have run it once and reset the signal
+ * to its default action; the deliveries after it are counted alone while a
+ * share lives, and releasing the last share leaves the default action. A
+ * system that does not report SA_RESETHAND through `sigaction`, as macOS
+ * does not, gives the router nothing to honour. */
+static void a_one_shot_host_action_is_chained_to_once(void) {
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        struct sigaction action;
+        memset(&action, 0, sizeof action);
+        action.sa_handler = one_shot_host;
+        action.sa_flags = (int)SA_RESETHAND;
+        sigemptyset(&action.sa_mask);
+        if (sigaction(SIGUSR1, &action, 0) != 0) _exit(10);
+        struct sigaction reported;
+        if (sigaction(SIGUSR1, 0, &reported) != 0) _exit(11);
+        if (((unsigned)reported.sa_flags & (unsigned)SA_RESETHAND) == 0) _exit(0);
+        if (linea_signal_acquire(3) != 0) _exit(12);
+        if (raise(SIGUSR1) != 0 || raise(SIGUSR1) != 0) _exit(13);
+        if (one_shot_host_calls != 1) _exit(14);
+        linea_signal_release(3, 0);
+        struct sigaction restored;
+        if (sigaction(SIGUSR1, 0, &restored) != 0 || restored.sa_handler != SIG_DFL) _exit(15);
+        /* A first share taken after that saves the default action. */
+        if (linea_signal_acquire(3) != 0) _exit(16);
+        if (raise(SIGUSR1) != 0) _exit(17);
+        linea_signal_release(3, 0);
+        if (one_shot_host_calls != 1) _exit(18);
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
 /* Run `body` in a child process and check that it stops the program with
@@ -1018,9 +1275,15 @@ int main(void) {
     a_second_terminate_after_the_last_share_ends_the_process();
     a_set_of_endpoints_keeps_its_signals_when_it_moves();
     a_set_watching_more_than_endpoints_does_not_move();
+    a_route_races_a_new_first_share();
+    a_signal_between_two_withdrawals_is_answered_signalled();
+    a_signal_before_a_take_is_answered_signalled();
+    a_routed_host_action_runs_under_its_own_mask();
+    a_one_shot_host_action_is_chained_to_once();
 #if defined(LINEA_WAITSET_PAUSES)
     a_retired_slot_is_replaced_by_a_new_number();
+    a_route_chains_to_the_action_saved_when_it_began();
 #endif
-    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
+    puts("native wait sets: every interleaving of a source and the owner at each linearization point delivers or takes each registration once and loses no wake; descriptors, timers and signals wake a set; the signal router chains each delivery to the host action saved when it began, while a new first share saves another, under that action's mask, and an SA_RESETHAND action once; a set of endpoints moves between loops and a slot's number is not bounded by the registrations held");
     return 0;
 }

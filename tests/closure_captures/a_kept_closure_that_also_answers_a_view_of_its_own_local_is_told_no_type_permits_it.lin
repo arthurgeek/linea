@@ -1,0 +1,22 @@
+// A lambda given to `mem.Closure.open` with nothing to say which `fn` type
+// it is kept as answers either a copy of what it captured or a view of a
+// local of its own. A clause could permit the first, but nothing permits
+// the second, which ends when the call returns.
+import std.mem
+
+fn main() -> UInt8 {
+    let first: UInt8 = 7
+    let pick = mem.Closure.open(
+        [sink saved = borrow first] |fresh: Bool| -> borrow UInt8 {
+            let local: UInt8 = 9
+            if fresh {
+                borrow local
+            } else {
+                copy(saved)
+            }
+        },
+    ).unwrap()
+    let answer = *pick(false)
+    pick.release()
+    answer
+}

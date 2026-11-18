@@ -655,21 +655,33 @@ long linea_waitset_next(unsigned long set) {
     }
 }
 
+/* Bring a signal registration up to date with its signal's deliveries, so
+ * `take` and `close` answer it signalled once its signal has arrived,
+ * whether or not anything has read the router's wake descriptor since. Only
+ * a signal's answer is read: the set marks the share it hands back. */
+static void catch_up_signal(struct linea_registration *r) {
+    if (r->kind == signal_source && load_state(r) == registered) linea_signal_catch_up(&r->watch);
+}
+
 uint8_t linea_waitset_take(unsigned long set, unsigned long slot, unsigned long generation, uint8_t only_registered) {
     struct waitset *s = set_of(set);
     if (slot >= s->made) return 0;
     struct linea_registration *r = slot_at(s, (uint32_t)slot);
     if (r->generation != generation) return 0;
     /* A timer past its deadline or a descriptor the kernel has reported has
-     * fired, whether or not `next` has looked. */
-    if (r->kind == timer_source || r->kind == descriptor_source || r->kind == signal_source) observe(s);
+     * fired, whether or not `next` has looked, and so has a signal delivered
+     * since the registration was made. */
+    if (r->kind == timer_source || r->kind == descriptor_source) observe(s);
+    catch_up_signal(r);
     linea_waitset_pause(linea_pause_take_before_swap);
+    uint8_t answer = 1;
     if (!swap_state(r, registered, taken)) {
         if (only_registered || !swap_state(r, signalled, taken)) return 0;
+        answer = 2;
     }
     linea_waitset_pause(linea_pause_take_after_swap);
     disarm(s, r);
-    return 1;
+    return answer;
 }
 
 long linea_waitset_withdraw(unsigned long set) {
@@ -677,10 +689,12 @@ long linea_waitset_withdraw(unsigned long set) {
     while (s->withdraw_from < s->made) {
         struct linea_registration *r = slot_at(s, s->withdraw_from);
         s->withdraw_from += 1;
-        if (swap_state(r, registered, taken) || swap_state(r, signalled, taken)) {
+        catch_up_signal(r);
+        const int was_registered = swap_state(r, registered, taken);
+        if (was_registered || swap_state(r, signalled, taken)) {
             linea_waitset_pause(linea_pause_take_after_swap);
             disarm(s, r);
-            return (long)r->slot;
+            return (long)r->slot * 2 + (was_registered ? 0 : 1);
         }
     }
     s->withdraw_from = 0;

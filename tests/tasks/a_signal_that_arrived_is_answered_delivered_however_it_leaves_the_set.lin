@@ -1,0 +1,86 @@
+// A signal registration that a delivery signalled hands back a share whose
+// `delivered()` is true, whether `next` answers it or the set gives it back
+// through `close` or `take`. One that no delivery signalled hands back a
+// share whose `delivered()` is false.
+import std.io
+import std.task
+import std.testing
+
+use task.WaitSet
+
+// Two signals arrive before `next`: `next` answers one, and `close` answers
+// the other, which arrived too.
+fn close_answers_an_arrived_signal_delivered() {
+    var sim = io.Simulation.open(seed: 11).unwrap()
+    let answers = &sim.run(
+        |inout world| {
+            var waiting: WaitSet[io.SignalShare] = WaitSet.open()
+            let _one = &waiting.signal(.User1, |sink share| share).unwrap()
+            let _two = &waiting.signal(.User2, |sink share| share).unwrap()
+            &world.deliver(.User1)
+            &world.deliver(.User2)
+            let first = &waiting.next().unwrap()
+            let first_delivered = first.delivered()
+            first.settle()
+            var left = waiting.close()
+            let second = &left.pop().unwrap()
+            let second_delivered = second.delivered()
+            second.settle()
+            left.finish().unwrap()
+            (first_delivered, second_delivered)
+        },
+    )
+    sim.close()
+    testing.assert_eq(answers, (true, true), "a signal that arrived was answered undelivered by close").unwrap()
+}
+
+// No signal arrives, so `close` answers the registration undelivered.
+fn close_answers_a_quiet_signal_undelivered() {
+    var sim = io.Simulation.open(seed: 12).unwrap()
+    let delivered = &sim.run(
+        |inout _world| {
+            var waiting: WaitSet[io.SignalShare] = WaitSet.open()
+            let _one = &waiting.signal(.User1, |sink share| share).unwrap()
+            var left = waiting.close()
+            let share = &left.pop().unwrap()
+            let delivered = share.delivered()
+            share.settle()
+            left.finish().unwrap()
+            delivered
+        },
+    )
+    sim.close()
+    testing.assert_eq(delivered, false, "a signal that never arrived was answered delivered by close").unwrap()
+}
+
+// `take` gives a registration back in its own type: delivered when its
+// signal arrived, undelivered when none did.
+fn take_answers_whether_the_signal_arrived() {
+    var sim = io.Simulation.open(seed: 13).unwrap()
+    let answers = &sim.run(
+        |inout world| {
+            var waiting: WaitSet[io.SignalShare] = WaitSet.open()
+            let arrived = &waiting.signal(.User1, |sink share| share).unwrap()
+            let quiet = &waiting.signal(.User2, |sink share| share).unwrap()
+            &world.deliver(.User1)
+            let taken = &waiting.take(arrived).unwrap()
+            let arrived_delivered = taken.delivered()
+            taken.settle()
+            let untouched = &waiting.take(quiet).unwrap()
+            let quiet_delivered = untouched.delivered()
+            untouched.settle()
+            waiting.close().finish().unwrap()
+            (arrived_delivered, quiet_delivered)
+        },
+    )
+    sim.close()
+    testing.assert_eq(answers, (true, false), "take answered whether a signal arrived wrongly").unwrap()
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    close_answers_an_arrived_signal_delivered()
+    close_answers_a_quiet_signal_undelivered()
+    take_answers_whether_the_signal_arrived()
+    io.println("ok")?
+    .Ok(0)
+}

@@ -3,3 +3,5 @@ error[O-Escapes]: this boundary carries an observation from an owner its signatu
   |
 3 |     let callback = [sink saved = borrow first] || copy(saved)
   |                                                   ^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: the value comes from `saved`; write `where carries(saved)` to say so

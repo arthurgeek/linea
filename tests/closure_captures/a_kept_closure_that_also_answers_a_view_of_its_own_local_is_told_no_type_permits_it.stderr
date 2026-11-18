@@ -1,0 +1,10 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/closure_captures/a_kept_closure_that_also_answers_a_view_of_its_own_local_is_told_no_type_permits_it.lin:15:17
+   |
+13 |                 borrow local
+   |                 ------------ this leaves the function as well
+15 |                 copy(saved)
+   |                 ^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: part of the value comes from `saved`, which `where carries(saved)` would permit; the rest no clause can
+   = help: `local` belongs to this closure and ends when it returns, so nothing returned may observe it

@@ -681,6 +681,7 @@ const Builder = struct {
             .inouts = owned_inouts,
             .contract_declined = descriptor.contract_declined,
             .default_carrier = descriptor.default_carrier,
+            .own_signature = descriptor.own_signature,
         });
     }
 

@@ -796,6 +796,10 @@ pub const Function = struct {
     /// The parameter whose carrier type supplied the contract of a function
     /// that wrote no clause, for the report of a body that does not keep it.
     default_carrier: ?u32 = null,
+    /// Whether this closure was checked as its own signature where a call
+    /// left a callable bound for it to settle, so a `fn` type written where
+    /// its value is bound would have given it context.
+    own_signature: bool = false,
 
     pub fn deinitOne(self: *const Function, gpa: std.mem.Allocator) void {
         gpa.free(self.inouts);

@@ -1466,6 +1466,7 @@ The library tests itself.
   ok    task.an offering endpoint is delivered once its peer chooses
   ok    task.an owning task hands its state back when closed
   ok    task.calls from two tasks run one at a time
+  ok    task.closing a set answers a signal registration undelivered
   ok    task.closing a set answers what it still holds
   ok    task.closing answers every change a call made
   ok    task.each next delivers one of several ready sources
@@ -1664,4 +1665,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1661 passed, 0 failed
+  1662 passed, 0 failed

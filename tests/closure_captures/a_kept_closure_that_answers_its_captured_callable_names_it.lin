@@ -1,0 +1,71 @@
+// `mem.Closure.open` is given a lambda with nothing around it that says
+// which `fn` type the closure is kept as, so the lambda is checked as its own
+// signature. What it answers comes from the callable it captured, and that
+// signature does not say so.
+import std.mem
+
+@(linear)
+struct Ticket {
+    number: UInt8,
+    used: Bool,
+}
+
+impl Ticket {
+    fn punched(sink self: Self) -> Ticket {
+        let Ticket { number, used: _ } = self
+        Ticket { number, used = true }
+    }
+
+    fn redeem(sink self: Self) -> UInt8 {
+        let Ticket { number, used } = self
+        if used {
+            number
+        } else {
+            0
+        }
+    }
+}
+
+struct Desk[M] {
+    kept: mem.Vec[mem.Closure[fn(sink ticket: Ticket, punch: Bool) -> M]],
+}
+
+impl[M] Desk[M] {
+    fn keep(inout self: Self, sink deliver: mem.Closure[fn(sink ticket: Ticket, punch: Bool) -> M]) where retains(self: deliver) {
+        &self.kept.push(deliver).unwrap()
+    }
+
+    // Keep `wrap` behind a closure that punches the ticket before handing it
+    // on when `punch` is true.
+    fn register[W: Release + fn(sink ticket: Ticket) -> M](inout self: Self, sink wrap: W) where retains(self: wrap) {
+        let deliver = mem.Closure.open(
+            [sink wrap] |sink ticket: Ticket, punch: Bool| -> M {
+                if punch {
+                    wrap(ticket.punched())
+                } else {
+                    wrap(ticket)
+                }
+            },
+        ).unwrap()
+        &self.keep(deliver)
+    }
+}
+
+fn main() -> UInt8 {
+    var desk: Desk[UInt8] = .{ kept = mem.Vec.new() }
+    &desk.register(
+        |sink ticket: Ticket| -> UInt8 {
+            ticket.redeem()
+        },
+    )
+    let Desk { kept } = desk
+    var holding = kept
+    loop {
+        let deliver = &holding.pop() else {
+            break
+        }
+        deliver.release()
+    }
+    holding.finish().unwrap()
+    0
+}

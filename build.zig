@@ -2029,8 +2029,9 @@ pub fn build(b: *std.Build) void {
         });
     }
     // The wait set's race tests stop a thread at each linearization point of
-    // the registration protocol, so the task and the set are compiled with
-    // the pauses the tests supply.
+    // the registration protocol, and the signal router's handler before it
+    // chains to the host's action, so the task, the set and the router are
+    // compiled with the pauses the tests supply.
     var paused_flags: std.ArrayList([]const u8) = .empty;
     paused_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     paused_flags.append(b.allocator, "-DLINEA_WAITSET_PAUSES=1") catch @panic("OOM");
@@ -2038,7 +2039,7 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/task.c", .flags = paused_flags.items },
         .{ .file = "runtime/waitset.c", .flags = paused_flags.items },
         .{ .file = "runtime/park.c", .flags = runtime_flags.items },
-        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = paused_flags.items },
         .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
         .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
         .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },

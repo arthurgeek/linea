@@ -22,6 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "host_action.h"
 #include "pipe_signal.h"
 
 /* A sanitizer installs a fault handler of its own, which reports a stack
@@ -419,11 +420,9 @@ static void fault_handler_returned(void) {
  * runtime's.
  *
  * A handler runs as the system would have run it in some respects and not
- * all. Preserved: the handler is called with the same arguments, and with
- * the thread's signal mask during the call extended by its `sa_mask` and,
- * unless it set `SA_NODEFER`, by the fault's own signal; with `SA_NODEFER`
- * and the signal outside its `sa_mask`, the signal is unblocked during the
- * call. A handler installed with `SA_RESETHAND` runs for the first such fault
+ * all. Preserved: the handler is called with the same arguments and under
+ * the mask `host_action.h` describes. A handler installed with
+ * `SA_RESETHAND` runs for the first such fault
  * only, and every later one takes the default action, which the system would
  * have reset it to. macOS does not report `SA_RESETHAND` through
  * `sigaction`; there a fault that has repeated unrepaired for a second takes
@@ -446,36 +445,15 @@ static void fault_handler_returned(void) {
 static void pass_on(int signal, siginfo_t *info, void *context) {
     const struct sigaction *previous = signal == SIGBUS ? &previous_bus : &previous_segv;
     int *spent = signal == SIGBUS ? &previous_bus_spent : &previous_segv_spent;
-    /* The two handler fields share storage, and a process can carry
-     * `SA_SIGINFO` beside the default action, so the default and ignored
-     * actions are recognised before the flag is read. `SA_RESETHAND` and
-     * `SA_NODEFER` do not fit an `int` on every system, so the flags are read
-     * unsigned. */
-    const unsigned flags = (unsigned)previous->sa_flags;
-    int handled = previous->sa_handler != SIG_DFL && previous->sa_handler != SIG_IGN;
-    if (handled && (flags & (unsigned)SA_RESETHAND) != 0) {
+    int handled = host_action_calls_handler(previous);
+    if (handled && (host_action_flags(previous) & (unsigned)SA_RESETHAND) != 0) {
         handled = __atomic_exchange_n(spent, 1, __ATOMIC_ACQ_REL) == 0;
     }
 #if defined(__APPLE__)
     if (handled && fault_left_unrepaired(signal, (unsigned long)info->si_addr, context)) handled = 0;
 #endif
     if (handled) {
-        /* The fault's signal is blocked already: the runtime's own action
-         * does not set `SA_NODEFER`. */
-        sigset_t before;
-        if (pthread_sigmask(SIG_BLOCK, &previous->sa_mask, &before) != 0) fail("linea: the runtime cannot hand a fault on\n");
-        if ((flags & (unsigned)SA_NODEFER) != 0 && sigismember(&previous->sa_mask, signal) != 1) {
-            sigset_t own;
-            if (sigemptyset(&own) != 0 || sigaddset(&own, signal) != 0 || pthread_sigmask(SIG_UNBLOCK, &own, 0) != 0) {
-                fail("linea: the runtime cannot hand a fault on\n");
-            }
-        }
-        if ((flags & (unsigned)SA_SIGINFO) != 0) {
-            previous->sa_sigaction(signal, info, context);
-        } else {
-            previous->sa_handler(signal);
-        }
-        if (pthread_sigmask(SIG_SETMASK, &before, 0) != 0) fail("linea: the runtime cannot hand a fault on\n");
+        if (host_action_call(previous, signal, info, context) != 0) fail("linea: the runtime cannot hand a fault on\n");
 #if defined(__APPLE__)
         fault_handler_returned();
 #endif

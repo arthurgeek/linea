@@ -2709,6 +2709,10 @@ pub const ClosureDescriptor = struct {
     /// Whether inference found several sources for a result written without
     /// a clause. The body then has no contract to be checked against.
     contract_declined: bool = false,
+    /// Whether the lambda was passed for a callable bound the call left for
+    /// it to settle, so it was checked as its own signature, with no `fn`
+    /// type to give it context.
+    own_signature: bool = false,
     /// The parameter whose carrier type supplied the contract of a lambda that
     /// wrote no clause.
     default_carrier: ?u32 = null,

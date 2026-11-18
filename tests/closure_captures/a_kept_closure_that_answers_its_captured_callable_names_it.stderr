@@ -1,0 +1,8 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/closure_captures/a_kept_closure_that_answers_its_captured_callable_names_it.lin:46:21
+   |
+46 |                     wrap(ticket)
+   |                     ^^^^^^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: the value comes from `wrap`; write `where carries(wrap)` to say so
+   = help: or write the type the call's result is kept as where it is bound, such as `let name: mem.Closure[fn(…) -> …] = …`: the `fn` type in it gives the lambda its context, under which its result may carry what its captures carry

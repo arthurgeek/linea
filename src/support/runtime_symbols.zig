@@ -369,6 +369,7 @@ pub const internal_functions = [_]Signature{
     .{ .symbol = "linea_signal_watch", .declared_by = .compiler, .parameters = &.{ p(.ptr), p(.ptr), p(.u64), p(.u8) }, .result = .unit },
     .{ .symbol = "linea_signal_unwatch", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_signal_drain", .declared_by = .compiler, .parameters = &.{}, .result = .unit },
+    .{ .symbol = "linea_signal_catch_up", .declared_by = .compiler, .parameters = &.{p(.ptr)}, .result = .unit },
     .{ .symbol = "linea_sim_now", .declared_by = .compiler, .parameters = &.{}, .result = .u64 },
     .{ .symbol = "linea_sim_ready", .declared_by = .compiler, .parameters = &.{ p(.i32), p(.u8) }, .result = .i32 },
     .{ .symbol = "linea_sim_next_event", .declared_by = .compiler, .parameters = &.{}, .result = .u64 },

@@ -499,7 +499,7 @@ static void signal_waiter(unsigned long endpoint, unsigned long at, unsigned lon
     assert(prepared > 0);
     const unsigned long sender = linea_task_start((unsigned long)prepared, signal_sender, release_body, 0, 0, 0);
     assert(linea_waitset_next(set) == (long)slot);
-    assert(linea_waitset_withdraw(set) == (long)timeout);
+    assert(linea_waitset_withdraw(set) == (long)timeout * 2);
     assert(linea_waitset_withdraw(set) == -1);
     linea_waitset_close(set);
     linea_chan_close(sender);
