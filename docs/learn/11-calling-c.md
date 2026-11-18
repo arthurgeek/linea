@@ -1546,6 +1546,10 @@ extern fn sqlite3_step(statement: StatementHandle) -> Int32
 
 extern fn sqlite3_column_text(read statement: StatementHandle, column: Int32) -> ffi.CText where borrows(statement)
 
+// How many columns the current row holds: 0 before the first `step` and
+// after the last, when SQLite defines no column to read.
+extern fn sqlite3_data_count(read statement: StatementHandle) -> Int32
+
 extern fn sqlite3_finalize(sink statement: StatementHandle) -> Int32
 
 let ok: Int32 = 0
@@ -1557,6 +1561,9 @@ let done: Int32 = 101
 let read_write_create: Int32 = 6
 
 let out_of_memory: Int32 = 7
+
+// `SQLITE_MISUSE`, the code for reading a column no row holds.
+let misuse: Int32 = 21
 
 // A result code SQLite refused with.
 @copyable
@@ -1657,8 +1664,13 @@ impl Statement {
         .Err(.{ code = code })
     }
 
-    pub fn text(self: Self, column: Int32) -> String {
-        copied(sqlite3_column_text(self.handle, column))
+    // Read a column of the row `step` made current, or refuse when there is
+    // no such row or column.
+    pub fn text(self: Self, column: Int32) -> Result[String, Error] {
+        if column < 0 || column >= sqlite3_data_count(self.handle) {
+            return .Err(.{ code = misuse })
+        }
+        .Ok(copied(sqlite3_column_text(self.handle, column)))
     }
 
     pub fn finish(sink self: Self) {
@@ -1719,7 +1731,9 @@ fn main() -> Result[UInt8, io.IoError] {
         if !more {
             break
         }
-        defer let name = names.text(0)
+        defer let name = names.text(0) else |_| {
+            return .Ok(7)
+        }
         io.println("{name}")?
     }
     match database.prepare("SELEC name FROM guests") {
@@ -1741,7 +1755,9 @@ SQLite refused code 1: near "SELEC": syntax error
 
 Nothing in `main` can misuse SQLite: it never sees a pointer, every
 connection and statement it opens is linear or released by `defer`, and every
-error is a value it must handle.
+error is a value it must handle. SQLite defines a column only while `step` has
+made a row current, so `text` asks `sqlite3_data_count` before it reads one and
+refuses a read before the first row or after the last.
 
 A `Statement` holds `database: borrow Database`, so the connection stays in
 place while any statement prepared on it is open, much as a Rust
@@ -1763,11 +1779,11 @@ pub fn close_too_soon(sink database: Database) {
 
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> guests/main.lin:60:5
+  --> guests/main.lin:62:5
    |
-60 |     database.close()
+62 |     database.close()
    |     ^^^^^^^^ keep this place available until the last use of its observation
-61 |     names.finish()
+63 |     names.finish()
    |     ----- the observation is still used here
 ```
 

@@ -260,6 +260,7 @@ pub enum Error {
     TooLong,
     InvalidParameter(UInt32),
     InvalidColumn(UInt32),
+    NoRow,
     OutOfMemory,
     TrailingSql,
     EmptySql,
