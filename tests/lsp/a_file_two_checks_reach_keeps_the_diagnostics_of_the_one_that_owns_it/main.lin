@@ -1,0 +1,9 @@
+// The program imports `util`, so its check owns what `util.lin` reports. A
+// file of `sub`, which nothing imports, is checked with its module as the
+// entry; that check reaches `util` too, and dropping its import leaves what
+// the program's check reported for `util.lin` standing.
+import util
+
+fn main() -> UInt8 {
+    util.value()
+}

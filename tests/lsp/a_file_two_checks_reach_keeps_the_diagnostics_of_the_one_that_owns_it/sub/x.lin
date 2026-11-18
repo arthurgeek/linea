@@ -1,0 +1,5 @@
+import util
+
+pub fn twice() -> UInt8 {
+    util.value() + util.value()
+}

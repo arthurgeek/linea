@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// The program imports `util`, so its check owns what `util.lin` reports. A\n// file of `sub`, which nothing imports, is checked with its module as the\n// entry; that check reaches `util` too, and dropping its import leaves what\n// the program's check reported for `util.lin` standing.\nimport util\n\nfn main() -> UInt8 {\n    util.value()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"sub/x.lin","languageId":"linea","version":1,"text":"import util\n\npub fn twice() -> UInt8 {\n    util.value() + util.value()\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"sub/x.lin","version":2},"contentChanges":[{"text":"pub fn twice() -> UInt8 {\n    2\n}\n"}]}}
+{"jsonrpc":"2.0","id":2,"method":"shutdown"}

@@ -185,6 +185,11 @@ pub const Handler = struct {
         /// no import of its program reaches; null for the program itself.
         /// Owned, as `entry` is.
         module: ?[]u8 = null,
+        /// For a module's analysis, the files its program's check holds. That
+        /// check owns what is published for them, so a file both checks reach
+        /// shows one check's diagnostics, and dropping an import here clears
+        /// nothing the program still reports. Keys owned.
+        program_files: std.StringHashMapUnmanaged(void) = .empty,
         of: analysis.Analysis,
     };
 
@@ -802,32 +807,60 @@ pub const Handler = struct {
                     if (module != null and std.mem.eql(u8, checked_module, module.?)) return &held.of;
                 } else {
                     if (module == null or held.of.fileNamed(path) != null) return &held.of;
-                    return handler.checkAs(arena, root, module);
+                    return handler.checkModule(arena, root, module.?, &held.of);
                 }
             }
         }
 
-        const program = try handler.checkAs(arena, root, null);
+        const program = try handler.checkAs(arena, root, null, .empty);
         if (module == null or program.fileNamed(path) != null) return program;
-        return handler.checkAs(arena, root, module);
+        return handler.checkModule(arena, root, module.?, program);
+    }
+
+    /// Checks `root` with `module` as the entry, holding with it the files
+    /// `program`, the check of the root itself, holds.
+    fn checkModule(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: []const u8, program: *const analysis.Analysis) !*const analysis.Analysis {
+        var owned: std.StringHashMapUnmanaged(void) = .empty;
+        errdefer freeKeys(handler.gpa, &owned);
+        var it = publish.files(&program.program);
+        while (it.next()) |file| {
+            const file_path = program.table.get(file).path;
+            if (owned.contains(file_path)) continue;
+            const key = try handler.gpa.dupe(u8, file_path);
+            errdefer handler.gpa.free(key);
+            try owned.put(handler.gpa, key, {});
+        }
+        return handler.checkAs(arena, root, module, owned);
+    }
+
+    fn freeKeys(gpa: std.mem.Allocator, set: *std.StringHashMapUnmanaged(void)) void {
+        var keys = set.keyIterator();
+        while (keys.next()) |key| gpa.free(key.*);
+        set.deinit(gpa);
     }
 
     /// Checks `root`, with `module` as the entry where one is named, and
-    /// holds the answer in place of what was held.
-    fn checkAs(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: ?[]const u8) !*const analysis.Analysis {
+    /// holds the answer in place of what was held, taking `program_files`.
+    fn checkAs(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: ?[]const u8, program_files: std.StringHashMapUnmanaged(void)) !*const analysis.Analysis {
+        // Everything below is released here until the held analysis owns it,
+        // and by `drop` after.
+        var held = false;
+        var taken = program_files;
+        errdefer if (!held) freeKeys(handler.gpa, &taken);
         const files = try handler.documents.filesFor(arena, handler.io, root, .open_and_manifests);
 
         // The analysis copies what it was given, so the buffers above are the
         // caller's business from here and the message's arena may reclaim
         // them whenever it likes.
         var fresh = try analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, root.entry, module, handler.io);
-        errdefer fresh.deinit();
+        errdefer if (!held) fresh.deinit();
         const key = try handler.gpa.dupe(u8, root.entry);
-        errdefer handler.gpa.free(key);
+        errdefer if (!held) handler.gpa.free(key);
         const held_module: ?[]u8 = if (module) |dir| try handler.gpa.dupe(u8, dir) else null;
 
         handler.drop();
-        handler.cached = .{ .entry = key, .module = held_module, .of = fresh };
+        handler.cached = .{ .entry = key, .module = held_module, .program_files = taken, .of = fresh };
+        held = true;
         try handler.watchEmbeds(arena, &handler.cached.?.of);
         return &handler.cached.?.of;
     }
@@ -1049,6 +1082,7 @@ pub const Handler = struct {
             held.of.deinit();
             handler.gpa.free(held.entry);
             if (held.module) |dir| handler.gpa.free(dir);
+            freeKeys(handler.gpa, &held.program_files);
             handler.cached = null;
         }
     }
@@ -1228,6 +1262,9 @@ pub const Handler = struct {
             const diagnostics = try publication.forFile(arena, file, handler.offset_encoding);
             const file_path = checked.table.get(file).path;
             try held.put(arena, file_path, {});
+            // What the program's own check reports for this file is what an
+            // editor shows; a module's check reaching it publishes nothing.
+            if (handler.cached.?.program_files.contains(file_path)) continue;
             if (diagnostics.len != 0) try wrong.append(arena, file_path);
             try handler.publishFor(arena, file_path, diagnostics);
         }
