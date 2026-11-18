@@ -584,7 +584,9 @@ ok    every allocation the banner asks for can fail
 
 The test allocator is linear, so it is released like any other owner, and
 releasing it checks `all_disposed()` once more: a test that leaves an
-allocation live stops there. It counts however many allocations a test makes.
+allocation live stops there. `close()` ends it without stopping, and answers
+whether everything was given back, for a test that would rather report its
+own failure first. It counts however many allocations a test makes.
 The result of `banner_in` is matched rather than tested with `is_err()`,
 because on success it holds a `String` that must be released.
 

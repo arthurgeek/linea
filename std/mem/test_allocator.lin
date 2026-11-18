@@ -202,6 +202,28 @@ impl[H: Allocator] TestAllocator[H] {
         testing.assert(!settled_while_live, "a live allocation reads as settled")?
         testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
     }
+
+    // End the test allocator and answer whether every allocation it handed
+    // out was disposed, without stopping the program when one was not: a
+    // test that has already failed reports its own failure first. Releasing
+    // a test allocator stops the program instead.
+    pub fn close(sink self: Self) -> Bool {
+        let settled = self.all_disposed()
+        let TestAllocator { words, backing: _ } = self
+        words.release()
+        settled
+    }
+
+    test "close answers whether every allocation was disposed" {
+        defer let arena = Arena.open(system(), 1024)
+        let settled = TestAllocator.open(arena.handle()).unwrap()
+        settled.handle().acquire(8).unwrap().release()
+        testing.assert(settled.close(), "a test allocator with nothing live did not close settled")?
+        let unsettled = TestAllocator.open(arena.handle()).unwrap()
+        // A buffer from an arena carries no obligation, so it may be dropped live.
+        let _dropped = unsettled.handle().acquire(8).unwrap()
+        testing.assert(!unsettled.close(), "a test allocator with an allocation live closed settled")?
+    }
 }
 
 // The attempt numbered by `attempt`, counting from one, as the allocator's
@@ -218,11 +240,9 @@ fn counted_from_one(attempt: Option[UInt64]) -> UInt64 {
 // was disposed, and stops the program when one was not.
 impl[H: Allocator] Release for TestAllocator[H] {
     fn release(sink self: Self) {
-        if !self.all_disposed() {
+        if !self.close() {
             panic("a test allocator was released with an allocation it handed out still live")
         }
-        let TestAllocator { words, backing: _ } = self
-        words.release()
     }
 }
 

@@ -267,7 +267,11 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
         Err(_) => false,
     }
     if !succeeded {
-        counting.release()
+        // The run's failure is the walk's answer; an allocation it left live
+        // is told beside it rather than stopping the program in its place.
+        if !counting.close() {
+            return .Err(.{ said = "the run with nothing refused did not succeed, and left an allocation live", refusal = false })
+        }
         return .Err(.{ said = "the run with nothing refused did not succeed", refusal = false })
     }
     if !counting.all_disposed() {
@@ -300,6 +304,27 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
     }
 
     .Ok(attempts)
+}
+
+// A buffer from an arena carries no obligation, so a body walked over an
+// arena may drop one it acquired. A body that fails while it holds such a
+// buffer leaves it live, and the walk still reports the body's failure.
+test "each_allocation_failure reports a failed run that left an allocation live" -> Result[(), Failure] {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    let checked = each_allocation_failure(
+        arena.handle(),
+        |allocator| -> Result[(), Failure] {
+            let _kept = allocator.acquire(8)
+            assert(false, "the body failed")
+        },
+        |error| error.is_refusal(),
+    )
+    let said = match checked {
+        Ok(_) => "",
+        Err(failure) => copy(failure.said),
+    }
+    assert(said.starts_with("the run with nothing refused did not succeed"), "the body's failure was not what the walk reported")?
+    .Ok(())
 }
 
 test "each_allocation_failure takes callbacks that change lent counts" -> Result[(), Failure] {

@@ -331,17 +331,37 @@ impl[H: Allocator] SharedTestAllocator[H] {
         testing.assert(!settled_while_live, "a live allocation reads as settled")?
         testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
     }
+
+    // End the shared test allocator and answer whether every allocation it
+    // handed out was disposed, without stopping the program when one was
+    // not: a test that has already failed reports its own failure first.
+    // Releasing it stops the program instead.
+    pub fn close(sink self: Self) -> Bool {
+        let settled = self.all_disposed()
+        let SharedTestAllocator { owner, backing: _ } = self
+        owner.release()
+        settled
+    }
+
+    test "a shared test allocator closes answering whether it is settled" {
+        defer let arena = Arena.open(system(), 1024)
+        let settled = SharedTestAllocator.open(system()).unwrap()
+        settled.handle().acquire(8).unwrap().release()
+        testing.assert(settled.close(), "a shared test allocator with nothing live did not close settled")?
+        let unsettled = SharedTestAllocator.open(arena.handle()).unwrap()
+        // A buffer from an arena carries no obligation, so it may be dropped live.
+        let _dropped = unsettled.handle().acquire(8).unwrap()
+        testing.assert(!unsettled.close(), "a shared test allocator with an allocation live closed settled")?
+    }
 }
 
 // Releasing a shared test allocator checks that every buffer its handles
 // acquired was disposed, and stops the program when one was not.
 impl[H: Allocator] Release for SharedTestAllocator[H] {
     fn release(sink self: Self) {
-        if !self.all_disposed() {
+        if !self.close() {
             panic("a shared test allocator was released with an allocation it handed out still live")
         }
-        let SharedTestAllocator { owner, backing: _ } = self
-        owner.release()
     }
 }
 
