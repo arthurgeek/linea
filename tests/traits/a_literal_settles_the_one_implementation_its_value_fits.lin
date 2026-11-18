@@ -1,0 +1,50 @@
+// `Ruler` implements `Scale` at three integer types and at `Bool`. A literal
+// that only one of them can hold says which implementation the call runs,
+// however the call is written: `1` is no `Bool` and `300` is too large for a
+// `UInt8`, so `narrow` and `widen` reach the integer each fits, and `-1` is
+// below every unsigned type, so `lower` calls `Scale[Int8]`.
+trait Scale[T] {
+    fn scale(self: Self, by: T) -> UInt8
+}
+
+struct Ruler {}
+
+impl Scale[UInt16] for Ruler {
+    fn scale(_self: Self, _by: UInt16) -> UInt8 {
+        2
+    }
+}
+
+impl Scale[Int8] for Ruler {
+    fn scale(_self: Self, _by: Int8) -> UInt8 {
+        4
+    }
+}
+
+impl Scale[Bool] for Ruler {
+    fn scale(_self: Self, _by: Bool) -> UInt8 {
+        8
+    }
+}
+
+struct Gauge {}
+
+impl Scale[UInt8] for Gauge {
+    fn scale(_self: Self, _by: UInt8) -> UInt8 {
+        16
+    }
+}
+
+impl Scale[Bool] for Gauge {
+    fn scale(_self: Self, _by: Bool) -> UInt8 {
+        32
+    }
+}
+
+fn main() -> UInt8 {
+    let narrow = Gauge {}.scale(1)
+    let widen = Ruler {}.scale(300)
+    let lower = Scale.scale(Ruler {}, -1)
+    let named = Ruler.scale(Ruler {}, 300)
+    narrow + widen + lower + named
+}

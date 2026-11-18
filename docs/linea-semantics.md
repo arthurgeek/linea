@@ -1565,12 +1565,18 @@ type and no expectation settles, and `Self` implements the trait at exactly one
 argument list, the parameter takes that implementation's argument, so the
 literal in `Money.from(1250)` takes the integer type `Money` converts from.
 This holds however the call is written: `x.op(1)`, `Trait.op(x, 1)` or
-`Type.op(x, 1)`. Where several implementations answer, including one whose
-trait arguments `Self` leaves open, the literal takes its default type, so
-adding a second implementation can change which body a literal argument runs,
-without a diagnostic. A trait
-parameter no argument stands at is settled only by what the call is expected to
-produce.
+`Type.op(x, 1)`. Where several implementations answer, a literal settles the
+one whose argument can hold its value, as [T-Literal] decides, by the rule a
+type parameter bounded at several argument lists follows: `k.scale(1)` on a
+type implementing `Scale[UInt8]` and `Scale[Bool]` is a call at
+`Scale[UInt8]`, and `k.scale(300)` on one implementing `Scale[UInt8]` and
+`Scale[UInt16]` a call at `Scale[UInt16]`. A literal fitting several,
+`k.scale(1)` on that type, does not say which implementation runs and is
+[N-Ambiguous]; one fitting none, and one where an implementation leaves its
+trait arguments open, takes its default type. So adding an implementation
+never changes silently which body a literal argument runs: a literal it also
+fits becomes [N-Ambiguous]. A trait parameter no argument stands at is settled
+only by what the call is expected to produce.
 
 Importing a trait can make such a name ambiguous, as it can a postfix call: a
 trait brought into scope that declares the name for the type turns an existing

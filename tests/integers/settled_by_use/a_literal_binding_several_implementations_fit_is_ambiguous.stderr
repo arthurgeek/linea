@@ -1,0 +1,5 @@
+error[N-Ambiguous]: `Meters` implements `Scale[UInt8]` and `Scale[Int64]`, and this call fits each
+  --> tests/integers/settled_by_use/a_literal_binding_several_implementations_fit_is_ambiguous.lin:28:5
+   |
+28 |     distance.scale(factor) - 5
+   |     ^^^^^^^^^^^^^^^^^^^^^^ give an argument the type of the one it means

@@ -13419,19 +13419,20 @@ const Checker = struct {
         return out;
     }
 
-    /// Settles the trait arguments a call left to its literals where `Self` is
-    /// a type parameter, from the bounds that parameter carries. The generic
-    /// body is checked where it is written, so the call must name one of
-    /// them there: `Scale.scale(s, 1)` under `S: Scale[UInt8] + Scale[Bool]`
-    /// is a call at `Scale[UInt8]`, and under `S: Scale[UInt8] +
-    /// Scale[UInt16]` the literal fits both and the call is refused. False
-    /// where it was refused.
+    /// Settles the trait arguments a call left to its literals from the
+    /// lists `Self` implements the trait at: the bounds a type parameter
+    /// carries, or a concrete type's implementations. One rule for both, so
+    /// a generic body and the same call on a concrete type settle alike:
+    /// `s.scale(1)` under `S: Scale[UInt8] + Scale[Bool]`, and on a type
+    /// implementing both, is a call at `Scale[UInt8]`; where the literal fits
+    /// `Scale[UInt8]` and `Scale[UInt16]` both, the call is refused; where
+    /// it fits none, it takes its default type. False where it was refused.
     ///
-    /// **Bound:** the bounds and implementations `keys` reads for the
-    /// parameter, each compared once against the trait's parameters.
+    /// **Bound:** the bounds and implementations `keys` reads for `Self`,
+    /// each compared once against the trait's parameters.
     fn settleLiteralTraitArgs(self: *Checker, id: ExprId, trait: node.DeclId, out: []TypeId, values_from: u32) std.mem.Allocator.Error!bool {
         const receiver = self.self_at_call orelse return true;
-        if (receiver == .poison or self.builder.get(receiver) != .parameter) return true;
+        if (receiver == .poison) return true;
         for (out) |*slot| {
             if (slot.* != .poison) slot.* = try self.builder.resolveOpen(slot.*, &self.open_types);
         }

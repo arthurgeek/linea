@@ -1,0 +1,15 @@
+error[N-Ambiguous]: `Money` implements `Scale[UInt8]` and `Scale[Int64]`, and this call fits each
+  --> tests/integers/settled_by_use/a_literal_argument_several_implementations_fit_is_ambiguous.lin:29:5
+   |
+29 |     price.scaled(2) + Scale.scaled(price, 2) + Money.scaled(price, 2)
+   |     ^^^^^^^^^^^^^^^ give an argument the type of the one it means
+error[N-Ambiguous]: `Money` implements `Scale[UInt8]` and `Scale[Int64]`, and this call fits each
+  --> tests/integers/settled_by_use/a_literal_argument_several_implementations_fit_is_ambiguous.lin:29:23
+   |
+29 |     price.scaled(2) + Scale.scaled(price, 2) + Money.scaled(price, 2)
+   |                       ^^^^^^^^^^^^^^^^^^^^^^ give an argument the type of the one it means
+error[N-Ambiguous]: `Money` implements `Scale[UInt8]` and `Scale[Int64]`, and this call fits each
+  --> tests/integers/settled_by_use/a_literal_argument_several_implementations_fit_is_ambiguous.lin:29:48
+   |
+29 |     price.scaled(2) + Scale.scaled(price, 2) + Money.scaled(price, 2)
+   |                                                ^^^^^^^^^^^^^^^^^^^^^^ give an argument the type of the one it means

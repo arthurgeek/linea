@@ -1,0 +1,30 @@
+// `Money` scales by a `UInt8` and by an `Int64`, and the literal `2` fits
+// both, so it says nothing about which implementation it means. The postfix
+// form, the call through the trait and the call through the type are each
+// refused, rather than run the body of whichever type the literal falls back
+// to.
+trait Scale[F] {
+    fn scaled(self: Self, by: F) -> UInt8
+}
+
+@copyable
+struct Money {
+    cents: UInt8,
+}
+
+impl Scale[UInt8] for Money {
+    fn scaled(self: Money, by: UInt8) -> UInt8 {
+        self.cents * by
+    }
+}
+
+impl Scale[Int64] for Money {
+    fn scaled(self: Money, by: Int64) -> UInt8 {
+        self.cents + UInt8(by)
+    }
+}
+
+fn main() -> UInt8 {
+    let price: Money = .{ cents = 20 }
+    price.scaled(2) + Scale.scaled(price, 2) + Money.scaled(price, 2)
+}
