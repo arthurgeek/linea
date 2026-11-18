@@ -215,10 +215,15 @@ pub fn forPositionReporting(
 /// (`ANewNameWouldShadowAnotherBinding`). Either program may still check, and
 /// compute something else.
 ///
-/// Each use is asked which binding the new spelling would reach where it is
-/// written, through the scope query completion lists names from
-/// (`completion.reachableAt`). A use whose binding that query does not list,
-/// such as one reached through a qualifier, is a use no spelling there can
+/// A use is any name written bare where a name is looked up: in an
+/// expression, a written type, a pattern, or at the head of a path. A name
+/// after a dot is selected from what is before it, and no spelling changes
+/// what it reaches. Each use is asked which binding the new spelling would
+/// reach where it is written: a type parameter of a declaration around it,
+/// which is in scope across that declaration, signature included, and then
+/// what the scope query completion lists names from (`completion.reachableAt`)
+/// makes visible. In a written type only what names a type is asked. A use
+/// whose binding that query does not list is a use no spelling there can
 /// capture. The files asked about are those the rename edits and every file of
 /// a module declaring a renamed binding, where a declaration of the module
 /// would come into scope.
@@ -258,23 +263,16 @@ fn refuseRebinding(
             // change what it reaches.
             const text = ast.tokenText(token);
             if (!std.mem.eql(u8, text, new_name) and !spelledLike(ast, res, renamed, text)) continue;
+            if (followsDot(ast, part.token_start, token)) continue;
+            if (checked.uses.declaredAt(token) != BindingId.none) continue;
             const start = ast.tokenSpan(token).start;
-            var chain = checked.cursors.enclosing(ast, file, start);
-            const named = switch (chain.next() orelse continue) {
-                .expr => |e| e,
-                else => continue,
-            };
-            if (ast.exprTag(named) != .name_ref or ast.exprMain(named) != token) continue;
-            const current = res.targetOf(named);
-            if (current == BindingId.none) continue;
+            const use = useAt(checked, file, token) orelse continue;
+            const current = use.binding;
             const was_renamed = contains(renamed, current);
             if (!was_renamed and !std.mem.eql(u8, text, new_name)) continue;
 
             try completion.reachableAt(gpa, program, res, &checked.cursors, file, start, &reachable);
-            const reached = for (reachable.items) |b| {
-                const spelled = if (contains(renamed, b)) new_name else completion.nameOf(ast, res, b) orelse continue;
-                if (std.mem.eql(u8, spelled, new_name)) break b;
-            } else BindingId.none;
+            const reached = reachedAs(checked, file, start, renamed, new_name, use.in_expression, reachable.items);
             if (reached == BindingId.none) continue;
             if (was_renamed and !contains(renamed, reached)) return Refused.ANewNameWouldBeCapturedByAnotherBinding;
             if (!was_renamed and contains(renamed, reached)) return Refused.ANewNameWouldShadowAnotherBinding;
@@ -285,6 +283,82 @@ fn refuseRebinding(
 fn appendOnce(gpa: std.mem.Allocator, files: *std.ArrayList(FileId), file: FileId) !void {
     for (files.items) |held| if (held == file) return;
     try files.append(gpa, file);
+}
+
+/// A bare name and the binding it reaches now, and whether it is written in
+/// an expression rather than in a type, a pattern or a path's head.
+const Use = struct { binding: BindingId, in_expression: bool };
+
+fn useAt(checked: *const Analysis, file: FileId, token: TokenId) ?Use {
+    const ast = &checked.program.ast;
+    const res = &checked.semantics.res;
+    var chain = checked.cursors.enclosing(ast, file, ast.tokenSpan(token).start);
+    if (chain.next()) |n| switch (n) {
+        .expr => |e| if (ast.exprTag(e) == .name_ref and ast.exprMain(e) == token) {
+            const b = res.targetOf(e);
+            return if (b == BindingId.none) null else .{ .binding = b, .in_expression = true };
+        },
+        .decl, .stmt => {},
+    };
+    const written = checked.uses.writesAt(res, token);
+    return if (written == BindingId.none) null else .{ .binding = written, .in_expression = false };
+}
+
+/// The binding a name spelled `new_name` would reach at `offset`, with
+/// `renamed` spelled that way: a type parameter of a declaration around the
+/// point, innermost first, and then the first of `visible`. Outside an
+/// expression only a binding that names a type is reached.
+fn reachedAs(
+    checked: *const Analysis,
+    file: FileId,
+    offset: u32,
+    renamed: []const BindingId,
+    new_name: []const u8,
+    in_expression: bool,
+    visible: []const BindingId,
+) BindingId {
+    const ast = &checked.program.ast;
+    const res = &checked.semantics.res;
+    var chain = checked.cursors.enclosing(ast, file, offset);
+    while (chain.next()) |n| switch (n) {
+        .decl => |d| for (ast.declTypeParams(d)) |parameter| {
+            const b = checked.uses.declaredAt(parameter.name);
+            if (b != BindingId.none and spelledAs(ast, res, renamed, new_name, b, new_name)) return b;
+        },
+        .expr, .stmt => {},
+    };
+    for (visible) |b| {
+        if (!in_expression and !namesAType(res.kindOf(b))) continue;
+        if (spelledAs(ast, res, renamed, new_name, b, new_name)) return b;
+    }
+    return BindingId.none;
+}
+
+/// Whether `b`, with `renamed` spelled `new_name`, is spelled `text`.
+fn spelledAs(ast: *const ast_mod.Ast, res: *const resolve.Resolution, renamed: []const BindingId, new_name: []const u8, b: BindingId, text: []const u8) bool {
+    const spelled = if (contains(renamed, b)) new_name else completion.nameOf(ast, res, b) orelse return false;
+    return std.mem.eql(u8, spelled, text);
+}
+
+/// Whether a name of this kind may be written as a type or a path's head
+/// there. Exhaustive, so a kind added to the language says which it is.
+fn namesAType(kind: Kind) bool {
+    return switch (kind) {
+        .declared_type, .builtin_type, .trait, .type_parameter, .type_alias, .associated_type, .module => true,
+        .local, .parameter, .capture, .binder, .constant, .function => false,
+    };
+}
+
+/// Whether `token` is written after a `.`, ignoring comments between.
+fn followsDot(ast: *const ast_mod.Ast, first: u32, token: TokenId) bool {
+    var before = token.index();
+    while (before > first) {
+        before -= 1;
+        const tag = ast.tokenTag(TokenId.at(before));
+        if (tag.isTrivia()) continue;
+        return tag == .dot;
+    }
+    return false;
 }
 
 /// Whether `text` is how one of `bindings` is spelled.
@@ -1015,6 +1089,41 @@ test "a new name that would answer for another binding's use is refused" {
             forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(case.text, site + 1), .@"utf-16", "", case.new),
         );
     }
+}
+
+test "a new name that would change which type a written type names is refused" {
+    const gpa = testing.allocator;
+
+    // A type parameter is in scope across its function, signature included:
+    // `T` renamed to `Unit` would stand for the parameter's type where
+    // `_u: Unit` names the struct, and the struct renamed to `T` would be
+    // reached as the type parameter there.
+    const text =
+        \\struct Unit { n: UInt8 }
+        \\
+        \\fn pick[T](x: T, _u: Unit) -> T {
+        \\    x
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    pick(1, .{ n = 2 })
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    const parameter = std.mem.indexOf(u8, text, "[T]").? + 1;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, parameter), .@"utf-16", "", "Unit"),
+    );
+    const declared = std.mem.indexOf(u8, text, "Unit").?;
+    try testing.expectError(
+        Refused.ANewNameWouldBeCapturedByAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, declared + 1), .@"utf-16", "", "T"),
+    );
 }
 
 test "a new name no use would reach differently is accepted" {
