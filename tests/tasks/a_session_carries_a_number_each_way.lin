@@ -7,8 +7,8 @@ use session.End
 use session.Recv
 use session.Send
 
-// The body receives a number and sends back its square. Each `send` returns
-// once the other end has taken the value.
+// The body receives a number and sends back its square. Each `send` leaves
+// its value in the session, and the other end's `recv` takes it.
 fn main() -> Result[UInt8, io.IoError] {
     let body = sink [] |sink me: Chan[Recv[UInt64, Send[UInt64, End]]]| {
         let (number, answering) = me.recv()

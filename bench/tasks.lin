@@ -1,0 +1,228 @@
+// Time `task.map` and `task.all` over cheap items against fixed chunks, the
+// items cut into eight equal shares and each share mapped by a task of its
+// own started with `task.start`, and time a lazy map that hands each item to
+// a worker and takes its result back. Every round times the three designs in
+// a rotating order, so a change in the machine's load reaches all three. The
+// figures are medians over the rounds, and the ratios are of the medians, in
+// thousandths. Each measurement runs twice: on the system Io, where every
+// task is a thread of its own, and inside a task on a loop of eight carriers,
+// and of as many carriers as the machine has processors where that differs,
+// where every task is a fiber of that loop.
+import std.env
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.time
+
+use io.IoError
+use io.println
+use session.Chan
+use session.End
+use session.Send
+
+// The cheap item: the work is so small that a design's cost is what it
+// spends starting, feeding and joining its tasks.
+fn plus_one(sink n: UInt64) -> UInt64 {
+    n + 1
+}
+
+// The numbers below `count`, in order.
+fn numbers(count: UInt64) -> mem.Vec[UInt64] {
+    var items: mem.Vec[UInt64] = mem.Vec.new()
+    &items.reserve(count).unwrap()
+    for n in 0..count {
+        &items.push(n).unwrap()
+    }
+    items
+}
+
+// Map `items` through `plus_one` on `workers` tasks, each holding an equal
+// share from its start, and collect the shares in order.
+fn fixed_chunks(sink items: mem.Vec[UInt64], workers: UInt64) -> mem.Vec[UInt64] {
+    let total = items.length()
+    let base = total / workers
+    let remainder = total % workers
+    var handles: mem.Vec[Chan[session.Recv[mem.Vec[UInt64], End]]] = mem.Vec.new()
+    var drained = items.drain()
+    for at in 0..workers {
+        let length = base + (if at < remainder {
+            UInt64(1)
+        } else {
+            UInt64(0)
+        })
+        var chunk: mem.Vec[UInt64] = mem.Vec.new()
+        &chunk.reserve(length).unwrap()
+        for _ in 0..length {
+            match &drained.next() {
+                Some(item) => &chunk.push(item).unwrap(),
+                None => break,
+            }
+        }
+        let body = sink [sink chunk] |sink me: Chan[Send[mem.Vec[UInt64], End]]| {
+            var results: mem.Vec[UInt64] = mem.Vec.new()
+            &results.reserve(chunk.length()).unwrap()
+            var pending = chunk.drain()
+            for item in &pending {
+                &results.push(plus_one(item)).unwrap()
+            }
+            pending.finish().unwrap()
+            me.send(results).close()
+        }
+        &handles.push(task.prepare(body).unwrap().start().detach()).unwrap()
+    }
+    drained.finish().unwrap()
+    var results: mem.Vec[UInt64] = mem.Vec.new()
+    &results.reserve(total).unwrap()
+    var pending = handles.drain()
+    for handle in &pending {
+        let (part, done) = handle.recv()
+        done.close()
+        var moving = part.drain()
+        for result in &moving {
+            &results.push(result).unwrap()
+        }
+        moving.finish().unwrap()
+    }
+    pending.finish().unwrap()
+    results
+}
+
+// `count` jobs that each answer 1, for `task.all`.
+fn jobs(count: UInt64) -> mem.Vec[fn() -> UInt64] {
+    var all: mem.Vec[fn() -> UInt64] = mem.Vec.new()
+    &all.reserve(count).unwrap()
+    for _ in 0..count {
+        &all.push(one).unwrap()
+    }
+    all
+}
+
+// The cheap job.
+fn one() -> UInt64 {
+    1
+}
+
+// Sort `kept` in place, smallest first.
+fn sort(inout kept: mem.Vec[UInt64]) {
+    let n = kept.length()
+    for i in 1..n {
+        var j = i
+        while j > 0 && kept[j - 1] > kept[j] {
+            let before = kept[j - 1]
+            kept[j - 1] = kept[j]
+            kept[j] = before
+            j -= 1
+        }
+    }
+}
+
+// Write the fastest, median and 90th-percentile times of `ordered`, and
+// answer the median.
+fn summary(name: Str, inout ordered: mem.Vec[UInt64]) -> Result[UInt64, IoError] {
+    sort(&ordered)
+    let n = ordered.length()
+    let low = ordered[0]
+    let median = ordered[n / 2]
+    let high = ordered[n * 9 / 10]
+    println("  {name}: min {low / 1000} us, median {median / 1000} us, p90 {high / 1000} us")?
+    .Ok(median)
+}
+
+// Time the three designs over `count` items, `rounds` times each.
+fn measure(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
+    defer var fixed: mem.Vec[UInt64] = mem.Vec.new()
+    defer var mapped: mem.Vec[UInt64] = mem.Vec.new()
+    defer var gathered: mem.Vec[UInt64] = mem.Vec.new()
+    var check = UInt64(0)
+    for round in 0..rounds {
+        for turn in 0..3 {
+            let which = (round + turn) % 3
+            let items = numbers(count)
+            if which == 0 {
+                let started = time.Instant.now()
+                let results = fixed_chunks(items, 8)
+                &fixed.push(time.Instant.now().since(started).nanoseconds()).unwrap()
+                check += results[count - 1]
+                results.release()
+            } else if which == 1 {
+                let started = time.Instant.now()
+                let results = task.map(.Threads(8), items, plus_one)
+                &mapped.push(time.Instant.now().since(started).nanoseconds()).unwrap()
+                check += results[count - 1]
+                results.release()
+            } else {
+                items.release()
+                let all_jobs = jobs(count)
+                let started = time.Instant.now()
+                let results: mem.Vec[UInt64] = task.all(.Threads(8), all_jobs)
+                &gathered.push(time.Instant.now().since(started).nanoseconds()).unwrap()
+                check += results[count - 1]
+                results.release()
+            }
+        }
+    }
+    println("{count} items, {rounds} rounds (check {check}):")?
+    let base = summary("fixed chunks", &fixed)?
+    let map = summary("task.map", &mapped)?
+    let all = summary("task.all", &gathered)?
+    println("  ratio of medians: map {map * 1000 / base} / 1000, all {all * 1000 / base} / 1000")?
+    .Ok(())
+}
+
+// Walk a lazy map over `count` items on two workers: every item is one
+// handoff to a worker and one answer back.
+fn handoffs(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
+    defer var times: mem.Vec[UInt64] = mem.Vec.new()
+    var total = UInt64(0)
+    for _ in 0..rounds {
+        let started = time.Instant.now()
+        defer var walked = task.lazy_map(.Threads(2), UInt64(0)..count, plus_one)
+        for result in &walked {
+            total += result
+        }
+        &times.push((time.Instant.now().since(started).nanoseconds()) / count).unwrap()
+    }
+    sort(&times)
+    let n = times.length()
+    println("lazy_map at max 2, {count} items (check {total}): min {times[0]} ns, median {times[n / 2]} ns, max {times[n - 1]} ns an item")?
+    .Ok(())
+}
+
+// Every measurement, on whatever Io the caller runs on.
+fn measure_all() -> Result[(), IoError] {
+    measure(10000, 200)?
+    measure(100000, 60)?
+    handoffs(20000, 7)
+}
+
+// Every measurement inside a task started on a loop of `carriers` carriers,
+// so the tasks each design starts are fibers of that loop.
+fn measure_on_loop(carriers: UInt64) -> Result[(), IoError] {
+    let looped = io.Loop.open(carriers: carriers)?
+    println("on a loop of {carriers} carriers:")?
+    let body = sink [] |sink me: Chan[Send[Bool, End]]| {
+        let measured = match measure_all() {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+        me.send(measured).close()
+    }
+    let (measured, done) = task.start(body, on: looped).unwrap().recv()
+    done.close()
+    if !measured {
+        println("the measurements on the loop could not be written")?
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, IoError] {
+    println("on the system Io, a thread per task:")?
+    measure_all()?
+    measure_on_loop(8)?
+    let processors = env.available_parallelism()
+    if processors != 8 {
+        measure_on_loop(processors)?
+    }
+    .Ok(0)
+}

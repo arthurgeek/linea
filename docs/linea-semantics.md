@@ -6717,9 +6717,12 @@ effects, for the remainder of that fiber's execution. This preserves execution
 affinity; a thread-bound foreign resource instead stays in its owning execution
 context, such as a task selected with `io.system()`. Holding that owner's client
 does not itself bind a fiber. `start` orders everything its creator did before
-it before everything the body does; a `send` returns
-once the other end has received the value, and orders everything the sender
-did before it before everything the receiver does after the `recv`; `close`
+it before everything the body does; a `send` leaves the value in the session
+for the other end and returns, waiting first only while the session already
+holds two values the other end has not received, and orders everything the
+sender did before it before everything the receiver does after the `recv`
+that takes the value (values are received in the order they were sent, and a
+`choose` is a send of its branch); `close`
 on the handle returns once the body has returned and the task has been
 joined, and orders everything the body did before everything after the
 `close`. With [O-Borrow], [O-Cross] and the `Owned` payload bound, every
@@ -6797,7 +6800,11 @@ apart
    is the `send`, the `choose` or the return that makes the registration
    ready, and `next` then returns. A registration never performs the
    exchange, so withdrawing an endpoint with `take` or `close` leaves the
-   session where it was, the peer still waiting where it had begun to send.
+   session where it was, the peer's value still queued for the `recv` or
+   `offer` that takes it. A `send` waits only while two values from its end
+   are queued, and the other end's next operation is then the `recv` that
+   takes one, so a full queue is no wait on each other either
+   ([ADR 0288](adr/0288-a-session-send-leaves-its-value-queued-and-returns.md)).
    A timer, a descriptor and a signal wait on the world, not on a task. A
    wait set holds its values behind `mem.Closure`, so it is not Isolated, not
    Owned and not Shareable: it is never an owning task's state or part of a

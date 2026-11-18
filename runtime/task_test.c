@@ -4,6 +4,7 @@
 #undef NDEBUG
 #include <assert.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,7 +46,10 @@ static unsigned long elapsed_ms(const struct timespec *since) {
     return ms < 0 ? 0UL : (unsigned long)ms;
 }
 
-enum { counts, doubles, offers, ping_pong, allocates, recurses };
+enum { counts, doubles, offers, ping_pong, allocates, recurses, sums, sends_and_returns, echoes_large };
+
+/* A payload larger than a session keeps in its own record. */
+enum { large_bytes = 4096 };
 
 static unsigned long send_word(unsigned long endpoint, unsigned long word) {
     unsigned long sent = word;
@@ -90,8 +94,8 @@ static void entry(unsigned long endpoint, unsigned long at, unsigned long len) {
         break;
     }
     case ping_pong:
-        /* A receive followed at once by a send: the peer's send must return
-         * before this send fills the slot again. */
+        /* A receive followed at once by a send, so the session's values
+         * change direction every step. */
         for (unsigned long i = 0; i < b->rounds; i += 1) (void)send_word(endpoint, recv_word(endpoint) + 1);
         break;
     case allocates: {
@@ -112,9 +116,38 @@ static void entry(unsigned long endpoint, unsigned long at, unsigned long len) {
     case recurses:
         recurse(0);
         break;
+    case sums: {
+        /* Receive `rounds` words after a pause, each one more than the last,
+         * and answer their sum, or zero if one came out of order. */
+        sleep_ms(b->delay_ms);
+        unsigned long total = 0;
+        int in_order = 1;
+        for (unsigned long i = 0; i < b->rounds; i += 1) {
+            const unsigned long word = recv_word(endpoint);
+            if (word != i + 1) in_order = 0;
+            total += word;
+        }
+        (void)send_word(endpoint, in_order ? total : 0);
+        break;
+    }
+    case sends_and_returns:
+        (void)send_word(endpoint, b->answer);
+        break;
+    case echoes_large: {
+        /* Receive a value larger than the record holds and send it back
+         * with every byte one higher. */
+        sleep_ms(b->delay_ms);
+        unsigned char value[large_bytes];
+        linea_chan_recv(endpoint, (unsigned long)value, sizeof value);
+        for (unsigned long i = 0; i < sizeof value; i += 1) value[i] = (unsigned char)((value[i] + 1U) & 0xffU);
+        linea_chan_send(endpoint, (unsigned long)value, sizeof value);
+        break;
+    }
     }
     linea_chan_close(endpoint);
-    b->returned = 1;
+    /* A test may watch this flag while the task runs, so it is set
+     * atomically. */
+    __atomic_store_n(&b->returned, 1, __ATOMIC_SEQ_CST);
 }
 
 static void release(unsigned long at, unsigned long len) {
@@ -164,21 +197,72 @@ static void cancel_settles_the_parked_thread(void) {
     }
 }
 
-/* A send returns only once the peer has taken the value: the body waits
- * before it receives, and the send waits with it. The bytes the sender
- * named may be reused as soon as it returns. */
-static void a_send_waits_for_its_receiver(void) {
-    struct body b = {.kind = doubles, .delay_ms = 60};
+/* A send returns before the peer has taken the value: the body waits
+ * before it receives, and the send does not wait with it. The bytes the
+ * sender named may be reused as soon as it returns. */
+static void a_send_returns_before_its_receiver_takes_it(void) {
+    struct body b = {.kind = doubles, .delay_ms = 200};
     const unsigned long handle = started(&b, 1UL << 20);
     struct timespec before;
     assert(clock_gettime(CLOCK_MONOTONIC, &before) == 0);
     unsigned long word = 21;
     linea_chan_send(handle, (unsigned long)&word, sizeof word);
-    assert(elapsed_ms(&before) >= 50);
+    assert(elapsed_ms(&before) < 150);
     word = 0;
     assert(recv_word(handle) == 42);
     linea_chan_close(handle);
     assert(b.released == 1);
+}
+
+/* A session holds two values its receiver has not taken. A third send
+ * waits until the receiver takes one, and the values arrive in the order
+ * they were sent. */
+static void a_third_send_waits_for_the_receiver(void) {
+    struct body b = {.kind = sums, .delay_ms = 200, .rounds = 3};
+    const unsigned long handle = started(&b, 1UL << 20);
+    struct timespec before;
+    assert(clock_gettime(CLOCK_MONOTONIC, &before) == 0);
+    (void)send_word(handle, 1);
+    (void)send_word(handle, 2);
+    assert(elapsed_ms(&before) < 150);
+    (void)send_word(handle, 3);
+    assert(elapsed_ms(&before) >= 190);
+    assert(recv_word(handle) == 6);
+    linea_chan_close(handle);
+}
+
+/* Many values sent with no answer between them arrive in order. */
+static void values_arrive_in_the_order_they_were_sent(void) {
+    struct body b = {.kind = sums, .rounds = 100000};
+    const unsigned long handle = started(&b, 1UL << 20);
+    for (unsigned long i = 1; i <= b.rounds; i += 1) (void)send_word(handle, i);
+    assert(recv_word(handle) == b.rounds * (b.rounds + 1) / 2);
+    linea_chan_close(handle);
+}
+
+/* A task that sends and returns at once leaves its value in the session,
+ * and its creator receives it after the body has returned. */
+static void a_value_outlives_the_body_that_sent_it(void) {
+    struct body b = {.kind = sends_and_returns, .answer = 77};
+    const unsigned long handle = started(&b, 1UL << 20);
+    while (!__atomic_load_n(&b.returned, __ATOMIC_SEQ_CST)) sched_yield();
+    assert(recv_word(handle) == 77);
+    linea_chan_close(handle);
+    assert(b.released == 1);
+}
+
+/* A value larger than the session's record is queued in bytes of its own,
+ * and comes back whole once the slow receiver takes it. */
+static void a_large_value_is_queued_whole(void) {
+    struct body b = {.kind = echoes_large, .delay_ms = 100};
+    const unsigned long handle = started(&b, 1UL << 20);
+    unsigned char value[large_bytes];
+    for (unsigned long i = 0; i < sizeof value; i += 1) value[i] = (unsigned char)((i * 13) & 0xffUL);
+    linea_chan_send(handle, (unsigned long)value, sizeof value);
+    memset(value, 0, sizeof value);
+    linea_chan_recv(handle, (unsigned long)value, sizeof value);
+    for (unsigned long i = 0; i < sizeof value; i += 1) assert(value[i] == (unsigned char)((i * 13 + 1) & 0xffUL));
+    linea_chan_close(handle);
 }
 
 /* A choice is a send of its branch, and an offer answers it. */
@@ -193,7 +277,7 @@ static void an_offer_answers_the_choice(void) {
 }
 
 /* Values alternate direction with no pause between them, many times. */
-static void values_alternate_through_one_slot(void) {
+static void values_alternate_direction(void) {
     struct body b = {.kind = ping_pong, .rounds = 20000};
     const unsigned long handle = started(&b, 1UL << 20);
     unsigned long value = 0;
@@ -222,6 +306,26 @@ static void many_tasks_run_at_once(void) {
     for (unsigned long i = 0; i < tasks; i += 1) {
         linea_chan_close(handles[i]);
         assert(values[i] == 200 && bodies[i].released == 1);
+    }
+}
+
+/* Many sessions each hold two queued values at once, sent before any of
+ * their receivers runs, and each sum comes back whole. */
+static void many_sessions_queue_at_once(void) {
+    enum { tasks = 64 };
+    static struct body bodies[tasks];
+    unsigned long handles[tasks];
+    for (unsigned long i = 0; i < tasks; i += 1) {
+        bodies[i] = (struct body){.kind = sums, .rounds = 2, .delay_ms = 20};
+        handles[i] = started(&bodies[i], 1UL << 18);
+    }
+    for (unsigned long i = 0; i < tasks; i += 1) {
+        (void)send_word(handles[i], 1);
+        (void)send_word(handles[i], 2);
+    }
+    for (unsigned long i = 0; i < tasks; i += 1) {
+        assert(recv_word(handles[i]) == 3);
+        linea_chan_close(handles[i]);
     }
 }
 
@@ -296,6 +400,18 @@ static void overflow_on_main(void) {
     char *argv[] = {name, NULL};
     linea_set_args(1, argv);
     recurse(0);
+}
+
+static void close_with_a_value_never_received(void) {
+    struct body b = {.kind = sends_and_returns, .answer = 5};
+    linea_chan_close(started(&b, 1UL << 18));
+}
+
+/* Dual protocols receive every value before a session ends, so a session
+ * freed with a value still queued stops the program rather than dropping
+ * bytes a value may own. */
+static void a_session_ended_holding_a_value_stops_the_program(void) {
+    aborts_saying(close_with_a_value_never_received, "linea: a session ended holding a value its receiver never took\n");
 }
 
 /* The fault handler runs on the alternate signal stack of the thread that
@@ -376,19 +492,25 @@ int main(void) {
     close_joins_after_the_body_returns();
     a_body_never_runs_before_start();
     cancel_settles_the_parked_thread();
-    a_send_waits_for_its_receiver();
+    a_send_returns_before_its_receiver_takes_it();
+    a_third_send_waits_for_the_receiver();
+    values_arrive_in_the_order_they_were_sent();
+    a_value_outlives_the_body_that_sent_it();
+    a_large_value_is_queued_whole();
     an_offer_answers_the_choice();
-    values_alternate_through_one_slot();
+    values_alternate_direction();
     many_tasks_run_at_once();
     tasks_allocate_at_once();
     concurrent_prepare_and_cancel_stress();
+    many_sessions_queue_at_once();
     an_impossible_stack_is_refused();
     an_owner_serves_every_call_alone();
     /* A sanitizer reports an overflow through a fault handler of its own. */
 #if !defined(LINEA_SANITIZED)
     an_overflow_is_reported();
+    a_session_ended_holding_a_value_stops_the_program();
     the_fault_handler_runs_on_the_signal_stack();
 #endif
-    puts("native task: prepare, start, cancel, rendezvous, choice, join, owner calls, overflow and concurrent allocation passed");
+    puts("native task: prepare, start, cancel, queued sends, choice, join, owner calls, overflow and concurrent allocation passed");
     return 0;
 }

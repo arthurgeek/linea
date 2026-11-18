@@ -5,8 +5,9 @@
 
 /* A task runs on a thread or fiber, with one session to its creator. A task
  * and an endpoint are named by an unsigned long the runtime hands out. Each
- * session holds one slot, so a send returns only once its peer has taken
- * the value, and a choice is a send of its branch number.
+ * session queues at most two values one end has sent and the other has not
+ * received: a send copies its value in and returns, waiting only while two
+ * are queued, and a choice is a send of its branch number.
  *
  * Happens-before: everything the creator did before `linea_task_start` is
  * visible to the body; everything a task did before a send is visible to its
@@ -44,16 +45,17 @@ unsigned long linea_task_start_migratable(unsigned long task, linea_task_entry e
  * free what `linea_task_prepare_on` made. */
 void linea_task_cancel(unsigned long task);
 
-/* Hand the `len` bytes at `at` to the peer of `endpoint`, and return once
- * the peer has copied them. */
+/* Queue a copy of the `len` bytes at `at` for the peer of `endpoint`, and
+ * return; wait first while two values are queued. The bytes at `at` may be
+ * reused as soon as the call returns. */
 void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len);
 
-/* Wait until the peer of `endpoint` sends, and copy the `len` bytes it sent
- * to `at`. */
+/* Wait until the peer of `endpoint` has queued a value, and copy the oldest
+ * one's `len` bytes to `at`. */
 void linea_chan_recv(unsigned long endpoint, unsigned long at, unsigned long len);
 
 /* Send the branch a choice takes, 0 for the left one and 1 for the right
- * one, and return once the peer has read it. */
+ * one, as `linea_chan_send` does. */
 void linea_chan_choose(unsigned long endpoint, uint8_t branch);
 
 /* Wait until the peer of `endpoint` chooses, and return its branch. */
@@ -62,13 +64,14 @@ uint8_t linea_chan_offer(unsigned long endpoint);
 /* Finish one end of a session at its end state. The task's own end returns
  * at once. The handle's returns only once the body has returned and the
  * execution has retired, and it then releases the bytes the body was kept
- * in, in the calling task, before freeing the session. */
+ * in, in the calling task, before freeing the session. A session freed with
+ * a value still queued stops the program. */
 void linea_chan_close(unsigned long endpoint);
 
 struct linea_registration;
 
-/* Watch `endpoint` for a wait set: `r` is signalled once the peer's send or
- * choice waits, or, with `returned` set on a handle, once the task's body
+/* Watch `endpoint` for a wait set: `r` is signalled once a value the peer
+ * sent or chose is queued for it, or, with `returned` set on a handle, once the task's body
  * has returned. Whichever happened before the call signals it at once. */
 void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int returned);
 
@@ -76,7 +79,8 @@ void linea_chan_watch(unsigned long endpoint, struct linea_registration *r, int 
  * registration it was watched for. */
 void linea_chan_unwatch(unsigned long endpoint);
 
-/* Wait until the peer of `endpoint` sends or timeout elapses. Returns 1 if received, 0 on timeout. */
+/* Wait until the peer of `endpoint` has queued a value or timeout elapses.
+ * Returns 1 if received, 0 on timeout, leaving the queue as it was. */
 uint8_t linea_chan_recv_until(unsigned long endpoint, unsigned long at, unsigned long len, unsigned long timeout_ns);
 
 /* An owning task's call queue: many callers, one owner. A call hands the

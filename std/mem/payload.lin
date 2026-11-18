@@ -2,16 +2,17 @@ import std.mem.address
 
 // A session payload moves between two tasks as bytes. The sender moves the
 // value into bytes the system allocator lends, the runtime copies them into
-// the receiver's bytes once both ends have met, and the receiver moves the
-// value out. A payload is `Owned`, so its bytes name nothing either task
+// the session's queue, the receiver's receive copies them into its own bytes,
+// and the receiver moves the value out. A payload is `Owned`, so its bytes name nothing either task
 // observes, and moving them moves the whole value.
 
-// Hand the `len` bytes at `at` to the peer of `endpoint`. The call returns
-// once the peer has copied them.
+// Queue a copy of the `len` bytes at `at` for the peer of `endpoint`. The
+// call waits only while the session already holds two values the peer has
+// not received.
 extern fn linea_chan_send(endpoint: UInt64, at: UInt64, len: UInt64)
 
-// Wait until the peer of `endpoint` sends, and copy the `len` bytes it sent
-// to `at`.
+// Wait until the peer of `endpoint` has queued a value, and copy the oldest
+// one's `len` bytes to `at`.
 extern fn linea_chan_recv(endpoint: UInt64, at: UInt64, len: UInt64)
 
 extern fn linea_chan_recv_until(endpoint: UInt64, at: UInt64, len: UInt64, timeout_ns: UInt64) -> UInt8

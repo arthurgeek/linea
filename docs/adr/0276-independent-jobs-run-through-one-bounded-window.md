@@ -5,6 +5,10 @@ Status: Accepted — 2026-11-16. Supersedes the clause of
 that `task.map` and `task.all` divide their items among at most `max` tasks.
 Extends 0253 §2 with `task.lazy_map` and the `_in` forms of every
 combinator.
+Extended by
+[0288](0288-a-session-send-leaves-its-value-queued-and-returns.md), whose
+queued sends remove the handoff's wait for the receiver and under which
+`finish` tells every worker to stop before it joins the first.
 
 ## Context
 
