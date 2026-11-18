@@ -1,4 +1,4 @@
-# 286. Tests allocate through `testing.TestAllocator` and `testing.SharedTestAllocator`
+# 287. Tests allocate through `testing.TestAllocator` and `testing.SharedTestAllocator`
 
 Status: Accepted — 2026-11-18. Supersedes the instrument
 [0191](0191-the-caller-chooses-every-allocator.md) declares,

@@ -6,7 +6,7 @@ Accepted. Builds on [0095](0095-the-system-allocator-is-named-rather-than-receiv
 [0123](0123-observations-carry-owner-dependencies-through-callable-contracts.md)
 and [0140](0140-aggregate-constants-retain-checked-construction-plans.md).
 Its sentence that `from_value` takes a document of the same allocator type is
-superseded by [0285](0285-a-document-decodes-into-any-allocator.md).
+superseded by [0286](0286-a-document-decodes-into-any-allocator.md).
 
 ## Context
 

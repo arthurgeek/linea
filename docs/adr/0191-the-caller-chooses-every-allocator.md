@@ -7,7 +7,7 @@ every allocating API takes its allocator from its caller is superseded by
 [0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md).
 Its instrument, `AllocationLog` with its `RefusingAllocator` and a
 `refuse_at` count, is superseded by
-[0286](0286-tests-allocate-through-a-test-allocator.md).
+[0287](0287-tests-allocate-through-a-test-allocator.md).
 
 ## Context
 

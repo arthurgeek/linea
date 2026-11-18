@@ -1,4 +1,4 @@
-# 283. Serving moves a factory's error and keeps its listener on the calling task
+# 284. Serving moves a factory's error and keeps its listener on the calling task
 
 Status: Accepted — 2026-11-18. Supersedes the clause of
 [0259](0259-a-handler-factory-may-fail-and-serving-begins-once-every-task-has-one.md)

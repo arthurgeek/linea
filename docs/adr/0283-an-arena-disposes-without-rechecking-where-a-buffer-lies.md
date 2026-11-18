@@ -1,4 +1,4 @@
-# 282. An arena disposes of a buffer without rechecking where it lies
+# 283. An arena disposes of a buffer without rechecking where it lies
 
 Status: Accepted — 2026-11-18. Supersedes the disposal clause of
 [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md):

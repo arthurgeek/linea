@@ -1,4 +1,4 @@
-# 284. A serving task announces the bound address once every task has its handler
+# 285. A serving task announces the bound address once every task has its handler
 
 Status: Accepted — 2026-11-18. Supersedes
 [0259](0259-a-handler-factory-may-fail-and-serving-begins-once-every-task-has-one.md)

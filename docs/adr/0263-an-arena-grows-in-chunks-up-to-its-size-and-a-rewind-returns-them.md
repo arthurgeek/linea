@@ -9,7 +9,7 @@ bytes the exchange used. Builds on
 allocation come from an allocator the caller chooses.
 Its disposal clause, that `dispose` checks a buffer lies within one of the
 arena's chunks, is superseded by
-[0282](0282-an-arena-disposes-without-rechecking-where-a-buffer-lies.md).
+[0283](0283-an-arena-disposes-without-rechecking-where-a-buffer-lies.md).
 
 ## Context
 

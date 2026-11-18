@@ -1,4 +1,4 @@
-# 285. A JSON document decodes into an allocator of its own
+# 286. A JSON document decodes into an allocator of its own
 
 Status: Accepted — 2026-11-18. Supersedes the sentence of
 [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) that
