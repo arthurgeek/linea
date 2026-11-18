@@ -97,14 +97,18 @@ pub struct Unregistered[T] {
     reason: IoError,
 }
 
-// The value of one registration, kept in bytes, and the callable that turns
-// it into the set's message. `delivered` is true when `next` answers the
-// registration because its source is ready, and false when `close` answers it
-// withdrawn.
+// The value of one registration, kept in bytes, the callable that turns it
+// into the set's message, and whether the value is a signal's share, which
+// leaves the set marked delivered once its signal has arrived.
 struct Held[M] {
     value: mem.Buffer[mem.SystemAllocator],
-    deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M],
+    deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M],
+    signal: Bool,
 }
+
+// What `linea_waitset_take` answers for a registration its source had
+// signalled; it answers 1 for one still registered, and 0 for none.
+let taken_signalled: UInt8 = 2
 
 // The runtime answers a reserved slot in the high 32 bits of a word and its
 // generation in the low 32.
@@ -205,22 +209,23 @@ impl[M] WaitSet[M] {
     }
 
     // Erase `wrap` into the callable that turns the bytes a `T` is kept in
-    // into an `M`, whether the registration was delivered or withdrawn.
-    fn wrapping[T, W: Release + fn(sink ready: T) -> M](_self: Self, sink wrap: W) -> mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M] where carries(wrap) {
+    // into an `M`.
+    fn wrapping[T, W: Release + fn(sink ready: T) -> M](_self: Self, sink wrap: W) -> mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M] where carries(wrap) {
         mem.Closure.open(
-            [sink wrap] |sink value: mem.Buffer[mem.SystemAllocator], _delivered: Bool| -> M {
+            [sink wrap] |sink value: mem.Buffer[mem.SystemAllocator]| -> M {
                 wrap(mem.take_value[T](value))
             },
         ).unwrap()
     }
 
-    // Keep `value` in a reserved slot with the callable that delivers it.
-    fn hold[T](inout self: Self, slot: UInt64, sink value: T, sink deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M]) where retains(self: value, deliver) {
+    // Keep `value` in a reserved slot with the callable that delivers it;
+    // `signal` says the value is a signal's share.
+    fn hold[T](inout self: Self, slot: UInt64, sink value: T, sink deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M], signal: Bool) where retains(self: value, deliver) {
         while self.held.length() <= slot {
             let empty: Option[Held[M]] = .None
             &self.held.push(empty).unwrap()
         }
-        let filled: Option[Held[M]] = .Some(.{ value = mem.keep_value(value), deliver })
+        let filled: Option[Held[M]] = .Some(.{ value = mem.keep_value(value), deliver, signal })
         match mem.exchange(&self.held[slot], filled) {
             None => {},
             Some(_) => panic("a wait set reserved a slot it still holds"),
@@ -236,18 +241,28 @@ impl[M] WaitSet[M] {
         }
     }
 
-    // Take the value in `slot` out of the set, as the set's message:
-    // delivered when `next` answers it, withdrawn when `close` does.
-    fn deliver_held(inout self: Self, slot: UInt64, delivered: Bool) -> M where carries(self) {
-        let Held { value, deliver } = &self.release_slot(slot)
-        let message = deliver(value, delivered)
+    // Take what `slot` holds out of the set, with a signal's share marked
+    // delivered when the runtime answered the registration `signalled`.
+    fn release_answered(inout self: Self, slot: UInt64, signalled: Bool) -> (mem.Buffer[mem.SystemAllocator], mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator]) -> M]) where carries(self) {
+        let Held { value, deliver, signal } = &self.release_slot(slot)
+        if signal && signalled {
+            let share = mem.take_value[SignalShare](value)
+            return (mem.keep_value(share.delivered_now()), deliver)
+        }
+        (value, deliver)
+    }
+
+    // Take the value in `slot` out of the set, as the set's message.
+    fn deliver_held(inout self: Self, slot: UInt64, signalled: Bool) -> M where carries(self) {
+        let (value, deliver) = &self.release_answered(slot, signalled)
+        let message = deliver(value)
         deliver.release()
         message
     }
 
     // Take the value in `slot` out of the set, in its own type.
-    fn take_held[T](inout self: Self, slot: UInt64) -> T where carries(self) {
-        let Held { value, deliver } = &self.release_slot(slot)
+    fn take_held[T](inout self: Self, slot: UInt64, signalled: Bool) -> T where carries(self) {
+        let (value, deliver) = &self.release_answered(slot, signalled)
         deliver.release()
         mem.take_value[T](value)
     }
@@ -281,7 +296,7 @@ impl[M] WaitSet[M] {
         let (slot, generation) = &self.reserve()
         let endpoint = chan.number()
         let deliver = self.wrapping(wrap)
-        &self.hold(slot, chan, deliver)
+        &self.hold(slot, chan, deliver, false)
         linea_waitset_received(self.set, slot, endpoint)
         Registered.minted(self.identity, slot, generation)
     }
@@ -303,7 +318,7 @@ impl[M] WaitSet[M] {
         let (slot, generation) = &self.reserve()
         let endpoint = chan.number()
         let deliver = self.wrapping(wrap)
-        &self.hold(slot, chan, deliver)
+        &self.hold(slot, chan, deliver, false)
         linea_waitset_received(self.set, slot, endpoint)
         Registered.minted(self.identity, slot, generation)
     }
@@ -328,7 +343,7 @@ impl[M] WaitSet[M] {
         let (slot, generation) = &self.reserve()
         let endpoint = handle.number()
         let deliver = self.wrapping(wrap)
-        &self.hold(slot, handle, deliver)
+        &self.hold(slot, handle, deliver, false)
         linea_waitset_returned(self.set, slot, endpoint)
         Registered.minted(self.identity, slot, generation)
     }
@@ -357,7 +372,7 @@ impl[M] WaitSet[M] {
     pub fn after[T, W: Release + fn(sink ready: T) -> M](inout self: Self, duration: time.Duration, sink message: T, sink wrap: W) -> Registered[T] where retains(self: message, wrap) {
         let (slot, generation) = &self.reserve()
         let deliver = self.wrapping(wrap)
-        &self.hold(slot, message, deliver)
+        &self.hold(slot, message, deliver, false)
         linea_waitset_timer(self.set, slot, duration.nanoseconds())
         Registered.minted(self.identity, slot, generation)
     }
@@ -386,7 +401,7 @@ impl[M] WaitSet[M] {
         match watched {
             None => {
                 let deliver = self.wrapping(wrap)
-                &self.hold(slot, holder, deliver)
+                &self.hold(slot, holder, deliver, false)
                 linea_waitset_ready(self.set, slot)
             },
             Some(refused) => {
@@ -396,7 +411,7 @@ impl[M] WaitSet[M] {
                     return .Err(.{ value = holder, reason = IoError.from_os(.Configure, Int32(0 - refused)) })
                 }
                 let deliver = self.wrapping(wrap)
-                &self.hold(slot, holder, deliver)
+                &self.hold(slot, holder, deliver, false)
             },
         }
         .Ok(Registered.minted(self.identity, slot, generation))
@@ -478,21 +493,10 @@ impl[M] WaitSet[M] {
             wrap.release()
             return .Err(.{ value = share.undelivered(), reason = IoError.from_os(.Configure, Int32(0 - watched)) })
         }
-        // The share is marked delivered as it leaves the set through `next`,
-        // and stays undelivered when `close` withdraws it. The annotation
-        // gives the lambda the `fn` type it is kept as, under which its
-        // result may carry what `wrap` carries.
-        let deliver: mem.Closure[fn(sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool) -> M] = mem.Closure.open(
-            [sink wrap] |sink value: mem.Buffer[mem.SystemAllocator], delivered: Bool| -> M {
-                let held = mem.take_value[SignalShare](value)
-                if delivered {
-                    wrap(held.delivered_now())
-                } else {
-                    wrap(held)
-                }
-            },
-        ).unwrap()
-        &self.hold(slot, share.undelivered(), deliver)
+        // The share is held undelivered, and leaves the set marked delivered
+        // once its signal has arrived.
+        let deliver = self.wrapping(wrap)
+        &self.hold(slot, share.undelivered(), deliver, true)
         .Ok(Registered.minted(self.identity, slot, generation))
     }
 
@@ -579,10 +583,11 @@ impl[M] WaitSet[M] {
         if set != self.identity {
             return .None
         }
-        if linea_waitset_take(self.set, slot, generation, only_registered) == 0 {
+        let taken = linea_waitset_take(self.set, slot, generation, only_registered)
+        if taken == 0 {
             return .None
         }
-        .Some(&self.take_held(slot))
+        .Some(&self.take_held(slot, taken == taken_signalled))
     }
 
     // Close the set and answer every value still registered, wrapped, in the
@@ -591,11 +596,12 @@ impl[M] WaitSet[M] {
         var closing = self
         var left: mem.Vec[M] = mem.Vec.new()
         loop {
-            let slot = linea_waitset_withdraw(closing.set)
-            if slot < 0 {
+            let withdrawn = linea_waitset_withdraw(closing.set)
+            if withdrawn < 0 {
                 break
             }
-            &left.push(&closing.deliver_held(UInt64(slot), false)).unwrap()
+            let answer = UInt64(withdrawn)
+            &left.push(&closing.deliver_held(answer / 2, answer % 2 == 1)).unwrap()
         }
         let WaitSet { set, identity: _, held } = closing
         linea_waitset_close(set)

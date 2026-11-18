@@ -664,23 +664,29 @@ uint8_t linea_waitset_take(unsigned long set, unsigned long slot, unsigned long 
      * fired, whether or not `next` has looked. */
     if (r->kind == timer_source || r->kind == descriptor_source || r->kind == signal_source) observe(s);
     linea_waitset_pause(linea_pause_take_before_swap);
+    uint8_t answer = 1;
     if (!swap_state(r, registered, taken)) {
         if (only_registered || !swap_state(r, signalled, taken)) return 0;
+        answer = 2;
     }
     linea_waitset_pause(linea_pause_take_after_swap);
     disarm(s, r);
-    return 1;
+    return answer;
 }
 
 long linea_waitset_withdraw(unsigned long set) {
     struct waitset *s = set_of(set);
+    /* A source that has fired is answered signalled, whether or not `next`
+     * has looked, as `take` answers it; one look serves a whole pass. */
+    if (s->withdraw_from == 0) observe(s);
     while (s->withdraw_from < s->made) {
         struct linea_registration *r = slot_at(s, s->withdraw_from);
         s->withdraw_from += 1;
-        if (swap_state(r, registered, taken) || swap_state(r, signalled, taken)) {
+        const int was_registered = swap_state(r, registered, taken);
+        if (was_registered || swap_state(r, signalled, taken)) {
             linea_waitset_pause(linea_pause_take_after_swap);
             disarm(s, r);
-            return (long)r->slot;
+            return (long)r->slot * 2 + (was_registered ? 0 : 1);
         }
     }
     s->withdraw_from = 0;

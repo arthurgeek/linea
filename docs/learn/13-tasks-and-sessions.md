@@ -1325,7 +1325,7 @@ error[T-Mismatch]: expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End]
 21  |     let _key = &waiting.received(sending, |sink ready| Waited.Ready(ready))
     |                                  ^^^^^^^ expected `Chan[Recv[T, N], H]`, found `Chan[Send[UInt64, End], ()]`
    ::: std/task/wait_set.lin
-280 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
+295 | ... nk ready: Chan[Recv[T, N], H]) -> M](inout self: Self, sink chan: Chan[Recv[T, N], H], sink wrap: W) -> Registered[Chan[ ...
     |                                                                 ---- expected because of this parameter
 ```
 

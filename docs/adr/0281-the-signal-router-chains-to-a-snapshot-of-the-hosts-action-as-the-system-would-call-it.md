@@ -2,7 +2,7 @@
 
 Status: Accepted — 2026-11-18; supersedes the delivery and host-handler
 clauses of [0265](0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md)
-§4.5
+§4.5, and its sentence on the share a taken or closed registration answers
 
 ## Context
 
@@ -35,6 +35,13 @@ Both were incomplete as built, and the gaps broke promises:
    of once. The fault handler, which hands a fault that is not Linea's to
    the action installed before the runtime's, already called the previous
    handler under its `sa_mask` and `SA_NODEFER`, in code of its own.
+3. **A share handed back said nothing of whether its signal had arrived.**
+   §4.5 says "a registration taken or closed answers its share undelivered".
+   A signal that arrived after `next` last looked leaves its registration
+   signalled, and `take` or `close` handed that registration's share back
+   undelivered. Two signals arriving before one `next` therefore lost the
+   second: `next` answered the first, and `close` answered the second as if
+   it had never come.
 
 ## Decision
 
@@ -89,6 +96,18 @@ Not reproduced, as with the fault handler:
 - A system call it interrupts restarts under the router's `SA_RESTART`,
   whatever the host's flags say.
 
+**A share answers whether its signal arrived while its registration was
+held, however it leaves the set.** `next` delivers a signalled registration,
+so its share is delivered. `take` and `close` answer whether the
+registration they withdrew had been signalled: `linea_waitset_take` answers 2
+for one its source had signalled and 1 for one still registered, and
+`linea_waitset_withdraw` answers twice the slot, plus 1 for a signalled one.
+Each looks at the sources that have fired first, whether or not `next` has,
+so a signal that arrived before `close` counts though no `next` ran. The set
+marks a signal's share delivered as it leaves whenever its registration was
+signalled; every other value leaves as it went in. A share handed back
+before any delivery of its signal is undelivered, as before.
+
 The rest of 0265 §4.5 stands: which signals are offered, the wake
 descriptor, coalescing, masking, disposition shares, and an ignored signal
 being refused.
@@ -103,6 +122,10 @@ being refused.
 - **Save the host's action once, at the first share the process ever
   takes.** A host that changes its action between two periods of sharing
   would lose the change.
+- **Answer a share's delivery by the path it leaves through**, delivered from
+  `next` and undelivered from `take` and `close`. A signal that arrived after
+  `next` last looked would be answered as if it never came, which is how a
+  second shutdown signal was lost.
 - **Copy only `sa_mask` into the router's installed action.** The router's
   own work would then run under the host's mask, and `SA_NODEFER` and
   `SA_RESETHAND` would still be unanswered.

@@ -220,7 +220,7 @@ static void take_of_a_signalled_endpoint_leaves_the_sender_waiting(void) {
     tell_to_send();
     pass(linea_pause_send_filled);
     assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 1) == 0);
-    assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 0) == 1);
+    assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 0) == 2);
     assert(linea_waitset_take(set, slot_of(reserved), generation_of(reserved), 0) == 0);
     assert(linea_waitset_next(set) == -1);
     finish_send_one(handle);
@@ -257,7 +257,7 @@ static void take_between_a_sources_swap_and_its_post(void) {
     pass(linea_pause_take_after_swap);
     release_pause(linea_pause_source_after_swap);
     assert(pthread_join(taker, 0) == 0);
-    assert(call.answer == 1);
+    assert(call.answer == 2);
     assert(linea_waitset_next(set) == -1);
     finish_send_one(handle);
     linea_waitset_close(set);
@@ -322,7 +322,7 @@ static void an_expired_timer_is_taken_or_delivered_once(void) {
     assert(pthread_create(&taker, 0, call_take, &call) == 0);
     pass(linea_pause_take_after_swap);
     assert(pthread_join(taker, 0) == 0);
-    assert(call.answer == 1);
+    assert(call.answer == 2);
     assert(linea_waitset_next(set) == -1);
 
     const unsigned long b = linea_waitset_reserve(set);
@@ -370,9 +370,13 @@ static void close_withdraws_each_registration_once(void) {
     linea_waitset_timer(set, slot_of(c), 0);
     int seen[3] = { 0, 0, 0 };
     for (;;) {
-        const long slot = linea_waitset_withdraw(set);
-        if (slot < 0) break;
+        const long withdrawn = linea_waitset_withdraw(set);
+        if (withdrawn < 0) break;
+        const long slot = withdrawn / 2;
         assert(slot < 3);
+        /* The endpoint whose peer has sent and the expired timer were
+         * signalled; the far timer was not. */
+        assert(withdrawn % 2 == (slot != (long)slot_of(b)));
         seen[slot] += 1;
     }
     assert(seen[0] == 1 && seen[1] == 1 && seen[2] == 1);
@@ -646,7 +650,7 @@ static void close_between_a_sources_swap_and_its_post(void) {
     pass(linea_pause_take_after_swap);
     release_pause(linea_pause_source_after_swap);
     assert(pthread_join(closer, 0) == 0);
-    assert(call.answer == (long)slot_of(reserved));
+    assert(call.answer == (long)slot_of(reserved) * 2 + 1);
     assert(linea_waitset_withdraw(set) == -1);
     linea_waitset_close(set);
     finish_send_one(handle);
@@ -733,7 +737,7 @@ static void a_withdrawn_descriptor_leaves_its_reused_number_watched(void) {
     assert(second[0] == number);
     const unsigned long current = linea_waitset_reserve(set);
     assert(linea_waitset_descriptor(set, slot_of(current), second[0], 0) == 0);
-    assert(linea_waitset_take(set, slot_of(stale), generation_of(stale), 0) == 1);
+    assert(linea_waitset_take(set, slot_of(stale), generation_of(stale), 0) == 2);
     const unsigned long timer = linea_waitset_reserve(set);
     linea_waitset_timer(set, slot_of(timer), 2000000000UL);
     assert(write(second[1], "x", 1) == 1);

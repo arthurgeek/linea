@@ -85,12 +85,14 @@ long linea_waitset_signal(unsigned long set, unsigned long slot, uint8_t signal,
 long linea_waitset_next(unsigned long set);
 
 /* Withdraw the registration at `slot` if it has generation `generation` and
- * has not been taken, answering 1, or 0 for a slot that has moved on. With
+ * has not been taken, answering 1 for one still registered and 2 for one its
+ * source has signalled, or 0 for a slot that has moved on. With
  * `only_registered` set, a registration already signalled is left alone and
  * 0 answered. */
 uint8_t linea_waitset_take(unsigned long set, unsigned long slot, unsigned long generation, uint8_t only_registered);
 
-/* Withdraw any registration still held and answer its slot, or -1 for an
+/* Withdraw any registration still held and answer twice its slot, plus 1
+ * when its source has fired, whether or not `next` has looked, or -1 for an
  * empty set. */
 long linea_waitset_withdraw(unsigned long set);
 
