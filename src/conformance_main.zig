@@ -5563,7 +5563,13 @@ fn costOfFiles(
     var compilation = std.heap.ArenaAllocator.init(backing);
     defer compilation.deinit();
     const gpa = compilation.allocator();
-    var counting: Counting = .{ .under = gpa, .allow_growth = mode == .timing };
+    var counting: Counting = .{
+        .under = gpa,
+        .allow_growth = mode == .timing,
+        // Refined integer records require this alignment. Otherwise a nested
+        // arena's padding can change its growth count with its backing address.
+        .minimum_alignment = if (mode == .accounting) .fromByteUnits(@alignOf(u128)) else .@"1",
+    };
     const a = counting.allocator();
 
     const timer = CostTimer.start(io);

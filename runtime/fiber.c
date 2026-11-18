@@ -132,6 +132,7 @@ struct linea_fiber {
     int transfer_ready;
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
     unsigned forced_transfers;
+    int forced_dispatch_pending;
 #endif
 #endif
     struct carrier *claimant;
@@ -824,7 +825,7 @@ static int clean_runnable(struct linea_fiber *f, struct carrier *source) {
     require_metadata(f);
     TRACE_COUNT(source->loop, eligibility_checks);
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
-    if (f->forced_transfers >= 2) { TRACE_COUNT(source->loop, ref_quota); return 0; }
+    if (f->forced_transfers >= 2 || f->forced_dispatch_pending) { TRACE_COUNT(source->loop, ref_quota); return 0; }
 #endif
     if (f->home != source || f->loop != source->loop) { TRACE_COUNT(source->loop, ref_state); return 0; }
     if (!f->proven) { TRACE_COUNT(source->loop, ref_entry); return 0; }
@@ -926,8 +927,15 @@ static int finish_transfer(struct transfer_claim *claim, struct carrier *target,
     }
 #if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
     f->forced_transfers += 1;
+    f->forced_dispatch_pending = 1;
 #endif
     f->home = target;
+#if defined(LINEA_FIBER_REFUSAL_PROBES_TEST) && defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    /* The forced control must execute on its destination before a second
+     * transfer. Production stealing may transfer queued work repeatedly. */
+    if (f->forced_transfers < 2 && clean_runnable(f, target))
+        fail("linea: forced work could return before destination dispatch\n");
+#endif
 #if (defined(LINEA_FIBER_BUSY_SOURCE_TEST) || defined(LINEA_FIBER_NEW_WORK_TEST))
 #if defined(LINEA_FIBER_NEW_WORK_TEST)
     if (dispatch && f != busy_test.body && busy_test.worker == NULL) {
@@ -1975,6 +1983,9 @@ static void run_fiber(struct carrier *c, struct linea_fiber *f) {
     f->transfer_ready = 0;
 #endif
     f->state = running;
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    f->forced_dispatch_pending = 0;
+#endif
     c->executing = f;
     unlock_fiber(f);
 #if __has_feature(thread_sanitizer)

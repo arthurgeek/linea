@@ -17,6 +17,9 @@ pub const Counting = struct {
     under: std.mem.Allocator,
     took: usize = 0,
     allow_growth: bool = true,
+    /// Backing alignment policy, unchanged while allocations are live. Keeping
+    /// nested arena nodes aligned makes accounting independent of buffer offsets.
+    minimum_alignment: std.mem.Alignment = .@"1",
     /// What a growth in place is charged.
     charge: enum { resulting, added } = .resulting,
     /// The most `took` may reach. An allocation or growth that would pass it
@@ -37,7 +40,7 @@ pub const Counting = struct {
     fn alloc(ctx: *anyopaque, n: usize, a: std.mem.Alignment, ra: usize) ?[*]u8 {
         const self: *Counting = @ptrCast(@alignCast(ctx));
         if (self.past(n)) return null;
-        const got = self.under.rawAlloc(n, a, ra) orelse return null;
+        const got = self.under.rawAlloc(n, self.backingAlignment(a), ra) orelse return null;
         self.took += n;
         return got;
     }
@@ -46,7 +49,7 @@ pub const Counting = struct {
         const self: *Counting = @ptrCast(@alignCast(ctx));
         if (!self.allow_growth and n > buf.len) return false;
         if (n > buf.len and self.past(self.grown(buf.len, n))) return false;
-        if (!self.under.rawResize(buf, a, n, ra)) return false;
+        if (!self.under.rawResize(buf, self.backingAlignment(a), n, ra)) return false;
         if (n > buf.len) self.took += self.grown(buf.len, n);
         return true;
     }
@@ -55,7 +58,7 @@ pub const Counting = struct {
         const self: *Counting = @ptrCast(@alignCast(ctx));
         if (!self.allow_growth and n > buf.len) return null;
         if (n > buf.len and self.past(self.grown(buf.len, n))) return null;
-        const got = self.under.rawRemap(buf, a, n, ra) orelse return null;
+        const got = self.under.rawRemap(buf, self.backingAlignment(a), n, ra) orelse return null;
         if (n > buf.len) self.took += self.grown(buf.len, n);
         return got;
     }
@@ -75,9 +78,45 @@ pub const Counting = struct {
 
     fn free(ctx: *anyopaque, buf: []u8, a: std.mem.Alignment, ra: usize) void {
         const self: *Counting = @ptrCast(@alignCast(ctx));
-        self.under.rawFree(buf, a, ra);
+        self.under.rawFree(buf, self.backingAlignment(a), ra);
+    }
+
+    fn backingAlignment(self: *const Counting, requested: std.mem.Alignment) std.mem.Alignment {
+        return requested.max(self.minimum_alignment);
     }
 };
+
+test "accounting nested arenas is independent of backing buffer offsets" {
+    for (1..64) |count| {
+        var expected: ?usize = null;
+        for ([_]usize{ 0, 8 }) |offset| {
+            var storage: [16384]u8 align(64) = undefined;
+            var fixed = std.heap.FixedBufferAllocator.init(storage[offset..]);
+            var outer = std.heap.ArenaAllocator.init(fixed.allocator());
+            defer outer.deinit();
+            var counting: Counting = .{
+                .under = outer.allocator(),
+                .allow_growth = false,
+                .minimum_alignment = .fromByteUnits(@alignOf(u128)),
+            };
+            var inner = std.heap.ArenaAllocator.init(counting.allocator());
+            defer inner.deinit();
+            for (0..count) |_| _ = try inner.allocator().create(u128);
+            if (expected) |value| try testing.expectEqual(value, counting.took);
+            expected = counting.took;
+        }
+    }
+}
+
+test "accounting backing alignment also governs growth and release" {
+    var counting: Counting = .{ .under = testing.allocator, .minimum_alignment = .fromByteUnits(@alignOf(u128)) };
+    const a = counting.allocator();
+    var bytes: std.ArrayList(u8) = .empty;
+    defer bytes.deinit(a);
+    for (0..64) |_| try bytes.append(a, 91);
+    bytes.shrinkAndFree(a, 3);
+    try testing.expectEqualSlices(u8, &.{ 91, 91, 91 }, bytes.items);
+}
 
 /// An allocator whose large allocations always grow in place.
 ///
