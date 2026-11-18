@@ -15,26 +15,24 @@ fn write_padded[W: io.Writer](inout w: W, text: Str, width: UInt64) -> Result[()
     .Ok(())
 }
 
-// Serialize note as JSON object using json.encode to guarantee RFC-compliant string escaping.
-fn write_note_json[W: io.Writer](inout writer: W, note: borrow Note) {
-    &writer.write_str(r#"{"id":"#).unwrap()
-    note.id.fmt(&writer).unwrap()
-    &writer.write_str(r#","title":"#).unwrap()
-    json.encode(&writer, note.title.view()).unwrap()
-    &writer.write_str(r#","status":""#).unwrap()
-    &writer.write_str(note.status.as_str()).unwrap()
-    &writer.write_str(r#"","priority":""#).unwrap()
-    &writer.write_str(note.priority.as_str()).unwrap()
-    &writer.write_str(r#"","tags":["#).unwrap()
-    var first = true
-    for read tag in note.tags {
-        if !first {
-            &writer.write_str(",").unwrap()
+// `Matching` encodes the notes that pass a status and a tag filter as one
+// JSON array. Each note writes itself with the `json.Encode` it derives.
+struct Matching {
+    notes: mem.Slice[Note],
+    status_filter: Option[Status],
+    tag_filter: Option[Str],
+}
+
+impl json.Encode for Matching {
+    fn encode[W: io.Writer](self: Self, inout encoder: json.Encoder, inout writer: W) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
+        &encoder.begin_array(&writer)?
+        for read note in self.notes {
+            if note.matches_status(self.status_filter) && note.matches_tag(self.tag_filter) {
+                &encoder.value(&writer, note)?
+            }
         }
-        first = false
-        json.encode(&writer, tag.view()).unwrap()
+        &encoder.end_array(&writer)
     }
-    &writer.write_str("]}").unwrap()
 }
 
 // TableFormatter renders notes into aligned tabular text or detailed views.
@@ -62,7 +60,7 @@ impl TableFormatter {
     // Render single note as JSON.
     pub fn render_detail_json(note: borrow Note) -> String {
         var output = String.new()
-        write_note_json(&output, note)
+        json.encode(&output, note).unwrap()
         output
     }
 
@@ -181,23 +179,29 @@ impl TableFormatter {
     }
 
     // Render list of notes as JSON array with optional filters.
-    pub fn render_filtered_json(notes: mem.Slice[Note], status_filter: Option[Status], tag_filter: Option[Str]) -> String {
+    pub fn render_filtered_json(sink notes: mem.Slice[Note], sink status_filter: Option[Status], sink tag_filter: Option[Str]) -> String {
         var output = String.new()
-        &output.append("[").unwrap()
-        var first = true
-        var i: UInt64 = 0
-        while i < notes.length() {
-            let note = notes.get(i).unwrap()
-            if note.matches_status(status_filter) && note.matches_tag(tag_filter) {
-                if !first {
-                    &output.append(",").unwrap()
-                }
-                first = false
-                write_note_json(&output, note)
-            }
-            i += 1
-        }
-        &output.append("]").unwrap()
+        json.encode(&output, Matching { notes, status_filter, tag_filter }).unwrap()
         output
+    }
+
+    test "filtered json holds only the matching notes" {
+        var work: Vec[String] = Vec.new()
+        &work.push("work".to_owned().unwrap()).unwrap()
+        let report = Note.new(1, "Write report", .High, work).unwrap()
+        var home: Vec[String] = Vec.new()
+        &home.push("home".to_owned().unwrap()).unwrap()
+        let groceries = Note.new(2, "Buy groceries", .Low, home).unwrap()
+
+        defer var notes: Vec[Note] = Vec.new()
+        &notes.push(report).unwrap()
+        &notes.push(groceries).unwrap()
+
+        defer let home_json = TableFormatter.render_filtered_json(notes.as_slice(), .None, .Some("home"))
+        let expected = r#"[{"id":2,"title":"Buy groceries","status":"open","priority":"low","tags":["home"]}]"#
+        testing.assert_eq(home_json.view(), expected, "the filter did not select the home note alone")?
+        defer let none_json = TableFormatter.render_filtered_json(notes.as_slice(), .Some(.Done), .None)
+        testing.assert_eq(none_json.view(), "[]", "notes that match no filter were written")?
+        .Ok(())
     }
 }
