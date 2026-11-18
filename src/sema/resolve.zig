@@ -10198,6 +10198,15 @@ const Resolver = struct {
     /// Rendering later uses these typed references to distinguish a parameter
     /// whose uses survived expansion from one whose reflected region vanished;
     /// it never searches generated text for a spelling.
+    /// The position of the type parameter in `parameters` that the identifier
+    /// at `at` spells, if it spells one.
+    fn memberTypeParameterNamed(ast: *const Ast, parameters: []const node.TypeParam, at: TokenId) ?u32 {
+        for (parameters, 0..) |parameter, position| {
+            if (std.mem.eql(u8, ast.tokenText(at), ast.tokenText(parameter.name))) return @intCast(position);
+        }
+        return null;
+    }
+
     fn templateParameterPlans(
         self: *Resolver,
         member_decl: DeclId,
@@ -10412,11 +10421,26 @@ const Resolver = struct {
                 defer type_references.deinit(self.gpa);
                 var member_type_references: std.ArrayList(reflection.MemberTypeParameterReference) = .empty;
                 defer member_type_references.deinit(self.gpa);
-                // The member's type parameters shadow every other name they
-                // spell inside it, so each identifier of the member written as
-                // one of them, and not selected after a `.`, names it.
+                // The member's type parameters shadow every type of their
+                // name inside it, so an identifier spelling one names it where
+                // it is written as a type. Where it is written as an
+                // expression, resolution says what it names: `W.zero()` names
+                // the parameter, and a pattern head `W` a variant, which keeps
+                // its name. The member's expressions are found in the tree's
+                // one table of them, read once for each template member that
+                // declares type parameters, of which a library has few.
                 const member_type_params = self.program.ast.declTypeParams(member_plan.member);
                 if (member_type_params.len != 0) {
+                    const expression_tokens = try self.gpa.alloc(bool, member_tokens.len());
+                    defer self.gpa.free(expression_tokens);
+                    @memset(expression_tokens, false);
+                    for (0..self.program.ast.exprCount()) |expression_index| {
+                        const expression = ExprId.at(@intCast(expression_index));
+                        if (self.program.ast.exprTag(expression) != .name_ref) continue;
+                        const main = self.program.ast.exprMain(expression);
+                        if (main == .none or main.index() < member_tokens.start.index() or main.index() >= member_tokens.end.index()) continue;
+                        expression_tokens[main.index() - member_tokens.start.index()] = true;
+                    }
                     var previous: token.Tag = .invalid;
                     for (member_tokens.start.index()..member_tokens.end.index()) |token_at| {
                         const at = TokenId.at(@intCast(token_at));
@@ -10424,11 +10448,14 @@ const Resolver = struct {
                         if (tag.isTrivia()) continue;
                         defer previous = tag;
                         if (tag != .identifier or previous == .dot) continue;
-                        for (member_type_params, 0..) |parameter, position| {
-                            if (std.mem.eql(u8, self.program.ast.tokenText(at), self.program.ast.tokenText(parameter.name))) {
-                                try member_type_references.append(self.gpa, .{ .at = at, .parameter = @intCast(position) });
-                                break;
-                            }
+                        if (expression_tokens[token_at - member_tokens.start.index()]) {
+                            const binding = validation.references[token_at - validation.token_start];
+                            if (binding == .none) continue;
+                            const held = self.bindings.items[binding.index()];
+                            if (held.kind != .type_parameter or held.decl != member_plan.member) continue;
+                        }
+                        if (memberTypeParameterNamed(&self.program.ast, member_type_params, at)) |position| {
+                            try member_type_references.append(self.gpa, .{ .at = at, .parameter = position });
                         }
                     }
                 }
