@@ -2078,7 +2078,8 @@ directory, and the outcome cache keys on their bytes.
 Holds every `extern` naming a C function, and every `export` its root's C
 declares, to the prototype its root's C declarations give it
 ([T-ExternPrototype], ADR 0262). It runs in the driver for `check`, `build`,
-`run`, `test` and `emit-mlir`, and in the conformance runner, after
+`run`, `test`, `emit-mlir` and `dump-asm` (`holdsCDeclarations` names every
+command), and in the conformance runner, after
 the semantic passes accepted the program and before lowering, because it
 starts a process, which no pass may. The loader records each root's C
 declarations on `RootFacts` (`native`, `headers`, `manifest_dir`).

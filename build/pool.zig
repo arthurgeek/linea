@@ -102,6 +102,11 @@ test "every index is worked once, however many threads the host starts" {
     }
 }
 
+/// Makes a signal that stops a gate kill every command `runMerged` started
+/// first, since each runs in a process group of its own that the terminal's
+/// interrupt does not reach.
+pub const killCommandsOnInterrupt = process.killGroupsOnInterrupt;
+
 pub const Finished = struct {
     succeeded: bool,
     /// Standard output and standard error, interleaved as the child wrote them.
@@ -112,7 +117,7 @@ pub const Finished = struct {
 };
 
 /// Runs `argv`, with its standard error folded into its standard output, and
-/// kills it after `timeout_seconds`.
+/// kills it and every process it started after `timeout_seconds`.
 pub fn runMerged(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -127,6 +132,7 @@ pub fn runMerged(
     const result = process.run(gpa, io, .{
         .argv = shell_argv.items,
         .cwd = cwd,
+        .process_group = true,
         .timeout = .{ .duration = .{ .raw = .fromSeconds(timeout_seconds), .clock = .awake } },
         .partial = &partial,
     }) catch |err| switch (err) {

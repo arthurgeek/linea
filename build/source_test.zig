@@ -4759,6 +4759,21 @@ test "a pass file hands every error on, whatever is called" {
         .{ .statement = "self.visit(d) catch |err| { if (self.strict) { return err; } };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch |err| { return err; self.undo(); };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "self.visit(d) catch { if (self.strict) return error.OutOfMemory; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        // `unreachable` after a call that can fail is undefined behaviour
+        // in a ReleaseFast build, in every spelling.
+        .{ .statement = "self.visit(d) catch { unreachable; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch { self.undo(); unreachable; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| unreachable;", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |_| unreachable;", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch |err| { self.undo(); unreachable; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "if (self.find(d)) |found| use(found) else |_| unreachable;", .form = "else |…| that does not return the error", .callee = "else" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => unreachable, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory, error.Refused => unreachable, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return err, else => unreachable };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        // An `unreachable` on any path of the handler is reached when the
+        // call fails, whatever the handler ends in.
+        .{ .statement = "self.visit(d) catch |err| { if (self.strict) unreachable; return err; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch { if (self.strict) unreachable; return error.OutOfMemory; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => {}, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.Refused => return err, else => {} };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
     };
@@ -4784,7 +4799,18 @@ test "a pass file hands every error on, whatever is called" {
         "self.emit(d) catch @panic(\"OOM\");",
         "if (self.find(d)) |found| use(found) else |err| return err;",
         "self.emit(d) catch |err| { if (self.strict) self.undo(); return err; };",
-        "self.emit(d) catch |err| { self.undo(); unreachable; };",
+        // `@panic` stops the process, a defined end, in every spelling.
+        "self.emit(d) catch { @panic(\"OOM\"); };",
+        "self.emit(d) catch { self.undo(); @panic(\"OOM\"); };",
+        "self.emit(d) catch |err| @panic(@errorName(err));",
+        "self.emit(d) catch |err| { self.undo(); @panic(@errorName(err)); };",
+        "if (self.find(d)) |found| use(found) else |_| @panic(\"OOM\");",
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => @panic(\"OOM\"), else => return err };",
+        // A prong hands the error on through its own capture, from a block,
+        // or among the other errors it names.
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => |oom| return oom, else => {} };",
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => { return err; }, else => {} };",
+        "self.walk(d) catch |err| switch (err) { error.Refused, error.OutOfMemory => return err, else => {} };",
         "self.walk(d) catch |err| switch (err) { error.Refused => {}, else => return err };",
         "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return err, error.Refused => {} };",
         "const found = self.find(d) orelse return;",
@@ -4913,4 +4939,68 @@ test "the passes discard no error but where an exception names it, and every exc
             try testing.expect(source.unexplainedDiscards(gpa, files, changed).len != 0);
         }
     }
+}
+
+test "the package holds every top-level path the build reads" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const io = testing.io;
+    const cwd = std.Io.Dir.cwd();
+
+    // What `zig fetch` keeps of the repository: the strings `.paths` lists.
+    const zon = try cwd.readFileAlloc(io, "build.zig.zon", gpa, .limited(1 << 16));
+    const listed_at = std.mem.indexOf(u8, zon, ".paths") orelse return error.TestUnexpectedResult;
+    var packaged: std.StringHashMapUnmanaged(void) = .empty;
+    for (try stringLiterals(gpa, zon[listed_at..])) |path| try packaged.put(gpa, path, {});
+
+    // The repository's own top-level entries, as git tracks them, so a cache
+    // or an output beside them is not taken for something the build reads.
+    const tracked = try std.process.run(gpa, io, .{ .argv = &.{ "git", "ls-files", "-z" } });
+    try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, tracked.term);
+    var top: std.StringHashMapUnmanaged(void) = .empty;
+    var files = std.mem.tokenizeScalar(u8, tracked.stdout, 0);
+    while (files.next()) |file| try top.put(gpa, file[0 .. std.mem.indexOfScalar(u8, file, '/') orelse file.len], {});
+
+    // Every path the build script and the gates it imports name, by the
+    // top-level entry it starts with.
+    var readers: std.ArrayList([]const u8) = .empty;
+    try readers.append(gpa, "build.zig");
+    var build_dir = try cwd.openDir(io, "build", .{ .iterate = true });
+    defer build_dir.close(io);
+    var entries = build_dir.iterate();
+    while (try entries.next(io)) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".zig") or std.mem.endsWith(u8, entry.name, "_test.zig")) continue;
+        try readers.append(gpa, try std.fmt.allocPrint(gpa, "build/{s}", .{entry.name}));
+    }
+    var missing = false;
+    for (readers.items) |reader| {
+        const text = try cwd.readFileAlloc(io, reader, gpa, .limited(1 << 22));
+        for (try stringLiterals(gpa, text)) |literal| {
+            const first = literal[0 .. std.mem.indexOfScalar(u8, literal, '/') orelse literal.len];
+            if (!top.contains(first) or packaged.contains(first)) continue;
+            std.debug.print("{s} names \"{s}\", and build.zig.zon's paths leave out \"{s}\"\n", .{ reader, literal, first });
+            missing = true;
+        }
+    }
+    try testing.expect(!missing);
+}
+
+/// The contents of every plain string literal in `text`.
+fn stringLiterals(gpa: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+    const z = try gpa.dupeZ(u8, text);
+    var tokens: std.zig.Tokenizer = .init(z);
+    var out: std.ArrayList([]const u8) = .empty;
+    while (true) {
+        const token = tokens.next();
+        switch (token.tag) {
+            .eof => break,
+            .string_literal => {
+                const quoted = z[token.loc.start..token.loc.end];
+                if (quoted.len >= 2) try out.append(gpa, quoted[1 .. quoted.len - 1]);
+            },
+            else => {},
+        }
+    }
+    return out.items;
 }

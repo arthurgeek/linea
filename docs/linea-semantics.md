@@ -1254,7 +1254,8 @@ respelling that no program can declare, such as a reserved word or `Self`, is
 named but not offered, and so is one that would be declared twice where the name
 is (in its module, among its type's members, or in the list of fields, variants
 or type parameters it was written in), since accepting it would trade this error
-for [N-Duplicate]. A rename refuses a new name in the wrong case for the same
+for [N-Duplicate], and so is an `export`'s respelling that names a symbol the
+runtime owns, which [M-Export] would refuse. A rename refuses a new name in the wrong case for the same
 kind, with the same respelling.
 
 **[N-NotCallable]** Only a function or a value whose type carries a callable
@@ -2202,7 +2203,10 @@ An export must also be in a library's **root module**, the interface available
 to foreign callers; modules below it cannot be named externally. An export
 below the root is diagnosed where declared. The published symbol uses the
 declaration's name, matching the C header, and omits the prefix applied to
-other Linea-defined symbols, so it must not collide with a runtime symbol.
+other Linea-defined symbols, so it must not be a symbol the runtime owns:
+any name in the runtime's `linea_` namespace, its public functions and the
+version marker every program references included, or one it defines outside
+that namespace, such as `main`.
 
 A dependency's `export` is not exported. Only the root being built publishes C
 symbols, so an `export` in a library a program depends on gives that program's
@@ -5092,8 +5096,11 @@ through an `__asm__` label or `overloadable`, as glibc sends `lseek` to
 C declaration must give it the same one, and a symbol no Linea declaration
 can be emitted under is refused, as is one in the runtime's `linea_`
 namespace, one the runtime owns, and one Linea or LLVM emits its own code
-under (`lin.`, `lcb.`, `llvm.`). A symbol C makes an `ifunc`, an alias, a
-variable or anything but a function it declares or defines is refused. Every
+under (`lin.`, `lcb.`, `llvm.`). A symbol C makes an alias, a variable or
+anything but a function it declares or defines is refused. A symbol C makes an
+`ifunc` is held to the function type C declares for it, as a function is; the
+`ifunc` does not say how C extends an enumeration narrower than 32 bits, so
+such an enumeration matches nothing there. Every
 `extern` of one name must reach one symbol in every root that declares it,
 and every `extern` reaching one symbol must imply one prototype. An
 `export` is held to the same rules wherever its root's C declarations declare
@@ -5120,8 +5127,8 @@ value match nothing. What C defines without a declaration the
 compiler reads, a symbol a top-level `__asm__` defines included, is
 believed. A `read` parameter does not require a `const` pointee:
 what C does through the address remains the wrapper's promise
-([T-ExternHandle]). The check runs for `linea check`, `build`, `run`, `test`
-and `emit-mlir` once the program is otherwise accepted, and reads each
+([T-ExternHandle]). The check runs for `linea check`, `build`, `run`, `test`,
+`emit-mlir` and `dump-asm` once the program is otherwise accepted, and reads each
 prototype from the C compiler, which describes a pointer to each declared
 function after including each C declaration
 ([ADR 0262](adr/0262-a-hand-written-c-declaration-is-held-to-the-c-compilers-prototype.md)).

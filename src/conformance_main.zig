@@ -16945,6 +16945,9 @@ test "slow: a walk that selects nothing, or cannot run its transcripts, fails" {
 }
 
 pub fn main(init: std.process.Init) !u8 {
+    // A transcript runs in a process group of its own, which an interrupt of
+    // the runner does not reach.
+    @import("conformance/process.zig").killGroupsOnInterrupt();
     return try compiler_stack.run(runInit, .{init});
 }
 

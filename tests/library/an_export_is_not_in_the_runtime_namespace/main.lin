@@ -1,0 +1,7 @@
+export fn linea_close(descriptor: Int64) -> Int64 {
+    descriptor
+}
+
+export fn linea_runtime_abi_1() -> Int64 {
+    1
+}

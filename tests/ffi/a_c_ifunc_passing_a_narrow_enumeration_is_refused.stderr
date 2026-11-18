@@ -1,0 +1,8 @@
+error[T-ExternPrototype]: C declares `enum level flip(enum level)`, and this declaration calls it as `int8_t flip(int8_t)`
+ --> tests/ffi/a_c_ifunc_passing_a_narrow_enumeration_is_refused/level/level.lin:1:23
+  |
+1 | extern fn flip(value: Int8) -> Int8
+  |                       ^^^^ C takes `enum level` here
+  |
+  = note: `flip` is declared by `level/level.c`
+  = help: C's `enum level` is an enumeration whose width or extension the C compiler does not state here, as it does not behind a pointer, in a callback, or through an `ifunc` for one narrower than 32 bits: call it through a C function, built under "native", that takes an integer

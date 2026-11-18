@@ -1,0 +1,1 @@
+{ "extern": ["level"], "native": ["level/level.c"] }

@@ -255,6 +255,18 @@ fn defaultOptLevel(tag: cli.Tag) []const u8 {
     };
 }
 
+/// Whether a command holds the program's C declarations to the C compiler's
+/// prototypes once the semantic passes accept it: every command that builds
+/// the program or prints the code a build ships, which calls each C function
+/// by the symbol C gives it, and `check`, which reports what `build` would.
+/// The switch names every command, so a new one is decided here.
+fn holdsCDeclarations(tag: cli.Tag) bool {
+    return switch (tag) {
+        .check, .run, .build, .@"test", .emit_mlir, .dump_asm => true,
+        .fmt, .lsp, .init, .dump_tokens, .dump_ast, .dump_expanded, .dump_mir, .dump_inferred, .dump_mono => false,
+    };
+}
+
 /// Links the checking allocator, which `test` always links: a use of freed
 /// storage, a second disposal or a store outside an allocation aborts.
 const check_storage_option: cli.Option = .{ .name = "--check-storage", .arity = .flag, .help = "abort on a use of freed storage (slower; always on for `test`)" };
@@ -814,9 +826,7 @@ pub fn run(process: std.process.Init) !u8 {
                 else
                     try checkProgram(gpa, process.gpa, &program, &interner, &sink, purpose);
                 defer settled.deinit(gpa);
-                // Every command that would build the program holds its C
-                // declarations to the C compiler's prototypes first.
-                const foreign_symbols = if ((is_check or is_run or is_build or is_test or is_emit_mlir) and !sink.hasErrors())
+                const foreign_symbols = if (holdsCDeclarations(cmd.tag) and !sink.hasErrors())
                     try prototypes.check(gpa, io, &settled, &sink, .{ .scratch = scratchDir(process.minimal.environ) })
                 else
                     &.{};

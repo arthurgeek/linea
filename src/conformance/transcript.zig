@@ -532,16 +532,30 @@ test "commands share one shell and see the checkout root" {
     try std.testing.expectEqual(@as(u8, 1), steps[3].exit);
 }
 
-/// Fails unless the process whose pid `directory/job` records has exited.
+/// Fails, naming the pid, unless the background job whose pid a transcript
+/// wrote to `job` in `directory` has exited. The run kills the job's process
+/// group and answers once no process in it is alive, so this is asked once.
+/// On Linux the run has reaped the job; elsewhere it may still be a zombie
+/// init has not reaped.
 fn expectJobKilled(io: Io, directory: std.Io.Dir) !void {
     var buffer: [64]u8 = undefined;
     const recorded = try directory.readFile(io, "job", &buffer);
     const job = try std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, recorded, " \n"), 10);
-    var attempts: usize = 0;
-    while (!try processExited(io, job)) : (attempts += 1) {
-        if (attempts == 200) return error.JobSurvived;
-        try io.sleep(.fromMilliseconds(10), .awake);
+    if (try processExited(io, job)) return;
+    std.debug.print("the background job {d} is still running once the run answered\n", .{job});
+    return error.JobSurvived;
+}
+
+/// Fails, saying what step `index` printed and how it exited, unless it
+/// exited `expected`.
+fn expectStepExit(ran: Ran, index: usize, expected: u8) !void {
+    if (index < ran.steps.len and ran.steps[index].exit == expected) return;
+    if (index >= ran.steps.len) {
+        std.debug.print("the run reported {d} steps, and step {d} was expected\n", .{ ran.steps.len, index });
+    } else {
+        std.debug.print("step {d} exited {d}, not {d}, having printed \"{s}\"\n", .{ index, ran.steps[index].exit, expected, ran.steps[index].expected });
     }
+    return error.TestUnexpectedResult;
 }
 
 /// Whether the process `pid` has exited: it is gone, or it is a zombie whose
@@ -577,18 +591,23 @@ fn linuxProcessIsZombie(io: Io, pid: std.posix.pid_t) !bool {
     return stat[state_at] == 'Z' or stat[state_at] == 'X';
 }
 
-/// Whether `sysctl` reports the process in state `SZOMB`, read from
-/// `kp_proc.p_stat` of the `struct kinfo_proc` that `CTL_KERN`, `KERN_PROC`,
-/// `KERN_PROC_PID` answers with. `proc_pidinfo` cannot ask this: it refuses a
+/// Whether `sysctl` reports the process in state `SZOMB`, or exiting with
+/// `P_WEXIT` set in its flags, read from `kp_proc.p_stat` and `kp_proc.p_flag`
+/// of the `struct kinfo_proc` that `CTL_KERN`, `KERN_PROC`, `KERN_PROC_PID`
+/// answers with. A process killed but not yet a zombie is exiting, and
+/// sending its group a signal no longer reaches it. `proc_pidinfo` cannot ask this: it refuses a
 /// zombie with `ESRCH`, as it refuses a process that is gone.
 fn darwinProcessIsZombie(pid: std.posix.pid_t) !bool {
     const ctl_kern = 1;
     const kern_proc = 14;
     const kern_proc_pid = 1;
-    // `sizeof(struct kinfo_proc)`, and the offset of `kp_proc.p_stat` in it.
+    // `sizeof(struct kinfo_proc)`, and the offsets of `kp_proc.p_flag` and
+    // `kp_proc.p_stat` in it.
     const kinfo_proc_size = 648;
+    const p_flag_offset = 32;
     const p_stat_offset = 36;
     const szomb = 5;
+    const p_wexit = 0x00002000;
     var mib = [_]c_int{ ctl_kern, kern_proc, kern_proc_pid, pid };
     var info: [kinfo_proc_size]u8 align(8) = undefined;
     var len: usize = info.len;
@@ -596,7 +615,8 @@ fn darwinProcessIsZombie(pid: std.posix.pid_t) !bool {
     // An empty answer is a process the kernel no longer lists.
     if (len == 0) return true;
     if (len != kinfo_proc_size) return error.UnreadableProcessState;
-    return info[p_stat_offset] == szomb;
+    const flags = std.mem.readInt(i32, info[p_flag_offset..][0..4], @import("builtin").cpu.arch.endian());
+    return info[p_stat_offset] == szomb or flags & p_wexit != 0;
 }
 
 test "a process that exited and was not reaped has exited" {
@@ -647,11 +667,14 @@ test "a command past its deadline fails its case with what ran before it" {
     }, t);
     defer ran.deinit(gpa);
 
-    try std.testing.expect(ran.timed_out);
+    if (!ran.timed_out) {
+        std.debug.print("the shell ended before its 1 s deadline, though its last step sleeps 5 s\n", .{});
+        return error.TestUnexpectedResult;
+    }
     try std.testing.expectEqualStrings("started\n", ran.steps[0].expected);
-    try std.testing.expectEqual(@as(u8, 0), ran.steps[1].exit);
+    try expectStepExit(ran, 1, 0);
     try std.testing.expectEqualStrings("waiting\n", ran.steps[2].expected);
-    try std.testing.expectEqual(@as(u8, 255), ran.steps[2].exit);
+    try expectStepExit(ran, 2, 255);
     try expectJobKilled(io, tmp.dir);
 }
 
@@ -679,11 +702,14 @@ test "a background job still running when the last command ends is killed" {
         .timeout_seconds = 20,
     }, t);
     defer ran.deinit(gpa);
-    const elapsed = started.durationTo(std.Io.Clock.awake.now(io));
 
-    try std.testing.expect(!ran.timed_out);
-    try std.testing.expectEqual(@as(u8, 0), ran.steps[0].exit);
-    try std.testing.expect(elapsed.toSeconds() < 5);
+    // The job sleeps longer than the deadline, so a run that answered before
+    // the deadline did not wait for the job to end by itself.
+    if (ran.timed_out) {
+        std.debug.print("the shell outlived its 20 s deadline, {d} s after it started\n", .{started.durationTo(std.Io.Clock.awake.now(io)).toSeconds()});
+        return error.TestUnexpectedResult;
+    }
+    try expectStepExit(ran, 0, 0);
     try expectJobKilled(io, tmp.dir);
 }
 

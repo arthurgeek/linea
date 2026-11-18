@@ -1,0 +1,5 @@
+extern fn flip(value: Int8) -> Int8
+
+pub fn of(value: Int8) -> Int8 {
+    flip(value)
+}

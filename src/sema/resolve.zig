@@ -3,6 +3,7 @@ const slow_tests = @import("../support/slow_tests.zig");
 const testing = std.testing;
 
 const tracy = @import("../support/tracy.zig");
+const symbol_names = @import("../support/symbol.zig");
 const Source = @import("../support/source.zig").Source;
 const FileId = @import("../support/source.zig").FileId;
 const Span = @import("../support/span.zig").Span;
@@ -12434,7 +12435,7 @@ const Resolver = struct {
                     .{ .module_run = module }
                 else
                     .{ .members = .{ .module = module, .owner = source.tokenName(source.memberOwner(d)) } };
-                try checks.name(source.declName(d), kind, namespace);
+                try checks.nameAs(source.declName(d), kind, namespace, source.declIsExport(d));
             }
             switch (source.declTag(d)) {
                 .import_ => {
@@ -12489,6 +12490,9 @@ const Resolver = struct {
             at: TokenId,
             kind: name_case.Kind,
             namespace: Namespace,
+            /// Whether the name is an `export`'s, which publishes it as a C
+            /// symbol and so may take none the runtime owns.
+            exported: bool = false,
 
             fn before(_: void, a: Refusal, b: Refusal) bool {
                 return a.at.index() < b.at.index();
@@ -12504,6 +12508,11 @@ const Resolver = struct {
         /// nearly every name passes on; the file a name is in is asked only
         /// where a resumed run skips some.
         fn name(self: *Checks, at: TokenId, kind: name_case.Kind, namespace: Namespace) !void {
+            return self.nameAs(at, kind, namespace, false);
+        }
+
+        /// `name`, for a name `exported` says an `export` publishes.
+        fn nameAs(self: *Checks, at: TokenId, kind: name_case.Kind, namespace: Namespace, exported: bool) !void {
             if (at == TokenId.none or self.source.tokenTag(at) != .identifier) return;
             if (self.skipped.bit_length != 0) {
                 const file = self.source.fileOf(at);
@@ -12515,7 +12524,7 @@ const Resolver = struct {
             recorded.value_ptr.* = kind;
             const case = name_case.of(self.source.tokenText(at)) orelse return;
             if (case == kind.case()) return;
-            try self.refused.append(r.gpa, .{ .at = at, .kind = kind, .namespace = namespace });
+            try self.refused.append(r.gpa, .{ .at = at, .kind = kind, .namespace = namespace, .exported = exported });
         }
 
         /// Reports every refused name in source order, each with the
@@ -12550,6 +12559,8 @@ const Resolver = struct {
                 const label = switch (try respelling(sink.arena, text, refusal.kind)) {
                     .offered => |respelled| if (self.clashes(interner, refusal.namespace, &list_names, respelled))
                         try std.fmt.allocPrint(sink.arena, "rename it: `{s}` would be declared twice", .{respelled})
+                    else if (refusal.exported and symbol_names.reservedForeign(respelled))
+                        try std.fmt.allocPrint(sink.arena, "rename it: `{s}` is a symbol the Linea runtime owns, which no export may take", .{respelled})
                     else
                         try std.fmt.allocPrint(sink.arena, "rename it `{s}`", .{respelled}),
                     .unusable => |respelled| try std.fmt.allocPrint(sink.arena, "rename it: `{s}` is not a name a program declares", .{respelled}),
