@@ -37584,6 +37584,10 @@ const Checker = struct {
                 // closure's uses to settle, which is what a lambda's written
                 // parameter types are to a lambda.
                 got = try self.check(value, null);
+                const unwrapped = self.ast.withoutGroups(value);
+                if (self.ast.exprTag(unwrapped) == .lambda) {
+                    self.closure_descriptors[self.res.closures.closureOf(unwrapped).index()].own_signature = true;
+                }
                 if (got != .poison and !try self.settleCallbackResult(bound, try self.callbackValueSignature(got), settling, value)) {
                     walked[j] = true;
                     delayed_refused = true;

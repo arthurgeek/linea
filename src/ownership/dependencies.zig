@@ -2628,12 +2628,15 @@ const Analysis = struct {
     }
 
     /// What an escape's origins say a clause could name: the parameters it
-    /// comes from, as sources at their positions, a local owner, and a
+    /// comes from, as sources at their positions, and a closure's own
+    /// captures, after its parameters in capture order; a local owner; and a
     /// consumed parameter whose own place is observed, which ends with the
     /// function like a local and no clause can name.
     const EscapeSources = struct {
         sources: []const types.ClauseSource,
         positions: []const u32,
+        /// Whether a capture of this closure is among `sources`.
+        captured: bool,
         local: ?BindingId,
         consumed: ?BindingId,
         /// A parameter written as a pattern rather than a name, which no
@@ -2648,9 +2651,28 @@ const Analysis = struct {
         var local: ?BindingId = null;
         var consumed: ?BindingId = null;
         var unnamed: ?BindingId = null;
+        var captured = false;
         for (origins) |origin| {
             if (origin.temporary != .none or origin.lent != .none) continue;
             const root = origin.place.root;
+            // A capture's own storage ends with the closure's environment,
+            // which no clause can name, so only what a capture carries, or a
+            // read capture's observation of its place, is a source.
+            if (self.ownCapture(root)) |index| if (origin.external or self.res.captureConvention(root) == .read) {
+                const spelling = self.ast.tokenText(self.res.captureNameToken(root));
+                const listed = for (sources.items) |source| {
+                    if (std.mem.eql(u8, source.spelling, spelling)) break true;
+                } else false;
+                if (listed) continue;
+                // A clause names a capture as it names a parameter: `borrows`
+                // for a read capture, which observes the captured place, and
+                // `carries` for what an owned capture holds.
+                const read = self.res.captureConvention(root) == .read;
+                try sources.append(arena, .{ .spelling = spelling, .borrows = read });
+                try positions.append(arena, @intCast(self.function.parameters.len + index));
+                captured = true;
+                continue;
+            };
             const position: ?u32 = for (self.function.parameters, 0..) |parameter, at| {
                 if (parameter == root) break @intCast(at);
             } else null;
@@ -2676,7 +2698,16 @@ const Analysis = struct {
             try sources.append(arena, .{ .spelling = spelling, .borrows = !origin.external });
             try positions.append(arena, position.?);
         }
-        return .{ .sources = sources.items, .positions = positions.items, .local = local, .consumed = consumed, .unnamed = unnamed };
+        return .{ .sources = sources.items, .positions = positions.items, .captured = captured, .local = local, .consumed = consumed, .unnamed = unnamed };
+    }
+
+    /// The index of `binding` among the captures of the closure this
+    /// function is, or null where it is no capture of it.
+    fn ownCapture(self: *const Analysis, binding: BindingId) ?u32 {
+        if (self.function.lambda == .none) return null;
+        const location = self.res.captureOfBinding(binding) orelse return null;
+        if (location.closure != self.res.closures.closureOf(self.function.lambda)) return null;
+        return location.index;
     }
 
     /// The whole clause the function needs, from `wholeClause`: what the
@@ -2699,9 +2730,12 @@ const Analysis = struct {
             const contracts = self.ast.lambda(self.function.lambda).contracts;
             break :wrote contracts.end != contracts.start;
         } else false;
+        // A closure checked as its own signature keeps every source its
+        // contract inferred: that signature is the `fn` type it is kept as,
+        // which must still match the type written where the closure goes.
         var keep: std.ArrayList(u32) = .empty;
         if (!wrote_clause) for (self.function.parameters, 0..) |parameter, index| {
-            if (self.covered_owners.contains(parameter)) try keep.append(arena, @intCast(index));
+            if (self.function.own_signature or self.covered_owners.contains(parameter)) try keep.append(arena, @intCast(index));
         };
         var written: std.ArrayList(types.CallableContract) = .empty;
         if (signature) |callable| for (callable.contracts) |contract| {
@@ -2817,6 +2851,10 @@ const Analysis = struct {
             }));
             if (edit == .edit) try fixes.append(arena, .{ .kind = .where_clause, .note = clause_note, .edits = try arena.dupe(diagnostics.Edit, &.{edit.edit}) });
         };
+        // A lambda a call checked as its own signature takes context from a
+        // `fn` type written where its value is bound, under which its result
+        // may carry what its captures carry.
+        if (found.captured and fixed == null and self.function.own_signature) try notes.append(arena, "or write the type the call's result is kept as where it is bound, such as `let name: mem.Closure[fn(…) -> …] = …`: the `fn` type in it gives the lambda its context, under which its result may carry what its captures carry");
         if (found.unnamed != null) try notes.append(arena, try std.fmt.allocPrint(arena, "the value comes from a parameter written as a pattern, and a clause names a parameter by its name: bind it to a name, and take it apart in {s}'s body", .{try self.functionName()}));
         if (consumed) |owner| try notes.append(arena, try std.fmt.allocPrint(arena, "`{s}` is consumed by {s} and ends when it returns, so no clause lets anything observe it past the return", .{
             self.ast.tokenText(self.res.declaringToken(owner)),
