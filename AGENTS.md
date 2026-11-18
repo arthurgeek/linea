@@ -724,8 +724,8 @@ APIs.
   `else` prong where it names none) is one of those; a `return` on one path of
   several does not count. `unreachable` never hands an error on: after a call
   that can fail it is undefined behaviour in a ReleaseFast build, so
-  `catch unreachable`, `catch { unreachable; }` and a body or prong ending in
-  `unreachable` are refused alike. `try`, `catch |e| return e`,
+  `catch unreachable`, `catch { unreachable; }` and a body or prong holding
+  `unreachable` on any path are refused alike. `try`, `catch |e| return e`,
   `catch return error.…`, `catch @panic(…)` and a block ending in `@panic(…)`
   pass. A discard that loses
   nothing, such as arithmetic overflow that is itself the answer or a call
