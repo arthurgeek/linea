@@ -114,8 +114,6 @@ fn waitUntil(io: std.Io, child: *std.process.Child, deadline: std.Io.Timeout, gr
     };
     var slots: [2]Raced = undefined;
     var race: std.Io.Select(Raced) = .init(io, &slots);
-    // Cancelling the wait may leave it blocked until the child exits, so a
-    // child still running is killed before the race is cancelled.
     defer race.cancelDiscard();
     const pid = child.id.?;
     try race.concurrent(.exited, std.process.Child.wait, .{ child, io });
@@ -123,9 +121,12 @@ fn waitUntil(io: std.Io, child: *std.process.Child, deadline: std.Io.Timeout, gr
     switch (try race.await()) {
         .exited => |term| return term,
         .expired => |slept| {
-            try slept;
+            // A cancelled wait releases the child without reaping it, so the
+            // child is killed and the wait already running reaps it.
             if (group) std.posix.kill(-pid, .KILL) catch {};
             std.posix.kill(pid, .KILL) catch {};
+            _ = race.await() catch {};
+            try slept;
             return error.Timeout;
         },
     }
@@ -201,4 +202,24 @@ test "the timeout bounds a child that closes its streams and keeps running" {
     } else |err| try testing.expectEqual(error.Timeout, err);
     try testing.expect(started.durationTo(std.Io.Clock.awake.now(io)).toSeconds() < 20);
     try testing.expectEqualStrings("started\n", partial);
+}
+
+test "a child killed at the deadline is reaped" {
+    const testing = std.testing;
+    const io = testing.io;
+    var partial: []u8 = &.{};
+    defer testing.allocator.free(partial);
+    const result = run(testing.allocator, io, .{
+        .argv = &.{ "/bin/sh", "-c", "echo $$; exec >&- 2>&-; sleep 30" },
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(1), .clock = .awake } },
+        .partial = &partial,
+    });
+    if (result) |finished| {
+        testing.allocator.free(finished.stdout);
+        testing.allocator.free(finished.stderr);
+        return error.TestExpectedError;
+    } else |err| try testing.expectEqual(error.Timeout, err);
+    const pid = try std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, partial, "\n"), 10);
+    // A zombie still answers a signal; a reaped child is gone.
+    try testing.expectError(error.ProcessNotFound, std.posix.kill(pid, @enumFromInt(0)));
 }
