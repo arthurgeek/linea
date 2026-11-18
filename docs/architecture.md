@@ -1341,7 +1341,12 @@ Vecs and subspans after their explicit view construction.
 For a projection, the checker computes one canonical path per implementation
 and records its selection at each bracket site. Lowering substitutes that
 site's receiver and index into the recorded path. The path is not recomputed
-per use, and no projection operation survives into MIR.
+per use, and no projection operation survives into MIR. Discovery walks the
+same substitution to reach the bodies the site's expressions call. Both read
+the path through one slot environment, `instantiate.ProjectionSlots`, which
+answers which slot a name reaches, which slots the site's own expression may
+see and under which instance it is read, and both follow a delegated
+projection through one route rule, `instantiate.delegatedRoute`.
 
 Field delegation retains its contextual keyword and target token in the source
 AST. The type checker records the stored field in the existing source-reference
@@ -1864,6 +1869,9 @@ programs from compiler defects.
 Every layout check it makes is relative to `module.layouts`, and every physical
 value check reads the representation and role accessors owned by MIR. It proves
 exact table coverage and role consistency before those facts can be indexed.
+Every function's types, slot tables and signature are checked before any body
+is walked, and no body is walked unless all of them hold, because a call reads
+its callee's slots, roles and signature whatever order the functions sit in.
 The external-definition table contains one flag per function, including modules
 constructed by tests; an empty table does not stand for a module's local bodies.
 ADR 0050's bounded exception remains: the layout rule has a second
@@ -1887,9 +1895,13 @@ function compatible with the recorded pointer interface under the shared
 contextual callable predicate (outer labels may differ), that an indirect callee is a code
 pointer, that the indirect argument extent and every argument/result
 representation match that signature, and that no non-capturing body acquires a
-hidden environment parameter. If `module.zeroed_allocator` is present, the
-verifier requires it to identify an external function with two `read UInt64`
-parameters, no defaults, and a `UInt64` result (ADR 0119).
+hidden environment parameter. A typed pointer, a code pointer or an
+observation, keeps its exact type wherever it is passed or returned, since two
+of either share one representation and differ in the signature or referent
+they stand for; every other value is held to its computation representation.
+If `module.zeroed_allocator` is present, the verifier requires it to identify
+an external function with two `read UInt64` parameters, no defaults, and a
+`UInt64` result (ADR 0119).
 
 For no-value control flow it proves that no value-producing instruction has
 type `Never`, normal and noreturn calls agree with the callee's settled result,

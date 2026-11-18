@@ -1,0 +1,18 @@
+// Captures that take no bytes are each recovered on their own, beside one
+// another and beside a capture that fills every byte.
+struct Marker {}
+
+struct Holder { marker: Marker, count: UInt8 }
+
+fn main() -> UInt8 {
+    let markers = [sink _a = Marker {}, sink _b = Marker {}] || {}
+    let { _a: first, _b: second } = markers.into_captures()
+    let _x = first
+    let _y = second
+
+    let holder: Holder = .{ marker = Marker {}, count = 3 }
+    let held = [sink _holder = holder, sink _marker = Marker {}] || {}
+    let { _holder: kept, _marker: _ } = held.into_captures()
+    let Holder { marker: _, count } = kept
+    count
+}

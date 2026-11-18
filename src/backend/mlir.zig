@@ -1273,26 +1273,8 @@ fn emitFunction(
     // address is for.
     for (0..mir.param_count) |i| {
         if (!module.arrivesByAddress(mir, i)) {
-            const storage = module.representationOf(mir.locals[i]).storage;
-            switch (storage) {
-                .integer => |integer| if (integer.bits < 64) {
-                    const t = storageType(storage);
-                    try w.print("    %pw{d} = arith.trunci %a{d} : {s} to {s}\n", .{ i, i, int_type, t });
-                    try w.print("    llvm.store %pw{d}, %s{d} : {s}, !llvm.ptr\n", .{ i, i, t });
-                } else {
-                    try w.print("    llvm.store %a{d}, %s{d} : {s}, !llvm.ptr\n", .{ i, i, int_type });
-                },
-                .boolean => {
-                    try w.print("    %pw{d} = arith.extui %a{d} : i1 to i8\n", .{ i, i });
-                    try w.print("    llvm.store %pw{d}, %s{d} : i8, !llvm.ptr\n", .{ i, i });
-                },
-                .float, .enum_tag, .unit, .code_pointer, .data_pointer => try w.print("    llvm.store %a{d}, %s{d} : {s}, !llvm.ptr\n", .{
-                    i, i, storageType(storage),
-                }),
-                .bytes, .no_value, .invalid => std.debug.panic("compiler defect: a scalar parameter has {s} storage", .{
-                    @tagName(std.meta.activeTag(storage)),
-                }),
-            }
+            const access: ScalarAccess = .{ .w = w, .n = i, .temp = "pw", .address = .{ .slot = i } };
+            try access.store(module.representationOf(mir.locals[i]).storage, .{ .parameter = i }, "a scalar parameter");
         } else if (mir.slotRoleOf(.at(@intCast(i))) == .managed_address) {
             try w.print("    llvm.store %a{d}, %s{d} : !llvm.ptr, !llvm.ptr\n", .{ i, i });
         } else {
@@ -1393,6 +1375,145 @@ fn emitFunction(
 
 /// Per-function emission state, named for the function because a module holds
 /// nothing while it walks its functions.
+/// One scalar moved between memory, at the width its storage representation
+/// states, and a register, at the width computation uses. Every scalar load
+/// and store goes through here: a narrow integer is truncated to its storage
+/// width when stored and extended back by its signedness when loaded, a
+/// Boolean is widened to a byte when stored and read back as whether that
+/// byte is nonzero, and every other scalar is stored as it is computed.
+///
+/// What differs between the accesses is only how they name things: the
+/// address and the stored value, the temporaries' prefix, and whether the
+/// lines carry a source location.
+const ScalarAccess = struct {
+    w: *std.Io.Writer,
+    /// The emitter whose values and locations the access names, or null for
+    /// a function's prologue, which names its incoming parameters and writes
+    /// no location.
+    emitter: ?*FunctionEmitter = null,
+    span: Span = .empty,
+    /// The number the access's result and temporaries carry.
+    n: usize,
+    /// The prefix of the narrowed or widened temporary.
+    temp: []const u8,
+    /// The prefix of the zero a Boolean load compares its byte against.
+    zero: []const u8 = "",
+    address: Operand,
+
+    const Operand = union(enum) {
+        /// An instruction's value, spelled as the emitter spells it, so an
+        /// observation stays the alias of the address it observes.
+        inst: InstId,
+        slot: usize,
+        /// A parameter as it arrives, before the prologue stores it.
+        parameter: usize,
+        /// The checked pointer a raw access computed.
+        raw: usize,
+    };
+
+    fn operand(self: ScalarAccess, o: Operand) std.Io.Writer.Error!void {
+        switch (o) {
+            .inst => |id| try self.emitter.?.writeValue(id),
+            .slot => |i| try self.w.print("%s{d}", .{i}),
+            .parameter => |i| try self.w.print("%a{d}", .{i}),
+            .raw => |i| try self.w.print("%ip{d}", .{i}),
+        }
+    }
+
+    fn end(self: ScalarAccess) std.Io.Writer.Error!void {
+        if (self.emitter) |emitter| try emitter.here(self.span) else try self.w.writeAll("\n");
+    }
+
+    /// Stores `value` at the address. Truncating needs no guard: a value
+    /// reaching storage of this type has already passed a range check against
+    /// its bounds, so the bits a narrow store drops are bits the checker
+    /// proved were not there.
+    fn store(self: ScalarAccess, storage: mir_mod.StorageRepresentation, value: Operand, what: []const u8) std.Io.Writer.Error!void {
+        switch (storage) {
+            .integer => |integer| if (integer.bits < 64) {
+                const t = storageType(storage);
+                try self.w.print("    %{s}{d} = arith.trunci ", .{ self.temp, self.n });
+                try self.operand(value);
+                try self.w.print(" : {s} to {s}", .{ int_type, t });
+                try self.end();
+                try self.w.print("    llvm.store %{s}{d}, ", .{ self.temp, self.n });
+                try self.operand(self.address);
+                try self.w.print(" : {s}, !llvm.ptr", .{t});
+                try self.end();
+            } else {
+                try self.w.writeAll("    llvm.store ");
+                try self.operand(value);
+                try self.w.writeAll(", ");
+                try self.operand(self.address);
+                try self.w.print(" : {s}, !llvm.ptr", .{int_type});
+                try self.end();
+            },
+            .boolean => {
+                try self.w.print("    %{s}{d} = arith.extui ", .{ self.temp, self.n });
+                try self.operand(value);
+                try self.w.writeAll(" : i1 to i8");
+                try self.end();
+                try self.w.print("    llvm.store %{s}{d}, ", .{ self.temp, self.n });
+                try self.operand(self.address);
+                try self.w.writeAll(" : i8, !llvm.ptr");
+                try self.end();
+            },
+            .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
+                try self.w.writeAll("    llvm.store ");
+                try self.operand(value);
+                try self.w.writeAll(", ");
+                try self.operand(self.address);
+                try self.w.print(" : {s}, !llvm.ptr", .{storageType(storage)});
+                try self.end();
+            },
+            .bytes, .no_value, .invalid => std.debug.panic("compiler defect: {s} has {s} storage", .{
+                what, @tagName(std.meta.activeTag(storage)),
+            }),
+        }
+    }
+
+    /// Loads the value at the address into `%v{n}`.
+    fn load(self: ScalarAccess, storage: mir_mod.StorageRepresentation, what: []const u8) std.Io.Writer.Error!void {
+        switch (storage) {
+            .integer => |integer| if (integer.bits < 64) {
+                const t = storageType(storage);
+                try self.w.print("    %{s}{d} = llvm.load ", .{ self.temp, self.n });
+                try self.operand(self.address);
+                try self.w.print(" : !llvm.ptr -> {s}", .{t});
+                try self.end();
+                try self.w.print("    %v{d} = arith.{s} %{s}{d} : {s} to {s}", .{
+                    self.n, if (integer.signedness == .signed) "extsi" else "extui", self.temp, self.n, t, int_type,
+                });
+                try self.end();
+            } else {
+                try self.w.print("    %v{d} = llvm.load ", .{self.n});
+                try self.operand(self.address);
+                try self.w.print(" : !llvm.ptr -> {s}", .{int_type});
+                try self.end();
+            },
+            .boolean => {
+                try self.w.print("    %{s}{d} = llvm.load ", .{ self.temp, self.n });
+                try self.operand(self.address);
+                try self.w.writeAll(" : !llvm.ptr -> i8");
+                try self.end();
+                try self.w.print("    %{s}{d} = arith.constant 0 : i8", .{ self.zero, self.n });
+                try self.end();
+                try self.w.print("    %v{d} = arith.cmpi ne, %{s}{d}, %{s}{d} : i8", .{ self.n, self.temp, self.n, self.zero, self.n });
+                try self.end();
+            },
+            .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
+                try self.w.print("    %v{d} = llvm.load ", .{self.n});
+                try self.operand(self.address);
+                try self.w.print(" : !llvm.ptr -> {s}", .{storageType(storage)});
+                try self.end();
+            },
+            .bytes, .no_value, .invalid => std.debug.panic("compiler defect: {s} has {s} storage", .{
+                what, @tagName(std.meta.activeTag(storage)),
+            }),
+        }
+    }
+};
+
 const FunctionEmitter = struct {
     w: *std.Io.Writer,
     mir: *const Mir,
@@ -1534,36 +1655,8 @@ const FunctionEmitter = struct {
 
             .store => {
                 const s = mir.storeOf(id);
-                const storage = self.module.slotRepresentationOf(mir, s.local).storage;
-                switch (storage) {
-                    .integer => |integer| if (integer.bits < 64) {
-                        const t = storageType(storage);
-                        try self.w.print("    %sw{d} = arith.trunci %v{d} : {s} to {s}", .{ id.index(), s.value.index(), int_type, t });
-                        try self.here(span);
-                        try self.w.print("    llvm.store %sw{d}, %s{d} : {s}, !llvm.ptr", .{ id.index(), s.local.index(), t });
-                        try self.here(span);
-                    } else {
-                        try self.w.print("    llvm.store %v{d}, %s{d} : {s}, !llvm.ptr", .{ s.value.index(), s.local.index(), int_type });
-                        try self.here(span);
-                    },
-                    .boolean => {
-                        try self.w.print("    %sw{d} = arith.extui %v{d} : i1 to i8", .{ id.index(), s.value.index() });
-                        try self.here(span);
-                        try self.w.print("    llvm.store %sw{d}, %s{d} : i8, !llvm.ptr", .{ id.index(), s.local.index() });
-                        try self.here(span);
-                    },
-                    .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
-                        try self.w.writeAll("    llvm.store ");
-                        try self.writeValue(s.value);
-                        try self.w.print(", %s{d} : {s}, !llvm.ptr", .{
-                            s.local.index(), storageType(storage),
-                        });
-                        try self.here(span);
-                    },
-                    .bytes, .no_value, .invalid => std.debug.panic("compiler defect: a named store has {s} storage", .{
-                        @tagName(std.meta.activeTag(storage)),
-                    }),
-                }
+                const access: ScalarAccess = .{ .w = self.w, .emitter = self, .span = span, .n = id.index(), .temp = "sw", .address = .{ .slot = s.local.index() } };
+                try access.store(self.module.slotRepresentationOf(mir, s.local).storage, .{ .inst = s.value }, "a named store");
             },
             .load => {
                 const local = mir.localOf(id);
@@ -1572,36 +1665,9 @@ const FunctionEmitter = struct {
                         try self.w.print("    %v{d} = llvm.load %s{d} : !llvm.ptr -> !llvm.ptr", .{ id.index(), local.index() });
                         try self.here(span);
                     },
-                    .storage => |storage| switch (storage) {
-                        .integer => |integer| if (integer.bits < 64) {
-                            const t = storageType(storage);
-                            try self.w.print("    %lw{d} = llvm.load %s{d} : !llvm.ptr -> {s}", .{ id.index(), local.index(), t });
-                            try self.here(span);
-                            try self.w.print("    %v{d} = arith.{s} %lw{d} : {s} to {s}", .{
-                                id.index(), if (integer.signedness == .signed) "extsi" else "extui", id.index(), t, int_type,
-                            });
-                            try self.here(span);
-                        } else {
-                            try self.w.print("    %v{d} = llvm.load %s{d} : !llvm.ptr -> {s}", .{ id.index(), local.index(), int_type });
-                            try self.here(span);
-                        },
-                        .boolean => {
-                            try self.w.print("    %lw{d} = llvm.load %s{d} : !llvm.ptr -> i8", .{ id.index(), local.index() });
-                            try self.here(span);
-                            try self.w.print("    %lz{d} = arith.constant 0 : i8", .{id.index()});
-                            try self.here(span);
-                            try self.w.print("    %v{d} = arith.cmpi ne, %lw{d}, %lz{d} : i8", .{ id.index(), id.index(), id.index() });
-                            try self.here(span);
-                        },
-                        .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
-                            try self.w.print("    %v{d} = llvm.load %s{d} : !llvm.ptr -> {s}", .{
-                                id.index(), local.index(), storageType(storage),
-                            });
-                            try self.here(span);
-                        },
-                        .bytes, .no_value, .invalid => std.debug.panic("compiler defect: a named load has {s} storage", .{
-                            @tagName(std.meta.activeTag(storage)),
-                        }),
+                    .storage => |storage| {
+                        const access: ScalarAccess = .{ .w = self.w, .emitter = self, .span = span, .n = id.index(), .temp = "lw", .zero = "lz", .address = .{ .slot = local.index() } };
+                        try access.load(storage, "a named load");
                     },
                 }
             },
@@ -2098,50 +2164,19 @@ const FunctionEmitter = struct {
         if (mir.resultRoleOf(id) == .managed_address) return;
         const raw = mir.tagOf(id) == .load_raw;
         if (raw) try self.rawPointer(id);
-        const storage = self.module.representationOf(ty).storage;
-        switch (storage) {
-            .integer => |integer| if (integer.bits < 64) {
-                const t = storageType(storage);
-                try self.w.print("    %iw{d} = llvm.load ", .{n});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(address);
-                try self.w.print(" : !llvm.ptr -> {s}", .{t});
-                try self.here(span);
-                try self.w.print("    %v{d} = arith.{s} %iw{d} : {s} to {s}", .{
-                    n, if (integer.signedness == .signed) "extsi" else "extui", n, t, int_type,
-                });
-                try self.here(span);
-            } else {
-                try self.w.print("    %v{d} = llvm.load ", .{n});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(address);
-                try self.w.print(" : !llvm.ptr -> {s}", .{int_type});
-                try self.here(span);
-            },
-            .boolean => {
-                try self.w.print("    %iw{d} = llvm.load ", .{n});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(address);
-                try self.w.writeAll(" : !llvm.ptr -> i8");
-                try self.here(span);
-                try self.w.print("    %iz{d} = arith.constant 0 : i8", .{n});
-                try self.here(span);
-                try self.w.print("    %v{d} = arith.cmpi ne, %iw{d}, %iz{d} : i8", .{ n, n, n });
-                try self.here(span);
-            },
-            .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
-                try self.w.print("    %v{d} = llvm.load ", .{n});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(address);
-                try self.w.print(" : !llvm.ptr -> {s}", .{storageType(storage)});
-                try self.here(span);
-            },
-            .bytes, .no_value, .invalid => std.debug.panic("compiler defect: an indirect load has {s} storage", .{
-                @tagName(std.meta.activeTag(storage)),
-            }),
-        }
+        const access: ScalarAccess = .{
+            .w = self.w,
+            .emitter = self,
+            .span = span,
+            .n = n,
+            .temp = "iw",
+            .zero = "iz",
+            .address = if (raw) .{ .raw = n } else .{ .inst = address },
+        };
+        try access.load(self.module.representationOf(ty).storage, "an indirect load");
     }
 
-    /// A store through an address, truncating to the width the layout table
-    /// states. Truncating needs no guard: a value reaching a part of this type
-    /// has already passed a range check against that type's bounds, so the
-    /// bits a narrow store drops are bits the checker proved were not there.
+    /// A store through an address, at the width the layout table states.
     fn storeIndirect(self: *FunctionEmitter, id: InstId) std.Io.Writer.Error!void {
         const mir = self.mir;
         const n = id.index();
@@ -2156,42 +2191,15 @@ const FunctionEmitter = struct {
         const ty = mir.typeOf(id);
         const raw = mir.tagOf(id) == .store_raw;
         if (raw) try self.rawPointer(id);
-        const storage = self.module.representationOf(ty).storage;
-        switch (storage) {
-            .integer => |integer| if (integer.bits < 64) {
-                const t = storageType(storage);
-                try self.w.print("    %iw{d} = arith.trunci %v{d} : {s} to {s}", .{ n, rhs.index(), int_type, t });
-                try self.here(span);
-                try self.w.print("    llvm.store %iw{d}, ", .{n});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(lhs);
-                try self.w.print(" : {s}, !llvm.ptr", .{t});
-                try self.here(span);
-            } else {
-                try self.w.print("    llvm.store %v{d}, ", .{rhs.index()});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(lhs);
-                try self.w.print(" : {s}, !llvm.ptr", .{int_type});
-                try self.here(span);
-            },
-            .boolean => {
-                try self.w.print("    %iw{d} = arith.extui %v{d} : i1 to i8", .{ n, rhs.index() });
-                try self.here(span);
-                try self.w.print("    llvm.store %iw{d}, ", .{n});
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(lhs);
-                try self.w.writeAll(" : i8, !llvm.ptr");
-                try self.here(span);
-            },
-            .float, .enum_tag, .unit, .code_pointer, .data_pointer => {
-                try self.w.writeAll("    llvm.store ");
-                try self.writeValue(rhs);
-                try self.w.writeAll(", ");
-                if (raw) try self.w.print("%ip{d}", .{n}) else try self.writeValue(lhs);
-                try self.w.print(" : {s}, !llvm.ptr", .{storageType(storage)});
-                try self.here(span);
-            },
-            .bytes, .no_value, .invalid => std.debug.panic("compiler defect: an indirect store has {s} storage", .{
-                @tagName(std.meta.activeTag(storage)),
-            }),
-        }
+        const access: ScalarAccess = .{
+            .w = self.w,
+            .emitter = self,
+            .span = span,
+            .n = n,
+            .temp = "iw",
+            .address = if (raw) .{ .raw = n } else .{ .inst = lhs },
+        };
+        try access.store(self.module.representationOf(ty).storage, .{ .inst = rhs }, "an indirect store");
     }
 
     /// How wide a value of a type is. Read from the module's layout table,

@@ -9512,6 +9512,11 @@ pub const Typing = struct {
         observation_traits: []const bool = &.{},
         closure_args: std.ArrayList(TypeId) = .empty,
         interned_closures: Chain(.newest_first) = .empty,
+        /// The first closure type interned over each environment record. A
+        /// record substitutes as that closure does: what `into_captures`
+        /// answers inside a generic body is the record of the closure the
+        /// instance builds, not the record its body was checked against.
+        closure_of_environment: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
         empty_capture_record: TypeId = .poison,
         /// The exact source signature of each closure identity, borrowed from
         /// the checker or a finished typing so implementation lookup answers
@@ -9831,6 +9836,10 @@ pub const Typing = struct {
                 .self_ty = self_ty,
             } });
             try self.interned_closures.note(self.gpa, key, @intFromEnum(id));
+            if (environment != .unit) {
+                const slot = try self.closure_of_environment.getOrPut(self.gpa, environment);
+                if (!slot.found_existing) slot.value_ptr.* = id;
+            }
             return id;
         }
 
@@ -10116,7 +10125,7 @@ pub const Typing = struct {
                 else
                     .poison,
                 .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never => ty,
-                .struct_ => if (self.isInterpolation(ty) or self.instanceOf(ty) != null) null else ty,
+                .struct_ => if (self.isInterpolation(ty) or self.instanceOf(ty) != null or self.closure_of_environment.contains(ty)) null else ty,
                 .enum_, .newtype => if (self.instanceOf(ty) != null) null else ty,
                 .borrow, .array, .callable, .closure => null,
             };
@@ -10217,6 +10226,8 @@ pub const Typing = struct {
                 // nominal instance key; other nominal children use that key.
                 .struct_ => if (self.isInterpolation(ty)) {
                     return self.substituteInterpolation(ty, substitution);
+                } else if (self.closure_of_environment.get(ty)) |closure| {
+                    return self.get(try substitution.apply(self, closure)).closure.environment;
                 },
                 .enum_, .newtype => {},
                 .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never => unreachable,
@@ -12193,6 +12204,7 @@ pub const Typing = struct {
             self.borrowed_types = .empty;
             self.closure_args.deinit(self.gpa);
             self.interned_closures.deinit(self.gpa);
+            self.closure_of_environment.deinit(self.gpa);
             self.pool.deinit(self.gpa);
             self.expr_types.deinit(self.gpa);
             self.construction_types.deinit(self.gpa);
@@ -14555,6 +14567,8 @@ pub const Typing = struct {
             self.interned_callables = .empty;
             self.interned_closures.deinit(self.gpa);
             self.interned_closures = .empty;
+            self.closure_of_environment.deinit(self.gpa);
+            self.closure_of_environment = .empty;
 
             // One handover at a time, each owned from the moment it is taken.
             // As one struct literal, a field that fails leaves every field
@@ -14872,6 +14886,10 @@ pub const Typing = struct {
                 ),
                 .closure => |closure| {
                     try b.interned_closures.note(gpa, closureTypeHash(closure.closure, t.closureArgs(closure), t.closureImplArgs(closure), closure.self_ty), @intCast(i));
+                    if (closure.environment != .unit) {
+                        const slot = try b.closure_of_environment.getOrPut(gpa, closure.environment);
+                        if (!slot.found_existing) slot.value_ptr.* = TypeId.at(@intCast(i));
+                    }
                 },
                 else => {},
             };

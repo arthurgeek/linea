@@ -940,19 +940,22 @@ fn typecheckInternal(
     }
     defer c.unwrapped.deinit(gpa);
     defer gpa.free(c.binding_value_locs);
-    errdefer c.builder.deinit();
+    // Set once the finished typing owns everything the guards below release,
+    // so a failure after that is released by the typing alone.
+    var handed_over = false;
+    errdefer if (!handed_over) c.builder.deinit();
     // Guarded rather than deferred: the binding types leave with the caller,
     // so the only run that frees them here is one that never gets that far.
-    errdefer c.binding_types.deinit(gpa);
-    errdefer c.decl_returns.deinit(gpa);
-    errdefer c.decl_signatures.deinit(gpa);
-    errdefer gpa.free(c.declared_requirements);
-    errdefer gpa.free(c.declared_traits);
-    errdefer {
+    errdefer if (!handed_over) c.binding_types.deinit(gpa);
+    errdefer if (!handed_over) c.decl_returns.deinit(gpa);
+    errdefer if (!handed_over) c.decl_signatures.deinit(gpa);
+    errdefer if (!handed_over) gpa.free(c.declared_requirements);
+    errdefer if (!handed_over) gpa.free(c.declared_traits);
+    errdefer if (!handed_over) {
         for (c.declared_callables) |bounds| if (bounds.len > 0) gpa.free(bounds);
         gpa.free(c.declared_callables);
-    }
-    errdefer gpa.free(c.written_types);
+    };
+    errdefer if (!handed_over) gpa.free(c.written_types);
     defer c.variant_uses.deinit(gpa);
     defer c.part_selections.deinit(gpa);
     if (retained) |prefix| c.folded.pool = try prefix.typing.constant_pool.clone(gpa);
@@ -1202,7 +1205,7 @@ fn typecheckInternal(
     }
 
     const impl_of_decl = try gpa.alloc(u32, ast.declCount());
-    errdefer gpa.free(impl_of_decl);
+    errdefer if (!handed_over) gpa.free(impl_of_decl);
     @memset(impl_of_decl, impl_of_none);
     for (0..ast.declCount()) |i| {
         const impl = resolution.implEnclosing(node.DeclId.at(@intCast(i)));
@@ -1473,7 +1476,7 @@ fn typecheckInternal(
     z_overlap.end();
 
     const observation_traits = try @import("observations.zig").compute(gpa, ast, resolution);
-    errdefer gpa.free(observation_traits);
+    errdefer if (!handed_over) gpa.free(observation_traits);
     c.builder.observation_traits = observation_traits;
     const z_signatures = tracy.beginZone(@src(), "tc.signatures");
 
@@ -1484,7 +1487,7 @@ fn typecheckInternal(
     // written type read before the answer exists is a type nobody named.
     try c.pairImplementationMembers();
     c.supply = try types_mod.SupplyIndex.build(gpa, ast.declCount(), c.supplied.items);
-    errdefer c.supply.deinit(gpa);
+    errdefer if (!handed_over) c.supply.deinit(gpa);
     c.builder.supply = c.supply;
 
     // Before a part is resolved, because resolving one is what does not
@@ -1828,29 +1831,29 @@ fn typecheckInternal(
     // needs a parameter's type, and reading a declared one back out of its
     // annotation would ask a question about names that this pass answered.
     //
-    // Handing the builder over last leaves nothing that can fail after the
-    // guards above stop applying: every one of them frees something the
-    // returned typing has taken.
+    // Every guard from here on frees something the returned typing takes,
+    // so each stops at `handed_over`; the walk helps written after it read
+    // the finished typing, and a failure there releases it whole.
     z_obligations.end();
     const calls = try c.calls.toOwnedSlice(gpa);
-    errdefer {
+    errdefer if (!handed_over) {
         for (calls) |call| call.deinit(gpa);
         gpa.free(calls);
-    }
+    };
     const recovered_call_args = try c.recovered_call_args.toOwnedSlice(gpa);
-    errdefer gpa.free(recovered_call_args);
+    errdefer if (!handed_over) gpa.free(recovered_call_args);
     const recovered_calls = try c.recovered_calls.toOwnedSlice(gpa);
-    errdefer gpa.free(recovered_calls);
+    errdefer if (!handed_over) gpa.free(recovered_calls);
     const function_values = try c.function_values.toOwnedSlice(gpa);
-    errdefer {
+    errdefer if (!handed_over) {
         for (function_values) |value| value.deinit(gpa);
         gpa.free(function_values);
-    }
+    };
 
     // Handed on rather than freed: lowering asks the same question after
     // instantiation that a bound asked before it.
     const impls = try gpa.dupe(types_mod.Implementation, c.implementations);
-    errdefer gpa.free(impls);
+    errdefer if (!handed_over) gpa.free(impls);
 
     // What a symbol calls each module. Built here because this is the pass
     // holding both the program and the pool a symbol is spelled from; a type
@@ -1872,10 +1875,10 @@ fn typecheckInternal(
 
     const module_paths = try gpa.alloc([]const u8, c.program.modules.len);
     var filled: usize = 0;
-    errdefer {
+    errdefer if (!handed_over) {
         for (module_paths[0..filled]) |m| gpa.free(m);
         gpa.free(module_paths);
-    }
+    };
     for (0..c.program.modules.len) |i| {
         const dotted = try gpa.dupe(u8, c.program.modulePath(ModuleId.from(i)));
         module_paths[i] = dotted;
@@ -1889,10 +1892,10 @@ fn typecheckInternal(
     var body_namer = try BodyNamer.init(gpa, c.program, c.res, &pool_view, calls);
     defer body_namer.deinit();
     const closure_names = try body_namer.names(gpa, c.res.closures.exprs);
-    errdefer {
+    errdefer if (!handed_over) {
         for (closure_names) |n| gpa.free(n);
         gpa.free(closure_names);
-    }
+    };
     const constructor_names = names: {
         const exprs = try gpa.alloc(ExprId, c.constructor_count);
         defer gpa.free(exprs);
@@ -1902,36 +1905,42 @@ fn typecheckInternal(
         };
         break :names try body_namer.names(gpa, exprs);
     };
-    errdefer {
+    errdefer if (!handed_over) {
         for (constructor_names) |n| gpa.free(n);
         gpa.free(constructor_names);
-    }
+    };
     try c.nameCaptureEnvironments(closure_names);
 
     const suppressed_generated_bodies = try c.suppressed_generated_bodies.toOwnedSlice(gpa);
-    errdefer gpa.free(suppressed_generated_bodies);
+    errdefer if (!handed_over) gpa.free(suppressed_generated_bodies);
 
     const postfix = try c.postfix.toOwnedSlice(gpa);
-    errdefer {
+    errdefer if (!handed_over) {
         for (postfix) |p| gpa.free(p.args);
         gpa.free(postfix);
-    }
+    };
     const named = try c.named.toOwnedSlice(gpa);
-    errdefer gpa.free(named);
+    errdefer if (!handed_over) gpa.free(named);
     const projected = try c.projected.toOwnedSlice(gpa);
-    errdefer gpa.free(projected);
+    errdefer if (!handed_over) {
+        for (projected) |row| gpa.free(row.impl_args);
+        gpa.free(projected);
+    };
     const traversals = try c.traversals.toOwnedSlice(gpa);
-    errdefer gpa.free(traversals);
+    errdefer if (!handed_over) {
+        for (traversals) |row| gpa.free(row.impl_args);
+        gpa.free(traversals);
+    };
     const expansions = try c.expansions.toOwnedSlice(gpa);
-    errdefer {
+    errdefer if (!handed_over) {
         for (expansions) |row| {
             gpa.free(row.impl_args);
             if (row.delegation) |delegate| gpa.free(delegate.backing_args);
         }
         gpa.free(expansions);
-    }
+    };
     const range_places = try c.range_places.toOwnedSlice(gpa);
-    errdefer gpa.free(range_places);
+    errdefer if (!handed_over) gpa.free(range_places);
 
     // The lists have settled and their row order cannot change. The index
     // stores positions, so finishing the type pool cannot invalidate it.
@@ -1945,29 +1954,41 @@ fn typecheckInternal(
     indexed.traversals = traversals;
     indexed.range_places = range_places;
     var call_index = try types_mod.CallIndex.build(gpa, ast.exprCount(), &indexed);
-    errdefer call_index.deinit(gpa);
+    errdefer if (!handed_over) call_index.deinit(gpa);
 
     try c.reportDeferredUnused();
     try c.reportDeferredImmutable();
     try c.prepareValueQueries(prepare_completions);
     const constant_texts = try c.folded.takeTexts(gpa);
-    errdefer {
+    errdefer if (!handed_over) {
         for (constant_texts) |bytes| gpa.free(bytes);
         gpa.free(constant_texts);
-    }
+    };
+    // Each part of the seed is guarded until the seed holds it, and the
+    // seed as a whole until the check returns it to the caller.
     if (captured_seed) |seed| {
-        const parameters = try gpa.alloc([]const TypeId, param_types.len);
-        for (param_types, parameters) |row, *saved| saved.* = try gpa.dupe(TypeId, row);
+        const parameters = try copyRetained(gpa, param_types);
+        errdefer freeRetained(gpa, parameters);
+        const declared_types = try gpa.dupe(TypeId, type_of_decl.entries);
+        errdefer gpa.free(declared_types);
+        const expression_owners = try gpa.dupe(DeclId, c.expression_owners);
+        errdefer gpa.free(expression_owners);
+        const binding_owners = try gpa.dupe(DeclId, c.binding_owners);
+        errdefer gpa.free(binding_owners);
+        const declarations = try gpa.alloc(bool, ast.declCount());
+        errdefer gpa.free(declarations);
+        @memset(declarations, true);
+        const call_impls = try copyRetained(gpa, @as([]const types_mod.CallImpl, c.call_impls.items));
         seed.* = .{
             .parameters = parameters,
-            .declared_types = try gpa.dupe(TypeId, type_of_decl.entries),
-            .expression_owners = try gpa.dupe(DeclId, c.expression_owners),
-            .binding_owners = try gpa.dupe(DeclId, c.binding_owners),
-            .declarations = try gpa.alloc(bool, ast.declCount()),
-            .call_impls = try copyRetained(gpa, @as([]const types_mod.CallImpl, c.call_impls.items)),
+            .declared_types = declared_types,
+            .expression_owners = expression_owners,
+            .binding_owners = binding_owners,
+            .declarations = declarations,
+            .call_impls = call_impls,
         };
-        @memset(@constCast(seed.declarations), true);
     }
+    errdefer if (captured_seed) |seed| freeRetained(gpa, seed.*);
     // The checker transfers its graph below; reopened builders clone borrowed graphs.
     c.builder.constant_pool = &.{};
     var typing = try c.builder.finish(c.binding_types);
@@ -2108,6 +2129,8 @@ fn typecheckInternal(
     c.constant_materializations = .empty;
     typing.constant_values = c.constant_values;
     c.constant_values = .empty;
+    handed_over = true;
+    errdefer typing.deinit(gpa);
     try c.writeWalkHelps(&typing);
     return typing;
 }
@@ -23718,7 +23741,9 @@ const Checker = struct {
         const result = try self.expect(id, result_type, expected);
         if (result == .poison or self.call_of[id.index()] != no_call) return result;
         const index: u32 = @intCast(self.calls.items.len);
-        try self.calls.append(self.gpa, .{ .at = id, .target = .closure_recovery, .signature = signature, .args = try self.gpa.dupe(ExprId, &.{receiver}) });
+        const args = try self.gpa.dupe(ExprId, &.{receiver});
+        errdefer self.gpa.free(args);
+        try self.calls.append(self.gpa, .{ .at = id, .target = .closure_recovery, .signature = signature, .args = args });
         self.call_of[id.index()] = index;
         return result;
     }
@@ -24231,12 +24256,14 @@ const Checker = struct {
         if (self.call_of[id.index()] != no_call) return result;
 
         const at: u32 = @intCast(self.calls.items.len);
+        const normalized_args = try self.gpa.dupe(ExprId, args);
+        errdefer self.gpa.free(normalized_args);
         try self.calls.append(self.gpa, .{
             .at = id,
             .target = .{ .closure = closure_type.closure },
             .callee_convention = if (invocation_marked) .inout else descriptor.invocation,
             .signature = signature_ty,
-            .args = try self.gpa.dupe(ExprId, args),
+            .args = normalized_args,
         });
         self.call_of[id.index()] = at;
         return result;
@@ -27753,22 +27780,27 @@ const Checker = struct {
             if (!want.callable_context) converted = want.ty;
         }
 
-        var implementation = try self.valueImplementation(id, lists, settled);
-        const generics = self.ast.declTypeParams(d).len;
-        const type_args = if (generics == 0) &.{} else try self.gpa.dupe(TypeId, found[0][0..generics]);
-        errdefer if (type_args.len > 0) self.gpa.free(type_args);
-        if (implementation) |*rec| if (rec.args.len > 0) {
-            rec.args = try self.gpa.dupe(TypeId, rec.args);
+        // The arguments are the row's once it is appended, and guarded only
+        // until then: the row's own release frees them after.
+        const value: u32 = value: {
+            var implementation = try self.valueImplementation(id, lists, settled);
+            const generics = self.ast.declTypeParams(d).len;
+            const type_args = if (generics == 0) &.{} else try self.gpa.dupe(TypeId, found[0][0..generics]);
+            errdefer if (type_args.len > 0) self.gpa.free(type_args);
+            if (implementation) |*rec| if (rec.args.len > 0) {
+                rec.args = try self.gpa.dupe(TypeId, rec.args);
+            };
+            errdefer if (implementation) |rec| if (rec.args.len > 0) self.gpa.free(rec.args);
+            const value: u32 = @intCast(self.function_values.items.len);
+            try self.function_values.append(self.gpa, .{
+                .at = id,
+                .target = .{ .declared = d },
+                .signature = converted,
+                .type_args = type_args,
+                .implementation = implementation,
+            });
+            break :value value;
         };
-        errdefer if (implementation) |rec| if (rec.args.len > 0) self.gpa.free(rec.args);
-        const value: u32 = @intCast(self.function_values.items.len);
-        try self.function_values.append(self.gpa, .{
-            .at = id,
-            .target = .{ .declared = d },
-            .signature = converted,
-            .type_args = type_args,
-            .implementation = implementation,
-        });
 
         if (open) {
             var parameters: [3][]TypeId = .{ &.{}, &.{}, &.{} };
@@ -27871,11 +27903,15 @@ const Checker = struct {
     /// of the type it settled on.
     fn closeScope(self: *Checker, scope: OpenScope) std.mem.Allocator.Error!void {
         self.open_types.fallbackBody(scope.open);
-        for (self.pending_values.items[scope.values..]) |pending| {
-            defer pending.deinit(self.gpa);
-            try self.settleValue(pending);
+        // The body's values are released and leave the list together, on
+        // every exit: a settlement that fails part-way leaves no row behind
+        // for the checker's own cleanup to release a second time.
+        defer {
+            for (self.pending_values.items[scope.values..]) |pending| pending.deinit(self.gpa);
+            self.pending_values.shrinkRetainingCapacity(scope.values);
         }
-        self.pending_values.shrinkRetainingCapacity(scope.values);
+        var at: usize = scope.values;
+        while (at < self.pending_values.items.len) : (at += 1) try self.settleValue(self.pending_values.items[at]);
         try self.checkSettledRanges(scope.ranges);
     }
 
@@ -34692,6 +34728,9 @@ const Checker = struct {
         named: TokenId,
         containment: enum { here, where_promised },
     ) std.mem.Allocator.Error!void {
+        // A `where` clause the parser recovered may name no subject and no
+        // bound; a list of nothing repeats nothing and demands nothing.
+        if (bounds.len == 0) return;
         const through = try self.traitsBounding(null, bounds);
         defer types_mod.freeBoundTraits(self.gpa, through);
         const demand = capabilityDemand(self.ast, self.res, bounds, through);
@@ -39636,12 +39675,27 @@ fn copyRetained(gpa: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!
         .pointer => |pointer| {
             if (pointer.size != .slice) @compileError("retained semantic records must not contain pointers");
             const result = try gpa.alloc(pointer.child, value.len);
-            for (value, result) |item, *target| target.* = try copyRetained(gpa, item);
+            var filled: usize = 0;
+            errdefer {
+                for (result[0..filled]) |item| freeRetained(gpa, item);
+                gpa.free(result);
+            }
+            for (value, result) |item, *target| {
+                target.* = try copyRetained(gpa, item);
+                filled += 1;
+            }
             return result;
         },
         .@"struct" => |record| {
             var result: T = undefined;
-            inline for (record.fields) |field| @field(result, field.name) = try copyRetained(gpa, @field(value, field.name));
+            var copied: usize = 0;
+            errdefer inline for (record.fields, 0..) |field, i| {
+                if (i < copied) freeRetained(gpa, @field(result, field.name));
+            };
+            inline for (record.fields) |field| {
+                @field(result, field.name) = try copyRetained(gpa, @field(value, field.name));
+                copied += 1;
+            }
             return result;
         },
         .@"union" => {
@@ -39651,6 +39705,23 @@ fn copyRetained(gpa: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!
         },
         .optional => return if (value) |item| try copyRetained(gpa, item) else null,
         else => return value,
+    }
+}
+
+/// Releases what `copyRetained` copied, field by field.
+fn freeRetained(gpa: std.mem.Allocator, value: anytype) void {
+    switch (@typeInfo(@TypeOf(value))) {
+        .pointer => |pointer| {
+            if (pointer.size != .slice) @compileError("retained semantic records must not contain pointers");
+            for (value) |item| freeRetained(gpa, item);
+            gpa.free(value);
+        },
+        .@"struct" => |record| inline for (record.fields) |field| freeRetained(gpa, @field(value, field.name)),
+        .@"union" => switch (value) {
+            inline else => |payload| freeRetained(gpa, payload),
+        },
+        .optional => if (value) |item| freeRetained(gpa, item),
+        else => {},
     }
 }
 
@@ -43415,6 +43486,89 @@ test "slow: checking that fails part-way gives back what it took" {
     try testing.checkAllAllocationFailures(gpa, typecheckOnly, .{.{
         .resolved = &res,
     }});
+}
+
+test "slow: settling function values and closure calls gives back what it took on failure" {
+    try slow_tests.skipUnlessRun();
+    // A function value whose type its uses settle when the body closes, a
+    // closure call and a capture recovery, each recording rows whose storage
+    // passes from the checker to the typing: every allocation is refused in
+    // turn, and the testing allocator holds each row to one release.
+    const gpa = testing.allocator;
+    const source: Source = .{ .path = "t.lin", .text =
+        \\fn twice[T: Copyable](x: T) -> T {
+        \\    copy(x)
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let f = twice
+        \\    let n = f(UInt8(3))
+        \\    let add = [sink k = UInt8(1)] |m: UInt8| m + k
+        \\    let r = add(n)
+        \\    let { k } = add.into_captures()
+        \\    r + k
+        \\}
+    };
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    var interner: Interner = .empty;
+    defer interner.deinit(gpa);
+
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    defer ast.deinit(gpa);
+    var res = try resolveTree(gpa, &ast, &sink);
+    defer res.deinit(gpa);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+
+    try testing.checkAllAllocationFailures(gpa, typecheckOnly, .{.{
+        .resolved = &res,
+    }});
+}
+
+/// Checks a tree as a library prefix is checked, keeping the continuation
+/// seed, and releases what it returned. The seed's allocations are the
+/// caller's, so a check refused part-way through must give back every one.
+fn typecheckSeeded(gpa: std.mem.Allocator, ctx: struct {
+    resolved: *const resolve_mod.ResolvedTree,
+}) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    var seed: CheckSeed = undefined;
+    var typing = try typecheckInternal(gpa, &ctx.resolved.expanded, &ctx.resolved.resolution, &sink, &seed, null, false);
+    typing.deinit(gpa);
+    freeRetained(gpa, seed);
+}
+
+test "slow: checking that keeps a continuation seed gives back the seed when it fails part-way" {
+    try slow_tests.skipUnlessRun();
+    const gpa = testing.allocator;
+    const source: Source = .{ .path = "t.lin", .text =
+        \\trait Measure { fn of(x: Self) -> UInt8 }
+        \\struct Coins { count: UInt8 }
+        \\impl Measure for Coins {
+        \\    fn of(x: Self) -> UInt8 { x.count }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    let coins: Coins = .{ count = 1 }
+        \\    Measure.of(coins)
+        \\}
+    };
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    var interner: Interner = .empty;
+    defer interner.deinit(gpa);
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    defer ast.deinit(gpa);
+    var res = try resolveTree(gpa, &ast, &sink);
+    defer res.deinit(gpa);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+    try testing.checkAllAllocationFailures(gpa, typecheckSeeded, .{.{ .resolved = &res }});
 }
 
 test "an implementation the compiler provides names no declaration to call" {

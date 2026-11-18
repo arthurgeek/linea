@@ -1,0 +1,25 @@
+error[S-Type]: expected a type
+ --> tests/recovery/a_where_clause_missing_its_subject.lin:1:45
+  |
+1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
+  |                                             ^ a `:` introduces a type
+error[S-Type]: expected `:`
+ --> tests/recovery/a_where_clause_missing_its_subject.lin:1:45
+  |
+1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
+  |                                             ^ a where predicate bounds its subject
+error[S-Brace]: expected `{`
+ --> tests/recovery/a_where_clause_missing_its_subject.lin:1:45
+  |
+1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
+  |                                             ^ a function needs a body
+error[S-Entry]: a program is a list of declarations
+ --> tests/recovery/a_where_clause_missing_its_subject.lin:1:45
+  |
+1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
+  |                                             ^ expected `fn` here
+error[N-Unused]: `f` is never used
+ --> tests/recovery/a_where_clause_missing_its_subject.lin:1:4
+  |
+1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
+  |    ^ call it, or name it with a leading `_`

@@ -266,6 +266,7 @@ const OwnerIndex = struct {
             total += bucket.count();
         };
         const sets = try gpa.alloc(SetId, total);
+        errdefer gpa.free(sets);
         var i: usize = 0;
         for (buckets) |found| if (found) |bucket| {
             var keys = bucket.keyIterator();
@@ -873,6 +874,12 @@ const Store = struct {
 };
 
 pub fn check(gpa: Allocator, program: *const ExpandedProgram, res: *const Resolution, typing: *const Typing, cfg: *const Cfg, cancelled: *const std.AutoHashMapUnmanaged(cfg_mod.Placement, void), sink: *Sink) !void {
+    // Opened by the first escape report that asks whether a local owner lends
+    // allocations, and shared by every function after it: the typing it
+    // reopens is the program's, so one per function would be the program's
+    // size once per such function.
+    var escape_pool: ?Typing.Builder = null;
+    defer if (escape_pool) |*opened| opened.deinit();
     for (cfg.functions) |*function| {
         var needed = false;
         for (cfg.blocks[function.blocks.start..function.blocks.end]) |block| {
@@ -892,7 +899,7 @@ pub fn check(gpa: Allocator, program: *const ExpandedProgram, res: *const Resolu
             if (needed) break;
         }
         if (!needed) continue;
-        const initial: Analysis = .{ .gpa = gpa, .ast = &program.ast, .program = program, .res = res, .typing = typing, .cfg = cfg, .function = function, .cancelled = cancelled, .sink = sink, .store = .{ .gpa = gpa } };
+        const initial: Analysis = .{ .gpa = gpa, .ast = &program.ast, .program = program, .res = res, .typing = typing, .cfg = cfg, .function = function, .cancelled = cancelled, .sink = sink, .store = .{ .gpa = gpa }, .escape_pool = &escape_pool };
         var analysis = initial;
         defer analysis.deinit();
         if (!try analysis.seedsDependencies()) continue;
@@ -913,6 +920,9 @@ const Analysis = struct {
     cancelled: *const std.AutoHashMapUnmanaged(cfg_mod.Placement, void),
     sink: *Sink,
     store: Store,
+    /// The typing reopened for escape helps, shared by every function the
+    /// check walks; see `check`.
+    escape_pool: *?Typing.Builder,
     reported: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     liveness: ?*const Liveness = null,
     selections: std.AutoHashMapUnmanaged(ExprId, Selection) = .empty,
@@ -1771,10 +1781,19 @@ const Analysis = struct {
                 const callee = self.ast.withoutGroups(self.ast.call(id).callee);
                 const ordinal = types.variantOrdinalOf(&self.res.variant_ordinals, &self.typing.variant_uses, callee);
                 if (ordinal) |variant| {
+                    // Each payload's facts under its own variant and position,
+                    // gathered and interned once.
+                    var combined: std.ArrayList(Fact) = .empty;
+                    defer combined.deinit(self.gpa);
                     for (self.ast.call(id).args, 0..) |arg, index| {
                         const prefix = try self.store.prepend(payloadHead(variant, @intCast(index)), .root);
-                        result = try self.store.join(result, try self.store.prefixed(try self.value(state, arg), prefix));
+                        for (self.store.facts(try self.value(state, arg))) |fact| {
+                            var part = fact;
+                            part.path = try self.store.concat(prefix, fact.path);
+                            try combined.append(self.gpa, part);
+                        }
                     }
+                    result = try self.store.intern(combined.items);
                 } else if (resolve_mod.constructionOf(self.ast, self.res, id) != null) {
                     // A newtype holds its one operand whole, so it carries
                     // everything the operand carries.
@@ -1783,9 +1802,11 @@ const Analysis = struct {
                 } else result = try self.callResult(state, id);
             },
             // A literal observes each piece it borrows and carries what each
-            // piece it holds carries.
+            // piece it holds carries, gathered and interned once.
             .interp => {
                 const literal = self.typing.exprType(id);
+                var combined: std.ArrayList(Fact) = .empty;
+                defer combined.deinit(self.gpa);
                 for (self.ast.interpolation(id).pieces, 0..) |piece, i| {
                     if (i % 2 == 0) continue;
                     const facts = if (self.typing.interpolationBorrows(literal, @intCast(i)))
@@ -1793,8 +1814,9 @@ const Analysis = struct {
                     else
                         try self.value(state, piece);
                     try self.noteBorrowedThrough(Cell.expression(id), facts, piece);
-                    result = try self.store.join(result, facts);
+                    try combined.appendSlice(self.gpa, self.store.facts(facts));
                 }
+                result = try self.store.intern(combined.items);
             },
             // The success path of `e else { … }` yields what `e` carried, as
             // `e?` does; its failing path records the block as its source.
@@ -2617,14 +2639,12 @@ const Analysis = struct {
     ///
     /// **Bound:** the function's escape reports, each built once. The clause
     /// is one answer for the function and is worked out once for all of them,
-    /// and the typing is reopened at most once, by the first report that asks
-    /// whether a local owner lends allocations.
+    /// and the typing is reopened at most once for the whole check, by the
+    /// first report that asks whether a local owner lends allocations.
     fn reviseEscapes(self: *Analysis) !void {
         if (self.pending_escapes.items.len == 0) return;
         const clause = try self.functionClause();
-        var pool: ?Typing.Builder = null;
-        defer if (pool) |*opened| opened.deinit();
-        for (self.pending_escapes.items) |pending| try self.sink.revise(pending.index, try self.escapeReport(pending, clause, &pool));
+        for (self.pending_escapes.items) |pending| try self.sink.revise(pending.index, try self.escapeReport(pending, clause, self.escape_pool));
     }
 
     /// What an escape's origins say a clause could name: the parameters it

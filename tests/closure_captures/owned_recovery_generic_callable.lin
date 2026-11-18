@@ -1,0 +1,16 @@
+// A capture whose type is a type parameter is recovered as the type the
+// instance gives it, a function here.
+fn recover[T](sink item: T) -> T {
+    let callback = [sink _item = item] || {}
+    let { _item: recovered } = callback.into_captures()
+    recovered
+}
+
+fn seven() -> UInt8 {
+    7
+}
+
+fn main() -> UInt8 {
+    let get = recover(seven)
+    get()
+}

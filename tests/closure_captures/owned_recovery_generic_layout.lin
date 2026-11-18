@@ -1,0 +1,20 @@
+// The captures of a closure in a generic function are laid out by the types
+// the instance gives them, so a zero-sized parameter takes no room beside the
+// count.
+struct Marker {}
+
+fn count_after[T: Discardable](sink first: T, sink count: UInt8) -> UInt8 {
+    let callback = [sink _first = first, sink _count = count] || {}
+    let { _first: _, _count: kept } = callback.into_captures()
+    kept
+}
+
+fn count_before[T: Discardable](sink count: UInt8, sink last: T) -> UInt8 {
+    let callback = [sink _count = count, sink _last = last] || {}
+    let { _count: kept, _last: _ } = callback.into_captures()
+    kept
+}
+
+fn main() -> UInt8 {
+    count_after(Marker {}, 2) + count_before(3, Marker {}) + count_after(UInt64(9), 1)
+}

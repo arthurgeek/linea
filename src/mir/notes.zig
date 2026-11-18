@@ -92,6 +92,7 @@ pub fn settle(
 /// program does, and says `Cell[T]` in a program where nothing is generic.
 pub fn typesHeld(gpa: std.mem.Allocator, module: *const mir.Module) ![]bool {
     const held = try gpa.alloc(bool, module.types.pool.len);
+    errdefer gpa.free(held);
     @memset(held, false);
 
     // The same set the emitter declares from, and then what those hold: a

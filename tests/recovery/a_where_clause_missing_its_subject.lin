@@ -1,0 +1,7 @@
+fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
+    .Ok(w)
+}
+
+fn main() -> UInt8 {
+    0
+}

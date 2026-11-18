@@ -96,22 +96,36 @@ const Pending = struct {
 /// adjacent operation carrying the same pair.
 fn startsARun(graph: *const Cfg, first: u32, at: OpId) bool {
     if (at.index() == first) return true;
-    const before = OpId.at(@intCast(at.index() - 1));
-    return graph.opSchedule(before) != graph.opSchedule(at) or graph.opExit(before) != graph.opExit(at);
+    return !continuesThePlacement(graph, at);
 }
 
-/// Whether every place a placement takes is already gone on this path.
+/// Whether the operation before `at` in the whole graph belongs to the same
+/// placement. The builder emits a placement's operations one after another
+/// while it walks the deferred expression, so they are one contiguous range
+/// of operations, spread over the blocks that expression's control flow
+/// makes; only the first of them is the placement's entry.
+fn continuesThePlacement(graph: *const Cfg, at: OpId) bool {
+    if (at.index() == 0) return false;
+    const before = OpId.at(@intCast(at.index() - 1));
+    return graph.opSchedule(before) == graph.opSchedule(at) and graph.opExit(before) == graph.opExit(at);
+}
+
+/// Whether every place a placement takes is already gone on this path, asked
+/// at the placement's entry of the state before any of it applies.
 ///
-/// Asked of the state before the run applies, which is what makes the answer
-/// about the path rather than about what the run itself does. A run that takes
-/// one gone place and one live one is neither spent nor safe to skip: running
-/// it takes the first twice and skipping it loses the second, so it is not
-/// cancelled and [O-Move] refuses the program.
-fn spentAt(c: *const Checker, at: OpId, end: u32, state: []const State) bool {
-    const schedule = c.cfg.opSchedule(at);
-    const exit = c.cfg.opExit(at);
-    var i: u32 = @intCast(at.index());
-    while (i < end) : (i += 1) {
+/// The answer covers every operation of the placement, in every block its
+/// expression reaches, so the whole expression either runs or is cancelled:
+/// lowering omits a cancelled one whole. A placement that takes nothing is
+/// never spent, since it still has its effects to run. One that takes one
+/// gone place and one live one is not spent either: running it takes the
+/// first twice and skipping it loses the second, so it runs and [O-Move]
+/// refuses the program.
+fn spentAt(c: *const Checker, entry: OpId, state: []const State) bool {
+    const schedule = c.cfg.opSchedule(entry);
+    const exit = c.cfg.opExit(entry);
+    var takes = false;
+    var i: u32 = @intCast(entry.index());
+    while (i < c.cfg.ops.len) : (i += 1) {
         const op = OpId.at(i);
         if (c.cfg.opSchedule(op) != schedule or c.cfg.opExit(op) != exit) break;
         if (c.cfg.opTag(op) != .consume) continue;
@@ -119,8 +133,9 @@ fn spentAt(c: *const Checker, at: OpId, end: u32, state: []const State) bool {
         if (!place.isWhole()) return false;
         const slot = c.slotOf(place.root) orelse return false;
         if (state[slot] != .moved) return false;
+        takes = true;
     }
-    return true;
+    return takes;
 }
 
 fn holds(open: []const Pending, p: Pending) bool {
@@ -243,6 +258,7 @@ fn checkBodies(
     defer c.scheduled.deinit(gpa);
     defer c.held_by.deinit(gpa);
     defer c.taken_while_held.deinit(gpa);
+    defer c.spent_placements.deinit(gpa);
     defer c.emitted.deinit(gpa);
     defer c.leaks.deinit(gpa);
 
@@ -317,6 +333,10 @@ const Checker = struct {
     /// Whether every place the placement being walked takes is already gone.
     /// Settled once at the run's start; see `runBlock`.
     run_is_spent: bool = false,
+    /// Whether each placement of the function being walked was spent at its
+    /// entry, read by the runs of it in the blocks after the entry. Sized by
+    /// the function's placements.
+    spent_placements: std.AutoHashMapUnmanaged(cfg_mod.Placement, bool) = .empty,
     /// Placements the walk found already discharged, removed before the
     /// disposal plan crosses the pass boundary.
     cancelled: Cancellations = .empty,
@@ -2440,6 +2460,7 @@ const Checker = struct {
         self.scheduled.clearRetainingCapacity();
         self.held_by.clearRetainingCapacity();
         self.taken_while_held.clearRetainingCapacity();
+        self.spent_placements.clearRetainingCapacity();
         for (self.cfg.blocks[f.blocks.start..f.blocks.end]) |blk| {
             var ops = self.cfg.opsOf(blk);
             while (ops.next()) |op| {
@@ -2648,17 +2669,41 @@ const Checker = struct {
         while (ops.next()) |op| {
             const tag = self.cfg.opTag(op);
             const at = self.cfg.opAt(op);
-            // A placement's operations are contiguous, so whether it is spent
-            // is settled once, here, against the state before any of the run
-            // has applied. Asking per operation instead lets the first consume
-            // to find a moved place stand for the whole expression, while the
-            // consumes beside it keep marking their own values taken -- and
-            // lowering skips all of them, so those values are released by
-            // nobody and the graph says they were.
+            // Whether a placement is spent is settled once, at its entry,
+            // against the state before any of it has applied, and every run
+            // of it in the blocks after reads that answer. A spent placement
+            // is omitted whole by lowering, so none of its operations applies
+            // here either: a read, a write or a take it would make on this
+            // path is one the program does not make. Applying some of them
+            // lets a write in a cancelled expression refill a moved place
+            // that nothing refills at run time.
             const schedule = self.cfg.opSchedule(op);
             if (schedule != ExprId.none) {
-                if (startsARun(self.cfg, blk.ops.start, op)) {
-                    self.run_is_spent = spentAt(self, op, blk.ops.end, state);
+                const placement: cfg_mod.Placement = .{ .schedule = schedule, .exit = self.cfg.opExit(op) };
+                if (!continuesThePlacement(self.cfg, op)) {
+                    self.run_is_spent = spentAt(self, op, state);
+                    try self.spent_placements.put(self.gpa, placement, self.run_is_spent);
+                } else if (startsARun(self.cfg, blk.ops.start, op)) {
+                    self.run_is_spent = self.spent_placements.get(placement) orelse false;
+                }
+                if (self.run_is_spent) {
+                    // The program wrote one disposal and on this path it
+                    // happened elsewhere, so the placement is recorded as
+                    // cancelled for lowering to read: what a runtime drop flag
+                    // would answer, the lattice already knows.
+                    //
+                    // A place gone only because [O-Merge] already refused the
+                    // paths into this join is not cancelled: that disagreement
+                    // is the one mistake, and a dead schedule would be a
+                    // second report of it.
+                    if (report_now) {
+                        try self.cancelled.placed.put(self.gpa, placement, {});
+                        if (tag == .consume) {
+                            const root = self.cfg.opPlace(op).root;
+                            if (!self.fromMerge(moved_at[self.slotOf(root).?], root)) try self.cancelled.at.put(self.gpa, placement, {});
+                        }
+                    }
+                    continue;
                 }
             }
 
@@ -2995,28 +3040,7 @@ const Checker = struct {
     ) std.mem.Allocator.Error!void {
         const place = self.cfg.opPlace(op);
         const at = self.cfg.opAt(op);
-        const schedule = self.cfg.opSchedule(op);
         const root = place.root;
-
-        // A `defer` placed this, and on this path the value is already gone.
-        // The program wrote one disposal and it happened elsewhere, so the
-        // placement is recorded as cancelled and nothing is reported. This is
-        // what a runtime drop flag buys; here the lattice already knows, and
-        // what it knows is written down for lowering to read.
-        //
-        // A value that is gone only because [O-Merge] already refused the
-        // paths into this join is not cancelled: that disagreement is the one
-        // mistake, and a dead schedule would be a second report of it.
-        if (schedule != ExprId.none and self.run_is_spent and
-            place.isWhole() and state[slot] == .moved)
-        {
-            if (report_now and !self.fromMerge(moved_at[slot], root)) try self.cancelled.at.put(
-                self.gpa,
-                .{ .schedule = schedule, .exit = self.cfg.opExit(op) },
-                {},
-            );
-            return;
-        }
 
         if (!place.isWhole()) {
             // There is no partial move: a partially-moved value is a state the
@@ -3453,7 +3477,9 @@ test "a failed group entry does not suppress sibling generated ownership" {
 
 /// Runs the pass over `text` once per allocation it makes, cutting that
 /// allocation and every one after it, and requires each run to either refuse
-/// or report.
+/// or report. Every cut is made twice: once with resizing in place allowed,
+/// and once with every resize refused, so that a shrink falls back on a fresh
+/// allocation the cut can refuse too.
 ///
 /// `text` must be a program this pass rejects, so "reported nothing" is always
 /// the wrong answer and never merely an uninteresting one.
@@ -3479,30 +3505,33 @@ fn everyCutRefusesOrReports(gpa: std.mem.Allocator, text: []const u8) !void {
     var res = try resolveTree(scratch, &ast, &setup);
     var typing = try typecheckTree(scratch, &res, &setup);
 
-    var cut: usize = 0;
-    var refused: usize = 0;
-    while (cut < 4096) : (cut += 1) {
-        var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = cut });
-        var reports = std.heap.ArenaAllocator.init(failing.allocator());
-        defer reports.deinit();
-        var sink = Sink.init(reports.allocator());
+    for ([_]usize{ std.math.maxInt(usize), 0 }) |resize_fail_index| {
+        var cut: usize = 0;
+        var refused: usize = 0;
+        while (cut < 4096) : (cut += 1) {
+            var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = cut, .resize_fail_index = resize_fail_index });
+            var reports = std.heap.ArenaAllocator.init(failing.allocator());
+            defer reports.deinit();
+            var sink = Sink.init(reports.allocator());
 
-        if (checkTree(failing.allocator(), &res, &typing, &sink)) |returned| {
-            var plan = returned;
-            plan.deinit(failing.allocator());
-            // Returning normally is a claim that the program is safe, and this
-            // program is not. Whether the cut fell past the last allocation or
-            // on the one the diagnostic needed, the answer must be the same.
-            try testing.expect(sink.hasErrors());
-            if (cut > failing.alloc_index) break;
-        } else |err| {
-            try testing.expectEqual(error.OutOfMemory, err);
-            refused += 1;
+            if (checkTree(failing.allocator(), &res, &typing, &sink)) |returned| {
+                var plan = returned;
+                plan.deinit(failing.allocator());
+                // Returning normally is a claim that the program is safe, and
+                // this program is not. Whether the cut fell past the last
+                // allocation or on the one the diagnostic needed, the answer
+                // must be the same.
+                try testing.expect(sink.hasErrors());
+                if (cut > failing.alloc_index) break;
+            } else |err| {
+                try testing.expectEqual(error.OutOfMemory, err);
+                refused += 1;
+            }
         }
-    }
 
-    // A pass that allocated nothing would satisfy the loop vacuously.
-    try testing.expect(refused > 0);
+        // A pass that allocated nothing would satisfy the loop vacuously.
+        try testing.expect(refused > 0);
+    }
 }
 
 test "fixpoint budget covers reachability every state rise and open transfer" {
@@ -3958,6 +3987,25 @@ test "ownership allocation failure cannot accept an invalidated observation" {
         \\    let view = borrow owner
         \\    owner = 2
         \\    *view
+        \\}
+    );
+}
+
+test "ownership gives back what a function's graph and its invalidations took when allocation fails" {
+    // A function and a closure each with an `inout` parameter, whose lists
+    // pass to the graph, and a write invalidating a value that observes both
+    // the whole owner and one of its fields, whose set sits in both buckets.
+    try everyCutRefusesOrReports(testing.allocator,
+        \\struct Pair { a: UInt8, b: UInt8 }
+        \\struct Views { whole: borrow Pair, part: borrow UInt8 }
+        \\fn bump(inout p: Pair) { p.a = p.a + 1 }
+        \\fn main() -> UInt8 {
+        \\    var pair: Pair = .{ a = 1, b = 2 }
+        \\    let both: Views = .{ whole = borrow pair, part = borrow pair.a }
+        \\    let reset = |inout q: Pair| { q.b = 0 }
+        \\    reset(&pair)
+        \\    bump(&pair)
+        \\    *both.part + both.whole.b
         \\}
     );
 }
