@@ -127,7 +127,7 @@ test "a value is written through display" {
 
 // `fields_text` writes `fields` as a line writes them, after its message.
 fn fields_text[F: Fields](fields: F) -> String {
-    var line: Line[mem.SystemAllocator] = .{ text = String.new(), rendered = .{ bytes = Vec.new() } }
+    var line: Line[mem.SystemAllocator] = .{ text = String.new(), rendered = String.new() }
     fields.visit(&line).unwrap()
     let Line { text, rendered } = line
     rendered.release()
@@ -140,21 +140,7 @@ fn fields_text[F: Fields](fields: F) -> String {
 @derive(Release)
 struct Line[A: Allocator] {
     text: String[A],
-    rendered: Rendered[A],
-}
-
-// A `Rendered` keeps the text written to it.
-@derive(Release)
-struct Rendered[A: Allocator] {
-    bytes: Vec[UInt8, A],
-}
-
-impl[A: Allocator] Writer for Rendered[A] {
-    type Error = mem.Oom
-
-    fn write_str(inout self: Self, s: Str) -> Result[(), mem.Oom] where carries() {
-        &self.bytes.append_slice(s.as_bytes())
-    }
+    rendered: String[A],
 }
 
 // The text format writes each field as a space, the key, `=` and the value.
@@ -189,7 +175,7 @@ test "a message is quoted only when it could be read as a field" {
 
 // `message_text` writes `message` as a line writes it.
 fn message_text(message: Str) -> String {
-    var line: Line[mem.SystemAllocator] = .{ text = String.new(), rendered = .{ bytes = Vec.new() } }
+    var line: Line[mem.SystemAllocator] = .{ text = String.new(), rendered = String.new() }
     write_message(&line, message).unwrap()
     let Line { text, rendered } = line
     rendered.release()
@@ -202,10 +188,9 @@ fn message_text(message: Str) -> String {
 // differently each time it is asked, and a value judged plain and then
 // written with a line feed in it would be read back as two lines.
 fn write_value[T: Display, A: Allocator](inout line: Line[A], value: T) -> Result[(), mem.Oom] where carries() {
-    &line.rendered.bytes.clear()
+    &line.rendered.clear()
     value.fmt(&line.rendered)?
-    // Every piece written was a `Str`, so the pieces together are UTF-8.
-    let text = Str.from_bytes(line.rendered.bytes.as_slice()).unwrap()
+    let text = line.rendered.view()
     let scanned = scan(text)
     append_quoted_if(&line.text, text, scanned.empty || scanned.space || scanned.special)
 }
@@ -246,7 +231,8 @@ fn append_quoted_if[A: Allocator](inout text: String[A], value: Str, quoted: Boo
     &text.append("\"")
 }
 
-// A `Scan` records what text written to it holds, and keeps none of it.
+// A `Scan` records what a key, a value or a message holds that decides
+// whether it is quoted.
 @copyable
 struct Scan {
     empty: Bool,
@@ -254,12 +240,17 @@ struct Scan {
     special: Bool,
 }
 
-// `scan` records what `text` holds.
+// `scan` records what `text` holds: whether it is empty, holds a space, or
+// holds a control character, `"` or `=`.
 fn scan(text: Str) -> Scan {
-    var scanned = Scan { empty = true, space = false, special = false }
-    match &scanned.write_str(text) {
-        Ok(_) => {},
-        Err(never) => never,
+    var scanned = Scan { empty = text.length() == 0, space = false, special = false }
+    for byte in text.as_bytes() {
+        let b = *byte
+        if b == ascii_space {
+            scanned.space = true
+        } else if b < ascii_space || b == ascii_delete || b == ascii_quote || b == ascii_equals {
+            scanned.special = true
+        }
     }
     scanned
 }
@@ -274,23 +265,6 @@ let ascii_equals: UInt8 = 61
 let ascii_backslash: UInt8 = 92
 
 let ascii_delete: UInt8 = 127
-
-impl Writer for Scan {
-    type Error = Never
-
-    fn write_str(inout self: Self, s: Str) -> Result[(), Never] where carries() {
-        for byte in s.as_bytes() {
-            let b = *byte
-            self.empty = false
-            if b == ascii_space {
-                self.space = true
-            } else if b < ascii_space || b == ascii_delete || b == ascii_quote || b == ascii_equals {
-                self.special = true
-            }
-        }
-        .Ok(())
-    }
-}
 
 // Append `s` to `text` escaped for a quoted value. Runs of bytes that need no
 // escape are appended whole.
