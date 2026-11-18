@@ -7,9 +7,11 @@ const analysis_mod = @import("analysis.zig");
 const test_library = @import("../driver/test_library.zig");
 const Analysis = analysis_mod.Analysis;
 const positions = @import("positions.zig");
+const completion = @import("completion.zig");
 const references = @import("references.zig");
 const uri_mod = @import("uri.zig");
 const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
+const ast_mod = @import("../syntax/ast.zig");
 const TokenId = @import("../lexer/token.zig").TokenId;
 const resolve = @import("../sema/resolve.zig");
 const BindingId = resolve.BindingId;
@@ -39,6 +41,10 @@ pub const Refused = error{
     AnEntryPointIsNamedByItsSpelling,
     ACallableInterfaceRelationIsNotRenameable,
     AGeneratedMemberIsNotRenameable,
+    /// A use the rename rewrites would reach another binding of the new name.
+    ANewNameWouldBeCapturedByAnotherBinding,
+    /// A use of another binding of the new name would reach the renamed one.
+    ANewNameWouldShadowAnotherBinding,
 };
 
 /// Return edits for the name under the cursor, or null if no name is selected.
@@ -197,8 +203,102 @@ pub fn forPositionReporting(
 
     const sites = try references.sitesOf(gpa, checked, spelled_alike, true, null);
     defer gpa.free(sites);
+    try refuseRebinding(gpa, checked, spelled_alike, sites, new_name);
 
     return try editsAtSites(gpa, io, checked, sites, encoding, root, new_name, spelled_alike.len > 1);
+}
+
+/// Refuses a rename under which a bare name would reach a different binding
+/// than it does now: a use the rename rewrites reaching another binding of the
+/// new name (`ANewNameWouldBeCapturedByAnotherBinding`), or a use of another
+/// binding of the new name reaching a renamed one
+/// (`ANewNameWouldShadowAnotherBinding`). Either program may still check, and
+/// compute something else.
+///
+/// Each use is asked which binding the new spelling would reach where it is
+/// written, through the scope query completion lists names from
+/// (`completion.reachableAt`). A use whose binding that query does not list,
+/// such as one reached through a qualifier, is a use no spelling there can
+/// capture. The files asked about are those the rename edits and every file of
+/// a module declaring a renamed binding, where a declaration of the module
+/// would come into scope.
+///
+/// Costs one pass over the tokens of those files, a comparison of each name
+/// with the renamed bindings' spellings, and the scope chain at each use
+/// spelled the old or the new way.
+fn refuseRebinding(
+    gpa: std.mem.Allocator,
+    checked: *const Analysis,
+    renamed: []const BindingId,
+    sites: []const references.Site,
+    new_name: []const u8,
+) !void {
+    const program = &checked.program;
+    const ast = &program.ast;
+    const res = &checked.semantics.res;
+
+    var files: std.ArrayList(FileId) = .empty;
+    defer files.deinit(gpa);
+    for (sites) |site| try appendOnce(gpa, &files, site.file);
+    for (renamed) |b| {
+        const declared = res.declaringToken(b);
+        if (declared == TokenId.none) continue;
+        for (program.get(res.moduleOfFile(ast.fileOf(declared))).files) |f| try appendOnce(gpa, &files, f);
+    }
+
+    var reachable: std.ArrayList(BindingId) = .empty;
+    defer reachable.deinit(gpa);
+    for (files.items) |file| {
+        if (checked.library[file.index()]) continue;
+        const part = ast.partOfFile(file) orelse continue;
+        for (part.token_start..part.token_end) |i| {
+            const token = TokenId.at(@intCast(i));
+            if (ast.tokenTag(token) != .identifier) continue;
+            // Only a use spelled the new way or one of the old ways can
+            // change what it reaches.
+            const text = ast.tokenText(token);
+            if (!std.mem.eql(u8, text, new_name) and !spelledLike(ast, res, renamed, text)) continue;
+            const start = ast.tokenSpan(token).start;
+            var chain = checked.cursors.enclosing(ast, file, start);
+            const named = switch (chain.next() orelse continue) {
+                .expr => |e| e,
+                else => continue,
+            };
+            if (ast.exprTag(named) != .name_ref or ast.exprMain(named) != token) continue;
+            const current = res.targetOf(named);
+            if (current == BindingId.none) continue;
+            const was_renamed = contains(renamed, current);
+            if (!was_renamed and !std.mem.eql(u8, text, new_name)) continue;
+
+            try completion.reachableAt(gpa, program, res, &checked.cursors, file, start, &reachable);
+            const reached = for (reachable.items) |b| {
+                const spelled = if (contains(renamed, b)) new_name else completion.nameOf(ast, res, b) orelse continue;
+                if (std.mem.eql(u8, spelled, new_name)) break b;
+            } else BindingId.none;
+            if (reached == BindingId.none) continue;
+            if (was_renamed and !contains(renamed, reached)) return Refused.ANewNameWouldBeCapturedByAnotherBinding;
+            if (!was_renamed and contains(renamed, reached)) return Refused.ANewNameWouldShadowAnotherBinding;
+        }
+    }
+}
+
+fn appendOnce(gpa: std.mem.Allocator, files: *std.ArrayList(FileId), file: FileId) !void {
+    for (files.items) |held| if (held == file) return;
+    try files.append(gpa, file);
+}
+
+/// Whether `text` is how one of `bindings` is spelled.
+fn spelledLike(ast: *const ast_mod.Ast, res: *const resolve.Resolution, bindings: []const BindingId, text: []const u8) bool {
+    for (bindings) |b| {
+        const spelled = completion.nameOf(ast, res, b) orelse continue;
+        if (std.mem.eql(u8, spelled, text)) return true;
+    }
+    return false;
+}
+
+fn contains(bindings: []const BindingId, b: BindingId) bool {
+    for (bindings) |held| if (held == b) return true;
+    return false;
 }
 
 /// The kind whose case `new_name` breaks, or null where it keeps the case of
@@ -871,6 +971,80 @@ test "a name declared in a sibling file is changed in both" {
         "fn width() -> UInt8 {\n    1\n}\n\nfn twice() -> UInt8 {\n    width() + width()\n}\n",
         applied,
     );
+}
+
+test "a new name another binding would answer for at a use is refused" {
+    const gpa = testing.allocator;
+
+    // Each pair is a program and the name the first `_a` (or `helper`) is
+    // renamed to. Renamed, a use the rename rewrote would reach the other
+    // binding spelled that way, and the program would still check while
+    // computing something else.
+    const cases = [_]struct { text: []const u8, old: []const u8, new: []const u8 }{
+        // A later local of the new name stands between the declaration and the use.
+        .{ .text = "fn main() -> UInt8 {\n    let _a: UInt8 = 1\n    let _b: UInt8 = 2\n    _a + _b\n}\n", .old = "_a", .new = "_b" },
+        // A local of the new name stands between the function and its call.
+        .{ .text = "fn helper() -> UInt8 {\n    1\n}\n\nfn main() -> UInt8 {\n    let size: UInt8 = 2\n    helper() + size\n}\n", .old = "helper", .new = "size" },
+    };
+    for (cases) |case| {
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = case.text }}, "main.lin");
+        defer checked.deinit();
+        const declared = std.mem.indexOf(u8, case.text, case.old).?;
+        try testing.expectError(
+            Refused.ANewNameWouldBeCapturedByAnotherBinding,
+            forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(case.text, declared + 1), .@"utf-16", "", case.new),
+        );
+    }
+}
+
+test "a new name that would answer for another binding's use is refused" {
+    const gpa = testing.allocator;
+
+    // Renamed, the binding would stand between another binding of the new
+    // name and a use of it, and that use would reach the renamed one.
+    const cases = [_]struct { text: []const u8, old: []const u8, new: []const u8 }{
+        .{ .text = "fn main() -> UInt8 {\n    let _b: UInt8 = 2\n    let _a: UInt8 = 1\n    _a + _b\n}\n", .old = "_a", .new = "_b" },
+        .{ .text = "fn size() -> UInt8 {\n    1\n}\n\nfn main() -> UInt8 {\n    let n: UInt8 = 2\n    n + size()\n}\n", .old = "n", .new = "size" },
+    };
+    for (cases) |case| {
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = case.text }}, "main.lin");
+        defer checked.deinit();
+        const site = std.mem.lastIndexOf(u8, case.text, case.old).?;
+        try testing.expectError(
+            Refused.ANewNameWouldShadowAnotherBinding,
+            forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(case.text, site + 1), .@"utf-16", "", case.new),
+        );
+    }
+}
+
+test "a new name no use would reach differently is accepted" {
+    const gpa = testing.allocator;
+
+    // The earlier `x` is last used before `z` is declared, so `z` renamed to
+    // `x` shadows it only where nothing names it; and `y` in another function
+    // shares no scope with the `x` there.
+    const text =
+        \\fn other() -> UInt8 {
+        \\    let x: UInt8 = 4
+        \\    x
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let x: UInt8 = 1
+        \\    let y: UInt8 = x
+        \\    let z: UInt8 = 2
+        \\    y + z + other()
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    const z = std.mem.lastIndexOf(u8, text, "z").?;
+    const renamed = (try forPosition(gpa, testing.io, &checked, file, at(text, z), .@"utf-16", "", "x")).?;
+    defer free(gpa, renamed);
+    try testing.expectEqual(@as(usize, 2), editsFor(renamed, "main.lin").len);
 }
 
 test "a primitive is not the programmer's to rename" {
