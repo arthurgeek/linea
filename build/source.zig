@@ -732,7 +732,7 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
             .pipe => {
                 // `|e|`, then what is done with it.
                 const name = if (tags[i + 2] == .identifier) tree.tokenSlice(i + 2) else "";
-                if (handsTheErrorOn(&tree, partner, i + 4, name)) continue;
+                if (!reachesUnreachable(tags, partner, i + 4) and handsTheErrorOn(&tree, partner, i + 4, &.{name})) continue;
                 break :form if (is_else) "else |…| that does not return the error" else "catch |…| that does not return the error";
             },
             .keyword_unreachable => "catch unreachable",
@@ -751,9 +751,9 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
                 // With no capture there is no error to hand on but a new
                 // one, so a block passes where it ends returning one or
                 // stopping the process.
-                if (lastStatement(&tree, partner, i + 1)) |last| {
-                    if (statementHandsOn(&tree, partner, last, "")) continue;
-                }
+                if (!reachesUnreachable(tags, partner, i + 1)) if (lastStatement(&tree, partner, i + 1)) |last| {
+                    if (statementHandsOn(&tree, partner, last, &.{})) continue;
+                };
                 break :form "catch { … } that does not return an error";
             },
             else => "catch with a value",
@@ -783,12 +783,36 @@ pub fn discardedFailures(gpa: std.mem.Allocator, file: SourceFile) []const Disca
 /// `name`: a block whose last statement does, or an expression that does.
 /// A `return` somewhere inside is not enough, since a path past it reaches
 /// the end with the error dropped.
-fn handsTheErrorOn(tree: *const std.zig.Ast, partner: []const u32, start: u32, name: []const u8) bool {
+fn handsTheErrorOn(tree: *const std.zig.Ast, partner: []const u32, start: u32, names: []const []const u8) bool {
     const tags = tree.tokens.items(.tag);
     if (start >= tags.len) return false;
-    if (tags[start] != .l_brace or partner[start] == 0) return statementHandsOn(tree, partner, start, name);
+    if (tags[start] != .l_brace or partner[start] == 0) return statementHandsOn(tree, partner, start, names);
     const last = lastStatement(tree, partner, start) orelse return false;
-    return statementHandsOn(tree, partner, last, name);
+    return statementHandsOn(tree, partner, last, names);
+}
+
+/// The token after the end of the handler that begins at `start`: a block,
+/// or an expression running to the `;`, `,` or closer that ends it.
+fn handlerEnd(tags: []const std.zig.Token.Tag, partner: []const u32, start: u32) u32 {
+    if (start < tags.len and tags[start] == .l_brace and partner[start] != 0) return partner[start] + 1;
+    var i = start;
+    while (i < tags.len) : (i += 1) switch (tags[i]) {
+        .l_paren, .l_brace, .l_bracket => if (partner[i] > i) {
+            i = partner[i];
+        } else return i,
+        .r_paren, .r_brace, .r_bracket, .semicolon, .comma, .eof => return i,
+        else => {},
+    };
+    return i;
+}
+
+/// Whether the handler that begins at `start` holds an `unreachable` on any
+/// path. Each is reached only once the call failed, and after a call that
+/// can fail it is undefined behaviour in a ReleaseFast build.
+fn reachesUnreachable(tags: []const std.zig.Token.Tag, partner: []const u32, start: u32) bool {
+    const end = handlerEnd(tags, partner, start);
+    for (tags[start..end]) |tag| if (tag == .keyword_unreachable) return true;
+    return false;
 }
 
 /// The first token of the last statement of the block whose `{` is at
@@ -824,45 +848,65 @@ fn lastStatement(tree: *const std.zig.Ast, partner: []const u32, start: u32) ?u3
 }
 
 /// Whether the statement or expression at `at` hands the error on:
-/// `return name`, `return error.…`, `@panic(…)`, or a `switch` on `name`
-/// whose prong for a refused allocation does one of those. `unreachable`
-/// never does: after a call that can fail it is undefined behaviour in a
-/// ReleaseFast build.
-fn statementHandsOn(tree: *const std.zig.Ast, partner: []const u32, at: u32, name: []const u8) bool {
+/// `return` of one of `names`, `return error.…`, `@panic(…)`, or a `switch`
+/// on the first of `names` whose prong naming `error.OutOfMemory`, alone or
+/// among others, does one of those, or whose `else` prong does where no
+/// prong names it. A prong may return its own capture, and a prong's block
+/// is read by its last statement.
+fn statementHandsOn(tree: *const std.zig.Ast, partner: []const u32, at: u32, names: []const []const u8) bool {
     const tags = tree.tokens.items(.tag);
     if (at + 1 >= tags.len) return false;
     switch (tags[at]) {
-        .keyword_return => return tags[at + 1] == .keyword_error or
-            (name.len != 0 and tags[at + 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(at + 1), name)),
+        .keyword_return => {
+            if (tags[at + 1] == .keyword_error) return true;
+            if (tags[at + 1] != .identifier) return false;
+            for (names) |name| if (name.len != 0 and std.mem.eql(u8, tree.tokenSlice(at + 1), name)) return true;
+            return false;
+        },
         .builtin => return std.mem.eql(u8, tree.tokenSlice(at), "@panic"),
         .keyword_switch => {},
         else => return false,
     }
     // `switch (name) { … }`.
-    if (name.len == 0 or at + 4 >= tags.len or tags[at + 1] != .l_paren or tags[at + 2] != .identifier or
-        !std.mem.eql(u8, tree.tokenSlice(at + 2), name) or tags[at + 3] != .r_paren or tags[at + 4] != .l_brace) return false;
+    if (names.len == 0 or names[0].len == 0 or at + 4 >= tags.len or tags[at + 1] != .l_paren or tags[at + 2] != .identifier or
+        !std.mem.eql(u8, tree.tokenSlice(at + 2), names[0]) or tags[at + 3] != .r_paren or tags[at + 4] != .l_brace) return false;
     const end = partner[at + 4];
-    var else_returns = false;
+    var else_hands_on = false;
     var names_refusal = false;
-    var i = at + 5;
-    while (i + 2 < end) : (i += 1) {
-        if (tags[i] == .l_brace or tags[i] == .l_paren or tags[i] == .l_bracket) {
-            if (partner[i] != 0) i = partner[i];
-            continue;
+    var prong = at + 5;
+    while (prong < end) {
+        // The prong's items run to its `=>`.
+        var arrow = prong;
+        while (arrow < end and tags[arrow] != .equal_angle_bracket_right) : (arrow += 1) {
+            if ((tags[arrow] == .l_paren or tags[arrow] == .l_brace or tags[arrow] == .l_bracket) and partner[arrow] > arrow) arrow = partner[arrow];
         }
-        if (tags[i] != .equal_angle_bracket_right) continue;
-        const returns = (tags[i + 1] == .keyword_return and (tags[i + 2] == .keyword_error or
-            (tags[i + 2] == .identifier and std.mem.eql(u8, tree.tokenSlice(i + 2), name)))) or
-            (tags[i + 1] == .builtin and std.mem.eql(u8, tree.tokenSlice(i + 1), "@panic"));
-        const refusal = i >= 3 and tags[i - 1] == .identifier and std.mem.eql(u8, tree.tokenSlice(i - 1), "OutOfMemory") and
-            tags[i - 2] == .period and tags[i - 3] == .keyword_error;
+        if (arrow >= end) break;
+        var refusal = false;
+        var k = prong;
+        while (k + 2 < arrow) : (k += 1) {
+            if (tags[k] == .keyword_error and tags[k + 1] == .period and tags[k + 2] == .identifier and
+                std.mem.eql(u8, tree.tokenSlice(k + 2), "OutOfMemory")) refusal = true;
+        }
+        const is_else = tags[prong] == .keyword_else and arrow == prong + 1;
+        // An optional `|capture|`, then the body.
+        var body = arrow + 1;
+        var capture: []const u8 = "";
+        if (body < end and tags[body] == .pipe) {
+            var close = body + 1;
+            while (close < end and tags[close] != .pipe) : (close += 1) {
+                if (tags[close] == .identifier) capture = tree.tokenSlice(close);
+            }
+            body = close + 1;
+        }
+        const hands_on = handsTheErrorOn(tree, partner, body, &.{ names[0], capture });
         if (refusal) {
             names_refusal = true;
-            if (!returns) return false;
+            if (!hands_on) return false;
         }
-        if (tags[i - 1] == .keyword_else and returns) else_returns = true;
+        if (is_else and hands_on) else_hands_on = true;
+        prong = handlerEnd(tags, partner, body) + 1;
     }
-    return if (names_refusal) true else else_returns;
+    return if (names_refusal) true else else_hands_on;
 }
 
 /// What is wrong between the pass files and `allowed`: each discard no

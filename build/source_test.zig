@@ -4768,6 +4768,12 @@ test "a pass file hands every error on, whatever is called" {
         .{ .statement = "self.visit(d) catch |err| { self.undo(); unreachable; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
         .{ .statement = "if (self.find(d)) |found| use(found) else |_| unreachable;", .form = "else |…| that does not return the error", .callee = "else" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => unreachable, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory, error.Refused => unreachable, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return err, else => unreachable };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
+        // An `unreachable` on any path of the handler is reached when the
+        // call fails, whatever the handler ends in.
+        .{ .statement = "self.visit(d) catch |err| { if (self.strict) unreachable; return err; };", .form = "catch |…| that does not return the error", .callee = "self.visit" },
+        .{ .statement = "self.visit(d) catch { if (self.strict) unreachable; return error.OutOfMemory; };", .form = "catch { … } that does not return an error", .callee = "self.visit" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.OutOfMemory => {}, else => return err };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
         .{ .statement = "self.walk(d) catch |err| switch (err) { error.Refused => return err, else => {} };", .form = "catch |…| that does not return the error", .callee = "self.walk" },
     };
@@ -4800,6 +4806,11 @@ test "a pass file hands every error on, whatever is called" {
         "self.emit(d) catch |err| { self.undo(); @panic(@errorName(err)); };",
         "if (self.find(d)) |found| use(found) else |_| @panic(\"OOM\");",
         "self.walk(d) catch |err| switch (err) { error.OutOfMemory => @panic(\"OOM\"), else => return err };",
+        // A prong hands the error on through its own capture, from a block,
+        // or among the other errors it names.
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => |oom| return oom, else => {} };",
+        "self.walk(d) catch |err| switch (err) { error.OutOfMemory => { return err; }, else => {} };",
+        "self.walk(d) catch |err| switch (err) { error.Refused, error.OutOfMemory => return err, else => {} };",
         "self.walk(d) catch |err| switch (err) { error.Refused => {}, else => return err };",
         "self.walk(d) catch |err| switch (err) { error.OutOfMemory => return err, error.Refused => {} };",
         "const found = self.find(d) orelse return;",
