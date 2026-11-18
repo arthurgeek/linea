@@ -26,6 +26,7 @@ const mir_mod = @import("mir.zig");
 const Mir = mir_mod.Mir;
 const Module = mir_mod.Module;
 const InstId = mir_mod.InstId;
+const Inst = mir_mod.Inst;
 const BlockId = mir_mod.BlockId;
 const LocalId = mir_mod.LocalId;
 const FunctionId = mir_mod.FunctionId;
@@ -360,6 +361,10 @@ const Base = struct {
 
 const RootKind = enum(u8) { none, owned, lent, temp };
 
+/// A part of a place: the place a `field_addr`'s base selects, and the part
+/// it names.
+const FieldPlace = struct { of: Entity, part: Inst.Part };
+
 /// The whole per-entity state, held as parallel arrays and changed only
 /// through `set`, which logs the previous values on the trail: whether a
 /// root was moved out and by what, the live dependencies, the marks, and,
@@ -428,6 +433,18 @@ pub const Phase = struct {
     entries: std.ArrayList(Entry) = .empty,
     nodes: std.ArrayList(Node) = .empty,
     interned: std.AutoHashMapUnmanaged(Cons, SetId) = .empty,
+    /// The place each `field_addr` naming a part selects, by the place its
+    /// base selects and the part: the entity of the first such address,
+    /// which every later address of the same part of the same place shares.
+    /// Sized by the function's field addresses.
+    field_places: std.AutoHashMapUnmanaged(FieldPlace, Entity) = .empty,
+    /// The place each such address selects, by the address.
+    place_of: std.AutoHashMapUnmanaged(InstId, Entity) = .empty,
+    /// The place each field place is a part of.
+    place_parent: std.AutoHashMapUnmanaged(Entity, Entity) = .empty,
+    /// The field places of a zero-sized value owing its settlement, which a
+    /// write to a place holding them refills.
+    settled_places: std.ArrayList(Entity) = .empty,
     marks: std.ArrayList(MarkNode) = .empty,
     marks_interned: std.AutoHashMapUnmanaged(MarkCons, MarkId) = .empty,
     last_added: ?struct { dep: Dep, onto: MarkId, result: MarkId } = null,
@@ -688,6 +705,10 @@ pub const Phase = struct {
         self.entries.deinit(gpa);
         self.nodes.deinit(gpa);
         self.interned.deinit(gpa);
+        self.field_places.deinit(gpa);
+        self.place_of.deinit(gpa);
+        self.place_parent.deinit(gpa);
+        self.settled_places.deinit(gpa);
         self.marks.deinit(gpa);
         self.marks_interned.deinit(gpa);
         self.prefix.deinit(gpa);
@@ -1649,7 +1670,8 @@ pub const Phase = struct {
     /// into a value holding a stale view elsewhere. Ownership accepts the
     /// first, so this accepts both. A written type that cannot hold a
     /// dependency brings none.
-    fn writeFrom(self: *Phase, at: InstId, dst: Base, ty: TypeId, written: SetId, written_marks: MarkId) !void {
+    fn writeFrom(self: *Phase, at: InstId, address: InstId, dst: Base, ty: TypeId, written: SetId, written_marks: MarkId) !void {
+        if (self.settled_places.items.len != 0) try self.refillSettledIn(self.placeOf(address));
         if (dst.root == no_entity) return;
         const holds = (written == empty_set and written_marks == empty_set) or self.holdsDependencies(ty);
         const from = if (holds) written else empty_set;
@@ -1703,10 +1725,61 @@ pub const Phase = struct {
     }
 
     /// What a zero-sized value that must be settled is moved through: the
-    /// slot an address names whole, or else the address itself, so two
-    /// fields of one root are two values and one address taken twice is one.
+    /// place an address selects. A slot's address selects the slot, and a
+    /// field address naming a part selects that part of the place its base
+    /// selects, so two fields of one root are two values even where they
+    /// share an offset, and one field reached through two addresses is one.
+    /// Any other address is a value of its own.
     fn settledThrough(self: *const Phase, address: InstId) Entity {
-        return if (self.mir.tagOf(address) == .addr_of) slotEntity(self.mir.localOf(address)) else self.instEntity(address);
+        return self.placeOf(address);
+    }
+
+    fn placeOf(self: *const Phase, address: InstId) Entity {
+        if (self.mir.tagOf(address) == .addr_of) return slotEntity(self.mir.localOf(address));
+        return self.place_of.get(address) orelse self.instEntity(address);
+    }
+
+    /// Numbers the places the function's field addresses select, in
+    /// instruction order, so a base is numbered before an address built on
+    /// it.
+    ///
+    /// **Bound:** the function's instructions, once each.
+    fn prepareFieldPlaces(self: *Phase) !void {
+        const mir = self.mir;
+        for (0..mir.insts.len) |i| {
+            const id = InstId.at(@intCast(i));
+            if (mir.tagOf(id) != .field_addr) continue;
+            const f = mir.fieldAddrOf(id);
+            if (f.part == .none) continue;
+            const of = self.placeOf(f.base);
+            const got = try self.field_places.getOrPut(self.gpa, .{ .of = of, .part = f.part });
+            if (!got.found_existing) {
+                got.value_ptr.* = self.instEntity(id);
+                try self.place_parent.put(self.gpa, got.value_ptr.*, of);
+                if (self.settledAlone(mir.typeOf(id))) try self.settled_places.append(self.gpa, got.value_ptr.*);
+            }
+            try self.place_of.put(self.gpa, id, got.value_ptr.*);
+        }
+    }
+
+    /// Refills every zero-sized field owing its settlement that lies in
+    /// `place`, which a write just filled whole.
+    ///
+    /// **Bound:** such fields of the function times the depth of their
+    /// places, asked once per write.
+    fn refillSettledIn(self: *Phase, place: Entity) !void {
+        for (self.settled_places.items) |field| {
+            var at = field;
+            const within = while (true) {
+                if (at == place) break true;
+                at = self.place_parent.get(at) orelse break false;
+            };
+            if (!within or !self.moved[field]) continue;
+            var v = self.valuesOf(field);
+            v.moved = false;
+            v.moved_at = .none;
+            try self.set(field, v);
+        }
     }
 
     fn moveOut(self: *Phase, at: InstId, address: InstId, src: Base, ty: TypeId) !void {
@@ -1729,9 +1802,11 @@ pub const Phase = struct {
     fn step(self: *Phase, id: InstId) !void {
         const mir = self.mir;
         // An instruction run again makes a new value, so what was moved out
-        // of the one it made last time is not moved out of this one.
+        // of the one it made last time is not moved out of this one. A field
+        // place is not a value an address makes: it is moved out until a
+        // write refills it (`refillSettledIn`).
         const made = self.instEntity(id);
-        if (self.moved[made]) {
+        if (self.moved[made] and !self.place_parent.contains(made)) {
             var v = self.valuesOf(made);
             v.moved = false;
             v.moved_at = .none;
@@ -1748,6 +1823,7 @@ pub const Phase = struct {
                 const st = mir.storeOf(id);
                 const v = self.instEntity(st.value);
                 try self.set(slotEntity(st.local), .{ .deps = self.deps[v], .stale = self.stale[v] });
+                if (self.settled_places.items.len != 0) try self.refillSettledIn(slotEntity(st.local));
             },
             .borrow, .address_bits => {
                 const a = mir.unaryOf(id);
@@ -1788,7 +1864,7 @@ pub const Phase = struct {
                 const dst = self.base[p.lhs.index()];
                 if (dst.root == no_entity) return;
                 const stored = try self.storedAt(p.rhs, self.accessOf(dst, mir.typeOf(id)));
-                try self.writeFrom(id, dst, mir.typeOf(id), stored.deps, stored.marks);
+                try self.writeFrom(id, p.lhs, dst, mir.typeOf(id), stored.deps, stored.marks);
             },
             .copy_value, .move_value => {
                 const p = mir.binaryOf(id);
@@ -1810,7 +1886,7 @@ pub const Phase = struct {
                     carried_marks = try self.projectMarks(self.stale[src.carrier], from, placement, viewsRead(src));
                 }
                 if (mir.tagOf(id) == .move_value) try self.moveOut(id, p.rhs, src, ty);
-                try self.writeFrom(id, dst, ty, carried, carried_marks);
+                try self.writeFrom(id, p.lhs, dst, ty, carried, carried_marks);
             },
             .call, .call_noreturn => {
                 const c = mir.callOf(id);
@@ -2224,6 +2300,7 @@ pub const Phase = struct {
     fn check(self: *Phase, addresses: []const Address) !void {
         const mir = self.mir;
         self.prepare(addresses);
+        try self.prepareFieldPlaces();
         try self.controlFlow();
 
         const cells = @as(usize, self.order.len) * self.entity_count;
@@ -2853,7 +2930,7 @@ test "an array view held in a slot is stale once the array is written" {
     const bits = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
     _ = try b.addInst(entry, .{ .tag = .store, .ty = .u64, .span = Span.empty, .data = .{ .store = .{ .local = held, .value = bits } } });
     const eight = try constant(&b, entry, 8);
-    const field = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = eight } } });
+    const field = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = eight } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = field, .rhs = one } } });
     const again = try b.addInst(entry, .{ .tag = .load, .ty = .u64, .span = Span.empty, .data = .{ .local = held } });
@@ -2875,10 +2952,10 @@ test "an array view built into a slot from its address bits is stale once the ar
     const bits = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
     const h = try addrOf(&b, entry, view);
     const zero = try constant(&b, entry, 0);
-    const at = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = zero } } });
+    const at = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = zero } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = at, .rhs = bits } } });
     const eight = try constant(&b, entry, 8);
-    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = eight } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = eight } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = one } } });
     const used = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads, &.{h});
@@ -2903,7 +2980,7 @@ fn copyThroughBorrow(gpa: std.mem.Allocator, copy_after_write: bool) ![]Mir {
     const into = try addrOf(&b, entry, copied);
     if (!copy_after_write) _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = into, .rhs = pointee } } });
     const zero = try constant(&b, entry, 0);
-    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = zero } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = first, .rhs = one } } });
     if (copy_after_write) _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = into, .rhs = pointee } } });
@@ -2930,13 +3007,13 @@ fn copyOfPlainPart(gpa: std.mem.Allocator, tag: mir_mod.Inst.Tag) ![]Mir {
     const zero = try constant(&b, entry, 0);
     const eight = try constant(&b, entry, 8);
     const s = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = source } });
-    const held = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = s, .rhs = eight } } });
-    const word = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = held, .rhs = zero } } });
+    const held = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .field = .{ .base = s, .offset = eight } } });
+    const word = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = held, .offset = zero } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = word, .rhs = bits } } });
     const o = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = outer } });
-    const into = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = o, .rhs = eight } } });
+    const into = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.plain, .span = Span.empty, .data = .{ .field = .{ .base = o, .offset = eight } } });
     _ = try b.addInst(entry, .{ .tag = tag, .ty = Harness.plain, .span = Span.empty, .data = .{ .binary = .{ .lhs = into, .rhs = held } } });
-    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = zero } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = one } } });
     const c = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.holder, .span = Span.empty, .data = .{ .local = copied } });
@@ -2974,13 +3051,13 @@ fn copyOfHolderThroughBorrow(gpa: std.mem.Allocator) ![]Mir {
     const bits = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
     const h = try addrOf(&b, entry, holder);
     const zero = try constant(&b, entry, 0);
-    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = zero } } });
+    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = zero } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = first, .rhs = bits } } });
     const pointer = try b.addInst(entry, .{ .tag = .borrow, .ty = Harness.big_borrow, .span = Span.empty, .data = .{ .unary = h } });
     const pointee = try b.addInst(entry, .{ .tag = .observe, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .unary = pointer } });
     const into = try addrOf(&b, entry, copied);
     _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = into, .rhs = pointee } } });
-    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = zero } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = one } } });
     const used = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads, &.{into});
@@ -2995,7 +3072,7 @@ test "a copy through a borrow still observes what the bytes it copied held" {
 /// Writes the first word of the slot `a` addresses.
 fn writeFirstWord(b: *Builder, block: BlockId, a: InstId) !void {
     const zero = try constant(b, block, 0);
-    const first = try b.addInst(block, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const first = try b.addInst(block, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = zero } } });
     const one = try b.addInst(block, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(block, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = first, .rhs = one } } });
 }
@@ -3005,7 +3082,7 @@ fn writeFirstWord(b: *Builder, block: BlockId, a: InstId) !void {
 fn storeAddressBits(b: *Builder, block: BlockId, holder: InstId, a: InstId) !void {
     const bits = try b.addInst(block, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
     const zero = try constant(b, block, 0);
-    const first = try b.addInst(block, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = holder, .rhs = zero } } });
+    const first = try b.addInst(block, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = holder, .offset = zero } } });
     _ = try b.addInst(block, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = first, .rhs = bits } } });
 }
 
@@ -3025,10 +3102,10 @@ fn borrowLoadedThroughBorrow(gpa: std.mem.Allocator) ![]Mir {
     const pointer = try b.addInst(entry, .{ .tag = .borrow, .ty = Harness.big_borrow, .span = Span.empty, .data = .{ .unary = h } });
     const pointee = try b.addInst(entry, .{ .tag = .observe, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .unary = pointer } });
     const zero = try constant(&b, entry, 0);
-    const cell = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big_borrow, .span = Span.empty, .data = .{ .binary = .{ .lhs = pointee, .rhs = zero } } });
+    const cell = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big_borrow, .span = Span.empty, .data = .{ .field = .{ .base = pointee, .offset = zero } } });
     const loaded = try b.addInst(entry, .{ .tag = .load_indirect, .ty = Harness.big_borrow, .span = Span.empty, .data = .{ .unary = cell } });
     const word_size = try constant(&b, entry, 8);
-    const second = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = word_size } } });
+    const second = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = word_size } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = second, .rhs = one } } });
     const reached = try b.addInst(entry, .{ .tag = .observe, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .unary = loaded } });
@@ -3158,16 +3235,16 @@ fn twoObservationsThenLend(gpa: std.mem.Allocator, read_off: i128) ![]Mir {
     const bits_x = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
     const h = try addrOf(&b, entry, p);
     const zero = try constant(&b, entry, 0);
-    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = zero } } });
+    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = zero } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = first, .rhs = bits_x } } });
     const c = try addrOf(&b, entry, y);
     const bits_y = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = c } });
     const eight = try constant(&b, entry, 8);
-    const second = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = eight } } });
+    const second = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = eight } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = second, .rhs = bits_y } } });
     _ = try b.addCall(entry, .value, .u64, Span.empty, Shapes.lends, &.{a});
     const at = try constant(&b, entry, read_off);
-    const part = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = at } } });
+    const part = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = at } } });
     const read = try b.addInst(entry, .{ .tag = .load_indirect, .ty = .u64, .span = Span.empty, .data = .{ .unary = part } });
     try ret(&b, entry, read);
     return Shapes.callees(gpa, try b.finish(entry, .from(0)));
@@ -3194,16 +3271,16 @@ fn computedWriteBesideObservation(gpa: std.mem.Allocator, within_off: ?i128) ![]
     const entry = try b.addBlock();
     const a = try addrOf(&b, entry, t);
     const zero = try constant(&b, entry, 0);
-    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = zero } } });
     const bits = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = first } });
     _ = try b.addInst(entry, .{ .tag = .store, .ty = .u64, .span = Span.empty, .data = .{ .store = .{ .local = held, .value = bits } } });
     const k = try b.addInst(entry, .{ .tag = .load, .ty = .u64, .span = Span.empty, .data = .{ .local = index } });
     var within = a;
     if (within_off) |off| {
         const at = try constant(&b, entry, off);
-        within = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = at } } });
+        within = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = at } } });
     }
-    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = within, .rhs = k } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = within, .offset = k } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = one } } });
     const again = try b.addInst(entry, .{ .tag = .load, .ty = .u64, .span = Span.empty, .data = .{ .local = held } });
@@ -3296,18 +3373,18 @@ fn twoObservationsThenStridedRead(gpa: std.mem.Allocator, elem: u32, inner: i128
     const bits_x = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = a } });
     const h = try addrOf(&b, entry, p);
     const zero = try constant(&b, entry, 0);
-    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = zero } } });
+    const first = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = zero } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = first, .rhs = bits_x } } });
     const c = try addrOf(&b, entry, y);
     const bits_y = try b.addInst(entry, .{ .tag = .address_bits, .ty = .u64, .span = Span.empty, .data = .{ .unary = c } });
     const eight = try constant(&b, entry, 8);
-    const second = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = eight } } });
+    const second = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = eight } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = second, .rhs = bits_y } } });
     _ = try b.addCall(entry, .value, .u64, Span.empty, Shapes.lends, &.{a});
     const k = try b.addInst(entry, .{ .tag = .load, .ty = .u64, .span = Span.empty, .data = .{ .local = index } });
-    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = if (elem == 8) TypeId.u64 else Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = k } } });
+    const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = if (elem == 8) TypeId.u64 else Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = k } } });
     const at = try constant(&b, entry, inner);
-    const part = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = element, .rhs = at } } });
+    const part = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = element, .offset = at } } });
     const read = try b.addInst(entry, .{ .tag = .load_indirect, .ty = .u64, .span = Span.empty, .data = .{ .unary = part } });
     try ret(&b, entry, read);
     return Shapes.callees(gpa, try b.finish(entry, .from(0)));
@@ -3381,7 +3458,7 @@ test "a moved slot written part by part holds a value again" {
     const a = try addrOf(&b, entry, big);
     _ = try b.addCall(entry, .value, .u64, Span.empty, Shapes.takes, &.{a});
     const zero = try constant(&b, entry, 0);
-    const field = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = zero } } });
+    const field = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = zero } } });
     const one = try b.addInst(entry, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = field, .rhs = one } } });
     const again = try addrOf(&b, entry, big);
@@ -3411,6 +3488,50 @@ test "a zero-sized value owing its settlement is not moved out twice, and one ow
         const functions = try Shapes.callees(gpa, try b.finish(entry, .from(0)));
         if (ty == Harness.token) {
             try expectRefused(functions, "reads slot $0 after %2 moved it out");
+        } else {
+            try expectAccepted(functions);
+        }
+    }
+}
+
+test "a zero-sized field owing its settlement is taken once however many addresses name it" {
+    const gpa = testing.allocator;
+    // Both fields of `Tokens` lie at offset zero: the part a field address
+    // names is what tells them apart. Taking `left` through two addresses is
+    // refused; taking `left` and then `right` is not, and neither is taking
+    // `left` again once the record is written whole.
+    for ([_]struct { second: u32, refill: bool, refused: bool }{
+        .{ .second = 0, .refill = false, .refused = true },
+        .{ .second = 1, .refill = false, .refused = false },
+        .{ .second = 0, .refill = true, .refused = false },
+    }) |case| {
+        var b = Builder.init(gpa);
+        defer b.deinit();
+        b.return_type = .u64;
+        const held = try b.addLocal(Harness.tokens, .value);
+        const fresh = try b.addLocal(Harness.tokens, .value);
+        const first = try b.addLocal(Harness.token, .value);
+        const second = try b.addLocal(Harness.token, .value);
+        const entry = try b.addBlock();
+        const zero = try constant(&b, entry, 0);
+        const base = try addrOf(&b, entry, held);
+        const left = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.token, .span = Span.empty, .data = .{ .field = .{ .base = base, .offset = zero, .part = .at(0) } } });
+        const once = try addrOf(&b, entry, first);
+        _ = try b.addInst(entry, .{ .tag = .move_value, .ty = Harness.token, .span = Span.empty, .data = .{ .binary = .{ .lhs = once, .rhs = left } } });
+        if (case.refill) {
+            const whole = try addrOf(&b, entry, held);
+            const from = try addrOf(&b, entry, fresh);
+            _ = try b.addInst(entry, .{ .tag = .move_value, .ty = Harness.tokens, .span = Span.empty, .data = .{ .binary = .{ .lhs = whole, .rhs = from } } });
+        }
+        const again_base = try addrOf(&b, entry, held);
+        const again = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.token, .span = Span.empty, .data = .{ .field = .{ .base = again_base, .offset = zero, .part = .at(case.second) } } });
+        const twice = try addrOf(&b, entry, second);
+        _ = try b.addInst(entry, .{ .tag = .move_value, .ty = Harness.token, .span = Span.empty, .data = .{ .binary = .{ .lhs = twice, .rhs = again } } });
+        const k = try constant(&b, entry, 0);
+        try ret(&b, entry, k);
+        const functions = try Shapes.callees(gpa, try b.finish(entry, .from(0)));
+        if (case.refused) {
+            try expectRefused(functions, "moved it out");
         } else {
             try expectAccepted(functions);
         }
@@ -3516,7 +3637,7 @@ test "a slot built part by part and sunk on every pass of a loop is held on ever
     const cond = try b.addInst(loop.header, .{ .tag = .cmp_eq, .ty = .bool_, .span = Span.empty, .data = .{ .binary = .{ .lhs = flag, .rhs = zero } } });
     const a = try addrOf(&b, loop.body, big);
     const at = try constant(&b, loop.body, 0);
-    const field = try b.addInst(loop.body, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = at } } });
+    const field = try b.addInst(loop.body, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = at } } });
     const one = try b.addInst(loop.body, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(loop.body, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = field, .rhs = one } } });
     _ = try b.addCall(loop.body, .value, .u64, Span.empty, Shapes.takes, &.{a});
@@ -3576,7 +3697,7 @@ test "a slot every arm rewrites before the join is held after it, on every pass 
     _ = try b.setTerminator(whole, .{ .tag = .jump, .ty = .unit, .span = Span.empty, .data = .{ .target = join } });
     const a = try addrOf(&b, part, big);
     const at = try constant(&b, part, 0);
-    const field = try b.addInst(part, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = a, .rhs = at } } });
+    const field = try b.addInst(part, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .i64, .span = Span.empty, .data = .{ .field = .{ .base = a, .offset = at } } });
     const one = try b.addInst(part, .{ .tag = .constant, .ty = .i64, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(part, .{ .tag = .store_indirect, .ty = .i64, .span = Span.empty, .data = .{ .binary = .{ .lhs = field, .rhs = one } } });
     _ = try b.setTerminator(part, .{ .tag = .jump, .ty = .unit, .span = Span.empty, .data = .{ .target = join } });
@@ -3604,7 +3725,7 @@ test "a stale slot rebuilt part by part is fresh again" {
     const view = try b.addCall(entry, .value, .u64, Span.empty, Shapes.reads, &.{a});
     const h = try addrOf(&b, entry, holder);
     const at = try constant(&b, entry, 0);
-    const field = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = at } } });
+    const field = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u64, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = at } } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = field, .rhs = view } } });
     _ = try b.addCall(entry, .value, .u64, Span.empty, Shapes.lends, &.{a});
     const one = try constant(&b, entry, 1);

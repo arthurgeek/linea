@@ -617,7 +617,7 @@ fn lowerClosureRelease(gpa: std.mem.Allocator, ast: *const Ast, typing: *const T
             const field_type = mono.pool.erased(mono.pool.view().fieldType(environment, call.field.index()));
             const offset = mono.pool.view().fieldOffset(environment, call.field.index());
             const displacement = try b.addInst(block, .{ .tag = .constant, .result_role = .value, .ty = .u64, .span = span, .data = .{ .constant = offset } });
-            const address = try b.addInst(block, .{ .tag = .field_addr, .result_role = .managed_address, .ty = field_type, .span = span, .data = .{ .binary = .{ .lhs = base, .rhs = displacement } } });
+            const address = try b.addInst(block, .{ .tag = .field_addr, .result_role = .managed_address, .ty = field_type, .span = span, .data = .{ .field = .{ .base = base, .offset = displacement } } });
             const argument = try readStoredValue(&b, block, mono.pool.view(), address, field_type, span);
             _ = try b.addCall(block, .value, .unit, span, FunctionId.at(call.callee.index()), &.{argument});
         }
@@ -823,7 +823,7 @@ fn lowerErasedBody(
         const result_ty = b.return_type;
         const result = switch (mono.pool.get(callable)) {
             .closure => |closure| blk: {
-                if (closure.environment != .unit) try args.append(gpa, try l.fieldAddr(stored, closure.environment, 0, span));
+                if (closure.environment != .unit) try args.append(gpa, try l.fieldAddr(stored, closure.environment, 0, .none, span));
                 const callee = mono.idForClosure(closure);
                 break :blk try l.directCall(result_ty, span, callee, args.items);
             },
@@ -1247,7 +1247,7 @@ fn lowerFunction(
         for (resolution.closureCaptures(instance.body.closure), 0..) |capture, index| {
             const field: u32 = @intCast(index);
             const field_ty = l.types().fieldType(environment, field);
-            const address = try l.fieldAddr(base, field_ty, l.types().fieldOffset(environment, field), span);
+            const address = try l.fieldAddr(base, field_ty, l.types().fieldOffset(environment, field), .at(field), span);
             // A read or `inout` capture's field holds the address of the
             // place it observes; a sink capture's field is the place.
             const capture_address = if (capture.convention != .sink)
@@ -2502,15 +2502,20 @@ const Lowerer = struct {
         const view = self.types();
         const selected = self.typing.partSelection(part) orelse
             @panic("compiler defect: a pattern's part was not settled before emission");
+        const part_index: Inst.Part = switch (selected) {
+            .field => |f| .at(f.index),
+            .payload => |p| .at(p.index),
+            .base => .none,
+        };
         const offset: u32 = switch (selected) {
             .field => |f| view.fieldOffset(m.ty, f.index),
             .payload => |p| view.variantFieldOffset(m.ty, p.variant, p.index),
             .base => {
                 if (m.address == .none) return .{ .ty = ty, .value = m.value };
-                return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, 0, span) };
+                return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, 0, .none, span) };
             },
         };
-        return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, offset, span) };
+        return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, offset, part_index, span) };
     }
 
     /// Tests that `pattern` matches the value at `m`, its outer part first,
@@ -2648,14 +2653,15 @@ const Lowerer = struct {
         return self.bindPattern(d.pattern, m, lending, span);
     }
 
-    /// The address of a field within a value held in memory.
+    /// The address of a field within a value held in memory, and which
+    /// member of the value's type it is (`Inst.Part`).
     ///
     /// The projection is retained at offset zero because its result type says
     /// what the managed address denotes. The backend may erase the no-op
     /// offset, but MIR may not erase the type transition with it.
-    fn fieldAddr(self: *Lowerer, base: InstId, result_ty: TypeId, offset: u32, span: Span) !InstId {
+    fn fieldAddr(self: *Lowerer, base: InstId, result_ty: TypeId, offset: u32, part: Inst.Part, span: Span) !InstId {
         const off = try self.emit(.constant, .u64, span, .{ .constant = offset });
-        return self.emit(.field_addr, result_ty, span, .{ .binary = .{ .lhs = base, .rhs = off } });
+        return self.emit(.field_addr, result_ty, span, .{ .field = .{ .base = base, .offset = off, .part = part } });
     }
 
     fn isIndirect(self: *const Lowerer, local: LocalId) bool {
@@ -2750,7 +2756,7 @@ const Lowerer = struct {
         for (0..carried.count()) |j| {
             const field = self.types().variantFieldType(ty, @intCast(k), @intCast(j));
             const offset = self.types().variantFieldOffset(ty, @intCast(k), @intCast(j));
-            const at = try self.fieldAddr(base, field, offset, span);
+            const at = try self.fieldAddr(base, field, offset, .at(@intCast(j)), span);
             switch (carried) {
                 .values => |v| try self.writeThrough(at, field, v[j], span),
                 .written => |a| try self.writeInto(a[j], field, at, span),
@@ -2797,7 +2803,7 @@ const Lowerer = struct {
         ty: TypeId,
         span: Span,
     ) std.mem.Allocator.Error!InstId {
-        return self.fieldAddr(value, ty, self.types().variantFieldOffset(of, k, j), span);
+        return self.fieldAddr(value, ty, self.types().variantFieldOffset(of, k, j), .at(j), span);
     }
 
     /// `p.x`, or `Colour.Red`.
@@ -2840,7 +2846,7 @@ const Lowerer = struct {
 
         for (pieces, 0..) |piece, i| {
             const held = self.types().fieldType(ty, @intCast(i));
-            const at = try self.fieldAddr(base, held, self.types().fieldOffset(ty, @intCast(i)), span);
+            const at = try self.fieldAddr(base, held, self.types().fieldOffset(ty, @intCast(i)), .at(@intCast(i)), span);
             const borrowed = self.types().interpolationBorrows(ty, @intCast(i));
             if (self.typing.interpolationPosition(piece)) |position| std.debug.assert((position == .borrowed) == borrowed);
             if (borrowed) {
@@ -2886,7 +2892,7 @@ const Lowerer = struct {
         const stride = self.types().strideOf(element);
 
         for (c.args, 0..) |a, i| {
-            const at = try self.fieldAddr(base, element, @intCast(stride * i), span);
+            const at = try self.fieldAddr(base, element, @intCast(stride * i), .at(@intCast(i)), span);
             try self.writeInto(a, element, at, span);
         }
         return base;
@@ -2955,13 +2961,13 @@ const Lowerer = struct {
         const base = try self.baseFor(ty, span, dest);
 
         const address = try self.emit(.bytes_addr, at.ty, span, .{ .bytes = blob });
-        try self.writeThrough(try self.fieldAddr(base, at.ty, at.offset, span), at.ty, address, span);
+        try self.writeThrough(try self.fieldAddr(base, at.ty, at.offset, .none, span), at.ty, address, span);
 
         // Read back from the pool, so the length is the decoded blob's and not
         // the spelling's: `"\u{e1}"` is six characters and two bytes.
         const held: i128 = @intCast(self.mono.bytes.items[blob].len);
         const count = try self.emit(.constant, len.ty, span, .{ .constant = held });
-        try self.writeThrough(try self.fieldAddr(base, len.ty, len.offset, span), len.ty, count, span);
+        try self.writeThrough(try self.fieldAddr(base, len.ty, len.offset, .none, span), len.ty, count, span);
 
         return base;
     }
@@ -3002,7 +3008,7 @@ const Lowerer = struct {
                 continue;
             };
             if (update != null) given[found.index] = true;
-            const at = try self.fieldAddr(base, found.ty, found.offset, span);
+            const at = try self.fieldAddr(base, found.ty, found.offset, .at(@intCast(found.index)), span);
             try self.writeInto(c.args[i + 1], found.ty, at, span);
         }
 
@@ -3017,8 +3023,8 @@ const Lowerer = struct {
                 const field: u32 = @intCast(f);
                 const field_ty = self.types().fieldType(ty, field);
                 const offset = self.types().fieldOffset(ty, field);
-                const value = try self.readThrough(try self.fieldAddr(from, field_ty, offset, span), field_ty, span);
-                try self.writeThrough(try self.fieldAddr(base, field_ty, offset, span), field_ty, value, span);
+                const value = try self.readThrough(try self.fieldAddr(from, field_ty, offset, .at(field), span), field_ty, span);
+                try self.writeThrough(try self.fieldAddr(base, field_ty, offset, .at(field), span), field_ty, value, span);
             }
         }
         return base;
@@ -3043,7 +3049,7 @@ const Lowerer = struct {
         for (c.args, 0..) |arg, i| {
             const field: u32 = @intCast(i);
             const field_ty = self.types().fieldType(ty, field);
-            const at = try self.fieldAddr(base, field_ty, self.types().fieldOffset(ty, field), span);
+            const at = try self.fieldAddr(base, field_ty, self.types().fieldOffset(ty, field), .at(field), span);
             try self.writeInto(arg, field_ty, at, span);
         }
         return base;
@@ -3061,7 +3067,7 @@ const Lowerer = struct {
         if (ty == .never) return self.expr(operand);
         const base = try self.baseFor(ty, span, dest);
         const k = self.libraryField(ty, "k");
-        try self.writeInto(operand, k.ty, try self.fieldAddr(base, k.ty, k.offset, span), span);
+        try self.writeInto(operand, k.ty, try self.fieldAddr(base, k.ty, k.offset, .none, span), span);
         return base;
     }
 
@@ -3083,13 +3089,13 @@ const Lowerer = struct {
         const base = try self.baseFor(ty, span, dest);
 
         const lo = self.libraryField(ty, "lo");
-        try self.writeInto(ends.lhs, lo.ty, try self.fieldAddr(base, lo.ty, lo.offset, span), span);
+        try self.writeInto(ends.lhs, lo.ty, try self.fieldAddr(base, lo.ty, lo.offset, .none, span), span);
 
         const hi = self.libraryField(ty, "hi");
-        try self.writeInto(ends.rhs, hi.ty, try self.fieldAddr(base, hi.ty, hi.offset, span), span);
+        try self.writeInto(ends.rhs, hi.ty, try self.fieldAddr(base, hi.ty, hi.offset, .none, span), span);
 
         const inclusive = self.libraryField(ty, "inclusive");
-        const flag_at = try self.fieldAddr(base, inclusive.ty, inclusive.offset, span);
+        const flag_at = try self.fieldAddr(base, inclusive.ty, inclusive.offset, .none, span);
         const flag = try self.emit(.constant, inclusive.ty, span, .{
             .constant = @intFromBool(self.ast.rangeInclusive(id)),
         });
@@ -3847,7 +3853,7 @@ const Lowerer = struct {
         const place = if (counted) |_| at: {
             const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(item) });
             const offset = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = at, .rhs = stride } });
-            break :at try self.emit(.field_addr, item, span, .{ .binary = .{ .lhs = base, .rhs = offset } });
+            break :at try self.emit(.field_addr, item, span, .{ .field = .{ .base = base, .offset = offset } });
         } else try self.splicedPath(
             declared.?.expansion,
             .{ .held = .{ .value = base, .ty = walked } },
@@ -4044,7 +4050,7 @@ const Lowerer = struct {
         const base = try self.baseFor(ty, span, null);
         for ([_][]const u8{ "lo", "hi", "inclusive" }, [_]u32{ 0, count, 0 }) |name, value| {
             const field = self.types().lookupField(ty, name).?;
-            const at = try self.fieldAddr(base, field.ty, field.offset, span);
+            const at = try self.fieldAddr(base, field.ty, field.offset, .none, span);
             const constant = try self.emit(.constant, field.ty, span, .{ .constant = value });
             try self.writeThrough(at, field.ty, constant, span);
         }
@@ -4140,7 +4146,7 @@ const Lowerer = struct {
         const item = try self.typeAt(f.args[0]);
         const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(item) });
         const offset = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = position, .rhs = stride } });
-        const place = try self.emit(.field_addr, item, span, .{ .binary = .{ .lhs = base, .rhs = offset } });
+        const place = try self.emit(.field_addr, item, span, .{ .field = .{ .base = base, .offset = offset } });
         try self.takeWalked(f.args[0], item, try self.readThrough(place, item, span), span);
 
         try self.loops.append(self.gpa, .{
@@ -4534,7 +4540,7 @@ const Lowerer = struct {
         if (projection.field) |field| {
             const receiver = try self.substituted(projection.receiver);
             const member = self.types().fieldType(receiver, field.index());
-            return self.fieldAddr(address, member, self.types().fieldOffset(receiver, field.index()), span);
+            return self.fieldAddr(address, member, self.types().fieldOffset(receiver, field.index()), .at(field.index()), span);
         }
         return address;
     }
@@ -4752,7 +4758,7 @@ const Lowerer = struct {
         // formed, and this is what they settled to -- so no check is emitted,
         // which is the same nothing a settled index costs.
         if (self.calls.rangePlaceOf(self.typing, id)) |place| {
-            return self.fieldAddr(base, result_ty, @intCast(stride * place.first), span);
+            return self.fieldAddr(base, result_ty, @intCast(stride * place.first), .at(@intCast(place.first)), span);
         }
 
         return self.arrayElementAddress(base, head_ty, .{ .wrote = b.rhs }, index_ty, span);
@@ -4774,7 +4780,7 @@ const Lowerer = struct {
         if (self.typing.from_end != .poison and index_ty == self.typing.from_end) {
             if (wrote != .none) if (self.foldedCountBack(wrote)) |k| {
                 if (Typing.elementSlot(arr.count, k, true)) |slot|
-                    return self.fieldAddr(base, result_ty, @intCast(stride * slot), span);
+                    return self.fieldAddr(base, result_ty, @intCast(stride * slot), .at(@intCast(slot)), span);
             };
             const k = switch (position) {
                 .wrote => |expression| try self.fromEndCount(expression, span),
@@ -4784,7 +4790,7 @@ const Lowerer = struct {
         }
         if (wrote != .none) if (self.foldedIndex(wrote)) |at| {
             if (Typing.elementSlot(arr.count, at, false)) |slot|
-                return self.fieldAddr(base, result_ty, @intCast(stride * slot), span);
+                return self.fieldAddr(base, result_ty, @intCast(stride * slot), .at(@intCast(slot)), span);
         };
         const idx = switch (position) {
             .wrote => |expression| try self.expr(expression),
@@ -4806,7 +4812,7 @@ const Lowerer = struct {
         _ = try self.check(ok, .bool_, span, .index_out_of_bounds);
         const by = try self.emit(.constant, .u64, span, .{ .constant = stride });
         const off = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = address_index, .rhs = by } });
-        return self.emit(.field_addr, result_ty, span, .{ .binary = .{ .lhs = base, .rhs = off } });
+        return self.emit(.field_addr, result_ty, span, .{ .field = .{ .base = base, .offset = off } });
     }
 
     fn delegatedAddress(
@@ -4830,7 +4836,7 @@ const Lowerer = struct {
         };
         const route = try instantiate_mod.delegatedRoute(self.gpa, &self.mono.pool, self.typing, self.instance, found, delegation, receiver_ty);
         defer route.deinit(self.gpa);
-        const address = if (delegation.field) |field| try self.fieldAddr(base, route.field_ty, self.types().fieldOffset(receiver_ty, field), span) else base;
+        const address = if (delegation.field) |field| try self.fieldAddr(base, route.field_ty, self.types().fieldOffset(receiver_ty, field), .at(field), span) else base;
         if (route.backing) |backing| return self.splicedPath(backing, .{ .held = .{ .value = address, .ty = route.field_ty } }, position, span);
         const key = route.key orelse switch (position) {
             .wrote => |expression| try self.typeAt(expression),
@@ -4875,7 +4881,7 @@ const Lowerer = struct {
         const at = try self.emit(.sub, .u64, span, .{ .binary = .{ .lhs = count, .rhs = k } });
         const by = try self.emit(.constant, .u64, span, .{ .constant = stride });
         const off = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = at, .rhs = by } });
-        return self.emit(.field_addr, result_ty, span, .{ .binary = .{ .lhs = base, .rhs = off } });
+        return self.emit(.field_addr, result_ty, span, .{ .field = .{ .base = base, .offset = off } });
     }
 
     /// What a count back from the end counts by.
@@ -4913,7 +4919,7 @@ const Lowerer = struct {
     fn countIn(self: *Lowerer, value: InstId, of: TypeId, span: Span) std.mem.Allocator.Error!InstId {
         if (value == InstId.none) return InstId.none;
         const k = self.libraryField(of, "k");
-        return self.readThrough(try self.fieldAddr(value, k.ty, k.offset, span), k.ty, span);
+        return self.readThrough(try self.fieldAddr(value, k.ty, k.offset, .none, span), k.ty, span);
     }
 
     /// What a count back from an end counts by, where the compiler settles it.
@@ -5049,7 +5055,7 @@ const Lowerer = struct {
                 const receiver_type = try self.typeAt(receiver);
                 if (self.mono.pool.get(receiver_type).closure.environment == .unit)
                     return self.baseFor(ty, span, dest);
-                return self.fieldAddr(value, ty, 0, span);
+                return self.fieldAddr(value, ty, 0, .none, span);
             },
             .closure => return self.directClosureCall(id, normal, c.callee, ty, span),
             .generic_callable => |parameter| {
@@ -5278,8 +5284,8 @@ const Lowerer = struct {
         const read = self.mono.idFor(self.library.raw.errno_read, &.{}, .poison, &.{});
         const code = try self.directCall(code_field.ty, span, read, &.{});
         const base = try self.baseFor(ty, span, null);
-        try self.writeThrough(try self.fieldAddr(base, value_field.ty, value_field.offset, span), value_field.ty, value, span);
-        try self.writeThrough(try self.fieldAddr(base, code_field.ty, code_field.offset, span), code_field.ty, code, span);
+        try self.writeThrough(try self.fieldAddr(base, value_field.ty, value_field.offset, .none, span), value_field.ty, value, span);
+        try self.writeThrough(try self.fieldAddr(base, code_field.ty, code_field.offset, .none, span), code_field.ty, code, span);
         return base;
     }
 
@@ -5308,7 +5314,7 @@ const Lowerer = struct {
 
     fn fieldValue(self: *Lowerer, base: InstId, ty: TypeId, name: []const u8, span: Span) !InstId {
         const field = self.libraryField(ty, name);
-        return self.readThrough(try self.fieldAddr(base, field.ty, field.offset, span), field.ty, span);
+        return self.readThrough(try self.fieldAddr(base, field.ty, field.offset, .none, span), field.ty, span);
     }
 
     /// The field of a `mem.Closure` at `field`, in the order the checker
@@ -5316,15 +5322,15 @@ const Lowerer = struct {
     fn closureField(self: *Lowerer, closure: InstId, ty: TypeId, field: RawAccesses.ClosureField, span: Span) !InstId {
         const index = @intFromEnum(field);
         const field_ty = self.types().fieldType(ty, index);
-        return self.readThrough(try self.fieldAddr(closure, field_ty, self.types().fieldOffset(ty, index), span), field_ty, span);
+        return self.readThrough(try self.fieldAddr(closure, field_ty, self.types().fieldOffset(ty, index), .at(index), span), field_ty, span);
     }
 
     fn buildSpan(self: *Lowerer, ty: TypeId, address: InstId, count: InstId, span: Span) !InstId {
         const base = try self.baseFor(ty, span, null);
         const at = self.libraryField(ty, "at");
         const len = self.libraryField(ty, "len");
-        try self.writeThrough(try self.fieldAddr(base, at.ty, at.offset, span), at.ty, address, span);
-        try self.writeThrough(try self.fieldAddr(base, len.ty, len.offset, span), len.ty, count, span);
+        try self.writeThrough(try self.fieldAddr(base, at.ty, at.offset, .none, span), at.ty, address, span);
+        try self.writeThrough(try self.fieldAddr(base, len.ty, len.offset, .none, span), len.ty, count, span);
         return base;
     }
 
@@ -5381,7 +5387,7 @@ const Lowerer = struct {
         for (self.res.closureCaptures(closure.closure), 0..) |capture, index| {
             const field: u32 = @intCast(index);
             const field_ty = self.types().fieldType(closure.environment, field);
-            const at = try self.fieldAddr(base, field_ty, self.types().fieldOffset(closure.environment, field), span);
+            const at = try self.fieldAddr(base, field_ty, self.types().fieldOffset(closure.environment, field), .at(field), span);
             if (capture.convention != .sink) {
                 const source = try self.addressOfPlace(capture.source, self.ast.exprSpan(capture.source));
                 const observation = try self.emit(.borrow, field_ty, span, .{ .unary = source });
@@ -5417,7 +5423,7 @@ const Lowerer = struct {
             if (try self.appendCallArgument(&args, arg, self.typing.callableParams(self.typing.get(normal.signature).callable)[at])) |stopped| return stopped;
         }
         if (environment != .unit)
-            try args.append(self.gpa, try self.fieldAddr(value, environment, 0, span));
+            try args.append(self.gpa, try self.fieldAddr(value, environment, 0, .none, span));
         const callee = self.mono.idForClosure(self.mono.pool.get(closure_type).closure);
         return self.sourceCall(written, ty, span, callee, args.items);
     }
@@ -5904,7 +5910,7 @@ const Lowerer = struct {
         while (i < pieces) : (i += 1) {
             const field = self.types().fieldType(held, i);
             const piece = self.types().interpolationValue(held, i);
-            var at = try self.fieldAddr(value, field, self.types().fieldOffset(held, i), span);
+            var at = try self.fieldAddr(value, field, self.types().fieldOffset(held, i), .at(@intCast(i)), span);
             // A borrowed piece renders the value it observes.
             if (self.types().interpolationBorrows(held, i)) at = try self.observeLayers(try self.readThrough(at, field, span), field, 1, span);
             // A part wider than a register is reached through its address, and

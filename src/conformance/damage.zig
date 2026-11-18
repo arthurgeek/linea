@@ -272,7 +272,7 @@ test "damage restoration isolates every variant on a reused module" {
     defer insts.deinit(gpa);
     const instructions = [_]mir_mod.Inst{
         .{ .tag = .constant, .ty = .u8, .span = .{ .start = 0, .end = 0 }, .data = .{ .constant = 7 } },
-        .{ .tag = .field_addr, .ty = .u8, .span = .{ .start = 0, .end = 0 }, .data = .{ .binary = .{ .lhs = .at(0), .rhs = .at(0) } } },
+        .{ .tag = .field_addr, .ty = .u8, .span = .{ .start = 0, .end = 0 }, .data = .{ .field = .{ .base = .at(0), .offset = .at(0) } } },
         .{ .tag = .function_addr, .ty = .u8, .span = .{ .start = 0, .end = 0 }, .data = .{ .function = .at(0) } },
         .{ .tag = .call_indirect, .ty = .u8, .span = .{ .start = 0, .end = 0 }, .data = .{ .indirect_call = .{ .callee = .at(2), .args = .at(0) } } },
     };

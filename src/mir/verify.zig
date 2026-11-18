@@ -1132,7 +1132,7 @@ const Function = struct {
                     }
                 }
             },
-            .binary => {
+            .binary, .field => {
                 const p = mir.binaryOf(id);
                 if (!try self.operandInRange(id, p.lhs)) return false;
                 if (!try self.operandInRange(id, p.rhs)) return false;
@@ -1434,7 +1434,7 @@ const Function = struct {
                     single[0] = mir.unaryOf(user);
                     break :blk single[0..1];
                 },
-                .binary => blk: {
+                .binary, .field => blk: {
                     const pair = mir.binaryOf(user);
                     single[0] = pair.lhs;
                     single[1] = pair.rhs;
@@ -2737,6 +2737,8 @@ pub const Harness = struct {
         .{ .name = "other", .ty = .u64 },
         .{ .name = "first", .ty = .u64 },
         .{ .name = "plain", .ty = plain },
+        .{ .name = "left", .ty = token },
+        .{ .name = "right", .ty = token },
     };
 
     const all_variants = [_]types_mod.Variant{
@@ -2779,6 +2781,9 @@ pub const Harness = struct {
     pub const pair_borrow: TypeId = @enumFromInt(TypeId.builtins.len + 19);
     /// A linear structure of no fields: zero-sized, and owing its settlement.
     pub const token: TypeId = @enumFromInt(TypeId.builtins.len + 20);
+    /// Two `Token`s, zero-sized and sharing their offset: only which field
+    /// an address names tells them apart.
+    pub const tokens: TypeId = @enumFromInt(TypeId.builtins.len + 21);
 
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
@@ -2804,7 +2809,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 21;
+            const fixed_type_count = TypeId.builtins.len + 22;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2828,6 +2833,7 @@ pub const Harness = struct {
             pool[@intFromEnum(token)] = .{ .struct_ = .{ .name = "Token", .first_field = 0, .field_count = 0, .ownership_policy = .linear } };
             pool[@intFromEnum(plain)] = .{ .struct_ = .{ .name = "Plain", .first_field = 17, .field_count = 2 } };
             pool[@intFromEnum(holder)] = .{ .struct_ = .{ .name = "Holder", .first_field = 19, .field_count = 2 } };
+            pool[@intFromEnum(tokens)] = .{ .struct_ = .{ .name = "Tokens", .first_field = 21, .field_count = 2, .ownership_policy = .linear } };
             pool[@intFromEnum(callback_enum)] = .{ .enum_ = .{ .name = "Callbacks", .first_variant = 2, .variant_count = 5 } };
             const callable_params = [_]types_mod.CallableParam{
                 .{ .spelling = "value", .convention = .read, .ty = .u8, .default = .absent },
@@ -2890,6 +2896,7 @@ pub const Harness = struct {
             errdefer gpa.free(capabilities);
             @memset(capabilities, .affine);
             capabilities[@intFromEnum(token)] = .linear;
+            capabilities[@intFromEnum(tokens)] = .linear;
             break :blk .{
                 .binding_types = .empty,
                 .decl_returns = .empty,
@@ -3833,7 +3840,7 @@ test "a field address cannot relabel a field as a code pointer" {
         .result_role = .managed_address,
         .ty = Harness.nullary_callable,
         .span = Span.empty,
-        .data = .{ .binary = .{ .lhs = base, .rhs = offset } },
+        .data = .{ .field = .{ .base = base, .offset = offset } },
     });
     const pointer = try b.addInst(entry, .{
         .tag = .load_indirect,
@@ -3884,7 +3891,7 @@ test "an indexed element address holds a code pointer only when scaled by the el
             .result_role = .managed_address,
             .ty = case.ty,
             .span = Span.empty,
-            .data = .{ .binary = .{ .lhs = base, .rhs = offset } },
+            .data = .{ .field = .{ .base = base, .offset = offset } },
         });
         const result = try b.addInst(entry, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 0 } });
         _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
@@ -3933,7 +3940,7 @@ test "enum field addresses preserve exact code pointer types across overlapping 
             .result_role = .managed_address,
             .ty = case.ty,
             .span = Span.empty,
-            .data = .{ .binary = .{ .lhs = base, .rhs = offset } },
+            .data = .{ .field = .{ .base = base, .offset = offset } },
         });
         const result = try b.addInst(entry, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 0 } });
         _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = result } });
@@ -3960,7 +3967,7 @@ test "a field address cannot use a code pointer value as storage" {
         .result_role = .managed_address,
         .ty = Harness.nullary_callable,
         .span = Span.empty,
-        .data = .{ .binary = .{ .lhs = base, .rhs = offset } },
+        .data = .{ .field = .{ .base = base, .offset = offset } },
     });
     const pointer = try b.addInst(entry, .{
         .tag = .load_indirect,
@@ -5176,7 +5183,7 @@ fn aggregateInASlot(b: *Builder, returns: TypeId, offset: i128, width: TypeId) !
     const entry = try b.addBlock();
     const base = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .local = slot } });
     const off = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = offset } });
-    const at = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = base, .rhs = off } } });
+    const at = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = base, .offset = off } } });
     const value = try b.addInst(entry, .{ .tag = .constant, .ty = width, .span = Span.empty, .data = .{ .constant = 1 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = width, .span = Span.empty, .data = .{ .binary = .{ .lhs = at, .rhs = value } } });
     _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = base } });
@@ -5588,7 +5595,7 @@ test "an indirect call lending a read parameter kept in place less than it reach
     // One byte past the slot's single byte: the parameter reaches a byte the
     // slot does not have.
     const past = try caller.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 1 } });
-    const lent = try caller.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u8, .span = Span.empty, .data = .{ .binary = .{ .lhs = slot, .rhs = past } } });
+    const lent = try caller.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = .u8, .span = Span.empty, .data = .{ .field = .{ .base = slot, .offset = past } } });
     const call = try caller.addIndirectCall(entry, .value, .u8, Span.empty, callee, &.{lent});
     _ = try caller.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = call } });
     const functions = try gpa.dupe(Mir, &.{
@@ -5617,7 +5624,7 @@ test "an access through a lent address is bounded by what the parameter names" {
     const entry = try b.addBlock();
     const at = try b.addInst(entry, .{ .tag = .load, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .local = LocalId.at(0) } });
     const off = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 24 } });
-    const part = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = at, .rhs = off } } });
+    const part = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = at, .offset = off } } });
     const v = try b.addInst(entry, .{ .tag = .load_indirect, .ty = .i64, .span = Span.empty, .data = .{ .unary = part } });
     _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = v } });
 
@@ -5815,7 +5822,7 @@ test "a part with no bytes is not stored at a nonzero width" {
     const entry = try b.addBlock();
     const base = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.maybe, .span = Span.empty, .data = .{ .local = slot } });
     const off = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 8 } });
-    const at = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.maybe, .span = Span.empty, .data = .{ .binary = .{ .lhs = base, .rhs = off } } });
+    const at = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.maybe, .span = Span.empty, .data = .{ .field = .{ .base = base, .offset = off } } });
     const k = try b.addInst(entry, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 0 } });
     _ = try b.addInst(entry, .{ .tag = .store_indirect, .ty = .u64, .span = Span.empty, .data = .{ .binary = .{ .lhs = at, .rhs = k } } });
     _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = k } });
@@ -5971,11 +5978,11 @@ test "a place reached through a field address carries the offset it was given" {
     const entry = try b.addBlock();
     const base = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .local = slot } });
     const o1 = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 8 } });
-    const a1 = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = base, .rhs = o1 } } });
+    const a1 = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = base, .offset = o1 } } });
     // Twice, so the domain has to add rather than replace: 8 and 16 together
     // are past the end, and either alone is not.
     const o2 = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 16 } });
-    const a2 = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = a1, .rhs = o2 } } });
+    const a2 = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = a1, .offset = o2 } } });
     const v = try b.addInst(entry, .{ .tag = .load_indirect, .ty = .i64, .span = Span.empty, .data = .{ .unary = a2 } });
     _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = v } });
 
