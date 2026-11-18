@@ -64,6 +64,9 @@ pub const Documents = struct {
     /// substituted for what the file on disk holds. The caller owns every
     /// path and every text in the returned slice, and the slice itself.
     ///
+    /// An open buffer naming a file not on disk is listed too, wherever the
+    /// loader says a source of that path would belong.
+    ///
     /// Membership is the loader's answer, asked rather than re-derived: a
     /// walk of its own agrees on every module without a subdirectory and
     /// disagrees on the first one with, which is a server analysing a
@@ -86,7 +89,13 @@ pub const Documents = struct {
         root: loader.Root,
         reading: Reading,
     ) ![]const loader.InMemoryFile {
-        const paths = try loader.pathsOfRoot(gpa, io, root);
+        // A buffer the editor opened before saving it is listed where the
+        // file will be once it is written.
+        const buffers = try gpa.alloc([]const u8, self.open.count());
+        defer gpa.free(buffers);
+        var keys = self.open.keyIterator();
+        for (buffers) |*path| path.* = keys.next().?.*;
+        const paths = try loader.pathsOfRoot(gpa, io, root, buffers);
         defer {
             for (paths) |p| gpa.free(p);
             gpa.free(paths);

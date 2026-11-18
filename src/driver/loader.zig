@@ -944,7 +944,7 @@ fn loadFromDiskWith(
         named.close(io);
     }
 
-    const paths = try pathsOfRoot(gpa, io, found);
+    const paths = try pathsOfRoot(gpa, io, found, &.{});
     defer {
         for (paths) |q| gpa.free(q);
         gpa.free(paths);
@@ -1381,7 +1381,11 @@ pub fn entryOf(
 /// Every file a root is made of, by path: its sources, and the manifest that
 /// identified it. Both readers of a root from disk -- the command line and the
 /// editor -- take their files here, so a root's manifest reaches both.
-pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root) ![][]const u8 {
+///
+/// `unsaved` names files an editor holds that may not be on disk yet. Each one
+/// a root's source directory holds (`holdsSource`) is listed with that root's
+/// files, as it will be once it is written; the command line names none.
+pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root, unsaved: []const []const u8) ![][]const u8 {
     var all: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (all.items) |p| gpa.free(p);
@@ -1391,6 +1395,7 @@ pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root) ![][]const u8
     defer listed.deinit(gpa);
 
     try appendPaths(gpa, &all, &listed, try pathsOfModule(gpa, io, dirOfEntry(root.entry)));
+    try appendHeld(gpa, io, dirOfEntry(root.entry), unsaved, &all, &listed);
     const manifest = root.manifest orelse return all.toOwnedSlice(gpa);
     try appendPaths(gpa, &all, &listed, try gpa.dupe([]const u8, &.{try gpa.dupe(u8, manifest)}));
 
@@ -1410,8 +1415,33 @@ pub fn pathsOfRoot(gpa: std.mem.Allocator, io: std.Io, root: Root) ![][]const u8
         const where = std.Io.Dir.cwd().realPathFileAlloc(io, root_dir, arena.allocator()) catch root_dir;
         try seen.put(gpa, try gpa.dupe(u8, where), {});
     }
-    try appendDependencyPaths(gpa, io, dirOf(manifest), &all, &listed, &seen);
+    try appendDependencyPaths(gpa, io, dirOf(manifest), unsaved, &all, &listed, &seen);
     return all.toOwnedSlice(gpa);
+}
+
+/// Appends each of `unsaved` that the source directory `dir` holds and that is
+/// not already listed.
+fn appendHeld(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, unsaved: []const []const u8, all: *std.ArrayList([]const u8), listed: *std.StringHashMapUnmanaged(void)) !void {
+    for (unsaved) |path| {
+        if (!holdsSource(io, dir, path)) continue;
+        try appendPaths(gpa, all, listed, try gpa.dupe([]const u8, &.{try gpa.dupe(u8, path)}));
+    }
+}
+
+/// Whether `path` is one of the sources of the root whose source directory is
+/// `dir`: a `.lin` file inside it, beneath no directory between them that
+/// holds a manifest of its own. The membership `pathsOfModule` lists from
+/// disk, asked of one path that need not exist yet.
+///
+/// Costs one `stat` per directory between the file and `dir`.
+fn holdsSource(io: std.Io, dir: []const u8, path: []const u8) bool {
+    if (!std.mem.endsWith(u8, path, ".lin")) return false;
+    var at = dirOf(path);
+    if (!within(at, dir)) return false;
+    while (at.len > dir.len) : (at = dirOf(at)) {
+        if (holdsManifest(io, at)) return false;
+    }
+    return true;
 }
 
 /// Appends the paths not already listed, taking ownership of `paths` and
@@ -1438,6 +1468,7 @@ fn appendDependencyPaths(
     gpa: std.mem.Allocator,
     io: std.Io,
     manifest_dir: []const u8,
+    unsaved: []const []const u8,
     all: *std.ArrayList([]const u8),
     listed: *std.StringHashMapUnmanaged(void),
     seen: *std.StringHashMapUnmanaged(void),
@@ -1467,7 +1498,8 @@ fn appendDependencyPaths(
         const source = try librarySourceDir(a, dir, if (manifest) |m| m.source else null);
         const sources = pathsOfModule(gpa, io, source) catch continue;
         try appendPaths(gpa, all, listed, sources);
-        try appendDependencyPaths(gpa, io, dir, all, listed, seen);
+        try appendHeld(gpa, io, source, unsaved, all, listed);
+        try appendDependencyPaths(gpa, io, dir, unsaved, all, listed, seen);
     }
 }
 
@@ -1483,7 +1515,7 @@ test "a root's paths are its sources and the manifest that identified it" {
 
     const found = try rootOf(gpa, testing.io, root, .as_named, "");
     defer found.deinit(gpa);
-    const paths = try pathsOfRoot(gpa, testing.io, found);
+    const paths = try pathsOfRoot(gpa, testing.io, found, &.{});
     defer {
         for (paths) |q| gpa.free(q);
         gpa.free(paths);
@@ -2069,7 +2101,7 @@ test "a root's paths hold every library its manifest names" {
 
     const found = try rootOf(gpa, testing.io, guests, .as_named, "");
     defer found.deinit(gpa);
-    const paths = try pathsOfRoot(gpa, testing.io, found);
+    const paths = try pathsOfRoot(gpa, testing.io, found, &.{});
     defer {
         for (paths) |q| gpa.free(q);
         gpa.free(paths);
@@ -2095,7 +2127,7 @@ test "a root's paths list a library's manifest that will not parse" {
 
     const found = try rootOf(gpa, testing.io, app, .as_named, "");
     defer found.deinit(gpa);
-    const paths = try pathsOfRoot(gpa, testing.io, found);
+    const paths = try pathsOfRoot(gpa, testing.io, found, &.{});
     defer {
         for (paths) |q| gpa.free(q);
         gpa.free(paths);

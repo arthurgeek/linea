@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"main.lin","languageId":"linea","version":1,"text":"// A file the editor opened and has not saved yet belongs to the module of the\n// directory it is in, as it will once it is written: `new.lin` is checked with\n// this file, and `helper` is found here.\nfn main() -> UInt8 {\n    0\n}\n"}}}
+{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"new.lin","languageId":"linea","version":1,"text":"fn _helper() -> UInt8 {\n    true\n}\n"}}}
+{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"new.lin"}}}
+{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"main.lin","version":2},"contentChanges":[{"text":"// A file the editor opened and has not saved yet belongs to the module of the\n// directory it is in, as it will once it is written: `new.lin` is checked with\n// this file, and `helper` is found here.\nfn main() -> UInt8 {\n    _helper()\n}\n"}]}}
+{"jsonrpc":"2.0","id":3,"method":"shutdown"}
