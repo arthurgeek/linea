@@ -2493,8 +2493,9 @@ fn main() -> Result[UInt8, io.IoError] {
 path the walk could not read, here the link, and `error.cause()` answers a
 `fs.WalkCause`: `Io` with the `io.IoError` of the call that failed (its
 `operation` is `Metadata` here, and `Open` or `Read` for a directory), `Loop`
-for a followed link that leads back into a directory the walk is inside, or
-`Allocation` when storage for a path was refused. Without
+for a followed link that leads back into a directory the walk is inside,
+`Changed` for a directory the walk is inside that was moved or replaced while
+it walked, or `Allocation` when storage for a path was refused. Without
 `follow_symlinks: true` the walk reports `gone` as an entry of kind `Symlink`
 and never looks at what it names, so there is no error to report. To stop at
 the first error instead of going on, `break` out of the loop there and settle

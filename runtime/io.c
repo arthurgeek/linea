@@ -24,6 +24,16 @@
 #include <sys/sysctl.h>
 #endif
 
+/* The fault tests read directories through a stand-in that is interrupted
+ * once. It is named here rather than by renaming `readdir` on the command
+ * line, because macOS's <dirent.h> binds `readdir` to its 64-bit inode
+ * symbol through an asm label that a rename would not reach. */
+#ifdef LINEA_READDIR
+struct dirent *LINEA_READDIR(DIR *dir);
+#else
+#define LINEA_READDIR readdir
+#endif
+
 /* The runtime's scalar address ABI targets LP64 Linux and macOS. */
 typedef char linea_address_fits_pointer[(sizeof(unsigned long) == sizeof(void *)) ? 1 : -1];
 typedef char linea_count_fits_long[(sizeof(long) == 8) ? 1 : -1];
@@ -54,6 +64,7 @@ uint8_t linea_io_category(int code) {
     case ECONNRESET: case ECONNABORTED: return LINEA_IO_CONNECTION_RESET;
     case ECONNREFUSED: return LINEA_IO_CONNECTION_REFUSED;
     case EADDRINUSE: return LINEA_IO_ADDRESS_IN_USE;
+    case ENAMETOOLONG: return LINEA_IO_NAME_TOO_LONG;
     default: return LINEA_IO_OTHER;
     }
 }
@@ -393,8 +404,13 @@ long linea_dir_next(unsigned long stream, unsigned long at, unsigned long len, u
     DIR *dir = (DIR *)(uintptr_t)stream;
     struct dirent *entry;
     for (;;) {
-        errno = 0;
-        entry = readdir(dir);
+        /* readdir answers NULL both at the end, leaving errno alone, and on
+         * failure, so errno is cleared first; an interrupted read is tried
+         * again, as every other blocking call here is. */
+        do {
+            errno = 0;
+            entry = LINEA_READDIR(dir);
+        } while (entry == NULL && errno == EINTR);
         if (entry == NULL) return errno == 0 ? 0 : -(long)errno;
         if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) break;
     }

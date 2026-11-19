@@ -23,7 +23,8 @@ enum linea_io_category {
     LINEA_IO_TIMED_OUT = 15,
     LINEA_IO_CONNECTION_RESET = 16,
     LINEA_IO_CONNECTION_REFUSED = 17,
-    LINEA_IO_ADDRESS_IN_USE = 18
+    LINEA_IO_ADDRESS_IN_USE = 18,
+    LINEA_IO_NAME_TOO_LONG = 19
 };
 uint8_t linea_io_category(int code);
 /* `errno` as the call just made left it. The compiler calls this immediately
