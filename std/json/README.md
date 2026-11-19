@@ -206,7 +206,7 @@ reader back.
 ```linea
 let lines = json.Lines.open(file) else |failure| {
     failure.release()
-    return 1
+    return .Ok(1)
 }
 var checks = lines.decoded[Check]()
 for item in &checks {
@@ -222,15 +222,21 @@ for item in &checks {
     }
 }
 // `abandon` hands the file back to be closed.
-let _ = checks.abandon().close()
+checks.abandon().close()?
 ```
 
-A line ends at LF or CRLF, and the last line needs neither. A line holding
+A line ends at LF or CRLF, and the last line needs neither; a carriage
+return that ends the last line is dropped as one before a line feed is. A line holding
 only JSON whitespace is blank: it gives no item but is counted, so line
 numbers match the file. Each line is parsed within the `limits:` given, and
 `limits.max_input_bytes` (8 MiB by default) also bounds the line, so the
 reader holds at most one line of that length and its document whatever the
-stream's length; a longer line is read past without being stored.
+stream's length; a longer line is read past without being stored. Memory is
+bounded, time is not: an item comes only once its line ends, so a stream that
+sends no line feed is read to its end, or to its first failure, before the
+reader answers. Bound the wait on the source itself, for example with
+`net.Connection.set_deadline` on a connection, after which a read fails and
+that failure is the last item.
 
 A line that fails gives an error and the walk continues at the next line. A
 `LinesError` holds the line's number, counted from one, and its
@@ -250,7 +256,9 @@ health checks this way.
 write one line: compact JSON, which escapes every line feed inside a string,
 and a line feed. They neither buffer nor flush; write through an
 `io.BufferedWriter` and call its `flush` when the reader at the other end
-should see the lines written so far.
+should see the lines written so far. A write that fails partway leaves part of
+a line in the writer, and the next line would be appended to it, so after a
+failure abandon the writer rather than write on.
 
 ## Record and custom codecs
 

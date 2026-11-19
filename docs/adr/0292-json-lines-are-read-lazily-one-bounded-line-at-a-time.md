@@ -86,7 +86,13 @@ A stream whose input fails transiently ends the walk; a program that retries
 reads the reader back with `abandon` and opens a new `Lines` over it, losing
 the read-ahead. A line that is longer than the limit is still read to its end,
 so a stream with no line feed is read to its end before the error is
-reported, in bounded memory.
+reported, in bounded memory but unbounded time; a deadline on the source,
+such as `net.Connection.set_deadline`, bounds the wait.
+
+A writer that fails partway through `write_line` or `encode_line` holds part of
+a line, and a later line would be appended to it, so the stream is no longer
+JSON Lines. The functions do not recover it: a caller abandons the writer after
+a failure, as with any writer whose output is framed.
 
 ## Alternatives considered
 

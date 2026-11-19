@@ -240,13 +240,26 @@ impl[R: io.Reader, A: Allocator] Iterator for Lines[R, A] {
             if self.ended {
                 return .None
             }
-            match &self.input.read_line_borrowed(max_bytes: self.limits.max_input_bytes) {
+            // The last line may end in a carriage return that no line feed
+            // follows, which the buffered reader keeps; one byte more than the
+            // limit leaves room for it, and the length is checked once it is
+            // dropped.
+            let room = if self.limits.max_input_bytes == UInt64.max {
+                UInt64.max
+            } else {
+                self.limits.max_input_bytes + 1
+            }
+            match &self.input.read_line_borrowed(max_bytes: room) {
                 Ok(None) => {
                     self.ended = true
                     return .None
                 },
-                Ok(Some(text)) => {
+                Ok(Some(whole)) => {
                     self.lines_read += 1
+                    let text = without_final_return(whole)
+                    if text.length() > self.limits.max_input_bytes {
+                        return .Some(.Err(.{ line = self.lines_read, problem = .Document(.Parse(.{ kind = .InputLimit, offset = self.limits.max_input_bytes })) }))
+                    }
                     if blank(text) {
                         continue
                     }
@@ -323,6 +336,20 @@ test "a line past the input limit is skipped and reported" {
     let _source = lines.abandon()
     testing.assert(refused, "a line past the limit was not an input limit error on line 1")?
     testing.assert_eq(next.as_uint64().unwrap(), UInt64(12), "the line after a long one was lost")?
+}
+
+test "a final carriage return ends the last line as a crlf does" {
+    let limits = ParseLimits { max_input_bytes = 4, ..ParseLimits.default() }
+    var lines = Lines.open(LinesSource.of("1234\r\n5678\r"), limits: limits).unwrap()
+    let first = &lines.next().unwrap().unwrap()
+    defer first.release()
+    let last = &lines.next().unwrap().unwrap()
+    defer last.release()
+    let ended = finished(&lines.next())
+    let _source = lines.abandon()
+    testing.assert_eq(first.as_uint64().unwrap(), UInt64(1234), "a line ended by crlf changed")?
+    testing.assert_eq(last.as_uint64().unwrap(), UInt64(5678), "a final line ended by a carriage return was refused")?
+    testing.assert(ended, "the stream did not end after its last line")?
 }
 
 test "a zero input limit reports every line that is not blank" {
@@ -514,6 +541,9 @@ test "a line that does not decode names its line and the field" {
 // stream. Compact JSON writes a line feed inside a string as `\n`, so the
 // value takes exactly one line. The writer is not flushed; a buffered writer
 // hands lines on when its buffer fills or when it is flushed.
+// A write that fails partway leaves part of the line in the writer, and a
+// later line would be appended to it, so a caller abandons the writer after a
+// failure rather than writing on.
 pub fn write_line[A: Allocator, W: Writer](inout writer: W, value: Value[A]) -> Result[(), W.Error] where carries(.Err: writer) {
     write(&writer, value)?
     &writer.write_str("\n")
@@ -532,7 +562,8 @@ test "write_line writes one document on one line" {
 }
 
 // Encode `value` as compact JSON and a line feed, as `write_line` does for a
-// document. The writer is not flushed.
+// document. The writer is not flushed, and after a failure it may hold part of
+// the line, so a caller abandons it rather than writing on.
 pub fn encode_line[T: Encode, W: Writer](inout writer: W, value: T) -> Result[(), EncodeError[W.Error]] where carries(.Err: writer) {
     encode(&writer, value)?
     &writer.write_str("\n")?
@@ -556,6 +587,17 @@ test "encoded lines read back as the values written" {
     let _source = stock.abandon()
     testing.assert_eq(output.view(), two_stock_lines, "the encoded lines changed")?
     testing.assert_eq(units, UInt64(15), "the encoded lines did not read back")?
+}
+
+// Drop the carriage return that ends `line`, as a CRLF's is dropped. Only the
+// last line of a stream can end in one, since the buffered reader drops the
+// carriage return before every line feed.
+fn without_final_return(sink line: Str) -> Str where carries(line) {
+    if line.ends_with("\r") {
+        line.slice(0, line.length() - 1).unwrap()
+    } else {
+        line
+    }
 }
 
 // Return whether `line` holds only JSON whitespace, so it holds no document.

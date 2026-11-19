@@ -2248,7 +2248,11 @@ the file unread.
 
 A line longer than the parse limits' `max_input_bytes`, 8 MiB unless
 `limits:` says otherwise, is skipped and reported as `input too long`, so no
-line makes the reader take more memory than that. A blank line gives no item
+line makes the reader take more memory than that. The memory is bounded but
+the wait is not: a reading comes only once its line ends, so a stream that
+never sends a line feed is read to its end before the walk sees anything. On
+a network connection, `set_deadline` bounds that wait; a read past it fails,
+and the failure is the last item. A blank line gives no item
 but is still counted, so the numbers match what an editor shows. Without
 `decoded`, the items are `json.Value` documents. When the file itself cannot
 be read, that error is the last item. `json.Lines.open_in(allocator, file)`
@@ -2256,7 +2260,9 @@ reads the lines, and builds the values, in another allocator.
 
 `json.encode_line` writes the other way: a value as compact JSON followed by a
 line feed. A line feed inside a string is written as `\n`, so the value always
-takes exactly one line. `json.write_line` does the same for a `json.Value`.
+takes exactly one line. `json.write_line` does the same for a `json.Value`. A
+write that fails partway leaves part of a line behind, and the next line would
+be appended to it, so a program stops writing to that writer after a failure.
 Writing through a buffer saves a system call for each line, and `flush` hands
 what the buffer holds on when the reader at the other end should see it:
 
