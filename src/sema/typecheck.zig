@@ -890,6 +890,7 @@ fn typecheckInternal(
     defer c.walk_helps.deinit(gpa);
     defer c.refused_demands.deinit(gpa);
     defer c.refused_calls.deinit(gpa);
+    defer c.refused_values.deinit(gpa);
     defer {
         for (c.refused_demands_order.items) |demand| freeRefusedDemand(gpa, demand);
         c.refused_demands_order.deinit(gpa);
@@ -6731,6 +6732,10 @@ const Checker = struct {
     /// The calls whose type arguments a bound refused. Sized by the calls
     /// the program writes that were refused.
     refused_calls: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
+    /// The bindings declared holding a refused call's result, or a part of
+    /// one, as `fromRefusedCall` traces it. Filled only once a call was
+    /// refused, so sized by the bindings declared after one.
+    refused_values: std.AutoHashMapUnmanaged(BindingId, void) = .empty,
     refused_demands_order: std.ArrayList(types_mod.RefusedDemand) = .empty,
     /// Whether the body being checked is a closure's written inside a loop,
     /// which a `break` or `continue` in it cannot leave.
@@ -13425,19 +13430,20 @@ const Checker = struct {
         return out;
     }
 
-    /// Settles the trait arguments a call left to its literals where `Self` is
-    /// a type parameter, from the bounds that parameter carries. The generic
-    /// body is checked where it is written, so the call must name one of
-    /// them there: `Scale.scale(s, 1)` under `S: Scale[UInt8] + Scale[Bool]`
-    /// is a call at `Scale[UInt8]`, and under `S: Scale[UInt8] +
-    /// Scale[UInt16]` the literal fits both and the call is refused. False
-    /// where it was refused.
+    /// Settles the trait arguments a call left to its literals from the
+    /// lists `Self` implements the trait at: the bounds a type parameter
+    /// carries, or a concrete type's implementations. One rule for both, so
+    /// a generic body and the same call on a concrete type settle alike:
+    /// `s.scale(1)` under `S: Scale[UInt8] + Scale[Bool]`, and on a type
+    /// implementing both, is a call at `Scale[UInt8]`; where the literal fits
+    /// `Scale[UInt8]` and `Scale[UInt16]` both, the call is refused; where
+    /// it fits none, it takes its default type. False where it was refused.
     ///
-    /// **Bound:** the bounds and implementations `keys` reads for the
-    /// parameter, each compared once against the trait's parameters.
+    /// **Bound:** the bounds and implementations `keys` reads for `Self`,
+    /// each compared once against the trait's parameters.
     fn settleLiteralTraitArgs(self: *Checker, id: ExprId, trait: node.DeclId, out: []TypeId, values_from: u32) std.mem.Allocator.Error!bool {
         const receiver = self.self_at_call orelse return true;
-        if (receiver == .poison or self.builder.get(receiver) != .parameter) return true;
+        if (receiver == .poison) return true;
         for (out) |*slot| {
             if (slot.* != .poison) slot.* = try self.builder.resolveOpen(slot.*, &self.open_types);
         }
@@ -16930,6 +16936,7 @@ const Checker = struct {
             } else null;
             const of = try self.check(d.init, named);
             self.statement_value = previous_statement;
+            try self.noteRefusedBinders(d.pattern, d.init);
             // A consuming `let` takes the value apart, so each name owns what
             // it holds and is a place of its own. A `let read` observes the
             // place instead, so each name stands for the part the pattern
@@ -17234,6 +17241,11 @@ const Checker = struct {
             TypeId.poison
         else
             try self.check(d.init, annotated);
+        if (d.pattern != ExprId.none) {
+            try self.noteRefusedBinders(d.pattern, d.init);
+        } else if (b != BindingId.none and d.init != ExprId.none and try self.fromRefusedCall(d.init)) {
+            try self.refused_values.put(self.gpa, b, {});
+        }
         // A binding whose initialiser was refused has no value for a
         // constant expression naming it to read.
         if (d.init != ExprId.none and d.pattern == ExprId.none and self.builder.exprType(d.init) == .poison) {
@@ -22571,6 +22583,20 @@ const Checker = struct {
                 .{declared_name},
             );
         }
+        // Nor one the runtime calls without defining, such as the C
+        // library's `free`: a C host links one definition of the name, and
+        // the runtime would call the export in place of the function it
+        // means.
+        if (category == .t_export and runtime_symbols.imports(declared_name)) {
+            return self.sink.addErrorFmt(
+                .m_export,
+                self.ast.fileOf(self.ast.declName(d)),
+                self.ast.tokenSpan(self.ast.declName(d)),
+                "publish it under a name of your own",
+                "`{s}` is a symbol the Linea runtime calls, so an export of it would replace the function the runtime calls",
+                .{declared_name},
+            );
+        }
 
         // A callback an `extern` takes, and the context it hands back, are
         // checked as a pair ([T-ExternCallback]); what remains crosses alone.
@@ -25846,7 +25872,7 @@ const Checker = struct {
         // A call whose type arguments a bound refused still answers the type
         // its signature declares, and what is done with that value is
         // judged. What its type lacks only because of the refused bound is
-        // not, for the call itself or a `let` bound to it (`fromRefusedCall`).
+        // not, for the call or a value `fromRefusedCall` traces to it.
         const bounds_refused = self.sink.error_count != errors_before_bounds;
         if (bounds_refused) try self.refused_calls.put(self.gpa, id, {});
         // One mistake, one report: a bound the declaration refused is not
@@ -27262,24 +27288,151 @@ const Checker = struct {
     /// expression the report is about, and only where `fromRefusedCall`
     /// says it is the refused call's own result.
     fn refusalExplains(self: *Checker, trait: node.DeclId, of: TypeId, value: ExprId) std.mem.Allocator.Error!bool {
-        return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands, value != ExprId.none and self.fromRefusedCall(value));
+        return self.builder.explainedByRefusal(self.generic, trait, &.{}, of, &self.refused_demands, value != ExprId.none and try self.fromRefusedCall(value));
     }
 
-    /// Whether `value` is a call a bound refused, or a name a `let` binds
-    /// to one. Nothing further is traced: a value reaching a check by any
-    /// other route is judged as it is, since dropping an independent
-    /// mistake is worse than repeating a consequence.
-    fn fromRefusedCall(self: *const Checker, value: ExprId) bool {
-        const at = self.ast.withoutGroups(value);
-        if (self.refused_calls.contains(at)) return true;
-        if (self.ast.exprTag(at) != .name_ref) return false;
-        const b = self.res.targetOf(at);
-        if (b == BindingId.none or self.res.kindOf(b) != .local) return false;
-        const stmt = self.res.stmtOf(b);
-        if (stmt == StmtId.none or self.ast.stmtTag(stmt) != .let_decl or self.ast.stmtIsMutable(stmt)) return false;
-        const bound = self.ast.stmtData(stmt);
-        if (bound.name != self.res.declaringToken(b) or bound.init == ExprId.none) return false;
-        return self.refused_calls.contains(self.ast.withoutGroups(bound.init));
+    /// One step taken from a value to a part of it: a field by name, a
+    /// tuple pattern's element by position, or what a variant or newtype carries,
+    /// which only a value that is wholly a refused call's result answers.
+    const RefusedStep = union(enum) {
+        field: StringId,
+        position: u32,
+        carried,
+    };
+
+    /// Whether `value` is provably a refused call's result, or a part of one:
+    /// the call itself; a name declared holding one and never written
+    /// since; a block whose tail is one; an `if` or `match` each of whose
+    /// arms is one; or a field of one, or of a structure literal whose field
+    /// is one, and likewise a tuple pattern's element. Every other value is judged as
+    /// it is: dropping an independent mistake is worse than repeating a
+    /// consequence, so a name rewritten after its declaration, or an arm
+    /// building a value of its own, is not traced.
+    fn fromRefusedCall(self: *Checker, value: ExprId) std.mem.Allocator.Error!bool {
+        if (self.refused_calls.count() == 0) return false;
+        var steps: std.ArrayList(RefusedStep) = .empty;
+        defer steps.deinit(self.gpa);
+        return self.tracesToRefusedCall(value, &steps);
+    }
+
+    /// `fromRefusedCall` for the part `steps` selects from `value`, the last
+    /// step taken first. Consumes `steps`.
+    fn tracesToRefusedCall(self: *Checker, value: ExprId, steps: *std.ArrayList(RefusedStep)) std.mem.Allocator.Error!bool {
+        var at = value;
+        while (true) {
+            if (at == ExprId.none) return false;
+            at = self.ast.withoutGroups(at);
+            if (self.refused_calls.contains(at)) return true;
+            switch (self.ast.exprTag(at)) {
+                .name_ref => {
+                    const b = self.res.targetOf(at);
+                    if (b == BindingId.none or self.res.isRewritten(b)) return false;
+                    if (self.refused_values.contains(b)) return true;
+                    // A part of a structure or tuple a `let` built is traced
+                    // into the literal it was built from.
+                    if (steps.items.len == 0 or self.res.kindOf(b) != .local) return false;
+                    const stmt = self.res.stmtOf(b);
+                    if (stmt == StmtId.none or self.ast.stmtTag(stmt) != .let_decl) return false;
+                    const bound = self.ast.stmtData(stmt);
+                    if (bound.pattern != ExprId.none or bound.name != self.res.declaringToken(b)) return false;
+                    at = bound.init;
+                },
+                .field => {
+                    try steps.append(self.gpa, .{ .field = self.ast.tokenName(self.ast.exprMain(at)) });
+                    at = self.ast.unaryOperand(at);
+                },
+                .struct_literal => {
+                    const step = steps.pop() orelse return false;
+                    if (step != .field) return false;
+                    const args = self.ast.call(at).args;
+                    var i: usize = 0;
+                    const found = while (i + 1 < args.len) : (i += 2) {
+                        if (self.ast.exprTag(args[i]) != .err and self.ast.tokenName(self.ast.exprMain(args[i])) == step.field) break args[i + 1];
+                    } else null;
+                    if (found) |part| {
+                        at = part;
+                    } else {
+                        // A field the literal does not write is the base's.
+                        at = self.ast.structLiteralBase(at) orelse return false;
+                        try steps.append(self.gpa, step);
+                    }
+                },
+                .tuple_literal => {
+                    const step = steps.pop() orelse return false;
+                    if (step != .position) return false;
+                    const args = self.ast.call(at).args;
+                    if (step.position >= args.len) return false;
+                    at = args[step.position];
+                },
+                .block => at = self.ast.blockOf(at).tail,
+                .conditional => {
+                    const arms = self.ast.conditional(at);
+                    if (arms.otherwise == ExprId.none) return false;
+                    if (!try self.armTracesToRefusedCall(arms.then, steps.items)) return false;
+                    at = arms.otherwise;
+                },
+                .match_, .match_read => {
+                    const args = self.ast.call(at).args;
+                    if (args.len < 2) return false;
+                    var i: usize = 1;
+                    while (i + 2 < args.len) : (i += 2) {
+                        if (!try self.armTracesToRefusedCall(args[i], steps.items)) return false;
+                    }
+                    at = args[i];
+                },
+                else => return false,
+            }
+        }
+    }
+
+    /// `tracesToRefusedCall` for one arm of several, on its own copy of the
+    /// steps.
+    fn armTracesToRefusedCall(self: *Checker, arm: ExprId, steps: []const RefusedStep) std.mem.Allocator.Error!bool {
+        var own: std.ArrayList(RefusedStep) = .empty;
+        defer own.deinit(self.gpa);
+        try own.appendSlice(self.gpa, steps);
+        return self.tracesToRefusedCall(arm, &own);
+    }
+
+    /// Records each binder of `pattern` that takes apart a refused call's
+    /// result, or a part of one, from `source`, so a name it binds traces to
+    /// that call.
+    fn noteRefusedBinders(self: *Checker, pattern: ExprId, source: ExprId) std.mem.Allocator.Error!void {
+        if (self.refused_calls.count() == 0 or pattern == ExprId.none or source == ExprId.none) return;
+        var path: std.ArrayList(RefusedStep) = .empty;
+        defer path.deinit(self.gpa);
+        try self.noteRefusedBindersAt(pattern, source, &path);
+    }
+
+    /// `noteRefusedBinders` for the part of `source` that `path` selects,
+    /// first step first.
+    fn noteRefusedBindersAt(self: *Checker, pattern: ExprId, source: ExprId, path: *std.ArrayList(RefusedStep)) std.mem.Allocator.Error!void {
+        const form = self.ast.patternForm(pattern);
+        if (form == .name) {
+            if (!self.ast.partBinds(pattern)) return;
+            const b = self.res.targetOf(pattern);
+            if (b == BindingId.none) return;
+            var steps: std.ArrayList(RefusedStep) = .empty;
+            defer steps.deinit(self.gpa);
+            var i = path.items.len;
+            while (i > 0) {
+                i -= 1;
+                try steps.append(self.gpa, path.items[i]);
+            }
+            if (try self.tracesToRefusedCall(source, &steps)) try self.refused_values.put(self.gpa, b, {});
+            return;
+        }
+        var parts = self.ast.patternParts(pattern);
+        var position: u32 = 0;
+        while (parts.next()) |part| : (position += 1) {
+            try path.append(self.gpa, switch (form) {
+                .tuple => .{ .position = position },
+                .struct_ => if (self.ast.exprTag(part.label) == .err) .carried else .{ .field = self.ast.tokenName(self.ast.exprMain(part.label)) },
+                else => .carried,
+            });
+            defer _ = path.pop();
+            try self.noteRefusedBindersAt(part.node, source, path);
+        }
     }
 
     test "a refusal explains a missing implementation that fails only on what it reported" {
@@ -38964,6 +39117,10 @@ const Checker = struct {
         // arms; any judgement of its cover or its value would describe arms
         // nobody wrote.
         if (self.ast.matchCutShort(id)) return .poison;
+        {
+            var i: usize = 0;
+            while (i + 1 < m.args.len) : (i += 2) try self.noteRefusedBinders(m.args[i], m.callee);
+        }
 
         // On the scrutinee's type, not on what the arms name. A catch-all
         // names no variant and so needs nothing from a sealed type, which

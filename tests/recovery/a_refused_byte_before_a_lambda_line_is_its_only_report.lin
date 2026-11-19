@@ -1,0 +1,13 @@
+// A byte no token begins ends the first line of `make`, and the line after it
+// opens a lambda. `||` begins an expression as well as continuing one, so the
+// line is the body's tail rather than an operand of the line above, and the
+// byte is the only report.
+fn make() -> fn() -> UInt8 {
+    let _first: UInt8 = 1 é
+    || 2
+}
+
+fn main() -> UInt8 {
+    let made = make()
+    made()
+}

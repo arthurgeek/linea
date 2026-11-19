@@ -1,0 +1,25 @@
+// `Ruler` implements `Scale` at `UInt8` and at `UInt16`. The literal `1` fits
+// both, so the call does not say which implementation it means, and `70000`
+// fits neither, so it takes its default type and is a call at a list
+// `Ruler` does not implement.
+trait Scale[T] {
+    fn scale(self: Self, by: T) -> UInt8
+}
+
+struct Ruler {}
+
+impl Scale[UInt8] for Ruler {
+    fn scale(_self: Self, _by: UInt8) -> UInt8 {
+        1
+    }
+}
+
+impl Scale[UInt16] for Ruler {
+    fn scale(_self: Self, _by: UInt16) -> UInt8 {
+        2
+    }
+}
+
+fn main() -> UInt8 {
+    Ruler {}.scale(1) + Scale.scale(Ruler {}, 70000)
+}

@@ -158,8 +158,14 @@ pub const Inst = struct {
         store_raw,
         /// A checked heap address pointing at a concrete typed element.
         storage_addr,
-        /// The address of a field within a value held in memory. `lhs` is the
-        /// value's address and `rhs` a constant offset.
+        /// The address of a field within a value held in memory: the value's
+        /// address, an offset into it, and which part of the value's type the
+        /// address selects (`Part`). Read as a binary operation over the
+        /// first two, `lhs` and `rhs`, through `binaryOf`.
+        ///
+        /// The part is what tells two fields apart where the offset cannot:
+        /// zero-sized fields share their offset with what follows them, and
+        /// a field owing its settlement is held to one take by its identity.
         ///
         /// Not an `add`. An offset within a value cannot leave it, so there is
         /// nothing to check, and routing it through the checked add would emit
@@ -277,7 +283,8 @@ pub const Inst = struct {
                 .load, .addr_of => .local,
                 .load_indirect, .borrow, .observe, .address_bits => .unary,
                 .load_raw, .store_raw, .storage_addr => .raw_access,
-                .store_indirect, .field_addr, .copy_value, .move_value => .binary,
+                .store_indirect, .copy_value, .move_value => .binary,
+                .field_addr => .field,
                 .store => .store,
                 .add, .sub, .mul, .div, .rem => .binary,
                 .cmp_eq, .cmp_ne, .cmp_lt, .cmp_le, .cmp_gt, .cmp_ge => .binary,
@@ -296,7 +303,26 @@ pub const Inst = struct {
         }
     };
 
-    pub const Payload = enum { constant, bytes, static, local, store, unary, binary, float_math, raw_access, check, call, function, indirect_call, target, branch, trap };
+    pub const Payload = enum { constant, bytes, static, local, store, unary, binary, field, float_math, raw_access, check, call, function, indirect_call, target, branch, trap };
+
+    /// Which member of a value's type a `field_addr` selects: a field's or a
+    /// tuple component's index, a variant payload's position, or the index of
+    /// an array element a constant names. `none` where no one member is
+    /// named: an element chosen at run time, a run of elements a range
+    /// selects, or a part of a representation the compiler lays out itself.
+    /// An address naming none is a place of its own, told apart from no
+    /// other address.
+    pub const Part = enum(u32) {
+        none = std.math.maxInt(u32),
+        _,
+
+        pub fn at(i: u32) Part {
+            std.debug.assert(i != std.math.maxInt(u32));
+            return @enumFromInt(i);
+        }
+    };
+
+    pub const FieldAddr = struct { base: InstId, offset: InstId, part: Part = .none };
 
     /// Named rather than anonymous so a consumer can spell the type it is
     /// handed and pass it on.
@@ -341,6 +367,7 @@ pub const Inst = struct {
         store: struct { local: LocalId, value: InstId },
         unary: InstId,
         binary: struct { lhs: InstId, rhs: InstId },
+        field: FieldAddr,
         float_math: FloatMath,
         raw_access: ExtraIndex,
         check: Check,
@@ -1235,10 +1262,21 @@ pub const Mir = struct {
         return self.insts.items(.data)[i.index()].unary;
     }
 
+    /// The two operands of a binary instruction, and a field address's base
+    /// and offset as its `lhs` and `rhs`.
     pub fn binaryOf(self: *const Mir, i: InstId) struct { lhs: InstId, rhs: InstId } {
+        if (self.tagOf(i) == .field_addr) {
+            const f = self.fieldAddrOf(i);
+            return .{ .lhs = f.base, .rhs = f.offset };
+        }
         self.expectPayload(i, .binary);
         const d = self.insts.items(.data)[i.index()].binary;
         return .{ .lhs = d.lhs, .rhs = d.rhs };
+    }
+
+    pub fn fieldAddrOf(self: *const Mir, i: InstId) Inst.FieldAddr {
+        self.expectPayload(i, .field);
+        return self.insts.items(.data)[i.index()].field;
     }
 
     pub fn floatMathOf(self: *const Mir, i: InstId) Inst.FloatMath {

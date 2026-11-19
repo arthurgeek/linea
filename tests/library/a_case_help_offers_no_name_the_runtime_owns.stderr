@@ -2,4 +2,4 @@ error[N-Case]: functions start with a lowercase letter
  --> tests/library/a_case_help_offers_no_name_the_runtime_owns/main.lin:1:11
   |
 1 | export fn LINEA_close(descriptor: Int64) -> Int64 {
-  |           ^^^^^^^^^^^ rename it: `linea_close` is a symbol the Linea runtime owns, which no export may take
+  |           ^^^^^^^^^^^ rename it: `linea_close` is a symbol the Linea runtime owns or calls, which no export may take

@@ -89,6 +89,40 @@ test "a runtime symbol is refused and an ordinary name is not" {
     try testing.expect(!holds(""));
 }
 
+/// Whether the runtime calls a symbol it does not define, on any target it is
+/// built for: a C library function such as `free`, or one of the runtime's own
+/// files calls in another. A C host linking a library beside the runtime links
+/// one definition of each name, so a library exporting one would replace the
+/// function the runtime calls. Read from the undefined symbols of the
+/// runtime's objects compiled for every target (`build/runtime_imports.zig`
+/// writes them one per line, as C spells them), so a call the runtime gains is
+/// covered without a list to keep, and the set does not depend on the host.
+pub fn imports(name: []const u8) bool {
+    return listingImports(@embedFile("runtime_imports"), name);
+}
+
+/// Whether a listing of one name per line names `name`.
+fn listingImports(listing: []const u8, name: []const u8) bool {
+    if (name.len == 0) return false;
+    var lines = std.mem.tokenizeScalar(u8, listing, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, name)) return true;
+    }
+    return false;
+}
+
+test "the runtime calls the C library's allocator and nothing a program names" {
+    try testing.expect(imports("free"));
+    try testing.expect(imports("calloc"));
+    // Both platforms' imports, whichever the compiler runs on.
+    try testing.expect(imports("kqueue"));
+    try testing.expect(imports("epoll_create1"));
+    try testing.expect(!imports("square"));
+    try testing.expect(!imports(""));
+    try testing.expect(listingImports("free\nread\n", "read"));
+    try testing.expect(!listingImports("free\nread\n", "fre"));
+}
+
 /// A scalar a runtime function's signature names, as C and Linea agree on it.
 /// `ptr` is an address the compiler passes as a pointer: no Linea declaration
 /// spells it, so only the symbols the compiler owns use it. `callback` is the

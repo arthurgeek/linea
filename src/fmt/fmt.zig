@@ -3517,10 +3517,10 @@ pub const Difference = union(enum) {
 /// differences the language itself makes invisible.
 ///
 /// The output may hold an extra comma before a closing delimiter, which fmt
-/// writes whenever it breaks a list. The input may hold an extra semicolon
-/// before a closing brace, which fmt drops: the parser eats that one without
-/// recording it, so `{ e; }` and `{ e }` are one tree and one program, and
-/// there is nothing in hand to write back.
+/// writes whenever it breaks a list. The input may hold a semicolon the
+/// output does not, which fmt drops: every statement is printed on a line of
+/// its own, so the `;` says what the line break already says
+/// (`isDroppedSemicolon`).
 ///
 /// The two allowances run in opposite directions and are kept that way
 /// deliberately. Normalising both sides instead would forgive fmt deleting a

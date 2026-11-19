@@ -1,0 +1,5 @@
+error[S-Char]: unexpected character 'é'
+ --> tests/recovery/a_refused_byte_before_a_lambda_line_is_its_only_report.lin:6:27
+  |
+6 |     let _first: UInt8 = 1 é
+  |                           ^ not a valid token

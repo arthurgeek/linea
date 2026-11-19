@@ -323,7 +323,11 @@ pub const Tag = enum(u8) {
     /// `second_text`, ends what the line above was reading.
     ///
     /// It does after a token a statement can end with (`endsAStatement`),
-    /// unless the line below continues the one above (`continuesTheLine`).
+    /// unless the line below continues the one above (`continuesTheLine`),
+    /// or the line above ends in a token the lexer refused and the line
+    /// below opens with an operator no expression begins with
+    /// (`onlyContinues`): the refused token may stand for the operator that
+    /// carried the line on, and the line below can mean nothing else.
     /// Anywhere else the line above is unfinished, and an expression written
     /// across lines ends each line with the operator that carries it on.
     ///
@@ -332,13 +336,45 @@ pub const Tag = enum(u8) {
     /// whether the statement before a cursor has ended; they must agree, so
     /// the rule is here.
     pub fn lineBreakEnds(last: Tag, first: Tag, second: Tag, second_text: []const u8) bool {
+        if (last == .invalid and first.onlyContinues()) return false;
         return last.endsAStatement() and !first.continuesTheLine(second, second_text);
+    }
+
+    /// Whether this is a binary operator no expression, statement or list
+    /// element begins with, so a line opening with it can only continue the
+    /// line above. `-`, `*`, `&`, `..` and `||` are not: each also begins an
+    /// expression, `||` a lambda that takes no parameters.
+    pub fn onlyContinues(self: Tag) bool {
+        return switch (self) {
+            .plus,
+            .slash,
+            .percent,
+            .equal_equal,
+            .bang_equal,
+            .less,
+            .less_equal,
+            .greater,
+            .greater_equal,
+            .ampersand_ampersand,
+            => true,
+            else => false,
+        };
+    }
+
+    test onlyContinues {
+        try std.testing.expect(Tag.plus.onlyContinues());
+        try std.testing.expect(!Tag.pipe_pipe.onlyContinues());
+        try std.testing.expect(!Tag.minus.onlyContinues());
+        try std.testing.expect(!Tag.star.onlyContinues());
+        try std.testing.expect(!Tag.dot_dot.onlyContinues());
     }
 
     test lineBreakEnds {
         try std.testing.expect(lineBreakEnds(.identifier, .identifier, .equal, "="));
         try std.testing.expect(lineBreakEnds(.invalid, .identifier, .eof, ""));
         try std.testing.expect(lineBreakEnds(.invalid, .minus, .identifier, "x"));
+        try std.testing.expect(!lineBreakEnds(.invalid, .plus, .identifier, "x"));
+        try std.testing.expect(lineBreakEnds(.identifier, .plus, .identifier, "x"));
         try std.testing.expect(!lineBreakEnds(.identifier, .dot, .identifier, "map"));
         try std.testing.expect(!lineBreakEnds(.plus, .identifier, .eof, ""));
         try std.testing.expect(!lineBreakEnds(.equal, .identifier, .eof, ""));

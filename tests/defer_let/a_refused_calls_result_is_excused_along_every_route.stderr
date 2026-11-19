@@ -1,0 +1,40 @@
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:28:16
+   |
+28 |     var held = keep(s.view())
+   |                ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:30:17
+   |
+30 |     let first = keep(s.view())
+   |                 ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:34:9
+   |
+34 |         keep(s.view())
+   |         ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:37:9
+   |
+37 |         keep(s.view())
+   |         ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:39:9
+   |
+39 |         keep(s.view())
+   |         ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:41:32
+   |
+41 |     let (from_tuple, count) = (keep(s.view()), 2)
+   |                                ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:43:12
+   |
+43 |     match (keep(s.view()), 1) {
+   |            ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound
+error[T-Bound]: `T` requires `Owned`, and `Str` can carry a borrow: it holds a view of storage it does not own
+  --> tests/defer_let/a_refused_calls_result_is_excused_along_every_route.lin:48:53
+   |
+48 |     defer let from_field = Pair[Box[Str]] { first = keep(s.view()), second = 1 }.first
+   |                                                     ^^^^ `Str` is not `Owned`; pass a value whose type owns everything it holds, or drop the bound

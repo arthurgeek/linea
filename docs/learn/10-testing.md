@@ -550,8 +550,8 @@ the program; the `unwrap` to look for is the one in `banner_in`.
 directly to refuse one chosen allocation. `testing.TestAllocator.open(backing)`
 makes a test allocator whose `handle()` passes requests on to `backing` and
 counts them, and `open(backing, fail_at: .Some(n))` also refuses the `n`th;
-`attempts()` counts the requests it saw, and `all_disposed()` checks that
-everything it handed out was given back. It keeps its counts in memory from
+`attempts()` counts the requests it saw, and `outstanding()` counts what it
+handed out and was not given back. It keeps its counts in memory from
 `backing` too, so `open` answers a `Result`. Add this test to `banner.lin`:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
@@ -570,7 +570,7 @@ test "a refused second allocation leaves nothing behind" {
     }
     testing.assert(refused, "the banner was built without its second allocation")?
     testing.assert_eq(log.attempts(), 2, "the banner went on after the refusal")?
-    testing.assert(log.all_disposed(), "the first allocation was not given back")?
+    testing.assert_eq(log.outstanding(), 0, "the first allocation was not given back")?
 }
 ```
 
@@ -582,11 +582,13 @@ ok    every allocation the banner asks for can fail
 3 passed, 0 failed
 ```
 
-The test allocator is linear, so it is released like any other owner, and
-releasing it checks `all_disposed()` once more: a test that leaves an
-allocation live stops there. `close()` ends it without stopping, and answers
-whether everything was given back, for a test that would rather report its
-own failure first. It counts however many allocations a test makes.
+The test allocator is linear, so it is released like any other owner. It
+records what happened and leaves the judging to the compiler: a buffer from
+`mem.system()` must be given back, and a test that returns while one is still
+live is refused before it runs, while a buffer from an arena may be dropped,
+because the arena takes it back. A test that wants everything given back says
+so, as this one does with `outstanding()`. It counts however many allocations
+a test makes.
 The result of `banner_in` is matched rather than tested with `is_err()`,
 because on success it holds a `String` that must be released.
 
@@ -601,9 +603,9 @@ gives you one. It keeps its counts in an owning task of its own, which every
 task reaches one call at a time, so its handle is `Shareable` whenever the
 allocator under it is.
 
-It opens with the same `fail_at:`, answers `attempts()`, `acquired()` and
-`all_disposed()` like the other, checks `all_disposed()` when it is released,
-and refuses on request: `fail_at(.Some(n))` refuses the `n`th attempt,
+It opens with the same `fail_at:`, answers `attempts()`, `acquired()`,
+`outstanding()` and `all_disposed()` like the other, and refuses on request:
+`fail_at(.Some(n))` refuses the `n`th attempt,
 `fail_from(.Some(n))` every attempt from the `n`th on, `fail_size_at(size, n)`
 the `n`th acquisition of exactly `size` bytes made after the call, and
 `fail_size_from(size, n)` every such acquisition from the `n`th on.
@@ -661,7 +663,7 @@ refuses it.
 
 A router is a handler, so a test sends it a request. `http.new_request` builds a
 request in an arena you provide, exactly as `serve` would, and the test hands
-it to the router with a state of its own, which reads the extractors a
+it to the router with a context of its own, which reads the extractors a
 handler's parameters name and calls it. These tests are for the station
 server of [Networking](09-networking.md#reading-inputs-sharing-state-and-logging);
 add them to the end of `stations.lin`, with `import std.testing`,
@@ -669,64 +671,71 @@ add them to the end of `stations.lin`, with `import std.testing`,
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea
-// The tests hand the handlers a state whose logger writes only errors, so the
-// lines they log stay out of the test report.
-fn quiet() -> App {
-    .{ logger = log.to_stderr(minimum: .Error), readings = 0 }
+// The tests own an `App` of their own, and hand the handlers a context with a
+// client of it and a logger that writes only errors, so the lines the
+// handlers log stay out of the test report.
+fn quiet(owner: task.Owner[App]) -> Ctx where borrows(owner) {
+    .{ app = owner.client(), logger = log.to_stderr(minimum: .Error) }
 }
 
 // Build a request in an arena, as `serve` would, and send it through the routes.
 test "a reading is recorded and counted" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     var sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
     &sent.add_header("Authorization", "Bearer harbour").unwrap()
-    var app = quiet()
     defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&app, sent.request(), &incoming_1).unwrap()
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_1).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"station":"harbour","sky":"clear","count":1}"#, "the answer changed")?
-    testing.assert_eq(app.readings, 1, "the reading was not counted")?
+    let readings = ctx.app.call(|inout app: App| app.readings)
+    testing.assert_eq(readings, 1, "the reading was not counted")?
 }
 
 // A request that names no station is refused before anything is counted.
 test "a reading without a station is refused" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
-    var app = quiet()
     defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let refused = match &router.serve_http(&app, sent.request(), &incoming_2) {
+    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_2) {
         Ok(_) => return testing.assert(false, "a reading without a station was accepted"),
         Err(error) => error,
     }
     testing.assert_eq(refused.status(), http.Status.Unauthorized, "the status changed")?
-    testing.assert_eq(app.readings, 0, "a refused reading was counted")?
+    let readings = ctx.app.call(|inout app: App| app.readings)
+    testing.assert_eq(readings, 0, "a refused reading was counted")?
 }
 
 // `recorded_body` runs a streamed body into the request's arena, so a test
 // reads what a client would receive.
 test "the outlook streams one line a day" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/outlook?days=2", body: "").unwrap()
-    var app = quiet()
     defer var incoming_3 = http.RequestBody.from_request(sent.request())
-    let body = &router.serve_http(&app, sent.request(), &incoming_3).unwrap().recorded_body().unwrap()
+    let body = &router.serve_http(&ctx, sent.request(), &incoming_3).unwrap().recorded_body().unwrap()
     testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "day 1: sunny\nday 2: sunny\n", "the outlook changed")?
 }
 
 // A route that is a closure is reached the same way.
 test "the root answers with the greeting" {
-    defer var router: http.Router[App] = http.Router.new()
+    defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router, "Weather stations report here.\n").unwrap()
+    defer let owner = task.own(App { readings = 0 }).unwrap()
+    defer var ctx = quiet(owner)
     defer let arena = mem.Arena.open(mem.system(), size: 65536)
     let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var app = quiet()
     defer var incoming_4 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&app, sent.request(), &incoming_4).unwrap()
+    let response = &router.serve_http(&ctx, sent.request(), &incoming_4).unwrap()
     testing.assert_ok_eq(response.text(), "Weather stations report here.\n", "the greeting changed")?
 }
 ```
@@ -742,13 +751,16 @@ ok    the root answers with the greeting
 
 A few things to notice:
 
-- `quiet()` builds the state the tests share, with a logger that writes only
-  errors, so the lines the handlers log do not clutter the test report.
+- Each test owns an `App` of its own with `task.own`, and `quiet(owner)`
+  builds the `Ctx` the routes take: a client of that owner, and a logger that
+  writes only errors, so the lines the handlers log do not clutter the test
+  report. Both are `defer`red, so the context is released before the owner
+  closes.
 - `&sent.add_header(name, value)` adds a header to a built request, and
   `content_type:` sets its `Content-Type`.
-- `&router.serve_http(&app, request, &incoming)` runs the router as `serve` does: it reads
-  the extractors `record` names and calls it, and the test then reads
-  `app.readings` to see what it changed.
+- `&router.serve_http(&ctx, request, &incoming)` runs the router as `serve` does: it reads
+  the extractors `record` names and calls it, and the test then asks the
+  owning task for `readings` with `ctx.app.call` to see what it changed.
 - `response.text()` reads a held body as text, and answers an error instead
   for a streamed body or for bytes that are not UTF-8; `testing.assert_ok_eq`
   compares it with the text a client should see.
@@ -839,8 +851,8 @@ ok    1\.5 rounds up to 2
 - `testing.each_allocation_failure(allocator, body, is_refusal)` refuses each
   allocation in turn and checks that every one is handled.
 - `testing.TestAllocator.open(backing, fail_at: .Some(n))` counts what its
-  `handle()` hands out, refuses the `n`th request, and checks when it is
-  released that everything was given back.
+  `handle()` hands out and refuses the `n`th request; `outstanding()` says
+  what was not given back.
 - `testing.SharedTestAllocator` counts and refuses allocations made from many
   tasks at once, so a server under test can be refused the memory it asks for.
 - A handler is tested by calling it with a request from `http.new_request`,

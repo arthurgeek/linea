@@ -20,10 +20,13 @@ let log_words_bytes: UInt64 = 48
 
 // A TestAllocator hands out buffers from a backing allocator through its
 // handle, counts every acquisition and disposal, and can refuse a chosen
-// acquisition, so a test can walk every allocation-failure path and check that
-// each allocation was disposed. Every buffer a handle acquires carries the
-// backing's linear obligation, so it is disposed exactly once, and the counts
-// need no record per allocation: a test makes as many as it likes. Its handle
+// acquisition, so a test can walk every allocation-failure path. Every buffer a
+// handle acquires carries the backing's obligation, so the compiler holds it
+// to what the backing's buffers owe: one from the system allocator is disposed
+// exactly once, and one from an arena may be dropped, for the arena takes it
+// back. The test allocator records what happened and does not judge it; a test
+// that wants every buffer given back asserts `outstanding()` is zero. The
+// counts need no record per allocation: a test makes as many as it likes. Its handle
 // writes the counts through a `read` of the allocator, so a TestAllocator is
 // `@unshareable`, and so is every handle that borrows it; a test whose code
 // allocates from several tasks uses `SharedTestAllocator`. It is declared in
@@ -126,6 +129,39 @@ impl[H: Allocator] TestAllocator[H] {
         testing.assert_eq(log.acquired(), UInt64(1), "a refused attempt was recorded as acquired")?
     }
 
+    // Return how many acquired buffers were disposed.
+    pub fn disposed(self: Self) -> UInt64 {
+        self.words.load(log_disposed)
+    }
+
+    test "disposed counts the buffers given back" {
+        defer let log = TestAllocator.open(system()).unwrap()
+        let first = log.handle().acquire(16).unwrap()
+        let second = log.handle().acquire(8).unwrap()
+        first.release()
+        let one = log.disposed()
+        second.release()
+        testing.assert_eq(one, UInt64(1), "a disposal was not counted")?
+        testing.assert_eq(log.disposed(), UInt64(2), "the second disposal was not counted")?
+    }
+
+    // Return how many acquired buffers were not disposed: held now, or dropped
+    // where the backing let a test drop them.
+    pub fn outstanding(self: Self) -> UInt64 {
+        self.acquired() - self.disposed()
+    }
+
+    test "outstanding counts a dropped arena buffer until the end" {
+        defer let arena = Arena.open(system(), 1024)
+        defer let log = TestAllocator.open(arena.handle()).unwrap()
+        let kept = log.handle().acquire(16).unwrap()
+        let _dropped = log.handle().acquire(8).unwrap()
+        let both = log.outstanding()
+        kept.release()
+        testing.assert_eq(both, UInt64(2), "two buffers not given back were not counted")?
+        testing.assert_eq(log.outstanding(), UInt64(1), "a dropped buffer was not counted as outstanding")?
+    }
+
     // Return the most bytes live at once.
     pub fn peak_bytes(self: Self) -> UInt64 {
         self.words.load(log_peak_bytes)
@@ -202,28 +238,6 @@ impl[H: Allocator] TestAllocator[H] {
         testing.assert(!settled_while_live, "a live allocation reads as settled")?
         testing.assert(log.all_disposed(), "a disposed allocation stayed live")?
     }
-
-    // End the test allocator and answer whether every allocation it handed
-    // out was disposed, without stopping the program when one was not: a
-    // test that has already failed reports its own failure first. Releasing
-    // a test allocator stops the program instead.
-    pub fn close(sink self: Self) -> Bool {
-        let settled = self.all_disposed()
-        let TestAllocator { words, backing: _ } = self
-        words.release()
-        settled
-    }
-
-    test "close answers whether every allocation was disposed" {
-        defer let arena = Arena.open(system(), 1024)
-        let settled = TestAllocator.open(arena.handle()).unwrap()
-        settled.handle().acquire(8).unwrap().release()
-        testing.assert(settled.close(), "a test allocator with nothing live did not close settled")?
-        let unsettled = TestAllocator.open(arena.handle()).unwrap()
-        // A buffer from an arena carries no obligation, so it may be dropped live.
-        let _dropped = unsettled.handle().acquire(8).unwrap()
-        testing.assert(!unsettled.close(), "a test allocator with an allocation live closed settled")?
-    }
 }
 
 // The attempt numbered by `attempt`, counting from one, as the allocator's
@@ -236,15 +250,35 @@ fn counted_from_one(attempt: Option[UInt64]) -> UInt64 {
     }
 }
 
-// Releasing a test allocator checks that every buffer its handles acquired
-// was disposed, and stops the program when one was not.
+// Releasing a test allocator ends its counts. A buffer still live then is
+// one the backing let the test drop, as an arena's: the arena takes it back.
+// Over a backing that reclaims each buffer disposed into it, the system
+// allocator's, every buffer owes its disposal, so the compiler refused any
+// test that left one live; one live at release is a broken invariant of the
+// compiler or the runtime, and stops the program saying so.
 impl[H: Allocator] Release for TestAllocator[H] {
     fn release(sink self: Self) {
-        if !self.close() {
-            panic("a test allocator was released with an allocation it handed out still live")
+        let broken = !self.all_disposed() && self.backing.reclaims()
+        let TestAllocator { words, backing: _ } = self
+        words.release()
+        if broken {
+            panic(invariant_broken)
         }
     }
 }
+
+test "a test allocator over an arena is released with a dropped buffer" {
+    defer let arena = Arena.open(system(), 1024)
+    let log = TestAllocator.open(arena.handle()).unwrap()
+    let _dropped = log.handle().acquire(8).unwrap()
+    let outstanding = log.outstanding()
+    log.release()
+    testing.assert_eq(outstanding, UInt64(1), "the dropped buffer was not counted")?
+}
+
+// What a test allocator over a backing whose buffers owe their disposal says
+// when one is still live at release.
+let invariant_broken = "internal invariant broken: a test allocator was released with a buffer live that owes its disposal, which the compiler refuses to leave; report this as a compiler bug"
 
 // A TestHandle allocates through a test allocator. It owns nothing, so it can
 // be copied freely while the allocator it borrows is live.

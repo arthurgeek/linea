@@ -4249,9 +4249,24 @@ const Parser = struct {
         // rule is about the pair, and the earlier token is the one a reader
         // needs to see to understand why the later parameter is a problem.
         var last_default: ?TokenId = null;
+        // Whether a parameter ended in a refused token that took its line.
+        var took_a_line = false;
 
         while (!self.cursor.atEnd() and !self.cursor.at(close)) {
             const before = self.cursor.current();
+
+            // A token the lexer refused where a parameter begins was reported
+            // there, and stands for no parameter: a line holding only one
+            // goes on to the next.
+            if (self.cursor.at(.invalid)) {
+                while (self.cursor.at(.invalid)) _ = self.cursor.advance();
+                if (self.cursor.atEnd() or self.cursor.at(close)) break;
+                if (self.afterARefusedTokenEndingItsLine()) {
+                    took_a_line = true;
+                    if (!self.listGoesOnPastARefusedLineEnd()) break;
+                    continue;
+                }
+            }
 
             const convention: node.Convention = if (self.cursor.eat(.keyword_inout) != null)
                 .inout
@@ -4323,14 +4338,19 @@ const Parser = struct {
                 .default = default,
                 .recovered = recovered,
             });
-            if (self.cursor.eat(.comma) == null) break;
+            self.stepOverRefusedTokens();
+            if (self.cursor.eat(.comma) == null) {
+                if (!self.afterARefusedTokenEndingItsLine()) break;
+                took_a_line = true;
+                if (!self.listGoesOnPastARefusedLineEnd()) break;
+            }
 
             // Recovery that consumes nothing would loop forever, the same way
             // a statement sequence would.
             if (self.cursor.current() == before) _ = self.cursor.advance();
         }
 
-        if (self.cursor.eat(close) == null) {
+        if (self.cursor.eat(close) == null and !self.closerMayHaveBeenTaken(took_a_line)) {
             try self.reportAt(
                 if (delimiter == .pipes) .s_lambda else .s_params,
                 self.cursor.current(),
@@ -4839,6 +4859,13 @@ const Parser = struct {
     /// list, and ends where it cannot.
     fn afterARefusedTokenEndingItsLine(self: *const Parser) bool {
         return self.cursor.previousTag() == .invalid and (self.finishedAtALineBreak() or self.cursor.atEnd());
+    }
+
+    /// Steps over the tokens the lexer refused that follow on the cursor's
+    /// line. The lexer reported each, and none stands for anything a
+    /// production could read.
+    fn stepOverRefusedTokens(self: *Parser) void {
+        while (self.cursor.at(.invalid) and !self.cursor.precededByNewline()) _ = self.cursor.advance();
     }
 
     /// Whether a list goes on after an element with no comma behind it: the
@@ -6213,6 +6240,10 @@ const Parser = struct {
         m.operand();
 
         while (true) {
+            // A token the lexer refused after an operand, on its line, was
+            // reported there. It is stepped over, so what follows it on the
+            // line, or an operator opening the next, reads on as written.
+            self.stepOverRefusedTokens();
             if (self.finishedAtALineBreak()) break;
             const op = self.cursor.peek();
             const prec = precedence(op);

@@ -1,3 +1,6 @@
+// `factor` is bound to a literal no use has settled, and `Meters` scales by a
+// `UInt8` and by an `Int64`, both of which can hold it. The call is refused
+// rather than settle `factor` on the default type's implementation.
 trait Scale[F] {
     fn scale(self: Self, by: F) -> UInt8
 }

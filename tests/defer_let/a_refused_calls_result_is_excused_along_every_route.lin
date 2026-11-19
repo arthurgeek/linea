@@ -1,0 +1,50 @@
+// `keep` takes a value that owns what it holds, and a view of `s` is refused
+// at each call. Its result implements `Release` only for an owned item, which
+// is what was refused, so releasing that result is not reported again however
+// it reaches the `defer let`: through a `var` nothing writes, a chain of
+// `let`s, a block's tail, both arms of an `if`, a tuple taken apart, a `match`
+// binder or a field of a structure built from it.
+struct Box[T] {
+    item: T,
+}
+
+impl[T: Owned + Discardable] Release for Box[T] {
+    fn release(sink self: Self) {
+        let Box { item: _ } = self
+    }
+}
+
+struct Pair[A] {
+    first: A,
+    second: UInt64,
+}
+
+fn keep[T: Owned](sink value: T) -> Box[T] {
+    Box[T] { item = value }
+}
+
+fn main() -> UInt8 {
+    defer let s = "held".to_owned().unwrap()
+    var held = keep(s.view())
+    defer let from_var = held
+    let first = keep(s.view())
+    let second = first
+    defer let from_chain = second
+    defer let from_block = {
+        keep(s.view())
+    }
+    defer let from_if = if s.view().length() > 2 {
+        keep(s.view())
+    } else {
+        keep(s.view())
+    }
+    let (from_tuple, count) = (keep(s.view()), 2)
+    defer let taken = from_tuple
+    match (keep(s.view()), 1) {
+        (bound, _) => {
+            defer let matched = bound
+        },
+    }
+    defer let from_field = Pair[Box[Str]] { first = keep(s.view()), second = 1 }.first
+    UInt8(count)
+}

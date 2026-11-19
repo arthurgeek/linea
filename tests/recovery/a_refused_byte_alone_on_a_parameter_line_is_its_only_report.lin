@@ -1,0 +1,14 @@
+// A byte no token begins, alone on a line of a parameter list, stands for
+// no parameter: the lexer's report is the only one, and the parameters
+// after it are read as written.
+fn add(
+    x: UInt8,
+    é
+    y: UInt8,
+) -> UInt8 {
+    x + y
+}
+
+fn main() -> UInt8 {
+    add(1, 2)
+}

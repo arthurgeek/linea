@@ -3,7 +3,10 @@
 Status: Accepted — 2026-11-18. Supersedes the clause of
 [0259](0259-a-handler-factory-may-fail-and-serving-begins-once-every-task-has-one.md)
 §2 that a factory's error `E` "must be `Owned`, `Shareable` (it is sent from
-the task that met it) and `Release`".
+the task that met it) and `Release`". Its bound on a factory's error,
+`Owned + Release`, is superseded by
+[0290](0290-a-handler-factory-error-holds-no-end-of-a-session.md), which adds
+`Isolated`.
 
 ## Context
 

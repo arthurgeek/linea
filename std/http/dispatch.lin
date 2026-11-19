@@ -290,7 +290,7 @@ fn restart_request_arena[P: Allocator](inout arena: mem.Arena[P], parent: P, lim
 }
 
 // A worker's loop owns its handler and request arena for the whole serving run.
-fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]], parent: P, make_handler: M, limits: Limits, stopping: task.Client[Bool]) where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
+fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: session.Chan[session.Send[Result[(), ServeError[R.Error]], DispatchServing[R.Error]]], parent: P, make_handler: M, limits: Limits, stopping: task.Client[Bool]) where R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Isolated + Release {
     defer var refusal = parent.acquire(request_buffer_bytes) else |reason| {
         dispatch_failed_worker(me.send(.Err(.Memory(reason))))
         return
@@ -340,7 +340,7 @@ fn dispatch_worker[P: Allocator, R: MadeHandler[P], M: fn() -> R](sink me: sessi
     }
 }
 
-fn dispatch_put_worker[E: Owned + Release](inout slot: Option[session.Chan[DispatchServing[E]]], sink next: session.Chan[DispatchServing[E]]) {
+fn dispatch_put_worker[E: Owned + Isolated + Release](inout slot: Option[session.Chan[DispatchServing[E]]], sink next: session.Chan[DispatchServing[E]]) {
     match mem.exchange(&slot, .Some(next)) {
         Some(previous) => dispatch_failed_worker(previous),
         None => {},
@@ -348,7 +348,7 @@ fn dispatch_put_worker[E: Owned + Release](inout slot: Option[session.Chan[Dispa
 }
 
 // A failed startup still settles the session when the dispatcher cancels it.
-fn dispatch_failed_worker[E: Owned + Release](sink me: session.Chan[DispatchServing[E]]) {
+fn dispatch_failed_worker[E: Owned + Isolated + Release](sink me: session.Chan[DispatchServing[E]]) {
     match me.enter().offer() {
         Left(job) => {
             let (work, answer) = job.recv()
@@ -363,13 +363,13 @@ fn dispatch_failed_worker[E: Owned + Release](sink me: session.Chan[DispatchServ
     }
 }
 
-fn dispatch_finish_worker[E: Owned + Release, F](sink worker: DispatchFree[E, F]) -> Result[(), ServeError[E]] {
+fn dispatch_finish_worker[E: Owned + Isolated + Release, F](sink worker: DispatchFree[E, F]) -> Result[(), ServeError[E]] {
     let (answer, done) = worker.enter().choose_right().recv()
     done.close()
     answer
 }
 
-impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L, E, F] {
+impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Isolated + Release, F] Dispatch[L, E, F] {
     fn reserve_tables(inout self: Self, limits: Limits) -> Result[(), mem.Oom] {
         &self.idle.reserve(limits.open_connections)?
         &self.ready.reserve(limits.open_connections)?
@@ -590,7 +590,7 @@ impl[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F] Dispatch[L
 }
 
 // The local callback answers work inline only for a sequential dispatcher.
-fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F, W: inout fn(sink work: DispatchWork) -> DispatchResult](inout state: Dispatch[L, E, F], inout local: W, limits: Limits, sequential: Bool, stopping: Option[task.Client[Bool]]) -> Bool where retains(state: state) {
+fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Isolated + Release, F, W: inout fn(sink work: DispatchWork) -> DispatchResult](inout state: Dispatch[L, E, F], inout local: W, limits: Limits, sequential: Bool, stopping: Option[task.Client[Bool]]) -> Bool where retains(state: state) {
     loop {
         if state.failed.is_some() && !state.stopped {
             &state.begin_stop()
@@ -727,7 +727,7 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Release, F,
     false
 }
 
-fn dispatch_remember_failure[E: Owned + Release](inout failed: Option[ServeError[E]], sink result: Result[(), ServeError[E]]) {
+fn dispatch_remember_failure[E: Owned + Isolated + Release](inout failed: Option[ServeError[E]], sink result: Result[(), ServeError[E]]) {
     match result {
         Ok(_) => {},
         Err(reason) => match read failed {
@@ -738,7 +738,7 @@ fn dispatch_remember_failure[E: Owned + Release](inout failed: Option[ServeError
 }
 
 // Withdrawal returns values even when they are signalled; every owner is settled.
-fn dispatch_finish[L: io.Close, E: Owned + Release, F](sink state { waiting, listener, listening: _, idle, ready, free, busy: _, open: _, accepted: _, serial: _, pause_ms: _, stopped: _, terminate: _, interrupt: _, failed, retry: _, backoff: _ }: Dispatch[L, E, F]) -> Result[(), ServeError[E]] where L.CloseError: Into[io.IoError] {
+fn dispatch_finish[L: io.Close, E: Owned + Isolated + Release, F](sink state { waiting, listener, listening: _, idle, ready, free, busy: _, open: _, accepted: _, serial: _, pause_ms: _, stopped: _, terminate: _, interrupt: _, failed, retry: _, backoff: _ }: Dispatch[L, E, F]) -> Result[(), ServeError[E]] where L.CloseError: Into[io.IoError] {
     var failure = failed
     var withdrawn = waiting.close().drain()
     for woke in &withdrawn {
@@ -823,7 +823,7 @@ fn dispatch_open[L, E, F](sink listener: L) -> Dispatch[L, E, F] where carries(l
     }
 }
 
-fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R: MadeHandler[P], M: fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, announce: Option[net.Address], shutdown: Shutdown) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
+fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R: MadeHandler[P], M: fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, announce: Option[net.Address], shutdown: Shutdown) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Isolated + Release {
     var state: Dispatch[L, R.Error, ()] = dispatch_open(listener)
     let _reserved = &state.reserve_tables(limits) else |reason| {
         &state.fail(.Memory(reason))
@@ -880,7 +880,7 @@ fn dispatch_sequential[L: net.Acceptor + io.Close + io.Pollable, P: Allocator, R
     dispatch_finish(state)
 }
 
-fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown, on: io.Io) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Release {
+fn dispatch_serve[L: net.Acceptor + io.Close + io.Pollable, P: Allocator + Shareable, R: MadeHandler[P], M: Shareable + Copyable + fn() -> R](sink listener: L, parent: P, make_handler: M, limits: Limits, policy: task.Policy, announce: Option[net.Address], shutdown: Shutdown, on: io.Io) -> Result[(), ServeError[R.Error]] where L.CloseError: Into[io.IoError], R.Handler: Handler[(), P] + Observer + Release, R.Error: Owned + Isolated + Release {
     let metadata_bytes = smallest_arena(limits)
     if metadata_bytes == UInt64.max || limits.request_arena_bytes < metadata_bytes {
         let _closed = listener.close()

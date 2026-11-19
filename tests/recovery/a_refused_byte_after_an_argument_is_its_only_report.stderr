@@ -1,0 +1,10 @@
+error[S-Char]: unexpected character 'é'
+  --> tests/recovery/a_refused_byte_after_an_argument_is_its_only_report.lin:11:26
+   |
+11 |     let closed = twice(x é)
+   |                          ^ not a valid token
+error[S-Char]: unexpected character 'é'
+  --> tests/recovery/a_refused_byte_after_an_argument_is_its_only_report.lin:12:27
+   |
+12 |     let carried = twice(x é
+   |                           ^ not a valid token

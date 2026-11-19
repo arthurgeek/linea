@@ -7,7 +7,10 @@ call. Replaces the rule of the generics design
 that a
 trait's operation is reached through the trait and never through the type.
 Extended by
-[0187](0187-a-bound-brings-its-traits-operations-into-reach.md).
+[0187](0187-a-bound-brings-its-traits-operations-into-reach.md). The clause
+that a literal several implementations answer takes its default type is
+superseded by
+[0289](0289-a-literal-settles-the-one-implementation-its-value-fits.md).
 
 ## Context
 

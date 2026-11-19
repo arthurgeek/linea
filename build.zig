@@ -382,15 +382,17 @@ fn linkTracyClient(b: *std.Build, m: *std.Build.Module, profiling: bool) void {
 
 /// The files the compiler embeds, given to a module that compiles it.
 ///
-/// Every binary built from `src/` needs all five: a test reads the runtime's
-/// source to check the two agree about traps, a diagnostic's code is an index
-/// into the semantics, the standard library travels inside the binary, the
-/// fuzz corpus is replayed on every run, and the language server's protocol
-/// types enable IDE support. Every test scope receives the same compiler
-/// inputs even when it selects only one part of the test universe.
+/// Every binary built from `src/` needs all six: a test reads the runtime's
+/// source to check the two agree about traps, an `export` may not take a
+/// symbol the built runtime calls, a diagnostic's code is an index into the
+/// semantics, the standard library travels inside the binary, the fuzz corpus
+/// is replayed on every run, and the language server's protocol types enable
+/// IDE support. Every test scope receives the same compiler inputs even when
+/// it selects only one part of the test universe.
 fn addCompilerAssets(
     m: *std.Build.Module,
     runtime_source: std.Build.LazyPath,
+    runtime_imports: std.Build.LazyPath,
     semantics: std.Build.LazyPath,
     library: std.Build.LazyPath,
     corpus: *std.Build.Module,
@@ -399,6 +401,7 @@ fn addCompilerAssets(
 ) void {
     m.addOptions("build_options", options);
     m.addAnonymousImport("runtime_source", .{ .root_source_file = runtime_source });
+    m.addAnonymousImport("runtime_imports", .{ .root_source_file = runtime_imports });
     m.addAnonymousImport("semantics", .{ .root_source_file = semantics });
     m.addAnonymousImport("library_manifest", .{ .root_source_file = library });
     m.addImport("fuzz_corpus", corpus);
@@ -997,10 +1000,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig" },
     },
     .{
         .dir = "runtime",
@@ -2241,7 +2244,7 @@ pub fn build(b: *std.Build) void {
     const checked_runtime_archive = checked_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
     var ordinary_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
     var checked_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
-    for ([_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
+    const runtime_inputs = [_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
         .{ .name = "linea_rt", .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items, .checked_flags = checked_flags.items },
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
@@ -2259,7 +2262,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "sim", .file = b.path("runtime/sim.c"), .flags = runtime_flags.items },
         .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },
         .{ .name = "math", .file = b.path("runtime/math.c"), .flags = math_flags.items },
-    }) |input| {
+    };
+    for (runtime_inputs) |input| {
         const object = runtimeObject(b, runtime_target, input.name, input.file, input.flags);
         runtime.addArtifactArg(object);
         const checked_object = if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object;
@@ -2280,6 +2284,31 @@ pub fn build(b: *std.Build) void {
     // what each trap kind means. Naming it here is what lets a test embed a
     // file from outside `src/`.
     const runtime_source = b.path("runtime/linea_rt.c");
+
+    // Every symbol the runtime calls without defining it, on every target it
+    // is built for: the C library's functions among them. A library exporting
+    // one would replace the function the runtime calls in a C host that links
+    // both, so [M-Export] refuses each. Read from the runtime's own objects,
+    // compiled for each target, a call the runtime gains is refused without
+    // anyone listing it, and the refused set is one set whatever the host.
+    const runtime_imports_tool = b.addExecutable(.{
+        .name = "runtime-imports",
+        .root_module = b.createModule(.{ .root_source_file = b.path("build/runtime_imports.zig"), .target = b.graph.host }),
+    });
+    const runtime_imports_run = b.addRunArtifact(runtime_imports_tool);
+    const runtime_imports = runtime_imports_run.addOutputFileArg("runtime_imports.txt");
+    for ([_]std.Target.Query{
+        .{ .cpu_arch = .aarch64, .os_tag = .macos },
+        .{ .cpu_arch = .x86_64, .os_tag = .macos },
+        .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
+        .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu },
+    }) |query| {
+        const import_target = b.resolveTargetQuery(query);
+        for (runtime_inputs) |input| {
+            runtime_imports_run.addArtifactArg(runtimeObject(b, import_target, input.name, input.file, input.flags));
+            if (input.checked_flags) |flags| runtime_imports_run.addArtifactArg(runtimeObject(b, import_target, input.name, input.file, flags));
+        }
+    }
 
     // A diagnostic's code is an index into the semantics, so a test reads the
     // document to check that every rule it can emit is actually written there.
@@ -2305,7 +2334,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    addCompilerAssets(compiler_module, runtime_source, semantics, library, corpus, lsp_kit, tracy_options);
+    addCompilerAssets(compiler_module, runtime_source, runtime_imports, semantics, library, corpus, lsp_kit, tracy_options);
     linkTracyClient(b, compiler_module, profiling);
     // Filled in as each part it builds from is made; every heavy step below,
     // and each copy a sequential run orders, comes from it.
@@ -2941,7 +2970,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = if (safe_runner and optimize == .Debug) .ReleaseSafe else optimize,
     });
-    addCompilerAssets(conformance_module, runtime_source, semantics, library, corpus, lsp_kit, tracy_options);
+    addCompilerAssets(conformance_module, runtime_source, runtime_imports, semantics, library, corpus, lsp_kit, tracy_options);
     linkTracyClient(b, conformance_module, profiling);
 
     heavy.runner_module = conformance_module;
@@ -2957,7 +2986,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
-        addCompilerAssets(module, runtime_source, semantics, library, corpus, lsp_kit, tracy_options);
+        addCompilerAssets(module, runtime_source, runtime_imports, semantics, library, corpus, lsp_kit, tracy_options);
         addConformanceAssets(b, module);
         module.addOptions("test_options", test_options);
         linkTracyClient(b, module, profiling);
@@ -2973,7 +3002,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    addCompilerAssets(fuzz_module, runtime_source, semantics, library, corpus, lsp_kit, tracy_options);
+    addCompilerAssets(fuzz_module, runtime_source, runtime_imports, semantics, library, corpus, lsp_kit, tracy_options);
     fuzz_module.addOptions("test_options", test_options);
     linkTracyClient(b, fuzz_module, profiling);
     // Every fuzz target by default. A target whose one input compiles whole

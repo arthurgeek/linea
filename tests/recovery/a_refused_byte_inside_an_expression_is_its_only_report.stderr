@@ -1,0 +1,10 @@
+error[S-Char]: unexpected character 'é'
+ --> tests/recovery/a_refused_byte_inside_an_expression_is_its_only_report.lin:6:23
+  |
+6 |     let same_line = x é + 1
+  |                       ^ not a valid token
+error[S-Char]: unexpected character 'é'
+ --> tests/recovery/a_refused_byte_inside_an_expression_is_its_only_report.lin:7:23
+  |
+7 |     let next_line = x é
+  |                       ^ not a valid token

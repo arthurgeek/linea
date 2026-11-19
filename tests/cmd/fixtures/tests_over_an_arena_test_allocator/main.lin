@@ -1,0 +1,45 @@
+import std.mem
+import std.testing
+
+use mem.Lender
+
+// A buffer from an arena carries no obligation, so a test may drop one, and
+// the arena takes it back when it is released. The test allocator over it
+// counts what was acquired and disposed; it does not decide that a dropped
+// buffer is a mistake.
+fn main() -> UInt8 {
+    0
+}
+
+// The assertion fails while a buffer is live, and the report is the
+// assertion's.
+test "a test failing with an arena buffer live reports its own failure" {
+    defer let arena = mem.Arena.open(mem.system(), 1024)
+    defer let log = testing.TestAllocator.open(arena.handle()).unwrap()
+    let _held = log.handle().acquire(16).unwrap()
+    testing.assert(false, "the total is wrong")?
+}
+
+// Dropping the buffer is legal, so the test passes.
+test "a test dropping an arena buffer passes" {
+    defer let arena = mem.Arena.open(mem.system(), 1024)
+    defer let log = testing.TestAllocator.open(arena.handle()).unwrap()
+    let _dropped = log.handle().acquire(16).unwrap()
+    testing.assert_eq(log.acquired(), UInt64(1), "the acquisition was not counted")?
+}
+
+// A test that wants every buffer given back says so, and fails when one was not.
+test "a test asserting nothing is outstanding fails when a buffer was dropped" {
+    defer let arena = mem.Arena.open(mem.system(), 1024)
+    defer let log = testing.TestAllocator.open(arena.handle()).unwrap()
+    let _dropped = log.handle().acquire(16).unwrap()
+    testing.assert_eq(log.outstanding(), UInt64(0), "a buffer was not given back")?
+}
+
+// The shared test allocator counts the same way.
+test "a shared test allocator over an arena lets a test drop a buffer" {
+    defer let arena = mem.Arena.open(mem.system(), 1024)
+    defer let log = testing.SharedTestAllocator.open(arena.handle()).unwrap()
+    let _dropped = log.handle().acquire(16).unwrap()
+    testing.assert_eq(log.outstanding(), UInt64(1), "the dropped buffer was not counted as outstanding")?
+}

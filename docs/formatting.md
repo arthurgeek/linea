@@ -22,8 +22,10 @@ A bare `linea fmt` is an error rather than an implicit `.`: the shortest
 possible command should not be a recursive rewrite of everything below the
 working directory.
 
-Exit codes are `0` when nothing would change and nothing was refused, `1`
-otherwise, and `64` for a usage error.
+Exit codes are `0` when every file formatted and, under `--check`, none would
+change; `1` when a file was refused or could not be read, or, under
+`--check`, would change; `64` for a usage error; and `74` when standard input
+cannot be read.
 
 ### It formats what it can parse
 
@@ -261,9 +263,10 @@ test trap "a seat past the last stops the program" -> Result[(), Failure] {
 - **It does not remove parentheses**, even redundant ones.
 
 Two tokens do move, and both because the language leaves no choice. A trailing
-comma is written into a list that breaks, as above. A semicolon written before a
-closing brace is dropped: the parser accepts it without recording it, so `{ e; }`
-and `{ e }` are the same program and there is nothing to write back.
+comma is written into a list that breaks, as above. A semicolon is dropped:
+every statement takes a line of its own, so a `;` would say what the line
+break already says. The one kept is a `;` written before a line opening with
+`-`, `()` or `.`, where it answers [S-Continuation].
 
 ## Fixed, and not configurable
 
@@ -336,11 +339,11 @@ file is already formatted; this is that rule, applied by the command.
 
 ## Limits
 
-Expression nesting is bounded by stack, somewhere above ten thousand levels.
-The bound belongs to the frontend rather than to the formatter: the parser and
-the printer both recurse, and the parser reaches it first, so the formatter is
-never handed a tree it cannot print. No program written by a person comes near
-this; a generator might.
+An expression, a pattern or a written type nests at most 1000 levels
+([S-Nesting]). The bound belongs to the frontend rather than to the formatter:
+the parser and the printer both recurse, and the parser refuses anything
+deeper, so the formatter is never handed a tree it cannot print. No program
+written by a person comes near this; a generator might.
 
 ## Editors
 

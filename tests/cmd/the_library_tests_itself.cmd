@@ -1134,8 +1134,10 @@ The library tests itself.
   ok    mem.a reservation larger than the first chunk is handed out whole
   ok    mem.a rewound arena hands out its slab again zeroed
   ok    mem.a shared log allocator is shared by tasks that allocate at once
+  ok    mem.a shared log counts a dropped arena buffer as outstanding
   ok    mem.a shared log counts only successful acquisitions
   ok    mem.a shared log counts refused attempts too
+  ok    mem.a shared log counts the buffers given back
   ok    mem.a shared log counts what is acquired and not disposed
   ok    mem.a shared log is not all_disposed while an allocation is live
   ok    mem.a shared log refuses a later attempt through live handles
@@ -1144,13 +1146,14 @@ The library tests itself.
   ok    mem.a shared log refuses one acquisition of the named size
   ok    mem.a shared log refuses the acquisition open names
   ok    mem.a shared log remembers the most bytes live at once
-  ok    mem.a shared test allocator closes answering whether it is settled
+  ok    mem.a shared test allocator over an arena is released with a dropped buffer
   ok    mem.a slice debugs as its elements in brackets
   ok    mem.a slice observes only its initialized extent
   ok    mem.a system drain stopped early is returned by finish with its storage
   ok    mem.a tag records its code when it is released
   ok    mem.a terminated copy ends with one zero byte
   ok    mem.a test allocator counts past a thousand acquisitions
+  ok    mem.a test allocator over an arena is released with a dropped buffer
   ok    mem.a vec written without an allocator is the system vec
   ok    mem.a walk lent a drain may stop early and leave the rest with its owner
   ok    mem.acquired counts only successful acquisitions
@@ -1172,13 +1175,13 @@ The library tests itself.
   ok    mem.arena vector discard does not invoke optional element release
   ok    mem.as_slice views only the live elements
   ok    mem.attempts count refused acquisitions too
-  ok    mem.close answers whether every allocation was disposed
   ok    mem.closing a descriptor the process lacks reports an error
   ok    mem.derived oom equality compares its case
   ok    mem.derived oom release consumes its case
   ok    mem.derived oom rendering names its case
   ok    mem.derived system allocator debug renders its case
   ok    mem.derived system allocator equality compares its case
+  ok    mem.disposed counts the buffers given back
   ok    mem.each allocation failure covers every growth step in a push sequence
   ok    mem.each allocation failure covers every growth step in an append_slice sequence
   ok    mem.empty fd requests do not access a descriptor
@@ -1201,6 +1204,7 @@ The library tests itself.
   ok    mem.open policies have the runtime's codes
   ok    mem.open records into the backing the caller chooses
   ok    mem.open refuses the acquisition it names
+  ok    mem.outstanding counts a dropped arena buffer until the end
   ok    mem.peak_bytes remembers the most bytes live at once
   ok    mem.random_words differ between reads
   ok    mem.releasing a closure returns its bytes
@@ -1518,6 +1522,7 @@ The library tests itself.
   ok    testing.each_allocation_failure reports a run with nothing refused that failed
   ok    testing.each_allocation_failure returns the attempts it walked
   ok    testing.each_allocation_failure takes callbacks that change lent counts
+  ok    testing.each_allocation_failure walks a body that keeps an arena buffer
   ok    testing.each_allocation_failure walks an arena backing
   ok    testing.each_allocation_failure walks every attempt and settles
   ok    testing.equality accepts values with debug without display
@@ -1678,4 +1683,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1675 passed, 0 failed
+  1680 passed, 0 failed

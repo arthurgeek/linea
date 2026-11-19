@@ -92,7 +92,7 @@ A file is a list of imports and declarations. A module is a directory of such
 files ([§3.7](#37-modules)). Declaration order has no significance.
 
 ```
-file         ::= import* declaration*
+file         ::= (import | declaration)*
 import       ::= "import" path ("as" name)?
 path         ::= name ("." name)*
 
@@ -154,9 +154,10 @@ where_clause ::= "where" predicate ("," predicate)* ","?
 predicate    ::= type_name ":" type_bound ("+" type_bound)*
 
 parameters   ::= parameter ("," parameter)* ","?
-parameter    ::= convention? name ":" type_name ("=" expression)?
+parameter    ::= convention? name destructuring? ":" type_name ("=" expression)?
 lambda_params ::= lambda_param ("," lambda_param)* ","?
-lambda_param ::= convention? (name | tuple_pattern) (":" type_name)? ("=" expression)?
+lambda_param ::= convention? (name destructuring? | destructuring) (":" type_name)? ("=" expression)?
+destructuring ::= tuple_pattern | name? "{" binders "}" | name "(" pattern ")"
 capture_list ::= "[" (capture ("," capture)* ","?)? "]"
 capture ::= convention? name ("=" expression)?
 convention   ::= "read" | "inout" | "sink"
@@ -173,18 +174,19 @@ destructure  ::= "let" "read"? name? "{" binders? "}" "=" expression unwrap?
               | "let" "read"? name "(" name ")" "=" expression unwrap?
               | "let" "read"? tuple_pattern "=" expression unwrap?
 unwrap       ::= "else" ("|" name "|")? block
-scheduled    ::= "defer" expression
+scheduled    ::= "defer" (binding | expression)
 binders      ::= binder ("," binder)* ","?
-binder       ::= name (":" name)?
-tuple_pattern ::= "(" binder_name "," binder_name ("," binder_name)* ","? ")"
-binder_name  ::= name | "_"
+binder       ::= name (":" pattern)?
+tuple_pattern ::= "(" pattern "," pattern ("," pattern)* ","? ")"
 
 expression   ::= literal | qualified | "(" expression ")" | tuple
               | "reflect"
               | "." name ("(" arguments ")")?
+              | "[" (expression ("," expression)* ","?)? "]"
               | ".{" initialisers? "}"
               | name ("." name)* type_arguments? "{" initialisers? "}"
                | "-" expression
+               | "*" expression
                | "copy" "(" expression ")"
                | "panic" "(" expression ")"
                | ("embed" | "embed_bytes") "(" string ")"
@@ -196,10 +198,13 @@ expression   ::= literal | qualified | "(" expression ")" | tuple
               | expression rangeop expression
               | expression "(" arguments? ")"
               | expression type_arguments "(" arguments? ")"
-              | name "?" "(" arguments? ")"
+              | qualified "?" "(" arguments? ")"
+              | expression "?"
+              | expression "[" index "]"
               | (convention? capture_list)? ("||" | "|" lambda_params? "|") lambda_result? (expression | block)
               | place assignop expression
               | "&" place
+              | "&" expression "(" arguments? ")"
               | "borrow" place
               | "break" expression? | "continue" | "return" expression?
               | braced
@@ -213,11 +218,12 @@ ifexpr       ::= "if" expression block ("else" (block | ifexpr))?
 
 arms         ::= arm ("," arm)* ","?
 arm          ::= pattern "=>" expression
-pattern      ::= name ("(" name ("," name)* ","? ")")?
-              | name "{" binders "}"
+pattern      ::= qualified ("(" pattern ("," pattern)* ","? ")")?
+              | name? "{" binders "}"
               | "reflect" "." "case"
               | pattern_bound (rangeop pattern_bound)?
               | tuple_pattern
+              | "true" | "false"
               | "_"
 pattern_bound ::= litbound | string | qualified
 tuple        ::= "(" expression "," expression ("," expression)* ","? ")"
@@ -252,9 +258,11 @@ type_arguments ::= "[" type_name ("," type_name)* ","? "]"
 ```
 
 The grammar omits statement terminators. A line break separates statements
-([S-Separator]); `;` separates statements on the same line. Inside an array
-type, that token separates the element type from the length and ends no
-statement. It appears nowhere else. An `import` uses the same terminators as a
+([S-Separator]); `;` separates statements on the same line, and ends a
+declaration written without a block -- a signature, an alias, a newtype, an
+associated type, a `derive` or a delegation -- as a line break does. Inside an
+array type, that token separates the element type from the length and ends
+nothing. It appears nowhere else. An `import` uses the same terminators as a
 statement, although it is a declaration.
 
 Words quoted in the grammar are reserved and cannot be names, with the
@@ -264,7 +272,9 @@ such as `read`, `copy`, `sink`, `embed`, `embed_bytes`, `impl`, `opaque`,
 legal without knowing the parser's state.
 
 `type`, `alias`, `proj`, `trav`, `it`, `via` and `default` are contextual
-words, not reserved words.
+words, not reserved words, and so are `case`, `components`, `supertraits`,
+`target`, `derived` and `value`, which the grammar reads only after a `.` or in
+a template requirement.
 
 `default` marks a default implementation when it immediately precedes `impl`
 at the start of a declaration. Elsewhere it is a name, so the prelude's
@@ -485,7 +495,12 @@ contents; standard error carries the description.
 `Result` refers to the prelude's declaration, as it does for `?` and
 [T-DiscardFailure].
 
-**[S-Char]** A byte that cannot begin a token is invalid source.
+**[S-Char]** A byte that cannot begin a token is invalid source. It is that
+byte's only report: written after an operand, it is stepped over and the
+expression reads on as written, on its line or, where it ends its line, on a
+next line opening with an operator no expression begins with (`+`, `/`, `%`,
+a comparison or `&&`; `||` begins a lambda), since the byte may stand for an operator
+that carried the line on; and where a parameter or a list element begins, it stands for none.
 
 **[S-String]** A string literal must close before the end of its line. This
 holds for a raw literal too, and an unclosed raw literal is reported as
@@ -498,7 +513,9 @@ follows it is read as written. An unclosed
 literal holds the rest of its line, and a byte no token begins may stand for
 anything, so a call, an array, a tuple, a structure literal, a tuple pattern
 or a `match` with either
-as the last token of an element's line is not reported for the comma or the
+as the last token of an element's line, and a function's or lambda's parameter
+list with one as the last token of a parameter's line, is not reported for the
+comma or the
 closing bracket that line may have held. The list reads on to the next line
 unless that line begins a statement or a declaration; a separator missing
 anywhere else is reported, and so is a closing bracket missing where the list
@@ -589,7 +606,7 @@ not a `\\` line ends it. A blank line or a comment between two lines is refused
 under [S-String]. Whatever follows the literal is on the line after its last,
 because the last line runs to its end: a call's `)` or a following argument's
 `,` starts the next line, and the literal's last line ends a statement as any
-literal ending a line does ([ADR 0041](adr/0041-a-newline-ends-a-statement.md)).
+literal ending a line does ([ADR 0196](adr/0196-a-selection-line-continues-the-line-above.md)).
 
 A multi-line literal is a string literal in every other respect. It has type
 `Str`, it is a constant expression and it can be a parameter default. A comma
@@ -1101,9 +1118,10 @@ and there is nothing to mark. `visit(&counting)` lends the caller's `counting`;
 forgotten marker never changes a copy. `&` marks possible mutation and the
 associated exclusivity requirement at the call site. It does not take an
 address or create a reference; the language has no reference values. `&` is
-written in three places: before an argument, before a postfix call whose
-receiver is `inout` (below), and at the head of a plain `for`, `for x in &it`,
-where it marks the iterator the walk advances ([T-For]).
+written in four places: before an argument, before a postfix call whose
+receiver is `inout` (below), before the invocation of a callable that is
+`inout` (below), and at the head of a plain `for`, `for x in &it`, where it
+marks the iterator the walk advances ([T-For]).
 
 A postfix call whose receiver is `inout`, `inout self`, marks the receiver by
 writing `&` before the call: `&counter.bump()` and `&list.push(x)` pass
@@ -1255,7 +1273,7 @@ named but not offered, and so is one that would be declared twice where the name
 is (in its module, among its type's members, or in the list of fields, variants
 or type parameters it was written in), since accepting it would trade this error
 for [N-Duplicate], and so is an `export`'s respelling that names a symbol the
-runtime owns, which [M-Export] would refuse. A rename refuses a new name in the wrong case for the same
+runtime owns or calls, which [M-Export] would refuse. A rename refuses a new name in the wrong case for the same
 kind, with the same respelling.
 
 **[N-NotCallable]** Only a function or a value whose type carries a callable
@@ -1558,12 +1576,18 @@ type and no expectation settles, and `Self` implements the trait at exactly one
 argument list, the parameter takes that implementation's argument, so the
 literal in `Money.from(1250)` takes the integer type `Money` converts from.
 This holds however the call is written: `x.op(1)`, `Trait.op(x, 1)` or
-`Type.op(x, 1)`. Where several implementations answer, including one whose
-trait arguments `Self` leaves open, the literal takes its default type, so
-adding a second implementation can change which body a literal argument runs,
-without a diagnostic. A trait
-parameter no argument stands at is settled only by what the call is expected to
-produce.
+`Type.op(x, 1)`. Where several implementations answer, a literal settles the
+one whose argument can hold its value, as [T-Literal] decides, by the rule a
+type parameter bounded at several argument lists follows: `k.scale(1)` on a
+type implementing `Scale[UInt8]` and `Scale[Bool]` is a call at
+`Scale[UInt8]`, and `k.scale(300)` on one implementing `Scale[UInt8]` and
+`Scale[UInt16]` a call at `Scale[UInt16]`. A literal fitting several,
+`k.scale(1)` on that type, does not say which implementation runs and is
+[N-Ambiguous]; one fitting none, and one where an implementation leaves its
+trait arguments open, takes its default type. So adding an implementation
+never changes silently which body a literal argument runs: a literal it also
+fits becomes [N-Ambiguous]. A trait parameter no argument stands at is settled
+only by what the call is expected to produce.
 
 Importing a trait can make such a name ambiguous, as it can a postfix call: a
 trait brought into scope that declares the name for the type turns an existing
@@ -2206,7 +2230,12 @@ declaration's name, matching the C header, and omits the prefix applied to
 other Linea-defined symbols, so it must not be a symbol the runtime owns:
 any name in the runtime's `linea_` namespace, its public functions and the
 version marker every program references included, or one it defines outside
-that namespace, such as `main`.
+that namespace, such as `main`. Nor may it be a symbol the runtime calls
+without defining, such as the C library's `free` or `calloc`: a C host links
+one definition of each name, so the export would replace the function the
+runtime calls. That set is the union of the runtime's undefined symbols on
+every target it is built for (macOS and Linux, on aarch64 and x86-64), so an
+export means the same whichever machine compiles it.
 
 A dependency's `export` is not exported. Only the root being built publishes C
 symbols, so an `export` in a library a program depends on gives that program's
@@ -2563,8 +2592,9 @@ every bit, and `total_less`.
 **[T-Convert]** `T(e)` explicitly converts its single argument `e` to the
 primitive type named by `T`
 ([ADR 0018](adr/0018-the-integer-model.md)). A conversion uses call syntax.
-Newtypes also use `T(e)` for construction under [T-Newtype]; struct and enum
-type names are not callable ([N-NotCallable]).
+Newtypes also use `T(e)` for construction, and a refined newtype's
+construction is checked under [T-Refine]; struct and enum type names are not
+callable ([N-NotCallable]).
 
 A symbolic source or target with Integer evidence admits the same explicit
 numeric conversions. The conversion is not a constant expression while either
@@ -4008,9 +4038,19 @@ applied bases such as `Wrapper[S].Item`. An unresolved projection stands an
 unknown height above what it is selected from: it is bounded wherever its base
 and trait arguments are. `S.Item` inside `drain[S]` reached only as
 `drain[Tap]` is selected from a fixed type and leaves a recursion it joins
-bounded, while a projection of a recurring argument is an increase that no
-later descent undoes. A directly recurring projection remains rejected even
-when an implementation would settle it to a smaller type.
+bounded, while a projection of a recurring argument counts as an increase that
+no later descent undoes. That is not a claim that every projection grows: a
+projection the check cannot resolve is treated as no smaller than its base,
+because what a declaration states cannot prove that it decreases for every
+implementation the program may hold. So a directly recurring projection
+remains rejected even when every implementation in sight settles it to a
+smaller type. `drain[S: Source]` recurring at `S.Item` is refused beside
+`impl[T: Source] Source for Tap[T] { type Item = T }`, whose item shrinks,
+because a later `impl[T: Source] Source for Grow[T] { type Item =
+Grow[Grow[T]] }` would make `drain` instantiate without end. The route to
+accepting such a recursion is a decreasing measure the trait states and each
+implementation is checked against, not reasoning over the whole program or a
+limit on instantiation depth.
 
 Generic type parts retain the structural non-growth rule: each argument on a
 recurring part must contain none of the declaration's parameters or be exactly
@@ -6879,7 +6919,7 @@ anywhere ([ADR 0178](adr/0178-a-constant-is-a-static-place.md)).
 ## §6 Execution
 
 The entry point's result is the program's value and becomes the process's exit
-status ([ADR 0019](adr/0019-entry-point-is-main-returning-u8.md)).
+status ([ADR 0024](adr/0024-a-program-is-a-list-of-declarations.md)).
 
 No operation has undefined behaviour. Every operation produces a defined result
 or a diagnosed failure, independently of optimisation level

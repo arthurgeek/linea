@@ -1,0 +1,40 @@
+// `keep` takes a value that owns what it holds, and a view of `s` is refused
+// at each call. A `Box[Str]` built directly is a value of its own, whose type
+// implements `Release` only for an owned item, so releasing it is refused
+// wherever it meets a refused call's result: assigned to the `var` that held
+// one, beside one in a tuple, in the other arm of an `if`, or in another
+// field of a structure.
+struct Box[T] {
+    item: T,
+}
+
+impl[T: Owned + Discardable] Release for Box[T] {
+    fn release(sink self: Self) {
+        let Box { item: _ } = self
+    }
+}
+
+struct Pair[A] {
+    first: A,
+    second: A,
+}
+
+fn keep[T: Owned](sink value: T) -> Box[T] {
+    Box[T] { item = value }
+}
+
+fn main() -> UInt8 {
+    defer let s = "held".to_owned().unwrap()
+    var held = keep(s.view())
+    held = Box[Str] { item = s.view() }
+    defer let from_var = held
+    let (_kept, built) = (keep(s.view()), Box[Str] { item = s.view() })
+    defer let from_tuple = built
+    defer let from_if = if s.view().length() > 2 {
+        keep(s.view())
+    } else {
+        Box[Str] { item = s.view() }
+    }
+    defer let from_field = Pair[Box[Str]] { first = keep(s.view()), second = Box[Str] { item = s.view() } }.second
+    0
+}

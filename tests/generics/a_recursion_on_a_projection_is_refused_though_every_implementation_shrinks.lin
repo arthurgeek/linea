@@ -1,0 +1,47 @@
+// `drain` recurs at `S.Item`, and every implementation here settles it to a
+// smaller type: `Tap[T]`'s item is the `T` it wraps, and `Leaf`'s is itself.
+// The recursion is refused all the same. Whether `S.Item` shrinks is a fact
+// about implementations, and a later one, such as
+// `impl[T: Source] Source for Grow[T] { type Item = Grow[Grow[T]] }`, would
+// make `drain` instantiate without end. What `drain` declares cannot rule
+// that out, so the projection counts as no smaller than `S`.
+trait Source {
+    type Item: Source
+
+    fn next(sink self: Self) -> Option[Self.Item]
+}
+
+struct Leaf {}
+
+impl Source for Leaf {
+    type Item = Leaf
+
+    fn next(sink self: Self) -> Option[Leaf] {
+        let Leaf {} = self
+        .None
+    }
+}
+
+struct Tap[T] {
+    inner: T,
+}
+
+impl[T: Source] Source for Tap[T] {
+    type Item = T
+
+    fn next(sink self: Self) -> Option[T] {
+        let Tap { inner } = self
+        .Some(inner)
+    }
+}
+
+fn drain[S: Source](sink s: S) -> UInt64 {
+    match s.next() {
+        Some(inner) => 1 + drain(inner),
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8(drain(Tap[Tap[Leaf]] { inner = Tap[Leaf] { inner = Leaf {} } }))
+}

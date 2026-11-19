@@ -1,0 +1,10 @@
+error[N-Ambiguous]: `Ruler` implements `Scale[UInt8]` and `Scale[UInt16]`, and this call fits each
+  --> tests/traits/a_call_two_implementations_could_answer_is_refused.lin:24:5
+   |
+24 |     Ruler {}.scale(1) + Scale.scale(Ruler {}, 70000)
+   |     ^^^^^^^^^^^^^^^^^ give an argument the type of the one it means
+error[T-Bound]: `Ruler` does not implement `Scale[Int64]`
+  --> tests/traits/a_call_two_implementations_could_answer_is_refused.lin:24:25
+   |
+24 |     Ruler {}.scale(1) + Scale.scale(Ruler {}, 70000)
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implement `Scale[Int64]` for `Ruler`

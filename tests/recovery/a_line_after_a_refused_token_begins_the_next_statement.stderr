@@ -8,11 +8,6 @@ error[S-String]: unterminated string literal
    |
 10 |     let total = "unclosed
    |                 ^^^^^^^^^ string starts here and is never closed
-error[S-Separator]: expected `;` or a newline
- --> tests/recovery/a_line_after_a_refused_token_begins_the_next_statement.lin:4:19
-  |
-4 |     let label = 1 "unclosed
-  |                   ^^^^^^^^^ this binding ends here
 error[N-Undefined]: undefined name `missing`
  --> tests/recovery/a_line_after_a_refused_token_begins_the_next_statement.lin:5:5
   |

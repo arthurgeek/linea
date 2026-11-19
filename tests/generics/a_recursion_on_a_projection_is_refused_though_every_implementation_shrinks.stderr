@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `drain` with more than it was given
+  --> tests/generics/a_recursion_on_a_projection_is_refused_though_every_implementation_shrinks.lin:40:28
+   |
+40 |         Some(inner) => 1 + drain(inner),
+   |                            ^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls
