@@ -251,7 +251,7 @@ extern fn linea_dir_reopen(anchor: UInt64, names_at: UInt64, names_extent: UInt6
 
 extern fn linea_dir_open_up(stream: UInt64, inout parent: UInt64) -> Int64
 
-extern fn linea_dir_identity(stream: UInt64, inout device: UInt64, inout inode: UInt64) -> Int64
+extern fn linea_dir_identity(stream: UInt64, inout device: UInt64, inout inode: UInt64, inout birth_seconds: UInt64, inout birth_nanoseconds: UInt64) -> Int64
 
 extern fn linea_dir_close(stream: UInt64) -> Int64
 
@@ -360,13 +360,29 @@ impl DirStream {
 
     // Answer the device and inode numbers of the directory, or the errno.
     internal fn identity(self: Self) -> Result[(UInt64, UInt64), Int32] {
+        let (device, inode, _born) = self.lasting_identity()?
+        .Ok((device, inode))
+    }
+
+    // Answer the device and inode numbers of the directory and its birth time,
+    // as the seconds word and the nanoseconds word, or None for a file system
+    // that keeps no birth time; or the errno. A device and an inode name a
+    // directory only while something holds it open, since a directory made
+    // after it is removed may be given its inode; the birth time tells the two
+    // apart.
+    internal fn lasting_identity(self: Self) -> Result[(UInt64, UInt64, Option[(UInt64, UInt64)]), Int32] {
         var device: UInt64 = 0
         var inode: UInt64 = 0
-        let answer = linea_dir_identity(self.handle, &device, &inode)
+        var seconds: UInt64 = 0
+        var nanoseconds: UInt64 = 0
+        let answer = linea_dir_identity(self.handle, &device, &inode, &seconds, &nanoseconds)
         if answer < 0 {
             return .Err(Int32(-answer))
         }
-        .Ok((device, inode))
+        if answer == 1 {
+            return .Ok((device, inode, .None))
+        }
+        .Ok((device, inode, .Some((seconds, nanoseconds))))
     }
 
     // Close the stream and answer zero or a negated errno.

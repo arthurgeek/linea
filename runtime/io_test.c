@@ -530,10 +530,20 @@ static void directory_streams(void) {
     assert(next_entry(stream, record, 0, name) == 0);
     unsigned long device = 0;
     unsigned long inode = 0;
+    unsigned long born = 7;
+    unsigned long born_nanoseconds = 7;
     struct stat info;
     assert(stat(directory, &info) == 0);
-    assert(linea_dir_identity(stream, &device, &inode) == 0);
+    const long identified = linea_dir_identity(stream, &device, &inode, &born, &born_nanoseconds);
+    assert(identified == 0 || identified == 1);
     assert(device == (unsigned long)info.st_dev && inode == (unsigned long)info.st_ino);
+#if defined(__APPLE__)
+    /* macOS keeps a birth time on every directory. */
+    assert(identified == 0);
+    assert(born == (unsigned long)(long)info.st_birthtimespec.tv_sec);
+    assert(born_nanoseconds == (unsigned long)info.st_birthtimespec.tv_nsec);
+#endif
+    if (identified == 1) assert(born == 0 && born_nanoseconds == 0);
 
     /* Opening a link to a directory without following it is refused; with
      * following, it lists the directory it names. */
@@ -580,7 +590,9 @@ static void directory_streams(void) {
     assert(linea_dir_open_up(child, &up) == 0);
     unsigned long up_device = 0;
     unsigned long up_inode = 0;
-    assert(linea_dir_identity(up, &up_device, &up_inode) == 0);
+    unsigned long up_born = 0;
+    unsigned long up_born_nanoseconds = 0;
+    assert(linea_dir_identity(up, &up_device, &up_inode, &up_born, &up_born_nanoseconds) >= 0);
     assert(up_device == identity[0] && up_inode == identity[1]);
     assert(linea_dir_close(up) == 0);
     assert(linea_dir_close(child) == 0);

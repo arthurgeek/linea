@@ -114,14 +114,24 @@ costs one open per level however deep it is.
 
 Coming back up, the walk leaves an open directory whose parent was read into
 memory. Before closing it, it opens `..` of it, which no link can stand in
-for, and keeps that descriptor as the parent's when it has the device and
-inode the walk recorded for the parent; the parent's entries still come from
-memory, and the directories it holds are opened inside it. The count of open
-descriptors does not change, and making room closes such a descriptor first
-when it is the shallowest.
+for, and keeps that descriptor as the parent's when it is the parent the walk
+recorded; the parent's entries still come from memory, and the directories it
+holds are opened inside it. The count of open descriptors does not change, and
+making room closes such a descriptor first when it is the shallowest.
 
-Only when that is not possible, because the directory left was moved out of
-its parent, does the walk find a directory by name: one runtime call,
+A device and an inode identify a directory only while something holds it
+open. The parent was closed when it was read into memory, so it may have been
+removed since and its inode given to a directory made anywhere on the same
+file system, ext4 and XFS reuse inodes readily, and `..` of a child moved
+into that new directory would lead there. So the walk records each
+directory's birth time with its device and inode when it enters it (`statx`'s
+`stx_btime` on Linux, `st_birthtimespec` on macOS), and the handover requires
+all three to match. On a file system that keeps no birth time (`STATX_BTIME`
+absent from `stx_mask`) the walk does not take the handover.
+
+When the handover is not taken, because the directory left was moved out of
+its parent, its parent's identity does not match, the file system keeps no
+birth time, or opening `..` failed, the walk finds a directory by name: one runtime call,
 `linea_dir_reopen`, opens each directory from the deepest one still open down
 to the parent again, one name at a time with `openat` relative to the one
 above (`O_NOFOLLOW` unless links are followed), as a bare descriptor held to
@@ -136,11 +146,18 @@ directory's own `Io` error.
 Below the root the walk therefore opens no path of more than one name: nothing
 above can redirect it, and no path is too long for the system to open. A walk
 follows the directories it entered, not their names: a directory moved while
-the walk is inside it is walked where it went. During a step at most two
+the walk is inside it is walked where it went, whether the walk holds it open
+or regains it through `..` with its device, inode and birth time, since
+either way it is the directory the walk entered from the root and not one a
+name now leads to. The by-name reopen holds directories to their device and
+inode alone; it opens one name at a time below a directory the walk holds,
+so it stays inside the tree whatever it finds, and a directory under a name
+that is not the one entered is `Changed`. During a step at most two
 descriptors beyond `max_open` are open; a walk of a 500-deep chain needs
 `max_open` plus one beyond the three standard descriptors. A walk costs one
 `openat` per directory entered and one more per directory left whose parent
-was read into memory: a 500-deep chain takes about 0.1 s and a 500-deep chain
+was read into memory, and a reopen from the deepest open directory, one
+`openat` per level, each time a handover is not taken: a 500-deep chain takes about 0.1 s and a 500-deep chain
 with a second directory at every level about 0.2 s, at `max_open` 2 or 16, on
 an Apple-silicon Mac (a whole-chain reopen per directory took 9 s and 17 s).
 A listing is kept until the walk leaves its directory, so memory past the

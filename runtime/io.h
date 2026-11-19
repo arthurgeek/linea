@@ -106,8 +106,14 @@ long linea_dir_reopen(unsigned long anchor, unsigned long names_at, unsigned lon
 /* Opens the parent of the directory the stream `stream` reads, "..", which is
  * never a symbolic link, and writes a stream over it to `*parent`. */
 long linea_dir_open_up(unsigned long stream, unsigned long *parent);
-/* Writes the device and inode numbers of the directory the stream reads. */
-long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode);
+/* Writes the device and inode numbers of the directory the stream reads, and
+ * its birth time as whole seconds since the Unix epoch (two's complement) and
+ * the nanoseconds past them. Answers 0; 1 when the file system keeps no birth
+ * time, leaving both birth words 0; or a negated errno. A device and inode
+ * identify a directory only while something holds it open: once it is closed
+ * and removed, a new directory may be given the same inode. */
+long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode,
+                        unsigned long *birth_seconds, unsigned long *birth_nanoseconds);
 /* Closes the stream and its descriptor; the handle is invalid afterwards,
  * whatever the answer. */
 long linea_dir_close(unsigned long stream);

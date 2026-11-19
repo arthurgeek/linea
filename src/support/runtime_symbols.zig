@@ -590,7 +590,7 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_dir_next", .parameters = &.{ dir_stream, bytes_at, p(.u64), p(.u8) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     .{ .symbol = "linea_dir_reopen", .parameters = &.{ dir_stream, bytes_at, p(.u64), bytes_at, p(.u64), p(.u8), written, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     .{ .symbol = "linea_dir_open_up", .parameters = &.{ dir_stream, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
-    .{ .symbol = "linea_dir_identity", .parameters = &.{ dir_stream, written, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_identity", .parameters = &.{ dir_stream, written, written, written, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     .{ .symbol = "linea_dir_close", .parameters = &.{dir_stream}, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     // The descriptor limit is process-wide; errors are captured before return.
     .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted, .migration_contract = .neutral },

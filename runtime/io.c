@@ -521,16 +521,38 @@ long linea_dir_open_up(unsigned long stream, unsigned long *parent) {
     return open_stream(dirfd((DIR *)(uintptr_t)stream), "..", 1, parent);
 }
 
-long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode) {
+long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode,
+                        unsigned long *birth_seconds, unsigned long *birth_nanoseconds) {
+    const int fd = dirfd((DIR *)(uintptr_t)stream);
     struct stat info;
     int result;
     do {
-        result = fstat(dirfd((DIR *)(uintptr_t)stream), &info);
+        result = fstat(fd, &info);
     } while (result != 0 && errno == EINTR);
     if (result != 0) return -(long)errno;
     *device = (unsigned long)info.st_dev;
     *inode = (unsigned long)info.st_ino;
+    *birth_seconds = 0;
+    *birth_nanoseconds = 0;
+#if defined(__APPLE__)
+    *birth_seconds = (unsigned long)(long)info.st_birthtimespec.tv_sec;
+    *birth_nanoseconds = (unsigned long)info.st_birthtimespec.tv_nsec;
     return 0;
+#elif defined(__linux__) && defined(STATX_BTIME)
+    /* Linux reports a birth time through statx alone, and only on file
+     * systems that keep one, which `stx_mask` says. */
+    struct statx extended;
+    do {
+        result = statx(fd, "", AT_EMPTY_PATH, STATX_BTIME, &extended);
+    } while (result != 0 && errno == EINTR);
+    if (result != 0) return errno == ENOSYS ? 1 : -(long)errno;
+    if ((extended.stx_mask & STATX_BTIME) == 0) return 1;
+    *birth_seconds = (unsigned long)(long)extended.stx_btime.tv_sec;
+    *birth_nanoseconds = (unsigned long)extended.stx_btime.tv_nsec;
+    return 0;
+#else
+    return 1;
+#endif
 }
 
 long linea_dir_close(unsigned long stream) {
