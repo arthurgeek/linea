@@ -8,6 +8,7 @@ pub enum IoOperation {
     Flush,
     Close,
     Open,
+    Create,
     Metadata,
     Permissions,
     Publish,

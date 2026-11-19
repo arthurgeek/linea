@@ -1,0 +1,164 @@
+import std.mem
+import std.io
+import std.testing
+
+// A new directory starts with mode octal 0777 (rwxrwxrwx), and the process
+// umask then removes bits from it.
+let default_dir_mode: UInt64 = 511
+
+// Create the directory `path`, with permission bits 0777 less the process
+// umask. Its parent must exist, and a path that already names an entry is
+// refused as `AlreadyExists`. The parent and the final name are copied into
+// scratch storage from `allocator`.
+pub fn create_dir_in[A: Allocator](allocator: A, path: Path) -> Result[(), FsFailure] where carries() {
+    let target = prepare(allocator, path)?
+    let made = mem._make_dir_at(target.name, target.parent, default_dir_mode)
+    let failure = if made < 0 {
+        FsFailure.new(.Io(io.IoError.from_os(.Create, Int32(-made))))
+    } else {
+        FsFailure.empty()
+    }
+    complete(target, failure)
+}
+
+test "creating a directory takes its scratch from an arena" {
+    // The arena holds only the parent's and the name's scratch copies.
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    testing.assert_ok_eq(create_dir_in(arena.handle(), path), (), "a directory was not created over an arena")?
+    testing.assert_ok_eq(remove_dir(path), (), "the directory created over an arena was not removed")?
+}
+
+// Create the directory `path`, as `create_dir_in` does, with the system
+// allocator for the path's scratch storage.
+pub fn create_dir(path: Path) -> Result[(), FsFailure] where carries() {
+    create_dir_in(mem.system(), path)
+}
+
+test "creating a directory refuses an existing entry" {
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    testing.assert_ok_eq(create_dir(path), (), "a new directory was not created")?
+    let refused = match create_dir(path) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary {
+            Some(Io(reason)) => reason.category == .AlreadyExists,
+            _ => false,
+        },
+    }
+    testing.assert_ok_eq(remove_dir(path), (), "the new directory was not removed")?
+    testing.assert(refused, "creating a directory twice did not report that it exists")?
+}
+
+// Remove the empty directory `path`. A directory that still holds entries,
+// or a path that names no directory, is refused with the system's reason.
+// The parent and the final name are copied into scratch storage from
+// `allocator`.
+pub fn remove_dir_in[A: Allocator](allocator: A, path: Path) -> Result[(), FsFailure] where carries() {
+    let target = prepare(allocator, path)?
+    let removed = mem._remove_dir_at(target.name, target.parent)
+    let failure = if removed < 0 {
+        FsFailure.new(.Io(io.IoError.from_os(.Remove, Int32(-removed))))
+    } else {
+        FsFailure.empty()
+    }
+    complete(target, failure)
+}
+
+test "removing a directory takes its scratch from an arena" {
+    defer let arena = mem.Arena.open(mem.system(), size: 4096)
+    defer let owned = scratch_path()
+    let path = Path.from_str(owned.view()).unwrap()
+    create_dir(path).unwrap()
+    testing.assert_ok_eq(remove_dir_in(arena.handle(), path), (), "a directory was not removed over an arena")?
+}
+
+// Remove the empty directory `path`, as `remove_dir_in` does, with the system
+// allocator for the path's scratch storage.
+pub fn remove_dir(path: Path) -> Result[(), FsFailure] where carries() {
+    remove_dir_in(mem.system(), path)
+}
+
+test "removing a directory refuses one that holds a file and a missing one" {
+    defer let owned = scratch_path()
+    let directory = Path.from_str(owned.view()).unwrap()
+    create_dir(directory).unwrap()
+    var inside = owned.view().to_owned().unwrap()
+    &inside.append("/kept").unwrap()
+    defer let held = inside
+    let file = Path.from_str(held.view()).unwrap()
+    let _written = write_file(file, "x".as_bytes(), policy: .CreateNew).unwrap()
+    let full = remove_dir(directory).is_err()
+    remove_file(file).unwrap()
+    testing.assert_ok_eq(remove_dir(directory), (), "an emptied directory was not removed")?
+    let missing = match remove_dir(directory) {
+        Ok(_) => false,
+        Err(failure) => match read failure.primary {
+            Some(Io(reason)) => reason.category == .NotFound,
+            _ => false,
+        },
+    }
+    testing.assert(full, "a directory holding a file was removed")?
+    testing.assert(missing, "removing a missing directory did not report it as not found")?
+}
+
+// Create the symbolic link `link` naming `target`, which is stored as given
+// and need not exist. A `link` that already names an entry is refused. The
+// link's parent, its final name and the target are copied into scratch
+// storage from `allocator`.
+pub fn create_symlink_in[A: Allocator](allocator: A, target: Path, link: Path) -> Result[(), FsFailure] where carries() {
+    let place = prepare(allocator, link)?
+    let named = mem._terminated(allocator, target.as_bytes()) else |reason| {
+        return complete(place, FsFailure.new(.Allocation(reason)))
+    }
+    let made = mem._symlink_at(place.name, named, place.parent)
+    named.release()
+    let failure = if made < 0 {
+        FsFailure.new(.Io(io.IoError.from_os(.Create, Int32(-made))))
+    } else {
+        FsFailure.empty()
+    }
+    complete(place, failure)
+}
+
+test "each allocation failure covers creating a symbolic link" -> Result[(), testing.Failure] {
+    let checked = testing.each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), FsFailure] {
+            defer let owned = scratch_path()
+            let link = Path.from_str(owned.view()).unwrap()
+            create_symlink_in(allocator, Path.from_str("target").unwrap(), link)?
+            remove_file(link).unwrap()
+            return .Ok(())
+        },
+        FsFailure.is_refusal,
+    )
+    // The parent path, the link's name and the target are the walk's three
+    // acquisitions.
+    testing.assert(checked.unwrap_or(0) == 3, "creating a link was reported as failing, or took scratch from another allocator")?
+    .Ok(())
+}
+
+// Create the symbolic link `link` naming `target`, as `create_symlink_in`
+// does, with the system allocator for the scratch storage.
+pub fn create_symlink(target: Path, link: Path) -> Result[(), FsFailure] where carries() {
+    create_symlink_in(mem.system(), target, link)
+}
+
+test "a symbolic link names its target and refuses an existing name" {
+    defer let owned = scratch_path()
+    let file = Path.from_str(owned.view()).unwrap()
+    defer remove_scratch(file)
+    let _written = write_file(file, "tea".as_bytes(), policy: .CreateNew).unwrap()
+    var named = owned.view().to_owned().unwrap()
+    &named.append("-link").unwrap()
+    defer let held = named
+    let link = Path.from_str(held.view()).unwrap()
+    create_symlink(file, link).unwrap()
+    let again = create_symlink(file, link).is_err()
+    defer let bytes = read_file(link, max_bytes: 8).unwrap()
+    remove_file(link).unwrap()
+    testing.assert_eq(bytes.as_slice(), "tea".as_bytes(), "reading through a link read something else")?
+    testing.assert(again, "a second link with the same name was created")?
+}

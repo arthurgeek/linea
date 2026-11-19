@@ -98,8 +98,13 @@ test "an empty file fails to parse and a directory fails to read" {
     let path = fs.Path.from_str(owned.view()).unwrap()
     defer fs.remove_scratch(path)
     testing.assert(failed_at_parse(read_file(path)), "an empty file was not a parse failure")?
-    let directory = fs.Path.from_str("/tmp").unwrap()
-    testing.assert(failed_at_read(read_file(directory)), "a directory was not a read failure")?
+    // A directory of the test's own is read in place of a file.
+    defer let made = fs.scratch_path()
+    let directory = fs.Path.from_str(made.view()).unwrap()
+    fs.create_dir(directory).unwrap()
+    let refused = failed_at_read(read_file(directory))
+    fs.remove_dir(directory).unwrap()
+    testing.assert(refused, "a directory was not a read failure")?
 }
 
 // DecodeFileError says whether loading a typed value from a file failed to read

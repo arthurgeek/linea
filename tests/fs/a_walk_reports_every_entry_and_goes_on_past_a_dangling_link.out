@@ -1,0 +1,6 @@
+a.txt file of 3 bytes at depth 1
+docs directory at depth 1
+docs/b.txt file of 5 bytes at depth 2
+docs/deep directory at depth 2
+docs/deep/c.txt file of 1 bytes at depth 3
+1 error, 1 of them a missing target

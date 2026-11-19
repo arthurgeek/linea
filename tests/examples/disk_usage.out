@@ -1,0 +1,9 @@
+sample-project
+   50000 bytes   2 files  assets
+   14800 bytes   3 files  src
+    1200 bytes   1 file   README.md
+   66000 bytes   6 files  in all
+largest files:
+   32000 bytes  assets/fonts/body.woff
+   18000 bytes  assets/logo.png
+    7300 bytes  src/parse/parser.lin

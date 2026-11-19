@@ -11,9 +11,10 @@ operations that answer the common questions in one call: `sum`, `min`,
 `position`, walking backwards with `rev`, neighbours with `windows`, running
 totals with `scan` and looking ahead with `peekable`. The later sections
 cover the less common tools: collecting into a `Vec`, callbacks that
-keep their state, and collections of values that must be consumed, such as
-payments, and how to empty them one by one. The last section reads a file of
-JSON records one line at a time.
+keep their state, collections of values that must be consumed, such as
+payments, and how to empty them one by one, how to read a file of JSON
+records one line at a time, and how to walk every file and directory below
+a directory with `fs.Walk`.
 
 ## Walking with `for`
 
@@ -2322,6 +2323,258 @@ fn main() -> UInt8 {
 brings into reach. `finish` flushes whatever is left and hands standard output
 back.
 
+## Walking a directory tree: `fs.Walk`
+
+A directory and everything below it is a sequence too: the files and
+directories a walk finds, one at a time. `fs.Walk.open(root)` opens the
+directory `root` and answers a walk, which is an `Iterator`, so a `for` takes
+its entries in turn. Each step reads one entry and its metadata, its kind,
+size, permissions and when it last changed, and a directory it reports is
+entered at the step after, so the walk reads nothing ahead of what you ask
+for. This program builds a small tree of notes in a fresh directory, walks it
+and lists what it found:
+
+```linea
+import std.fmt
+import std.fs
+import std.io
+import std.uuid
+
+// The notes, by their paths below the root, and what each says.
+let notes = [("/todo.txt", "milk, bread"), ("/trips/rome.txt", "the colosseum at dawn")]
+
+fn main() -> Result[UInt8, io.IoError] {
+    // A fresh name keeps this tree apart from any other in /tmp.
+    defer let root = fmt.render_owned("/tmp/notes-{uuid.Uuid.v4()}").unwrap()
+    for directory in ["", "/trips"] {
+        defer let path = fmt.render_owned("{root}{directory}").unwrap()
+        fs.create_dir(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for (name, text) in notes {
+        defer let path = fmt.render_owned("{root}{name}").unwrap()
+        let _ = fs.write_file(fs.Path.from_str(path.view()).unwrap(), text.as_bytes(), policy: .CreateNew).unwrap()
+    }
+
+    let start = fs.Path.from_str(root.view()).unwrap()
+    var walk = fs.Walk.open(start) else |error| {
+        io.println("cannot walk the notes: {error}")?
+        return .Ok(1)
+    }
+    defer var lines: Vec[String] = Vec.new()
+    var skipped = 0
+    // `&walk` lends the walk to the loop, as `&pending` lent the drain: the
+    // walk holds the directories it is reading open, so it is closed after.
+    for found in &walk {
+        // Each item is a `Result`: an entry, or an error for one entry.
+        defer let entry = found else |error| {
+            error.release()
+            skipped += 1
+            continue
+        }
+        let line = if entry.is_file() {
+            fmt.render_owned("{entry.name()}: a file of {entry.size()} bytes at depth {entry.depth()}").unwrap()
+        } else {
+            fmt.render_owned("{entry.name()}: a {entry.kind()} at depth {entry.depth()}").unwrap()
+        }
+        &lines.push(line).unwrap()
+    }
+    // `close` closes what the walk still holds open, and reports a failure.
+    walk.close()?
+    // A walk answers entries in the order the file system keeps them, so the
+    // program sorts what it found before printing it.
+    &lines.sort_by(|left, right| left.view() < right.view())
+    for read line in lines {
+        io.println(line.view())?
+    }
+    io.println("{skipped} skipped")?
+
+    for (name, _) in notes {
+        defer let path = fmt.render_owned("{root}{name}").unwrap()
+        fs.remove_file(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for directory in ["/trips", ""] {
+        defer let path = fmt.render_owned("{root}{directory}").unwrap()
+        fs.remove_dir(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    .Ok(0)
+}
+```
+
+```
+rome.txt: a file of 21 bytes at depth 2
+todo.txt: a file of 11 bytes at depth 1
+trips: a directory at depth 1
+0 skipped
+```
+
+A walk is linear, like the payment drain: it holds the directories it is in
+the middle of open, so it cannot be dropped. Lend it to the loop with `&walk`
+and settle it afterwards with `walk.close()`, which answers an `io.IoError` if
+a directory failed to close, or `walk.release()` when that does not matter.
+The root itself is not reported; `entry.depth()` is 1 for what the root holds,
+2 for what those directories hold, and so on. `entry.path()` is the root
+joined to every name down to the entry, and `entry.name()` the last of those.
+A directory's size is whatever the file system records for it, which differs
+from one file system to the next, so the program prints sizes for files only.
+
+The loop never uses `?`: leaving `main` from inside it would leave the walk
+unsettled, and the compiler refuses that with `[O-Leak]`, just as it would for
+the drain. The program counts what it skipped and prints after `close`.
+
+Each entry owns its path, from the walk's allocator, so it lasts as long as
+you keep it: a program can keep the largest files it has seen, or sort them
+after the walk. That is why the loop binds it with `defer let`. `fs.Walk.open`
+uses the system allocator; `fs.Walk.open_in(allocator, root)` takes another,
+and over an arena an entry owes nothing and can simply be dropped. Rust's
+`walkdir` crate works the same way, with a `DirEntry` that owns its `PathBuf`.
+
+### One entry that cannot be read
+
+Some entries cannot be read: a file removed between the listing and the
+`stat`, a directory the program may not open, or a symbolic link whose target
+is gone. The walk answers each as an `Err(fs.WalkError)` naming the path and
+why, skips it, and goes on with the rest. `fs.Walk.open` takes
+`follow_symlinks: true` to follow links to what they name, and then a dangling
+link is such an error:
+
+```linea
+import std.fmt
+import std.fs
+import std.io
+import std.uuid
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let root = fmt.render_owned("/tmp/links-{uuid.Uuid.v4()}").unwrap()
+    let start = fs.Path.from_str(root.view()).unwrap()
+    fs.create_dir(start).unwrap()
+    defer let kept = fmt.render_owned("{root}/kept.txt").unwrap()
+    let _ = fs.write_file(fs.Path.from_str(kept.view()).unwrap(), "here".as_bytes(), policy: .CreateNew).unwrap()
+    // `create_symlink` makes a link named `gone` to a file that does not exist.
+    defer let gone = fmt.render_owned("{root}/gone").unwrap()
+    fs.create_symlink(fs.Path.from_str("missing.txt").unwrap(), fs.Path.from_str(gone.view()).unwrap()).unwrap()
+
+    var walk = fs.Walk.open(start, follow_symlinks: true).unwrap()
+    var found_entries = 0
+    var missing_targets = 0
+    for found in &walk {
+        match found {
+            Ok(entry) => {
+                found_entries += 1
+                entry.release()
+            },
+            Err(error) => {
+                // `error.cause()` says why; here the link's target is missing.
+                let missing = match read error.cause() {
+                    Io(reason) => reason.category == .NotFound,
+                    _ => false,
+                }
+                if missing {
+                    missing_targets += 1
+                }
+                error.release()
+            },
+        }
+    }
+    walk.close()?
+    io.println("{found_entries} entry read, {missing_targets} link to a missing file")?
+
+    fs.remove_file(fs.Path.from_str(gone.view()).unwrap()).unwrap()
+    fs.remove_file(fs.Path.from_str(kept.view()).unwrap()).unwrap()
+    fs.remove_dir(start).unwrap()
+    .Ok(0)
+}
+```
+
+```
+1 entry read, 1 link to a missing file
+```
+
+`kept.txt` is read, and `gone` is the one error. `error.path()` borrows the
+path the walk could not read, here the link, and `error.cause()` answers a
+`fs.WalkCause`: `Io` with the `io.IoError` of the call that failed (its
+`operation` is `Metadata` here, and `Open` or `Read` for a directory), `Loop`
+for a followed link that leads back into a directory the walk is inside, or
+`Allocation` when storage for a path was refused. Without
+`follow_symlinks: true` the walk reports `gone` as an entry of kind `Symlink`
+and never looks at what it names, so there is no error to report. To stop at
+the first error instead of going on, `break` out of the loop there and settle
+the walk as usual.
+
+### Leaving a directory out: `skip_children` and `max_depth`
+
+`max_depth: n` stops a walk `n` levels below the root: `max_depth: 1` reports
+only what the root holds. To leave out one directory, such as a project's
+`.git`, call `walk.skip_children()` right after the walk answers that
+directory, before asking for the next entry. The body of a lent `for` cannot
+name `walk`, so a program that prunes walks with `next` in a `loop`, as the
+peekable till did:
+
+```linea
+import std.fmt
+import std.fs
+import std.io
+import std.uuid
+
+// The project's files, by their paths below its root.
+let files = ["/.git/HEAD", "/src/main.lin", "/README.md"]
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer let root = fmt.render_owned("/tmp/project-{uuid.Uuid.v4()}").unwrap()
+    for directory in ["", "/.git", "/src"] {
+        defer let path = fmt.render_owned("{root}{directory}").unwrap()
+        fs.create_dir(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for name in files {
+        defer let path = fmt.render_owned("{root}{name}").unwrap()
+        let _ = fs.write_file(fs.Path.from_str(path.view()).unwrap(), "x".as_bytes(), policy: .CreateNew).unwrap()
+    }
+
+    var walk = fs.Walk.open(fs.Path.from_str(root.view()).unwrap()).unwrap()
+    var sources = 0
+    var skipped = 0
+    loop {
+        let found = &walk.next() else {
+            break
+        }
+        defer let entry = found else |error| {
+            error.release()
+            skipped += 1
+            continue
+        }
+        // The walk has not entered `.git` yet, so skipping it now leaves out
+        // everything inside.
+        if entry.is_dir() && entry.name().as_bytes() == ".git".as_bytes() {
+            &walk.skip_children()
+        } else if entry.is_file() {
+            sources += 1
+        }
+    }
+    walk.close()?
+    io.println("{sources} files outside .git, {skipped} skipped")?
+
+    for name in files {
+        defer let path = fmt.render_owned("{root}{name}").unwrap()
+        fs.remove_file(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for directory in ["/.git", "/src", ""] {
+        defer let path = fmt.render_owned("{root}{directory}").unwrap()
+        fs.remove_dir(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    .Ok(0)
+}
+```
+
+```
+2 files outside .git, 0 skipped
+```
+
+A walk keeps the directories it is inside open, at most 16 of them by
+default (`max_open:` sets another number); a tree deeper than that is still
+walked whole, with each deeper directory read into memory and closed at once,
+so however deep the tree, the walk holds no more than that many open. The [disk usage
+example](../../examples/disk_usage.lin) adds up what each part of a directory
+holds and lists its largest files.
+
 ## What you have seen
 
 | You want | Write |
@@ -2361,17 +2614,21 @@ back.
 | to walk a drain of values that must be consumed | `var pending = v.drain()`, `for x in &pending`, then `pending.finish()` |
 | the records of a JSON Lines file, one at a time | `json.Lines.open(file)`, `.decoded[T]()`, `for item in &lines`, then `lines.abandon()` |
 | to write a value as one line of JSON | `json.encode_line(&writer, value)`, or `json.write_line` for a `json.Value` |
+| every file and directory below a directory | `var walk = fs.Walk.open(root)?`, `for found in &walk`, then `walk.close()` |
+| a walk that follows links, or stops at a depth | `fs.Walk.open(root, follow_symlinks: true, max_depth: n)` |
+| to leave a directory out of a walk | `&walk.skip_children()` right after `&walk.next()` answers it |
 
 The [payment batch](../../examples/payment_batch.lin) commits or declines a
 queue of payments with a lent walk, the [savings
 planner](../../examples/savings_planner.lin) sums a range, the [parcel
 manifest](../../examples/parcel_manifest.lin) filters and collects a shipment,
 the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
-from a walk of years that never ends, and the [trail
+from a walk of years that never ends, the [trail
 profile](../../examples/trail_profile.lin) reports a hike with `windows`,
 `scan`, `peekable` and `rev`. The [uptime report](../../examples/uptime_report.lin)
 reads a log of health checks as JSON Lines and writes a summary for each
-service the same way.
+service the same way, and the [disk usage](../../examples/disk_usage.lin)
+report walks a directory tree.
 
 Next: [Borrowing](06-borrowing.md) — the views that chains hand out, and the
 `borrows`, `carries` and `retains` clauses that say where a view points.

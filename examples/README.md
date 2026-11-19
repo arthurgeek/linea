@@ -45,6 +45,7 @@ Strings, collections, parsing, and files.
 - [server_settings.lin](server_settings.lin): reads a listen address from `key = value` lines; `lines()`, `split_once`, and `let ... else`.
 - [form-letters](form-letters/main.lin): fills a letter template per order; files embedded with `embed`, `split_once`, JSON decoding and string building.
 - [json_settings.lin](json_settings.lin): reads, validates, and prints settings as JSON; `json.decode`, `json.decode_file`, and `json.encode_line`.
+- [disk_usage.lin](disk_usage.lin): adds up the bytes and files under each entry of a directory and lists its largest files; a lazy `fs.Walk` in a lent `for`, an entry error reported without stopping the walk, and `walk.close()`.
 - [json_inventory.lin](json_inventory.lin): totals an inventory and adds a summary; loading with `json.read_file` and editing a `json.Value` document.
 - [uptime_report.lin](uptime_report.lin): summarizes a log of health checks per service; reading JSON Lines lazily with `json.Lines` and writing them with `json.encode_line`.
 - [notes](notes/main.lin): manages personal tasks and notes with priority and tags; CLI argument parsing, subcommands, atomic JSON storage, tabular formatting, and JSON output.
