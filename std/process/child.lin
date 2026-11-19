@@ -169,7 +169,10 @@ impl Child {
     }
 
     // Send SIGKILL to the child. It still has to be waited for, and `wait`
-    // then reports it killed by signal 9, unless it had already exited.
+    // then reports it killed by signal 9, unless it had already exited. While
+    // SIGCHLD is ignored the kernel reaps children itself and the process ID
+    // may already name another process, so nothing is sent and the kill
+    // fails with an `io.IoError` whose errno is ECHILD.
     pub fn kill(inout self: Self) -> Result[(), ProcessError] where carries() {
         let answer = linea_process_kill(self.pid)
         if answer < 0 {

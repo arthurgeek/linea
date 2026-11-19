@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -326,6 +327,69 @@ static void a_fiber_waiting_on_a_child_leaves_its_carrier(void) {
     assert(fiber_pipe > 2);
 }
 
+static void a_closed_standard_stream_stays_closed_in_the_child(void) {
+    const int saved = fcntl(0, F_DUPFD_CLOEXEC, 3);
+    assert(saved > 2);
+    assert(close(0) == 0);
+    /* The child inherits standard input closed: reading it fails. */
+    struct block probe = shell("if read line 2>/dev/null; then exit 1; fi; exit 0");
+    struct child child = start(&probe, NULL, NULL, 0);
+    assert(dup2(saved, 0) == 0 && close(saved) == 0);
+    assert(child.pid > 0);
+    unsigned long status = 99;
+    assert(finish(child.pid, &status) == 0 && status == 0);
+}
+
+static void an_ignored_child_signal_refuses_a_spawn(void) {
+    /* An ignored SIGCHLD has the kernel reap children itself, after which a
+     * process ID could name a stranger. */
+    struct sigaction ignore, saved;
+    memset(&ignore, 0, sizeof ignore);
+    ignore.sa_handler = SIG_IGN;
+    assert(sigaction(SIGCHLD, &ignore, &saved) == 0);
+    const int before = open_descriptors();
+    struct block quick = shell("exit 0");
+    struct child child = start(&quick, NULL, NULL, streams(LINEA_PROCESS_PIPE, LINEA_PROCESS_PIPE, LINEA_PROCESS_INHERIT));
+    assert(child.pid == -(long)ECHILD);
+    assert(child.in == -1 && child.out == -1 && open_descriptors() == before);
+    assert(sigaction(SIGCHLD, &saved, NULL) == 0);
+}
+
+static void wait_without_descriptors(unsigned long endpoint, unsigned long at, unsigned long len) {
+    assert(at == 0 && len == 0);
+    struct block slow = shell("sleep 0.2");
+    struct child child = start(&slow, NULL, NULL, 0);
+    assert(child.pid > 0);
+    struct rlimit saved, lowered;
+    assert(getrlimit(RLIMIT_NOFILE, &saved) == 0);
+    lowered = saved;
+    lowered.rlim_cur = 64;
+    assert(setrlimit(RLIMIT_NOFILE, &lowered) == 0);
+    int filled[64];
+    int count = 0;
+    for (;;) {
+        const int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+        if (fd < 0) break;
+        assert(count < 64);
+        filled[count++] = fd;
+    }
+    /* No descriptor is left for a pidfd or a kqueue, and the wait still
+     * reaps the child. */
+    unsigned long status = 99;
+    assert(finish(child.pid, &status) == 0 && status == 0);
+    for (int i = 0; i < count; i++) assert(close(filled[i]) == 0);
+    assert(setrlimit(RLIMIT_NOFILE, &saved) == 0);
+    linea_chan_close(endpoint);
+}
+
+static void a_wait_with_no_descriptor_left_still_reaps(void) {
+    const long loop = linea_loop_open(1);
+    assert(loop > 0);
+    const long prepared = linea_task_prepare_on(stack_bytes, (unsigned long)loop);
+    assert(prepared > 0);
+    linea_chan_close(linea_task_start((unsigned long)prepared, wait_without_descriptors, release_body, 0, 0, 0));
+}
+
 int main(void) {
     an_exit_code_and_a_signal_are_reported();
     a_missing_program_is_not_found_and_leaves_nothing_open();
@@ -335,6 +399,9 @@ int main(void) {
     input_written_comes_back_and_a_closed_reader_is_a_broken_pipe();
     a_directory_and_an_environment_are_the_childs();
     a_fiber_waiting_on_a_child_leaves_its_carrier();
+    a_closed_standard_stream_stays_closed_in_the_child();
+    an_ignored_child_signal_refuses_a_spawn();
+    a_wait_with_no_descriptor_left_still_reaps();
     puts("native process tests passed");
     return 0;
 }

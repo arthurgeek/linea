@@ -208,7 +208,9 @@ sort exited with code 0
 
 `wait` closes any pipe the child still holds before it waits, so a child
 cannot wait forever for input you never closed, or for room to write output
-you never read.
+you never read. A pipe you took is yours: close the writer you took before
+you wait, or a child such as `sort` that reads to the end of its input waits
+for it as long as you wait for the child.
 
 ### Feeding input and capturing output with `wait_with_output`
 

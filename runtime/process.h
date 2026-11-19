@@ -34,7 +34,9 @@ enum linea_process_setup {
  * For each stream set to a pipe, `*stdin_fd`, `*stdout_fd` or `*stderr_fd`
  * receives the parent's end, nonblocking and close-on-exec; every other one
  * receives -1. On failure nothing is left open. Inside a simulation no
- * process starts and the answer is -ENOTSUP. */
+ * process starts and the answer is -ENOTSUP; while SIGCHLD is ignored or
+ * caught with SA_NOCLDWAIT, so the kernel reaps children itself, none starts
+ * and the answer is -ECHILD. */
 long linea_process_spawn(unsigned long arguments_at, unsigned long arguments_extent, unsigned long argument_count,
                          unsigned long environment_at, unsigned long environment_extent, unsigned long environment_count,
                          unsigned long directory_at, unsigned long directory_extent,
@@ -48,7 +50,9 @@ long linea_process_spawn(unsigned long arguments_at, unsigned long arguments_ext
 long linea_process_wait(int pid, unsigned long *status);
 
 /* Send SIGKILL to the child `pid`, which has not been reaped, so the number
- * still names it. Answers 0 or a negated errno. */
+ * still names it. Answers 0 or a negated errno, -ECHILD without signalling
+ * while the kernel reaps children itself, since the number may then name
+ * another process. */
 long linea_process_kill(int pid);
 
 /* Read from or write to the parent's nonblocking end of a child's pipe,

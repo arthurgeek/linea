@@ -98,6 +98,8 @@ each pipe through an `inout` descriptor.
 - The directory change is `posix_spawn_file_actions_addchdir_np`, weak on
   Linux for the same reason; where it is absent a command with a directory
   fails with `Unsupported`.
+- A standard stream this process has closed stays closed in the child, on
+  both systems: on macOS only an open stream is named for inheritance.
 - On any failure every descriptor the call opened is closed before it
   answers. The native test `runtime/process_test.c` counts the parent's
   descriptors around a spawn, failed and successful, and has a child look for
@@ -114,11 +116,22 @@ and no zombie outlives the path that made it; a test runs
 `ps` to show none is left after the allocation-failure walks and after a
 child killed for its output.
 
+A wait fails only where `waitpid` itself does, when the child is not this
+process's to reap (`ECHILD`). Every other failure on its way, such as no
+descriptor left for the pidfd or kqueue of §7, or a parking that could not be
+armed, falls back to the blocking `waitpid`, which still reaps the child; a
+native test fills the descriptor table on a fiber and waits. A wait also goes
+on past a child that a tracer reports stopped, since it has not ended.
+
 `kill` takes the child `inout` and sends `SIGKILL`; it does not settle it, so
 a killed child is still waited for, and `wait` answers
 `Signalled(9)`. Because the process ID belongs to a child not yet reaped, the
-kernel cannot give the number to another process, so `kill` can never signal
-a stranger. `take_stdin`, `take_stdout` and `take_stderr` move a pipe's end
+kernel cannot give the number to another process, so `kill` never signals a
+stranger. That holds only while the program reaps its own children: when
+`SIGCHLD` is ignored, or caught with `SA_NOCLDWAIT`, the kernel reaps each
+child as it ends and the number is free at once. In that state `spawn`
+starts nothing and `kill` signals nothing; both fail with `ECHILD`
+(§8). `take_stdin`, `take_stdout` and `take_stderr` move a pipe's end
 out of the child.
 
 `wait` closes every pipe the child still holds before it waits: the child
@@ -184,9 +197,11 @@ hold its carrier:
   (`pidfd_open`, Linux 5.3) or a kqueue holding an `EVFILT_PROC`/`NOTE_EXIT`
   registration (macOS), parks on it the same way, closes it, and reaps. A
   child that ended between the two steps answers `ESRCH` to the
-  registration, and the loop reaps it at once. A Linux kernel without pidfds
-  (`ENOSYS`) leaves only the blocking `waitpid`, which then holds the carrier
-  until the child ends.
+  registration; on macOS the exit is reported a moment before the child can
+  be reaped, so the fiber sleeps a millisecond, parked, and tries again. Any
+  other failure to make or park on the descriptor, a Linux kernel without
+  pidfds (`ENOSYS`) or a full descriptor table included, leaves the blocking
+  `waitpid`, which then holds the carrier until the child ends (§3).
 
 The native test runs both on a one-carrier loop beside a fiber that sleeps
 and notes that it ran: the note is made before the wait returns only if the
@@ -207,9 +222,12 @@ have to own the signal's disposition process-wide, and its handler would have
 to reap with `waitpid(-1)` or walk every outstanding child, which takes the
 exit status of children it did not start: a C library, or a host embedding
 Linea, that waits for its own children would find them gone (`ECHILD`). A
-wait by ID touches only the child the `Child` owns. If the host sets
-`SIGCHLD` to `SIG_IGN`, the kernel reaps every child itself and a wait fails
-with `ECHILD`, reported as an `IoError` of operation `Wait`.
+wait by ID touches only the child the `Child` owns. If `SIGCHLD` is
+ignored, which Linux keeps across `exec` so a program can be started that
+way, or a host catches it with `SA_NOCLDWAIT`, the kernel reaps every child
+itself; `spawn` then refuses with `ECHILD` rather than start a child it could
+neither wait for nor safely signal, and `kill` refuses the same way should
+the disposition change after a spawn.
 
 ### 9. A simulation starts no process
 
@@ -250,8 +268,10 @@ twice and signal whatever process took its number.
 - On Linux without glibc's `addclosefrom`, a descriptor another thread opens
   without close-on-exec while a spawn lists `/proc/self/fd` can reach the
   child; with it, and on macOS, none can.
-- A Linux kernel older than 5.3 makes a fiber's wait for a child hold its
-  carrier.
+- A Linux kernel older than 5.3, or a descriptor table that is full, makes a
+  fiber's wait for a child hold its carrier.
+- A program whose `SIGCHLD` is ignored cannot start children; it fails with
+  `ECHILD` and can restore the default disposition first.
 
 ## Alternatives considered
 

@@ -451,7 +451,9 @@ impl[A: Allocator] Command[A] {
     // pointer tables take scratch storage from the command's allocator,
     // released before this returns. A program that cannot be found fails
     // with category `NotFound`, and one that may not be run with
-    // `PermissionDenied`.
+    // `PermissionDenied`. While SIGCHLD is ignored, so the kernel would reap
+    // the child before anyone could wait for it, nothing starts and the
+    // spawn fails with errno ECHILD.
     pub fn spawn(sink self: Self) -> Result[Child, ProcessError] where carries() {
         let started = self.start(self.input, self.output, self.errors)
         self.release()

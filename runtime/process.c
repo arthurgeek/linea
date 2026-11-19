@@ -52,6 +52,16 @@ static void refuse_simulated(void) {
     if (linea_sim_running()) fail("linea: a child process was used inside a simulation\n");
 }
 
+/* Whether the kernel reaps this process's children itself: SIGCHLD ignored,
+ * or caught with SA_NOCLDWAIT. A child then leaves no zombie to wait for, and
+ * once it ends its process ID may name another process, so no child is
+ * started and none is signalled. */
+static int children_reaped_by_kernel(void) {
+    struct sigaction action;
+    if (sigaction(SIGCHLD, NULL, &action) != 0) return 0;
+    return action.sa_handler == SIG_IGN || (action.sa_flags & SA_NOCLDWAIT) != 0;
+}
+
 /* Fill `table` with a pointer to each of the `count` NUL-terminated strings
  * that fill exactly the `extent` bytes at `at`, then a null pointer. */
 static int split(unsigned long at, unsigned long extent, unsigned long count, char **table) {
@@ -159,7 +169,10 @@ static int stream_action(posix_spawn_file_actions_t *actions, int target, unsign
     switch (mode) {
     case LINEA_PROCESS_INHERIT:
 #if defined(__APPLE__)
-        /* POSIX_SPAWN_CLOEXEC_DEFAULT closes every descriptor not named. */
+        /* POSIX_SPAWN_CLOEXEC_DEFAULT closes every descriptor not named. A
+         * stream this process has closed stays closed in the child, as it
+         * does on Linux; naming it would fail the whole spawn with EBADF. */
+        if (fcntl(target, F_GETFD) == -1) return 0;
         return posix_spawn_file_actions_addinherit_np(actions, target);
 #else
         return 0;
@@ -181,6 +194,7 @@ long linea_process_spawn(unsigned long arguments_at, unsigned long arguments_ext
     int *parents[3] = { stdin_fd, stdout_fd, stderr_fd };
     for (int i = 0; i < 3; i++) *parents[i] = -1;
     if (linea_sim_running()) return -(long)ENOTSUP;
+    if (children_reaped_by_kernel()) return -(long)ECHILD;
 
     int invalid = linea_io_byte_range(arguments_at, arguments_extent);
     if (invalid == 0) invalid = linea_io_byte_range(environment_at, environment_extent);
@@ -287,8 +301,9 @@ long linea_process_spawn(unsigned long arguments_at, unsigned long arguments_ext
 }
 
 /* 0 with the exit code, or 1 with the signal's number, from a status
- * waitpid wrote. A child that neither exited nor was signalled is never
- * reported, since no wait here asks for stopped children. */
+ * waitpid wrote, or 2 for a child that only stopped or continued, as a
+ * traced child is reported even to a wait that did not ask, and has not
+ * ended. */
 static long decode(int raw, unsigned long *status) {
     if (WIFEXITED(raw)) {
         *status = (unsigned long)WEXITSTATUS(raw);
@@ -298,19 +313,21 @@ static long decode(int raw, unsigned long *status) {
         *status = (unsigned long)WTERMSIG(raw);
         return 1;
     }
-    fail("linea: waitpid reported a child that neither exited nor was signalled\n");
-    return -(long)EINVAL;
+    return 2;
 }
 
-/* Block the calling thread until `pid` ends. */
+/* Block the calling thread until `pid` ends, and reap it. */
 static long wait_in_place(int pid, unsigned long *status) {
-    int raw = 0;
-    pid_t answered;
-    do {
-        answered = waitpid((pid_t)pid, &raw, 0);
-    } while (answered < 0 && errno == EINTR);
-    if (answered < 0) return -(long)errno;
-    return decode(raw, status);
+    for (;;) {
+        int raw = 0;
+        pid_t answered;
+        do {
+            answered = waitpid((pid_t)pid, &raw, 0);
+        } while (answered < 0 && errno == EINTR);
+        if (answered < 0) return -(long)errno;
+        const long ended = decode(raw, status);
+        if (ended != 2) return ended;
+    }
 }
 
 /* A descriptor that becomes readable once `pid` ends: a pidfd on Linux, a
@@ -346,6 +363,11 @@ static long exit_descriptor(int pid) {
 #endif
 }
 
+/* A wait fails only where waitpid itself does, when the child is not this
+ * process's to reap (ECHILD): every other failure on the way, such as no
+ * descriptor left for a pidfd or a kqueue, or a parking that could not be
+ * armed, falls back to the blocking wait, which holds the carrier but still
+ * reaps the child. */
 long linea_process_wait(int pid, unsigned long *status) {
     if (pid <= 0) return -(long)EINVAL;
     refuse_simulated();
@@ -357,22 +379,30 @@ long linea_process_wait(int pid, unsigned long *status) {
             answered = waitpid((pid_t)pid, &raw, WNOHANG);
         } while (answered < 0 && errno == EINTR);
         if (answered < 0) return -(long)errno;
-        if (answered == (pid_t)pid) return decode(raw, status);
+        if (answered == (pid_t)pid) {
+            const long ended = decode(raw, status);
+            if (ended != 2) return ended;
+            continue;
+        }
         const long fd = exit_descriptor(pid);
-        if (fd == -(long)ESRCH) continue;
-        /* A kernel without pidfds leaves only the blocking wait, which holds
-         * the carrier until the child ends. */
-        if (fd == -(long)ENOSYS) return wait_in_place(pid, status);
-        if (fd < 0) return fd;
+        if (fd == -(long)ESRCH) {
+            /* macOS reports the exit before the zombie can be reaped; sleep
+             * a millisecond, parked, rather than spin on the carrier. */
+            const long slept = linea_fiber_sleep(1000000UL);
+            if (slept < 0) return wait_in_place(pid, status);
+            continue;
+        }
+        if (fd < 0) return wait_in_place(pid, status);
         const long woke = linea_fiber_wait_descriptor((int)fd, 0, 0);
         close((int)fd);
-        if (woke < 0) return woke;
+        if (woke < 0) return wait_in_place(pid, status);
     }
 }
 
 long linea_process_kill(int pid) {
     if (pid <= 0) return -(long)EINVAL;
     refuse_simulated();
+    if (children_reaped_by_kernel()) return -(long)ECHILD;
     /* kill does not block; Linux and macOS document no EINTR for it. */
     return kill((pid_t)pid, SIGKILL) == 0 ? 0 : -(long)errno;
 }
@@ -395,10 +425,10 @@ static long wait_ready(int fd, int writable) {
  * descriptor transfer, which retries EINTR and turns a write's SIGPIPE into
  * -EPIPE; on the nonblocking end it answers -EAGAIN until the pipe is ready. */
 static long transfer(int fd, unsigned long at, unsigned long len, int writing) {
+    refuse_simulated();
     const int invalid = linea_io_byte_range(at, len);
     if (invalid != 0) return -(long)invalid;
     if (len == 0) return 0;
-    refuse_simulated();
     for (;;) {
         long answer = writing ? linea_write_some(fd, at, len) : linea_read_some(fd, at, len);
 #if EWOULDBLOCK != EAGAIN
