@@ -82,6 +82,17 @@ pub const Documents = struct {
     /// with its text left on disk (`InMemoryFile.deferred`): what the walk
     /// finds is every file of the program's directories, and a program
     /// reaches only those it imports.
+    ///
+    /// A buffer is found for a file however the program spells it -- through
+    /// a symlink, or in another case where the file system ignores case --
+    /// by identity (`loader.identityOf`), so every program reaching a file
+    /// reads the text the editor shows.
+    ///
+    /// **Bound:** a buffer found under the spelling the program lists costs a
+    /// lookup. Only where some open buffer is not, the buffers' identities
+    /// are taken, one canonicalisation each, and a listed file is looked up
+    /// by its directory's identity, one canonicalisation per directory the
+    /// root's files sit in.
     pub fn filesFor(
         self: *const Documents,
         gpa: std.mem.Allocator,
@@ -104,6 +115,22 @@ pub const Documents = struct {
             files.deinit(gpa);
         }
 
+        // Buffers by identity, taken only where some buffer is not listed
+        // under its own spelling.
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        defer scratch.deinit();
+        const s = scratch.allocator();
+        var listed_exactly: usize = 0;
+        for (paths) |listed| {
+            if (self.open.contains(listed.path)) listed_exactly += 1;
+        }
+        var by_identity: std.StringHashMapUnmanaged([]const u8) = .empty;
+        var directories: std.StringHashMapUnmanaged([]const u8) = .empty;
+        if (listed_exactly < self.open.count()) {
+            var it = self.open.iterator();
+            while (it.next()) |entry| try by_identity.put(s, try loader.identityOf(s, io, entry.key_ptr.*), entry.value_ptr.*);
+        }
+
         for (paths) |listed| {
             const disk_path = listed.path;
             const path = try gpa.dupe(u8, disk_path);
@@ -117,7 +144,13 @@ pub const Documents = struct {
             // buffer is the text the editor shows. Any other source is left
             // on disk where the load can read it.
             const is_manifest = std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name);
-            const buffer = self.open.get(disk_path);
+            const buffer = self.open.get(disk_path) orelse if (by_identity.count() == 0) null else found: {
+                const directory = std.fs.path.dirname(disk_path) orelse ".";
+                const known = try directories.getOrPut(s, directory);
+                if (!known.found_existing) known.value_ptr.* = try loader.identityOf(s, io, directory);
+                const identity = try std.fs.path.join(s, &.{ known.value_ptr.*, std.fs.path.basename(disk_path) });
+                break :found by_identity.get(identity);
+            };
             const deferred = buffer == null and !is_manifest and reading == .open_and_manifests;
             // A manifest the walk read is the text it read, so the load and
             // the walk that listed its files agree on what each one says.

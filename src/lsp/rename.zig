@@ -47,17 +47,18 @@ pub const Refused = error{
     ANewNameWouldShadowAnotherBinding,
     /// The program renamed reports an error it did not.
     ANewNameWouldNotCheck,
-    /// An edit lands in a file no program checked holds, or a program holding
-    /// the declaration does not hold it where the request's program does.
+    /// A program the rename reaches cannot be held to it: it holds the
+    /// declaration elsewhere than the request's program does, it does not
+    /// read the name there as one to rename, or an edit lands in a file no
+    /// program checked holds. `ProgramRefusal` names it and why.
     AProgramTheRenameEditsCouldNotBeChecked,
     /// A program reaching the declaration does not load, so what the rename
-    /// does to it cannot be checked. `Unloaded` names it and why.
+    /// does to it cannot be checked. `ProgramRefusal` names it and why.
     AProgramTheRenameReachesDoesNotLoad,
 };
 
-/// A program a rename reaches that does not load: the entry it is loaded
-/// from, and the message of the first error its load reported.
-pub const Unloaded = struct { entry: []const u8, reason: []const u8 };
+/// The program a refusal is about: the entry it is loaded from, and why.
+pub const ProgramRefusal = struct { entry: []const u8, reason: []const u8 };
 
 /// The first error a load of `checked` reported where the program could not
 /// be assembled: a dependency its manifest names that cannot be loaded, or no
@@ -147,7 +148,9 @@ pub fn forPositionReporting(
 ///
 /// The programs affected are the ones holding the file that declares the
 /// name. Each must load (`loadFailure`); one that does not refuses the rename
-/// with `AProgramTheRenameReachesDoesNotLoad` and names itself in `unloaded`.
+/// with `AProgramTheRenameReachesDoesNotLoad` and names itself in `unloaded`; one the rename cannot be held to refuses with
+/// `AProgramTheRenameEditsCouldNotBeChecked`, named the same way. A reason is
+/// allocated in `gpa`.
 /// A program holding no file of the declaration is not affected, however
 /// broken. Each affected program is renamed by the same rules, the edits
 /// joined, and every affected program checked with the joined edits applied;
@@ -172,7 +175,7 @@ pub fn across(
     root: []const u8,
     new_name: []const u8,
     refused_kind: ?*?name_case.Kind,
-    unloaded: ?*?Unloaded,
+    unloaded: ?*?ProgramRefusal,
 ) !?lsp.types.WorkspaceEdit {
     const first = programs[0];
     if (loadFailure(first)) |reason| {
@@ -222,11 +225,15 @@ pub fn across(
             return Refused.AProgramTheRenameReachesDoesNotLoad;
         }
         const text = other.table.get(in).text;
-        const token = tokenWithin(&other.program.ast, in, .{ .start = declared_span.start, .end = declared_span.start }, ast.tokenText(declared)) orelse
+        const token = tokenWithin(&other.program.ast, in, .{ .start = declared_span.start, .end = declared_span.start }, ast.tokenText(declared)) orelse {
+            if (unloaded) |out| out.* = .{ .entry = other.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "`{s}` does not declare `{s}` where the edited program reads it", .{ other.table.get(in).path, ast.tokenText(declared) }) };
             return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        };
         const there = lsp.offsets.indexToPosition(text, other.program.ast.tokenSpan(token).start, encoding);
-        const plan = try planAt(gpa, io, other, in, there, encoding, root, new_name, refused_kind) orelse
+        const plan = try planAt(gpa, io, other, in, there, encoding, root, new_name, refused_kind) orelse {
+            if (unloaded) |out| out.* = .{ .entry = other.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "it does not read `{s}` in `{s}` as a name to rename", .{ ast.tokenText(declared), other.table.get(in).path }) };
             return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        };
         errdefer plan.deinit(gpa);
         try planned.append(gpa, known);
         try plans.append(gpa, plan);
@@ -242,9 +249,12 @@ pub fn across(
         const held = for (planned.items) |known| {
             if (try known.fileNamed(path) != null) break true;
         } else false;
-        if (!held) return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        if (!held) {
+            if (unloaded) |out| out.* = .{ .entry = first.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "no program checked holds `{s}`, which the rename edits", .{path}) };
+            return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        }
     }
-    for (plans.items, planned.items) |plan, known| try refuseChangedMeaning(gpa, plan.checked, known, plan.declared, new_name, edit, encoding);
+    for (plans.items, planned.items) |plan, known| try refuseChangedMeaning(gpa, plan.checked, known, plan.declared, new_name, edit, encoding, unloaded);
     return edit;
 }
 
@@ -452,6 +462,9 @@ fn refuseChangedMeaning(
     new_name: []const u8,
     edit: lsp.types.WorkspaceEdit,
     encoding: lsp.offsets.Encoding,
+    /// Names `checked` and why, where the renamed program cannot be held to
+    /// the old one. Its reason is allocated in `gpa`.
+    refusal: ?*?ProgramRefusal,
 ) !void {
     const ast = &checked.program.ast;
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -489,7 +502,10 @@ fn refuseChangedMeaning(
         for (m.files) |file| {
             const path = checked.table.get(file).path;
             const part = ast.partOfFile(file) orelse continue;
-            const after_file = after.fileNamed(path) orelse return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+            const after_file = after.fileNamed(path) orelse {
+                if (refusal) |out| out.* = .{ .entry = checked.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "renamed, it no longer holds `{s}`", .{path}) };
+                return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+            };
             for (part.token_start..part.token_end) |i| {
                 const token = TokenId.at(@intCast(i));
                 if (ast.tokenTag(token) != .identifier) continue;

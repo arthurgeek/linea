@@ -266,7 +266,15 @@ pub const Handler = struct {
         else
             params.rootUri;
         // Held for the session, so it outlives this message's arena.
-        if (root_uri) |uri| handler.setRoot(try uri_mod.pathOf(handler.gpa, uri));
+        if (root_uri) |uri| {
+            // A directory named with a trailing `/` is the directory without
+            // it, which is how every path compared against the root is spelled.
+            const named = try uri_mod.pathOf(handler.gpa, uri);
+            defer handler.gpa.free(named);
+            var end = named.len;
+            while (end > 1 and named[end - 1] == '/') end -= 1;
+            handler.setRoot(try handler.gpa.dupe(u8, named[0..end]));
+        }
 
         // Advertises exactly the methods this struct implements: a
         // capability offered here with no method to answer it fails the
@@ -707,7 +715,7 @@ pub const Handler = struct {
         for (others.analysed.items, programs[1..]) |*other, *slot| slot.* = other;
 
         var refused_kind: ?name_case.Kind = null;
-        var unloaded: ?rename.Unloaded = null;
+        var unloaded: ?rename.ProgramRefusal = null;
         return rename.across(
             arena,
             handler.io,
@@ -724,12 +732,13 @@ pub const Handler = struct {
             // The program the rename cannot check, and why, beside the
             // refusal: what the reader has to fix before renaming.
             if (unloaded) |program| {
+                const said = if (err == error.AProgramTheRenameReachesDoesNotLoad) "reaches this name and does not load" else "cannot be held to this rename";
                 try handler.transport.writeNotification(
                     handler.io,
                     arena,
                     "window/showMessage",
                     lsp.types.window.ShowMessageParams,
-                    .{ .type = .Error, .message = try std.fmt.allocPrint(arena, "the program at `{s}` reaches this name and does not load: {s}", .{ program.entry, program.reason }) },
+                    .{ .type = .Error, .message = try std.fmt.allocPrint(arena, "the program at `{s}` {s}: {s}", .{ program.entry, said, program.reason }) },
                     .{ .emit_null_optional_fields = false },
                 );
             }
@@ -2258,6 +2267,65 @@ test "a rename in a shared library edits a program that names it in another case
     // Only a file system that ignores case reaches `Almanac` at `almanac`.
     ws.dir.dir.access(std.testing.io, "ALMANAC/linea.json", .{}) catch return error.SkipZigTest;
     try expectRenamedThroughAnotherSpelling(&ws, "../Almanac");
+}
+
+/// The almanac workspace with `b` naming the library through `link`, and
+/// `almanac.lin` open with `unsaved`; the rename of `frost` from `a` must
+/// edit the buffer's text at `at`, each line once.
+fn expectRenamedInTheBufferThroughASymlink(unsaved: []const u8, at: []const u32) !void {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    try ws.dir.dir.symLink(std.testing.io, "almanac", "link", .{ .is_directory = true });
+    try ws.dir.dir.createDirPath(std.testing.io, "b");
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/main.lin", .data = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" });
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/linea.json", .data = "{ \"dependencies\": { \"almanac\": { \"path\": \"../link\" } } }" });
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+        .uri = try ws.pathAt("almanac/almanac.lin"),
+        .languageId = .{ .custom_value = "linea" },
+        .version = 1,
+        .text = unsaved,
+    } });
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    try std.testing.expectEqual(@as(usize, 3), edit.changes.?.map.count());
+    var it = edit.changes.?.map.iterator();
+    const edits = while (it.next()) |entry| {
+        if (std.mem.endsWith(u8, entry.key_ptr.*, "almanac/almanac.lin")) break entry.value_ptr.*;
+    } else return error.TestExpectedEqual;
+    try std.testing.expectEqual(at.len, edits.len);
+    for (edits, at) |e, line| try std.testing.expectEqual(line, e.range.start.line);
+}
+
+test "a rename edits an open buffer a program reaches through a symlink, not the file under it" {
+    // The buffer has dropped `thaw`, whose call to `frost` is still on disk.
+    try expectRenamedInTheBufferThroughASymlink("pub fn frost() -> UInt8 { 1 }\n\n// the almanac keeps a calendar of frosts\n", &.{0});
+}
+
+test "a rename edits an open buffer a program reaches through a symlink where its lines moved" {
+    try expectRenamedInTheBufferThroughASymlink("// frost before thaw\npub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n", &.{ 1, 3 });
+}
+
+test "a root given with a trailing slash is the directory it names" {
+    const gpa = std.testing.allocator;
+    var handler: Handler = .{
+        .gpa = gpa,
+        .region_backing = gpa,
+        .library = test_library.get(),
+        .io = std.testing.io,
+        .transport = undefined,
+        .documents = .{ .gpa = gpa },
+    };
+    defer handler.deinit();
+    _ = try handler.initialize(gpa, .{ .capabilities = .{}, .rootUri = "file:///workspace/w1/" });
+    try std.testing.expectEqualStrings("/workspace/w1", handler.root);
 }
 
 test "a manifest changed on disk changes which files the program holds" {
