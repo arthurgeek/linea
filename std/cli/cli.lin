@@ -867,6 +867,11 @@ impl[A: Allocator] Matches[A] {
     }
 }
 
+// The exit status a program answers with when it was called wrongly: 64,
+// `EX_USAGE` in the BSD `sysexits.h` convention, which the `linea` command
+// follows too.
+pub let usage_status: UInt8 = 64
+
 // Errors produced during command-line argument parsing. A `Str` payload is
 // the argument or the schema text the error is about; `NotText` holds the
 // index of an argument that is not UTF-8, counting the executable as 0.
@@ -2615,6 +2620,94 @@ impl[A: Allocator] Command[A] {
             Err(e) => e.release(),
         }
         testing.assert(res.is_ok(), "parse_args refused the test runner's arguments")?
+        .Ok(())
+    }
+
+    // Write `error` to standard error as `error: ` and the error, followed by
+    // the help of the command it is about (see `help_for_arguments`), and
+    // return the exit status for `main` to answer: `usage_status` for a
+    // mistake in the arguments, or 1 when memory ran out. `args` are the
+    // arguments the refused parse read; the help is built in the command's
+    // allocator and released before `report` returns.
+    pub fn report(self: Self, args: env.Args, error: CliError) -> UInt8 {
+        io.eprintln("error: {error}")
+        match read error {
+            Allocation(_) => return 1,
+            _ => {},
+        }
+        var cursor = ArgCursor.new(args)
+        let help = self.help_for_arguments(&cursor, error) else |reason| {
+            let refused: CliError = .Allocation(reason)
+            io.eprintln("error: {refused}")
+            return 1
+        }
+        io.eprint(help.view())
+        help.release()
+        usage_status
+    }
+
+    test "report answers the usage status, or 1 when memory runs out" {
+        defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+        defer var root = Command.new_in(log.handle(), "tool")
+        var serve_cmd = Command.new_in(log.handle(), "serve", "serve requests")
+        &serve_cmd.option("port", "--port", "port to listen on", required: true)
+        &root.subcommand(serve_cmd)
+        testing.assert_eq(root.report(env.args(), CliError.MissingOption("--port")), usage_status, "a usage mistake did not answer the usage status")?
+        testing.assert_eq(root.report(env.args(), CliError.Allocation(.Exhausted)), UInt8(1), "a refused allocation did not answer 1")?
+        log.fail_at(.Some(log.attempts() + 1))
+        testing.assert_eq(root.report(env.args(), CliError.MissingOption("--port")), UInt8(1), "a help that could not be built did not answer 1")?
+        .Ok(())
+    }
+
+    // Write the help of the command `matches` reached to standard output, as
+    // `format_help` builds it from this command's declarations, and return
+    // the exit status for `main` to answer: 0, or 1 after writing to standard
+    // error why the help could not be built or written.
+    pub fn print_help(self: Self, matches: borrow Matches[A]) -> UInt8 {
+        let help = self.format_help(matches) else |reason| {
+            let refused: CliError = .Allocation(reason)
+            io.eprintln("error: {refused}")
+            return 1
+        }
+        let written = io.print(help.view())
+        help.release()
+        match written {
+            Ok(_) => 0,
+            Err(error) => {
+                io.eprintln("error: cannot write the help: {error}")
+                1
+            },
+        }
+    }
+
+    test "print_help answers 0 once the help is written, and 1 when it cannot be" {
+        defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+        defer var cmd = Command.new_in(log.handle(), "tool", "a tool")
+        &cmd.flag("json", "--json", "print JSON")
+        let input = ["--help"]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        defer let matches = cmd.parse(&cursor).unwrap()
+        testing.assert_eq(cmd.print_help(borrow matches), UInt8(0), "writing the help did not answer 0")?
+        log.fail_at(.Some(log.attempts() + 1))
+        testing.assert_eq(cmd.print_help(borrow matches), UInt8(1), "a refused allocation did not answer 1")?
+        .Ok(())
+    }
+
+    // Report `message` as a mistake in how the program was called, one that
+    // the parse accepted but the program refuses, such as a missing
+    // subcommand or two options that exclude each other. It is written as
+    // `report` writes a `CliError`: `error: ` and the message, then the help
+    // of the deepest command the arguments reached; the answer is
+    // `usage_status`, or 1 when memory ran out.
+    pub fn usage_error(self: Self, args: env.Args, message: Str) -> UInt8 {
+        self.report(args, .InvalidValue(copy(message)))
+    }
+
+    test "usage_error answers the usage status" {
+        defer var root = Command.new("tool", "a tool")
+        let serve_cmd = Command.new("serve", "serve requests")
+        &root.subcommand(serve_cmd)
+        testing.assert_eq(root.usage_error(env.args(), "no command given"), usage_status, "a usage error did not answer the usage status")?
         .Ok(())
     }
 }

@@ -287,6 +287,107 @@ deepest subcommand the arguments reached. After a refused parse,
 writes the help of the command the error is about: the one the parse stopped
 in, so `notes --frmat json add` shows the options of `notes`, not of `add`.
 
+### Reporting a mistake and answering `--help`
+
+A command-line program's `main` answers three things the same way every time:
+a mistake in its arguments, a request for help, and a mistake the parse
+accepted but the program refuses. A `Command` answers each with one call, and
+each call returns the exit status for `main` to return:
+
+- `cmd.report(env.args(), error)` writes `error: ` and the `CliError` to
+  standard error, followed by the help of the command the error is about, and
+  answers 64, the conventional exit status for a program called wrongly
+  (`cli.usage_status`).
+- `cmd.print_help(borrow matches)` writes the help of the command the
+  arguments reached to standard output and answers 0. The help is built from
+  the schema the parse used, so it lists exactly what the program accepts.
+- `cmd.usage_error(env.args(), message)` reports a message of the program's
+  own the way `report` reports a `CliError`, and answers 64 too.
+
+Each builds the help in the command's allocator and releases it before it
+returns; when memory runs out it says so and answers 1. This program splits a
+bill. Run without arguments, it is missing the bill:
+
+`split.lin`:
+
+```linea
+import std.cli
+import std.env
+import std.io
+
+fn main() -> UInt8 {
+    defer var cmd = cli.Command.new("split", "Split a bill between friends")
+    &cmd.positional("cents", "the bill in cents")
+    &cmd.option("people", "--people", "how many share the bill", default: .Some("2"))
+    defer let matches = cmd.parse_args(env.args()) else |error| {
+        return cmd.report(env.args(), error)
+    }
+    if matches.is_help() {
+        return cmd.print_help(borrow matches)
+    }
+    // `get` refuses a value that does not read as the type asked for, and
+    // `report` shows that error the same way.
+    let cents: UInt64 = matches.get_positional("cents") else |error| {
+        return cmd.report(env.args(), error)
+    }
+    let people: UInt64 = matches.get("people") else |error| {
+        return cmd.report(env.args(), error)
+    }
+    // Zero people parses as a number, so the program refuses it itself.
+    if people == 0 {
+        return cmd.usage_error(env.args(), "a bill is split between at least one person")
+    }
+    if io.println("each of {people} pays {cents / people} cents").is_err() {
+        return 1
+    }
+    0
+}
+```
+
+```
+error: missing required argument 'cents'
+usage: split <cents> [options]
+
+Split a bill between friends
+
+options:
+  --people <value>    how many share the bill (default: 2)
+```
+
+With arguments, each path answers in its own way:
+
+<!-- guide: unchecked a session at a terminal -->
+```
+$ linea run split.lin -- 9000 --people 3
+each of 3 pays 3000 cents
+$ linea run split.lin -- 9000 --people 0
+error: a bill is split between at least one person
+usage: split <cents> [options]
+
+Split a bill between friends
+
+options:
+  --people <value>    how many share the bill (default: 2)
+$ linea run split.lin -- ninety
+error: invalid value 'ninety' for argument 'cents'
+usage: split <cents> [options]
+
+Split a bill between friends
+
+options:
+  --people <value>    how many share the bill (default: 2)
+$ linea run split.lin -- --help
+usage: split <cents> [options]
+
+Split a bill between friends
+
+options:
+  --people <value>    how many share the bill (default: 2)
+```
+
+Every run but the first and the last exits with status 64; `--help` exits
+with 0, and its help goes to standard output, where a reader can page it.
+
 Flags, options with defaults, optional and variadic positionals, and
 subcommands keep their definitions in one place. The [notes example](../../examples/notes/)
 builds a multi-command CLI with table rendering, JSON export, and config

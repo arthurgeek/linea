@@ -1,3 +1,4 @@
+error: no command given
 usage: tcp_echo <command>
 
 Echo text over TCP
@@ -5,4 +6,3 @@ Echo text over TCP
 commands:
   serve <port> [clients]      listen for and echo connections
   send <port> <message>...    send messages to an echo server
-
