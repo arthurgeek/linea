@@ -471,6 +471,111 @@ static void positional_io(void) {
     assert(linea_close(fd) == 0);
 }
 
+/* Read one record from `stream`, answering the name length, and copy the name
+ * into `name` NUL-terminated. */
+static long next_entry(unsigned long stream, uint64_t *record, uint8_t follow, char *name) {
+    const long length = linea_dir_next(stream, ADDRESS(record), LINEA_DIR_RECORD_BYTES, follow);
+    if (length > 0) {
+        memcpy(name, (const char *)record + LINEA_DIR_RECORD_HEADER, (size_t)length);
+        name[length] = '\0';
+    }
+    return length;
+}
+
+static void directory_streams(void) {
+    /* The modes below are what the test asks for under the common umask. */
+    const mode_t previous_mask = umask(022);
+    char directory[] = "/tmp/linea-native-walk-XXXXXX";
+    assert(mkdtemp(directory) != NULL);
+    const long opened = linea_open_parent(ADDRESS(directory), EXTENT(directory));
+    assert(opened >= 0 && opened <= INT_MAX);
+    const int parent = (int)opened;
+    assert(linea_make_dir_at(parent, ADDRESS("sub"), 4, 0700) == 0);
+    assert(linea_make_dir_at(parent, ADDRESS("sub"), 4, 0700) == -EEXIST);
+    assert(linea_make_dir_at(parent, ADDRESS("bad"), 4, 01000) == -EINVAL);
+    const long file = linea_open_at(parent, ADDRESS("data"), 5, 1, 0640);
+    assert(file >= 0 && file <= INT_MAX);
+    assert(linea_write_some((int)file, ADDRESS("12345"), 5) == 5);
+    assert(linea_close((int)file) == 0);
+    assert(linea_symlink_at(parent, ADDRESS("link"), 5, ADDRESS("sub"), 4) == 0);
+    assert(linea_symlink_at(parent, ADDRESS("gone"), 5, ADDRESS("missing"), 8) == 0);
+
+    unsigned long stream = 0;
+    assert(linea_dir_open(ADDRESS("/no/such/linea"), EXTENT("/no/such/linea"), 1, &stream) == -ENOENT);
+    assert(linea_dir_open(ADDRESS(directory), EXTENT(directory), 1, &stream) == 0);
+    uint64_t record[LINEA_DIR_RECORD_BYTES / sizeof(uint64_t) + 1];
+    assert(linea_dir_next(stream, ADDRESS(record), LINEA_DIR_RECORD_BYTES - 1, 0) == -EINVAL);
+    char name[LINEA_DIR_RECORD_BYTES];
+    int seen = 0;
+    long length;
+    while ((length = next_entry(stream, record, 0, name)) > 0) {
+        if (strcmp(name, "sub") == 0) {
+            assert(record[0] == 1 && record[1] == 0700 && record[5] == 0);
+            seen |= 1;
+        } else if (strcmp(name, "data") == 0) {
+            assert(record[0] == 0 && record[2] == 5 && record[1] == 0640 && record[5] == 0);
+            assert(record[3] > 1700000000ULL && record[4] < 1000000000ULL);
+            seen |= 2;
+        } else if (strcmp(name, "link") == 0) {
+            assert(record[0] == 2 && record[5] == 0);
+            seen |= 4;
+        } else {
+            /* The directory holds nothing but these four entries. */
+            assert(strcmp(name, "gone") == 0);
+            assert(record[0] == 2 && record[5] == 0);
+            seen |= 8;
+        }
+    }
+    assert(length == 0 && seen == 15);
+    assert(next_entry(stream, record, 0, name) == 0);
+    unsigned long device = 0;
+    unsigned long inode = 0;
+    struct stat info;
+    assert(stat(directory, &info) == 0);
+    assert(linea_dir_identity(stream, &device, &inode) == 0);
+    assert(device == (unsigned long)info.st_dev && inode == (unsigned long)info.st_ino);
+
+    /* Opening a link to a directory without following it is refused; with
+     * following, it lists the directory it names. */
+    unsigned long child = 0;
+    const long refused = linea_dir_open_at(stream, ADDRESS("link"), 5, 0, &child);
+    assert(refused == -ELOOP || refused == -ENOTDIR);
+    assert(linea_dir_open_at(stream, ADDRESS("sub"), 4, 0, &child) == 0);
+    assert(next_entry(child, record, 0, name) == 0);
+    assert(linea_dir_close(child) == 0);
+    assert(linea_dir_open_at(stream, ADDRESS("link"), 5, 1, &child) == 0);
+    assert(linea_dir_close(child) == 0);
+    assert(linea_dir_open_at(stream, ADDRESS("data"), 5, 1, &child) == -ENOTDIR);
+    assert(linea_dir_open_at(stream, ADDRESS("a/b"), 4, 1, &child) == -EINVAL);
+    assert(linea_dir_close(stream) == 0);
+
+    /* Following links describes what each names, and a dangling link reports
+     * the errno of reading it. */
+    assert(linea_dir_open(ADDRESS(directory), EXTENT(directory), 1, &stream) == 0);
+    seen = 0;
+    while ((length = next_entry(stream, record, 1, name)) > 0) {
+        if (strcmp(name, "link") == 0) {
+            assert(record[0] == 1 && record[5] == 0);
+            seen |= 1;
+        } else if (strcmp(name, "gone") == 0) {
+            assert(record[5] == ENOENT && record[2] == 0);
+            seen |= 2;
+        }
+    }
+    assert(length == 0 && seen == 3);
+    assert(linea_dir_close(stream) == 0);
+
+    assert(linea_remove_dir_at(parent, ADDRESS("data"), 5) == -ENOTDIR);
+    assert(linea_unlink_at(parent, ADDRESS("gone"), 5) == 0);
+    assert(linea_unlink_at(parent, ADDRESS("link"), 5) == 0);
+    assert(linea_unlink_at(parent, ADDRESS("data"), 5) == 0);
+    assert(linea_remove_dir_at(parent, ADDRESS("sub"), 4) == 0);
+    assert(linea_remove_dir_at(parent, ADDRESS("sub"), 4) == -ENOENT);
+    assert(linea_close(parent) == 0);
+    assert(rmdir(directory) == 0);
+    umask(previous_mask);
+}
+
 int main(void) {
     error_categories();
     transfers();
@@ -485,6 +590,7 @@ int main(void) {
     short_write();
     searchable_parent();
     filesystem();
-    puts("native I/O: transfers, short writes, SIGPIPE, and atomic files passed");
+    directory_streams();
+    puts("native I/O: transfers, short writes, SIGPIPE, atomic files and directory streams passed");
     return 0;
 }

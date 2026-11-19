@@ -215,6 +215,184 @@ internal fn _unlink_at_fd[A: Allocator](name: Buffer[A], parent: Int32) -> Int64
     linea_unlink_at(parent, address.raw(bytes_in(name, 0)), name.length())
 }
 
+extern fn linea_make_dir_at(parent: Int32, at: UInt64, extent: UInt64, mode: UInt64) -> Int64
+
+extern fn linea_remove_dir_at(parent: Int32, at: UInt64, extent: UInt64) -> Int64
+
+extern fn linea_symlink_at(parent: Int32, at: UInt64, extent: UInt64, target: UInt64, target_extent: UInt64) -> Int64
+
+// Create the directory `name` in the directory `parent` with permission bits
+// `mode`, which the process umask narrows.
+internal fn _make_dir_at[A: Allocator](name: Buffer[A], parent: Int32, mode: UInt64) -> Int64 {
+    linea_make_dir_at(parent, address.raw(bytes_in(name, 0)), name.length(), mode)
+}
+
+// Remove the empty directory `name` from the directory `parent`.
+internal fn _remove_dir_at[A: Allocator](name: Buffer[A], parent: Int32) -> Int64 {
+    linea_remove_dir_at(parent, address.raw(bytes_in(name, 0)), name.length())
+}
+
+// Create the symbolic link `name` in the directory `parent`, naming the
+// NUL-terminated `target`.
+internal fn _symlink_at[A: Allocator, B: Allocator](name: Buffer[A], target: Buffer[B], parent: Int32) -> Int64 {
+    linea_symlink_at(parent, address.raw(bytes_in(name, 0)), name.length(), address.raw(bytes_in(target, 0)), target.length())
+}
+
+// The runtime opens, reads and closes directory streams. An open writes the
+// stream's handle to `stream`; every call answers zero, a count, or a negated
+// errno.
+extern fn linea_dir_open(at: UInt64, extent: UInt64, follow: UInt8, inout stream: UInt64) -> Int64
+
+extern fn linea_dir_open_at(parent: UInt64, at: UInt64, extent: UInt64, follow: UInt8, inout stream: UInt64) -> Int64
+
+extern fn linea_dir_next(stream: UInt64, at: UInt64, len: UInt64, follow: UInt8) -> Int64
+
+extern fn linea_dir_identity(stream: UInt64, inout device: UInt64, inout inode: UInt64) -> Int64
+
+extern fn linea_dir_close(stream: UInt64) -> Int64
+
+// A directory record is six 64-bit words of metadata followed by the entry's
+// name, for which it leaves 1024 bytes, more than a name on any supported
+// system takes.
+internal let dir_record_header: UInt64 = 48
+
+internal let dir_record_bytes: UInt64 = 1072
+
+// The runtime takes "follow a final symbolic link" as 1 and "do not" as 0.
+fn follow_code(follow: Bool) -> UInt8 {
+    if follow {
+        1
+    } else {
+        0
+    }
+}
+
+// A DirStream owns one directory the runtime holds open for reading. Its
+// handle is valid from the open that made it to the close that consumes it.
+// The runtime trusts the handle, so only `mem` builds one or reads its field;
+// every module of the standard library is trusted to keep to that.
+@linear
+internal struct DirStream {
+    handle: UInt64,
+}
+
+// Open the directory at the NUL-terminated `path`, following a final symbolic
+// link only when `follow` is set, and answer the stream or the errno.
+internal fn _open_dir[A: Allocator](path: Buffer[A], follow: Bool) -> Result[DirStream, Int32] {
+    var handle: UInt64 = 0
+    let answer = linea_dir_open(address.raw(bytes_in(path, 0)), path.length(), follow_code(follow), &handle)
+    if answer < 0 {
+        return .Err(Int32(-answer))
+    }
+    .Ok(.{ handle })
+}
+
+// Open the directory `name`, one NUL-terminated component, inside the
+// directory `parent` reads.
+internal fn _open_dir_at[A: Allocator](parent: DirStream, name: Buffer[A], follow: Bool) -> Result[DirStream, Int32] {
+    var handle: UInt64 = 0
+    let answer = linea_dir_open_at(parent.handle, address.raw(bytes_in(name, 0)), name.length(), follow_code(follow), &handle)
+    if answer < 0 {
+        return .Err(Int32(-answer))
+    }
+    .Ok(.{ handle })
+}
+
+// Write the next entry of `stream` to `record` and answer the length of its
+// name, 0 once the directory is exhausted, or a negated errno. A record
+// smaller than `dir_record_bytes` could not hold every name, so it traps.
+internal fn _read_dir[A: Allocator](stream: DirStream, inout record: Buffer[A], follow: Bool) -> Int64 {
+    if record.length() < dir_record_bytes {
+        panic("a directory record buffer is smaller than a record")
+    }
+    linea_dir_next(stream.handle, address.raw(bytes_in(record, 0)), record.length(), follow_code(follow))
+}
+
+impl DirStream {
+    // Open the directory `name`, one NUL-terminated component, inside the
+    // directory this stream reads.
+    internal fn open_at[A: Allocator](self: Self, name: Buffer[A], follow: Bool) -> Result[DirStream, Int32] {
+        _open_dir_at(self, name, follow)
+    }
+
+    // Write the next entry's record to `record` and answer its name's length,
+    // 0 once the directory is exhausted, or a negated errno. A record smaller
+    // than `dir_record_bytes` could not hold every name, so it traps.
+    internal fn next[A: Allocator](self: Self, inout record: Buffer[A], follow: Bool) -> Int64 {
+        _read_dir(self, &record, follow)
+    }
+
+    // Answer the device and inode numbers of the directory, or the errno.
+    internal fn identity(self: Self) -> Result[(UInt64, UInt64), Int32] {
+        var device: UInt64 = 0
+        var inode: UInt64 = 0
+        let answer = linea_dir_identity(self.handle, &device, &inode)
+        if answer < 0 {
+            return .Err(Int32(-answer))
+        }
+        .Ok((device, inode))
+    }
+
+    // Close the stream and answer zero or a negated errno.
+    internal fn close(sink self: Self) -> Int64 {
+        let DirStream { handle } = self
+        linea_dir_close(handle)
+    }
+}
+
+impl Release for DirStream {
+    fn release(sink self: Self) {
+        let _closed = self.close()
+    }
+}
+
+test "a directory stream lists what a directory holds" {
+    let root = _terminated(system(), "/".as_bytes()).unwrap()
+    let opened = _open_dir(root, follow: true)
+    root.release()
+    let stream = opened.unwrap()
+    defer var record = system().acquire(dir_record_bytes).unwrap()
+    let first = stream.next(&record, follow: false)
+    let identified = stream.identity().is_ok()
+    testing.assert_eq(stream.close(), Int64(0), "closing a directory stream failed")?
+    // The root directory of every supported system holds at least one entry,
+    // and no name in it holds a slash (ASCII 47) or a NUL.
+    testing.assert(first > 0, "the root directory listed nothing")?
+    testing.assert(identified, "the root directory had no identity")?
+    let name = record.as_slice().subspan(start: dir_record_header, count: UInt64(first)).unwrap()
+    for index in 0..name.length() {
+        testing.assert(name[index] != 47 && name[index] != 0, "a listed name held a slash or a NUL")?
+    }
+}
+
+test "a directory stream opens a directory inside the one it reads" {
+    let root = _terminated(system(), "/".as_bytes()).unwrap()
+    let opened = _open_dir(root, follow: true)
+    root.release()
+    let stream = opened.unwrap()
+    // Both supported systems keep `/usr` as a directory of its own.
+    let name = _terminated(system(), "usr".as_bytes()).unwrap()
+    let inner = stream.open_at(name, follow: false)
+    name.release()
+    let closed = stream.close()
+    let child = inner.unwrap()
+    testing.assert_eq(child.close(), Int64(0), "closing the inner stream failed")?
+    testing.assert_eq(closed, Int64(0), "closing the outer stream failed")?
+}
+
+test "opening a missing directory answers its errno" {
+    let path = _terminated(system(), "/no/such/linea/directory".as_bytes()).unwrap()
+    let opened = _open_dir(path, follow: false)
+    path.release()
+    match opened {
+        Ok(stream) => {
+            stream.release()
+            return testing.assert(false, "a missing directory opened")
+        },
+        Err(code) => testing.assert(code > 0, "a missing directory answered no errno")?,
+    }
+}
+
 // The runtime closes a descriptor and returns zero or a negated errno.
 extern fn linea_close(fd: Int32) -> Int64
 
