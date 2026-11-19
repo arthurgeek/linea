@@ -1069,10 +1069,16 @@ impl[A: Allocator] ParseState[A] {
             return true
         }
         if token.starts_with("-") && token.length() > 1 {
-            let letter = token.slice(1, character_end(token, 1)).unwrap()
-            return self.short_flag(letter).is_some() || self.short_option(letter).is_some()
+            return self.declares_short(token)
         }
         false
+    }
+
+    // Return whether the first character after the dash of `token` is the
+    // name of a declared short flag or option.
+    fn declares_short(self: Self, token: Str) -> Bool {
+        let letter = token.slice(1, character_end(token, 1)).unwrap()
+        self.short_flag(letter).is_some() || self.short_option(letter).is_some()
     }
 
     // Return whether option `name` of the command at `depth` was supplied.
@@ -1190,6 +1196,66 @@ fn names_short(short: Option[Str], letter: Str) -> Bool {
         Some(s) => s.length() == letter.length() + 1 && s.starts_with("-") && s.ends_with(letter),
         None => false,
     }
+}
+
+// ASCII codes the negative-number scanner compares bytes with.
+let ascii_zero: UInt8 = 48
+
+let ascii_nine: UInt8 = 57
+
+let ascii_point: UInt8 = 46
+
+let ascii_plus: UInt8 = 43
+
+let ascii_minus: UInt8 = 45
+
+let ascii_upper_e: UInt8 = 69
+
+let ascii_lower_e: UInt8 = 101
+
+// Return the byte of `token` at `at`, or 0, which no number holds, past
+// its end.
+fn byte_at(token: Str, at: UInt64) -> UInt8 {
+    token.byte(at).unwrap_or(0)
+}
+
+// Return whether `token` is a dash and a decimal number: digits, then
+// optionally a point and digits, then optionally `e` or `E`, a sign and
+// digits. These are the numbers `Float64` reads that start with a digit.
+fn reads_as_negative_number(token: Str) -> Bool {
+    if byte_at(token, 0) != ascii_minus {
+        return false
+    }
+    var at = digits_end(token, 1)
+    var has_digits = at > 1
+    if has_digits && byte_at(token, at) == ascii_point {
+        let start = at + 1
+        at = digits_end(token, start)
+        has_digits = at > start
+    }
+    let marker = byte_at(token, at)
+    if has_digits && (marker == ascii_lower_e || marker == ascii_upper_e) {
+        var start = at + 1
+        let sign = byte_at(token, start)
+        if sign == ascii_plus || sign == ascii_minus {
+            start += 1
+        }
+        at = digits_end(token, start)
+        has_digits = at > start
+    }
+    has_digits && at == token.length()
+}
+
+// Return the offset of the first byte at or after `start` that is not an
+// ASCII digit.
+fn digits_end(token: Str, start: UInt64) -> UInt64 {
+    var end = start
+    var digit = byte_at(token, end)
+    while digit >= ascii_zero && digit <= ascii_nine {
+        end += 1
+        digit = byte_at(token, end)
+    }
+    end
 }
 
 // Return the byte offset just past the character that starts at `start`.
@@ -1778,7 +1844,9 @@ impl[A: Allocator] Command[A] {
                     }
                     continue
                 }
-                if arg.starts_with("-") && arg.length() > 1 {
+                // A negative number such as `-2` is a value unless a declared short
+                // switch is named by its first character after the dash.
+                if arg.starts_with("-") && arg.length() > 1 && (state.declares_short(arg) || !reads_as_negative_number(arg)) {
                     match &state.take_short(arg, &cursor) {
                         Ok(_) => {},
                         Err(error) => {
@@ -1880,6 +1948,51 @@ impl[A: Allocator] Command[A] {
         var cursor = ArgCursor.from_slice(input.as_slice())
         defer let matches = cmd.parse(&cursor).unwrap()
         testing.assert(matches.flag("dry_run"), "dry_run flag not set")?
+        .Ok(())
+    }
+
+    test "parse takes a negative number as a value unless a short switch spells it" {
+        defer var cmd = Command.new("convert")
+        &cmd.option("offset", "--offset", "added to the value")
+        &cmd.flag("verbose", "--verbose", short: .Some("-v"))
+        &cmd.positional("value")
+        &cmd.positional("rest", required: false, variadic: true)
+
+        let numbers = ["-2", "-0.5", "-1e3", "-2.5E-4", "--offset", "-3"]
+        var numbers_cursor = ArgCursor.from_slice(numbers.as_slice())
+        defer let matches = cmd.parse(&numbers_cursor).unwrap()
+        testing.assert_eq(matches.positional("value"), Option.Some("-2"), "a negative integer was not a positional")?
+        defer let rest = matches.positionals_all("rest").unwrap()
+        testing.assert_eq(rest.length(), UInt64(3), "a negative fraction or exponent was not a positional")?
+        testing.assert_eq(rest[2], "-2.5E-4", "a number with a signed exponent was not a positional")?
+        testing.assert_eq(matches.option("offset"), Option.Some("-3"), "a negative option value was lost")?
+
+        for unknown in ["-x", "-2x", "-.5", "-1.", "-1e"] {
+            let input = [copy(unknown)]
+            var cursor = ArgCursor.from_slice(input.as_slice())
+            let refused = match cmd.parse(&cursor) {
+                Ok(m) => {
+                    m.release()
+                    false
+                },
+                Err(e) => e == CliError.UnknownOption(unknown),
+            }
+            testing.assert(refused, "an argument that is not a number was taken as a value")?
+        }
+
+        let ended = ["--", "-2"]
+        var ended_cursor = ArgCursor.from_slice(ended.as_slice())
+        defer let after_end = cmd.parse(&ended_cursor).unwrap()
+        testing.assert_eq(after_end.positional("value"), Option.Some("-2"), "a negative number after `--` was lost")?
+
+        defer var digits = Command.new("tail")
+        &digits.flag("one", "--one", short: .Some("-1"))
+        &digits.positional("value", required: false)
+        let declared = ["-1"]
+        var declared_cursor = ArgCursor.from_slice(declared.as_slice())
+        defer let switched = digits.parse(&declared_cursor).unwrap()
+        testing.assert(switched.flag("one"), "a declared short switch spelled as a digit was not the switch")?
+        testing.assert(switched.positional("value").is_none(), "a declared short switch was also a positional")?
         .Ok(())
     }
 

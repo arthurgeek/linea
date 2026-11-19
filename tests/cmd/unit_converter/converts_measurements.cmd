@@ -50,13 +50,20 @@ program exits with 64.
   [64]
 
 A value the parse accepts but the conversion cannot use is reported the same
-way. `--` lets a negative number through as the value.
+way. A negative number is a value, not an option, so it reaches the
+conversion; after `--` every word is a value, so `--` changes nothing here.
 
-  $ ./units length -- -2 m ft
+  $ ./units length -2 m ft
   error: a length cannot be negative
   usage: unit_converter length <value> <from> <to>
   
   convert mm, cm, m, km, in, ft or mi
+  [64]
+  $ ./units temperature -300 C K
+  error: no temperature is below absolute zero
+  usage: unit_converter temperature <value> <from> <to>
+  
+  convert C, F or K
   [64]
   $ ./units temperature -- -300 C K
   error: no temperature is below absolute zero
