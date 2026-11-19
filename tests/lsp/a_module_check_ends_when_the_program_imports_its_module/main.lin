@@ -1,0 +1,6 @@
+// Opened before anything imports it, `sub/x.lin` is checked with its module
+// as the entry. Once the program imports `sub`, the program's check is the
+// one reaching it, and fixing it leaves nothing of the module's check shown.
+fn main() -> UInt8 {
+    0
+}

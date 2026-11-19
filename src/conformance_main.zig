@@ -8577,6 +8577,8 @@ const Taken = struct {
     /// not the text a compiler reads, and a run that stopped reaching one
     /// would look exactly like a run that reached it.
     stopped: u32 = 0,
+    /// Of the accepted, the conversions `conversionProbe` was offered.
+    converted: u32 = 0,
 };
 
 /// What one workspace manifest contributes, kept apart until every worker has
@@ -8647,6 +8649,7 @@ fn mergeWorkspaceResults(
         taken.rewritten += result.taken.rewritten;
         taken.declined += result.taken.declined;
         taken.stopped += result.taken.stopped;
+        taken.converted += result.taken.converted;
     }
 }
 
@@ -10816,6 +10819,28 @@ fn acceptsCompletions(
         taken,
     ) > 0) asked = true;
 
+    // Asked only of a program that reports nothing: the probe declares an
+    // implementation of the library's `From`, which a program whose modules
+    // or library did not load refuses for reasons of its own.
+    if (before.rules.len == 0) {
+        for ([_][]const u8{ "_ProbeMarked", "_ProbePlain" }) |held| {
+            if (try acceptOffered(
+                gpa,
+                backing,
+                checked_library,
+                failures,
+                display_path,
+                query,
+                program,
+                files,
+                before,
+                try conversionProbe(gpa, program, held),
+                .conversions,
+                taken,
+            ) > 0) asked = true;
+        }
+    }
+
     const modules = try modulesOffered(gpa, query, program);
     defer gpa.free(modules);
 
@@ -11144,6 +11169,10 @@ const Accepts = union(enum) {
     /// parameter names would make this a property about whether they happen to
     /// be in scope at the call site.
     calls,
+    /// Every `into` offered after the dot of `conversionProbe`. Accepting one
+    /// writes a call the checker settles through an implementation of `From`
+    /// whose bounds must hold, which is what completion decided it by.
+    conversions,
 };
 
 /// One file written to hold a cursor, and where in it the completion is asked.
@@ -11194,6 +11223,60 @@ fn callProbe(gpa: std.mem.Allocator, program: []const u8) !Probe {
     return .{
         .file = .{
             .path = try std.fs.path.join(gpa, &.{ loader.dirOfEntry(program), "_completion_call_probe.lin" }),
+            .text = text,
+        },
+        .at = lsp.offsets.indexToPosition(text, head.len, .@"utf-16"),
+    };
+}
+
+/// A probe asking what follows the dot of a value an implementation of
+/// `From` converts from only where its bound holds, with the cursor after the
+/// dot: `held` is `_ProbeMarked`, which meets the bound, or `_ProbePlain`,
+/// which does not.
+///
+/// The conversion is annotated with its result, so accepting `into` leaves a
+/// call whose only question is whether the conversion exists. Where it does
+/// not, accepting it is [T-Bound], which the program did not report. Written
+/// into every program for the reason `dotProbe` is, and every name begins with
+/// `_` for the same reason.
+fn conversionProbe(gpa: std.mem.Allocator, program: []const u8, held: []const u8) !Probe {
+    const head = try std.fmt.allocPrint(gpa,
+        \\trait _ProbeTag {{}}
+        \\
+        \\struct _ProbePlain {{
+        \\    n: UInt8,
+        \\}}
+        \\
+        \\struct _ProbeMarked {{
+        \\    n: UInt8,
+        \\}}
+        \\
+        \\impl _ProbeTag for _ProbeMarked {{}}
+        \\
+        \\struct _ProbeBox[T] {{
+        \\    item: T,
+        \\}}
+        \\
+        \\struct _ProbeWrap[T] {{
+        \\    item: T,
+        \\}}
+        \\
+        \\impl[T: _ProbeTag] From[_ProbeBox[T]] for _ProbeWrap[T] {{
+        \\    fn from(sink source: _ProbeBox[T]) -> _ProbeWrap[T] {{
+        \\        let _ProbeBox {{ item: held }} = source
+        \\        .{{ item = held }}
+        \\    }}
+        \\}}
+        \\
+        \\fn _probe_converts() {{
+        \\    let _boxed: _ProbeBox[{0s}] = .{{ item = .{{ n = 1 }} }}
+        \\    let _wrapped: _ProbeWrap[{0s}] = _boxed.
+    , .{held});
+    const text = try std.fmt.allocPrint(gpa, "{s}\n}}\n", .{head});
+    const name = try std.fmt.allocPrint(gpa, "_completion_conversion_probe{s}.lin", .{held});
+    return .{
+        .file = .{
+            .path = try std.fs.path.join(gpa, &.{ loader.dirOfEntry(program), name }),
             .text = text,
         },
         .at = lsp.offsets.indexToPosition(text, head.len, .@"utf-16"),
@@ -11334,6 +11417,7 @@ fn acceptOffered(
             },
             .rewrites => if (item.textEdit == null or !std.mem.startsWith(u8, item.label, "_probed")) continue,
             .calls => if (!std.mem.startsWith(u8, item.label, "_probe_takes_")) continue,
+            .conversions => if (!std.mem.eql(u8, item.label, "into")) continue,
         }
         const carried = item.additionalTextEdits orelse &.{};
 
@@ -11378,6 +11462,7 @@ fn acceptOffered(
         taken.applied += 1;
         if (item.textEdit != null) taken.rewritten += 1;
         if (leaves.stops > 0) taken.stopped += 1;
+        if (accepts == .conversions) taken.converted += 1;
 
         for (after.rules) |rule| {
             if (indexOfRule(before.rules, rule) != null) continue;
@@ -12836,10 +12921,15 @@ fn checkCompletionOffers(
 
     var holds: std.ArrayList(resolve_mod.Selectable) = .empty;
     defer holds.deinit(gpa);
+    // Variants of an opaque enum named outside its module: the resolver
+    // selects them, and the checker refuses each [M-Opaque].
+    var sealed: std.StringHashMapUnmanaged(void) = .empty;
+    defer sealed.deinit(gpa);
 
     for (0..ast.exprCount()) |i| {
         const e: ExprId = .at(@intCast(i));
         if (ast.exprTag(e) != .field) continue;
+        sealed.clearRetainingCapacity();
 
         // A dot with nothing after it writes no name, so there is no first byte
         // of one to ask at and nothing the program wrote to look for.
@@ -12885,6 +12975,12 @@ fn checkCompletionOffers(
             );
 
             reachable.clearRetainingCapacity();
+            // Whether the namespace's representation is sealed here, by the
+            // rule the checker refuses a variant by.
+            const named = res.throughAlias(qualifier);
+            const representation_sealed = named != resolve_mod.BindingId.none and
+                res.kindOf(named) == .declared_type and
+                typecheck_mod.representationSealed(ast, program, res.declaredBy(named), res.moduleOfFile(file));
             for (holds.items) |written| switch (written) {
                 .member => |m| {
                     // What may stand here, which is not everything the
@@ -12896,7 +12992,7 @@ fn checkCompletionOffers(
                     const name = lsp_completion.nameOf(ast, res, m) orelse continue;
                     try reachable.put(gpa, name, {});
                 },
-                .variant => |v| try reachable.put(gpa, ast.tokenText(v), {}),
+                .variant => |v| try (if (representation_sealed) &sealed else &reachable).put(gpa, ast.tokenText(v), {}),
             };
 
             const integer_namespace = if (res.builtinOf(qualifier)) |primitive|
@@ -12917,10 +13013,14 @@ fn checkCompletionOffers(
             if (res.kindOf(qualifier) != .trait) {
                 var through: std.ArrayList(typecheck_mod.Applicable) = .empty;
                 defer through.deinit(gpa);
-                try typecheck_mod.reachIn(ast, program, res, typing, res.moduleOfFile(file), functions.items[holder])
-                    .namespaced(gpa, typing.exprType(receiver), null, true, &through, null);
+                const reach = typecheck_mod.reachIn(ast, program, res, typing, res.moduleOfFile(file), functions.items[holder]);
+                try reach.namespaced(gpa, typing.exprType(receiver), null, true, &through, null);
                 try typecheck_mod.keepReached(gpa, ast, &through);
-                for (through.items) |a| try reachable.put(gpa, ast.tokenText(ast.declName(a.sig)), {});
+                for (through.items) |a| {
+                    // A conversion nothing converts from settles on no result.
+                    if (!try reach.settlesSomewhere(gpa, typing.exprType(receiver), a)) continue;
+                    try reachable.put(gpa, ast.tokenText(ast.declName(a.sig)), {});
+                }
             }
             try checkNamespaceOffers(gpa, failures, display_path, ast.tokenText(ast.exprMain(receiver)), &reachable, offered);
         }
@@ -12938,6 +13038,9 @@ fn checkCompletionOffers(
         if (!resolve_mod.standsWhereAValueBelongs(res.kindOf(res.targetOf(e)))) continue;
 
         const written = ast.tokenText(at);
+        // A sealed variant is refused where it is written, so it is not
+        // offered there either.
+        if (sealed.contains(written)) continue;
         const found = for (offered) |item| {
             if (std.mem.eql(u8, item.label, written)) break true;
         } else false;
@@ -17231,6 +17334,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     var layouts_compared: u32 = 0;
     var levels_agreed: u32 = 0;
     var materialized_derives: u32 = 0;
+    var renames_run: u32 = 0;
     var made_rewrites: std.EnumMap(Transform, u32) = .{};
     var made_mutations: std.EnumMap(Mutation, u32) = .{};
     var made_damages: std.EnumMap(Damage, u32) = .{};
@@ -17409,12 +17513,15 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .{ rt, runtime_symbols.checked_archive_name },
     );
     var sanitized_skips: std.atomic.Value(u32) = .init(0);
+    var rename_slots: std.Io.Semaphore = .{ .permits = rename_walkers };
     var libraries: Libraries = .{ .backing = scratch_backing, .io = io, .environ = environ, .prelude = checked_library };
     defer libraries.deinit();
     const settings: Settings = .{
         .library = checked_library,
         .libraries = &libraries,
         .properties = options.properties,
+        .rename_sampled = options.property_cases != null,
+        .rename_slots = &rename_slots,
         .corpus_properties = sanitize == null,
         .levels = options.levels,
         .cache = &cache,
@@ -17629,6 +17736,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         layouts_compared += one.layouts_compared;
         levels_agreed += one.levels_agreed;
         materialized_derives += one.materialized_derives;
+        renames_run += one.renames_run;
         for (std.enums.values(Mutation)) |k| {
             if (one.mutations.get(k)) |n| mutations.put(k, (mutations.get(k) orelse 0) + n);
         }
@@ -17764,6 +17872,21 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         "conformance: {d} program(s) checked with derives replaced by ordinary source\n",
         .{materialized_derives},
     );
+    std.debug.print(
+        "conformance: {d} rename(s) the server accepted checked and run against the program renamed\n",
+        .{renames_run},
+    );
+    // Below this, the sample stopped reaching the renames the `rename/` cases
+    // alone accept.
+    const renames_floor = 20;
+    if (focused_floors and renames_run < renames_floor) {
+        try failures.append(gpa, .{
+            .path = "the corpus",
+            .what = "reaches too few renames the server accepted",
+            .expected = try std.fmt.allocPrint(gpa, "at least {d}", .{@as(u32, renames_floor)}),
+            .actual = try std.fmt.allocPrint(gpa, "{d} from the corpus", .{renames_run}),
+        });
+    }
     if (focused_floors and materialized_derives < 1) {
         try failures.append(gpa, .{
             .path = "the corpus",
@@ -18157,8 +18280,8 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         // what the property above cannot see.
         std.debug.print(
             "conformance: {d} completion item(s) accepted and re-checked, {d} of them a rewrite, " ++
-                "{d} of them reduced from a snippet, {d} declined as naming no value\n",
-            .{ taken.applied, taken.rewritten, taken.stopped, taken.declined },
+                "{d} of them reduced from a snippet, {d} of them a conversion, {d} declined as naming no value\n",
+            .{ taken.applied, taken.rewritten, taken.stopped, taken.converted, taken.declined },
         );
 
         // Informational, and not a property: the sub-grain of
@@ -18198,6 +18321,17 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
                 .what = "accepting what the server offers leaves a program that checks",
                 .expected = try gpa.dupe(u8, "at least 1 rewrite(s) accepted"),
                 .actual = try std.fmt.allocPrint(gpa, "{d}", .{taken.rewritten}),
+            });
+        }
+        // And one for a conversion, which is offered only where an
+        // implementation's bounds hold: a server that stopped offering one
+        // would leave every other count where it is.
+        if (focused_floors and taken.converted < 1) {
+            try failures.append(gpa, .{
+                .path = "the corpus",
+                .what = "accepting what the server offers leaves a program that checks",
+                .expected = try gpa.dupe(u8, "at least 1 conversion(s) accepted"),
+                .actual = try std.fmt.allocPrint(gpa, "{d}", .{taken.converted}),
             });
         }
         // And one for the snippet, which is the shape whose text a compiler
@@ -19656,6 +19790,198 @@ fn retainFrom(keep: std.mem.Allocator, failures: *std.ArrayList(Failure), from: 
         f.expected = try keep.dupe(u8, f.expected);
         f.actual = try keep.dupe(u8, f.actual);
     }
+}
+
+/// How many walkers run the rename property at once: the runner's peak holds
+/// this many cases' trials, however many walkers there are.
+const rename_walkers = 2;
+
+/// Property: a rename the server accepts leaves a program that checks and runs
+/// as the program it was made from did.
+///
+/// Every declaration the case's own files make is renamed, in turn, to every
+/// spelling another of them carries, which is where a rename can be captured
+/// or shadow something; past `rename_trials` pairs a sample seeded from the
+/// case's path is taken, so a failure names a reproducible pair. A refusal is
+/// not a failure. An accepted rename whose program reports an error, or runs
+/// to another outcome, is the server changing what the program means.
+///
+/// Where `sampled`, a case under `rename/` always runs and any other one in
+/// `rename_case_share`, chosen by a hash of its path seeded with
+/// `rename_sample_seed`: the same cases each run, so a failure reproduces.
+///
+/// **Bound:** `rename_trials` renames per case taken, each one check by the
+/// server, one load and check here, and one build and run; sampled, about one
+/// case in `rename_case_share` beside the `rename/` cases.
+fn checkRenamesRun(
+    gpa: std.mem.Allocator,
+    scratch_parent: std.mem.Allocator,
+    io: std.Io,
+    cache: *const OutcomeCache,
+    env: Env,
+    checked_library: *const loader.CheckedLibrary,
+    sampled: bool,
+    slots: ?*std.Io.Semaphore,
+    failures: *std.ArrayList(Failure),
+    count: *u32,
+    display_path: []const u8,
+    name: []const u8,
+    case: Case,
+    original: Ran,
+    foreign: Foreign,
+) !void {
+    const rename_trials = 200;
+    const rename_case_share = 8;
+    const rename_sample_seed = 0x5eed;
+    if (sampled and std.mem.indexOf(u8, display_path, "rename/") == null and
+        std.hash.Wyhash.hash(rename_sample_seed, display_path) % rename_case_share != 0) return;
+    if (slots) |held| held.waitUncancelable(io);
+    defer if (slots) |held| held.post(io);
+    // The case's analysis and its trials' list are released when the
+    // property ends, rather than with the case's arena (`gpa`), which the
+    // case's other properties go on filling while the walker holds it.
+    var case_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer case_arena.deinit();
+    const c = case_arena.allocator();
+    const inputs = try inputsOf(c, case);
+    var checked = try lsp_analysis.of(c, c, checked_library, inputs, case.entry);
+    defer checked.deinit();
+    if (checked.sink.hasErrors()) return;
+    const ast = &checked.program.ast;
+    const res = &checked.semantics.res;
+
+    const Trial = struct { binding: resolve_mod.BindingId, to: []const u8 };
+    var declared: std.ArrayList(resolve_mod.BindingId) = .empty;
+    var spellings: std.StringArrayHashMapUnmanaged(void) = .empty;
+    for (0..res.bindingCount()) |i| {
+        const b = resolve_mod.BindingId.at(@intCast(i));
+        const at = res.declaringToken(b);
+        if (at == TokenId.none or at.index() >= ast.tokenCount()) continue;
+        if (checked.library[ast.fileOf(at).index()]) continue;
+        if (ast.tokenTag(at) != .identifier) continue;
+        const text = ast.tokenText(at);
+        if (std.mem.startsWith(u8, text, "_") or std.mem.eql(u8, text, "main")) continue;
+        try declared.append(c, b);
+        try spellings.put(c, text, {});
+    }
+    var trials: std.ArrayList(Trial) = .empty;
+    for (declared.items) |b| {
+        const own = ast.tokenText(res.declaringToken(b));
+        for (spellings.keys()) |to| {
+            if (std.mem.eql(u8, to, own)) continue;
+            if (std.ascii.isUpper(to[0]) != std.ascii.isUpper(own[0])) continue;
+            try trials.append(c, .{ .binding = b, .to = to });
+        }
+    }
+    if (trials.items.len > rename_trials) {
+        var prng = std.Random.DefaultPrng.init(std.hash.Wyhash.hash(0, display_path));
+        prng.random().shuffle(Trial, trials.items);
+        trials.shrinkRetainingCapacity(rename_trials);
+    }
+
+    for (trials.items) |trial| {
+        var per_trial = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer per_trial.deinit();
+        const a = per_trial.allocator();
+        const at = res.declaringToken(trial.binding);
+        const was = ast.tokenText(at);
+        const file = ast.fileOf(at);
+        const position = lsp.offsets.indexToPosition(ast.partOfFile(file).?.source, ast.tokenSpan(at).start, .@"utf-16");
+        const answered = lsp_rename.forPosition(a, io, &checked, file, position, .@"utf-16", "", trial.to) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => continue,
+        };
+        const edit = answered orelse continue;
+
+        const after = try a.dupe(InMemoryFile, inputs);
+        var it = edit.changes.?.map.iterator();
+        while (it.next()) |entry| {
+            const path = try lsp_uri.pathOf(a, entry.key_ptr.*);
+            for (after) |*f| {
+                if (!std.mem.eql(u8, f.path, path)) continue;
+                f.text = try lsp_rename.applyTo(a, f.text, entry.value_ptr.*, .@"utf-16");
+            }
+        }
+
+        // Everything a trial allocates is the trial's, and a failure it
+        // records is copied out (`retainFrom`): a case renamed two hundred
+        // times holds one trial at a time.
+        const what = try std.fmt.allocPrint(a, "a rename the server accepts, `{s}` to `{s}`, leaves the program meaning what it did", .{ was, trial.to });
+        var table: FileTable = .empty;
+        var sink = Sink.init(a);
+        var interner: Interner = .empty;
+        // Resumed from the case's library, as the case itself is checked:
+        // a trial checks the case's own modules and not the library again.
+        var loaded = try checked_library.loadFromMemory(a, &table, &sink, &interner, case.entry, after, .program, .borrow);
+        try table.buildMaps(a);
+        var settled = try checked_library.checkProgram(a, scratch_parent, &loaded, &interner, &sink, .program);
+        defer settled.deinit(a);
+        if (sink.hasErrors()) {
+            var why: std.Io.Writer.Allocating = .init(a);
+            try render.renderAll(&why.writer, &table, &sink, .{ .color = .never });
+            const before = failures.items.len;
+            try failures.append(gpa, .{ .path = display_path, .what = what, .expected = "a program that checks", .actual = why.written() });
+            try retainFrom(gpa, failures, before);
+            return;
+        }
+        const mir = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
+        var ir: std.Io.Writer.Allocating = .init(a);
+        const before = failures.items.len;
+        if (!try emitOrRecord(gpa, failures, &ir, &mir, &table, &sink, display_path, env.sanitize, env.foreign_symbols)) {
+            try retainFrom(gpa, failures, before);
+            // Which rename the failure is about.
+            for (failures.items[before..]) |*f| f.what = try std.fmt.allocPrint(gpa, "{s}: {s}", .{ what, f.what });
+            return;
+        }
+        const ran = try outcomeOf(a, io, cache, env.buildRunOptions(
+            try std.fmt.allocPrint(a, "{s}.renamed-{d}", .{ name, count.* }),
+            ir.written(),
+            foreign,
+        ));
+        if (ran.tool_failed or ran.timed_out) continue;
+        count.* += 1;
+        // A derive prints the names it was written with, so the renamed
+        // program may print the new name where the old one printed the old.
+        const respelled = try respelledOutcome(a, original, was, trial.to);
+        if (outcomeDifferences(respelled, ran, .moved).count() == 0) continue;
+        const recorded = failures.items.len;
+        if (try recordOutcomeDifferences(gpa, failures, display_path, what, original, ran, .moved)) {
+            try retainFrom(gpa, failures, recorded);
+            return;
+        }
+    }
+}
+
+/// `ran` with every whole-word occurrence of `was` in what it printed spelled
+/// `to`, as a rename leaves what a derive prints of the name.
+fn respelledOutcome(a: std.mem.Allocator, ran: Ran, was: []const u8, to: []const u8) !Ran {
+    var respelled = ran;
+    respelled.text = try respelledWords(a, ran.text, was, to);
+    respelled.output = try respelledWords(a, ran.output, was, to);
+    respelled.errors = try respelledWords(a, ran.errors, was, to);
+    return respelled;
+}
+
+fn respelledWords(a: std.mem.Allocator, text: []const u8, was: []const u8, to: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < text.len) {
+        const whole = std.mem.startsWith(u8, text[i..], was) and
+            (i == 0 or !isWordByte(text[i - 1])) and
+            (i + was.len == text.len or !isWordByte(text[i + was.len]));
+        if (whole) {
+            try out.appendSlice(a, to);
+            i += was.len;
+        } else {
+            try out.append(a, text[i]);
+            i += 1;
+        }
+    }
+    return out.items;
+}
+
+fn isWordByte(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_';
 }
 
 /// Recompiles one program after replacing every admitted primary-root derive
@@ -21778,6 +22104,15 @@ const Settings = struct {
     /// The libraries each case resumes from.
     libraries: *Libraries,
     properties: bool = false,
+    /// Whether the rename property takes a sample of the cases it is given
+    /// rather than all of them (`rename_case_share`): the cases
+    /// `--property-cases` lists, where a narrowed walk renames every case.
+    rename_sampled: bool = false,
+    /// How many walkers may run the rename property at once
+    /// (`rename_walkers`). A trial holds the case's analysis, the server's
+    /// check of the renamed program and a build of it, and the property runs
+    /// long enough that every walker would otherwise hold one at once.
+    rename_slots: ?*std.Io.Semaphore = null,
     /// Whether every case is held to the frontend and editor properties the
     /// whole corpus is asked: formatting, poison, extents, scopes, hints,
     /// settled references and completions. A sanitized walk asks only what
@@ -21907,6 +22242,7 @@ const Work = struct {
     passed_over: std.EnumMap(Property, u32) = .{},
     rewrites: std.EnumMap(Transform, u32) = .{},
     materialized_derives: u32 = 0,
+    renames_run: u32 = 0,
     damages: std.EnumMap(Damage, u32) = .{},
     mutations: std.EnumMap(Mutation, u32) = .{},
     /// The cases that carried a fix of each kind.
@@ -23005,6 +23341,28 @@ fn checkCase(
                                 ir.written(),
                                 ran,
                                 try besideOf(gpa, case),
+                                case.foreign(&program),
+                            );
+                            try checkRenamesRun(
+                                gpa,
+                                scratch_parent,
+                                io,
+                                env.cache,
+                                .{
+                                    .scratch = env.scratch_dir,
+                                    .runtime = rt,
+                                    .foreign_symbols = foreign_symbols,
+                                    .sanitize = env.sanitize,
+                                },
+                                resumed_from,
+                                env.rename_sampled,
+                                env.rename_slots,
+                                &w.failures,
+                                &w.renames_run,
+                                display_path,
+                                case_name,
+                                case,
+                                ran,
                                 case.foreign(&program),
                             );
                         }

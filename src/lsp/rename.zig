@@ -4,12 +4,14 @@ const testing = std.testing;
 const lsp = @import("lsp");
 
 const analysis_mod = @import("analysis.zig");
+const loader = @import("../driver/loader.zig");
 const test_library = @import("../driver/test_library.zig");
 const Analysis = analysis_mod.Analysis;
 const positions = @import("positions.zig");
 const references = @import("references.zig");
 const uri_mod = @import("uri.zig");
 const isIdentifier = @import("../lexer/lexer.zig").isIdentifier;
+const ast_mod = @import("../syntax/ast.zig");
 const TokenId = @import("../lexer/token.zig").TokenId;
 const resolve = @import("../sema/resolve.zig");
 const BindingId = resolve.BindingId;
@@ -39,13 +41,54 @@ pub const Refused = error{
     AnEntryPointIsNamedByItsSpelling,
     ACallableInterfaceRelationIsNotRenameable,
     AGeneratedMemberIsNotRenameable,
+    /// A use the rename rewrites would reach another binding of the new name.
+    ANewNameWouldBeCapturedByAnotherBinding,
+    /// A use of another binding of the new name would reach the renamed one.
+    ANewNameWouldShadowAnotherBinding,
+    /// The program renamed reports an error it did not.
+    ANewNameWouldNotCheck,
+    /// A program the rename reaches cannot be held to it: it holds the
+    /// declaration elsewhere than the request's program does, it does not
+    /// read the name there as one to rename, or an edit lands in a file no
+    /// program checked holds. `ProgramRefusal` names it and why.
+    AProgramTheRenameEditsCouldNotBeChecked,
+    /// A program reaching the declaration does not load, so what the rename
+    /// does to it cannot be checked. `ProgramRefusal` names it and why.
+    AProgramTheRenameReachesDoesNotLoad,
+    /// One file is open twice, under two spellings, with different text, so
+    /// no one text says what the rename edits. `ProgramRefusal` names both.
+    AFileIsOpenTwiceWithDifferentText,
 };
+
+/// An invariant a rename's edits are held to before they are returned, which
+/// no input should break: reaching it is a defect in the server, refused
+/// rather than written into the reader's files.
+pub const Broken = error{
+    /// An edit does not cover an old spelling of what is renamed, in the one
+    /// text its file has.
+    AnEditDoesNotCoverTheNameItRenames,
+};
+
+/// The program a refusal is about: the entry it is loaded from, and why.
+pub const ProgramRefusal = struct { entry: []const u8, reason: []const u8 };
+
+/// The first error a load of `checked` reported where the program could not
+/// be assembled: a dependency its manifest names that cannot be loaded, or no
+/// entry. Its modules are then not all of what it reaches, and no check of it
+/// can say what a rename does to it. An error in its source is not one.
+fn loadFailure(checked: *const Analysis) ?[]const u8 {
+    for (checked.sink.items()) |d| {
+        if (d.severity != .err) continue;
+        const code = d.code orelse continue;
+        if (code == .m_dependency or code == .m_entry) return d.message;
+    }
+    return null;
+}
 
 /// Return edits for the name under the cursor, or null if no name is selected.
 ///
-/// Include every use in the current analysis, including public declarations.
-/// The analysis is rooted at the file the editor opened; uses in other
-/// programs importing the same module are outside its scope.
+/// Include every use in the analysis, including public declarations; `across`
+/// renames in every program of a workspace.
 ///
 /// Refuse primitive names without source declarations, generated members,
 /// modules whose rename requires moving a directory, re-exports whose spelling
@@ -108,6 +151,260 @@ pub fn forPositionReporting(
     new_name: []const u8,
     refused_kind: ?*?name_case.Kind,
 ) !?lsp.types.WorkspaceEdit {
+    return across(gpa, io, &.{checked}, &.{}, &.{}, file, position, encoding, root, new_name, refused_kind, null);
+}
+
+/// As `forPositionReporting`, over every program of the workspace, as one
+/// change or none: `programs` holds the program the request was made in
+/// first, then every other program of the workspace that could be analysed.
+///
+/// The programs affected are the ones holding the file that declares the
+/// name. Each must load (`loadFailure`); one that does not refuses the rename
+/// with `AProgramTheRenameReachesDoesNotLoad` and names itself in `unloaded`; one the rename cannot be held to refuses with
+/// `AProgramTheRenameEditsCouldNotBeChecked`, named the same way. A reason is
+/// allocated in `gpa`.
+/// A program holding no file of the declaration is not affected, however
+/// broken. Each affected program is renamed by the same rules, the edits
+/// joined, and every affected program checked with the joined edits applied;
+/// the edits are returned only when every one of them holds, so a library two
+/// programs depend on is renamed for both or for neither.
+///
+/// Costs what `forPositionReporting` costs, once per affected program, and a
+/// look-up of the declaring file in each other one: exact where the program
+/// spells it the same way, and otherwise one canonicalisation per file of
+/// that program, built once for the request (`analysis.FileIdentities`).
+pub fn across(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    programs: []const *const Analysis,
+    /// The directory of each program of the workspace that could not be
+    /// analysed. One that may hold the declaring file (`loader.mayHold`)
+    /// refuses the rename, since its uses cannot be found.
+    unanalysed: []const []const u8,
+    /// The path of every document the client has open. A file open under
+    /// several of them has its edits written under each, since each is a
+    /// buffer the client edits and saves.
+    open: []const []const u8,
+    file: FileId,
+    position: lsp.types.Position,
+    encoding: lsp.offsets.Encoding,
+    root: []const u8,
+    new_name: []const u8,
+    refused_kind: ?*?name_case.Kind,
+    unloaded: ?*?ProgramRefusal,
+) !?lsp.types.WorkspaceEdit {
+    const first = programs[0];
+    if (loadFailure(first)) |reason| {
+        if (unloaded) |out| out.* = .{ .entry = first.made_from.entry, .reason = reason };
+        return Refused.AProgramTheRenameReachesDoesNotLoad;
+    }
+    // What one request learns about each program's files, dropped with it.
+    var request = std.heap.ArenaAllocator.init(gpa);
+    defer request.deinit();
+    const identities = try request.allocator().alloc(analysis_mod.FileIdentities, programs.len);
+    for (programs, identities) |program, *slot| slot.* = .{ .checked = program, .io = io, .arena = request.allocator() };
+
+    var plans: std.ArrayList(Plan) = .empty;
+    defer {
+        for (plans.items) |plan| plan.deinit(gpa);
+        plans.deinit(gpa);
+    }
+    var planned: std.ArrayList(*analysis_mod.FileIdentities) = .empty;
+    defer planned.deinit(gpa);
+    {
+        const plan = try planAt(gpa, io, first, file, position, encoding, root, new_name, refused_kind) orelse return null;
+        errdefer plan.deinit(gpa);
+        // `planned` first: a plan is freed by `plans` once it is in it, and
+        // by the `errdefer` above until then, never by both.
+        try planned.append(gpa, &identities[0]);
+        try plans.append(gpa, plan);
+    }
+
+    // The declaration, by its file and byte, which is how another program
+    // holding that file finds it.
+    const ast = &first.program.ast;
+    const declared = plans.items[0].declared[0];
+    const declared_path = first.table.get(ast.fileOf(declared)).path;
+    const declared_span = ast.tokenSpan(declared);
+    // The reason is allocated in `gpa`, which a server passes as the arena
+    // of the message it answers.
+    for (unanalysed) |dir| {
+        if (try loader.mayHold(gpa, io, dir, declared_path)) |reason| {
+            if (unloaded) |out| out.* = .{ .entry = dir, .reason = reason };
+            return Refused.AProgramTheRenameReachesDoesNotLoad;
+        }
+    }
+    for (programs[1..], identities[1..]) |other, *known| {
+        const in = try known.fileNamed(declared_path) orelse continue;
+        if (loadFailure(other)) |reason| {
+            if (unloaded) |out| out.* = .{ .entry = other.made_from.entry, .reason = reason };
+            return Refused.AProgramTheRenameReachesDoesNotLoad;
+        }
+        const text = other.table.get(in).text;
+        const token = tokenWithin(&other.program.ast, in, .{ .start = declared_span.start, .end = declared_span.start }, ast.tokenText(declared)) orelse {
+            if (unloaded) |out| out.* = .{ .entry = other.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "`{s}` does not declare `{s}` where the edited program reads it", .{ other.table.get(in).path, ast.tokenText(declared) }) };
+            return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        };
+        const there = lsp.offsets.indexToPosition(text, other.program.ast.tokenSpan(token).start, encoding);
+        const plan = try planAt(gpa, io, other, in, there, encoding, root, new_name, refused_kind) orelse {
+            if (unloaded) |out| out.* = .{ .entry = other.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "it does not read `{s}` in `{s}` as a name to rename", .{ ast.tokenText(declared), other.table.get(in).path }) };
+            return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        };
+        errdefer plan.deinit(gpa);
+        try planned.append(gpa, known);
+        try plans.append(gpa, plan);
+    }
+
+    const edit = try joined(gpa, io, plans.items, open);
+    errdefer free(gpa, edit);
+
+    // Every edited document is one some program was checked with.
+    var it = edit.changes.?.map.iterator();
+    while (it.next()) |entry| {
+        const path = try uri_mod.pathOf(request.allocator(), entry.key_ptr.*);
+        const held = for (planned.items) |known| {
+            if (try known.fileNamed(path) != null) break true;
+        } else false;
+        if (!held) {
+            if (unloaded) |out| out.* = .{ .entry = first.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "no program checked holds `{s}`, which the rename edits", .{path}) };
+            return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+        }
+    }
+    for (plans.items, planned.items) |plan, known| try refuseChangedMeaning(gpa, plan.checked, known, plan.declared, new_name, edit, encoding, unloaded);
+
+    // Each edit covers an old spelling of what is renamed, in the one text
+    // its file has.
+    var old_names: std.StringHashMapUnmanaged(void) = .empty;
+    for (plans.items) |plan| {
+        for (plan.declared) |token| try old_names.put(request.allocator(), plan.checked.program.ast.tokenText(token), {});
+    }
+    var covered = edit.changes.?.map.iterator();
+    while (covered.next()) |entry| {
+        const path = try uri_mod.pathOf(request.allocator(), entry.key_ptr.*);
+        const text = for (planned.items) |known| {
+            if (try known.fileNamed(path)) |held| break known.checked.table.get(held).text;
+        } else unreachable;
+        if (!coversOldNames(text, entry.value_ptr.*, &old_names, encoding)) return Broken.AnEditDoesNotCoverTheNameItRenames;
+    }
+    return edit;
+}
+
+/// Whether every edit in `edits` covers, in `text`, exactly one of
+/// `old_names`.
+fn coversOldNames(text: []const u8, edits: []const lsp.types.TextEdit, old_names: *const std.StringHashMapUnmanaged(void), encoding: lsp.offsets.Encoding) bool {
+    for (edits) |e| {
+        const start = lsp.offsets.positionToIndex(text, e.range.start, encoding);
+        const end = lsp.offsets.positionToIndex(text, e.range.end, encoding);
+        if (start > end or end > text.len or !old_names.contains(text[start..end])) return false;
+    }
+    return true;
+}
+
+test "an edit covering anything but an old name is caught" {
+    var names: std.StringHashMapUnmanaged(void) = .empty;
+    defer names.deinit(testing.allocator);
+    try names.put(testing.allocator, "frost", {});
+    const text = "pub fn frost() -> UInt8 { 1 }\n// a calendar\n";
+    const on_name: lsp.types.TextEdit = .{ .range = .{ .start = .{ .line = 0, .character = 7 }, .end = .{ .line = 0, .character = 12 } }, .newText = "chill" };
+    const off_name: lsp.types.TextEdit = .{ .range = .{ .start = .{ .line = 1, .character = 5 }, .end = .{ .line = 1, .character = 10 } }, .newText = "chill" };
+    try testing.expect(coversOldNames(text, &.{on_name}, &names, .@"utf-16"));
+    try testing.expect(!coversOldNames(text, &.{ on_name, off_name }, &names, .@"utf-16"));
+}
+
+/// What renaming the name at one place of one program edits, and the tokens
+/// declaring what it renames.
+const Plan = struct {
+    checked: *const Analysis,
+    edit: lsp.types.WorkspaceEdit,
+    declared: []const TokenId,
+
+    fn deinit(self: Plan, gpa: std.mem.Allocator) void {
+        free(gpa, self.edit);
+        gpa.free(self.declared);
+    }
+};
+
+/// The edits of every plan, as one: a file several programs hold gets each
+/// edit once, in order. Two programs may spell one file two ways -- through
+/// a symlink, or in another case -- so files are told apart by identity
+/// (`loader.identityOf`), and every program read one text for each
+/// (`Documents.openTwiceApart`). A file's edits are written under every URI
+/// in `open` that names it, since each is a buffer the client edits and
+/// saves, and under the URI the first plan wrote where none does. Two plans
+/// writing one range two ways would be two renames of one name, which no
+/// rule here makes, and is refused.
+fn joined(gpa: std.mem.Allocator, io: std.Io, plans: []const Plan, open: []const []const u8) !lsp.types.WorkspaceEdit {
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
+    const a = scratch.allocator();
+    var open_by_identity: std.StringHashMapUnmanaged(std.ArrayList([]const u8)) = .empty;
+    for (open) |path| {
+        const slot = try open_by_identity.getOrPut(a, try loader.identityOf(a, io, path));
+        if (!slot.found_existing) slot.value_ptr.* = .empty;
+        try slot.value_ptr.append(a, try uri_mod.uriOf(a, path));
+    }
+    const Document = struct { uri: []const u8, edits: std.ArrayList(lsp.types.TextEdit) = .empty };
+    var lists: std.StringArrayHashMapUnmanaged(Document) = .empty;
+    for (plans) |plan| {
+        var it = plan.edit.changes.?.map.iterator();
+        while (it.next()) |entry| {
+            const identity = try loader.identityOf(a, io, try uri_mod.pathOf(a, entry.key_ptr.*));
+            const slot = try lists.getOrPut(a, identity);
+            if (!slot.found_existing) slot.value_ptr.* = .{ .uri = entry.key_ptr.* };
+            for (entry.value_ptr.*) |e| {
+                const present = for (slot.value_ptr.edits.items) |held| {
+                    if (!std.meta.eql(held.range, e.range)) continue;
+                    if (!std.mem.eql(u8, held.newText, e.newText)) return Refused.ANewNameWouldNotCheck;
+                    break true;
+                } else false;
+                if (!present) try slot.value_ptr.edits.append(a, e);
+            }
+        }
+    }
+
+    var changes: Changes = .empty;
+    errdefer release(gpa, &changes);
+    for (lists.keys(), lists.values()) |identity, *document| {
+        std.mem.sort(lsp.types.TextEdit, document.edits.items, {}, earlier);
+        const uris: []const []const u8 = if (open_by_identity.get(identity)) |opened| opened.items else &.{document.uri};
+        for (uris) |target| {
+            if (changes.contains(target)) continue;
+            const uri = try gpa.dupe(u8, target);
+            errdefer gpa.free(uri);
+            const written = try gpa.alloc(lsp.types.TextEdit, document.edits.items.len);
+            var initialized: usize = 0;
+            errdefer {
+                for (written[0..initialized]) |e| gpa.free(e.newText);
+                gpa.free(written);
+            }
+            for (document.edits.items, written) |e, *w| {
+                w.* = .{ .range = e.range, .newText = try gpa.dupe(u8, e.newText) };
+                initialized += 1;
+            }
+            try changes.put(gpa, uri, written);
+        }
+    }
+    return .{ .changes = .{ .map = changes } };
+}
+
+fn earlier(_: void, a: lsp.types.TextEdit, b: lsp.types.TextEdit) bool {
+    if (a.range.start.line != b.range.start.line) return a.range.start.line < b.range.start.line;
+    return a.range.start.character < b.range.start.character;
+}
+
+/// The rename of the name at `position` in one program, with every refusal
+/// but the check of what the edits mean.
+fn planAt(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    checked: *const Analysis,
+    file: FileId,
+    position: lsp.types.Position,
+    encoding: lsp.offsets.Encoding,
+    root: []const u8,
+    new_name: []const u8,
+    refused_kind: ?*?name_case.Kind,
+) !?Plan {
     const named = references.namedAt(checked, file, position, encoding);
     if (named == BindingId.none) {
         const field = references.sourceNameAt(checked, file, position, encoding);
@@ -121,7 +418,9 @@ pub fn forPositionReporting(
         }
         const sites = try references.sourceNameSites(gpa, checked, field, true, null);
         defer gpa.free(sites);
-        return try editsAtSites(gpa, io, checked, sites, encoding, root, new_name, false);
+        const edit = try editsAtSites(gpa, io, checked, sites, encoding, root, new_name, false);
+        errdefer free(gpa, edit);
+        return .{ .checked = checked, .edit = edit, .declared = try gpa.dupe(TokenId, &.{field}) };
     }
 
     // The binding introduced at no token, which is the one recognition
@@ -198,7 +497,232 @@ pub fn forPositionReporting(
     const sites = try references.sitesOf(gpa, checked, spelled_alike, true, null);
     defer gpa.free(sites);
 
-    return try editsAtSites(gpa, io, checked, sites, encoding, root, new_name, spelled_alike.len > 1);
+    const edit = try editsAtSites(gpa, io, checked, sites, encoding, root, new_name, spelled_alike.len > 1);
+    errdefer free(gpa, edit);
+    const declared = try gpa.alloc(TokenId, spelled_alike.len);
+    for (spelled_alike, declared) |b, *t| t.* = checked.semantics.res.declaringToken(b);
+    return .{ .checked = checked, .edit = edit, .declared = declared };
+}
+
+/// Refuses a rename that would change what the program means, by checking the
+/// program the edits write. The sources are edited in memory and checked as
+/// this analysis was (`analysis.rechecked`). Every name the old program wrote
+/// -- in an expression, a written type, a pattern, a path, a field written by
+/// its own name, a field read and an operation selected after a dot or
+/// through its type -- must reach in the new program the declaration it
+/// reached, moved by the edits, and no error may appear that the old program
+/// did not report. A use of a renamed declaration reaching another is
+/// `ANewNameWouldBeCapturedByAnotherBinding`; another name reaching a renamed
+/// declaration is `ANewNameWouldShadowAnotherBinding`; a new error is
+/// `ANewNameWouldNotCheck`.
+///
+/// Costs one check of the program and one pass over its sources' tokens, each
+/// looked up by a binary search in the new program's tokens.
+fn refuseChangedMeaning(
+    gpa: std.mem.Allocator,
+    checked: *const Analysis,
+    /// Which of `checked`'s files a document of `edit` is, however its URI
+    /// spells it.
+    known: *analysis_mod.FileIdentities,
+    renamed: []const TokenId,
+    new_name: []const u8,
+    edit: lsp.types.WorkspaceEdit,
+    encoding: lsp.offsets.Encoding,
+    /// Names `checked` and why, where the renamed program cannot be held to
+    /// the old one. Its reason is allocated in `gpa`.
+    refusal: ?*?ProgramRefusal,
+) !void {
+    const ast = &checked.program.ast;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Each edited source's new text, and where its edits sit in the old.
+    var moves: std.StringHashMapUnmanaged([]const Move) = .empty;
+    var sources: std.ArrayList(loader.InMemoryFile) = .empty;
+    var it = edit.changes.?.map.iterator();
+    while (it.next()) |entry| {
+        // A document another program holds; `across` refuses one none holds.
+        // Keyed by this program's own spelling of the file, which the URI
+        // may spell another way.
+        const file = try known.fileNamed(try uri_mod.pathOf(a, entry.key_ptr.*)) orelse continue;
+        const path = checked.table.get(file).path;
+        // A file open under two URIs has one set of edits under each.
+        if (moves.contains(path)) continue;
+        const text = checked.table.get(file).text;
+        const edits = entry.value_ptr.*;
+        const placed = try a.alloc(Move, edits.len);
+        for (edits, placed) |e, *m| m.* = .{
+            .start = @intCast(lsp.offsets.positionToIndex(text, e.range.start, encoding)),
+            .end = @intCast(lsp.offsets.positionToIndex(text, e.range.end, encoding)),
+            .written = @intCast(e.newText.len),
+        };
+        try moves.put(a, path, placed);
+        try sources.append(a, .{ .path = path, .text = try applyTo(a, text, edits, encoding) });
+    }
+
+    var after = try analysis_mod.rechecked(gpa, checked, sources.items);
+    defer after.deinit();
+    const after_ast = &after.program.ast;
+
+    for (checked.program.modules) |m| {
+        if (m.library) continue;
+        for (m.files) |file| {
+            const path = checked.table.get(file).path;
+            const part = ast.partOfFile(file) orelse continue;
+            const after_file = after.fileNamed(path) orelse {
+                if (refusal) |out| out.* = .{ .entry = checked.made_from.entry, .reason = try std.fmt.allocPrint(gpa, "renamed, it no longer holds `{s}`", .{path}) };
+                return Refused.AProgramTheRenameEditsCouldNotBeChecked;
+            };
+            for (part.token_start..part.token_end) |i| {
+                const token = TokenId.at(@intCast(i));
+                if (ast.tokenTag(token) != .identifier) continue;
+                const reached = referenceOf(checked, file, token);
+                if (reached == TokenId.none) {
+                    // A use that reached nothing, already spelled the new
+                    // name, must not come to reach what the rename declares.
+                    if (!std.mem.eql(u8, ast.tokenText(token), new_name)) continue;
+                    const now = tokenWithin(after_ast, after_file, placeOf(&moves, path, ast.tokenSpan(token).start), ast.tokenText(token)) orelse continue;
+                    const reaches = referenceOf(&after, after_file, now);
+                    if (reaches == TokenId.none) continue;
+                    const reaches_path = after.table.get(after_ast.fileOf(reaches)).path;
+                    for (renamed) |r| {
+                        const r_path = checked.table.get(ast.fileOf(r)).path;
+                        if (!std.mem.eql(u8, r_path, reaches_path)) continue;
+                        if (placeOf(&moves, r_path, ast.tokenSpan(r).start).holds(after_ast.tokenSpan(reaches).start))
+                            return Refused.ANewNameWouldShadowAnotherBinding;
+                    }
+                    continue;
+                }
+                const reached_path = checked.table.get(ast.fileOf(reached)).path;
+                // A declaration the expansion generated has no place the
+                // edits move, and its uses answer for it.
+                if (!checked.library[ast.fileOf(reached).index()] and after.fileNamed(reached_path) == null) continue;
+                // A use of a renamed declaration is spelled the new way where
+                // an edit rewrote it; any other name keeps its spelling.
+                // A use of something the language spells alike with it, such
+                // as a `use` re-exporting it, is rewritten too, so the other
+                // spelling is looked for where the first is not.
+                const is_renamed = std.mem.indexOfScalar(TokenId, renamed, reached) != null;
+                const spelled = if (is_renamed) new_name else ast.tokenText(token);
+                const other = if (is_renamed) ast.tokenText(token) else new_name;
+                // A name no longer written where the edits moved it reaches
+                // nothing it reached.
+                const place = placeOf(&moves, path, ast.tokenSpan(token).start);
+                const now = tokenWithin(after_ast, after_file, place, spelled) orelse tokenWithin(after_ast, after_file, place, other);
+                const reaches = if (now) |t| referenceOf(&after, after_file, t) else TokenId.none;
+                const expected = placeOf(&moves, reached_path, ast.tokenSpan(reached).start);
+                const same = reaches != TokenId.none and
+                    std.mem.eql(u8, after.table.get(after_ast.fileOf(reaches)).path, reached_path) and
+                    expected.holds(after_ast.tokenSpan(reaches).start);
+                if (same) continue;
+                if (std.mem.indexOfScalar(TokenId, renamed, reached) != null) return Refused.ANewNameWouldBeCapturedByAnotherBinding;
+                return Refused.ANewNameWouldShadowAnotherBinding;
+            }
+        }
+    }
+
+    // An error the edited program reports that the old one did not, at the
+    // place the edits moved it to.
+    var reported: std.StringHashMapUnmanaged(void) = .empty;
+    for (checked.sink.items()) |d| {
+        if (d.severity != .err) continue;
+        try reported.put(a, try errorKey(a, &checked.table, &moves, d), {});
+    }
+    for (after.sink.items()) |d| {
+        if (d.severity != .err) continue;
+        if (!reported.contains(try errorKey(a, &after.table, null, d))) return Refused.ANewNameWouldNotCheck;
+    }
+}
+
+/// One edit as byte offsets in the old text, and how many bytes it writes.
+const Move = struct { start: u32, end: u32, written: u32 };
+
+/// Where the byte at `offset` of the file at `path` sits once the file's
+/// edits are applied; a byte inside an edit sits where the edit starts.
+fn moved(moves: *const std.StringHashMapUnmanaged([]const Move), path: []const u8, offset: u32) u32 {
+    const edits = moves.get(path) orelse return offset;
+    var shift: i64 = 0;
+    for (edits) |e| {
+        if (offset < e.start) break;
+        if (offset < e.end) return @intCast(@as(i64, e.start) + shift);
+        shift += @as(i64, e.written) - @as(i64, e.end - e.start);
+    }
+    return @intCast(@as(i64, offset) + shift);
+}
+
+/// What identifies an error: its rule, its file and where its primary label
+/// starts, moved by `moves` where given.
+fn errorKey(a: std.mem.Allocator, table: anytype, moves: ?*const std.StringHashMapUnmanaged([]const Move), d: anytype) ![]const u8 {
+    const code = if (d.code) |c| @tagName(c) else "";
+    const label = d.primaryLabel() orelse return std.fmt.allocPrint(a, "{s}", .{code});
+    const path = table.get(label.file).path;
+    const start = if (moves) |m| moved(m, path, label.span.start) else label.span.start;
+    return std.fmt.allocPrint(a, "{s} {s}:{d}", .{ code, path, start });
+}
+
+/// Where a byte of the old text sits in the new: one place, or the bytes an
+/// edit wrote where the edit covered it.
+const Place = struct {
+    start: u32,
+    end: u32,
+
+    fn holds(self: Place, offset: u32) bool {
+        return offset >= self.start and offset <= self.end;
+    }
+};
+
+/// `moved`, as the bytes an edit wrote where one covered `offset`.
+fn placeOf(moves: *const std.StringHashMapUnmanaged([]const Move), path: []const u8, offset: u32) Place {
+    const here = moved(moves, path, offset);
+    const edits = moves.get(path) orelse return .{ .start = here, .end = here };
+    for (edits) |e| {
+        if (offset >= e.start and offset < e.end) return .{ .start = here, .end = here + e.written };
+    }
+    return .{ .start = here, .end = here };
+}
+
+/// The first token of `file` starting in `place` and spelled `text`, found by
+/// a binary search over the file's tokens, whose starts ascend, and a walk of
+/// the few an edit wrote.
+fn tokenWithin(ast: *const ast_mod.Ast, file: FileId, place: Place, text: []const u8) ?TokenId {
+    const part = ast.partOfFile(file) orelse return null;
+    const spans = ast.tokens.items(.span);
+    var lo = part.token_start;
+    var hi = part.token_end;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (spans[mid].start < place.start) lo = mid + 1 else hi = mid;
+    }
+    while (lo < part.token_end and place.holds(spans[lo].start)) : (lo += 1) {
+        if (std.mem.eql(u8, ast.tokenText(TokenId.at(lo)), text)) return TokenId.at(lo);
+    }
+    return null;
+}
+
+/// The token declaring what `token` names where it is written, or `.none`
+/// where it names nothing or declares what it names.
+fn referenceOf(checked: *const Analysis, file: FileId, token: TokenId) TokenId {
+    const ast = &checked.program.ast;
+    const res = &checked.semantics.res;
+    if (checked.uses.declaredAt(token) != BindingId.none and checked.uses.initializerBindingAt(token) == null) return .none;
+    // A field written by its own name names the field and reads the local;
+    // what a rename can move is the local.
+    if (checked.uses.initializerBindingAt(token)) |b| return res.declaringToken(b);
+    const field = checked.uses.sourceNameAt(token);
+    if (field != .none and field != token) return field;
+    const written = checked.uses.writesAt(res, token);
+    if (written != BindingId.none) return res.declaringToken(written);
+    var chain = checked.cursors.enclosing(ast, file, ast.tokenSpan(token).start);
+    while (chain.next()) |n| switch (n) {
+        .expr => |e| {
+            if (ast.exprMain(e) != token) continue;
+            const b = checked.uses.reachedBy(ast, res, e);
+            if (b != BindingId.none) return res.declaringToken(b);
+        },
+        .decl, .stmt => return .none,
+    };
+    return .none;
 }
 
 /// The kind whose case `new_name` breaks, or null where it keeps the case of
@@ -871,6 +1395,429 @@ test "a name declared in a sibling file is changed in both" {
         "fn width() -> UInt8 {\n    1\n}\n\nfn twice() -> UInt8 {\n    width() + width()\n}\n",
         applied,
     );
+}
+
+test "a new name another binding would answer for at a use is refused" {
+    const gpa = testing.allocator;
+
+    // Each pair is a program and the name the first `_a` (or `helper`) is
+    // renamed to. Renamed, a use the rename rewrote would reach the other
+    // binding spelled that way, and the program would still check while
+    // computing something else.
+    const cases = [_]struct { text: []const u8, old: []const u8, new: []const u8 }{
+        // A later local of the new name stands between the declaration and the use.
+        .{ .text = "fn main() -> UInt8 {\n    let _a: UInt8 = 1\n    let _b: UInt8 = 2\n    _a + _b\n}\n", .old = "_a", .new = "_b" },
+        // A local of the new name stands between the function and its call.
+        .{ .text = "fn helper() -> UInt8 {\n    1\n}\n\nfn main() -> UInt8 {\n    let size: UInt8 = 2\n    helper() + size\n}\n", .old = "helper", .new = "size" },
+    };
+    for (cases) |case| {
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = case.text }}, "main.lin");
+        defer checked.deinit();
+        const declared = std.mem.indexOf(u8, case.text, case.old).?;
+        try testing.expectError(
+            Refused.ANewNameWouldBeCapturedByAnotherBinding,
+            forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(case.text, declared + 1), .@"utf-16", "", case.new),
+        );
+    }
+}
+
+test "a new name another binding would answer for is refused where the program already has errors" {
+    const gpa = testing.allocator;
+
+    // Each program already reports an error the rename does not touch: a
+    // name nothing declares, or a value of the wrong type.
+    const errors = [_][]const u8{ "missing", "true" };
+    for (errors) |wrong| {
+        const text = try std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{\n    let _a: UInt8 = 1\n    let _b: UInt8 = 2\n    let _c: UInt8 = {s}\n    _a + _b\n}}\n", .{wrong});
+        defer gpa.free(text);
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+        defer checked.deinit();
+        try testing.expect(checked.sink.hasErrors());
+        const declared = std.mem.indexOf(u8, text, "_a").?;
+        try testing.expectError(
+            Refused.ANewNameWouldBeCapturedByAnotherBinding,
+            forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, declared + 1), .@"utf-16", "", "_b"),
+        );
+
+        // A call the rename would hand from the trait's `score` to the
+        // type's own operation.
+        const calls = try std.fmt.allocPrint(gpa,
+            \\trait Score {{
+            \\    fn score(self: Self) -> UInt8
+            \\}}
+            \\
+            \\struct P {{ x: UInt8 }}
+            \\
+            \\impl Score for P {{
+            \\    fn score(self: Self) -> UInt8 {{
+            \\        self.x - 2
+            \\    }}
+            \\}}
+            \\
+            \\impl P {{
+            \\    fn bonus(self: Self) -> UInt8 {{
+            \\        self.x + 2
+            \\    }}
+            \\}}
+            \\
+            \\fn main() -> UInt8 {{
+            \\    let p = P {{ x = 3 }}
+            \\    let _c: UInt8 = {s}
+            \\    p.score() + p.bonus() + p.x
+            \\}}
+            \\
+        , .{wrong});
+        defer gpa.free(calls);
+        var called = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = calls }}, "main.lin");
+        defer called.deinit();
+        try testing.expect(called.sink.hasErrors());
+        const bonus = std.mem.indexOf(u8, calls, "fn bonus").? + "fn ".len;
+        try testing.expectError(
+            Refused.ANewNameWouldShadowAnotherBinding,
+            forPosition(gpa, testing.io, &called, called.fileNamed("main.lin").?, at(calls, bonus + 1), .@"utf-16", "", "score"),
+        );
+    }
+}
+
+test "a new name a use that reaches nothing would reach is refused" {
+    const gpa = testing.allocator;
+
+    // Each program writes a name that reaches nothing, which is an error.
+    // Renaming a declaration to that name would make the use reach it, and
+    // the error would go away by changing what the program says.
+    const cases = [_]struct { text: []const u8, old: []const u8, new: []const u8 }{
+        .{ .text = "fn main() -> UInt8 {\n    let _a: UInt8 = 1\n    let _c: UInt8 = later\n    _a + _c\n}\n", .old = "_a", .new = "later" },
+        .{ .text = "struct P { x: UInt8 }\n\nimpl P {\n    fn bonus(self: Self) -> UInt8 {\n        self.x\n    }\n}\n\nfn main() -> UInt8 {\n    let p = P { x = 3 }\n    p.score() + p.bonus()\n}\n", .old = "bonus", .new = "score" },
+    };
+    for (cases) |case| {
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = case.text }}, "main.lin");
+        defer checked.deinit();
+        try testing.expect(checked.sink.hasErrors());
+        const declared = std.mem.indexOf(u8, case.text, case.old).?;
+        try testing.expectError(
+            Refused.ANewNameWouldShadowAnotherBinding,
+            forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(case.text, declared + 1), .@"utf-16", "", case.new),
+        );
+    }
+}
+
+test "a new name that would answer for another binding's use is refused" {
+    const gpa = testing.allocator;
+
+    // Renamed, the binding would stand between another binding of the new
+    // name and a use of it, and that use would reach the renamed one.
+    const cases = [_]struct { text: []const u8, old: []const u8, new: []const u8 }{
+        .{ .text = "fn main() -> UInt8 {\n    let _b: UInt8 = 2\n    let _a: UInt8 = 1\n    _a + _b\n}\n", .old = "_a", .new = "_b" },
+        .{ .text = "fn size() -> UInt8 {\n    1\n}\n\nfn main() -> UInt8 {\n    let n: UInt8 = 2\n    n + size()\n}\n", .old = "n", .new = "size" },
+    };
+    for (cases) |case| {
+        var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = case.text }}, "main.lin");
+        defer checked.deinit();
+        const site = std.mem.lastIndexOf(u8, case.text, case.old).?;
+        try testing.expectError(
+            Refused.ANewNameWouldShadowAnotherBinding,
+            forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(case.text, site + 1), .@"utf-16", "", case.new),
+        );
+    }
+}
+
+test "a new name that would change which type a written type names is refused" {
+    const gpa = testing.allocator;
+
+    // A type parameter is in scope across its function, signature included:
+    // `T` renamed to `Unit` would stand for the parameter's type where
+    // `_u: Unit` names the struct, and the struct renamed to `T` would be
+    // reached as the type parameter there.
+    const text =
+        \\struct Unit { n: UInt8 }
+        \\
+        \\fn pick[T](x: T, _u: Unit) -> T {
+        \\    x
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    pick(1, .{ n = 2 })
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    const parameter = std.mem.indexOf(u8, text, "[T]").? + 1;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, parameter), .@"utf-16", "", "Unit"),
+    );
+    const declared = std.mem.indexOf(u8, text, "Unit").?;
+    try testing.expectError(
+        Refused.ANewNameWouldBeCapturedByAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, declared + 1), .@"utf-16", "", "T"),
+    );
+}
+
+test "a new name that would change which operation a call reaches is refused" {
+    const gpa = testing.allocator;
+
+    // A call reaches the type's own operation before a trait's. Renaming the
+    // own `bonus` to `score` would take `p.score()` from the trait, and
+    // renaming the trait's `score` to `bonus` would hand its call to the
+    // type's own `bonus`. Either program checks, and computes something else.
+    const text =
+        \\trait Score {
+        \\    fn score(self: Self) -> UInt8
+        \\}
+        \\
+        \\struct P { x: UInt8 }
+        \\
+        \\impl Score for P {
+        \\    fn score(self: Self) -> UInt8 {
+        \\        self.x - 2
+        \\    }
+        \\}
+        \\
+        \\impl P {
+        \\    fn bonus(self: Self) -> UInt8 {
+        \\        self.x + 2
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p = P { x = 3 }
+        \\    p.score() + p.bonus() + p.x
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    const bonus = std.mem.indexOf(u8, text, "fn bonus").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, bonus + 1), .@"utf-16", "", "score"),
+    );
+    const score = std.mem.indexOf(u8, text, "fn score").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldBeCapturedByAnotherBinding,
+        forPosition(gpa, testing.io, &checked, file, at(text, score + 1), .@"utf-16", "", "bonus"),
+    );
+}
+
+test "a new name that would change what a call written through its type reaches is refused" {
+    const gpa = testing.allocator;
+
+    // `P.score(p)` reaches the trait's `score` while the type declares none;
+    // the type's own `bonus` renamed to `score` would take it.
+    const text =
+        \\trait Score {
+        \\    fn score(self: Self) -> UInt8
+        \\}
+        \\
+        \\struct P { x: UInt8 }
+        \\
+        \\impl Score for P {
+        \\    fn score(self: Self) -> UInt8 {
+        \\        self.x + 10
+        \\    }
+        \\}
+        \\
+        \\impl P {
+        \\    fn bonus(self: Self) -> UInt8 {
+        \\        self.x + 20
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p = P { x = 3 }
+        \\    let q = P { x = 4 }
+        \\    P.score(p) + q.bonus()
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const bonus = std.mem.indexOf(u8, text, "fn bonus").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, bonus + 1), .@"utf-16", "", "score"),
+    );
+}
+
+test "a new name that would change what a call in another module reaches is refused" {
+    const gpa = testing.allocator;
+
+    // The call is written in `main.lin`, which holds no site of the rename.
+    const lib =
+        \\pub trait Score {
+        \\    fn score(self: Self) -> UInt8
+        \\}
+        \\
+        \\pub struct P { x: UInt8 }
+        \\
+        \\impl Score for P {
+        \\    fn score(self: Self) -> UInt8 {
+        \\        self.x + 10
+        \\    }
+        \\}
+        \\
+        \\impl P {
+        \\    pub fn bonus(self: Self) -> UInt8 {
+        \\        self.x + 20
+        \\    }
+        \\
+        \\    pub fn make(x: UInt8) -> P {
+        \\        .{ x = x }
+        \\    }
+        \\}
+        \\
+    ;
+    const main =
+        \\import lib
+        \\
+        \\use lib.Score
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p = lib.P.make(3)
+        \\    p.score()
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
+        .{ .path = "app/main.lin", .text = main },
+        .{ .path = "app/lib/lib.lin", .text = lib },
+    }, "app");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+    const bonus = std.mem.indexOf(u8, lib, "fn bonus").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, checked.fileNamed("app/lib/lib.lin").?, at(lib, bonus + 1), .@"utf-16", "", "score"),
+    );
+}
+
+test "a new name a field of the same spelling leaves alone is accepted" {
+    const gpa = testing.allocator;
+
+    // `p.x` reads the field, which no operation's name reaches, so the
+    // operation may be named `x`.
+    const text =
+        \\struct P { x: UInt8 }
+        \\
+        \\impl P {
+        \\    fn bonus(self: Self) -> UInt8 {
+        \\        self.x + 2
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p = P { x = 3 }
+        \\    p.bonus() + p.x
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const bonus = std.mem.indexOf(u8, text, "fn bonus").? + "fn ".len;
+    const edit = (try forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, bonus + 1), .@"utf-16", "", "x")).?;
+    defer free(gpa, edit);
+    try testing.expectEqual(@as(usize, 2), editsFor(edit, "main.lin").len);
+}
+
+test "a new name that would leave a call answered by two traits is refused" {
+    const gpa = testing.allocator;
+
+    const text =
+        \\trait A {
+        \\    fn foo(self: Self) -> UInt8
+        \\}
+        \\
+        \\trait B {
+        \\    fn bar(self: Self) -> UInt8
+        \\}
+        \\
+        \\struct P { x: UInt8 }
+        \\
+        \\impl A for P {
+        \\    fn foo(self: Self) -> UInt8 {
+        \\        self.x
+        \\    }
+        \\}
+        \\
+        \\impl B for P {
+        \\    fn bar(self: Self) -> UInt8 {
+        \\        self.x + 1
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let p = P { x = 3 }
+        \\    p.foo() + p.bar()
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const bar = std.mem.indexOf(u8, text, "fn bar").? + "fn ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, bar + 1), .@"utf-16", "", "foo"),
+    );
+}
+
+test "a new name that a field written by its own name would reach is refused" {
+    const gpa = testing.allocator;
+
+    // `P { x, y = q }` writes the field `x` from the local `x`. Renamed to
+    // `x`, the later `q` would be the local the shorthand reads.
+    const text =
+        \\struct P { x: UInt8, y: UInt8 }
+        \\
+        \\fn main() -> UInt8 {
+        \\    let x: UInt8 = 1
+        \\    let q: UInt8 = 2
+        \\    let p = P { x, y = q }
+        \\    p.x + p.y
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const q = std.mem.indexOf(u8, text, "let q").? + "let ".len;
+    try testing.expectError(
+        Refused.ANewNameWouldShadowAnotherBinding,
+        forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, q), .@"utf-16", "", "x"),
+    );
+}
+
+test "a new name no use would reach differently is accepted" {
+    const gpa = testing.allocator;
+
+    // The earlier `x` is last used before `z` is declared, so `z` renamed to
+    // `x` shadows it only where nothing names it; and `y` in another function
+    // shares no scope with the `x` there.
+    const text =
+        \\fn other() -> UInt8 {
+        \\    let x: UInt8 = 4
+        \\    x
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let x: UInt8 = 1
+        \\    let y: UInt8 = x
+        \\    let z: UInt8 = 2
+        \\    y + z + other()
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const file = checked.fileNamed("main.lin").?;
+
+    const z = std.mem.lastIndexOf(u8, text, "z").?;
+    const renamed = (try forPosition(gpa, testing.io, &checked, file, at(text, z), .@"utf-16", "", "x")).?;
+    defer free(gpa, renamed);
+    try testing.expectEqual(@as(usize, 2), editsFor(renamed, "main.lin").len);
 }
 
 test "a primitive is not the programmer's to rename" {

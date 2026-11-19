@@ -1,0 +1,6 @@
+// Nothing here imports `sub`, so the program does not load it. A file of
+// `sub` the editor opens is still checked: its module is the entry, with this
+// root's imports, as `linea check sub/ondisk.lin` checks it.
+fn main() -> UInt8 {
+    0
+}

@@ -133,3 +133,9 @@ traits/two_applications_of_one_type_each_implement_a_trait.lin
 traits/each_application_settles_its_own_declared_type.lin
 # Two callable heads of one shape: declaration reversal must reach the same bodies.
 traits/callable_heads/two_callable_heads_of_one_shape_each_implement_a_trait.lin
+# Every operation a rename can move: own versus trait, written through the
+# type or the value, in another module, two traits, and a field beside it.
+rename/a_call_reaches_the_types_own_operation_before_a_traits.lin
+rename/two_traits_answer_calls_of_their_own_names.lin
+rename/a_field_and_an_operation_are_read_apart.lin
+rename/a_call_in_another_module_reaches_what_its_type_declares

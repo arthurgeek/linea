@@ -1798,13 +1798,13 @@ test "example roots: a file named like a manifest is not the manifest" {
     try testing.expectEqualStrings("app/stray.lin", stray.files[0]);
 }
 
-test "example roots: a source that leaves its root, and a manifest that is not JSON, are named" {
+test "example roots: a source that is not a path down from its root, and a manifest that is not JSON, are named" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
 
-    // The spellings of the loader's test "a manifest's source stays inside the
-    // directory holding it".
+    // The spellings of the test "a manifest's source stays inside the
+    // directory holding it" in `src/support/manifest_source.zig`.
     const entries = [_]source.ExampleEntry{
         .{ .path = "up", .directory = true },
         .{ .path = "up/linea.json", .directory = false, .text = "{\"source\": \"../d\"}" },
@@ -1823,11 +1823,12 @@ test "example roots: a source that leaves its root, and a manifest that is not J
     const roots = source.exampleRoots(gpa, &entries);
     const found = source.unreachedSources(gpa, &entries, roots);
     try testing.expectEqual(@as(usize, 0), found.files.len);
-    try testing.expectEqual(@as(usize, 4), found.problems.len);
-    try testing.expectEqualStrings("absolute/linea.json names a source, \"/tmp\", outside its directory", found.problems[0]);
+    try testing.expectEqual(@as(usize, 5), found.problems.len);
+    try testing.expectEqualStrings("absolute/linea.json names a source, \"/tmp\", that is not a path down from its directory", found.problems[0]);
     try testing.expectEqualStrings("broken/linea.json is not valid JSON", found.problems[1]);
-    try testing.expectEqualStrings("climbs/linea.json names a source, \"src/../../x\", outside its directory", found.problems[2]);
-    try testing.expectEqualStrings("up/linea.json names a source, \"../d\", outside its directory", found.problems[3]);
+    try testing.expectEqualStrings("climbs/linea.json names a source, \"src/../../x\", that is not a path down from its directory", found.problems[2]);
+    try testing.expectEqualStrings("inside/linea.json names a source, \"src/../lib\", that is not a path down from its directory", found.problems[3]);
+    try testing.expectEqualStrings("up/linea.json names a source, \"../d\", that is not a path down from its directory", found.problems[4]);
 }
 
 test "example roots: the tests a run reported are read from its closing line" {

@@ -710,6 +710,15 @@ pub fn run(process: std.process.Init) !u8 {
                 .{ loader.manifest_name, file_path },
             ),
             error.FileNotFound => "no file or directory of that name",
+            error.ManifestSourceLoops => reason: {
+                const source = try loader.entryOf(gpa, io, file_path, .as_named, "");
+                defer gpa.free(source);
+                break :reason try std.fmt.allocPrint(
+                    gpa,
+                    "its source, '{s}', is a symbolic link that leads back to itself; name a directory in the {s}",
+                    .{ source, loader.manifest_name },
+                );
+            },
             error.SourceTooLarge => try std.fmt.allocPrint(
                 gpa,
                 "a source is larger than the {d} bytes a position can address",
@@ -727,7 +736,7 @@ pub fn run(process: std.process.Init) !u8 {
             ),
             error.ManifestSourceLeavesRoot => try std.fmt.allocPrint(
                 gpa,
-                "the `source` in its {s} leaves the directory holding it; name a directory inside that one",
+                "the `source` in its {s} is not a path down from the directory holding it; name a directory inside that one, without `..`",
                 .{loader.manifest_name},
             ),
             error.ManifestExternNotModules => try std.fmt.allocPrint(

@@ -1,0 +1,10 @@
+error[T-Bound]: `Pair` takes 0 type argument(s), and was given 1
+  --> tests/traits/a_derive_parameter_spelled_as_the_type_it_derives_for.lin:30:35
+   |
+30 | derive[Pair: Measure] Measure for Pair[Pair]
+   |                                   ^^^^ this type takes no arguments
+error[T-UnknownOperation]: `Pair[UInt8]` has no operation `measure`
+  --> tests/traits/a_derive_parameter_spelled_as_the_type_it_derives_for.lin:34:5
+   |
+34 |     pair.measure()
+   |     ^^^^^^^^^^^^ `Measure` declares it, and `Pair[UInt8]` does not implement `Measure`

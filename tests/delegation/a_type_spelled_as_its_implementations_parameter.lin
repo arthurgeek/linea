@@ -1,0 +1,17 @@
+struct C[C] {
+    inner: C,
+}
+
+impl[C: Index[UInt64]] Index[UInt64] for C[C] {
+    type Elem = C.Elem
+
+    proj at(inout self: C[C], i: UInt64) -> C.Elem {
+        self.inner[i]
+    }
+}
+
+fn main() -> UInt8 {
+    var wrapped: C[[UInt8; 2]] = .{ inner = [2, 3] }
+    wrapped[0] += 1
+    return wrapped[0] + wrapped[1] - 6
+}

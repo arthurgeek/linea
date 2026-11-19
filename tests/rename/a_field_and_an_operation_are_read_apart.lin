@@ -1,0 +1,17 @@
+// `p.x` reads the field and `p.bonus()` runs the operation: a field is never
+// what a call reaches, and an operation never what a field read is.
+struct P { x: UInt8, y: UInt8 }
+
+impl P {
+    fn bonus(self: Self) -> UInt8 {
+        self.x + self.y
+    }
+}
+
+fn main() -> UInt8 {
+    let x: UInt8 = 1
+    let y: UInt8 = 2
+    let p = P { x, y }
+    let total = p.x + x
+    total + p.bonus()
+}

@@ -8307,6 +8307,27 @@ const Resolver = struct {
         // was written. Nothing is recorded for it, so its members are the
         // members of nothing rather than of unit or of a tuple nobody wrote.
         if (headRefusedByTheParser(written_head)) return self.refuseKeyless(d);
+        // A type parameter is in scope over the whole declaration, its head
+        // included, so a head spelled as one of them names the parameter.
+        // A parameter takes no arguments, and a head giving it some names no
+        // type: in `derive[Pair] Measure for Pair[Pair]` the generated body
+        // would name the parameter wherever it means the type. The checker
+        // reads an implementation's head as a written type and reports it
+        // there; a derive's head it never reads, so it is reported here.
+        if (written_head.kind == .named and written_head.base == .none and written_head.args.len() != 0) {
+            for (self.ast.declTypeParams(d)) |parameter| {
+                if (self.ast.tokenName(parameter.name) != self.ast.tokenName(written_head.name)) continue;
+                if (is_derive) try self.sink.addErrorFmt(
+                    .t_bound,
+                    self.ast.fileOf(tok),
+                    self.ast.tokenSpan(written_head.name),
+                    "this type takes no arguments",
+                    "`{s}` takes 0 type argument(s), and was given {d}",
+                    .{ self.ast.tokenText(written_head.name), written_head.args.len() },
+                );
+                return self.refuseKeyless(d);
+            }
+        }
         // An implementation whose head or trait arguments hold a type the
         // parser refused has no key to read: it is compared with no other,
         // and is not asked whether its parameters can be recovered from one.

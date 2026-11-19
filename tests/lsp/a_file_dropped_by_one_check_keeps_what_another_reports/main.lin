@@ -1,0 +1,7 @@
+// The program drops `util` while a file of `sub` still imports it, so what
+// the check of `sub` reports for `util.lin` is still shown.
+import util
+
+fn main() -> UInt8 {
+    util.value()
+}

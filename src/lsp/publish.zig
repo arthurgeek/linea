@@ -355,7 +355,7 @@ test "a module read from disk whose bytes are not UTF-8 publishes text" {
     const loaded = try docs.filesFor(gpa, testing.io, found, .every_file);
     defer Documents.freeFiles(gpa, loaded);
 
-    var checked = try analysis_mod.onDisk(gpa, gpa, test_library.get(), loaded, found.entry, testing.io);
+    var checked = try analysis_mod.onDisk(gpa, gpa, test_library.get(), loaded, found.entry, null, testing.io);
     defer checked.deinit();
     var messages = std.heap.ArenaAllocator.init(gpa);
     defer messages.deinit();

@@ -215,6 +215,10 @@ pub const Index = struct {
     /// found. Owned, and fixed once built: a program is a directory holding a
     /// manifest, and finding a new one is a walk.
     programs: []const []const u8,
+    /// The directory of each manifest under the workspace whose program could
+    /// not be resolved, such as one that will not parse. Owned. A rename
+    /// reads it, since nothing shows such a program not holding a file.
+    unresolved: []const []const u8 = &.{},
     /// Sorted by root, then name, then module, then file. The order is what
     /// makes a query for one root and one prefix a single contiguous run.
     entries: std.ArrayList(Entry),
@@ -276,7 +280,13 @@ pub const Index = struct {
         defer walked.deinit();
         const w = walked.allocator();
 
-        self.programs = try programsUnder(gpa, w, io, root);
+        var unresolved: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (unresolved.items) |p| gpa.free(p);
+            unresolved.deinit(gpa);
+        }
+        self.programs = try programsUnder(gpa, w, io, root, &unresolved);
+        self.unresolved = try unresolved.toOwnedSlice(gpa);
 
         // One arena for what reading a file costs, released before the next
         // one is read. A file's text, its tokens and its syntax tree are the
@@ -351,6 +361,8 @@ pub const Index = struct {
         self.gpa.free(self.by_file);
         for (self.programs) |p| self.gpa.free(p);
         self.gpa.free(self.programs);
+        for (self.unresolved) |p| self.gpa.free(p);
+        self.gpa.free(self.unresolved);
         self.gpa.free(self.root);
     }
 
@@ -672,6 +684,9 @@ fn programsUnder(
     scratch: std.mem.Allocator,
     io: std.Io,
     root: []const u8,
+    /// Gains the directory of each manifest whose program the loader could
+    /// not resolve. Its strings are `gpa`'s.
+    unresolved: *std.ArrayList([]const u8),
 ) ![]const []const u8 {
     var found: std.ArrayList([]const u8) = .empty;
     errdefer {
@@ -705,15 +720,25 @@ fn programsUnder(
 
         // What the manifest marks is the program; where its source begins is
         // the loader's answer and not a second reading of the same file.
-        const entry = loader.entryOf(scratch, io, holding, .as_named, root) catch continue;
+        const entry = loader.entryOf(scratch, io, holding, .as_named, root) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => {
+                const kept = try gpa.dupe(u8, holding);
+                errdefer gpa.free(kept);
+                try unresolved.append(gpa, kept);
+                continue;
+            },
+        };
         try found.append(gpa, try gpa.dupe(u8, entry));
     }
 
     std.mem.sort([]const u8, found.items, {}, lessByPath);
 
+    // A duplicate is compared with the last root kept, which is live; the
+    // entry before it may be a duplicate already freed.
     var kept: usize = 0;
-    for (found.items, 0..) |p, i| {
-        if (i > 0 and std.mem.eql(u8, p, found.items[i - 1])) {
+    for (found.items) |p| {
+        if (kept > 0 and std.mem.eql(u8, p, found.items[kept - 1])) {
             gpa.free(p);
             continue;
         }
@@ -929,6 +954,23 @@ test "a manifest inside a program marks a program of its own" {
     defer testing.allocator.free(from_inner);
     try testing.expectEqual(@as(usize, 1), from_inner.len);
     try testing.expectEqualStrings("inner", from_inner[0]);
+}
+
+test "three manifests naming one source root are one program" {
+    // The outer manifest's source is `a/inner`, the middle one's is `inner`,
+    // and the innermost marks `a/inner` itself: each names the same directory.
+    var ws = try Scratch.init(&.{
+        .{ .at = "linea.json", .text = "{\"source\": \"a/inner\"}" },
+        .{ .at = "a/linea.json", .text = "{\"source\": \"inner\"}" },
+        .{ .at = "a/inner/linea.json", .text = "{}" },
+        .{ .at = "a/inner/main.lin", .text = "pub fn only() -> UInt8 { 1 }\n" },
+    });
+    defer ws.deinit();
+
+    var index = try Index.build(testing.allocator, testing.io, ws.root);
+    defer index.deinit();
+
+    try testing.expectEqual(@as(usize, 1), index.programs.len);
 }
 
 test "a prefix matching a name two modules export answers both" {

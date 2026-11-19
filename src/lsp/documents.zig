@@ -64,6 +64,9 @@ pub const Documents = struct {
     /// substituted for what the file on disk holds. The caller owns every
     /// path and every text in the returned slice, and the slice itself.
     ///
+    /// An open buffer naming a file not on disk is listed too, wherever the
+    /// loader says a source of that path would belong.
+    ///
     /// Membership is the loader's answer, asked rather than re-derived: a
     /// walk of its own agrees on every module without a subdirectory and
     /// disagrees on the first one with, which is a server analysing a
@@ -79,6 +82,18 @@ pub const Documents = struct {
     /// with its text left on disk (`InMemoryFile.deferred`): what the walk
     /// finds is every file of the program's directories, and a program
     /// reaches only those it imports.
+    ///
+    /// A buffer is found for a file however the program spells it -- through
+    /// a symlinked directory, a file that is itself a symlink, or another
+    /// case where the file system ignores case -- by identity
+    /// (`loader.identityOf`), so every program reaching a file reads the text
+    /// the editor shows. Two buffers of one file with different text are
+    /// `openTwiceApart`, which a rename refuses; with one text, either is it.
+    ///
+    /// **Bound:** a buffer found under the spelling the program lists costs a
+    /// lookup. Only where some open buffer is not, the buffers' identities
+    /// are taken, one canonicalisation each, and each listed file without a
+    /// buffer of its own spelling is canonicalised once.
     pub fn filesFor(
         self: *const Documents,
         gpa: std.mem.Allocator,
@@ -86,11 +101,14 @@ pub const Documents = struct {
         root: loader.Root,
         reading: Reading,
     ) ![]const loader.InMemoryFile {
-        const paths = try loader.pathsOfRoot(gpa, io, root);
-        defer {
-            for (paths) |p| gpa.free(p);
-            gpa.free(paths);
-        }
+        // A buffer the editor opened before saving it is listed where the
+        // file will be once it is written.
+        const buffers = try gpa.alloc([]const u8, self.open.count());
+        defer gpa.free(buffers);
+        var keys = self.open.keyIterator();
+        for (buffers) |*path| path.* = keys.next().?.*;
+        const paths = try loader.pathsOfRoot(gpa, io, root, buffers);
+        defer loader.freeListed(gpa, paths);
 
         var files: std.ArrayList(loader.InMemoryFile) = .empty;
         errdefer {
@@ -98,7 +116,23 @@ pub const Documents = struct {
             files.deinit(gpa);
         }
 
-        for (paths) |disk_path| {
+        // Buffers by identity, taken only where some buffer is not listed
+        // under its own spelling.
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        defer scratch.deinit();
+        const s = scratch.allocator();
+        var listed_exactly: usize = 0;
+        for (paths) |listed| {
+            if (self.open.contains(listed.path)) listed_exactly += 1;
+        }
+        var by_identity: std.StringHashMapUnmanaged([]const u8) = .empty;
+        if (listed_exactly < self.open.count()) {
+            var it = self.open.iterator();
+            while (it.next()) |entry| try by_identity.put(s, try loader.identityOf(s, io, entry.key_ptr.*), entry.value_ptr.*);
+        }
+
+        for (paths) |listed| {
+            const disk_path = listed.path;
             const path = try gpa.dupe(u8, disk_path);
             errdefer gpa.free(path);
 
@@ -110,12 +144,19 @@ pub const Documents = struct {
             // buffer is the text the editor shows. Any other source is left
             // on disk where the load can read it.
             const is_manifest = std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name);
-            const buffer = self.open.get(disk_path);
+            const buffer = self.open.get(disk_path) orelse if (by_identity.count() == 0)
+                null
+            else
+                by_identity.get(try loader.identityOf(s, io, disk_path));
             const deferred = buffer == null and !is_manifest and reading == .open_and_manifests;
+            // A manifest the walk read is the text it read, so the load and
+            // the walk that listed its files agree on what each one says.
             const text = if (buffer) |held|
                 try gpa.dupe(u8, held)
             else if (deferred)
                 try gpa.dupe(u8, "")
+            else if (listed.text) |read|
+                try gpa.dupe(u8, read)
             else
                 try source_mod.readFileAlloc(io, gpa, path);
             errdefer gpa.free(text);
@@ -135,6 +176,25 @@ pub const Documents = struct {
         }
 
         return files.toOwnedSlice(gpa);
+    }
+
+    /// Two open buffers of one file, by identity (`loader.identityOf`), whose
+    /// texts differ: their paths, or null where every file open twice is open
+    /// with one text. A rename edits one text per file, and there is none.
+    ///
+    /// **Bound:** one canonicalisation per open buffer.
+    pub fn openTwiceApart(self: *const Documents, io: std.Io, arena: std.mem.Allocator) !?[2][]const u8 {
+        var seen: std.StringHashMapUnmanaged([]const u8) = .empty;
+        var it = self.open.iterator();
+        while (it.next()) |entry| {
+            const slot = try seen.getOrPut(arena, try loader.identityOf(arena, io, entry.key_ptr.*));
+            if (!slot.found_existing) {
+                slot.value_ptr.* = entry.key_ptr.*;
+                continue;
+            }
+            if (!std.mem.eql(u8, self.open.get(slot.value_ptr.*).?, entry.value_ptr.*)) return .{ slot.value_ptr.*, entry.key_ptr.* };
+        }
+        return null;
     }
 
     /// Releases what `filesFor` returned.

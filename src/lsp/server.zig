@@ -2,6 +2,7 @@ const std = @import("std");
 const lsp = @import("lsp");
 const Documents = @import("documents.zig").Documents;
 const loader = @import("../driver/loader.zig");
+const slow_tests = @import("../support/slow_tests.zig");
 const analysis = @import("analysis.zig");
 const publish = @import("publish.zig");
 const tokens = @import("tokens.zig");
@@ -117,14 +118,22 @@ pub const Handler = struct {
     /// outside the editor, which the client's watch reports and which drops
     /// the analysis of the module that holds it.
     cached: ?Cached = null,
-    /// The files each program was last published with something wrong in,
-    /// by the program's entry. An editor shows a file's diagnostics until
-    /// others are published for it, so a file the program no longer holds is
-    /// published once more, with none.
+    /// The analysis of a file of a root no import of its program reaches,
+    /// checked with its module as the entry, held beside the program's in
+    /// `cached`: deciding that the program does not reach the file reads the
+    /// program's analysis, and keeping both means an edit in such a file
+    /// costs one check, not the program's again as well.
+    alone: ?Cached = null,
+    /// What each check last reported for each file it reached, by the
+    /// check's key: a program's entry, or the module a file no import reaches
+    /// was checked as. A file is published with the union of what every key
+    /// reaching it reported, so a check that stops reaching a file takes back
+    /// only its own diagnostics, and what an editor shows for a file is what
+    /// every check of it reports, whichever ran last.
     ///
-    /// **Bound:** the files that had a diagnostic when their program was
-    /// last published, over the programs the session has published.
-    flagged: std.StringHashMapUnmanaged(std.ArrayList([]u8)) = .empty,
+    /// **Bound:** the files each key last reached, over the keys the session
+    /// has published; publishing one file reads each key once.
+    reported: std.StringArrayHashMapUnmanaged(Reported) = .empty,
     /// What every program under the workspace exports, held for the session.
     ///
     /// Built on the first request that reads it, so a session that never asks
@@ -177,10 +186,28 @@ pub const Handler = struct {
     const embeds_registration = "linea.embeddedFiles";
 
     /// One module's analysis with the module it is of.
+    /// One check's last report: its program's entry, and for each file it
+    /// reached, the diagnostics it reported there as the JSON a client is
+    /// sent. Everything, the key it is held under included, lives in `arena`.
+    const Reported = struct {
+        arena: std.heap.ArenaAllocator,
+        entry: []const u8,
+        /// The path the check is run again from: the entry for a program's
+        /// check, and the open document it was made for for a module's.
+        asked: []const u8,
+        /// Whether this is a module's check rather than its program's.
+        module: bool,
+        files: std.StringArrayHashMapUnmanaged([]const []const u8) = .empty,
+    };
+
     const Cached = struct {
         /// The entry the analysis was checked from. Owned, because the
         /// resolution it was copied from lives on a message's arena.
         entry: []u8,
+        /// The module checked as the entry, where the analysis is of a file
+        /// no import of its program reaches; null for the program itself.
+        /// Owned, as `entry` is.
+        module: ?[]u8 = null,
         of: analysis.Analysis,
     };
 
@@ -239,7 +266,15 @@ pub const Handler = struct {
         else
             params.rootUri;
         // Held for the session, so it outlives this message's arena.
-        if (root_uri) |uri| handler.setRoot(try uri_mod.pathOf(handler.gpa, uri));
+        if (root_uri) |uri| {
+            // A directory named with a trailing `/` is the directory without
+            // it, which is how every path compared against the root is spelled.
+            const named = try uri_mod.pathOf(handler.gpa, uri);
+            defer handler.gpa.free(named);
+            var end = named.len;
+            while (end > 1 and named[end - 1] == '/') end -= 1;
+            handler.setRoot(try handler.gpa.dupe(u8, named[0..end]));
+        }
 
         // Advertises exactly the methods this struct implements: a
         // capability offered here with no method to answer it fails the
@@ -383,7 +418,13 @@ pub const Handler = struct {
             try handler.freshen(arena, path);
         }
         if (manifest_changed) return handler.reportOpen(arena);
-        if (republish) |entry| try handler.report(arena, entry);
+        if (republish) |entry| try handler.refresh(arena, entry, true);
+        // A source changed on disk is what every check that read it reads
+        // again.
+        for (params.changes) |change| {
+            const path = try uri_mod.pathOf(arena, change.uri);
+            if (std.mem.endsWith(u8, path, ".lin")) try handler.refresh(arena, path, false);
+        }
     }
 
     pub fn @"textDocument/didOpen"(
@@ -396,35 +437,37 @@ pub const Handler = struct {
         const change = try handler.documents.set(path, document.text);
         if (!handler.cachedTextMatches(path, document.text)) try handler.invalidate(arena, path);
         if (change != .unchanged) try handler.freshen(arena, path);
-        try handler.report(arena, path);
+        try handler.refresh(arena, path, true);
     }
 
-    /// Full-text sync only, so `contentChanges` holds exactly one whole
-    /// document per notification -- the shape `initialize` advertised is the
-    /// only one a compliant client sends.
+    /// Full-text sync only, so `contentChanges` holds whole documents -- the
+    /// shape `initialize` advertised is the only one a compliant client sends.
+    /// Applied in order, the last whole document is the text.
     ///
-    /// A change naming the region it replaces is one this server cannot apply,
-    /// and it stops the notification. Dropped instead, the text the server
-    /// held was no longer the text the editor held, and everything below
-    /// republished diagnostics about a document nobody was looking at --
-    /// confidently wrong rather than absent.
+    /// The notification is validated before anything changes, and refused
+    /// whole: a document `didOpen` never opened is `error.DocumentNotOpen`, and
+    /// a change naming the region it replaces is `error.PartialChangeUnsupported`,
+    /// which this server cannot apply. Applied in part, or to a document opened
+    /// by the change itself, the text the server held would no longer be the
+    /// text the editor held, and everything below would republish diagnostics
+    /// about a document nobody was looking at.
     pub fn @"textDocument/didChange"(
         handler: *Handler,
         arena: std.mem.Allocator,
         params: lsp.types.TextDocument.DidChangeParams,
     ) !void {
         const path = try uri_mod.pathOf(arena, params.textDocument.uri);
-        var changed = false;
+        if (!handler.documents.open.contains(path)) return error.DocumentNotOpen;
+        var last: ?[]const u8 = null;
         for (params.contentChanges) |change| switch (change) {
-            .text_document_content_change_whole_document => |whole| {
-                changed = (try handler.documents.set(path, whole.text)) != .unchanged or changed;
-            },
+            .text_document_content_change_whole_document => |whole| last = whole.text,
             .text_document_content_change_partial => return error.PartialChangeUnsupported,
         };
+        const changed = if (last) |whole| (try handler.documents.set(path, whole)) != .unchanged else false;
         const text = handler.documents.open.get(path).?;
         if (!handler.cachedTextMatches(path, text)) try handler.invalidate(arena, path);
         if (changed) try handler.freshen(arena, path);
-        try handler.report(arena, path);
+        try handler.refresh(arena, path, true);
     }
 
     pub fn @"textDocument/didClose"(
@@ -435,9 +478,11 @@ pub const Handler = struct {
         const path = try uri_mod.pathOf(arena, params.textDocument.uri);
         handler.documents.close(path);
         // The buffer is gone, so the module now reads that file from disk, and
-        // so does what the index holds for it.
+        // so does what the index holds for it. What the disk's text reports is
+        // published, since an editor still shows what the buffer's did.
         try handler.invalidate(arena, path);
         try handler.freshen(arena, path);
+        try handler.refresh(arena, path, true);
     }
 
     /// The kind the lexer gave every token of a document.
@@ -648,30 +693,73 @@ pub const Handler = struct {
     /// reasons it was. The alternative is answering an empty edit, which a
     /// client applies in silence.
     ///
-    /// The program the server sees is the one rooted at the file the editor
-    /// opened. A sibling program importing this module is not in it, so its
-    /// uses are not among these and are left as they were.
+    /// Every program of the workspace holding the file that declares the
+    /// name is renamed with it and checked with the edits applied, so a
+    /// library two programs depend on is renamed for both or neither.
     pub fn @"textDocument/rename"(
         handler: *Handler,
         arena: std.mem.Allocator,
         params: lsp.types.rename.Params,
     ) !?lsp.types.WorkspaceEdit {
+        // A rename edits one text per file, and a file open twice with two
+        // texts has none.
+        if (try handler.documents.openTwiceApart(handler.io, arena)) |pair| {
+            try handler.transport.writeNotification(
+                handler.io,
+                arena,
+                "window/showMessage",
+                lsp.types.window.ShowMessageParams,
+                .{ .type = .Error, .message = try std.fmt.allocPrint(arena, "one file is open twice with different text, at `{s}` and `{s}`; save or close one", .{ pair[0], pair[1] }) },
+                .{ .emit_null_optional_fields = false },
+            );
+            return rename.Refused.AFileIsOpenTwiceWithDifferentText;
+        }
+        const open = try arena.alloc([]const u8, handler.documents.open.count());
+        var opened = handler.documents.open.keyIterator();
+        for (open) |*slot| slot.* = opened.next().?.*;
+
         const path = try uri_mod.pathOf(arena, params.textDocument.uri);
         const checked = try handler.check(arena, path);
         const file = checked.fileNamed(path) orelse return null;
 
+        var others = try handler.otherPrograms(arena, checked);
+        defer {
+            for (others.analysed.items) |*other| other.deinit();
+            others.analysed.deinit(arena);
+        }
+        const programs = try arena.alloc(*const analysis.Analysis, others.analysed.items.len + 1);
+        programs[0] = checked;
+        for (others.analysed.items, programs[1..]) |*other, *slot| slot.* = other;
+
         var refused_kind: ?name_case.Kind = null;
-        return rename.forPositionReporting(
+        var unloaded: ?rename.ProgramRefusal = null;
+        return rename.across(
             arena,
             handler.io,
-            checked,
+            programs,
+            others.unanalysed.items,
+            open,
             file,
             params.position,
             handler.offset_encoding,
             handler.root,
             params.newName,
             &refused_kind,
+            &unloaded,
         ) catch |err| {
+            // The program the rename cannot check, and why, beside the
+            // refusal: what the reader has to fix before renaming.
+            if (unloaded) |program| {
+                const said = if (err == error.AProgramTheRenameReachesDoesNotLoad) "reaches this name and does not load" else "cannot be held to this rename";
+                try handler.transport.writeNotification(
+                    handler.io,
+                    arena,
+                    "window/showMessage",
+                    lsp.types.window.ShowMessageParams,
+                    .{ .type = .Error, .message = try std.fmt.allocPrint(arena, "the program at `{s}` {s}: {s}", .{ program.entry, said, program.reason }) },
+                    .{ .emit_null_optional_fields = false },
+                );
+            }
             // A refusal carries only its name, so the kind and the respelling
             // [N-Case] would offer are shown beside it.
             if (refused_kind) |kind| {
@@ -774,30 +862,124 @@ pub const Handler = struct {
 
     /// The module a document belongs to, checked.
     ///
-    /// Costs one check of the module, or nothing where the module held is
-    /// already the one asked about. The result is borrowed from the handler
-    /// and stays valid until the next document changes; `arena` carries only
-    /// what the resolution needed.
+    /// The program its root makes, wherever that program holds the document.
+    /// A file the root's source holds that no import of the program reaches
+    /// is checked as `linea check` checks it when named: from the program's
+    /// root, with the file's module as the entry. Analysed only with the
+    /// program, it would be analysed by nothing, and an editor would show no
+    /// diagnostic for it.
+    ///
+    /// Costs one check of the program, one more for such a file, or nothing
+    /// where the analysis held is already the one asked about. The result is
+    /// borrowed from the handler and stays valid until the next document
+    /// changes; `arena` carries only what the resolution needed.
     fn check(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !*const analysis.Analysis {
         const root = try handler.rootFor(arena, path);
         const entry = root.entry;
-        if (handler.cached) |*held| {
-            if (std.mem.eql(u8, held.entry, entry)) return &held.of;
+        const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        const module: ?[]const u8 = if (sourceHolds(entry, named)) std.fs.path.dirname(named) orelse "" else null;
+        const program = if (handler.cached) |*held|
+            (if (std.mem.eql(u8, held.entry, entry)) &held.of else try handler.checkAs(arena, root, null))
+        else
+            try handler.checkAs(arena, root, null);
+        if (module == null or program.fileNamed(path) != null) return program;
+        if (handler.alone) |*held| {
+            if (std.mem.eql(u8, held.entry, entry) and std.mem.eql(u8, held.module.?, module.?)) return &held.of;
         }
+        return handler.checkAs(arena, root, module);
+    }
 
+    /// Checks `root`, with `module` as the entry where one is named, and
+    /// holds the answer in place of what was held in its slot: the program's
+    /// in `cached`, a module's in `alone`.
+    fn checkAs(handler: *Handler, arena: std.mem.Allocator, root: loader.Root, module: ?[]const u8) !*const analysis.Analysis {
+        // Everything below is released here until the held analysis owns it,
+        // and by `drop` after.
+        var held = false;
         const files = try handler.documents.filesFor(arena, handler.io, root, .open_and_manifests);
 
         // The analysis copies what it was given, so the buffers above are the
         // caller's business from here and the message's arena may reclaim
         // them whenever it likes.
-        var fresh = try analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, entry, handler.io);
-        errdefer fresh.deinit();
-        const key = try handler.gpa.dupe(u8, entry);
+        var fresh = try analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, root.entry, module, handler.io);
+        errdefer if (!held) fresh.deinit();
+        const key = try handler.gpa.dupe(u8, root.entry);
+        errdefer if (!held) handler.gpa.free(key);
+        const held_module: ?[]u8 = if (module) |dir| try handler.gpa.dupe(u8, dir) else null;
 
-        handler.drop();
-        handler.cached = .{ .entry = key, .of = fresh };
-        try handler.watchEmbeds(arena, &handler.cached.?.of);
-        return &handler.cached.?.of;
+        const slot = if (module == null) &handler.cached else &handler.alone;
+        handler.release(slot);
+        slot.* = .{ .entry = key, .module = held_module, .of = fresh };
+        held = true;
+        try handler.watchEmbeds(arena, &slot.*.?.of);
+        return &slot.*.?.of;
+    }
+
+    /// What every program of the workspace but `checked`'s is, for a rename.
+    const OtherPrograms = struct {
+        /// Each checked with the documents the editor holds; one that loads
+        /// with errors is kept, and `rename.across` decides.
+        analysed: std.ArrayList(analysis.Analysis) = .empty,
+        /// The directory of each program that could not be analysed: a
+        /// manifest the index could not resolve, or a root or files that
+        /// could not be read.
+        unanalysed: std.ArrayList([]const u8) = .empty,
+    };
+
+    /// Every program of the workspace but the one `checked` is, for a rename
+    /// to find the ones it reaches. Held apart from the cached slots, which
+    /// hold `checked` itself.
+    ///
+    /// Costs one check per program the workspace holds.
+    fn otherPrograms(handler: *Handler, arena: std.mem.Allocator, checked: *const analysis.Analysis) !OtherPrograms {
+        var others: OtherPrograms = .{};
+        errdefer {
+            for (others.analysed.items) |*other| other.deinit();
+            others.analysed.deinit(arena);
+        }
+        const index = try handler.indexOf();
+        try others.unanalysed.appendSlice(arena, index.unresolved);
+        const own = try loader.identityOf(arena, handler.io, checked.made_from.entry);
+        for (index.programs) |entry| {
+            if (std.mem.eql(u8, try loader.identityOf(arena, handler.io, entry), own)) continue;
+            const root = loader.rootOf(arena, handler.io, entry, .as_named, handler.root) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => {
+                    try others.unanalysed.append(arena, entry);
+                    continue;
+                },
+            };
+            const files = handler.documents.filesFor(arena, handler.io, root, .open_and_manifests) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => {
+                    try others.unanalysed.append(arena, entry);
+                    continue;
+                },
+            };
+            const other = analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, root.entry, null, handler.io) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => {
+                    try others.unanalysed.append(arena, entry);
+                    continue;
+                },
+            };
+            others.analysed.append(arena, other) catch |err| {
+                var dropped = other;
+                dropped.deinit();
+                return err;
+            };
+        }
+        return others;
+    }
+
+    /// Whether `file`, spelled canonically, is a `.lin` file inside the source
+    /// root `entry` names; an entry that is a file holds nothing else.
+    fn sourceHolds(entry: []const u8, file: []const u8) bool {
+        if (std.mem.endsWith(u8, entry, ".lin") or !std.mem.endsWith(u8, file, ".lin")) return false;
+        const dir = std.fs.path.dirname(file) orelse "";
+        if (entry.len == 0) return true;
+        if (!std.mem.startsWith(u8, dir, entry)) return false;
+        return dir.len == entry.len or dir[entry.len] == '/';
     }
 
     /// Releases everything the session holds: the workspace it was told about,
@@ -810,13 +992,8 @@ pub const Handler = struct {
     /// now does once per case.
     pub fn deinit(handler: *Handler) void {
         handler.drop();
-        var flagged = handler.flagged.iterator();
-        while (flagged.next()) |kept| {
-            for (kept.value_ptr.items) |path| handler.gpa.free(path);
-            kept.value_ptr.deinit(handler.gpa);
-            handler.gpa.free(kept.key_ptr.*);
-        }
-        handler.flagged.deinit(handler.gpa);
+        for (handler.reported.values()) |*kept| kept.arena.deinit();
+        handler.reported.deinit(handler.gpa);
         for (handler.embeds_watched.items) |path| handler.gpa.free(path);
         handler.embeds_watched.deinit(handler.gpa);
         handler.documents.deinit();
@@ -1001,29 +1178,43 @@ pub const Handler = struct {
         for (paths.items) |path| handler.embeds_watched.appendAssumeCapacity(try handler.gpa.dupe(u8, path));
     }
 
-    /// Releases the held analysis, so the next request checks again.
+    /// Releases the held analyses, so the next request checks again.
     fn drop(handler: *Handler) void {
-        if (handler.cached) |*held| {
+        handler.release(&handler.cached);
+        handler.release(&handler.alone);
+    }
+
+    fn release(handler: *Handler, slot: *?Cached) void {
+        if (slot.*) |*held| {
             held.of.deinit();
             handler.gpa.free(held.entry);
-            handler.cached = null;
+            if (held.module) |dir| handler.gpa.free(dir);
+            slot.* = null;
         }
     }
 
-    /// Whether the held analysis already describes these exact document bytes.
+    /// Whether the held analyses already describe these exact document bytes:
+    /// one holds the file, and none holds other text for it.
     fn cachedTextMatches(handler: *const Handler, path: []const u8, text: []const u8) bool {
-        const held = if (handler.cached) |*cached| &cached.of else return false;
-        const file = held.fileNamed(path) orelse return false;
-        return std.mem.eql(u8, held.table.get(file).text, text);
+        var holds = false;
+        for ([_]?Cached{ handler.cached, handler.alone }) |slot| {
+            const held = slot orelse continue;
+            const file = held.of.fileNamed(path) orelse continue;
+            if (!std.mem.eql(u8, held.of.table.get(file).text, text)) return false;
+            holds = true;
+        }
+        return holds;
     }
 
-    /// The entry of the held program when it embeds `path`, read or not, or
+    /// The entry of a held analysis that embeds `path`, read or not, or
     /// null. Copied into `arena`, since invalidating releases the analysis.
     fn embeddedBy(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !?[]const u8 {
-        const held = handler.cached orelse return null;
         const named = try loader.canonical(arena, loader.trimmedEntry(path));
-        for (held.of.program.embeds.watched) |watched| {
-            if (std.mem.eql(u8, watched, named)) return try arena.dupe(u8, held.entry);
+        for ([_]?Cached{ handler.cached, handler.alone }) |slot| {
+            const held = slot orelse continue;
+            for (held.of.program.embeds.watched) |watched| {
+                if (std.mem.eql(u8, watched, named)) return try arena.dupe(u8, held.entry);
+            }
         }
         return null;
     }
@@ -1049,7 +1240,7 @@ pub const Handler = struct {
         for (paths.items) |path| {
             const entry = (try handler.rootFor(arena, path)).entry;
             if ((try published.getOrPut(arena, entry)).found_existing) continue;
-            try handler.report(arena, path);
+            try handler.refresh(arena, path, true);
         }
 
         // A manifest decides which program a file belongs to. A program
@@ -1058,23 +1249,23 @@ pub const Handler = struct {
         // last published with is taken down. One no document is open in,
         // that its files still resolve to, keeps what it showed.
         var gone: std.ArrayList([]const u8) = .empty;
-        var remembered = handler.flagged.iterator();
-        while (remembered.next()) |kept| {
-            const entry = kept.key_ptr.*;
-            if (published.contains(entry)) continue;
-            const now = handler.rootFor(arena, kept.value_ptr.items[0]) catch null;
-            if (now) |root| if (std.mem.eql(u8, root.entry, entry)) continue;
-            try gone.append(arena, try arena.dupe(u8, entry));
+        var kept = handler.reported.iterator();
+        while (kept.next()) |held| {
+            const key = held.key_ptr.*;
+            if (published.contains(key)) continue;
+            const files = held.value_ptr.files.keys();
+            if (files.len != 0) {
+                const now = handler.rootFor(arena, files[0]) catch null;
+                if (now) |root| if (std.mem.eql(u8, root.entry, held.value_ptr.entry)) continue;
+            }
+            try gone.append(arena, try arena.dupe(u8, key));
         }
         std.mem.sort([]const u8, gone.items, {}, struct {
             fn before(_: void, a: []const u8, b: []const u8) bool {
                 return std.mem.lessThan(u8, a, b);
             }
         }.before);
-        for (gone.items) |entry| {
-            try handler.clearLeft(arena, entry, null);
-            try handler.remember(entry, &.{});
-        }
+        for (gone.items) |key| _ = try handler.withdraw(arena, key, true);
     }
 
     /// Drops an analysis when a loaded file or a loaded module's sibling changes.
@@ -1103,30 +1294,30 @@ pub const Handler = struct {
             }
             return;
         }
-        const held = handler.cached orelse return;
-        if (held.of.fileNamed(named) != null) {
-            handler.drop();
-            return;
-        }
+        if (try handler.stale(arena, &handler.cached, named)) handler.release(&handler.cached);
+        if (try handler.stale(arena, &handler.alone, named)) handler.release(&handler.alone);
+    }
+
+    /// Whether the analysis in `slot` may answer differently once `named`
+    /// changed: it holds the file, embeds it, holds the module directory it
+    /// sits in, or reported errors a new file of its program could answer.
+    fn stale(handler: *Handler, arena: std.mem.Allocator, slot: *const ?Cached, named: []const u8) !bool {
+        const held = slot.* orelse return false;
+        if (held.of.fileNamed(named) != null) return true;
         // A file the program embeds is as much its input as a source is, and
         // so is one it names that could not be read.
         for (held.of.program.embeds.watched) |watched| {
-            if (std.mem.eql(u8, watched, named)) {
-                handler.drop();
-                return;
-            }
+            if (std.mem.eql(u8, watched, named)) return true;
         }
         const directory = std.fs.path.dirname(named) orelse ".";
         for (held.of.program.modules) |module| {
-            if (std.mem.eql(u8, module.dir, directory)) {
-                handler.drop();
-                return;
-            }
+            if (std.mem.eql(u8, module.dir, directory)) return true;
         }
         if (held.of.sink.hasErrors()) {
             const entry = try handler.entryFor(arena, named);
-            if (std.mem.eql(u8, held.entry, entry)) handler.drop();
+            if (std.mem.eql(u8, held.entry, entry)) return true;
         }
+        return false;
     }
 
     /// Which program a document belongs to, or the document itself where the
@@ -1161,36 +1352,206 @@ pub const Handler = struct {
         };
     }
 
-    /// Checks the module a document belongs to and tells the client what is
-    /// wrong with every file of it.
+    /// Brings what is published up to date after `path` changed, so each
+    /// file shows the union of what every check currently reaching it reports
+    /// as of that check's latest run.
     ///
-    /// Every file, not the edited one: a module's files see each other's
-    /// declarations, so a change in one moves the diagnostics in its
-    /// siblings, and a server that published only what was typed in leaves
-    /// the others showing what the program used to say. A file with nothing
-    /// wrong is published as an empty list, which is how the protocol says a
-    /// file is clean.
+    /// A document's own change (`own`) runs the check `path` belongs to, then
+    /// every check whose last report reached `path`: no other check read it,
+    /// so no other answer moved. A change on disk, which an editor sends for
+    /// a file it may not hold open, runs the program's check of `path`'s root
+    /// first, wherever a document of the root is open or that check ran
+    /// before, since the file may be one the program's imports now reach or
+    /// no longer reach; then every check that reached `path`, and the check
+    /// of every open document of the root. A program's check that now loads a
+    /// module withdraws that module's own check; one that stops reaching an
+    /// open document leaves it to its module's check, which runs. A module's
+    /// check exists only for an open document no program reaches, and a
+    /// program's check reports once it reaches an open document.
     ///
-    /// Costs one check of the module, which is what the answer being right
-    /// across files costs, plus one pass over each published file's
-    /// diagnostics.
-    fn report(handler: *Handler, arena: std.mem.Allocator, path: []const u8) !void {
+    /// Every file is published, not only the edited one: a module's files see
+    /// each other's declarations, so a change in one moves the diagnostics in
+    /// its siblings. A file with nothing wrong is published as an empty list,
+    /// which is how the protocol says a file is clean.
+    ///
+    /// **Bound:** each check key runs once, its key decided before it runs
+    /// (`keyOf`), over the keys that reached `path` and the open documents of
+    /// its root.
+    fn refresh(handler: *Handler, arena: std.mem.Allocator, path: []const u8, own: bool) !void {
+        const entry = (try handler.rootFor(arena, path)).entry;
+        var open: std.ArrayList([]const u8) = .empty;
+        var documents = handler.documents.open.keyIterator();
+        while (documents.next()) |document| {
+            if (std.mem.eql(u8, (try handler.rootFor(arena, document.*)).entry, entry)) try open.append(arena, document.*);
+        }
+        std.mem.sort([]const u8, open.items, {}, struct {
+            fn before(_: void, a: []const u8, b: []const u8) bool {
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.before);
+
+        var asked: std.ArrayList([]const u8) = .empty;
+        if (own) try asked.append(arena, path);
+        if (!own and (open.items.len != 0 or handler.reported.contains(entry))) try asked.append(arena, entry);
+        for (handler.reported.values()) |*kept| {
+            if (kept.files.contains(path)) try asked.append(arena, try arena.dupe(u8, kept.asked));
+        }
+        if (!own) try asked.appendSlice(arena, open.items);
+
+        var ran: std.StringHashMapUnmanaged(void) = .empty;
+        var i: usize = 0;
+        while (i < asked.items.len) : (i += 1) {
+            if (ran.contains(try handler.keyOf(arena, asked.items[i]))) continue;
+            try handler.report(arena, asked.items[i], &ran, &asked);
+        }
+    }
+
+    /// The key of the check `path` belongs to, decided without running it:
+    /// its root's entry where the program's latest report reached `path` or
+    /// the root's source does not hold it, and its module's directory
+    /// otherwise. `refresh` runs the program's check before any module's, so
+    /// within one refresh that report is current.
+    fn keyOf(handler: *Handler, arena: std.mem.Allocator, path: []const u8) ![]const u8 {
+        const entry = (try handler.rootFor(arena, path)).entry;
+        const named = try loader.canonical(arena, loader.trimmedEntry(path));
+        if (!sourceHolds(entry, named)) return entry;
+        if (handler.reported.get(entry)) |program| {
+            if (program.files.contains(path)) return entry;
+        }
+        return std.fs.path.dirname(named) orelse "";
+    }
+
+    /// Runs the check `path` belongs to and publishes what changed, once per
+    /// key in `ran`, adding to `asked` each open document it lets go.
+    fn report(
+        handler: *Handler,
+        arena: std.mem.Allocator,
+        path: []const u8,
+        ran: *std.StringHashMapUnmanaged(void),
+        asked: *std.ArrayList([]const u8),
+    ) !void {
         const checked = try handler.check(arena, path);
+        const entry = (try handler.rootFor(arena, path)).entry;
+        const module = if (handler.alone) |*held| (if (&held.of == checked) held.module else null) else null;
+        const key = try arena.dupe(u8, module orelse entry);
+        if ((try ran.getOrPut(arena, key)).found_existing) return;
+
+        // A module's check of a document no longer open is nobody's, and
+        // what it reported is taken back; another open document of the module
+        // asks for it again.
+        if (module != null and !handler.documents.open.contains(path)) {
+            const reopened = try handler.withdraw(arena, key, true);
+            for (reopened) |other| if (handler.documents.open.contains(other)) try asked.append(arena, other);
+            return;
+        }
+
+        // A program's check that has never reported, and reaches no open
+        // document, is no check any document asked for.
+        if (module == null and !handler.reported.contains(key)) {
+            var reaches_open = false;
+            var documents = handler.documents.open.keyIterator();
+            while (documents.next()) |document| {
+                if (checked.fileNamed(document.*) != null) reaches_open = true;
+            }
+            if (!reaches_open) return;
+        }
+
+        var fresh: Reported = .{ .arena = .init(handler.gpa), .entry = undefined, .asked = undefined, .module = module != null };
+        errdefer fresh.arena.deinit();
+        const keep = fresh.arena.allocator();
+        fresh.entry = try keep.dupe(u8, entry);
+        fresh.asked = try keep.dupe(u8, if (module != null) path else entry);
+        const owned_key = try keep.dupe(u8, key);
 
         const publication = try publish.Publication.init(arena, checked);
-        var held: std.StringHashMapUnmanaged(void) = .empty;
-        var wrong: std.ArrayList([]const u8) = .empty;
         var it = publish.files(&checked.program);
         while (it.next()) |file| {
             const diagnostics = try publication.forFile(arena, file, handler.offset_encoding);
+            const texts = try keep.alloc([]const u8, diagnostics.len);
+            for (diagnostics, texts) |d, *text| text.* = try std.json.Stringify.valueAlloc(keep, d, .{ .emit_null_optional_fields = false });
             const file_path = checked.table.get(file).path;
-            try held.put(arena, file_path, {});
-            if (diagnostics.len != 0) try wrong.append(arena, file_path);
-            try handler.publishFor(arena, file_path, diagnostics);
+            if (fresh.files.contains(file_path)) continue;
+            try fresh.files.put(keep, try keep.dupe(u8, file_path), texts);
         }
-        const entry = (try handler.rootFor(arena, path)).entry;
-        try handler.clearLeft(arena, entry, &held);
-        try handler.remember(entry, wrong.items);
+
+        // What this key reported before for a file it no longer reaches is
+        // taken back; a file it reported nothing for shows the same as before.
+        // An open document it let go is its module's to check.
+        var left: std.ArrayList([]const u8) = .empty;
+        if (handler.reported.get(key)) |before| {
+            for (before.files.keys(), before.files.values()) |file_path, texts| {
+                if (fresh.files.contains(file_path)) continue;
+                if (module == null and handler.documents.open.contains(file_path)) try asked.append(arena, try arena.dupe(u8, file_path));
+                if (texts.len != 0) try left.append(arena, try arena.dupe(u8, file_path));
+            }
+        }
+
+        // A module's check exists while no program reaches the module: the
+        // program's check that now loads it takes it back before publishing.
+        var gone: std.ArrayList([]const u8) = .empty;
+        if (module == null) {
+            for (handler.reported.keys(), handler.reported.values()) |other, *kept| {
+                if (!kept.module or !std.mem.eql(u8, kept.entry, entry)) continue;
+                if (loadsModule(checked, other)) try gone.append(arena, try arena.dupe(u8, other));
+            }
+        }
+        var withdrawn: std.ArrayList([]const u8) = .empty;
+        for (gone.items) |other| try withdrawn.appendSlice(arena, try handler.withdraw(arena, other, false));
+
+        try handler.hold(owned_key, fresh);
+        for (handler.reported.get(key).?.files.keys()) |file_path| try handler.publishUnion(arena, file_path);
+        for (left.items) |file_path| try handler.publishUnion(arena, file_path);
+        for (withdrawn.items) |file_path| {
+            if (!handler.reported.get(key).?.files.contains(file_path)) try handler.publishUnion(arena, file_path);
+        }
+    }
+
+    /// Whether `checked` loads the module in directory `dir`.
+    fn loadsModule(checked: *const analysis.Analysis, dir: []const u8) bool {
+        for (checked.program.modules) |m| {
+            if (std.mem.eql(u8, m.dir, dir)) return true;
+        }
+        return false;
+    }
+
+    /// Holds `report` under `key` in place of what was held there.
+    fn hold(handler: *Handler, key: []const u8, report_held: Reported) !void {
+        if (handler.reported.fetchOrderedRemove(key)) |old| {
+            var released = old.value;
+            released.arena.deinit();
+        }
+        try handler.reported.put(handler.gpa, key, report_held);
+    }
+
+    /// Withdraws everything `key` reported, and returns every file it reached.
+    /// Where `publish_now`, each file it reported something for is published
+    /// with what the keys left still report.
+    fn withdraw(handler: *Handler, arena: std.mem.Allocator, key: []const u8, publish_now: bool) ![]const []const u8 {
+        var removed = handler.reported.fetchOrderedRemove(key) orelse return &.{};
+        defer removed.value.arena.deinit();
+        var reached: std.ArrayList([]const u8) = .empty;
+        for (removed.value.files.keys(), removed.value.files.values()) |file_path, texts| {
+            try reached.append(arena, try arena.dupe(u8, file_path));
+            if (publish_now and texts.len != 0) try handler.publishUnion(arena, file_path);
+        }
+        return reached.items;
+    }
+
+    /// Publishes `file` with the union of what every key reports for it, in
+    /// the order the keys were last reported, a diagnostic another key
+    /// already reported written once.
+    fn publishUnion(handler: *Handler, arena: std.mem.Allocator, file: []const u8) !void {
+        var seen: std.StringHashMapUnmanaged(void) = .empty;
+        var out: std.ArrayList(lsp.types.Diagnostic) = .empty;
+        for (handler.reported.values()) |*kept| {
+            const texts = kept.files.get(file) orelse continue;
+            for (texts) |text| {
+                if (seen.contains(text)) continue;
+                try out.append(arena, try std.json.parseFromSliceLeaky(lsp.types.Diagnostic, arena, text, .{ .ignore_unknown_fields = true }));
+            }
+            for (texts) |text| try seen.put(arena, text, {});
+        }
+        try handler.publishFor(arena, file, out.items);
     }
 
     fn publishFor(handler: *Handler, arena: std.mem.Allocator, path: []const u8, diagnostics: []const lsp.types.Diagnostic) !void {
@@ -1205,44 +1566,6 @@ pub const Handler = struct {
             },
             .{ .emit_null_optional_fields = false },
         );
-    }
-
-    /// Publishes no diagnostics for each file the program at `entry` was
-    /// last published with something wrong in and no longer holds. `held`
-    /// is every file just published, or null where the program itself is
-    /// gone.
-    ///
-    /// **Bound:** the files remembered for this one program.
-    fn clearLeft(handler: *Handler, arena: std.mem.Allocator, entry: []const u8, held: ?*const std.StringHashMapUnmanaged(void)) !void {
-        const before = handler.flagged.getPtr(entry) orelse return;
-        for (before.items) |old| {
-            if (held) |now| if (now.contains(old)) continue;
-            try handler.publishFor(arena, old, &.{});
-        }
-    }
-
-    /// Replaces what is remembered for the program at `entry` with `wrong`,
-    /// the files just published with a diagnostic.
-    fn remember(handler: *Handler, entry: []const u8, wrong: []const []const u8) !void {
-        const gpa = handler.gpa;
-        if (handler.flagged.getPtr(entry)) |before| {
-            for (before.items) |old| gpa.free(old);
-            before.clearRetainingCapacity();
-            if (wrong.len == 0) {
-                var removed = handler.flagged.fetchRemove(entry).?;
-                removed.value.deinit(gpa);
-                gpa.free(removed.key);
-                return;
-            }
-        } else {
-            if (wrong.len == 0) return;
-            const key = try gpa.dupe(u8, entry);
-            errdefer gpa.free(key);
-            try handler.flagged.put(gpa, key, .empty);
-        }
-        const list = handler.flagged.getPtr(entry).?;
-        try list.ensureTotalCapacity(gpa, wrong.len);
-        for (wrong) |file_path| list.appendAssumeCapacity(try gpa.dupe(u8, file_path));
     }
 };
 
@@ -1480,6 +1803,17 @@ const Rooted = struct {
         self.handler.deinit();
         self.arena.deinit();
         self.dir.cleanup();
+    }
+
+    /// Opens the main file with `text`, as a client does before it sends a
+    /// change to it.
+    fn open(self: *Rooted, text: []const u8) !void {
+        try self.handler.@"textDocument/didOpen"(self.arena.allocator(), .{ .textDocument = .{
+            .uri = try self.main(),
+            .languageId = .{ .custom_value = "linea" },
+            .version = 1,
+            .text = text,
+        } });
     }
 
     /// The one file of the program, named the way a client names it.
@@ -1727,6 +2061,388 @@ test "a file changed on disk changes what the index offers" {
     try std.testing.expectEqualStrings("after", then[0]);
 }
 
+test "a rename in a library two programs depend on edits both programs" {
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    const dependent = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }";
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n" },
+        .{ .at = "a/linea.json", .text = dependent },
+        .{ .at = "a/main.lin", .text = program },
+        .{ .at = "b/linea.json", .text = dependent },
+        .{ .at = "b/main.lin", .text = program },
+    });
+    defer ws.deinit();
+    // The workspace is the three projects and nothing above them.
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+
+    // From a use in one program, and from the declaration in the library.
+    const asked = [_]struct { at: []const u8, line: u32, character: u32 }{
+        .{ .at = "a/main.lin", .line = 3, .character = 12 },
+        .{ .at = "almanac/almanac.lin", .line = 0, .character = 7 },
+    };
+    for (asked) |ask| {
+        const edit = (try ws.handler.@"textDocument/rename"(a, .{
+            .textDocument = .{ .uri = try ws.pathAt(ask.at) },
+            .position = .{ .line = ask.line, .character = ask.character },
+            .newName = "chill",
+        })).?;
+        const expected = [_]struct { path: []const u8, edits: usize }{
+            .{ .path = "a/main.lin", .edits = 1 },
+            .{ .path = "b/main.lin", .edits = 1 },
+            .{ .path = "almanac/almanac.lin", .edits = 2 },
+        };
+        try std.testing.expectEqual(expected.len, edit.changes.?.map.count());
+        for (expected) |want| {
+            var it = edit.changes.?.map.iterator();
+            const edits = while (it.next()) |entry| {
+                if (std.mem.endsWith(u8, entry.key_ptr.*, want.path)) break entry.value_ptr.*;
+            } else return error.TestExpectedEqual;
+            try std.testing.expectEqual(want.edits, edits.len);
+        }
+    }
+}
+
+test "a rename in a shared library is offered beside a broken program that does not reach it" {
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    const dependent = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }";
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = dependent },
+        .{ .at = "a/main.lin", .text = program },
+        // Depends on a library that is not there, and not on `almanac`.
+        .{ .at = "broken/linea.json", .text = "{ \"dependencies\": { \"gone\": { \"path\": \"../gone\" } } }" },
+        .{ .at = "broken/main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    try std.testing.expectEqual(@as(usize, 2), edit.changes.?.map.count());
+}
+
+test "a rename in a shared library is refused where a program reaching it does not load, naming it" {
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = program },
+        // Depends on `almanac` and on a library that is not there.
+        .{ .at = "broken/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" }, \"gone\": { \"path\": \"../gone\" } } }" },
+        .{ .at = "broken/main.lin", .text = program },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    try std.testing.expectError(rename.Refused.AProgramTheRenameReachesDoesNotLoad, ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("almanac/almanac.lin") },
+        .position = .{ .line = 0, .character = 7 },
+        .newName = "chill",
+    }));
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "broken") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "does not load") != null);
+}
+
+test "a rename in a shared library is offered beside a program whose manifest cannot be read and that does not hold it" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+        // A manifest that will not parse names no library, so this program
+        // holds nothing outside its own directory.
+        .{ .at = "unread/linea.json", .text = "{ not json" },
+        .{ .at = "unread/main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    try std.testing.expectEqual(@as(usize, 2), edit.changes.?.map.count());
+}
+
+test "a rename in a shared library is refused where a program whose manifest cannot be read holds it, naming it" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        // The library sits inside a program whose manifest will not parse.
+        .{ .at = "outer/linea.json", .text = "{ not json" },
+        .{ .at = "outer/almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "outer/almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../outer/almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    try std.testing.expectError(rename.Refused.AProgramTheRenameReachesDoesNotLoad, ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    }));
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "outer") != null);
+}
+
+/// The almanac workspace with program `b` naming the library at `spelled`,
+/// another path to the same directory, and the rename of `frost` from `a`.
+/// Each document is edited once, at one URI, and `b` is among them.
+fn expectRenamedThroughAnotherSpelling(ws: *Rooted, spelled: []const u8) !void {
+    const a = ws.arena.allocator();
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    try ws.dir.dir.createDirPath(std.testing.io, "b");
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/main.lin", .data = program });
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/linea.json", .data = try std.fmt.allocPrint(a, "{{ \"dependencies\": {{ \"almanac\": {{ \"path\": \"{s}\" }} }} }}", .{spelled}) });
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    const expected = [_]struct { path: []const u8, edits: usize }{
+        .{ .path = "a/main.lin", .edits = 1 },
+        .{ .path = "b/main.lin", .edits = 1 },
+        .{ .path = "almanac/almanac.lin", .edits = 2 },
+    };
+    try std.testing.expectEqual(expected.len, edit.changes.?.map.count());
+    for (expected) |want| {
+        var it = edit.changes.?.map.iterator();
+        const edits = while (it.next()) |entry| {
+            if (std.mem.endsWith(u8, entry.key_ptr.*, want.path)) break entry.value_ptr.*;
+        } else return error.TestExpectedEqual;
+        try std.testing.expectEqual(want.edits, edits.len);
+    }
+}
+
+fn almanacWorkspace() !Rooted {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+    });
+    errdefer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    return ws;
+}
+
+test "a rename in a shared library edits a program that names it through a symlink" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    try ws.dir.dir.symLink(std.testing.io, "almanac", "link", .{ .is_directory = true });
+    try expectRenamedThroughAnotherSpelling(&ws, "../link");
+}
+
+test "a rename in a shared library edits a program that names it in another case" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    // Only a file system that ignores case reaches `Almanac` at `almanac`.
+    ws.dir.dir.access(std.testing.io, "ALMANAC/linea.json", .{}) catch return error.SkipZigTest;
+    try expectRenamedThroughAnotherSpelling(&ws, "../Almanac");
+}
+
+/// The almanac workspace with `b` naming the library through `link`, and
+/// `almanac.lin` open with `unsaved`; the rename of `frost` from `a` must
+/// edit the buffer's text at `at`, each line once.
+fn expectRenamedInTheBufferThroughASymlink(unsaved: []const u8, at: []const u32) !void {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    try ws.dir.dir.symLink(std.testing.io, "almanac", "link", .{ .is_directory = true });
+    try ws.dir.dir.createDirPath(std.testing.io, "b");
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/main.lin", .data = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" });
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/linea.json", .data = "{ \"dependencies\": { \"almanac\": { \"path\": \"../link\" } } }" });
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+        .uri = try ws.pathAt("almanac/almanac.lin"),
+        .languageId = .{ .custom_value = "linea" },
+        .version = 1,
+        .text = unsaved,
+    } });
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    try std.testing.expectEqual(@as(usize, 3), edit.changes.?.map.count());
+    var it = edit.changes.?.map.iterator();
+    const edits = while (it.next()) |entry| {
+        if (std.mem.endsWith(u8, entry.key_ptr.*, "almanac/almanac.lin")) break entry.value_ptr.*;
+    } else return error.TestExpectedEqual;
+    try std.testing.expectEqual(at.len, edits.len);
+    for (edits, at) |e, line| try std.testing.expectEqual(line, e.range.start.line);
+}
+
+test "a rename edits an open buffer a program reaches through a symlink, not the file under it" {
+    // The buffer has dropped `thaw`, whose call to `frost` is still on disk.
+    try expectRenamedInTheBufferThroughASymlink("pub fn frost() -> UInt8 { 1 }\n\n// the almanac keeps a calendar of frosts\n", &.{0});
+}
+
+test "a rename edits an open buffer a program reaches through a symlink where its lines moved" {
+    try expectRenamedInTheBufferThroughASymlink("// frost before thaw\npub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n", &.{ 1, 3 });
+}
+
+/// The almanac workspace with `b` naming the library through `link`, and
+/// `almanac.lin` open at both spellings, `through_almanac` and `through_link`.
+fn twiceOpenAlmanac(ws: *Rooted, recorder: *Recorder, through_almanac: []const u8, through_link: []const u8) !?lsp.types.WorkspaceEdit {
+    try ws.dir.dir.symLink(std.testing.io, "almanac", "link", .{ .is_directory = true });
+    try ws.dir.dir.createDirPath(std.testing.io, "b");
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/main.lin", .data = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" });
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/linea.json", .data = "{ \"dependencies\": { \"almanac\": { \"path\": \"../link\" } } }" });
+    const a = ws.arena.allocator();
+    ws.handler.transport = &recorder.transport;
+    for ([_][2][]const u8{ .{ "almanac/almanac.lin", through_almanac }, .{ "link/almanac.lin", through_link } }) |opened| {
+        try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+            .uri = try ws.pathAt(opened[0]),
+            .languageId = .{ .custom_value = "linea" },
+            .version = 1,
+            .text = opened[1],
+        } });
+    }
+    return ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    });
+}
+
+const almanac_on_disk = "pub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n";
+
+test "a rename is refused where one file is open twice with different text, naming both" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    try std.testing.expectError(rename.Refused.AFileIsOpenTwiceWithDifferentText, twiceOpenAlmanac(
+        &ws,
+        &recorder,
+        almanac_on_disk ++ "// abcdefghijklmnopqrstuvwxyz0123456789\n",
+        almanac_on_disk ++ "pub fn cold() -> UInt8 { frost() }\n",
+    ));
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "almanac/almanac.lin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "link/almanac.lin") != null);
+}
+
+test "a rename edits each buffer of a file open twice with one text alike" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    const text = almanac_on_disk ++ "pub fn cold() -> UInt8 { frost() }\n";
+    const edit = (try twiceOpenAlmanac(&ws, &recorder, text, text)).?;
+    var through_almanac: ?[]const lsp.types.TextEdit = null;
+    var through_link: ?[]const lsp.types.TextEdit = null;
+    var it = edit.changes.?.map.iterator();
+    while (it.next()) |entry| {
+        if (std.mem.endsWith(u8, entry.key_ptr.*, "/almanac/almanac.lin")) through_almanac = entry.value_ptr.*;
+        if (std.mem.endsWith(u8, entry.key_ptr.*, "/link/almanac.lin")) through_link = entry.value_ptr.*;
+    }
+    try std.testing.expectEqual(@as(usize, 3), through_almanac.?.len);
+    try std.testing.expectEqual(through_almanac.?.len, through_link.?.len);
+    for (through_almanac.?, through_link.?) |x, y| try std.testing.expect(std.meta.eql(x.range, y.range));
+}
+
+test "a rename edits the buffer open at the target of a library file that is a symlink" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "store/almanac.lin", .text = almanac_on_disk },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    try ws.dir.dir.symLink(std.testing.io, "../store/almanac.lin", "almanac/almanac.lin", .{});
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+    // The buffer has dropped `thaw` and moved `frost` down a line.
+    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+        .uri = try ws.pathAt("store/almanac.lin"),
+        .languageId = .{ .custom_value = "linea" },
+        .version = 1,
+        .text = "// frost alone\npub fn frost() -> UInt8 { 1 }\n",
+    } });
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    var it = edit.changes.?.map.iterator();
+    var library_edits: usize = 0;
+    while (it.next()) |entry| {
+        if (!std.mem.endsWith(u8, entry.key_ptr.*, "almanac.lin")) continue;
+        try std.testing.expect(std.mem.endsWith(u8, entry.key_ptr.*, "store/almanac.lin"));
+        for (entry.value_ptr.*) |e| try std.testing.expectEqual(@as(u32, 1), e.range.start.line);
+        library_edits += entry.value_ptr.len;
+    }
+    try std.testing.expectEqual(@as(usize, 1), library_edits);
+}
+
+test "a root given with a trailing slash is the directory it names" {
+    const gpa = std.testing.allocator;
+    var handler: Handler = .{
+        .gpa = gpa,
+        .region_backing = gpa,
+        .library = test_library.get(),
+        .io = std.testing.io,
+        .transport = undefined,
+        .documents = .{ .gpa = gpa },
+    };
+    defer handler.deinit();
+    _ = try handler.initialize(gpa, .{ .capabilities = .{}, .rootUri = "file:///workspace/w1/" });
+    try std.testing.expectEqualStrings("/workspace/w1", handler.root);
+}
+
 test "a manifest changed on disk changes which files the program holds" {
     var ws = try Rooted.initFiles(std.testing.allocator, &.{
         .{ .at = "main.lin", .text = "pub fn here() -> UInt8 { 1 }\n" },
@@ -1782,6 +2498,7 @@ test "an edit to an open buffer changes what the index offers before the file is
     try std.testing.expectEqualStrings("before", (try ws.offered())[0]);
 
     const a = ws.arena.allocator();
+    try ws.open("pub fn before() -> UInt8 { 1 }\n");
     try ws.handler.@"textDocument/didChange"(a, .{
         .textDocument = .{ .uri = try ws.main(), .version = 2 },
         .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
@@ -1808,6 +2525,7 @@ test "an index built while a buffer is open holds what the buffer says" {
     // manifest drops an index that was built: either way the next ask walks
     // the files on disk, which still say `before`.
     const a = ws.arena.allocator();
+    try ws.open("pub fn before() -> UInt8 { 1 }\n");
     try ws.handler.@"textDocument/didChange"(a, .{
         .textDocument = .{ .uri = try ws.main(), .version = 2 },
         .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
@@ -1870,6 +2588,7 @@ test "a client granting no file watching is asked for none, and its buffers are 
 
     try std.testing.expectEqualStrings("before", (try ws.offered())[0]);
 
+    try ws.open("pub fn before() -> UInt8 { 1 }\n");
     try ws.handler.@"textDocument/didChange"(a, .{
         .textDocument = .{ .uri = try ws.main(), .version = 2 },
         .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
@@ -1924,6 +2643,82 @@ test "a change the server cannot apply leaves the document as it was" {
     // What the server holds is what it held. Applied as nothing and reported
     // anyway, it would have published diagnostics about a document the editor
     // had already replaced.
+    try std.testing.expectEqualStrings(held, handler.documents.open.get("main.lin").?);
+}
+
+test "a change to a document nobody opened opens nothing" {
+    const gpa = std.testing.allocator;
+
+    var handler: Handler = .{
+        .gpa = gpa,
+        .region_backing = gpa,
+        .library = test_library.get(),
+        .io = std.testing.io,
+        // The notification is refused before anything is published.
+        .transport = undefined,
+        .documents = .{ .gpa = gpa },
+    };
+    defer handler.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    try std.testing.expectError(error.DocumentNotOpen, handler.@"textDocument/didChange"(
+        arena.allocator(),
+        .{
+            .textDocument = .{ .uri = "main.lin", .version = 2 },
+            .contentChanges = &.{.{ .text_document_content_change_whole_document = .{
+                .text = "fn main() -> UInt8 { 0 }\n",
+            } }},
+        },
+    ));
+    try std.testing.expectError(error.DocumentNotOpen, handler.@"textDocument/didChange"(
+        arena.allocator(),
+        .{ .textDocument = .{ .uri = "main.lin", .version = 3 }, .contentChanges = &.{} },
+    ));
+
+    // Only `didOpen` makes a buffer the server reads instead of the disk.
+    try std.testing.expectEqual(@as(u32, 0), handler.documents.open.count());
+}
+
+test "a whole change followed by a partial one applies neither" {
+    const gpa = std.testing.allocator;
+
+    var handler: Handler = .{
+        .gpa = gpa,
+        .region_backing = gpa,
+        .library = test_library.get(),
+        .io = std.testing.io,
+        .transport = undefined,
+        .documents = .{ .gpa = gpa },
+    };
+    defer handler.deinit();
+
+    const held = "fn main() -> UInt8 {\n    0\n}\n";
+    _ = try handler.documents.set("main.lin", held);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    try std.testing.expectError(error.PartialChangeUnsupported, handler.@"textDocument/didChange"(
+        arena.allocator(),
+        .{
+            .textDocument = .{ .uri = "main.lin", .version = 2 },
+            .contentChanges = &.{
+                .{ .text_document_content_change_whole_document = .{ .text = "fn main() -> UInt8 { 1 }\n" } },
+                .{ .text_document_content_change_partial = .{
+                    .range = .{
+                        .start = .{ .line = 0, .character = 0 },
+                        .end = .{ .line = 0, .character = 2 },
+                    },
+                    .text = "fun",
+                } },
+            },
+        },
+    ));
+
+    // The notification is one transition: refused as a whole, the buffer and
+    // every answer computed from it stay as they were.
     try std.testing.expectEqualStrings(held, handler.documents.open.get("main.lin").?);
 }
 
@@ -2029,4 +2824,260 @@ test "a file the program never reaches is not read, and one it reaches is read o
     try std.testing.expect(listed < reached.len);
     try std.testing.expect(checked.source_arena.queryCapacity() < 2 * reached.len);
     try std.testing.expect(checked.source_arena.queryCapacity() >= reached.len);
+}
+
+test "a program rewritten on disk while only a file it imports is open publishes its errors" {
+    const gpa = std.testing.allocator;
+    var ws = try Rooted.initFiles(gpa, &.{
+        .{ .at = "main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+        .{ .at = "util/util.lin", .text = "pub fn value() -> UInt8 {\n    1\n}\n" },
+    });
+    defer ws.deinit();
+    var recorder = Recorder.init(gpa);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    const a = ws.arena.allocator();
+    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+        .uri = try ws.pathAt("util/util.lin"),
+        .languageId = .{ .custom_value = "linea" },
+        .version = 1,
+        .text = "pub fn value() -> UInt8 {\n    1\n}\n",
+    } });
+    // The program now imports `util`, which is open, and a `sub` that is not
+    // there: what `linea check` reports for it is what the editor shows.
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "main.lin", .data = "import util\nimport sub\n\nfn main() -> UInt8 {\n    util.value()\n}\n" });
+    try ws.handler.@"workspace/didChangeWatchedFiles"(a, .{ .changes = &.{.{ .uri = try ws.pathAt("main.lin"), .type = .Changed }} });
+
+    const last = try lastPublished(a, recorder.written.items);
+    const shown = last.get(try uri_mod.uriOf(a, try ws.pathAt("main.lin"))) orelse return error.TestExpectedPublished;
+    const missing = for (shown) |d| {
+        if (std.mem.indexOf(u8, d, "\"M-Import\"") != null) break true;
+    } else false;
+    try std.testing.expect(missing);
+}
+
+/// A small program held to the rule for what an editor is shown: each file's
+/// published diagnostics are the union of what every check reaching it
+/// reports, each as of its latest run. The checks are the program's, from its
+/// root, and for each open document no import of the program reaches, its
+/// module's, as `linea check` checks a file named alone.
+const Workspace = struct {
+    /// A chain of modules, each of which may import the next: the program,
+    /// `lib`, `sub` and `util`. Each file's text is one of its variants, and
+    /// any of them may be deleted from disk while closed.
+    const paths = [_][]const u8{ "main.lin", "lib/l.lin", "sub/x.lin", "util/util.lin" };
+    const imports = [_]?[]const u8{ "lib", "sub", "util", null };
+    const functions = [_][]const u8{ "main", "low", "twice", "value" };
+    const variant_count = [_]u8{ 4, 4, 4, 2 };
+    /// Two spellings of one manifest, so rewriting it changes nothing it means.
+    const manifests = [_][]const u8{ "{}", "{ \"kind\": \"program\" }" };
+
+    /// Bit 0 of a variant imports the next module and calls it; bit 1, or bit
+    /// 0 for the last module, makes the file's result the wrong type.
+    fn text(gpa: std.mem.Allocator, file: usize, variant: u8) ![]u8 {
+        const next = imports[file];
+        const wrong = if (next == null) variant & 1 != 0 else variant & 2 != 0;
+        const calls = next != null and variant & 1 != 0;
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        errdefer out.deinit();
+        const w = &out.writer;
+        if (calls) try w.print("import {s}\n\n", .{next.?});
+        try w.print("{s}fn {s}() -> UInt8 {{\n    ", .{ if (file == 0) "" else "pub ", functions[file] });
+        if (wrong) try w.writeAll("true") else if (calls) try w.print("{s}.{s}()", .{ next.?, functions[file + 1] }) else try w.writeAll("1");
+        try w.writeAll("\n}\n");
+        return out.toOwnedSlice();
+    }
+
+    const Op = enum { open, change, close, save, disk, delete, recreate, manifest };
+    const Step = struct { op: Op, file: usize, variant: u8 };
+};
+
+/// Each diagnostic the server last published for each file, by URI, as text.
+fn lastPublished(gpa: std.mem.Allocator, written: []const u8) !std.StringHashMapUnmanaged([]const []const u8) {
+    var last: std.StringHashMapUnmanaged([]const []const u8) = .empty;
+    var lines = std.mem.splitScalar(u8, written, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const parsed = try std.json.parseFromSliceLeaky(std.json.Value, gpa, line, .{});
+        const method = parsed.object.get("method") orelse continue;
+        if (!std.mem.eql(u8, method.string, "textDocument/publishDiagnostics")) continue;
+        const params = parsed.object.get("params").?.object;
+        const listed = params.get("diagnostics").?.array.items;
+        const texts = try gpa.alloc([]const u8, listed.len);
+        for (listed, texts) |d, *t| t.* = try std.json.Stringify.valueAlloc(gpa, d, .{});
+        try last.put(gpa, params.get("uri").?.string, texts);
+    }
+    return last;
+}
+
+/// What the rule says each file shows, by URI: the union over the program's
+/// check and each open document's module check where the program does not
+/// reach it, computed afresh from the texts the editor and the disk hold. A
+/// file deleted from disk and not open is not among them.
+///
+/// The program's check counts once an open document it holds has been seen,
+/// `program_seen`, which this sets: a check, once it ran, keeps what it
+/// reported after its documents close, and none reports before it reaches
+/// an open document.
+fn expectedPublished(
+    gpa: std.mem.Allocator,
+    root: []const u8,
+    manifest: []const u8,
+    texts: []const ?[]const u8,
+    open: []const bool,
+    program_seen: *bool,
+) !std.StringHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) {
+    var files: std.ArrayList(loader.InMemoryFile) = .empty;
+    try files.append(gpa, .{ .path = try std.fs.path.join(gpa, &.{ root, loader.manifest_name }), .text = manifest });
+    for (Workspace.paths, texts) |at, held| {
+        const t = held orelse continue;
+        try files.append(gpa, .{ .path = try std.fs.path.join(gpa, &.{ root, at }), .text = t });
+    }
+
+    var program = try analysis.onDisk(gpa, gpa, test_library.get(), files.items, root, null, std.testing.io);
+    for (Workspace.paths, open) |at, is_open| {
+        if (is_open and program.fileNamed(try std.fs.path.join(gpa, &.{ root, at })) != null) program_seen.* = true;
+    }
+    var checks: std.ArrayList(analysis.Analysis) = .empty;
+    if (program_seen.*) try checks.append(gpa, program) else program.deinit();
+    var modules: std.StringHashMapUnmanaged(void) = .empty;
+    for (Workspace.paths, open) |at, is_open| {
+        if (!is_open) continue;
+        const path = try std.fs.path.join(gpa, &.{ root, at });
+        if (program_seen.* and checks.items[0].fileNamed(path) != null) continue;
+        const dir = std.fs.path.dirname(path).?;
+        if ((try modules.getOrPut(gpa, dir)).found_existing) continue;
+        try checks.append(gpa, try analysis.onDisk(gpa, gpa, test_library.get(), files.items, root, dir, std.testing.io));
+    }
+
+    var expected: std.StringHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) = .empty;
+    for (checks.items) |*checked| {
+        defer checked.deinit();
+        const publication = try publish.Publication.init(gpa, checked);
+        var it = publish.files(&checked.program);
+        while (it.next()) |file| {
+            const uri = try uri_mod.uriOf(gpa, checked.table.get(file).path);
+            const set = try expected.getOrPut(gpa, uri);
+            if (!set.found_existing) set.value_ptr.* = .empty;
+            for (try publication.forFile(gpa, file, .@"utf-16")) |d| {
+                const once = try std.json.Stringify.valueAlloc(gpa, d, .{ .emit_null_optional_fields = false });
+                const value = try std.json.parseFromSliceLeaky(std.json.Value, gpa, once, .{});
+                try set.value_ptr.put(gpa, try std.json.Stringify.valueAlloc(gpa, value, .{}), {});
+            }
+        }
+    }
+    return expected;
+}
+
+fn lessText(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+test "slow: every file shows what each check reaching it reports, after any sequence of edits" {
+    try slow_tests.skipUnlessRun();
+    const gpa = std.testing.allocator;
+    const sequences = 6;
+    const steps_each = 12;
+    const count = Workspace.paths.len;
+
+    for (0..sequences) |seed| {
+        var scratch = std.heap.ArenaAllocator.init(gpa);
+        defer scratch.deinit();
+        const s = scratch.allocator();
+        var initial: [count]Rooted.File = undefined;
+        var disk: [count]?[]const u8 = undefined;
+        var buffer: [count]?[]const u8 = .{null} ** count;
+        for (Workspace.paths, &initial, &disk, 0..) |at, *f, *held, file| {
+            const t = try Workspace.text(s, file, 0);
+            held.* = t;
+            f.* = .{ .at = at, .text = t };
+        }
+        var manifest: usize = 0;
+        var ws = try Rooted.initFiles(gpa, &initial);
+        defer ws.deinit();
+        var recorder = Recorder.init(gpa);
+        defer recorder.deinit();
+        ws.handler.transport = &recorder.transport;
+
+        var program_seen = false;
+        var prng = std.Random.DefaultPrng.init(seed);
+        const random = prng.random();
+        var steps: std.ArrayList(Workspace.Step) = .empty;
+        for (0..steps_each) |_| {
+            const file = random.uintLessThan(usize, count);
+            const variant = random.uintLessThan(u8, Workspace.variant_count[file]);
+            const op: Workspace.Op = if (random.uintLessThan(u8, 12) == 0)
+                .manifest
+            else if (buffer[file] != null)
+                ([_]Workspace.Op{ .change, .close, .save })[random.uintLessThan(usize, 3)]
+            else if (disk[file] == null)
+                ([_]Workspace.Op{ .open, .recreate })[random.uintLessThan(usize, 2)]
+            else
+                ([_]Workspace.Op{ .open, .disk, .delete })[random.uintLessThan(usize, 3)];
+            try steps.append(s, .{ .op = op, .file = file, .variant = variant });
+
+            var step_arena = std.heap.ArenaAllocator.init(gpa);
+            defer step_arena.deinit();
+            const a = step_arena.allocator();
+            const path = try ws.pathAt(Workspace.paths[file]);
+            const written = try Workspace.text(s, file, variant);
+            switch (op) {
+                .open => {
+                    buffer[file] = written;
+                    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{ .uri = path, .languageId = .{ .custom_value = "linea" }, .version = 1, .text = written } });
+                },
+                .change => {
+                    buffer[file] = written;
+                    try ws.handler.@"textDocument/didChange"(a, .{ .textDocument = .{ .uri = path, .version = 2 }, .contentChanges = &.{.{ .text_document_content_change_whole_document = .{ .text = written } }} });
+                },
+                .close => {
+                    buffer[file] = null;
+                    try ws.handler.@"textDocument/didClose"(a, .{ .textDocument = .{ .uri = path } });
+                },
+                .save, .disk, .recreate => {
+                    const saved = if (op == .save) buffer[file].? else written;
+                    const existed = disk[file] != null;
+                    disk[file] = saved;
+                    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = Workspace.paths[file], .data = saved });
+                    try ws.handler.@"workspace/didChangeWatchedFiles"(a, .{ .changes = &.{.{ .uri = path, .type = if (existed) .Changed else .Created }} });
+                },
+                .delete => {
+                    disk[file] = null;
+                    try ws.dir.dir.deleteFile(std.testing.io, Workspace.paths[file]);
+                    try ws.handler.@"workspace/didChangeWatchedFiles"(a, .{ .changes = &.{.{ .uri = path, .type = .Deleted }} });
+                },
+                .manifest => {
+                    manifest = 1 - manifest;
+                    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = loader.manifest_name, .data = Workspace.manifests[manifest] });
+                    try ws.handler.@"workspace/didChangeWatchedFiles"(a, .{ .changes = &.{.{ .uri = try ws.pathAt(loader.manifest_name), .type = .Changed }} });
+                },
+            }
+
+            var texts: [count]?[]const u8 = undefined;
+            var open: [count]bool = undefined;
+            for (&texts, &open, buffer, disk) |*t, *o, held, on_disk| {
+                t.* = held orelse on_disk;
+                o.* = held != null;
+            }
+            const expected = try expectedPublished(a, ws.handler.root, Workspace.manifests[manifest], &texts, &open, &program_seen);
+            const got = try lastPublished(a, recorder.written.items);
+            for (Workspace.paths) |at| {
+                const uri = try uri_mod.uriOf(a, try ws.pathAt(at));
+                const want = try a.dupe([]const u8, if (expected.get(uri)) |set| set.keys() else &.{});
+                const have = try a.dupe([]const u8, got.get(uri) orelse &.{});
+                std.mem.sort([]const u8, want, {}, lessText);
+                std.mem.sort([]const u8, have, {}, lessText);
+                const same = want.len == have.len and for (want, have) |w, h| {
+                    if (!std.mem.eql(u8, w, h)) break false;
+                } else true;
+                if (same) continue;
+                std.debug.print("seed {d}: after {d} step(s), `{s}` shows {d} diagnostic(s) where its checks report {d}\n", .{ seed, steps.items.len, at, have.len, want.len });
+                for (steps.items) |st| std.debug.print("  {t} {s} variant {d}\n", .{ st.op, Workspace.paths[st.file], st.variant });
+                for (want) |w| std.debug.print("  expected {s}\n", .{w});
+                for (have) |h| std.debug.print("  published {s}\n", .{h});
+                return error.TestExpectedEqual;
+            }
+        }
+    }
 }

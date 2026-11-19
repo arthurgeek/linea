@@ -272,6 +272,7 @@ pub fn atOffset(
     snippets: Snippets,
 ) ![]const Item {
     const ast = &program.ast;
+    if (insideText(ast, file, offset)) return &.{};
     const in = res.moduleOfFile(file);
     const attribute = attributeContext(ast, file, offset);
     if (attribute == .trait_arguments) return &.{};
@@ -355,7 +356,7 @@ pub fn atOffset(
 
     var visible: std.ArrayList(BindingId) = .empty;
     defer visible.deinit(gpa);
-    try res.visibleIn(gpa, scopeAt(program, res, cursors, file, offset), &visible);
+    try reachableAt(gpa, program, res, cursors, file, offset, &visible);
 
     var offered: std.ArrayList(Item) = .empty;
     errdefer offered.deinit(gpa);
@@ -368,11 +369,7 @@ pub fn atOffset(
     defer already.deinit(gpa);
 
     for (visible.items) |b| {
-        if (res.kindOf(b) == .module and !importedIn(ast, res, b, file)) continue;
         if (attribute == .traits and res.kindOf(b) != .trait and res.kindOf(b) != .module) continue;
-        // Asked before the spelling is taken, so a local declared further
-        // down does not stand in for the one a name here reaches.
-        if (!declaredBy(ast, res, b, file, offset)) continue;
         const name = nameOf(ast, res, b) orelse continue;
         if ((try already.getOrPut(gpa, name)).found_existing) continue;
         try offered.append(gpa, try itemFor(gpa, ast, res, typing, snippets, name, b));
@@ -455,6 +452,35 @@ fn namesShadowingImports(
     }
 }
 
+/// The bindings a bare name written at `offset` may reach, innermost first,
+/// so the first of a spelling is the one that name reaches: what the scope
+/// chain there makes visible, less a local whose statement has not ended
+/// before `offset` and a module another file of the module imported.
+///
+/// Completion lists them and rename asks which one a new spelling would reach,
+/// so both read one answer about what is in scope at a point. Costs the chain's
+/// size, and nothing about the program. `out` is emptied first.
+pub fn reachableAt(
+    gpa: std.mem.Allocator,
+    program: *const program_mod.Program,
+    res: *const Resolution,
+    cursors: *const positions.Index,
+    file: FileId,
+    offset: u32,
+    out: *std.ArrayList(BindingId),
+) !void {
+    const ast = &program.ast;
+    try res.visibleIn(gpa, scopeAt(program, res, cursors, file, offset), out);
+    var kept: usize = 0;
+    for (out.items) |b| {
+        if (res.kindOf(b) == .module and !importedIn(ast, res, b, file)) continue;
+        if (!declaredBy(ast, res, b, file, offset)) continue;
+        out.items[kept] = b;
+        kept += 1;
+    }
+    out.shrinkRetainingCapacity(kept);
+}
+
 /// Whether a name written at `offset` could reach `b`. A scope lists every
 /// local its block declares, but a local is in scope only from the end of
 /// the statement that declares it: not above it, and not inside the
@@ -477,7 +503,8 @@ fn declaredBy(ast: *const Ast, res: *const Resolution, b: BindingId, file: FileI
 /// recovered from, has no extent that holds the cursor.
 fn endedBefore(ast: *const Ast, statement: node.StmtId, file: FileId, offset: u32) bool {
     const extent = ast.stmtSpan(statement);
-    if (offset <= extent.end) return false;
+    // A `;` is the statement's last byte, so a cursor at its end is past it.
+    if (offset < extent.end) return false;
 
     // The statement's last token says whether it can have ended, by the rule
     // the parser reads: a `;` ends it where it stands, and a line break ends
@@ -502,6 +529,56 @@ fn significantAfter(ast: *const Ast, t: TokenId) TokenId {
     var at = TokenId.at(t.index() + 1);
     while (ast.tokenTag(at).isTrivia()) at = TokenId.at(at.index() + 1);
     return at;
+}
+
+/// Whether `offset` falls inside a comment or the text of a string literal,
+/// where no name is written. A cursor straight after a closed string is
+/// outside it; one at the end of a comment, or of a string never closed, is
+/// still inside. An interpolation's expression is ordinary tokens, and a
+/// cursor among them is outside the text.
+fn insideText(ast: *const Ast, file: FileId, offset: u32) bool {
+    const part = ast.partOfFile(file) orelse return false;
+    var before = positions.tokenBefore(ast, file, offset);
+    const next: u32 = if (before == .none) part.token_start else before.index() + 1;
+    if (next < part.token_end) {
+        const t = TokenId.at(next);
+        const span = ast.tokenSpan(t);
+        if (span.start < offset and offset < span.end) return isText(ast.tokenTag(t), ast.tokenText(t));
+    }
+    // The file's `eof` ends where its last token does, and stands for none.
+    if (before != .none and ast.tokenTag(before) == .eof) {
+        before = if (before.index() > part.token_start) TokenId.at(before.index() - 1) else .none;
+    }
+    // A token ending before the cursor's line holds nothing written on it.
+    if (before == .none or ast.tokenSpan(before).end != offset) return false;
+    const text = ast.tokenText(before);
+    return switch (ast.tokenTag(before)) {
+        .comment, .string_line, .format_spec => true,
+        // A literal's text ends at its closing `"`, or where an
+        // interpolation's `{` opens an expression; one ending elsewhere was
+        // never closed and runs to the end of its line.
+        .string_literal, .str_close => text.len < 2 or text[text.len - 1] != '"',
+        .str_open, .str_mid => text[text.len - 1] != '{',
+        // A literal never closed is one token from its `"`, or from the `}`
+        // that ends its last interpolation, to the end of its line.
+        .invalid => text.len > 0 and (text[0] == '"' or text[0] == '}'),
+        // The `:` of an interpolation begins its format spec, which names
+        // nothing.
+        .colon => next < part.token_end and switch (ast.tokenTag(TokenId.at(next))) {
+            .format_spec, .str_mid, .str_close => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
+/// Whether a token of this tag and text is text a name is never written in.
+fn isText(tag: Tag, text: []const u8) bool {
+    return switch (tag) {
+        .comment, .string_literal, .string_line, .str_open, .str_mid, .str_close, .format_spec => true,
+        .invalid => text.len > 0 and (text[0] == '"' or text[0] == '}'),
+        else => false,
+    };
 }
 
 /// Where a cursor sits inside a declaration attribute. A derive entry takes no
@@ -977,7 +1054,7 @@ fn afterADot(
     if (held == .poison) return offered.toOwnedSlice(gpa);
 
     const owner = cursors.declarationAt(ast, file, offset);
-    try appendFields(gpa, typing, held, &offered);
+    try appendFields(gpa, program, typing, res.moduleOfFile(file), held, &offered);
     if (typing.arrayViewReceiver(held)) |adjustment| {
         const element = typing.get(adjustment.receiver).array.element;
         const label = try gpa.dupe(u8, types.array_view_name);
@@ -1246,7 +1323,13 @@ fn appendSelectable(
 
     var reaches: std.ArrayList(resolve.Selectable) = .empty;
     defer reaches.deinit(gpa);
-    try resolve.selectableUnder(gpa, ast, program, res, res.moduleOfFile(file), b, &reaches);
+    const writing = res.moduleOfFile(file);
+    try resolve.selectableUnder(gpa, ast, program, res, writing, b, &reaches);
+    // An opaque enum's variants are its representation: the resolver finds
+    // `Shade.Dim` outside its module, and the checker refuses it [M-Opaque].
+    const named = res.throughAlias(b);
+    const sealed = named != BindingId.none and res.kindOf(named) == .declared_type and
+        typecheck.representationSealed(ast, program, res.declaredBy(named), writing);
 
     for (reaches.items) |written| switch (written) {
         .member => |m| {
@@ -1255,7 +1338,7 @@ fn appendSelectable(
             const name = nameOf(ast, res, m) orelse continue;
             try offered.append(gpa, try itemFor(gpa, ast, res, typing, snippets, name, m));
         },
-        .variant => |at| try offered.append(gpa, .{
+        .variant => |at| if (!sealed) try offered.append(gpa, .{
             .label = try gpa.dupe(u8, ast.tokenText(at)),
             .kind = .EnumMember,
             // What a variant is worth is the enum, which is written to the
@@ -1303,9 +1386,11 @@ fn appendOperationsThroughType(
     for (offered.items) |item| try own.put(gpa, item.label, {});
 
     try typecheck.keepReached(gpa, ast, &applicable);
+    const reach = typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner);
     for (applicable.items) |a| {
         // The type's own operations were offered with its namespace.
         if (a.trait == node.DeclId.none) continue;
+        if (!try reach.settlesSomewhere(gpa, held, a)) continue;
         const name = ast.tokenText(ast.declName(a.sig));
         if (own.contains(name)) continue;
         const call = if (snippets == .supported) try callWritten(gpa, ast, name, a.sig) else null;
@@ -1331,11 +1416,16 @@ fn appendOperationsThroughType(
 /// program.
 fn appendFields(
     gpa: std.mem.Allocator,
+    program: *const program_mod.Program,
     typing: *const Typing,
+    from: program_mod.ModuleId,
     held: types.TypeId,
     offered: *std.ArrayList(Item),
 ) !void {
     const receiver = typing.observedReceiver(held).receiver;
+    // An opaque type's fields are named only in its own module; elsewhere a
+    // selection of one is [M-Opaque].
+    if (typecheck.representationSealed(&program.ast, program, typing.declOfType(receiver), from)) return;
     for (0..typing.fieldCount(receiver)) |i| {
         const at: u32 = @intCast(i);
         try appendField(gpa, typing, typing.fieldName(receiver, at), typing.fieldType(receiver, at), offered);
@@ -1560,8 +1650,8 @@ fn appendOperations(
 
     var applicable: std.ArrayList(typecheck.Applicable) = .empty;
     defer applicable.deinit(gpa);
-    try typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner)
-        .each(gpa, held, &applicable);
+    const reach = typecheck.reachIn(ast, program, res, typing, res.moduleOfFile(file), owner);
+    try reach.each(gpa, held, &applicable);
 
     // The range a rewrite replaces, and whether one may be offered at all.
     // Where the call spans lines, an item is written in at the cursor like
@@ -1578,6 +1668,10 @@ fn appendOperations(
     }
 
     for (applicable.items) |a| {
+        // Counted above, since the checker counts it when a call names it,
+        // but not offered: a conversion that settles on no result is not one
+        // a call can make.
+        if (!try reach.settlesSomewhere(gpa, held, a)) continue;
         // `&` lends the receiver of the postfix call it marks, so once it is
         // written the offer is only what it can lend: an operation whose own
         // receiver is `read` or `sink` cannot be reached through it, and
@@ -2545,7 +2639,188 @@ test "what the reader wrote stays as written when a stop is added beside it" {
     try testing.expect((try requireItem(plain, "plus")).textEdit == null);
 }
 
+test "nothing is offered inside a string or a comment" {
+    const gpa = testing.allocator;
+    inline for (.{
+        "fn main() -> UInt8 {\n    let _s = \"ab|c\"\n    0\n}\n",
+        "fn main() -> UInt8 {\n    // a com|ment\n    0\n}\n",
+        "fn main() -> UInt8 {\n    // a comment|\n    0\n}\n",
+        "/// do|c\nfn main() -> UInt8 {\n    0\n}\n",
+        "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"{n} a|b\"\n    0\n}\n",
+        "fn main() -> UInt8 {\n    0\n}\n\nlet _s = \"open|",
+        "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"v {n} wor|\n    0\n}\n",
+        "fn main() -> UInt8 {\n    let n: UInt8 = 1\n    let _s = \"{n:|>5}\"\n    0\n}\n",
+    }) |marked| {
+        const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
+        const text = marked[0..at] ++ marked[at + 1 ..];
+        const offered = try offeredAt(gpa, text, at);
+        defer releaseAll(gpa, offered);
+        try testing.expectEqual(@as(usize, 0), offered.len);
+    }
+}
+
+test "a conversion is offered only where something converts from the value" {
+    const gpa = testing.allocator;
+    const text =
+        \\struct Plain { n: UInt8 }
+        \\struct Wrapped { n: UInt8 }
+        \\
+        \\impl From[Plain] for Wrapped {
+        \\    fn from(source: Plain) -> Wrapped {
+        \\        .{ n = source.n }
+        \\    }
+        \\}
+        \\
+        \\struct Lone { n: UInt8 }
+        \\
+        \\fn main() -> UInt8 {
+        \\    let plain = Plain { n = 1 }
+        \\    let lone = Lone { n = 2 }
+        \\    let w: Wrapped = plain.into()
+        \\    w.n + lone.n
+        \\}
+        \\
+    ;
+    const plain = std.mem.lastIndexOf(u8, text, "plain.").? + "plain.".len;
+    const converts = try offeredAt(gpa, text, plain);
+    defer releaseAll(gpa, converts);
+    try testing.expect(holds(converts, "into"));
+    const lone = std.mem.lastIndexOf(u8, text, "lone.").? + "lone.".len;
+    const stays = try offeredAt(gpa, text, lone);
+    defer releaseAll(gpa, stays);
+    try testing.expect(!holds(stays, "into"));
+    try testing.expect(!holds(stays, "try_into"));
+}
+
+test "a conversion is offered where a generic or a bound one converts from the value" {
+    const gpa = testing.allocator;
+    const text =
+        \\struct Box[T] { item: T }
+        \\struct Wrap[T] { item: T }
+        \\
+        \\impl[T] From[Box[T]] for Wrap[T] {
+        \\    fn from(source: Box[T]) -> Wrap[T] {
+        \\        .{ item = source.item }
+        \\    }
+        \\}
+        \\
+        \\struct Count { n: UInt8 }
+        \\
+        \\fn conv[T: Into[Count]](sink t: T) -> UInt8 {
+        \\    let c: Count = t.into()
+        \\    c.n
+        \\}
+        \\
+        \\impl From[UInt8] for Count {
+        \\    fn from(source: UInt8) -> Count {
+        \\        .{ n = source }
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let b: Box[UInt8] = .{ item = 3 }
+        \\    let w: Wrap[UInt8] = b.into()
+        \\    w.item + conv(UInt8(1))
+        \\}
+        \\
+    ;
+    const boxed = std.mem.lastIndexOf(u8, text, "b.").? + "b.".len;
+    const from_box = try offeredAt(gpa, text, boxed);
+    defer releaseAll(gpa, from_box);
+    try testing.expect(holds(from_box, "into"));
+    const bounded = std.mem.indexOf(u8, text, "t.into").? + "t.".len;
+    const from_bound = try offeredAt(gpa, text, bounded);
+    defer releaseAll(gpa, from_bound);
+    try testing.expect(holds(from_bound, "into"));
+}
+
+test "a conversion is offered only where the bounds of the one that converts hold" {
+    const gpa = testing.allocator;
+    // `plain_box.into()` is [T-Bound]: the conversion from `Box[T]` asks
+    // `T: Tag`, which `Plain` does not implement.
+    const text =
+        \\trait Tag {}
+        \\
+        \\struct Plain { n: UInt8 }
+        \\struct Marked { n: UInt8 }
+        \\
+        \\impl Tag for Marked {}
+        \\
+        \\struct Box[T] { item: T }
+        \\struct Wrap[T] { item: T }
+        \\
+        \\impl[T: Tag] From[Box[T]] for Wrap[T] {
+        \\    fn from(source: Box[T]) -> Wrap[T] {
+        \\        .{ item = source.item }
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let plain_box: Box[Plain] = .{ item = .{ n = 1 } }
+        \\    let marked_box: Box[Marked] = .{ item = .{ n = 2 } }
+        \\    let wrapped: Wrap[Marked] = marked_box.into()
+        \\    plain_box.item.n + wrapped.item.n
+        \\}
+        \\
+    ;
+    const plain = std.mem.indexOf(u8, text, "plain_box.item").? + "plain_box.".len;
+    const from_plain = try offeredAt(gpa, text, plain);
+    defer releaseAll(gpa, from_plain);
+    try testing.expect(!holds(from_plain, "into"));
+    const marked = std.mem.indexOf(u8, text, "marked_box.into").? + "marked_box.".len;
+    const from_marked = try offeredAt(gpa, text, marked);
+    defer releaseAll(gpa, from_marked);
+    try testing.expect(holds(from_marked, "into"));
+}
+
+test "an operation two traits answer is offered written out, the conversion only where it converts" {
+    const gpa = testing.allocator;
+    // `lone.into()` is [N-Ambiguous]: `Conv` and `Into` both declare `into`.
+    // Only `Conv`'s can be written, and it is written out.
+    const text =
+        \\trait Conv {
+        \\    fn into(self: Self) -> UInt8
+        \\}
+        \\
+        \\struct Lone { n: UInt8 }
+        \\
+        \\impl Conv for Lone {
+        \\    fn into(self: Self) -> UInt8 {
+        \\        self.n
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let lone = Lone { n = 2 }
+        \\    Conv.into(lone)
+        \\}
+        \\
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const edited = try std.mem.replaceOwned(u8, gpa, text, "    Conv.into(lone)", "    lone.");
+    defer gpa.free(edited);
+    var typed = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = edited }}, "main.lin");
+    defer typed.deinit();
+    const offset = std.mem.indexOf(u8, edited, "lone.\n").? + "lone.".len;
+    const items = try offeredReading(gpa, &typed, typed.fileNamed("main.lin").?, offset, .unsupported);
+    defer free(gpa, items);
+    var offered: ?Item = null;
+    for (items) |item| {
+        if (!std.mem.eql(u8, item.label, "into")) continue;
+        try testing.expect(offered == null);
+        offered = item;
+    }
+    const conv = offered orelse return error.TestExpectedCompletion;
+    try testing.expectEqualStrings("Conv", conv.labelDetails.?.description.?);
+    const written = switch (conv.textEdit.?) {
+        inline else => |e| e.newText,
+    };
+    try testing.expectEqualStrings("Conv.into(lone)", written);
+}
+
 test "a local is offered from the statement after the one that declares it" {
+    @setEvalBranchQuota(4000);
     const gpa = testing.allocator;
 
     const text =
@@ -2602,6 +2877,8 @@ test "a local is offered from the statement after the one that declares it" {
     inline for (.{
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;\n    |\n    2\n}\n",
         "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true; |\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;|\n    2\n}\n",
+        "fn main() -> UInt8 {\n    let x: UInt8 = 1\n    let x: Bool = true;|x\n    2\n}\n",
     }) |marked| {
         const at = comptime std.mem.indexOfScalar(u8, marked, '|').?;
         const ended = marked[0..at] ++ marked[at + 1 ..];

@@ -1,0 +1,21 @@
+pub trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+pub struct P { x: UInt8 }
+
+impl Score for P {
+    fn score(self: Self) -> UInt8 {
+        self.x + 10
+    }
+}
+
+impl P {
+    pub fn bonus(self: Self) -> UInt8 {
+        self.x + 20
+    }
+
+    pub fn make(x: UInt8) -> P {
+        .{ x = x }
+    }
+}

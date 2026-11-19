@@ -46,6 +46,22 @@ pub const Analysis = struct {
     /// ask and a per-request table is sized by the compilation rather than by
     /// the request. One byte per file, filled in one pass over the modules.
     library: []const bool,
+    /// What the analysis was made from beyond the sources its modules hold,
+    /// so a rename can check the program it would write the way this one was
+    /// checked (`rechecked`).
+    made_from: MadeFrom,
+
+    /// The checked library the analysis resumed from, the entry and the
+    /// module checked as the entry, the disk an embedded file is read from,
+    /// and the inputs that are no module's source: a manifest, an embedded
+    /// file. Copied into `source_arena`.
+    pub const MadeFrom = struct {
+        library: *const loader.CheckedLibrary,
+        entry: []const u8,
+        module: ?[]const u8,
+        embeds_from: ?std.Io,
+        extras: []const loader.InMemoryFile,
+    };
 
     pub fn deinit(self: *Analysis) void {
         self.arena.deinit();
@@ -67,6 +83,38 @@ pub const Analysis = struct {
             if (std.mem.eql(u8, self.table.get(file).path, path)) return file;
         }
         return null;
+    }
+};
+
+/// Which file of an analysed program a path names, where the path may spell
+/// the file another way than the program does -- through a symlink, or in
+/// another case where the file system ignores case. Files are one file by
+/// identity (`loader.identityOf`).
+///
+/// Built for one request and dropped with it, so nothing it learns outlives
+/// the files it was asked about.
+///
+/// **Bound:** a path the program spells exactly is `Analysis.fileNamed`. The
+/// first other path asked builds the program's identities, one
+/// canonicalisation per file the program publishes; each later one costs one
+/// canonicalisation of the path asked and one hash lookup.
+pub const FileIdentities = struct {
+    checked: *const Analysis,
+    io: std.Io,
+    arena: std.mem.Allocator,
+    by_identity: ?std.StringHashMapUnmanaged(source_mod.FileId) = null,
+
+    pub fn fileNamed(self: *FileIdentities, path: []const u8) std.mem.Allocator.Error!?source_mod.FileId {
+        if (self.checked.fileNamed(path)) |file| return file;
+        if (self.by_identity == null) {
+            var built: std.StringHashMapUnmanaged(source_mod.FileId) = .empty;
+            var it = publish.files(&self.checked.program);
+            while (it.next()) |file| {
+                try built.put(self.arena, try loader.identityOf(self.arena, self.io, self.checked.table.get(file).path), file);
+            }
+            self.by_identity = built;
+        }
+        return self.by_identity.?.get(try loader.identityOf(self.arena, self.io, path));
     }
 };
 
@@ -93,21 +141,26 @@ pub fn of(
     files: []const loader.InMemoryFile,
     entry: []const u8,
 ) !Analysis {
-    return analyze(gpa, region_backing, library, files, entry, null);
+    return analyze(gpa, region_backing, library, files, entry, null, null);
 }
 
 /// As `of`, reading every file the program embeds from disk through `io`. An
 /// editor holds the program's own buffers and never a template or an image the
 /// program embeds, so this is how a server checks what a command line would.
+///
+/// `module`, where given, is a directory inside the source root `entry`
+/// names, checked as the entry module as a command line checks a file of it
+/// that is named: imports still resolve from `entry`.
 pub fn onDisk(
     gpa: std.mem.Allocator,
     region_backing: std.mem.Allocator,
     library: *const loader.CheckedLibrary,
     files: []const loader.InMemoryFile,
     entry: []const u8,
+    module: ?[]const u8,
     io: std.Io,
 ) !Analysis {
-    return analyze(gpa, region_backing, library, files, entry, io);
+    return analyze(gpa, region_backing, library, files, entry, module, io);
 }
 
 fn analyze(
@@ -116,6 +169,7 @@ fn analyze(
     library: *const loader.CheckedLibrary,
     files: []const loader.InMemoryFile,
     entry: []const u8,
+    module: ?[]const u8,
     embeds_from: ?std.Io,
 ) !Analysis {
     var arena = std.heap.ArenaAllocator.init(region_backing);
@@ -140,7 +194,7 @@ fn analyze(
         .{ .copy_reading_disk = .{ .allocator = source_arena.allocator(), .io = io } }
     else
         .{ .copy = source_arena.allocator() };
-    source_program.* = try library.loadFromMemory(a, &table, &sink, &interner, entry, files, .program, ownership);
+    source_program.* = try library.loadModuleFromMemory(a, &table, &sink, &interner, entry, module, files, .program, ownership);
     const program = source_program.*;
     z_load.end();
     const z_check = tracy.beginZone(@src(), "check");
@@ -176,6 +230,18 @@ fn analyze(
         for (m.files) |f| library_files[f.index()] = m.library;
     }
 
+    const kept = source_arena.allocator();
+    var extras: std.ArrayList(loader.InMemoryFile) = .empty;
+    for (files) |f| {
+        if (std.mem.endsWith(u8, f.path, ".lin")) continue;
+        try extras.append(kept, .{ .path = try kept.dupe(u8, f.path), .text = try kept.dupe(u8, f.text), .identity = try kept.dupe(u8, f.identity), .deferred = f.deferred });
+    }
+    // Allocate through `kept` before the result copies `source_arena`: an
+    // allocation after the copy would grow only the local arena, which
+    // nothing frees.
+    const kept_entry = try kept.dupe(u8, entry);
+    const kept_module = if (module) |dir| try kept.dupe(u8, dir) else null;
+
     return .{
         .arena = arena,
         .source_arena = source_arena,
@@ -186,7 +252,37 @@ fn analyze(
         .cursors = cursors,
         .uses = uses,
         .library = library_files,
+        .made_from = .{
+            .library = library,
+            .entry = kept_entry,
+            .module = kept_module,
+            .embeds_from = embeds_from,
+            .extras = extras.items,
+        },
     };
+}
+
+/// The analysis of `checked`'s program with each of its own sources as
+/// `sources` holds it: the same library, entry, module and other inputs, so
+/// what differs is what the sources changed. A source `sources` leaves out
+/// keeps the text it was checked with.
+pub fn rechecked(gpa: std.mem.Allocator, checked: *const Analysis, sources: []const loader.InMemoryFile) !Analysis {
+    var inputs: std.ArrayList(loader.InMemoryFile) = .empty;
+    defer inputs.deinit(gpa);
+    try inputs.appendSlice(gpa, sources);
+    for (checked.program.modules) |m| {
+        if (m.library) continue;
+        for (m.files) |f| {
+            const held = checked.table.get(f);
+            const given = for (sources) |s| {
+                if (std.mem.eql(u8, s.path, held.path)) break true;
+            } else false;
+            if (!given) try inputs.append(gpa, .{ .path = held.path, .text = held.text });
+        }
+    }
+    try inputs.appendSlice(gpa, checked.made_from.extras);
+    const from = checked.made_from;
+    return analyze(gpa, gpa, from.library, inputs.items, from.entry, from.module, from.embeds_from);
 }
 
 test "unrelated source payloads do not increase analysis allocation" {

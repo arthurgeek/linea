@@ -1,0 +1,6 @@
+// A file the editor opened and has not saved yet belongs to the module of the
+// directory it is in, as it will once it is written: `new.lin` is checked with
+// this file, and `helper` is found here.
+fn main() -> UInt8 {
+    0
+}

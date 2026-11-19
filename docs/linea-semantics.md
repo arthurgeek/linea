@@ -1754,6 +1754,8 @@ require an initialiser at their declaration.
 A module is a directory. Every `.lin` file directly inside it belongs to that
 module and sees every other file's declarations, regardless of order. The
 directory determines membership; source files contain no module declaration.
+A `.lin` entry that is a symbolic link to a file is a source read through the
+link; one that leads to no file is not a source.
 
 A compilation accepts a file or a directory as its entry. A file entry forms a
 single-file module, so unrelated programs stored in one directory do not become
@@ -1817,7 +1819,7 @@ only by naming them too. A library two manifests name is one root, so a type it
 declares is one type wherever it is named; a library is identified by the
 directory it sits in as the filesystem resolves it, however a manifest spells
 the path to it. A library's `source` names a directory inside the one holding
-its manifest. A dependency and its consumer are compiled together from source,
+its manifest, as any root's does. A dependency and its consumer are compiled together from source,
 and testing a root runs that root's tests alone.
 
 **[M-Dependency]** An entry under `dependencies` names a library this root may
@@ -1827,9 +1829,12 @@ when the library's own `"name"` is absent or differs from the entry's name;
 when the name is `std`, or is written twice in one manifest; when the name
 already names a library in another directory anywhere in the compilation; when
 the library reaches itself through dependencies, the cycle named in the help;
-when the library's `source` leaves the directory holding its manifest, or
-shares modules with another root's source (they are one directory, or one holds
-the other without the inner root's manifest between them); or when the library's manifest grants `extern` to any of its modules and the
+when the library's `source` is not a path down from the directory holding its
+manifest, or
+shares modules with another root's source (both would read one module file:
+they are one directory, or one holds the other and no directory below the outer
+source, down to the inner one, holds a manifest, since a root's walk stops at
+every directory holding one); or when the library's manifest grants `extern` to any of its modules and the
 entry does not consent with `"extern": true`, or the entry consents and the
 manifest grants nothing. The program links every root's `extern`
 declarations, so the primary root's manifest also names every library in the
@@ -1988,6 +1993,13 @@ access for unloaded roots. Private and internal aliases are checked.
 a library and which declares `main` is refused where the `main` is written,
 `pub fn main` included; so is a dependency whose root module declares one. This differs from [S-Entry], which requires a program
 entry point.
+
+A manifest's `"source"` names the directory its root's modules sit in, relative
+to the manifest, by a path down from it: not absolute and with no `..`
+component, so every reader joins the same components and the filesystem
+follows them, links included, to one directory. Absent or
+empty, it is the manifest's own directory. A source of another shape stops the
+command before anything is checked.
 
 A manifest says what its root is: `"kind"` is `"program"` (the default) or
 `"library"`; `"name"` names a library, and the name `std` makes the root the
@@ -3041,6 +3053,11 @@ recoverable from that complete key, outside associated-type projections; a
 missing parameter is [T-Impl]. A parameter head grants no type-side module
 owner, so the implementation belongs in the trait's module ([M-Impl]); an
 inherent parameter-headed implementation is invalid.
+
+An implementation's or a derive's type parameters are in scope over its whole
+head and body, so a head spelled as one of them names that parameter. A
+parameter takes no type arguments, and a head applying one to some, as in
+`impl[Pair] Show for Pair[Pair]`, is [T-Bound].
 
 A structural callable type may head an implementation of a trait,
 `impl[S] Handle[S] for fn(inout state: S, input: UInt64) -> UInt64`. It has no

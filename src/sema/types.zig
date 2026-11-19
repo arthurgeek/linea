@@ -14278,7 +14278,8 @@ pub const Typing = struct {
             }
             if (self.sealed) @panic("implementation applicability was not prepared before emission");
             if (try decided.provisionalAnswer(key_)) |answer| return answer;
-            if (decided.active.get(key_)) |active| {
+            if (decided.active.getEntry(key_)) |reached| {
+                const active = reached.value_ptr.*;
                 // A question that reaches back to itself is a cycle. One that
                 // passes through a derived implementation is assumed to hold:
                 // a derived body recurses through the fields of a finite
@@ -14286,7 +14287,11 @@ pub const Typing = struct {
                 // outside the cycle do. Any other cycle is refused. Either way
                 // the answer rests on this key, so nothing decided under it is
                 // recorded until the key itself is settled.
-                try decided.assumed.append(self.gpa, key_);
+                //
+                // The key kept is the one the open frame holds: this lookup's
+                // arguments may be a buffer its caller frees on return, and
+                // the frames below read the assumption after that.
+                try decided.assumed.append(self.gpa, reached.key_ptr.*);
                 const frame = &decided.frames.items[active.frame];
                 if (active.header_matches and decided.cycleIsDerived(key_)) {
                     if (try self.coinductiveArguments(impls, decided, impls[at], args, held)) |bindings| {

@@ -1,0 +1,26 @@
+// Outside this module a `Secret` is built by `seal` and read by `peek`, and a
+// `Shade` by `dim` and `lit`: neither's representation is named anywhere else.
+@opaque
+struct Secret { hidden: UInt8 }
+
+@opaque
+enum Shade { Dim, Bright }
+
+pub fn seal(n: UInt8) -> Secret {
+    .{ hidden = n }
+}
+
+pub fn peek(s: Secret) -> UInt8 {
+    s.hidden
+}
+
+pub fn dim() -> Shade {
+    Shade.Dim
+}
+
+pub fn lit(s: Shade) -> UInt8 {
+    match read s {
+        Dim => 0,
+        Bright => 1,
+    }
+}
