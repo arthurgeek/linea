@@ -912,8 +912,9 @@ pub const Handler = struct {
         }
         const index = try handler.indexOf();
         try others.unanalysed.appendSlice(arena, index.unresolved);
+        const own = try loader.identityOf(arena, handler.io, checked.made_from.entry);
         for (index.programs) |entry| {
-            if (std.mem.eql(u8, entry, checked.made_from.entry)) continue;
+            if (std.mem.eql(u8, try loader.identityOf(arena, handler.io, entry), own)) continue;
             const root = loader.rootOf(arena, handler.io, entry, .as_named, handler.root) catch |err| switch (err) {
                 error.OutOfMemory => return err,
                 else => {
@@ -2148,15 +2149,37 @@ test "a rename in a shared library is refused where a program reaching it does n
     try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "does not load") != null);
 }
 
-test "a rename in a shared library is refused beside a program whose manifest cannot be read, naming it" {
+test "a rename in a shared library is offered beside a program whose manifest cannot be read and that does not hold it" {
     var ws = try Rooted.initFiles(std.testing.allocator, &.{
         .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
         .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
         .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
         .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
-        // Nothing can say which libraries this program depends on.
+        // A manifest that will not parse names no library, so this program
+        // holds nothing outside its own directory.
         .{ .at = "unread/linea.json", .text = "{ not json" },
-        .{ .at = "unread/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+        .{ .at = "unread/main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    try std.testing.expectEqual(@as(usize, 2), edit.changes.?.map.count());
+}
+
+test "a rename in a shared library is refused where a program whose manifest cannot be read holds it, naming it" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        // The library sits inside a program whose manifest will not parse.
+        .{ .at = "outer/linea.json", .text = "{ not json" },
+        .{ .at = "outer/almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "outer/almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../outer/almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
     });
     defer ws.deinit();
     try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
@@ -2170,7 +2193,71 @@ test "a rename in a shared library is refused beside a program whose manifest ca
         .position = .{ .line = 3, .character = 12 },
         .newName = "chill",
     }));
-    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "unread") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "outer") != null);
+}
+
+/// The almanac workspace with program `b` naming the library at `spelled`,
+/// another path to the same directory, and the rename of `frost` from `a`.
+/// Each document is edited once, at one URI, and `b` is among them.
+fn expectRenamedThroughAnotherSpelling(ws: *Rooted, spelled: []const u8) !void {
+    const a = ws.arena.allocator();
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    try ws.dir.dir.createDirPath(std.testing.io, "b");
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/main.lin", .data = program });
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/linea.json", .data = try std.fmt.allocPrint(a, "{{ \"dependencies\": {{ \"almanac\": {{ \"path\": \"{s}\" }} }} }}", .{spelled}) });
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    const expected = [_]struct { path: []const u8, edits: usize }{
+        .{ .path = "a/main.lin", .edits = 1 },
+        .{ .path = "b/main.lin", .edits = 1 },
+        .{ .path = "almanac/almanac.lin", .edits = 2 },
+    };
+    try std.testing.expectEqual(expected.len, edit.changes.?.map.count());
+    for (expected) |want| {
+        var it = edit.changes.?.map.iterator();
+        const edits = while (it.next()) |entry| {
+            if (std.mem.endsWith(u8, entry.key_ptr.*, want.path)) break entry.value_ptr.*;
+        } else return error.TestExpectedEqual;
+        try std.testing.expectEqual(want.edits, edits.len);
+    }
+}
+
+fn almanacWorkspace() !Rooted {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+    });
+    errdefer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    return ws;
+}
+
+test "a rename in a shared library edits a program that names it through a symlink" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    try ws.dir.dir.symLink(std.testing.io, "almanac", "link", .{ .is_directory = true });
+    try expectRenamedThroughAnotherSpelling(&ws, "../link");
+}
+
+test "a rename in a shared library edits a program that names it in another case" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    // Only a file system that ignores case reaches `Almanac` at `almanac`.
+    ws.dir.dir.access(std.testing.io, "ALMANAC/linea.json", .{}) catch return error.SkipZigTest;
+    try expectRenamedThroughAnotherSpelling(&ws, "../Almanac");
 }
 
 test "a manifest changed on disk changes which files the program holds" {

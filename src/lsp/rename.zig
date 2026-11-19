@@ -155,7 +155,9 @@ pub fn forPositionReporting(
 /// programs depend on is renamed for both or for neither.
 ///
 /// Costs what `forPositionReporting` costs, once per affected program, and a
-/// look-up of the declaring file in each other one.
+/// look-up of the declaring file in each other one: exact where the program
+/// spells it the same way, and otherwise one canonicalisation per file of
+/// that program, built once for the request (`analysis.FileIdentities`).
 pub fn across(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -177,14 +179,25 @@ pub fn across(
         if (unloaded) |out| out.* = .{ .entry = first.made_from.entry, .reason = reason };
         return Refused.AProgramTheRenameReachesDoesNotLoad;
     }
+    // What one request learns about each program's files, dropped with it.
+    var request = std.heap.ArenaAllocator.init(gpa);
+    defer request.deinit();
+    const identities = try request.allocator().alloc(analysis_mod.FileIdentities, programs.len);
+    for (programs, identities) |program, *slot| slot.* = .{ .checked = program, .io = io, .arena = request.allocator() };
+
     var plans: std.ArrayList(Plan) = .empty;
     defer {
         for (plans.items) |plan| plan.deinit(gpa);
         plans.deinit(gpa);
     }
+    var planned: std.ArrayList(*analysis_mod.FileIdentities) = .empty;
+    defer planned.deinit(gpa);
     {
         const plan = try planAt(gpa, io, first, file, position, encoding, root, new_name, refused_kind) orelse return null;
         errdefer plan.deinit(gpa);
+        // `planned` first: a plan is freed by `plans` once it is in it, and
+        // by the `errdefer` above until then, never by both.
+        try planned.append(gpa, &identities[0]);
         try plans.append(gpa, plan);
     }
 
@@ -202,8 +215,8 @@ pub fn across(
             return Refused.AProgramTheRenameReachesDoesNotLoad;
         }
     }
-    for (programs[1..]) |other| {
-        const in = other.fileNamed(declared_path) orelse continue;
+    for (programs[1..], identities[1..]) |other, *known| {
+        const in = try known.fileNamed(declared_path) orelse continue;
         if (loadFailure(other)) |reason| {
             if (unloaded) |out| out.* = .{ .entry = other.made_from.entry, .reason = reason };
             return Refused.AProgramTheRenameReachesDoesNotLoad;
@@ -215,24 +228,23 @@ pub fn across(
         const plan = try planAt(gpa, io, other, in, there, encoding, root, new_name, refused_kind) orelse
             return Refused.AProgramTheRenameEditsCouldNotBeChecked;
         errdefer plan.deinit(gpa);
+        try planned.append(gpa, known);
         try plans.append(gpa, plan);
     }
 
-    const edit = try joined(gpa, plans.items);
+    const edit = try joined(gpa, io, plans.items);
     errdefer free(gpa, edit);
 
     // Every edited document is one some program was checked with.
-    var a_buffer = std.heap.ArenaAllocator.init(gpa);
-    defer a_buffer.deinit();
     var it = edit.changes.?.map.iterator();
     while (it.next()) |entry| {
-        const path = try uri_mod.pathOf(a_buffer.allocator(), entry.key_ptr.*);
-        const held = for (plans.items) |plan| {
-            if (plan.checked.fileNamed(path) != null) break true;
+        const path = try uri_mod.pathOf(request.allocator(), entry.key_ptr.*);
+        const held = for (planned.items) |known| {
+            if (try known.fileNamed(path) != null) break true;
         } else false;
         if (!held) return Refused.AProgramTheRenameEditsCouldNotBeChecked;
     }
-    for (plans.items) |plan| try refuseChangedMeaning(gpa, plan.checked, plan.declared, new_name, edit, encoding);
+    for (plans.items, planned.items) |plan, known| try refuseChangedMeaning(gpa, plan.checked, known, plan.declared, new_name, edit, encoding);
     return edit;
 }
 
@@ -250,44 +262,47 @@ const Plan = struct {
 };
 
 /// The edits of every plan, as one: a document several programs hold gets
-/// each edit once, in order. Two plans writing one range two ways would be two
-/// renames of one name, which no rule here makes, and is refused.
-fn joined(gpa: std.mem.Allocator, plans: []const Plan) !lsp.types.WorkspaceEdit {
-    var lists: std.StringArrayHashMapUnmanaged(std.ArrayList(lsp.types.TextEdit)) = .empty;
-    defer {
-        for (lists.values()) |*list| list.deinit(gpa);
-        lists.deinit(gpa);
-    }
+/// each edit once, in order, under the URI the first plan wrote it at. Two
+/// programs may spell one file two ways -- through a symlink, or in another
+/// case -- so documents are told apart by identity (`loader.identityOf`).
+/// Two plans writing one range two ways would be two renames of one name,
+/// which no rule here makes, and is refused.
+fn joined(gpa: std.mem.Allocator, io: std.Io, plans: []const Plan) !lsp.types.WorkspaceEdit {
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
+    const a = scratch.allocator();
+    const Document = struct { uri: []const u8, edits: std.ArrayList(lsp.types.TextEdit) = .empty };
+    var lists: std.StringArrayHashMapUnmanaged(Document) = .empty;
     for (plans) |plan| {
         var it = plan.edit.changes.?.map.iterator();
         while (it.next()) |entry| {
-            const slot = try lists.getOrPut(gpa, entry.key_ptr.*);
-            if (!slot.found_existing) slot.value_ptr.* = .empty;
+            const identity = try loader.identityOf(a, io, try uri_mod.pathOf(a, entry.key_ptr.*));
+            const slot = try lists.getOrPut(a, identity);
+            if (!slot.found_existing) slot.value_ptr.* = .{ .uri = entry.key_ptr.* };
             for (entry.value_ptr.*) |e| {
-                const present = for (slot.value_ptr.items) |held| {
+                const present = for (slot.value_ptr.edits.items) |held| {
                     if (!std.meta.eql(held.range, e.range)) continue;
                     if (!std.mem.eql(u8, held.newText, e.newText)) return Refused.ANewNameWouldNotCheck;
                     break true;
                 } else false;
-                if (!present) try slot.value_ptr.append(gpa, e);
+                if (!present) try slot.value_ptr.edits.append(a, e);
             }
         }
     }
 
     var changes: Changes = .empty;
     errdefer release(gpa, &changes);
-    var it = lists.iterator();
-    while (it.next()) |entry| {
-        std.mem.sort(lsp.types.TextEdit, entry.value_ptr.items, {}, earlier);
-        const uri = try gpa.dupe(u8, entry.key_ptr.*);
+    for (lists.values()) |*document| {
+        std.mem.sort(lsp.types.TextEdit, document.edits.items, {}, earlier);
+        const uri = try gpa.dupe(u8, document.uri);
         errdefer gpa.free(uri);
-        const written = try gpa.alloc(lsp.types.TextEdit, entry.value_ptr.items.len);
+        const written = try gpa.alloc(lsp.types.TextEdit, document.edits.items.len);
         var initialized: usize = 0;
         errdefer {
             for (written[0..initialized]) |e| gpa.free(e.newText);
             gpa.free(written);
         }
-        for (entry.value_ptr.items, written) |e, *w| {
+        for (document.edits.items, written) |e, *w| {
             w.* = .{ .range = e.range, .newText = try gpa.dupe(u8, e.newText) };
             initialized += 1;
         }
@@ -430,6 +445,9 @@ fn planAt(
 fn refuseChangedMeaning(
     gpa: std.mem.Allocator,
     checked: *const Analysis,
+    /// Which of `checked`'s files a document of `edit` is, however its URI
+    /// spells it.
+    known: *analysis_mod.FileIdentities,
     renamed: []const TokenId,
     new_name: []const u8,
     edit: lsp.types.WorkspaceEdit,
@@ -445,9 +463,11 @@ fn refuseChangedMeaning(
     var sources: std.ArrayList(loader.InMemoryFile) = .empty;
     var it = edit.changes.?.map.iterator();
     while (it.next()) |entry| {
-        const path = try uri_mod.pathOf(a, entry.key_ptr.*);
         // A document another program holds; `across` refuses one none holds.
-        const file = checked.fileNamed(path) orelse continue;
+        // Keyed by this program's own spelling of the file, which the URI
+        // may spell another way.
+        const file = try known.fileNamed(try uri_mod.pathOf(a, entry.key_ptr.*)) orelse continue;
+        const path = checked.table.get(file).path;
         const text = checked.table.get(file).text;
         const edits = entry.value_ptr.*;
         const placed = try a.alloc(Move, edits.len);

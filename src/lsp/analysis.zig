@@ -86,6 +86,38 @@ pub const Analysis = struct {
     }
 };
 
+/// Which file of an analysed program a path names, where the path may spell
+/// the file another way than the program does -- through a symlink, or in
+/// another case where the file system ignores case. Files are one file by
+/// identity (`loader.identityOf`).
+///
+/// Built for one request and dropped with it, so nothing it learns outlives
+/// the files it was asked about.
+///
+/// **Bound:** a path the program spells exactly is `Analysis.fileNamed`. The
+/// first other path asked builds the program's identities, one
+/// canonicalisation per file the program publishes; each later one costs one
+/// canonicalisation of the path asked and one hash lookup.
+pub const FileIdentities = struct {
+    checked: *const Analysis,
+    io: std.Io,
+    arena: std.mem.Allocator,
+    by_identity: ?std.StringHashMapUnmanaged(source_mod.FileId) = null,
+
+    pub fn fileNamed(self: *FileIdentities, path: []const u8) std.mem.Allocator.Error!?source_mod.FileId {
+        if (self.checked.fileNamed(path)) |file| return file;
+        if (self.by_identity == null) {
+            var built: std.StringHashMapUnmanaged(source_mod.FileId) = .empty;
+            var it = publish.files(&self.checked.program);
+            while (it.next()) |file| {
+                try built.put(self.arena, try loader.identityOf(self.arena, self.io, self.checked.table.get(file).path), file);
+            }
+            self.by_identity = built;
+        }
+        return self.by_identity.?.get(try loader.identityOf(self.arena, self.io, path));
+    }
+};
+
 /// Loads and checks a module the editor is looking at.
 ///
 /// Reached sources are copied into their own arena, so what the caller
