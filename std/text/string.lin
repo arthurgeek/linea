@@ -632,12 +632,10 @@ test "utf8 validation rejects non scalar and incomplete encodings" {
         [226, 130, 65, 0], // ASCII A replaces the final continuation.
     ]
     for read invalid in cases {
-        defer var bytes = Vec.filled(count: 5, value: UInt8(0)).unwrap()
-        // ASCII a makes the malformed sequence start at byte offset one.
-        bytes[0] = 97
-        for i in 0..invalid.length() {
-            bytes[i + 1] = invalid[i]
-        }
+        // ASCII a makes the malformed sequence start at byte offset one, and
+        // the run `bytes[1..5]` takes the case's four bytes after it.
+        var bytes: [UInt8; 5] = [97, 0, 0, 0, 0]
+        bytes[1..5] = copy(invalid)
         match validate_utf8(bytes.as_slice()) {
             Ok(_) => testing.assert(false, "malformed UTF-8 passed validation")?,
             Err(error) => testing.assert_eq(error.offset, UInt64(1), "invalid sequence lost its lead-byte offset")?,
