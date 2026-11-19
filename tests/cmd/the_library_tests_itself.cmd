@@ -273,22 +273,50 @@ The library tests itself.
   ok    fmt.write_integer reaches both ends of every width
   ok    fmt.write_integer right aligns and pads after the sign
   ok    fmt.write_integer writes hexadecimal digits in the case asked
+  ok    fs.a child path joins with one slash
+  ok    fs.a dangling link a walk follows is reported as not found
   ok    fs.a direct file write reports scratch allocation failure
   ok    fs.a direct file write takes its path scratch from an arena
+  ok    fs.a directory changed during a walk is reported once, by its own path
+  ok    fs.a directory swapped for a link during a walk is not followed
   ok    fs.a file close failure returns all successfully read bytes
   ok    fs.a file open failure has no partial allocation
   ok    fs.a file read failure and close failure are both retained
   ok    fs.a file read failure displays its primary and cleanup reasons
   ok    fs.a file takes a logged line
+  ok    fs.a followed link back into the walk is a loop and the walk goes on
+  ok    fs.a parent is held open again only when its birth time is the one recorded
+  ok    fs.a symbolic link names its target and refuses an existing name
+  ok    fs.a walk enters a directory whose path is longer than the system opens
+  ok    fs.a walk error displays its path and its cause
+  ok    fs.a walk error names the path it could not read
+  ok    fs.a walk holding one open directory lists the deeper ones
+  ok    fs.a walk over an arena counts every entry of the tree
+  ok    fs.a walk reports a link without following it
+  ok    fs.a walk reports every entry below the root once
+  ok    fs.a walk runs inside a simulation
+  ok    fs.a walk stops at its depth limit
+  ok    fs.a word above the signed range reads as a negative number
   ok    fs.an atomic save reports scratch allocation failure
   ok    fs.an atomic save takes its scratch names from an arena
+  ok    fs.an entry kind displays as a word
+  ok    fs.an entry's depth counts directories from the root
+  ok    fs.an entry's kind tells a file from a directory
+  ok    fs.an entry's modification time is when it was written
+  ok    fs.an entry's name is the last component of its path
+  ok    fs.an entry's path joins the root to the names below it
+  ok    fs.an entry's permissions give its owner what created it took
+  ok    fs.an entry's size counts a file's bytes
   ok    fs.as_bytes returns the bytes the path was made from
   ok    fs.atomic cleanup retains primary close remove and parent errors
   ok    fs.atomic parent close failure preserves publication and skips removal
   ok    fs.atomic save preserves old contents on create conflict and replaces permissions
   ok    fs.atomic save rejects an observed nonregular destination before writing
   ok    fs.atomic save rejects special permission bits before io
+  ok    fs.closing a walk part-way closes the directories it is inside
   ok    fs.create refuses an existing entry unless it replaces it
+  ok    fs.creating a directory refuses an existing entry
+  ok    fs.creating a directory takes its scratch from an arena
   ok    fs.creating a file makes an entry that opens
   ok    fs.creating a file reports scratch allocation failure
   ok    fs.creating a file takes its path scratch from an arena
@@ -296,13 +324,19 @@ The library tests itself.
   ok    fs.each allocation failure covers a direct file write
   ok    fs.each allocation failure covers both scratch names of an atomic save
   ok    fs.each allocation failure covers creating a file
+  ok    fs.each allocation failure covers creating a symbolic link
   ok    fs.each allocation failure covers every growth step of a file read
+  ok    fs.each allocation failure of a walk is reported
   ok    fs.file close consumes a failed descriptor
   ok    fs.from_arg takes an argument as a path and refuses a missing one
   ok    fs.from_str accepts text and refuses an embedded nul
+  ok    fs.is_dir holds of a directory alone
+  ok    fs.is_file holds of a regular file alone
+  ok    fs.is_symlink holds of a link the walk does not follow
   ok    fs.opening a file reads what was written
   ok    fs.opening a file takes its path scratch from an arena
   ok    fs.opening a path reports scratch allocation failure
+  ok    fs.opening a walk of a missing directory reports it
   ok    fs.path components preserve a root parent and reject special final names
   ok    fs.path display escapes undecodable bytes without losing them
   ok    fs.path errors are independent of released input bytes
@@ -316,9 +350,12 @@ The library tests itself.
   ok    fs.reading text names the offset of invalid utf8
   ok    fs.reading text releases the bytes of every failure and every refusal
   ok    fs.reading text reports a missing file as a read failure
+  ok    fs.removing a directory refuses one that holds a file and a missing one
+  ok    fs.removing a directory takes its scratch from an arena
   ok    fs.removing a file takes its name and reports a missing one
   ok    fs.saving atomically publishes the new contents
   ok    fs.settling a failed file read keeps the read and close errors
+  ok    fs.skipping a directory's children leaves them out
   ok    fs.temporary names have a fixed ascii extent and a single terminator
   ok    fs.writing a file reports the bytes written
   ok    hash.boolean hashes distinguish values
@@ -1137,6 +1174,9 @@ The library tests itself.
   ok    mem.a closure calls what it captured
   ok    mem.a closure keeps its captures in an arena
   ok    mem.a closure opened in the system allocator calls what it captured
+  ok    mem.a directory stream lists what a directory holds
+  ok    mem.a directory stream opens a directory inside the one it reads
+  ok    mem.a directory's lasting identity is the same through two streams
   ok    mem.a drain stopped early is returned by finish and resumes
   ok    mem.a foreign_address is where the bytes are
   ok    mem.a foreign_byte is read at its offset
@@ -1224,6 +1264,7 @@ The library tests itself.
   ok    mem.open policies have the runtime's codes
   ok    mem.open records into the backing the caller chooses
   ok    mem.open refuses the acquisition it names
+  ok    mem.opening a missing directory answers its errno
   ok    mem.outstanding counts a dropped arena buffer until the end
   ok    mem.peak_bytes remembers the most bytes live at once
   ok    mem.random_words differ between reads
@@ -1703,4 +1744,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1700 passed, 0 failed
+  1741 passed, 0 failed
