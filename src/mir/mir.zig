@@ -306,9 +306,12 @@ pub const Inst = struct {
     pub const Payload = enum { constant, bytes, static, local, store, unary, binary, field, float_math, raw_access, check, call, function, indirect_call, target, branch, trap };
 
     /// Which member of a value's type a `field_addr` selects: a field's or a
-    /// tuple component's index, a variant payload's position, or an
-    /// element's index. `none` where nothing names one: an element chosen at
-    /// run time, or a part of a representation the compiler lays out itself.
+    /// tuple component's index, a variant payload's position, or the index of
+    /// an array element a constant names. `none` where no one member is
+    /// named: an element chosen at run time, a run of elements a range
+    /// selects, or a part of a representation the compiler lays out itself.
+    /// An address naming none is a place of its own, told apart from no
+    /// other address.
     pub const Part = enum(u32) {
         none = std.math.maxInt(u32),
         _,

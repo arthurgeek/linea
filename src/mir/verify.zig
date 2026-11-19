@@ -2784,6 +2784,8 @@ pub const Harness = struct {
     /// Two `Token`s, zero-sized and sharing their offset: only which field
     /// an address names tells them apart.
     pub const tokens: TypeId = @enumFromInt(TypeId.builtins.len + 21);
+    /// Two `Token`s as an array: zero-sized elements at one offset.
+    pub const token_array: TypeId = @enumFromInt(TypeId.builtins.len + 22);
 
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
@@ -2809,7 +2811,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 22;
+            const fixed_type_count = TypeId.builtins.len + 23;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2834,6 +2836,7 @@ pub const Harness = struct {
             pool[@intFromEnum(plain)] = .{ .struct_ = .{ .name = "Plain", .first_field = 17, .field_count = 2 } };
             pool[@intFromEnum(holder)] = .{ .struct_ = .{ .name = "Holder", .first_field = 19, .field_count = 2 } };
             pool[@intFromEnum(tokens)] = .{ .struct_ = .{ .name = "Tokens", .first_field = 21, .field_count = 2, .ownership_policy = .linear } };
+            pool[@intFromEnum(token_array)] = .{ .array = .{ .name = "[Token; 2]", .element = token, .count = 2 } };
             pool[@intFromEnum(callback_enum)] = .{ .enum_ = .{ .name = "Callbacks", .first_variant = 2, .variant_count = 5 } };
             const callable_params = [_]types_mod.CallableParam{
                 .{ .spelling = "value", .convention = .read, .ty = .u8, .default = .absent },
@@ -2897,6 +2900,7 @@ pub const Harness = struct {
             @memset(capabilities, .affine);
             capabilities[@intFromEnum(token)] = .linear;
             capabilities[@intFromEnum(tokens)] = .linear;
+            capabilities[@intFromEnum(token_array)] = .linear;
             break :blk .{
                 .binding_types = .empty,
                 .decl_returns = .empty,

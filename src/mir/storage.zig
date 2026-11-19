@@ -3538,6 +3538,42 @@ test "a zero-sized field owing its settlement is taken once however many address
     }
 }
 
+test "a zero-sized element owing its settlement is taken once however many addresses name it" {
+    const gpa = testing.allocator;
+    // Both elements of `[Token; 2]` lie at offset zero: the index a constant
+    // names is what tells them apart. Taking element 0 through two addresses
+    // is refused; taking element 0 and then element 1 is not.
+    for ([_]struct { second: u32, refused: bool }{
+        .{ .second = 0, .refused = true },
+        .{ .second = 1, .refused = false },
+    }) |case| {
+        var b = Builder.init(gpa);
+        defer b.deinit();
+        b.return_type = .u64;
+        const held = try b.addLocal(Harness.token_array, .value);
+        const first = try b.addLocal(Harness.token, .value);
+        const second = try b.addLocal(Harness.token, .value);
+        const entry = try b.addBlock();
+        const zero = try constant(&b, entry, 0);
+        const base = try addrOf(&b, entry, held);
+        const element = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.token, .span = Span.empty, .data = .{ .field = .{ .base = base, .offset = zero, .part = .at(0) } } });
+        const once = try addrOf(&b, entry, first);
+        _ = try b.addInst(entry, .{ .tag = .move_value, .ty = Harness.token, .span = Span.empty, .data = .{ .binary = .{ .lhs = once, .rhs = element } } });
+        const again_base = try addrOf(&b, entry, held);
+        const again = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.token, .span = Span.empty, .data = .{ .field = .{ .base = again_base, .offset = zero, .part = .at(case.second) } } });
+        const twice = try addrOf(&b, entry, second);
+        _ = try b.addInst(entry, .{ .tag = .move_value, .ty = Harness.token, .span = Span.empty, .data = .{ .binary = .{ .lhs = twice, .rhs = again } } });
+        const k = try constant(&b, entry, 0);
+        try ret(&b, entry, k);
+        const functions = try Shapes.callees(gpa, try b.finish(entry, .from(0)));
+        if (case.refused) {
+            try expectRefused(functions, "moved it out");
+        } else {
+            try expectAccepted(functions);
+        }
+    }
+}
+
 test "a moved value is not read again, and a copied one is" {
     const gpa = testing.allocator;
     for ([_]mir_mod.Inst.Tag{ .move_value, .copy_value }) |tag| {

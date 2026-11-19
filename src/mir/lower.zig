@@ -4758,7 +4758,7 @@ const Lowerer = struct {
         // formed, and this is what they settled to -- so no check is emitted,
         // which is the same nothing a settled index costs.
         if (self.calls.rangePlaceOf(self.typing, id)) |place| {
-            return self.fieldAddr(base, result_ty, @intCast(stride * place.first), .at(@intCast(place.first)), span);
+            return self.fieldAddr(base, result_ty, @intCast(stride * place.first), .none, span);
         }
 
         return self.arrayElementAddress(base, head_ty, .{ .wrote = b.rhs }, index_ty, span);
