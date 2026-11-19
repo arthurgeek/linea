@@ -84,15 +84,16 @@ pub const Documents = struct {
     /// reaches only those it imports.
     ///
     /// A buffer is found for a file however the program spells it -- through
-    /// a symlink, or in another case where the file system ignores case --
-    /// by identity (`loader.identityOf`), so every program reaching a file
-    /// reads the text the editor shows.
+    /// a symlinked directory, a file that is itself a symlink, or another
+    /// case where the file system ignores case -- by identity
+    /// (`loader.identityOf`), so every program reaching a file reads the text
+    /// the editor shows. Two buffers of one file with different text are
+    /// `openTwiceApart`, which a rename refuses; with one text, either is it.
     ///
     /// **Bound:** a buffer found under the spelling the program lists costs a
     /// lookup. Only where some open buffer is not, the buffers' identities
-    /// are taken, one canonicalisation each, and a listed file is looked up
-    /// by its directory's identity, one canonicalisation per directory the
-    /// root's files sit in.
+    /// are taken, one canonicalisation each, and each listed file without a
+    /// buffer of its own spelling is canonicalised once.
     pub fn filesFor(
         self: *const Documents,
         gpa: std.mem.Allocator,
@@ -125,7 +126,6 @@ pub const Documents = struct {
             if (self.open.contains(listed.path)) listed_exactly += 1;
         }
         var by_identity: std.StringHashMapUnmanaged([]const u8) = .empty;
-        var directories: std.StringHashMapUnmanaged([]const u8) = .empty;
         if (listed_exactly < self.open.count()) {
             var it = self.open.iterator();
             while (it.next()) |entry| try by_identity.put(s, try loader.identityOf(s, io, entry.key_ptr.*), entry.value_ptr.*);
@@ -144,13 +144,10 @@ pub const Documents = struct {
             // buffer is the text the editor shows. Any other source is left
             // on disk where the load can read it.
             const is_manifest = std.mem.eql(u8, std.fs.path.basename(path), loader.manifest_name);
-            const buffer = self.open.get(disk_path) orelse if (by_identity.count() == 0) null else found: {
-                const directory = std.fs.path.dirname(disk_path) orelse ".";
-                const known = try directories.getOrPut(s, directory);
-                if (!known.found_existing) known.value_ptr.* = try loader.identityOf(s, io, directory);
-                const identity = try std.fs.path.join(s, &.{ known.value_ptr.*, std.fs.path.basename(disk_path) });
-                break :found by_identity.get(identity);
-            };
+            const buffer = self.open.get(disk_path) orelse if (by_identity.count() == 0)
+                null
+            else
+                by_identity.get(try loader.identityOf(s, io, disk_path));
             const deferred = buffer == null and !is_manifest and reading == .open_and_manifests;
             // A manifest the walk read is the text it read, so the load and
             // the walk that listed its files agree on what each one says.
@@ -179,6 +176,25 @@ pub const Documents = struct {
         }
 
         return files.toOwnedSlice(gpa);
+    }
+
+    /// Two open buffers of one file, by identity (`loader.identityOf`), whose
+    /// texts differ: their paths, or null where every file open twice is open
+    /// with one text. A rename edits one text per file, and there is none.
+    ///
+    /// **Bound:** one canonicalisation per open buffer.
+    pub fn openTwiceApart(self: *const Documents, io: std.Io, arena: std.mem.Allocator) !?[2][]const u8 {
+        var seen: std.StringHashMapUnmanaged([]const u8) = .empty;
+        var it = self.open.iterator();
+        while (it.next()) |entry| {
+            const slot = try seen.getOrPut(arena, try loader.identityOf(arena, io, entry.key_ptr.*));
+            if (!slot.found_existing) {
+                slot.value_ptr.* = entry.key_ptr.*;
+                continue;
+            }
+            if (!std.mem.eql(u8, self.open.get(slot.value_ptr.*).?, entry.value_ptr.*)) return .{ slot.value_ptr.*, entry.key_ptr.* };
+        }
+        return null;
     }
 
     /// Releases what `filesFor` returned.

@@ -701,6 +701,23 @@ pub const Handler = struct {
         arena: std.mem.Allocator,
         params: lsp.types.rename.Params,
     ) !?lsp.types.WorkspaceEdit {
+        // A rename edits one text per file, and a file open twice with two
+        // texts has none.
+        if (try handler.documents.openTwiceApart(handler.io, arena)) |pair| {
+            try handler.transport.writeNotification(
+                handler.io,
+                arena,
+                "window/showMessage",
+                lsp.types.window.ShowMessageParams,
+                .{ .type = .Error, .message = try std.fmt.allocPrint(arena, "one file is open twice with different text, at `{s}` and `{s}`; save or close one", .{ pair[0], pair[1] }) },
+                .{ .emit_null_optional_fields = false },
+            );
+            return rename.Refused.AFileIsOpenTwiceWithDifferentText;
+        }
+        const open = try arena.alloc([]const u8, handler.documents.open.count());
+        var opened = handler.documents.open.keyIterator();
+        for (open) |*slot| slot.* = opened.next().?.*;
+
         const path = try uri_mod.pathOf(arena, params.textDocument.uri);
         const checked = try handler.check(arena, path);
         const file = checked.fileNamed(path) orelse return null;
@@ -721,6 +738,7 @@ pub const Handler = struct {
             handler.io,
             programs,
             others.unanalysed.items,
+            open,
             file,
             params.position,
             handler.offset_encoding,
@@ -2311,6 +2329,103 @@ test "a rename edits an open buffer a program reaches through a symlink, not the
 
 test "a rename edits an open buffer a program reaches through a symlink where its lines moved" {
     try expectRenamedInTheBufferThroughASymlink("// frost before thaw\npub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n", &.{ 1, 3 });
+}
+
+/// The almanac workspace with `b` naming the library through `link`, and
+/// `almanac.lin` open at both spellings, `through_almanac` and `through_link`.
+fn twiceOpenAlmanac(ws: *Rooted, recorder: *Recorder, through_almanac: []const u8, through_link: []const u8) !?lsp.types.WorkspaceEdit {
+    try ws.dir.dir.symLink(std.testing.io, "almanac", "link", .{ .is_directory = true });
+    try ws.dir.dir.createDirPath(std.testing.io, "b");
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/main.lin", .data = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" });
+    try ws.dir.dir.writeFile(std.testing.io, .{ .sub_path = "b/linea.json", .data = "{ \"dependencies\": { \"almanac\": { \"path\": \"../link\" } } }" });
+    const a = ws.arena.allocator();
+    ws.handler.transport = &recorder.transport;
+    for ([_][2][]const u8{ .{ "almanac/almanac.lin", through_almanac }, .{ "link/almanac.lin", through_link } }) |opened| {
+        try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+            .uri = try ws.pathAt(opened[0]),
+            .languageId = .{ .custom_value = "linea" },
+            .version = 1,
+            .text = opened[1],
+        } });
+    }
+    return ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    });
+}
+
+const almanac_on_disk = "pub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n";
+
+test "a rename is refused where one file is open twice with different text, naming both" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    try std.testing.expectError(rename.Refused.AFileIsOpenTwiceWithDifferentText, twiceOpenAlmanac(
+        &ws,
+        &recorder,
+        almanac_on_disk ++ "// abcdefghijklmnopqrstuvwxyz0123456789\n",
+        almanac_on_disk ++ "pub fn cold() -> UInt8 { frost() }\n",
+    ));
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "almanac/almanac.lin") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "link/almanac.lin") != null);
+}
+
+test "a rename edits each buffer of a file open twice with one text alike" {
+    var ws = try almanacWorkspace();
+    defer ws.deinit();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    const text = almanac_on_disk ++ "pub fn cold() -> UInt8 { frost() }\n";
+    const edit = (try twiceOpenAlmanac(&ws, &recorder, text, text)).?;
+    var through_almanac: ?[]const lsp.types.TextEdit = null;
+    var through_link: ?[]const lsp.types.TextEdit = null;
+    var it = edit.changes.?.map.iterator();
+    while (it.next()) |entry| {
+        if (std.mem.endsWith(u8, entry.key_ptr.*, "/almanac/almanac.lin")) through_almanac = entry.value_ptr.*;
+        if (std.mem.endsWith(u8, entry.key_ptr.*, "/link/almanac.lin")) through_link = entry.value_ptr.*;
+    }
+    try std.testing.expectEqual(@as(usize, 3), through_almanac.?.len);
+    try std.testing.expectEqual(through_almanac.?.len, through_link.?.len);
+    for (through_almanac.?, through_link.?) |x, y| try std.testing.expect(std.meta.eql(x.range, y.range));
+}
+
+test "a rename edits the buffer open at the target of a library file that is a symlink" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "store/almanac.lin", .text = almanac_on_disk },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    try ws.dir.dir.symLink(std.testing.io, "../store/almanac.lin", "almanac/almanac.lin", .{});
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+    // The buffer has dropped `thaw` and moved `frost` down a line.
+    try ws.handler.@"textDocument/didOpen"(a, .{ .textDocument = .{
+        .uri = try ws.pathAt("store/almanac.lin"),
+        .languageId = .{ .custom_value = "linea" },
+        .version = 1,
+        .text = "// frost alone\npub fn frost() -> UInt8 { 1 }\n",
+    } });
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    var it = edit.changes.?.map.iterator();
+    var library_edits: usize = 0;
+    while (it.next()) |entry| {
+        if (!std.mem.endsWith(u8, entry.key_ptr.*, "almanac.lin")) continue;
+        try std.testing.expect(std.mem.endsWith(u8, entry.key_ptr.*, "store/almanac.lin"));
+        for (entry.value_ptr.*) |e| try std.testing.expectEqual(@as(u32, 1), e.range.start.line);
+        library_edits += entry.value_ptr.len;
+    }
+    try std.testing.expectEqual(@as(usize, 1), library_edits);
 }
 
 test "a root given with a trailing slash is the directory it names" {

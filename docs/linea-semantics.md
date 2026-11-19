@@ -1754,6 +1754,8 @@ require an initialiser at their declaration.
 A module is a directory. Every `.lin` file directly inside it belongs to that
 module and sees every other file's declarations, regardless of order. The
 directory determines membership; source files contain no module declaration.
+A `.lin` entry that is a symbolic link to a file is a source read through the
+link; one that leads to no file is not a source.
 
 A compilation accepts a file or a directory as its entry. A file entry forms a
 single-file module, so unrelated programs stored in one directory do not become

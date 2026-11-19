@@ -55,6 +55,18 @@ pub const Refused = error{
     /// A program reaching the declaration does not load, so what the rename
     /// does to it cannot be checked. `ProgramRefusal` names it and why.
     AProgramTheRenameReachesDoesNotLoad,
+    /// One file is open twice, under two spellings, with different text, so
+    /// no one text says what the rename edits. `ProgramRefusal` names both.
+    AFileIsOpenTwiceWithDifferentText,
+};
+
+/// An invariant a rename's edits are held to before they are returned, which
+/// no input should break: reaching it is a defect in the server, refused
+/// rather than written into the reader's files.
+pub const Broken = error{
+    /// An edit does not cover an old spelling of what is renamed, in the one
+    /// text its file has.
+    AnEditDoesNotCoverTheNameItRenames,
 };
 
 /// The program a refusal is about: the entry it is loaded from, and why.
@@ -139,7 +151,7 @@ pub fn forPositionReporting(
     new_name: []const u8,
     refused_kind: ?*?name_case.Kind,
 ) !?lsp.types.WorkspaceEdit {
-    return across(gpa, io, &.{checked}, &.{}, file, position, encoding, root, new_name, refused_kind, null);
+    return across(gpa, io, &.{checked}, &.{}, &.{}, file, position, encoding, root, new_name, refused_kind, null);
 }
 
 /// As `forPositionReporting`, over every program of the workspace, as one
@@ -169,6 +181,10 @@ pub fn across(
     /// analysed. One that may hold the declaring file (`loader.mayHold`)
     /// refuses the rename, since its uses cannot be found.
     unanalysed: []const []const u8,
+    /// The path of every document the client has open. A file open under
+    /// several of them has its edits written under each, since each is a
+    /// buffer the client edits and saves.
+    open: []const []const u8,
     file: FileId,
     position: lsp.types.Position,
     encoding: lsp.offsets.Encoding,
@@ -239,7 +255,7 @@ pub fn across(
         try plans.append(gpa, plan);
     }
 
-    const edit = try joined(gpa, io, plans.items);
+    const edit = try joined(gpa, io, plans.items, open);
     errdefer free(gpa, edit);
 
     // Every edited document is one some program was checked with.
@@ -255,7 +271,44 @@ pub fn across(
         }
     }
     for (plans.items, planned.items) |plan, known| try refuseChangedMeaning(gpa, plan.checked, known, plan.declared, new_name, edit, encoding, unloaded);
+
+    // Each edit covers an old spelling of what is renamed, in the one text
+    // its file has.
+    var old_names: std.StringHashMapUnmanaged(void) = .empty;
+    for (plans.items) |plan| {
+        for (plan.declared) |token| try old_names.put(request.allocator(), plan.checked.program.ast.tokenText(token), {});
+    }
+    var covered = edit.changes.?.map.iterator();
+    while (covered.next()) |entry| {
+        const path = try uri_mod.pathOf(request.allocator(), entry.key_ptr.*);
+        const text = for (planned.items) |known| {
+            if (try known.fileNamed(path)) |held| break known.checked.table.get(held).text;
+        } else unreachable;
+        if (!coversOldNames(text, entry.value_ptr.*, &old_names, encoding)) return Broken.AnEditDoesNotCoverTheNameItRenames;
+    }
     return edit;
+}
+
+/// Whether every edit in `edits` covers, in `text`, exactly one of
+/// `old_names`.
+fn coversOldNames(text: []const u8, edits: []const lsp.types.TextEdit, old_names: *const std.StringHashMapUnmanaged(void), encoding: lsp.offsets.Encoding) bool {
+    for (edits) |e| {
+        const start = lsp.offsets.positionToIndex(text, e.range.start, encoding);
+        const end = lsp.offsets.positionToIndex(text, e.range.end, encoding);
+        if (start > end or end > text.len or !old_names.contains(text[start..end])) return false;
+    }
+    return true;
+}
+
+test "an edit covering anything but an old name is caught" {
+    var names: std.StringHashMapUnmanaged(void) = .empty;
+    defer names.deinit(testing.allocator);
+    try names.put(testing.allocator, "frost", {});
+    const text = "pub fn frost() -> UInt8 { 1 }\n// a calendar\n";
+    const on_name: lsp.types.TextEdit = .{ .range = .{ .start = .{ .line = 0, .character = 7 }, .end = .{ .line = 0, .character = 12 } }, .newText = "chill" };
+    const off_name: lsp.types.TextEdit = .{ .range = .{ .start = .{ .line = 1, .character = 5 }, .end = .{ .line = 1, .character = 10 } }, .newText = "chill" };
+    try testing.expect(coversOldNames(text, &.{on_name}, &names, .@"utf-16"));
+    try testing.expect(!coversOldNames(text, &.{ on_name, off_name }, &names, .@"utf-16"));
 }
 
 /// What renaming the name at one place of one program edits, and the tokens
@@ -271,16 +324,25 @@ const Plan = struct {
     }
 };
 
-/// The edits of every plan, as one: a document several programs hold gets
-/// each edit once, in order, under the URI the first plan wrote it at. Two
-/// programs may spell one file two ways -- through a symlink, or in another
-/// case -- so documents are told apart by identity (`loader.identityOf`).
-/// Two plans writing one range two ways would be two renames of one name,
-/// which no rule here makes, and is refused.
-fn joined(gpa: std.mem.Allocator, io: std.Io, plans: []const Plan) !lsp.types.WorkspaceEdit {
+/// The edits of every plan, as one: a file several programs hold gets each
+/// edit once, in order. Two programs may spell one file two ways -- through
+/// a symlink, or in another case -- so files are told apart by identity
+/// (`loader.identityOf`), and every program read one text for each
+/// (`Documents.openTwiceApart`). A file's edits are written under every URI
+/// in `open` that names it, since each is a buffer the client edits and
+/// saves, and under the URI the first plan wrote where none does. Two plans
+/// writing one range two ways would be two renames of one name, which no
+/// rule here makes, and is refused.
+fn joined(gpa: std.mem.Allocator, io: std.Io, plans: []const Plan, open: []const []const u8) !lsp.types.WorkspaceEdit {
     var scratch = std.heap.ArenaAllocator.init(gpa);
     defer scratch.deinit();
     const a = scratch.allocator();
+    var open_by_identity: std.StringHashMapUnmanaged(std.ArrayList([]const u8)) = .empty;
+    for (open) |path| {
+        const slot = try open_by_identity.getOrPut(a, try loader.identityOf(a, io, path));
+        if (!slot.found_existing) slot.value_ptr.* = .empty;
+        try slot.value_ptr.append(a, try uri_mod.uriOf(a, path));
+    }
     const Document = struct { uri: []const u8, edits: std.ArrayList(lsp.types.TextEdit) = .empty };
     var lists: std.StringArrayHashMapUnmanaged(Document) = .empty;
     for (plans) |plan| {
@@ -302,21 +364,25 @@ fn joined(gpa: std.mem.Allocator, io: std.Io, plans: []const Plan) !lsp.types.Wo
 
     var changes: Changes = .empty;
     errdefer release(gpa, &changes);
-    for (lists.values()) |*document| {
+    for (lists.keys(), lists.values()) |identity, *document| {
         std.mem.sort(lsp.types.TextEdit, document.edits.items, {}, earlier);
-        const uri = try gpa.dupe(u8, document.uri);
-        errdefer gpa.free(uri);
-        const written = try gpa.alloc(lsp.types.TextEdit, document.edits.items.len);
-        var initialized: usize = 0;
-        errdefer {
-            for (written[0..initialized]) |e| gpa.free(e.newText);
-            gpa.free(written);
+        const uris: []const []const u8 = if (open_by_identity.get(identity)) |opened| opened.items else &.{document.uri};
+        for (uris) |target| {
+            if (changes.contains(target)) continue;
+            const uri = try gpa.dupe(u8, target);
+            errdefer gpa.free(uri);
+            const written = try gpa.alloc(lsp.types.TextEdit, document.edits.items.len);
+            var initialized: usize = 0;
+            errdefer {
+                for (written[0..initialized]) |e| gpa.free(e.newText);
+                gpa.free(written);
+            }
+            for (document.edits.items, written) |e, *w| {
+                w.* = .{ .range = e.range, .newText = try gpa.dupe(u8, e.newText) };
+                initialized += 1;
+            }
+            try changes.put(gpa, uri, written);
         }
-        for (document.edits.items, written) |e, *w| {
-            w.* = .{ .range = e.range, .newText = try gpa.dupe(u8, e.newText) };
-            initialized += 1;
-        }
-        try changes.put(gpa, uri, written);
     }
     return .{ .changes = .{ .map = changes } };
 }
@@ -481,6 +547,8 @@ fn refuseChangedMeaning(
         // may spell another way.
         const file = try known.fileNamed(try uri_mod.pathOf(a, entry.key_ptr.*)) orelse continue;
         const path = checked.table.get(file).path;
+        // A file open under two URIs has one set of edits under each.
+        if (moves.contains(path)) continue;
         const text = checked.table.get(file).text;
         const edits = entry.value_ptr.*;
         const placed = try a.alloc(Move, edits.len);

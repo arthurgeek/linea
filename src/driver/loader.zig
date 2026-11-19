@@ -2491,7 +2491,10 @@ pub fn pathsOfModule(gpa: std.mem.Allocator, io: std.Io, root: []const u8) ![][]
             }
         }
         try enterListed(&walker, io, e);
-        if (e.kind != .file) continue;
+        // A source may be a symlink to one, read through it as the file
+        // system reads it.
+        const source = e.kind == .file or (e.kind == .sym_link and namesAFile(io, dir, e.path));
+        if (!source) continue;
         if (!std.mem.endsWith(u8, e.basename, ".lin")) continue;
 
         const rel = if (root.len == 0)
@@ -2502,6 +2505,32 @@ pub fn pathsOfModule(gpa: std.mem.Allocator, io: std.Io, root: []const u8) ![][]
     }
 
     return found.toOwnedSlice(gpa);
+}
+
+/// Whether `path` in `dir`, followed through any symlink, is a regular file.
+fn namesAFile(io: std.Io, dir: std.Io.Dir, path: []const u8) bool {
+    const stat = dir.statFile(io, path, .{}) catch return false;
+    return stat.kind == .file;
+}
+
+test "a module holds a source that is a symlink to a file, and not one that dangles" {
+    const gpa = testing.allocator;
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "mod");
+    try tmp.dir.createDirPath(testing.io, "store");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "store/held.lin", .data = "pub fn one() -> UInt8 { 1 }\n" });
+    try tmp.dir.symLink(testing.io, "../store/held.lin", "mod/linked.lin", .{});
+    try tmp.dir.symLink(testing.io, "../store/gone.lin", "mod/dangling.lin", .{});
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/mod", .{tmp.sub_path});
+    defer gpa.free(root);
+    const paths = try pathsOfModule(gpa, testing.io, root);
+    defer {
+        for (paths) |p| gpa.free(p);
+        gpa.free(paths);
+    }
+    try testing.expectEqual(@as(usize, 1), paths.len);
+    try testing.expect(std.mem.endsWith(u8, paths[0], "mod/linked.lin"));
 }
 
 /// Descends into a directory the walk listed, skipping one removed since.
