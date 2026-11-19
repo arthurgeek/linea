@@ -138,7 +138,7 @@ pub fn forPositionReporting(
     new_name: []const u8,
     refused_kind: ?*?name_case.Kind,
 ) !?lsp.types.WorkspaceEdit {
-    return across(gpa, io, &.{checked}, file, position, encoding, root, new_name, refused_kind, null);
+    return across(gpa, io, &.{checked}, &.{}, file, position, encoding, root, new_name, refused_kind, null);
 }
 
 /// As `forPositionReporting`, over every program of the workspace, as one
@@ -160,6 +160,10 @@ pub fn across(
     gpa: std.mem.Allocator,
     io: std.Io,
     programs: []const *const Analysis,
+    /// The directory of each program of the workspace that could not be
+    /// analysed. One that may hold the declaring file (`loader.mayHold`)
+    /// refuses the rename, since its uses cannot be found.
+    unanalysed: []const []const u8,
     file: FileId,
     position: lsp.types.Position,
     encoding: lsp.offsets.Encoding,
@@ -190,6 +194,14 @@ pub fn across(
     const declared = plans.items[0].declared[0];
     const declared_path = first.table.get(ast.fileOf(declared)).path;
     const declared_span = ast.tokenSpan(declared);
+    // The reason is allocated in `gpa`, which a server passes as the arena
+    // of the message it answers.
+    for (unanalysed) |dir| {
+        if (try loader.mayHold(gpa, io, dir, declared_path)) |reason| {
+            if (unloaded) |out| out.* = .{ .entry = dir, .reason = reason };
+            return Refused.AProgramTheRenameReachesDoesNotLoad;
+        }
+    }
     for (programs[1..]) |other| {
         const in = other.fileNamed(declared_path) orelse continue;
         if (loadFailure(other)) |reason| {

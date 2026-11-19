@@ -699,12 +699,12 @@ pub const Handler = struct {
 
         var others = try handler.otherPrograms(arena, checked);
         defer {
-            for (others.items) |*other| other.deinit();
-            others.deinit(arena);
+            for (others.analysed.items) |*other| other.deinit();
+            others.analysed.deinit(arena);
         }
-        const programs = try arena.alloc(*const analysis.Analysis, others.items.len + 1);
+        const programs = try arena.alloc(*const analysis.Analysis, others.analysed.items.len + 1);
         programs[0] = checked;
-        for (others.items, programs[1..]) |*other, *slot| slot.* = other;
+        for (others.analysed.items, programs[1..]) |*other, *slot| slot.* = other;
 
         var refused_kind: ?name_case.Kind = null;
         var unloaded: ?rename.Unloaded = null;
@@ -712,6 +712,7 @@ pub const Handler = struct {
             arena,
             handler.io,
             programs,
+            others.unanalysed.items,
             file,
             params.position,
             handler.offset_encoding,
@@ -887,36 +888,54 @@ pub const Handler = struct {
         return &slot.*.?.of;
     }
 
-    /// Every program of the workspace but the one `checked` is, each checked
-    /// with the documents the editor holds, for a rename to find the ones it
-    /// reaches. Held apart from the cached slots, which hold `checked` itself.
-    /// A program whose root or files cannot be read gives no analysis: nothing
-    /// shows it reaching the name, so it is not among those a rename edits.
-    /// One that loads with errors is kept, and `rename.across` decides.
+    /// What every program of the workspace but `checked`'s is, for a rename.
+    const OtherPrograms = struct {
+        /// Each checked with the documents the editor holds; one that loads
+        /// with errors is kept, and `rename.across` decides.
+        analysed: std.ArrayList(analysis.Analysis) = .empty,
+        /// The directory of each program that could not be analysed: a
+        /// manifest the index could not resolve, or a root or files that
+        /// could not be read.
+        unanalysed: std.ArrayList([]const u8) = .empty,
+    };
+
+    /// Every program of the workspace but the one `checked` is, for a rename
+    /// to find the ones it reaches. Held apart from the cached slots, which
+    /// hold `checked` itself.
     ///
     /// Costs one check per program the workspace holds.
-    fn otherPrograms(handler: *Handler, arena: std.mem.Allocator, checked: *const analysis.Analysis) !std.ArrayList(analysis.Analysis) {
-        var others: std.ArrayList(analysis.Analysis) = .empty;
+    fn otherPrograms(handler: *Handler, arena: std.mem.Allocator, checked: *const analysis.Analysis) !OtherPrograms {
+        var others: OtherPrograms = .{};
         errdefer {
-            for (others.items) |*other| other.deinit();
-            others.deinit(arena);
+            for (others.analysed.items) |*other| other.deinit();
+            others.analysed.deinit(arena);
         }
         const index = try handler.indexOf();
+        try others.unanalysed.appendSlice(arena, index.unresolved);
         for (index.programs) |entry| {
             if (std.mem.eql(u8, entry, checked.made_from.entry)) continue;
             const root = loader.rootOf(arena, handler.io, entry, .as_named, handler.root) catch |err| switch (err) {
                 error.OutOfMemory => return err,
-                else => continue,
+                else => {
+                    try others.unanalysed.append(arena, entry);
+                    continue;
+                },
             };
             const files = handler.documents.filesFor(arena, handler.io, root, .open_and_manifests) catch |err| switch (err) {
                 error.OutOfMemory => return err,
-                else => continue,
+                else => {
+                    try others.unanalysed.append(arena, entry);
+                    continue;
+                },
             };
             const other = analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, root.entry, null, handler.io) catch |err| switch (err) {
                 error.OutOfMemory => return err,
-                else => continue,
+                else => {
+                    try others.unanalysed.append(arena, entry);
+                    continue;
+                },
             };
-            others.append(arena, other) catch |err| {
+            others.analysed.append(arena, other) catch |err| {
                 var dropped = other;
                 dropped.deinit();
                 return err;
@@ -2127,6 +2146,31 @@ test "a rename in a shared library is refused where a program reaching it does n
     }));
     try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "broken") != null);
     try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "does not load") != null);
+}
+
+test "a rename in a shared library is refused beside a program whose manifest cannot be read, naming it" {
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+        // Nothing can say which libraries this program depends on.
+        .{ .at = "unread/linea.json", .text = "{ not json" },
+        .{ .at = "unread/main.lin", .text = "import almanac\n\nfn main() -> UInt8 {\n    almanac.frost()\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    try std.testing.expectError(rename.Refused.AProgramTheRenameReachesDoesNotLoad, ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    }));
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "unread") != null);
 }
 
 test "a manifest changed on disk changes which files the program holds" {

@@ -2106,6 +2106,66 @@ pub fn joinedDir(gpa: std.mem.Allocator, base: []const u8, path: []const u8) std
     return std.fs.path.resolvePosix(gpa, &.{ base, path });
 }
 
+/// Whether the program a manifest in `dir` makes could load `file`, decided
+/// without loading it: null where its paths exclude the file, and otherwise
+/// why it may hold it. A program may hold a file under its own directory or
+/// under the directory of any library its manifests name, followed
+/// transitively; a manifest that cannot be read, or is not a JSON object,
+/// names directories nothing can rule out.
+///
+/// **Bound:** one read of each manifest the program and its libraries hold,
+/// each library once.
+pub fn mayHold(arena: std.mem.Allocator, io: std.Io, dir: []const u8, file: []const u8) std.mem.Allocator.Error!?[]const u8 {
+    const holding = dirOfEntry(file);
+    var pending: std.ArrayList([]const u8) = .empty;
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    try pending.append(arena, dir);
+    try seen.put(arena, dir, {});
+    while (pending.pop()) |at| {
+        if (within(holding, at)) return if (at.ptr == dir.ptr)
+            try std.fmt.allocPrint(arena, "`{s}` holds it", .{dir})
+        else
+            try std.fmt.allocPrint(arena, "it depends on the library at `{s}`, which holds it", .{at});
+        const text = try manifestTextOf(arena, io, at) orelse {
+            if (at.ptr != dir.ptr) continue;
+            return try std.fmt.allocPrint(arena, "its manifest in `{s}` cannot be read", .{dir});
+        };
+        const written = try dependencies.read(arena, text) orelse
+            return try std.fmt.allocPrint(arena, "the manifest in `{s}` is not a JSON object", .{at});
+        for (written.entries) |entry| {
+            const path = entry.path orelse continue;
+            const named = try joinedDir(arena, at, path);
+            if ((try seen.getOrPut(arena, named)).found_existing) continue;
+            try pending.append(arena, named);
+        }
+    }
+    return null;
+}
+
+test "a program may hold a file under its directory or its libraries', or where its manifest cannot be read" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(testing.io, "lib");
+    try tmp.dir.createDirPath(testing.io, "app");
+    try tmp.dir.createDirPath(testing.io, "other");
+    try tmp.dir.createDirPath(testing.io, "broken");
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "lib/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"lib\" }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/linea.json", .data = "{ \"dependencies\": { \"lib\": { \"path\": \"../lib\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "other/linea.json", .data = "{}" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "broken/linea.json", .data = "{ not json" });
+    const root = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const file = try std.fs.path.join(a, &.{ root, "lib/lib.lin" });
+
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "lib" }), file) != null);
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "app" }), file) != null);
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "other" }), file) == null);
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "broken" }), file) != null);
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "gone" }), file) != null);
+}
+
 test "a dependency's C is built once from its own directory, and its libraries keep each manifest's order" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
