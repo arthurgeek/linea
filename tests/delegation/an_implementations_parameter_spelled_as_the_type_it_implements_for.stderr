@@ -1,0 +1,25 @@
+error[T-Bound]: `Wrapper` takes 0 type argument(s), and was given 1
+ --> tests/delegation/an_implementations_parameter_spelled_as_the_type_it_implements_for.lin:5:48
+  |
+5 | impl[Wrapper: Index[UInt64]] Index[UInt64] for Wrapper[Wrapper] {
+  |                                                ^^^^^^^ this type takes no arguments
+error[T-Bound]: `Wrapper` takes 0 type argument(s), and was given 1
+ --> tests/delegation/an_implementations_parameter_spelled_as_the_type_it_implements_for.lin:8:25
+  |
+8 |     proj at(inout self: Wrapper[Wrapper], i: UInt64) -> Wrapper.Elem {
+  |                         ^^^^^^^ this type takes no arguments
+error[T-Bound]: `Wrapper[[UInt8; 2]]` does not implement `Index[UInt64]`
+  --> tests/delegation/an_implementations_parameter_spelled_as_the_type_it_implements_for.lin:15:5
+   |
+15 |     wrapped[0] += 1
+   |     ^^^^^^^ implement `Index[UInt64]` for `Wrapper[[UInt8; 2]]`
+error[T-Bound]: `Wrapper[[UInt8; 2]]` does not implement `Index[UInt64]`
+  --> tests/delegation/an_implementations_parameter_spelled_as_the_type_it_implements_for.lin:16:12
+   |
+16 |     return wrapped[0] + wrapped[1] - 6
+   |            ^^^^^^^ implement `Index[UInt64]` for `Wrapper[[UInt8; 2]]`
+error[T-Bound]: `Wrapper[[UInt8; 2]]` does not implement `Index[UInt64]`
+  --> tests/delegation/an_implementations_parameter_spelled_as_the_type_it_implements_for.lin:16:25
+   |
+16 |     return wrapped[0] + wrapped[1] - 6
+   |                         ^^^^^^^ implement `Index[UInt64]` for `Wrapper[[UInt8; 2]]`

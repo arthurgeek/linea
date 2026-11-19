@@ -3052,6 +3052,11 @@ missing parameter is [T-Impl]. A parameter head grants no type-side module
 owner, so the implementation belongs in the trait's module ([M-Impl]); an
 inherent parameter-headed implementation is invalid.
 
+An implementation's or a derive's type parameters are in scope over its whole
+head and body, so a head spelled as one of them names that parameter. A
+parameter takes no type arguments, and a head applying one to some, as in
+`impl[Pair] Show for Pair[Pair]`, is [T-Bound].
+
 A structural callable type may head an implementation of a trait,
 `impl[S] Handle[S] for fn(inout state: S, input: UInt64) -> UInt64`. It has no
 declaring module, so the implementation belongs in the trait's module
