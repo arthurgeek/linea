@@ -15,7 +15,9 @@
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -1305,7 +1307,54 @@ static void a_retired_slot_is_replaced_by_a_new_number(void) {
 }
 #endif
 
+long linea_loop_open(unsigned long carriers);
+
+/* Wait on a pipe from a fiber with the descriptor table full, so the
+ * fiber cannot park on the set's kernel queue, which takes a descriptor of
+ * its own: the set waits on the carrier instead, and still delivers the
+ * pipe. */
+static void wait_with_no_descriptor_left(unsigned long endpoint, unsigned long at, unsigned long len) {
+    assert(at == 0 && len == 0);
+    int ends[2];
+    assert(pipe(ends) == 0);
+    const unsigned long set = linea_waitset_open();
+    const unsigned long readable = linea_waitset_reserve(set);
+    assert(linea_waitset_descriptor(set, slot_of(readable), ends[0], 0) == 0);
+    struct rlimit saved, lowered;
+    assert(getrlimit(RLIMIT_NOFILE, &saved) == 0);
+    lowered = saved;
+    lowered.rlim_cur = 64;
+    assert(setrlimit(RLIMIT_NOFILE, &lowered) == 0);
+    int filled[64];
+    int count = 0;
+    for (;;) {
+        const int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+        if (fd < 0) break;
+        assert(count < 64);
+        filled[count++] = fd;
+    }
+    pthread_t writer;
+    assert(pthread_create(&writer, 0, write_after_a_moment, &ends[1]) == 0);
+    assert(linea_waitset_next(set) == (long)slot_of(readable));
+    assert(pthread_join(writer, 0) == 0);
+    for (int i = 0; i < count; i += 1) assert(close(filled[i]) == 0);
+    assert(setrlimit(RLIMIT_NOFILE, &saved) == 0);
+    linea_waitset_close(set);
+    close(ends[0]);
+    close(ends[1]);
+    linea_chan_close(endpoint);
+}
+
+static void a_full_descriptor_table_leaves_a_fiber_waiting_in_place(void) {
+    const long loop = linea_loop_open(1);
+    assert(loop > 0);
+    const long prepared = linea_task_prepare_on(1UL << 18, (unsigned long)loop);
+    assert(prepared > 0);
+    linea_chan_close(linea_task_start((unsigned long)prepared, wait_with_no_descriptor_left, release_nothing, 0, 0, 0));
+}
+
 int main(void) {
+    a_full_descriptor_table_leaves_a_fiber_waiting_in_place();
     a_send_before_registration_is_found();
     a_send_during_registration_signals_once();
     a_send_as_next_begins_to_wait_wakes_it();

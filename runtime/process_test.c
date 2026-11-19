@@ -14,6 +14,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
+#if defined(__APPLE__)
+#include <sys/event.h>
+#endif
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -340,6 +343,30 @@ static void a_closed_standard_stream_stays_closed_in_the_child(void) {
     assert(finish(child.pid, &status) == 0 && status == 0);
 }
 
+/* A runtime descriptor, close-on-exec, can take the number of a standard
+ * stream this process closed, as a loop's kqueue does. It is not the
+ * program's stream, so the child starts with that stream closed. */
+static void a_runtime_descriptor_in_a_closed_stream_is_not_inherited(void) {
+    const int saved = fcntl(0, F_DUPFD_CLOEXEC, 3);
+    assert(saved > 2);
+    assert(close(0) == 0);
+#if defined(__APPLE__)
+    /* A kqueue, as a loop opens one; macOS passes none to a child. */
+    const int runtime_held = kqueue();
+    assert(runtime_held == 0 && fcntl(runtime_held, F_SETFD, FD_CLOEXEC) == 0);
+#else
+    const int runtime_held = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    assert(runtime_held == 0);
+#endif
+    struct block probe = shell("if read line 2>/dev/null; then exit 1; fi; exit 0");
+    struct child child = start(&probe, NULL, NULL, 0);
+    assert(close(runtime_held) == 0);
+    assert(dup2(saved, 0) == 0 && close(saved) == 0);
+    assert(child.pid > 0);
+    unsigned long status = 99;
+    assert(finish(child.pid, &status) == 0 && status == 0);
+}
+
 static void an_ignored_child_signal_refuses_a_spawn(void) {
     /* An ignored SIGCHLD has the kernel reap children itself, after which a
      * process ID could name a stranger. */
@@ -400,6 +427,7 @@ int main(void) {
     a_directory_and_an_environment_are_the_childs();
     a_fiber_waiting_on_a_child_leaves_its_carrier();
     a_closed_standard_stream_stays_closed_in_the_child();
+    a_runtime_descriptor_in_a_closed_stream_is_not_inherited();
     an_ignored_child_signal_refuses_a_spawn();
     a_wait_with_no_descriptor_left_still_reaps();
     puts("native process tests passed");

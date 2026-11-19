@@ -167,16 +167,22 @@ static int close_inherited(posix_spawn_file_actions_t *actions) {
  * child end is `child`. */
 static int stream_action(posix_spawn_file_actions_t *actions, int target, unsigned mode, int child) {
     switch (mode) {
-    case LINEA_PROCESS_INHERIT:
+    case LINEA_PROCESS_INHERIT: {
 #if defined(__APPLE__)
         /* POSIX_SPAWN_CLOEXEC_DEFAULT closes every descriptor not named. A
          * stream this process has closed stays closed in the child, as it
-         * does on Linux; naming it would fail the whole spawn with EBADF. */
-        if (fcntl(target, F_GETFD) == -1) return 0;
+         * does on Linux; naming it would fail the whole spawn with EBADF. A
+         * close-on-exec descriptor in a stream's place is one the runtime
+         * opened there after the stream was closed, such as a loop's kqueue,
+         * which macOS also refuses to pass on; it stays closed too, as exec
+         * closes it on Linux. */
+        const int flags = fcntl(target, F_GETFD);
+        if (flags == -1 || (flags & FD_CLOEXEC) != 0) return 0;
         return posix_spawn_file_actions_addinherit_np(actions, target);
 #else
         return 0;
 #endif
+    }
     case LINEA_PROCESS_NULL:
         return posix_spawn_file_actions_addopen(actions, target, "/dev/null", target == 0 ? O_RDONLY : O_WRONLY, 0);
     case LINEA_PROCESS_PIPE:

@@ -225,6 +225,9 @@ impl Child {
     // taken, answers no bytes. Each stream may hold at most `max_bytes`; when
     // one passes it, or a read or an allocation fails, the child is killed and
     // reaped and the error answered.
+    // A stream ends when every process holding its pipe has closed it, so
+    // a program the child left running in the background with the same
+    // pipes keeps this waiting until it too closes them or ends.
     pub fn wait_with_output_in[A: Allocator](sink self: Self, allocator: A, max_bytes: UInt64) -> Result[Output[A], ProcessError] where carries(.Ok: allocator) {
         let Child { pid, stdin, stdout, stderr } = self
         close_pipes(stdin, .None, .None)

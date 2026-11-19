@@ -131,6 +131,12 @@ pipe stops until someone reads it, and a parent that waited for standard
 output to end first would wait forever. Reading whichever pipe has bytes
 avoids that, and so does every `output` and `wait_with_output` in Linea.
 
+A stream ends when every process holding its pipe has closed it, not when
+the child exits. A child that starts a program in the background, such as
+`sh -c 'server &'`, hands that program its pipes too, so `output` waits until
+the background program also finishes or closes them. Send such a program's
+output elsewhere (`server > server.log &`) when you only want the child's.
+
 ## A child must be waited for
 
 `spawn` starts the child and hands it back without waiting: a
@@ -215,16 +221,18 @@ for it as long as you wait for the child.
 ### Feeding input and capturing output with `wait_with_output`
 
 When you write input yourself and want the output captured, take the input
-end, write and close it, then let `wait_with_output` read the rest:
+end, write and close it, then let `wait_with_output` read the rest. `sort`
+reads all of its input before it writes a line, so it never waits for you to
+read while you are still writing:
 
 ```linea
 import std.io
 import std.process
 
 fn main() -> Result[UInt8, process.ProcessError] {
-    var child = process.Command.new("tr").arg("a-z").arg("A-Z").stdin(.Pipe).stdout(.Pipe).stderr(.Pipe).spawn()?
+    var child = process.Command.new("sort").arg("-r").stdin(.Pipe).stdout(.Pipe).stderr(.Pipe).spawn()?
     var input = &child.take_stdin().unwrap()
-    let wrote = "steep for three minutes\n".fmt(&input)
+    let wrote = "oolong\nsencha\nmatcha\n".fmt(&input)
     input.release()
     // `wait_with_output` reads the pipes the child still holds, both at once,
     // then waits.
@@ -232,15 +240,25 @@ fn main() -> Result[UInt8, process.ProcessError] {
     wrote?
     match Str.from_bytes(output.stdout.as_slice()) {
         Ok(text) => io.print("{text}")?,
-        Err(_) => io.println("tr printed something that is not text")?,
+        Err(_) => io.println("sort printed something that is not text")?,
     }
     .Ok(0)
 }
 ```
 
 ```text
-STEEP FOR THREE MINUTES
+sencha
+oolong
+matcha
 ```
+
+Writing everything first is safe only with a child that reads everything
+first. A child that writes while it reads, such as `tr` or `grep`, stops once
+its output pipe is full (64 KiB), and then stops reading; if you are still
+writing input more than a pipe holds, you both wait forever. Feed such a
+child from a task of its own ([Tasks and sessions](13-tasks-and-sessions.md))
+while `wait_with_output` reads, or write the input to a file and run the
+child through a shell redirection (`sh -c 'tr a-z A-Z < input.txt'`).
 
 ## Stopping a child with `kill`
 

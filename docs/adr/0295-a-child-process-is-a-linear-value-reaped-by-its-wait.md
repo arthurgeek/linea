@@ -166,7 +166,10 @@ child is killed and reaped and the error answered: stopping the reads would
 otherwise leave a child blocked on a full pipe.
 
 Standard input is as the command set it; a piped one is closed at once, so a
-child that reads its input sees it end.
+child that reads its input sees it end. A stream ends when every process holding the pipe has
+closed it, so a program the child leaves running in the background with its
+pipes keeps `output` reading until that program closes them or ends; the
+child's own exit does not end the read.
 
 ### 6. How a child ended, and why an operation failed
 
@@ -263,6 +266,12 @@ twice and signal whatever process took its number.
 - `output` uses a wait set, whose registrations take a little memory from the
   system allocator, and a duplicate descriptor per registration; the bytes
   read come from the caller's allocator.
+- A wait set's `next` on a fiber that cannot park on its kernel queue, because
+  the descriptor table is full or the carrier's storage is refused, now waits
+  on that queue in place, holding the carrier, instead of ending the process;
+  a full table while registering a pipe is the registration's error, which
+  `output` answers after killing and reaping the child. Every wait set user
+  gets the same.
 - `io.IoOperation` has three more cases, which every exhaustive match on it
   and every derived rendering of it carries.
 - On Linux without glibc's `addclosefrom`, a descriptor another thread opens
