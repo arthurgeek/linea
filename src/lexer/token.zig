@@ -342,8 +342,8 @@ pub const Tag = enum(u8) {
 
     /// Whether this is a binary operator no expression, statement or list
     /// element begins with, so a line opening with it can only continue the
-    /// line above. `-`, `*`, `&` and `..` are not: each also begins an
-    /// expression.
+    /// line above. `-`, `*`, `&`, `..` and `||` are not: each also begins an
+    /// expression, `||` a lambda that takes no parameters.
     pub fn onlyContinues(self: Tag) bool {
         return switch (self) {
             .plus,
@@ -356,7 +356,6 @@ pub const Tag = enum(u8) {
             .greater,
             .greater_equal,
             .ampersand_ampersand,
-            .pipe_pipe,
             => true,
             else => false,
         };
@@ -364,7 +363,7 @@ pub const Tag = enum(u8) {
 
     test onlyContinues {
         try std.testing.expect(Tag.plus.onlyContinues());
-        try std.testing.expect(Tag.pipe_pipe.onlyContinues());
+        try std.testing.expect(!Tag.pipe_pipe.onlyContinues());
         try std.testing.expect(!Tag.minus.onlyContinues());
         try std.testing.expect(!Tag.star.onlyContinues());
         try std.testing.expect(!Tag.dot_dot.onlyContinues());

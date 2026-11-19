@@ -499,7 +499,7 @@ contents; standard error carries the description.
 byte's only report: written after an operand, it is stepped over and the
 expression reads on as written, on its line or, where it ends its line, on a
 next line opening with an operator no expression begins with (`+`, `/`, `%`,
-a comparison, `&&` or `||`), since the byte may stand for an operator
+a comparison or `&&`; `||` begins a lambda), since the byte may stand for an operator
 that carried the line on; and where a parameter or a list element begins, it stands for none.
 
 **[S-String]** A string literal must close before the end of its line. This
