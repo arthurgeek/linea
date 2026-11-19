@@ -1316,6 +1316,9 @@ pub const LentPlace = enum {
     binder,
     /// A local a closure captures `inout`, lent from inside the closure.
     capture,
+    /// A local a `sink` closure captures `inout`, lent from inside the
+    /// closure, which is moved to another binding and called there.
+    sink_capture,
 };
 
 /// How the lent place's part moves: what the call the place is lent to does
@@ -1481,14 +1484,14 @@ pub fn renderPartMove(gpa: std.mem.Allocator, cell: PartMove, liveness: Liveness
     // The name the moving call is given: the binder or capture names the
     // place itself where the walk or the closure lends it.
     const lent: []const u8 = switch (cell.place) {
-        .local, .capture => "s",
+        .local, .capture, .sink_capture => "s",
         .field => "holder.inner",
         .nested => "outer.holder.inner",
         .element => "pairs[0]",
         .binder => "s",
     };
     const read: []const u8 = switch (cell.place) {
-        .local, .capture => "s.a",
+        .local, .capture, .sink_capture => "s.a",
         .field => "holder.inner.a",
         .nested => "outer.holder.inner.a",
         .element, .binder => "pairs[0].a",
@@ -1507,7 +1510,7 @@ pub fn renderPartMove(gpa: std.mem.Allocator, cell: PartMove, liveness: Liveness
         .field => try w.print(1, "var holder = Holder {{ label = \"kept\", inner = {s} }}", .{pair}),
         .nested => try w.print(1, "var outer = Outer {{ holder = Holder {{ label = \"kept\", inner = {s} }} }}", .{pair}),
         .element, .binder => try w.print(1, "var pairs = [{s}]", .{pair}),
-        .capture => try w.print(1, "var s = {s}", .{pair}),
+        .capture, .sink_capture => try w.print(1, "var s = {s}", .{pair}),
     }
     switch (cell.place) {
         .binder => {
@@ -1518,6 +1521,11 @@ pub fn renderPartMove(gpa: std.mem.Allocator, cell: PartMove, liveness: Liveness
         .capture => {
             try w.print(1, "var act = inout [inout s] || {{ {s} }}", .{call});
             try w.line(1, "&act()");
+        },
+        .sink_capture => {
+            try w.print(1, "let act = sink [inout s] || {{ {s} }}", .{call});
+            try w.line(1, "let moved = act");
+            try w.line(1, "moved()");
         },
         else => try w.line(1, call),
     }

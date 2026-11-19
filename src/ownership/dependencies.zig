@@ -2132,10 +2132,11 @@ const Analysis = struct {
         // part of it to another, so afterwards any part may hold what any
         // part held. A receiver reached through observations lends their
         // referent, which is the place merged.
-        if (normalized.callee_convention == .inout) {
-            try self.mergeParts(state, try self.selectedPath(self.ast.call(id).callee), id);
-            try self.mergeLentThrough(state, self.ast.call(id).callee, id);
-        }
+        // A callable invoked holds its `inout` lends whatever convention it
+        // is called by, so every place it holds lent `inout` is merged; one
+        // called `inout` is itself a lent place too.
+        if (normalized.target.calleeIsValue()) try self.mergeLentThrough(state, self.ast.call(id).callee, id);
+        if (normalized.callee_convention == .inout) try self.mergeParts(state, try self.selectedPath(self.ast.call(id).callee), id);
         for (self.typing.callableParams(signature), normalized.args, 0..) |param, arg, k| {
             if (arg == .none or param.convention == .read) continue;
             // A callable lent or given to the callee may be invoked there, and

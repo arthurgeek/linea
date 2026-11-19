@@ -6124,8 +6124,9 @@ hold what any part of it held before the call; what the whole place held is
 unchanged, and nothing any part held is dropped. This holds for every place
 that can be lent: a local, a field at any depth, an element, a `for inout`
 binder, an `inout` capture, a method receiver (the place its observations
-reach), the iterator a lent walk advances, and a callable invoked `inout`. A
-callable lent or given to a call may be invoked there, so every place it holds
+reach), the iterator a lent walk advances, and every place a callable holds lent
+`inout` when it is invoked, however it is called. A callable lent or given to
+a call may be invoked there, so every place it holds
 lent `inout` is merged too, and a write through a binding that lends another
 place, such as a `for inout` binder, is a write into that place. The call's
 own result is read from the lent place as it stood before the call, since the

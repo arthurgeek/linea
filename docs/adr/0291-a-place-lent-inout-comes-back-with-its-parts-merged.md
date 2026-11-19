@@ -23,7 +23,7 @@ which writes `s.a = copy(s.b)`, needed no clause of its own, because the
 retention it received was whole-to-whole; a function writing
 `s = swapped(s)` through a contract that carries `s` needed none either. Its
 caller then released the owner of `b` and read `a`: accepted, and the program
-read freed storage. Six such programs are in `tests/borrows/inout_lend`; each
+read freed storage. Such programs are in `tests/borrows/inout_lend`; each
 aborts with "storage was used after it was freed" under `--check-storage` on
 the compiler before this decision. The hole is reachable from any wrapper,
 any generic function lending its parameter to a trait operation, and any
@@ -36,8 +36,9 @@ call lends a place `inout`, every part of that place may hold what any part
 of it held before the call. The rule has no exception: it applies to a whole
 local, a field, a field of a field, an element, a walk binder, a closure's
 `inout` capture, a method receiver (through the receiver's observations to the
-place they reach), a lent walk's call of `next`, and a callable invoked
-`inout`. A callable lent or given to a call carries the places it holds lent
+place they reach), a lent walk's call of `next`, and each place a callable
+holds lent `inout` when it is invoked, whether it is called `inout` or
+by `sink`. A callable lent or given to a call carries the places it holds lent
 `inout`, and those places are merged too, because the callee may invoke it.
 A write through a binding that is a lend of another place, such as a
 `for inout` binder, is a write into that place.
@@ -67,7 +68,7 @@ decoder is given the document on each call instead of holding a view of it.
 
 ## Consequences
 
-The six programs in `tests/borrows/inout_lend` are refused by [O-Borrow] where
+The eight programs in `tests/borrows/inout_lend` are refused by [O-Borrow] where
 the moved owner is released and then used, and the accepted counterpart runs
 clean. The soundness matrix gains a part-move family: each place shape lent
 `inout` to each kind of mover (a declaring callee, a wrapper, a rebuild
