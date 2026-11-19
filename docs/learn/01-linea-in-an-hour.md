@@ -1006,6 +1006,100 @@ error[T-Index]: no element sits here, and the length is part of the type
    |                                ^ the length is 7, so the last index is 6
 ```
 
+### Runs of an array: `a[lo..hi]`
+
+A range inside the brackets names a run of neighbouring elements instead of
+one. `highs[0..3]` is the elements at indexes 0, 1 and 2: like the ranges a
+`for` loop walks, `..` stops before its end and `..=` includes it. A run is an
+array in its own right, `[Int64; 3]` here, so you can copy it out whole or
+assign a whole array of the same length into it:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    var highs: [Int64; 7] = [18, 21, 25, 19, 30, 27, 22]
+    // `highs[0..3]` is the run of elements at indexes 0, 1 and 2. `copy`
+    // makes a new array of them, a `[Int64; 3]`, that `start` owns.
+    let start = copy(highs[0..3])
+    // A run can be assigned too. The readings for Thursday and Friday were
+    // corrected, so two new numbers replace the elements at 3 and 4.
+    highs[3..5] = [20, 29]
+    // `..=` includes the end: `highs[5..=6]` is the weekend, indexes 5 and 6.
+    let weekend = copy(highs[5..=6])
+    io.println("The week starts {start:?}")?
+    io.println("Corrected: {highs:?}")?
+    io.println("The weekend is {weekend:?}")?
+    .Ok(0)
+}
+```
+
+```
+The week starts [18, 21, 25]
+Corrected: [18, 21, 25, 20, 29, 27, 22]
+The weekend is [27, 22]
+```
+
+Copying a run duplicates its elements, and Linea marks duplication with
+`copy`, so `let start = highs[0..3]` without it is refused. Assigning into a
+run writes every element of it at once, and the array on the right must have
+exactly the run's length: `highs[3..5] = [20, 29, 31]` is refused because three
+numbers do not fit in two places. Rust's `&highs[0..3]` names the same
+elements, but as a slice whose length is checked only while the program runs;
+Linea's run is an array whose length is part of its type.
+
+That is also why the compiler has to know both ends. The run's length is
+`hi - lo`, or `hi - lo + 1` with `..=`, and a type cannot have a length that
+is decided while the program runs. So the ends must be numbers the compiler
+can work out: digits, constants, `let` names given such a number, and
+arithmetic over them. A `var`, a function's parameter or a call's result is
+known only while the program runs. Here the start of the run depends on which
+day turns out warmest:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let highs: [Int64; 7] = [18, 21, 25, 19, 30, 27, 22]
+    // Find the warmest day while the program runs.
+    var warmest: UInt64 = 1
+    for day in 1..6 {
+        if highs[day] > highs[warmest] {
+            warmest = day
+        }
+    }
+    // The warmest day with the day before and the day after it.
+    let around = copy(highs[warmest - 1..warmest + 2])
+    io.println("Around the peak: {around:?}")?
+    .Ok(0)
+}
+```
+
+```
+error[T-RangePlace]: a range place's bounds settle where the place is formed
+  --> warmest.lin:13:29
+   |
+13 |     let around = copy(highs[warmest - 1..warmest + 2])
+   |                             ^^^^^^^^^^^ this is not settled here, and the place's length is what the bounds name
+   |                                          ----------- nor is this
+   |
+   = help: a run's length is part of its type, so it is fixed where the place is formed; read a run chosen while the program runs through a view, `as_slice().subspan(start, count)`, and write one element by element in a loop
+```
+
+Both ends depend on `warmest`, so the compiler points at both. As the help
+says, a run whose ends are known only while the program runs is read through a
+view instead. `subspan(start, count)` checks the run against the array's
+length while the program runs and answers nothing if it does not fit:
+
+<!-- guide: edit 13 let around = copy(highs[warmest - 1..warmest + 2]) -->
+```linea
+    let around = highs.as_slice().subspan(warmest - 1, 3).unwrap()
+```
+
+```
+Around the peak: [19, 30, 27]
+```
+
 ### Views: `Str` and `Slice`
 
 `weekend` is a `mem.Slice[Int64]`, the `Slice` type of the `std.mem` module; a
