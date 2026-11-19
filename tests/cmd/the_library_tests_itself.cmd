@@ -1522,6 +1522,7 @@ The library tests itself.
   ok    testing.each_allocation_failure reports a run with nothing refused that failed
   ok    testing.each_allocation_failure returns the attempts it walked
   ok    testing.each_allocation_failure takes callbacks that change lent counts
+  ok    testing.each_allocation_failure walks a body that keeps an arena buffer
   ok    testing.each_allocation_failure walks an arena backing
   ok    testing.each_allocation_failure walks every attempt and settles
   ok    testing.equality accepts values with debug without display
@@ -1682,4 +1683,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1679 passed, 0 failed
+  1680 passed, 0 failed

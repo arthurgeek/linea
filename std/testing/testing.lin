@@ -250,11 +250,13 @@ test "an error is accepted and a success is reported" -> Result[(), Failure] {
 // allocation, since a walk that refuses nothing checks nothing. A refused run
 // may complete, when the refused allocation was optional, or return an error
 // that `is_refusal` accepts; any other error fails the walk and names the
-// attempt, so an assertion the body makes holds in every run. Either way, body's
-// own ownership checking already forces it to settle every allocation it
-// acquires before returning, so a desynchronized log past that point is not a
-// reportable failure of body: it is a bug in the allocator wrapping it, and
-// panics naming the attempt instead of returning it as an ordinary Failure.
+// attempt, so an assertion the body makes holds in every run. Either way, the
+// compiler holds body to what its backing's buffers owe: over the system
+// allocator it settles every allocation before returning, and over an arena it
+// may drop one, which the arena takes back. A buffer owing its disposal that
+// is still live after a run is a broken invariant, not a failure of body: the
+// walk names the attempt and releasing the run's test allocator stops the
+// program.
 // Every run's log and allocations come from `backing`; a backing that refuses
 // a log is reported as a Failure. `body` and `is_refusal` are lent `inout`,
 // so they may change what they own or a place they are lent.
@@ -276,9 +278,9 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
         }
         return .Err(.{ said = "the run with nothing refused did not succeed", refusal = false })
     }
-    if !counting.all_disposed() {
-        panic("each_allocation_failure: the run with nothing refused left an allocation unsettled")
-    }
+    // A buffer the run left live is one the backing let it drop; over a
+    // backing whose buffers owe their disposal, releasing the test allocator
+    // stops the program as a broken invariant.
     let attempts = counting.attempts()
     counting.release()
     if attempts == 0 {
@@ -294,9 +296,8 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
             Ok(_) => true,
             Err(error) => &is_refusal(error),
         }
-        if !log.all_disposed() {
-            core.eprintln("attempt {attempt} of {attempts} left an allocation unsettled")
-            panic("each_allocation_failure: a refused attempt left an allocation unsettled")
+        if !log.all_disposed() && backing.reclaims() {
+            core.eprintln("attempt {attempt} of {attempts} left an allocation live that owes its disposal")
         }
         log.release()
         if !accepted {
@@ -326,6 +327,22 @@ test "each_allocation_failure reports a failed run that left an allocation live"
         Err(failure) => copy(failure.said),
     }
     assert(said.starts_with("the run with nothing refused did not succeed"), "the body's failure was not what the walk reported")?
+    .Ok(())
+}
+
+// A body walked over an arena may keep a buffer it acquired, on the run with
+// nothing refused and on every refused one: the arena takes it back.
+test "each_allocation_failure walks a body that keeps an arena buffer" -> Result[(), Failure] {
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    let checked = each_allocation_failure(
+        arena.handle(),
+        |allocator| -> Result[(), Oom] {
+            let _kept = allocator.acquire(8)?
+            .Ok(())
+        },
+        |error| error.is_refusal(),
+    )
+    assert_eq(checked.is_ok(), true, "a body keeping an arena buffer was not walked")?
     .Ok(())
 }
 
