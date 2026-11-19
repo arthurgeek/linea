@@ -7,29 +7,32 @@ pub trait FromField[A: Allocator]: Release {
     fn field(input: Input, allocator: A, name: Str) -> Result[Self, Failure] where carries(.Ok: allocator)
 }
 
+// Fields is given the input on each call rather than keeping a view of it:
+// each call lends `Fields` `inout`, after which any part of it may hold what
+// another part held, and a result built from `allocator` would then carry the
+// input too.
 @opaque
 struct Fields[A: Allocator] {
-    input: borrow Input,
     allocator: A,
     next: UInt64,
 }
 
 impl[A: Allocator] Fields[A] {
-    pub fn open(input: Input, allocator: A) -> Self where borrows(.input: input), carries(.allocator: allocator) {
-        .{ input = borrow input, allocator = copy(allocator), next = 0 }
+    pub fn open(allocator: A) -> Self where carries(.allocator: allocator) {
+        .{ allocator = copy(allocator), next = 0 }
     }
 
-    pub fn field[T: FromField[A]](inout self: Self, name: Str) -> Result[T, Failure] where carries(.Ok: self.allocator) {
+    pub fn field[T: FromField[A]](inout self: Self, input: Input, name: Str) -> Result[T, Failure] where carries(.Ok: self.allocator) {
         let names = ["first", "second", "enabled"]
         if self.next >= 3 || name != names[self.next] {
             return .Err(.Field)
         }
         self.next += 1
-        return FromField.field(*self.input, self.allocator, name)
+        return FromField.field(input, self.allocator, name)
     }
 
-    pub fn finish(self: Self) -> Result[(), Failure] {
-        if self.next != 3 || self.input.fail_at == 4 {
+    pub fn finish(self: Self, input: Input) -> Result[(), Failure] {
+        if self.next != 3 || input.fail_at == 4 {
             return .Err(.Finish)
         }
         return .Ok({})
@@ -38,7 +41,7 @@ impl[A: Allocator] Fields[A] {
 
 impl[A: Allocator] Release for Fields[A] {
     fn release(sink self: Self) {
-        let Fields { input: _, allocator: _, next: _ } = self
+        let Fields { allocator: _, next: _ } = self
     }
 }
 

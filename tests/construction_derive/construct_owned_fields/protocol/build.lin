@@ -14,17 +14,17 @@ template impl[Storage: Allocator] FromFields[Storage] where
     reflect.components: FromField[Storage],
 {
     fn build(input: Input, allocator: Storage) -> Result[Self, Failure] where carries(.Ok: allocator) {
-        var fields = Fields.open(input, allocator)
+        var fields = Fields.open(allocator)
         defer fields.release()
         let built: Self = reflect.construct(
             reflect.product,
             |component| {
-                let owned: component.Type = Fields.field(&fields, component.name)?
+                let owned: component.Type = Fields.field(&fields, input, component.name)?
                 defer owned.release()
                 owned
             },
             {
-                fields.finish()?
+                fields.finish(input)?
             },
         )
         return .Ok(built)
