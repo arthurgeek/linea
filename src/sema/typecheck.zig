@@ -4218,11 +4218,12 @@ pub const Reach = struct {
     /// Whether an implementation of the conversion trait `from` (`From`,
     /// `TryFrom`) converts from `held`: one whose source matches `held` by
     /// the checker's own key match (`ImplIndex.bindKey`), `Box[T]` matching
-    /// `Box[UInt8]`, and where the source is the implementation's parameter
-    /// itself, one whose bounds `held` answers.
+    /// `Box[UInt8]`, and whose predicates hold at what that match bound. A
+    /// predicate on a parameter only the target binds is the target's to
+    /// meet, and some target may.
     ///
-    /// **Bound:** the implementations of `from`, and for a generic one the
-    /// bounds of its parameter.
+    /// **Bound:** the implementations of `from`, and for each matching one
+    /// its predicates, each trait looked up once.
     pub fn convertsFrom(self: Reach, gpa: std.mem.Allocator, held: TypeId, from: node.DeclId) std.mem.Allocator.Error!bool {
         if (held == .poison) return false;
         const trait: u32 = @intCast(from.index());
@@ -4230,29 +4231,33 @@ pub const Reach = struct {
         while (rows.next()) |at| {
             const row = self.impls[at];
             if (row.trait != trait or !row.valid_key or row.args.len == 0) continue;
-            const source = row.args[0];
-            if (source == held) return true;
             const bindings = try gpa.alloc(TypeId, row.parameters);
             defer gpa.free(bindings);
             @memset(bindings, .poison);
-            if (!types_mod.ImplIndex.bindKey(self.typing, held, source, row.decl.index(), bindings)) continue;
-            switch (self.typing.get(source)) {
-                .parameter => |parameter| {
-                    const integer = switch (self.typing.get(held)) {
-                        .integer => true,
-                        .parameter => |promised| promised.integer,
-                        else => false,
-                    };
-                    if (parameter.integer and !integer) continue;
-                    const met = for (parameter.traits) |bound| {
-                        if (!try self.answers(gpa, held, bound.trait)) break false;
-                    } else true;
-                    if (met) return true;
-                },
-                else => return true,
-            }
+            const owner: u32 = @intCast(row.decl.index());
+            if (!types_mod.ImplIndex.bindKey(self.typing, held, row.args[0], owner, bindings)) continue;
+            if (try self.predicatesHold(gpa, row.predicates, owner, bindings)) return true;
         }
         return false;
+    }
+
+    /// Whether every predicate on a parameter `bindings` bound holds at its
+    /// binding, as an implementation's predicates are held to its arguments.
+    fn predicatesHold(self: Reach, gpa: std.mem.Allocator, predicates: []const types_mod.Predicate, owner: u32, bindings: []const TypeId) std.mem.Allocator.Error!bool {
+        for (predicates) |predicate| {
+            const given = switch (self.typing.get(predicate.subject)) {
+                .parameter => |p| if (p.owner == owner and p.index < bindings.len and bindings[p.index] != .poison)
+                    bindings[p.index]
+                else
+                    continue,
+                else => continue,
+            };
+            if (predicate.demand.integer and !self.typing.isIntegerWithin(self.scope, given)) return false;
+            for (predicate.demand.traits) |required| {
+                if (!try self.answers(gpa, given, required.trait)) return false;
+            }
+        }
+        return true;
     }
 };
 
@@ -14269,6 +14274,43 @@ const Checker = struct {
         self.binding_owners[binding.index()] = self.generic;
     }
 
+    /// Prepares, for completion after the dot of a value of `held`, what a
+    /// conversion from it rests on: for each implementation of `From` or
+    /// `TryFrom` whose source matches `held`, the lookup of every trait its
+    /// predicates demand of a parameter that match bound. `Reach.convertsFrom`
+    /// then reads what the checker decided, where nothing in the program
+    /// asked.
+    ///
+    /// **Bound:** the implementations of the two traits, and for each one
+    /// whose source matches, its predicates.
+    fn prepareConversionsFrom(self: *Checker, owner: DeclId, held: TypeId) !void {
+        if (held == .poison) return;
+        for ([_][]const u8{ "From", "TryFrom" }) |name| {
+            const from = self.program.libraryDeclIn("convert", name) orelse continue;
+            const trait: u32 = @intCast(from.index());
+            var rows = self.builder.impl_index.membersOfTrait(trait);
+            while (rows.next()) |at| {
+                const row = self.builder.implementations[at];
+                if (row.trait != trait or !row.valid_key or row.args.len == 0) continue;
+                const bindings = try self.gpa.alloc(TypeId, row.parameters);
+                defer self.gpa.free(bindings);
+                @memset(bindings, .poison);
+                const implementation: u32 = @intCast(row.decl.index());
+                if (!types_mod.ImplIndex.bindKey(&self.builder, held, row.args[0], implementation, bindings)) continue;
+                for (row.predicates) |predicate| {
+                    const given = switch (self.builder.get(predicate.subject)) {
+                        .parameter => |p| if (p.owner == implementation and p.index < bindings.len and bindings[p.index] != .poison)
+                            bindings[p.index]
+                        else
+                            continue,
+                        else => continue,
+                    };
+                    for (predicate.demand.traits) |required| try self.builder.prepareTraitLookupWithin(owner, required.trait, given);
+                }
+            }
+        }
+    }
+
     fn prepareValueQueries(self: *Checker, prepare_completions: bool) !void {
         for (self.expression_owners, 0..) |owner, index| {
             const expression = ExprId.at(@intCast(index));
@@ -14280,6 +14322,7 @@ const Checker = struct {
             if (prepare_completions and self.ast.exprTag(expression) == .field) {
                 const receiver = self.ast.unaryOperand(expression);
                 try self.builder.prepareLookupWithin(self.expression_owners[receiver.index()], self.builder.exprType(receiver));
+                try self.prepareConversionsFrom(self.expression_owners[receiver.index()], self.builder.exprType(receiver));
             }
         }
         // Completion at a written type's dot, finished or not, lists what the

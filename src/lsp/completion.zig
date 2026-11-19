@@ -2734,6 +2734,45 @@ test "a conversion is offered where a generic or a bound one converts from the v
     try testing.expect(holds(from_bound, "into"));
 }
 
+test "a conversion is offered only where the bounds of the one that converts hold" {
+    const gpa = testing.allocator;
+    // `plain_box.into()` is [T-Bound]: the conversion from `Box[T]` asks
+    // `T: Tag`, which `Plain` does not implement.
+    const text =
+        \\trait Tag {}
+        \\
+        \\struct Plain { n: UInt8 }
+        \\struct Marked { n: UInt8 }
+        \\
+        \\impl Tag for Marked {}
+        \\
+        \\struct Box[T] { item: T }
+        \\struct Wrap[T] { item: T }
+        \\
+        \\impl[T: Tag] From[Box[T]] for Wrap[T] {
+        \\    fn from(source: Box[T]) -> Wrap[T] {
+        \\        .{ item = source.item }
+        \\    }
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    let plain_box: Box[Plain] = .{ item = .{ n = 1 } }
+        \\    let marked_box: Box[Marked] = .{ item = .{ n = 2 } }
+        \\    let wrapped: Wrap[Marked] = marked_box.into()
+        \\    plain_box.item.n + wrapped.item.n
+        \\}
+        \\
+    ;
+    const plain = std.mem.indexOf(u8, text, "plain_box.item").? + "plain_box.".len;
+    const from_plain = try offeredAt(gpa, text, plain);
+    defer releaseAll(gpa, from_plain);
+    try testing.expect(!holds(from_plain, "into"));
+    const marked = std.mem.indexOf(u8, text, "marked_box.into").? + "marked_box.".len;
+    const from_marked = try offeredAt(gpa, text, marked);
+    defer releaseAll(gpa, from_marked);
+    try testing.expect(holds(from_marked, "into"));
+}
+
 test "an operation two traits answer is offered written out, the conversion only where it converts" {
     const gpa = testing.allocator;
     // `lone.into()` is [N-Ambiguous]: `Conv` and `Into` both declare `into`.
