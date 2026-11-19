@@ -1,6 +1,8 @@
-// Inside `head`, `task` is the parameter, so `task.default_stack_bytes` reads
-// the field the caller passed and settles no bound. The report says the name
-// is the parameter, not the module, and how to reach the module there.
+// Inside these functions `task` is the parameter, so `task.default_stack_bytes`
+// reads the field the caller passed and settles no bound. Each report says the
+// name is the parameter, not the module, and how to reach the module there,
+// whichever bound the shadowing name is written in, and says it once where
+// both are.
 import std.task
 
 struct Plan {
@@ -11,9 +13,19 @@ fn head(a: [UInt8; 4], task: Plan) -> [UInt8; 2] {
     copy(a[0..task.default_stack_bytes])
 }
 
+fn middle(a: [UInt8; 4], n: UInt64, task: Plan) -> [UInt8; 2] {
+    copy(a[n..task.default_stack_bytes])
+}
+
+fn both(a: [UInt8; 4], task: Plan) -> [UInt8; 2] {
+    copy(a[task.default_stack_bytes..task.default_stack_bytes])
+}
+
 fn main() -> UInt8 {
     let a: [UInt8; 4] = [1, 2, 3, 4]
     let _stack = task.default_stack_bytes
     let two = head(a, Plan { default_stack_bytes = 2 })
-    two[0] + two[1]
+    let mid = middle(a, 1, Plan { default_stack_bytes = 3 })
+    let none = both(a, Plan { default_stack_bytes = 2 })
+    two[0] + mid[0] + none[0]
 }

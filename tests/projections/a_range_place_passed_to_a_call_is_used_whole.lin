@@ -1,0 +1,12 @@
+// A range place handed to a call is neither copied out nor assigned into, so
+// it is refused where it is written. The help names the two whole uses rather
+// than writing one, since only the reader knows whether the call should get a
+// copy of the run or the run should be written.
+fn total(pair: [UInt8; 2]) -> UInt8 {
+    pair[0] + pair[1]
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    total(a[1..3])
+}

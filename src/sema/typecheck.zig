@@ -5873,6 +5873,9 @@ const Expected = struct {
         operand,
         /// The binding being assigned, whose type the value must have.
         assignment,
+        /// The bounds of a range place being assigned, whose run is the type
+        /// the value must have.
+        range_bounds,
         /// A `break` that settled the loop's type before this one.
         break_site,
         /// A `return` that settled the result of a closure writing none
@@ -5926,6 +5929,7 @@ const Expected = struct {
                 .arm => "expected because of this arm",
                 .operand => "expected because of this operand",
                 .assignment => "expected because of this binding",
+                .range_bounds => "expected because these bounds name the run",
                 .break_site => "expected because of this `break`",
                 .return_site => "expected because of this `return`",
                 .while_loop => "a `while` yields `()`, whatever its body",
@@ -21275,15 +21279,30 @@ const Checker = struct {
         }
 
         // The place's type flows into the value, so an assignment is checked
-        // the way an initialiser is and reports against the declaration.
+        // the way an initialiser is and reports against the declaration. A
+        // range place's type is the run its bounds name, so a mismatch points
+        // at the bounds.
+        const run = self.assignedRun(lhs);
         const value = try self.check(a.rhs, .{
             .ty = place,
-            .at = .{ .file = self.ast.fileOf(self.ast.exprMain(lhs)), .span = self.ast.tokenSpan(self.ast.exprMain(lhs)) },
-            .reason = .assignment,
+            .at = if (run) |bounds|
+                .{ .file = self.ast.fileOfExpr(bounds), .span = self.ast.exprSpan(bounds) }
+            else
+                .{ .file = self.ast.fileOf(self.ast.exprMain(lhs)), .span = self.ast.tokenSpan(self.ast.exprMain(lhs)) },
+            .reason = if (run != null) .range_bounds else .assignment,
         });
         if (value == .never) return self.expect(id, .never, expected);
 
         return self.expect(id, .unit, expected);
+    }
+
+    /// The bounds of the range place `lhs` names, where it is one: the last
+    /// range place recorded is the one just checked as the assignment's place.
+    fn assignedRun(self: *const Checker, lhs: ExprId) ?ExprId {
+        if (self.ast.exprTag(lhs) != .index) return null;
+        const recorded = self.range_places.items;
+        if (recorded.len == 0 or recorded[recorded.len - 1].at != lhs) return null;
+        return self.ast.binary(lhs).rhs;
     }
 
     /// `f(a, b)`. Arity is checked before types: a count that does not match
@@ -23871,6 +23890,10 @@ const Checker = struct {
         const signature = try self.builder.internCallable(&parameters, .u64, &.{}, .read);
         _ = try self.record(call.callee, signature);
         const result = try self.expect(id, .u64, expected);
+        // `a.length()` on a constant array is a constant expression, so it is
+        // worth what the shared folder says, as a name bound to it is: a
+        // range bound or an index reads the call the way it reads the name.
+        if (result != .poison) self.folds.set(id, .of(try self.worth(id)));
         if (result == .poison or self.call_of[id.index()] != no_call) return result;
         const index: u32 = @intCast(self.calls.items.len);
         const args = try self.gpa.dupe(ExprId, &.{receiver});
@@ -29136,13 +29159,7 @@ const Checker = struct {
         count: u32,
         expected: ?Expected,
     ) std.mem.Allocator.Error!TypeId {
-        if (self.whole_place != id) return try self.report(
-            .t_range_place,
-            id,
-            "a range place is copied out of or assigned into whole",
-            .{},
-            "this use is neither, and a part of a range place names nothing",
-        );
+        if (self.whole_place != id) return try self.refuseRangePlaceUse(id);
 
         // A range that arrived as a value has ends and no expressions for them,
         // so nothing here settles: the place's type would be read off a number
@@ -29199,6 +29216,55 @@ const Checker = struct {
         return self.folds.get(self.ast.withoutGroups(end)).valueOf();
     }
 
+    /// [T-RangePlace]'s whole-use clause. Where the range place is the whole
+    /// initialiser of a `let` or `var`, the value it was meant to be is the
+    /// copy of the run, so the help writes `copy(...)` around it. Elsewhere it
+    /// may sit inside a place being written or lent, where a copy would be a
+    /// temporary nothing reads, so the help says what is allowed and writes
+    /// nothing.
+    fn refuseRangePlaceUse(self: *Checker, id: ExprId) std.mem.Allocator.Error!TypeId {
+        const arena = self.sink.arena;
+        const file = self.ast.fileOfExpr(id);
+        const span = self.ast.exprSpan(id);
+        const labels = try arena.dupe(Label, &.{.{
+            .file = file,
+            .span = span,
+            .message = "this use is neither, and a part of a range place names nothing",
+        }});
+        const bound = if (self.statement_value) |statement|
+            statement.kind == .binding and statement.expr == id
+        else
+            false;
+        const notes = try arena.alloc([]const u8, 1);
+        var fixes: []const HelpFix = &.{};
+        if (bound) {
+            const text = self.ast.exprText(id);
+            notes[0] = try std.fmt.allocPrint(arena, "write `copy({s})` to bind a new array holding the run's elements", .{text});
+            const edit: HelpEdit = .{ .file = file, .span = span, .text = try std.fmt.allocPrint(arena, "copy({s})", .{text}) };
+            fixes = try arena.dupe(HelpFix, &.{.{ .kind = .copy_run, .note = 0, .edits = try arena.dupe(HelpEdit, &.{edit}) }});
+        } else {
+            notes[0] = "copy the run out with `copy(...)`, or assign a whole array of its length into it";
+        }
+        const before = self.sink.items().len;
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_range_place,
+            .message = "a range place is copied out of or assigned into whole",
+            .labels = labels,
+            .notes = notes,
+            .fixes = fixes,
+        });
+        try self.explainShadowedHead(id, before);
+        return try self.record(id, .poison);
+    }
+
+    /// The local a selection's head names where that local shadows an
+    /// imported module, so two bounds through one shadow explain it once.
+    fn shadowingLocal(self: *const Checker, selection: ExprId) ?BindingId {
+        if (!self.res.headShadowsAnImport(selection)) return null;
+        return self.res.targetOf(self.ast.unaryOperand(selection));
+    }
+
     /// [T-RangePlace]'s settling clause, reported once for the bracket with a
     /// label at each bound that failed it: `end`, and `other` where both did.
     ///
@@ -29233,6 +29299,8 @@ const Checker = struct {
             .notes = notes,
         });
         try self.explainShadowedHead(end, before);
+        if (other) |second| if (self.shadowingLocal(second) != self.shadowingLocal(end))
+            try self.explainShadowedHead(second, before);
         _ = try self.record(end, .poison);
         if (other) |second| _ = try self.record(second, .poison);
         return try self.record(id, .poison);

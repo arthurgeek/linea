@@ -1006,13 +1006,30 @@ error[T-Index]: no element sits here, and the length is part of the type
    |                                ^ the length is 7, so the last index is 6
 ```
 
+### Views: `Str` and `Slice`
+
+`weekend` is a `mem.Slice[Int64]`, the `Slice` type of the `std.mem` module; a
+signature that takes one writes `mem.Slice[Int64]` after `import std.mem`. It
+does not hold any numbers of its own. It is a
+**view**: it points at two of the elements `highs` owns. A view is cheap to
+make and to pass around, and it works only while the thing it points into is
+still there. Walking a slice with `for` hands you each element as a view too,
+and `*high` reads the number it points at.
+
+`Str` is the same idea for text. A string literal is a `Str` pointing at text
+stored in the program, and slicing text gives another `Str` pointing into the
+same bytes. Linea checks that no view outlives what it points into;
+[Borrowing](06-borrowing.md) shows how.
+
 ### Runs of an array: `a[lo..hi]`
 
-A range inside the brackets names a run of neighbouring elements instead of
-one. `highs[0..3]` is the elements at indexes 0, 1 and 2: like the ranges a
-`for` loop walks, `..` stops before its end and `..=` includes it. A run is an
-array in its own right, `[Int64; 3]` here, so you can copy it out whole or
-assign a whole array of the same length into it:
+A view points at elements the array still owns. Sometimes you want the
+elements themselves instead. A range inside the brackets names a run of
+neighbouring elements instead of one. `highs[0..3]` is the elements at
+indexes 0, 1 and 2: like the ranges a `for` loop walks, `..` stops before its
+end and `..=` includes it. A run is an array in its own right, `[Int64; 3]`
+here, so you can copy it out whole or assign a whole array of the same length
+into it:
 
 ```linea
 import std.io
@@ -1026,10 +1043,10 @@ fn main() -> Result[UInt8, io.IoError] {
     // corrected, so two new numbers replace the elements at 3 and 4.
     highs[3..5] = [20, 29]
     // `..=` includes the end: `highs[5..=6]` is the weekend, indexes 5 and 6.
-    let weekend = copy(highs[5..=6])
+    let weekend_copy = copy(highs[5..=6])
     io.println("The week starts {start:?}")?
     io.println("Corrected: {highs:?}")?
-    io.println("The weekend is {weekend:?}")?
+    io.println("The weekend is {weekend_copy:?}")?
     .Ok(0)
 }
 ```
@@ -1099,21 +1116,6 @@ length while the program runs and answers nothing if it does not fit:
 ```
 Around the peak: [19, 30, 27]
 ```
-
-### Views: `Str` and `Slice`
-
-`weekend` is a `mem.Slice[Int64]`, the `Slice` type of the `std.mem` module; a
-signature that takes one writes `mem.Slice[Int64]` after `import std.mem`. It
-does not hold any numbers of its own. It is a
-**view**: it points at two of the elements `highs` owns. A view is cheap to
-make and to pass around, and it works only while the thing it points into is
-still there. Walking a slice with `for` hands you each element as a view too,
-and `*high` reads the number it points at.
-
-`Str` is the same idea for text. A string literal is a `Str` pointing at text
-stored in the program, and slicing text gives another `Str` pointing into the
-same bytes. Linea checks that no view outlives what it points into;
-[Borrowing](06-borrowing.md) shows how.
 
 ### `Vec`: a list that grows
 

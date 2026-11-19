@@ -1,0 +1,14 @@
+// The length of a constant array is a constant expression, so it settles a
+// range place's bound wherever it is written: directly in the bracket, through
+// a `let` that holds it, and on a module constant alike.
+let table: [UInt8; 5] = [10, 20, 30, 40, 50]
+
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    let tail = copy(a[1..a.length()])
+    let n = a.length()
+    let held = copy(a[1..n])
+    let rest = copy(table[1..table.length()])
+    let last = copy(table[table.length() - 2..=table.length() - 1])
+    tail[2] + held[0] + rest[3] + last[0]
+}

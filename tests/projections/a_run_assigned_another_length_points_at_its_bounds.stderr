@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `[UInt8; 2]`, found `[UInt8; 3]`
+ --> tests/projections/a_run_assigned_another_length_points_at_its_bounds.lin:7:15
+  |
+7 |     a[0..2] = three
+  |       ---- expected because these bounds name the run
+  |               ^^^^^ expected `[UInt8; 2]`, found `[UInt8; 3]`

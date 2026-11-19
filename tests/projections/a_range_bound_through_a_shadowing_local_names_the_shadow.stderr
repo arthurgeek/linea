@@ -1,10 +1,32 @@
 error[T-RangePlace]: a range place's bounds settle where the place is formed
-  --> tests/projections/a_range_bound_through_a_shadowing_local_names_the_shadow.lin:11:15
+  --> tests/projections/a_range_bound_through_a_shadowing_local_names_the_shadow.lin:13:15
    |
-10 | fn head(a: [UInt8; 4], task: Plan) -> [UInt8; 2] {
+12 | fn head(a: [UInt8; 4], task: Plan) -> [UInt8; 2] {
    |                        ---- this parameter `task` shadows `task`, the import of `std.task`
-11 |     copy(a[0..task.default_stack_bytes])
+13 |     copy(a[0..task.default_stack_bytes])
    |               ^^^^^^^^^^^^^^^^^^^^^^^^ this is not settled here, and the place's length is what the bounds name
+   |
+   = help: a run's length is part of its type, so it is fixed where the place is formed; read a run chosen while the program runs through a view, `as_slice().subspan(start, count)`, and write one element by element in a loop
+   = help: inside this scope `task` is the parameter, not the module; write `import std.task as` another name to reach the module here
+error[T-RangePlace]: a range place's bounds settle where the place is formed
+  --> tests/projections/a_range_bound_through_a_shadowing_local_names_the_shadow.lin:17:12
+   |
+16 | fn middle(a: [UInt8; 4], n: UInt64, task: Plan) -> [UInt8; 2] {
+   |                                     ---- this parameter `task` shadows `task`, the import of `std.task`
+17 |     copy(a[n..task.default_stack_bytes])
+   |            ^ this is not settled here, and the place's length is what the bounds name
+   |               ------------------------ nor is this
+   |
+   = help: a run's length is part of its type, so it is fixed where the place is formed; read a run chosen while the program runs through a view, `as_slice().subspan(start, count)`, and write one element by element in a loop
+   = help: inside this scope `task` is the parameter, not the module; write `import std.task as` another name to reach the module here
+error[T-RangePlace]: a range place's bounds settle where the place is formed
+  --> tests/projections/a_range_bound_through_a_shadowing_local_names_the_shadow.lin:21:12
+   |
+20 | fn both(a: [UInt8; 4], task: Plan) -> [UInt8; 2] {
+   |                        ---- this parameter `task` shadows `task`, the import of `std.task`
+21 |     copy(a[task.default_stack_bytes..task.default_stack_bytes])
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^ this is not settled here, and the place's length is what the bounds name
+   |                                      ------------------------ nor is this
    |
    = help: a run's length is part of its type, so it is fixed where the place is formed; read a run chosen while the program runs through a view, `as_slice().subspan(start, count)`, and write one element by element in a loop
    = help: inside this scope `task` is the parameter, not the module; write `import std.task as` another name to reach the module here
