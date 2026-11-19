@@ -1,0 +1,26 @@
+// A write through a `for inout` binder is a write into the element it lends,
+// so storing a view `x` lends into the parameter `arr` is a dependency of
+// `arr` the signature does not declare.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn fill(inout arr: [Swap; 1], x: Str) {
+    for inout s in arr {
+        s.a = copy(x)
+    }
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var arr = [Swap { a = "static", b = "static" }]
+    fill(&arr, owned.view())
+    owned.release()
+    let _ = io.println(arr[0].a) else |_| {
+        return 1
+    }
+    0
+}

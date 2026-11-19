@@ -9325,6 +9325,9 @@ fn refusedByInvalidation(
 
 const SoundnessJob = union(enum) {
     cell: matrix.Cell,
+    /// A place lent `inout` to a call that moves one part's owner into
+    /// another part.
+    move: matrix.PartMove,
     /// A generated storage program and the seed its choices came from.
     program: struct { seed: u64, choices: []const u8 },
 };
@@ -9369,20 +9372,20 @@ fn runAccepted(
     return ran;
 }
 
-/// Checks both programs of one matrix cell.
+/// Checks both programs of one matrix cell or part-move cell.
 fn checkMatrixCell(
     scratch: std.mem.Allocator,
     keep: std.mem.Allocator,
     io: std.Io,
     settings: SoundnessSettings,
     ordinal: usize,
-    cell: matrix.Cell,
+    cell: anytype,
 ) !SoundnessResult {
     var result: SoundnessResult = .{};
     var failures: std.ArrayList(Failure) = .empty;
     var refusal_rules: std.ArrayList([]const u8) = .empty;
     for (std.enums.values(matrix.Liveness)) |liveness| {
-        const text = try matrix.render(scratch, cell, liveness);
+        const text = try matrix.renderAny(scratch, cell, liveness);
         const display_path = try std.fmt.allocPrint(scratch, "soundness/{f}/{s}", .{ cell, @tagName(liveness) });
         const name = try std.fmt.allocPrint(scratch, "soundness{d}{s}", .{ ordinal, @tagName(liveness) });
         switch (try compileWithLibrary(scratch, &failures, settings.library, display_path, text, cell.manifest(), settings.env.sanitize)) {
@@ -9467,6 +9470,7 @@ const SoundnessWalk = struct {
             _ = per_job.reset(.{ .retain_with_limit = 64 << 20 });
             results[at] = switch (jobs[at]) {
                 .cell => |cell| checkMatrixCell(per_job.allocator(), keep.allocator(), io, settings, at, cell),
+                .move => |cell| checkMatrixCell(per_job.allocator(), keep.allocator(), io, settings, at, cell),
                 .program => |program| checkStorageProgram(per_job.allocator(), keep.allocator(), io, settings, program.seed, program.choices),
             } catch |err| .{ .err = err };
         }
@@ -9733,7 +9737,10 @@ fn runSoundness(
     defer jobs.deinit(gpa);
     const all_cells = try matrix.cells(gpa);
     defer gpa.free(all_cells);
+    const all_moves = try matrix.partMoves(gpa);
+    defer gpa.free(all_moves);
     if (!options.skip_matrix) for (all_cells) |cell| try jobs.append(gpa, .{ .cell = cell });
+    if (!options.skip_matrix) for (all_moves) |cell| try jobs.append(gpa, .{ .move = cell });
     for (0..options.storage_programs) |k| {
         const seed = options.seed + k;
         try jobs.append(gpa, .{ .program = .{ .seed = seed, .choices = try storage_gen.choicesFromSeed(gpa, seed) } });
@@ -9773,7 +9780,7 @@ fn runSoundness(
     defer refused_by.deinit(gpa);
     for (results, jobs.items) |result, job| {
         switch (job) {
-            .cell => accepted_cells += result.accepted_live,
+            .cell, .move => accepted_cells += result.accepted_live,
             .program => accepted_mutants += result.accepted_live,
         }
         for (result.refusal_rules) |rule| {
@@ -9792,7 +9799,7 @@ fn runSoundness(
         total.unbuilt += result.unbuilt;
     }
     try checkSoundnessCounts(gpa, &failures, .{
-        .cells = if (options.skip_matrix) 0 else all_cells.len,
+        .cells = if (options.skip_matrix) 0 else all_cells.len + all_moves.len,
         .refused_live = total.refused_live,
         .accepted_cells = accepted_cells,
         .ended = total.ended,
@@ -9803,8 +9810,8 @@ fn runSoundness(
     });
     std.mem.sort(Failure, failures.items, {}, failureLess);
 
-    if (!options.skip_matrix) std.debug.print("soundness: {d} matrix cell(s): {d} live program(s) refused, {d} accepted; {d} ended program(s) accepted and run clean\n", .{
-        all_cells.len, total.refused_live, accepted_cells, total.ended,
+    if (!options.skip_matrix) std.debug.print("soundness: {d} matrix cell(s) and {d} part-move cell(s): {d} live program(s) refused, {d} accepted; {d} ended program(s) accepted and run clean\n", .{
+        all_cells.len, all_moves.len, total.refused_live, accepted_cells, total.ended,
     });
     std.debug.print("soundness: {d} generated storage program(s) from seeds {d}..{d} and {d} replayed; {d} mutant(s), {d} refused, {d} accepted\n", .{
         total.generated,

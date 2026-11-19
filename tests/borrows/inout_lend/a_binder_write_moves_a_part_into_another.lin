@@ -1,0 +1,21 @@
+// A write through a `for inout` binder writes the element it lends: after
+// `s.a = copy(s.b)`, `pairs[0].a` views `owned`.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var pairs = [Swap { a = "static", b = owned.view() }]
+    for inout s in pairs {
+        s.a = copy(s.b)
+    }
+    owned.release()
+    let _ = io.println(pairs[0].a) else |_| {
+        return 1
+    }
+    0
+}

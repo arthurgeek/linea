@@ -1,0 +1,29 @@
+// A place lent `inout` may come back with any part holding what any part held:
+// `swap` moves the owner of `b` into `a`, and `advance` passes the lend on
+// without a clause, so `a` depends on `owned` once `advance` returns.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn swap(inout s: Swap) where retains(s: s) {
+    s.a = copy(s.b)
+}
+
+fn advance(inout s: Swap) {
+    swap(&s)
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    advance(&s)
+    let Swap { a, b: _ } = s
+    owned.release()
+    let _ = io.println(a) else |_| {
+        return 1
+    }
+    0
+}

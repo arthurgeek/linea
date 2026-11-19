@@ -39,6 +39,7 @@ comptime {
     _ = Operation;
     _ = Observation;
     _ = Cell;
+    _ = PartMove;
 }
 
 /// What owns the storage an operation changes.
@@ -1285,6 +1286,292 @@ test "every cell renders a program the parser reads whole" {
     for (try cells(gpa)) |cell| {
         for (std.enums.values(Liveness)) |liveness| {
             const text = try render(gpa, cell, liveness);
+            const source: Source = .{ .path = "main.lin", .text = text };
+            var sink = Sink.init(gpa);
+            var interner: Interner = .empty;
+            const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+            _ = try parse(gpa, &source, .from(0), tokens, &sink);
+            if (sink.hasErrors()) {
+                std.debug.print("{f} ({s}) does not parse:\n{s}\n", .{ cell, @tagName(liveness), text });
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
+}
+
+/// Where a place lent `inout` sits, in the cells that move what one part of
+/// the place holds into another part while it is lent. A callee may arrange a
+/// place it is lent however it likes, so its caller takes every part of the
+/// place to hold what any part held, whatever the place's shape.
+pub const LentPlace = enum {
+    /// A whole local, `s`.
+    local,
+    /// A field of a local structure, `holder.inner`.
+    field,
+    /// A field of a field, `outer.holder.inner`.
+    nested,
+    /// An element of a fixed array, `pairs[0]`.
+    element,
+    /// The binder of a `for inout` walk, lent from inside the walk.
+    binder,
+    /// A local a closure captures `inout`, lent from inside the closure.
+    capture,
+    /// A local a `sink` closure captures `inout`, lent from inside the
+    /// closure, which is moved to another binding and called there.
+    sink_capture,
+};
+
+/// How the lent place's part moves: what the call the place is lent to does
+/// with it.
+pub const Mover = enum {
+    /// The callee declares `retains(s: s)` and moves the part itself.
+    declared,
+    /// A function without a clause passes the lend on to one that moves it.
+    wrapped,
+    /// A function without a clause rebuilds the place from a call that
+    /// carries it.
+    rebuilt,
+    /// A generic function lends the place to a trait operation that moves it.
+    generic,
+    /// A method moves the part through its receiver.
+    method,
+};
+
+/// One cell of the part-move family: a place, lent `inout` to a call that
+/// moves the owner of its part `b` into its part `a`. The `live` program
+/// releases that owner and then reads `a`, so the language refuses it by
+/// [O-Borrow]; the `ended` program reads `a` first, and must be accepted and
+/// run clean.
+pub const PartMove = struct {
+    place: LentPlace,
+    mover: Mover,
+
+    /// The rule that refuses the cell's `live` program.
+    pub fn refusal(_: PartMove) []const u8 {
+        return "O-Borrow";
+    }
+
+    /// Part-move programs need no manifest.
+    pub fn manifest(_: PartMove) ?[]const u8 {
+        return null;
+    }
+
+    /// The cell's name, which is also how a failure names it.
+    pub fn format(self: PartMove, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("inout_lend/{s}/{s}", .{ @tagName(self.place), @tagName(self.mover) });
+    }
+
+    test "a part-move cell is named by its place and its mover" {
+        var buffer: [64]u8 = undefined;
+        const cell: PartMove = .{ .place = .nested, .mover = .rebuilt };
+        try testing.expectEqualStrings("inout_lend/nested/rebuilt", try std.fmt.bufPrint(&buffer, "{f}", .{cell}));
+    }
+};
+
+/// Every place met with every mover.
+pub fn partMoves(gpa: std.mem.Allocator) ![]PartMove {
+    var out: std.ArrayList(PartMove) = .empty;
+    errdefer out.deinit(gpa);
+    for (std.enums.values(LentPlace)) |place| {
+        for (std.enums.values(Mover)) |mover| try out.append(gpa, .{ .place = place, .mover = mover });
+    }
+    return out.toOwnedSlice(gpa);
+}
+
+test "the part-move family meets every place with every mover" {
+    const all = try partMoves(testing.allocator);
+    defer testing.allocator.free(all);
+    try testing.expectEqual(std.enums.values(LentPlace).len * std.enums.values(Mover).len, all.len);
+}
+
+/// A matrix cell's or a part-move cell's program, written as its liveness
+/// asks.
+pub fn renderAny(gpa: std.mem.Allocator, cell: anytype, liveness: Liveness) ![]const u8 {
+    return switch (@TypeOf(cell)) {
+        Cell => render(gpa, cell, liveness),
+        PartMove => renderPartMove(gpa, cell, liveness),
+        else => @compileError("not a soundness cell"),
+    };
+}
+
+/// The cell's program: `owned` gives `b` its text, the call the place is lent
+/// to moves `b`'s view into `a`, and `a`'s length is read after `owned` is
+/// released (`live`) or before (`ended`).
+pub fn renderPartMove(gpa: std.mem.Allocator, cell: PartMove, liveness: Liveness) ![]const u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w: Lines = .{ .out = &out.writer };
+    try w.raw(
+        \\struct Pair {
+        \\    a: Str,
+        \\    b: Str,
+        \\}
+        \\
+        \\
+    );
+    if (cell.place == .field or cell.place == .nested) try w.raw(
+        \\struct Holder {
+        \\    label: Str,
+        \\    inner: Pair,
+        \\}
+        \\
+        \\
+    );
+    if (cell.place == .nested) try w.raw(
+        \\struct Outer {
+        \\    holder: Holder,
+        \\}
+        \\
+        \\
+    );
+    switch (cell.mover) {
+        .declared, .wrapped => try w.raw(
+            \\fn shift(inout s: Pair) where retains(s: s) {
+            \\    s.a = copy(s.b)
+            \\}
+            \\
+            \\
+        ),
+        .rebuilt => try w.raw(
+            \\fn swapped(sink s: Pair) -> Pair where carries(s) {
+            \\    let Pair { a: _, b } = s
+            \\    Pair { a = copy(b), b = b }
+            \\}
+            \\
+            \\fn relay(inout s: Pair) {
+            \\    let current = s
+            \\    s = swapped(current)
+            \\}
+            \\
+            \\
+        ),
+        .generic => try w.raw(
+            \\trait Shift {
+            \\    fn shift(inout self: Self) where retains(self: self)
+            \\}
+            \\
+            \\impl Shift for Pair {
+            \\    fn shift(inout self: Self) where retains(self: self) {
+            \\        self.a = copy(self.b)
+            \\    }
+            \\}
+            \\
+            \\fn relay[T: Shift](inout value: T) {
+            \\    &value.shift()
+            \\}
+            \\
+            \\
+        ),
+        .method => try w.raw(
+            \\impl Pair {
+            \\    fn shift(inout self: Self) where retains(self: self) {
+            \\        self.a = copy(self.b)
+            \\    }
+            \\}
+            \\
+            \\
+        ),
+    }
+    if (cell.mover == .wrapped) try w.raw(
+        \\fn relay(inout s: Pair) {
+        \\    shift(&s)
+        \\}
+        \\
+        \\
+    );
+
+    const pair = "Pair { a = \"static\", b = owned.view() }";
+    // The name the moving call is given: the binder or capture names the
+    // place itself where the walk or the closure lends it.
+    const lent: []const u8 = switch (cell.place) {
+        .local, .capture, .sink_capture => "s",
+        .field => "holder.inner",
+        .nested => "outer.holder.inner",
+        .element => "pairs[0]",
+        .binder => "s",
+    };
+    const read: []const u8 = switch (cell.place) {
+        .local, .capture, .sink_capture => "s.a",
+        .field => "holder.inner.a",
+        .nested => "outer.holder.inner.a",
+        .element, .binder => "pairs[0].a",
+    };
+    var call_buffer: [128]u8 = undefined;
+    const call = switch (cell.mover) {
+        .declared => try std.fmt.bufPrint(&call_buffer, "shift(&{s})", .{lent}),
+        .wrapped, .rebuilt, .generic => try std.fmt.bufPrint(&call_buffer, "relay(&{s})", .{lent}),
+        .method => try std.fmt.bufPrint(&call_buffer, "&{s}.shift()", .{lent}),
+    };
+
+    try w.raw("fn main() -> UInt8 {\n");
+    try w.line(1, "let owned = \"the text b views\".to_owned().unwrap()");
+    switch (cell.place) {
+        .local => try w.print(1, "var s = {s}", .{pair}),
+        .field => try w.print(1, "var holder = Holder {{ label = \"kept\", inner = {s} }}", .{pair}),
+        .nested => try w.print(1, "var outer = Outer {{ holder = Holder {{ label = \"kept\", inner = {s} }} }}", .{pair}),
+        .element, .binder => try w.print(1, "var pairs = [{s}]", .{pair}),
+        .capture, .sink_capture => try w.print(1, "var s = {s}", .{pair}),
+    }
+    switch (cell.place) {
+        .binder => {
+            try w.line(1, "for inout s in pairs {");
+            try w.line(2, call);
+            try w.line(1, "}");
+        },
+        .capture => {
+            try w.print(1, "var act = inout [inout s] || {{ {s} }}", .{call});
+            try w.line(1, "&act()");
+        },
+        .sink_capture => {
+            try w.print(1, "let act = sink [inout s] || {{ {s} }}", .{call});
+            try w.line(1, "let moved = act");
+            try w.line(1, "moved()");
+        },
+        else => try w.line(1, call),
+    }
+    switch (liveness) {
+        .live => {
+            try w.line(1, "owned.release()");
+            try w.print(1, "let length = {s}.length()", .{read});
+        },
+        .ended => {
+            try w.print(1, "let length = {s}.length()", .{read});
+            try w.line(1, "owned.release()");
+        },
+    }
+    try w.line(1, "if length > 1000 {");
+    try w.line(2, "return 1");
+    try w.line(1, "}");
+    try w.line(1, "0");
+    try w.raw("}\n");
+    return out.toOwnedSlice();
+}
+
+test "a part-move program reads the moved part after its owner ends only when live" {
+    const gpa = testing.allocator;
+    const cell: PartMove = .{ .place = .field, .mover = .wrapped };
+    const live = try renderPartMove(gpa, cell, .live);
+    defer gpa.free(live);
+    const ended = try renderPartMove(gpa, cell, .ended);
+    defer gpa.free(ended);
+    try testing.expect(std.mem.indexOf(u8, live, "owned.release()").? < std.mem.indexOf(u8, live, "holder.inner.a.length()").?);
+    try testing.expect(std.mem.indexOf(u8, ended, "holder.inner.a.length()").? < std.mem.indexOf(u8, ended, "owned.release()").?);
+    try testing.expect(std.mem.indexOf(u8, live, "relay(&holder.inner)") != null);
+}
+
+test "every part-move cell renders a program the parser reads whole" {
+    const tokenize = @import("../lexer/lexer.zig").tokenize;
+    const parse = @import("../parser/parser.zig").parse;
+    const Sink = @import("../diagnostics/sink.zig").Sink;
+    const Interner = @import("../support/interner.zig").Interner;
+    const Source = @import("../support/source.zig").Source;
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    for (try partMoves(gpa)) |cell| {
+        for (std.enums.values(Liveness)) |liveness| {
+            const text = try renderPartMove(gpa, cell, liveness);
             const source: Source = .{ .path = "main.lin", .text = text };
             var sink = Sink.init(gpa);
             var interner: Interner = .empty;

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/borrows/inout_lend/a_generic_lend_moves_any_part.lin:30:5
+   |
+30 |     owned.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+31 |     let _ = io.println(a) else |_| {
+   |                        - the observation is still used here

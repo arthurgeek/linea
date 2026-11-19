@@ -1213,10 +1213,11 @@ impl[K: Key, V, A: Allocator] Map[K, V, A] {
     // one factory can serve many calls and its captures can be recovered
     // afterwards. A built entry whose key does not match `query`, or hashes to
     // another code, is returned whole as `KeyMismatch` for the caller to
-    // settle.
+    // settle. The map is lent while the bucket is reserved, so a failure
+    // carries what the whole map carries.
     pub fn upsert[E, Make: inout fn(query: K.Query, allocator: A) -> Result[Entry[K, V], E] where carries(allocator), Update: inout fn(sink value: V) -> V](inout self: Self, query: K.Query, inout make_entry: Make, inout transform: Update) -> Result[(), UpsertFailure[K, V, E]] where
-        carries(.Err: self.allocator, make_entry),
-        retains(self: self.allocator, make_entry, transform)
+        carries(.Err: self, make_entry),
+        retains(self: make_entry, transform)
     {
         let code = query.hash()
         match self.find(query, code, |candidate, query| candidate.matches(query)) {

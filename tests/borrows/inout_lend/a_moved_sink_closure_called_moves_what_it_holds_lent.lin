@@ -1,0 +1,27 @@
+// A closure moved to another binding still holds its `inout` lend, and calling
+// it there may move one part's owner into another part of the lent place.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn swap(inout s: Swap) where retains(s: s) {
+    s.a = copy(s.b)
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    let mv = sink [inout s] || {
+        swap(&s)
+    }
+    let again = mv
+    again()
+    owned.release()
+    let _ = io.println(s.a) else |_| {
+        return 1
+    }
+    0
+}

@@ -1,0 +1,35 @@
+// A generic function lending its parameter to a trait operation cannot know
+// what the operation moves, so its caller takes every part of the lent place
+// to hold what any part held.
+import std.io
+
+trait Shift {
+    fn shift(inout self: Self) where retains(self: self)
+}
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+impl Shift for Swap {
+    fn shift(inout self: Self) where retains(self: self) {
+        self.a = copy(self.b)
+    }
+}
+
+fn advance[T: Shift](inout value: T) {
+    &value.shift()
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    advance(&s)
+    let Swap { a, b: _ } = s
+    owned.release()
+    let _ = io.println(a) else |_| {
+        return 1
+    }
+    0
+}

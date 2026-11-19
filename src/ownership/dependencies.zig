@@ -943,6 +943,12 @@ const Analysis = struct {
     /// expression that carried the dependency. Sized by the function's joins
     /// and writes times the owners each carries.
     arrivals: std.AutoHashMapUnmanaged(Arrival, ExprId) = .empty,
+    /// What each call lending a place `inout` returns, read before the call
+    /// merges the lent place's parts. A callee's exit check holds every
+    /// dependency it returns to the sources its contract names as they stood
+    /// when it was called, whatever it moved between the parts afterwards, so
+    /// the result is the pre-merge reading. Sized by the function's calls.
+    call_results: std.AutoHashMapUnmanaged(ExprId, SetId) = .empty,
     /// The piece or operand through which a literal, a `borrow` or a call
     /// first borrowed `owner` into its value. An [O-Borrow] report follows
     /// `arrivals` and then this one step further, to the borrow itself; an
@@ -998,6 +1004,7 @@ const Analysis = struct {
     fn deinit(self: *Analysis) void {
         self.store.deinit();
         self.arrivals.deinit(self.gpa);
+        self.call_results.deinit(self.gpa);
         self.borrowed_through.deinit(self.gpa);
         self.exits.deinit(self.gpa);
         self.reported_temporaries.deinit(self.gpa);
@@ -1645,6 +1652,24 @@ const Analysis = struct {
     /// right-hand side rather than its target, which is where a report about
     /// what the binding holds points.
     fn write(self: *Analysis, state: *State, root: BindingId, path: PathId, written: SetId, at: ExprId, arrived: ExprId, report: bool) !void {
+        try self.writeBinding(state, root, path, written, at, arrived, report);
+        // A binding whose alias names a place it was lent `inout`, such as a
+        // `for inout` binder, is that place: what is written into it is
+        // written there too. The alias names the place no finer than the
+        // lend reached it (a walk's element is named by its whole storage),
+        // so the written dependencies are joined into all of that place, and
+        // the place keeps what it held.
+        const origins = state.get(Cell.alias(root)) orelse return;
+        for (self.store.facts(origins)) |fact| {
+            const target = fact.origin.place;
+            if (target.root == .none or target.root == root or fact.origin.external or fact.origin.temporary != .none) continue;
+            const previous = try self.store.select(state.get(Cell.binding(target.root)) orelse .empty, target.path);
+            const incoming = try self.store.summarize(try self.heldAs(written, self.typing.bindingType(root)));
+            try self.writeBinding(state, target.root, target.path, try self.store.join(previous, incoming), at, arrived, false);
+        }
+    }
+
+    fn writeBinding(self: *Analysis, state: *State, root: BindingId, path: PathId, written: SetId, at: ExprId, arrived: ExprId, report: bool) !void {
         const value_set = try self.heldAs(written, self.typing.bindingType(root));
         try self.noteArrivalsOf(Cell.binding(root), value_set, arrived, true);
         if (report and !self.reported.contains(at) and try self.store.containsLocalOrigin(value_set, root)) {
@@ -1971,6 +1996,11 @@ const Analysis = struct {
     }
 
     fn callResult(self: *Analysis, state: *const State, id: ExprId) !SetId {
+        if (self.call_results.get(id)) |before| return before;
+        return self.contractResult(state, id);
+    }
+
+    fn contractResult(self: *Analysis, state: *const State, id: ExprId) !SetId {
         const call = self.typing.call_index.callOf(self.typing, id) orelse return .empty;
         // Recovery preserves the environment representation, including each
         // field's precise observation paths.
@@ -1995,6 +2025,8 @@ const Analysis = struct {
     /// observation of it is invalidated here, once per iteration -- the same
     /// answer `&it.next()` gets from `applyCall`.
     fn applyLentStep(self: *Analysis, state: *State, mark: ExprId) !void {
+        // `next` is lent the walked iterator, as any `inout` call is.
+        try self.mergeParts(state, try self.selectedPath(self.ast.unaryOperand(mark)), mark);
         if (self.dependents.owners.by_owner.count() == 0) return;
         for (self.store.facts(try self.actualPlace(state, self.ast.unaryOperand(mark)))) |fact| {
             if (!fact.origin.external) try self.invalidate(state, fact.origin.place, null, mark);
@@ -2094,6 +2126,26 @@ const Analysis = struct {
             .callable => |s| s,
             else => return,
         };
+        // The result is read before the merges below.
+        try self.call_results.put(self.gpa, id, try self.contractResult(state, id));
+        // A callee may move what a place lent to it `inout` holds from one
+        // part of it to another, so afterwards any part may hold what any
+        // part held. A receiver reached through observations lends their
+        // referent, which is the place merged.
+        // A callable invoked holds its `inout` lends whatever convention it
+        // is called by, so every place it holds lent `inout` is merged; one
+        // called `inout` is itself a lent place too.
+        if (normalized.target.calleeIsValue()) try self.mergeLentThrough(state, self.ast.call(id).callee, id);
+        if (normalized.callee_convention == .inout) try self.mergeParts(state, try self.selectedPath(self.ast.call(id).callee), id);
+        for (self.typing.callableParams(signature), normalized.args, 0..) |param, arg, k| {
+            if (arg == .none or param.convention == .read) continue;
+            // A callable lent or given to the callee may be invoked there, and
+            // change each place it holds lent `inout`.
+            try self.mergeLentThrough(state, arg, id);
+            if (param.convention != .inout) continue;
+            const endpoint = try self.callEndpoint(normalized, .{ .root = .{ .parameter = @intCast(k) } }) orelse continue;
+            try self.mergeParts(state, endpoint.selected, id);
+        }
         // Without a live local origin, an inout call cannot invalidate an
         // observation. Avoid constructing place facts solely for that check.
         if (self.dependents.owners.by_owner.count() != 0) {
@@ -2134,6 +2186,29 @@ const Analysis = struct {
             const added = try self.sourceFacts(state, normalized, contract.source, contract.borrows_source, false);
             const previous = try self.store.select(state.get(Cell.binding(root)) orelse .empty, path);
             try self.write(state, root, path, try self.store.join(previous, added), id, id, report);
+        }
+    }
+
+    /// Let every part of the place `selected` names hold what any part of it
+    /// holds, as a callee given the place `inout` may arrange it. The
+    /// dependencies of the whole are unchanged.
+    fn mergeParts(self: *Analysis, state: *State, selected: Selection, at: ExprId) !void {
+        if (!self.ast.refersToBinding(selected.root)) return;
+        try self.mergePlace(state, .{ .root = self.res.targetOf(selected.root), .path = selected.path }, at);
+    }
+
+    fn mergePlace(self: *Analysis, state: *State, place: Place, at: ExprId) !void {
+        const held = try self.store.select(state.get(Cell.binding(place.root)) orelse .empty, place.path);
+        if (held == .empty) return;
+        try self.write(state, place.root, place.path, try self.store.join(held, try self.store.summarize(held)), at, at, false);
+    }
+
+    /// A callable invoked `inout` may change each place it holds lent
+    /// `inout`, as a callee lent the place itself may.
+    fn mergeLentThrough(self: *Analysis, state: *State, callee: ExprId, at: ExprId) !void {
+        for (self.store.facts(try self.value(state, callee))) |fact| {
+            if (fact.origin.lent == .none or fact.origin.external or fact.origin.place.root == .none) continue;
+            try self.mergePlace(state, fact.origin.place, at);
         }
     }
 
@@ -3507,10 +3582,10 @@ const Analysis = struct {
                     try self.temporaryOutlived(fact.origin.temporary, at, true);
                     continue;
                 }
-                // Existing dependencies may remain where the caller put them.
-                // Moving them to a different field requires a retention clause.
-                if (fact.origin.external and fact.origin.place.root == parameter and
-                    try self.coveredPath(self.typing.bindingType(parameter), fact.origin.place.path, &.{fact.path}, true)) continue;
+                // What the caller's storage gave the parameter may move between
+                // the parameter's parts: a caller lending a place `inout`
+                // takes every part of it to hold what any part held.
+                if (fact.origin.external and fact.origin.place.root == parameter) continue;
                 var targets: std.ArrayList(PathId) = .empty;
                 defer targets.deinit(self.gpa);
                 for (try self.contractsFrom(fact.origin.place.root, signature.contracts)) |index| {
@@ -3788,6 +3863,9 @@ const Analysis = struct {
                     if (self.canCarry(self.typing.bindingType(place.root))) try cells.append(self.gpa, Cell.binding(place.root));
                     if (self.cfg.opTag(op) == .lent or self.isReadCapture(place.root)) try cells.append(self.gpa, Cell.alias(place.root));
                     uses_start = cells.items.len;
+                    // A write through a lend's binder writes the place its
+                    // alias names, so the alias is read there.
+                    if (self.cfg.ops.items(.replaces)[op.index()] and self.readsThroughAlias(place.root)) try cells.append(self.gpa, Cell.alias(place.root));
                     if ((self.res.kindOf(place.root) != .parameter and self.res.kindOf(place.root) != .capture) or self.cfg.ops.items(.replaces)[op.index()]) {
                         try self.addUses(cells, if (source != .none) source else at);
                         if (place.depth > 0 and self.canCarry(self.typing.bindingType(place.root))) try cells.append(self.gpa, Cell.binding(place.root));

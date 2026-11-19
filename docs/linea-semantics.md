@@ -6155,6 +6155,30 @@ own place to an escaping observation. Bodies are checked against these contracts
 including explicit returns, trailing expressions, and writes through `inout`
 destinations. Callable types retain source contracts as part of their signature.
 
+**A place lent `inout` comes back with its parts merged.** A callee may move
+what an `inout` parameter held from one of its parts to another, through its
+own writes, through a callee it lends the parameter to, or by rebuilding the
+parameter from a call that carries it, and no clause says so. After a call
+lends a place `inout`, the caller therefore takes every part of that place to
+hold what any part of it held before the call; what the whole place held is
+unchanged, and nothing any part held is dropped. This holds for every place
+that can be lent: a local, a field at any depth, an element, a `for inout`
+binder, an `inout` capture, a method receiver (the place its observations
+reach), the iterator a lent walk advances, and every place a callable holds lent
+`inout` when it is invoked, however it is called. A callable lent or given to
+a call may be invoked there, so every place it holds
+lent `inout` is merged too, and a write through a binding that lends another
+place, such as a `for inout` binder, is a write into that place. The call's
+own result is read from the lent place as it stood before the call, since the
+callee's exit check holds what it returns to the sources its contract names by
+where each dependency came from; every later reading sees the merge. A
+`retains` clause between parts of one `inout` parameter therefore states
+nothing a caller does not already assume, and a contract naming one part of a
+parameter, such as `carries(.Err: self.reader)`, cannot be kept by a body that
+lends `self` onward before reading that part; it names the whole parameter. [O-Borrow] refuses the use of a part
+whose merged dependency's owner has ended
+([ADR 0291](adr/0291-a-place-lent-inout-comes-back-with-its-parts-merged.md)).
+
 A **carrier** is a struct or enum declared `@carrier`: values built from it live as
 long as it does. A signature that writes no `where` clause and has exactly one
 parameter whose type is a carrier, after alias expansion and for any

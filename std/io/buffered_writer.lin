@@ -446,8 +446,9 @@ impl[W: ByteWriter, A: Allocator] BufferedWriter[W, A] {
 
     // Flush every pending byte and return the underlying writer. A failed flush
     // returns the whole buffered writer with the failure, so no pending byte is
-    // lost.
-    pub fn finish(sink self: Self) -> Result[W, FinishFailure[W, A, W.Error]] where carries(.Ok: self.writer), carries(.Err: self) {
+    // lost. Flushing lends the buffered writer, so the writer returned carries
+    // what any part of it held.
+    pub fn finish(sink self: Self) -> Result[W, FinishFailure[W, A, W.Error]] where carries(self) {
         var pending = self
         match &pending.flush() {
             Err(failure) => .Err(.{ writer = pending, failure = failure }),

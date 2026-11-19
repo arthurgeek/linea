@@ -1,0 +1,23 @@
+// Calling a closure that holds a place lent `inout` may move what one part of
+// the place held into another, whatever the closure is called through: after
+// `mv()`, `s.a` views `owned`.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var s = Swap { a = "static", b = owned.view() }
+    let mv = sink [inout s] || {
+        s.a = copy(s.b)
+    }
+    mv()
+    owned.release()
+    let _ = io.println(s.a) else |_| {
+        return 1
+    }
+    0
+}

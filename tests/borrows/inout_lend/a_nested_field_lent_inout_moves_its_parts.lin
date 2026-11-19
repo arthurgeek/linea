@@ -1,0 +1,35 @@
+// Lending a field `inout` lets the callee move what one of its parts held
+// into another, and the rest of the record keeps what it held.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+struct Pair {
+    label: Str,
+    inner: Swap,
+}
+
+fn swap(inout s: Swap) where retains(s: s) {
+    s.a = copy(s.b)
+}
+
+fn advance(inout s: Swap) {
+    swap(&s)
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    var pair = Pair { label = "kept", inner = Swap { a = "static", b = owned.view() } }
+    advance(&pair.inner)
+    owned.release()
+    let _ = io.println(pair.label) else |_| {
+        return 1
+    }
+    let _ = io.println(pair.inner.a) else |_| {
+        return 1
+    }
+    0
+}

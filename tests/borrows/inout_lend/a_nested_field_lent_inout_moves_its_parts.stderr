@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/borrows/inout_lend/a_nested_field_lent_inout_moves_its_parts.lin:27:5
+   |
+27 |     owned.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+31 |     let _ = io.println(pair.inner.a) else |_| {
+   |                        ------------ the observation is still used here
