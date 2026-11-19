@@ -2233,8 +2233,9 @@ version marker every program references included, or one it defines outside
 that namespace, such as `main`. Nor may it be a symbol the runtime calls
 without defining, such as the C library's `free` or `calloc`: a C host links
 one definition of each name, so the export would replace the function the
-runtime calls. That set is read from the built runtime's own undefined
-symbols.
+runtime calls. That set is the union of the runtime's undefined symbols on
+every target it is built for (macOS and Linux, on aarch64 and x86-64), so an
+export means the same whichever machine compiles it.
 
 A dependency's `export` is not exported. Only the root being built publishes C
 symbols, so an `export` in a library a program depends on gives that program's

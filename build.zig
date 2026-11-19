@@ -1000,10 +1000,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig" },
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig" },
     },
     .{
         .dir = "runtime",
@@ -2244,7 +2244,7 @@ pub fn build(b: *std.Build) void {
     const checked_runtime_archive = checked_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
     var ordinary_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
     var checked_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
-    for ([_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
+    const runtime_inputs = [_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
         .{ .name = "linea_rt", .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items, .checked_flags = checked_flags.items },
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
@@ -2262,7 +2262,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "sim", .file = b.path("runtime/sim.c"), .flags = runtime_flags.items },
         .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },
         .{ .name = "math", .file = b.path("runtime/math.c"), .flags = math_flags.items },
-    }) |input| {
+    };
+    for (runtime_inputs) |input| {
         const object = runtimeObject(b, runtime_target, input.name, input.file, input.flags);
         runtime.addArtifactArg(object);
         const checked_object = if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object;
@@ -2284,15 +2285,30 @@ pub fn build(b: *std.Build) void {
     // file from outside `src/`.
     const runtime_source = b.path("runtime/linea_rt.c");
 
-    // Every symbol the built runtime calls without defining it, as `nm` lists
-    // it: the C library's functions among them. A library exporting one would
-    // replace the function the runtime calls in a C host that links both, so
-    // [M-Export] refuses each; read from the archives themselves, a call the
-    // runtime gains is refused without anyone listing it.
-    const runtime_imports_listing = b.addSystemCommand(&.{ "nm", "-u" });
-    runtime_imports_listing.addFileArg(runtime_archive);
-    runtime_imports_listing.addFileArg(checked_runtime_archive);
-    const runtime_imports = runtime_imports_listing.captureStdOut(.{ .basename = "runtime_imports.txt" });
+    // Every symbol the runtime calls without defining it, on every target it
+    // is built for: the C library's functions among them. A library exporting
+    // one would replace the function the runtime calls in a C host that links
+    // both, so [M-Export] refuses each. Read from the runtime's own objects,
+    // compiled for each target, a call the runtime gains is refused without
+    // anyone listing it, and the refused set is one set whatever the host.
+    const runtime_imports_tool = b.addExecutable(.{
+        .name = "runtime-imports",
+        .root_module = b.createModule(.{ .root_source_file = b.path("build/runtime_imports.zig"), .target = b.graph.host }),
+    });
+    const runtime_imports_run = b.addRunArtifact(runtime_imports_tool);
+    const runtime_imports = runtime_imports_run.addOutputFileArg("runtime_imports.txt");
+    for ([_]std.Target.Query{
+        .{ .cpu_arch = .aarch64, .os_tag = .macos },
+        .{ .cpu_arch = .x86_64, .os_tag = .macos },
+        .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
+        .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu },
+    }) |query| {
+        const import_target = b.resolveTargetQuery(query);
+        for (runtime_inputs) |input| {
+            runtime_imports_run.addArtifactArg(runtimeObject(b, import_target, input.name, input.file, input.flags));
+            if (input.checked_flags) |flags| runtime_imports_run.addArtifactArg(runtimeObject(b, import_target, input.name, input.file, flags));
+        }
+    }
 
     // A diagnostic's code is an index into the semantics, so a test reads the
     // document to check that every rule it can emit is actually written there.
