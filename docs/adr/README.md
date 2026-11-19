@@ -72,7 +72,7 @@ true of a different implementation.
 | [0207](0207-linea-converts-nothing-implicitly.md) | Linea converts nothing implicitly | Accepted; extends 0018 and 0061 |
 | [0208](0208-defer-let-binds-and-schedules-its-release.md) | `defer let` binds a value and schedules its release | Accepted; extends 0063 and narrows 0104's no-scheduling sentence to "never without a written `defer`" |
 | [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192; extended by 0245 |
-| [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Accepted; extends 0192 and 0203; extended by 0292, which lets `next` retain from itself |
+| [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Accepted; extends 0192 and 0203 |
 | [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106 |
 | [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152, 0207 and 0226 |
 | [0019](0019-entry-point-is-main-returning-u8.md) | A program is `fn main() -> u8` | Superseded by 0024 |
@@ -190,7 +190,7 @@ true of a different implementation.
 | [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147; extended by 0227 |
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted; same-allocator `from_value` sentence superseded by 0286; extended by 0292 |
 | [0286](0286-a-document-decodes-into-any-allocator.md) | A JSON document decodes into an allocator of its own | Accepted; supersedes the same-allocator `from_value` sentence of 0141 |
-| [0292](0292-json-lines-are-read-lazily-one-bounded-line-at-a-time.md) | JSON Lines are read lazily, one bounded line at a time, and a failed line is an item | Accepted; extends 0141 and 0245 |
+| [0292](0292-json-lines-are-read-lazily-one-bounded-line-at-a-time.md) | JSON Lines are read lazily, one bounded line at a time, and a failed line is an item | Accepted; extends 0141 |
 | [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222; arena-memory clause superseded by 0263 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |

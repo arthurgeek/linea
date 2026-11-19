@@ -235,7 +235,7 @@ impl[R: io.Reader, A: Allocator] Iterator for Lines[R, A] {
 
     // Read lines until one that is not blank and parse it, or answer None at
     // the end of the stream or after the stream failed.
-    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self), retains(self: self) {
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self) {
         loop {
             if self.ended {
                 return .None
@@ -470,7 +470,7 @@ impl[T: Decode[A], R: io.Reader, A: Allocator] Iterator for DecodedLines[T, R, A
     type Item = Result[T, LinesError[R.Error, A]]
 
     // Read the next document and decode it as a T.
-    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self), retains(self: self) {
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self) {
         let parsed = &self.lines.next()?
         defer let document = parsed else |error| {
             return .Some(.Err(error))

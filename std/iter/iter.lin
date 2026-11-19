@@ -3,16 +3,16 @@ import std.mem
 import std.num
 
 // An Iterator transfers ownership of one Item at a time, updating its
-// position. Item may be linear, so the caller must settle each one. After
-// next returns None, every later call also returns None. Advancing may move
-// what one part of the iterator holds into another, as a buffered reader
-// refilling from its allocator does, so `next` retains from `self`. Every
-// iterator offers the searches below, which run in place: the iterator stays
-// with the caller, just after the last item inspected, for a later search.
+// position. Item may be linear, so the caller must settle each one. After next
+// returns None, every later call also returns None.
+//
+// Every iterator also offers the searches below, which run in place: the
+// iterator stays with the caller, positioned just after the last item a search
+// inspected, so a later search continues from there.
 pub trait Iterator {
     type Item
 
-    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self), retains(self: self)
+    fn next(inout self: Self) -> Option[Self.Item] where carries(.Some: self)
 
     test "counted find reports empty absent first and last matches" {
         var empty = UInt64(0)..0

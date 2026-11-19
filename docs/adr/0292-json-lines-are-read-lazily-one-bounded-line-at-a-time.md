@@ -1,10 +1,8 @@
 # 292. JSON Lines are read lazily, one bounded line at a time, and a failed line is an item
 
-Status: Accepted — 2026-11-18. Extends
+Status: Accepted — 2026-11-19. Extends
 [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md), whose
-parse limits bound each line, and
-[0245](0245-iterator-adapters-are-lazy.md), whose statement that
-`Iterator.next` permits no `retains(self: self)` it replaces.
+parse limits bound each line.
 
 ## Context
 
@@ -19,12 +17,10 @@ means. Each of those is a policy, and two programs choosing differently
 disagree about the same file.
 
 A reader that is an `Iterator` composes with `for`, `map`, `filter` and the
-rest. The buffered reader it wraps reports, on every line it reads, that the
-record it keeps may now hold dependencies of its own allocator
-(`retains(self.record: self.allocator)`), and an iterator holding that reader
-in a field therefore retains from itself. `Iterator.next` declared only
-`carries(.Some: self)`, so no iterator could read through a buffered reader,
-and [O-Escapes] refused the reader's `next`.
+rest. Its `next` lends the buffered reader it holds to each read, and since
+[0291](0291-a-place-lent-inout-comes-back-with-its-parts-merged.md) a callee
+may move what a place lent `inout` holds between its parts without a clause,
+so `next` needs no contract beyond the trait's `carries(.Some: self)`.
 
 ## Decision
 
@@ -79,27 +75,12 @@ one line. They neither buffer nor flush: `io.BufferedWriter` already owns
 buffering, `flush` and the `finish`/`abort` settlement, and a program flushes
 when the reader at the other end should see what was written.
 
-**`Iterator.next` may retain from itself.** Its contract becomes
-`carries(.Some: self), retains(self: self)`. A plain retention preserves only
-dependencies the source already holds, so the iterator as a whole holds no
-dependency it did not hold before; the clause tells a caller that, after
-`next`, any part of the iterator may hold what another part held. That is what
-an iterator buffering its source does, and what a caller holding the parts of
-a concrete iterator separately needs to know.
-
 ## Consequences
 
 `std.json` gains `Lines`, `DecodedLines`, `LinesError`, `LineProblem`,
 `write_line` and `encode_line`. The JSON settings and inventory examples write
 their output with `encode_line` and `write_line` instead of a helper of their
 own, and the uptime report example reads a log of health checks.
-
-Every `Iterator` implementation adopts the wider contract; one that writes the
-narrower `carries(.Some: self)` still satisfies it. A caller that takes a
-concrete iterator apart after advancing it reads each part as holding what the
-whole held. 0245's rule that an adapter's state carries nothing a callback
-made no longer follows from `next`'s contract; `scan` keeps the state its
-callback updates in place, which needs no clause either way.
 
 A stream whose input fails transiently ends the walk; a program that retries
 reads the reader back with `abandon` and opens a new `Lines` over it, losing
@@ -136,6 +117,5 @@ parsing already produced.
 
 **Reading lines with `read_line` and parsing them in the caller.** That is what
 programs did, and it is where the policies above diverged. A loop over an
-inherent `next` instead of `Iterator` would have avoided widening `next`'s
-contract, but would leave the reader outside `for` and every adapter, for a
-clause that adds no dependency to the iterator as a whole.
+inherent `next` instead of `Iterator` would leave the reader outside `for` and
+every adapter.
