@@ -685,9 +685,9 @@ pub const Handler = struct {
     /// reasons it was. The alternative is answering an empty edit, which a
     /// client applies in silence.
     ///
-    /// The program the server sees is the one rooted at the file the editor
-    /// opened. A sibling program importing this module is not in it, so its
-    /// uses are not among these and are left as they were.
+    /// Every program of the workspace holding the file that declares the
+    /// name is renamed with it and checked with the edits applied, so a
+    /// library two programs depend on is renamed for both or neither.
     pub fn @"textDocument/rename"(
         handler: *Handler,
         arena: std.mem.Allocator,
@@ -697,18 +697,41 @@ pub const Handler = struct {
         const checked = try handler.check(arena, path);
         const file = checked.fileNamed(path) orelse return null;
 
+        var others = try handler.otherPrograms(arena, checked);
+        defer {
+            for (others.items) |*other| other.deinit();
+            others.deinit(arena);
+        }
+        const programs = try arena.alloc(*const analysis.Analysis, others.items.len + 1);
+        programs[0] = checked;
+        for (others.items, programs[1..]) |*other, *slot| slot.* = other;
+
         var refused_kind: ?name_case.Kind = null;
-        return rename.forPositionReporting(
+        var unloaded: ?rename.Unloaded = null;
+        return rename.across(
             arena,
             handler.io,
-            checked,
+            programs,
             file,
             params.position,
             handler.offset_encoding,
             handler.root,
             params.newName,
             &refused_kind,
+            &unloaded,
         ) catch |err| {
+            // The program the rename cannot check, and why, beside the
+            // refusal: what the reader has to fix before renaming.
+            if (unloaded) |program| {
+                try handler.transport.writeNotification(
+                    handler.io,
+                    arena,
+                    "window/showMessage",
+                    lsp.types.window.ShowMessageParams,
+                    .{ .type = .Error, .message = try std.fmt.allocPrint(arena, "the program at `{s}` reaches this name and does not load: {s}", .{ program.entry, program.reason }) },
+                    .{ .emit_null_optional_fields = false },
+                );
+            }
             // A refusal carries only its name, so the kind and the respelling
             // [N-Case] would offer are shown beside it.
             if (refused_kind) |kind| {
@@ -862,6 +885,44 @@ pub const Handler = struct {
         held = true;
         try handler.watchEmbeds(arena, &slot.*.?.of);
         return &slot.*.?.of;
+    }
+
+    /// Every program of the workspace but the one `checked` is, each checked
+    /// with the documents the editor holds, for a rename to find the ones it
+    /// reaches. Held apart from the cached slots, which hold `checked` itself.
+    /// A program whose root or files cannot be read gives no analysis: nothing
+    /// shows it reaching the name, so it is not among those a rename edits.
+    /// One that loads with errors is kept, and `rename.across` decides.
+    ///
+    /// Costs one check per program the workspace holds.
+    fn otherPrograms(handler: *Handler, arena: std.mem.Allocator, checked: *const analysis.Analysis) !std.ArrayList(analysis.Analysis) {
+        var others: std.ArrayList(analysis.Analysis) = .empty;
+        errdefer {
+            for (others.items) |*other| other.deinit();
+            others.deinit(arena);
+        }
+        const index = try handler.indexOf();
+        for (index.programs) |entry| {
+            if (std.mem.eql(u8, entry, checked.made_from.entry)) continue;
+            const root = loader.rootOf(arena, handler.io, entry, .as_named, handler.root) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => continue,
+            };
+            const files = handler.documents.filesFor(arena, handler.io, root, .open_and_manifests) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => continue,
+            };
+            const other = analysis.onDisk(handler.gpa, handler.region_backing, handler.library, files, root.entry, null, handler.io) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => continue,
+            };
+            others.append(arena, other) catch |err| {
+                var dropped = other;
+                dropped.deinit();
+                return err;
+            };
+        }
+        return others;
     }
 
     /// Whether `file`, spelled canonically, is a `.lin` file inside the source
@@ -1951,6 +2012,121 @@ test "a file changed on disk changes what the index offers" {
     const then = try ws.offered();
     try std.testing.expectEqual(@as(usize, 1), then.len);
     try std.testing.expectEqualStrings("after", then[0]);
+}
+
+test "a rename in a library two programs depend on edits both programs" {
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    const dependent = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }";
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n\npub fn thaw() -> UInt8 { frost() + 1 }\n" },
+        .{ .at = "a/linea.json", .text = dependent },
+        .{ .at = "a/main.lin", .text = program },
+        .{ .at = "b/linea.json", .text = dependent },
+        .{ .at = "b/main.lin", .text = program },
+    });
+    defer ws.deinit();
+    // The workspace is the three projects and nothing above them.
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+
+    // From a use in one program, and from the declaration in the library.
+    const asked = [_]struct { at: []const u8, line: u32, character: u32 }{
+        .{ .at = "a/main.lin", .line = 3, .character = 12 },
+        .{ .at = "almanac/almanac.lin", .line = 0, .character = 7 },
+    };
+    for (asked) |ask| {
+        const edit = (try ws.handler.@"textDocument/rename"(a, .{
+            .textDocument = .{ .uri = try ws.pathAt(ask.at) },
+            .position = .{ .line = ask.line, .character = ask.character },
+            .newName = "chill",
+        })).?;
+        const expected = [_]struct { path: []const u8, edits: usize }{
+            .{ .path = "a/main.lin", .edits = 1 },
+            .{ .path = "b/main.lin", .edits = 1 },
+            .{ .path = "almanac/almanac.lin", .edits = 2 },
+        };
+        try std.testing.expectEqual(expected.len, edit.changes.?.map.count());
+        for (expected) |want| {
+            var it = edit.changes.?.map.iterator();
+            const edits = while (it.next()) |entry| {
+                if (std.mem.endsWith(u8, entry.key_ptr.*, want.path)) break entry.value_ptr.*;
+            } else return error.TestExpectedEqual;
+            try std.testing.expectEqual(want.edits, edits.len);
+        }
+    }
+}
+
+test "a rename in a shared library is offered beside a broken program that does not reach it" {
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    const dependent = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }";
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = dependent },
+        .{ .at = "a/main.lin", .text = program },
+        // Depends on a library that is not there, and not on `almanac`.
+        .{ .at = "broken/linea.json", .text = "{ \"dependencies\": { \"gone\": { \"path\": \"../gone\" } } }" },
+        .{ .at = "broken/main.lin", .text = "fn main() -> UInt8 {\n    0\n}\n" },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+
+    const edit = (try ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("a/main.lin") },
+        .position = .{ .line = 3, .character = 12 },
+        .newName = "chill",
+    })).?;
+    try std.testing.expectEqual(@as(usize, 2), edit.changes.?.map.count());
+}
+
+test "a rename in a shared library is refused where a program reaching it does not load, naming it" {
+    const program =
+        \\import almanac
+        \\
+        \\fn main() -> UInt8 {
+        \\    almanac.frost()
+        \\}
+        \\
+    ;
+    var ws = try Rooted.initFiles(std.testing.allocator, &.{
+        .{ .at = "almanac/linea.json", .text = "{ \"kind\": \"library\", \"name\": \"almanac\" }" },
+        .{ .at = "almanac/almanac.lin", .text = "pub fn frost() -> UInt8 { 1 }\n" },
+        .{ .at = "a/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" } } }" },
+        .{ .at = "a/main.lin", .text = program },
+        // Depends on `almanac` and on a library that is not there.
+        .{ .at = "broken/linea.json", .text = "{ \"dependencies\": { \"almanac\": { \"path\": \"../almanac\" }, \"gone\": { \"path\": \"../gone\" } } }" },
+        .{ .at = "broken/main.lin", .text = program },
+    });
+    defer ws.deinit();
+    try ws.dir.dir.deleteFile(std.testing.io, "linea.json");
+    const a = ws.arena.allocator();
+    var recorder = Recorder.init(std.testing.allocator);
+    defer recorder.deinit();
+    ws.handler.transport = &recorder.transport;
+
+    try std.testing.expectError(rename.Refused.AProgramTheRenameReachesDoesNotLoad, ws.handler.@"textDocument/rename"(a, .{
+        .textDocument = .{ .uri = try ws.pathAt("almanac/almanac.lin") },
+        .position = .{ .line = 0, .character = 7 },
+        .newName = "chill",
+    }));
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "broken") != null);
+    try std.testing.expect(std.mem.indexOf(u8, recorder.written.items, "does not load") != null);
 }
 
 test "a manifest changed on disk changes which files the program holds" {
