@@ -34,6 +34,16 @@ struct dirent *LINEA_READDIR(DIR *dir);
 #define LINEA_READDIR readdir
 #endif
 
+/* The fault tests also read birth times through a stand-in that refuses
+ * `statx`, as a seccomp filter in an older container does. */
+#if defined(__linux__) && defined(STATX_BTIME)
+#ifdef LINEA_STATX
+int LINEA_STATX(int dirfd, const char *path, int flags, unsigned int mask, struct statx *buffer);
+#else
+#define LINEA_STATX statx
+#endif
+#endif
+
 /* The runtime's scalar address ABI targets LP64 Linux and macOS. */
 typedef char linea_address_fits_pointer[(sizeof(unsigned long) == sizeof(void *)) ? 1 : -1];
 typedef char linea_count_fits_long[(sizeof(long) == 8) ? 1 : -1];
@@ -443,9 +453,10 @@ long linea_dir_next(unsigned long stream, unsigned long at, unsigned long len, u
     return (long)name_length;
 }
 
-/* Whether `name` is one component: not empty, no slash, and neither "." nor "..". */
+/* Whether `name` is one component: not empty, no slash, and neither "." nor
+ * "..". `(strchr)` names the function, as `path_bytes` does for `memchr`. */
 static int single_component(const char *name) {
-    return name[0] != '\0' && strchr(name, '/') == NULL && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
+    return name[0] != '\0' && (strchr)(name, '/') == NULL && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
 }
 
 long linea_dir_reopen(unsigned long anchor, unsigned long names_at, unsigned long names_extent,
@@ -534,19 +545,25 @@ long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned lo
     *inode = (unsigned long)info.st_ino;
     *birth_seconds = 0;
     *birth_nanoseconds = 0;
+    /* A birth time of zero is what a file system without one reports (macOS
+     * on devfs, NFS, SMB and FUSE), and tells no two directories apart. */
 #if defined(__APPLE__)
+    if (info.st_birthtimespec.tv_sec == 0 && info.st_birthtimespec.tv_nsec == 0) return 1;
     *birth_seconds = (unsigned long)(long)info.st_birthtimespec.tv_sec;
     *birth_nanoseconds = (unsigned long)info.st_birthtimespec.tv_nsec;
     return 0;
 #elif defined(__linux__) && defined(STATX_BTIME)
     /* Linux reports a birth time through statx alone, and only on file
-     * systems that keep one, which `stx_mask` says. */
+     * systems that keep one, which `stx_mask` says. The directory is already
+     * identified by fstat, so a statx that fails for any reason, refused by a
+     * seccomp filter included, leaves only the birth time unknown. */
     struct statx extended;
     do {
-        result = statx(fd, "", AT_EMPTY_PATH, STATX_BTIME, &extended);
+        result = LINEA_STATX(fd, "", AT_EMPTY_PATH, STATX_BTIME, &extended);
     } while (result != 0 && errno == EINTR);
-    if (result != 0) return errno == ENOSYS ? 1 : -(long)errno;
+    if (result != 0) return 1;
     if ((extended.stx_mask & STATX_BTIME) == 0) return 1;
+    if (extended.stx_btime.tv_sec == 0 && extended.stx_btime.tv_nsec == 0) return 1;
     *birth_seconds = (unsigned long)(long)extended.stx_btime.tv_sec;
     *birth_nanoseconds = (unsigned long)extended.stx_btime.tv_nsec;
     return 0;

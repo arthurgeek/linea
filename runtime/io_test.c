@@ -544,6 +544,19 @@ static void directory_streams(void) {
     assert(born_nanoseconds == (unsigned long)info.st_birthtimespec.tv_nsec);
 #endif
     if (identified == 1) assert(born == 0 && born_nanoseconds == 0);
+#if defined(__APPLE__)
+    /* devfs keeps no create time and reports it as zero, which is not a birth
+     * time two directories could be told apart by. */
+    unsigned long dev_stream = 0;
+    assert(linea_dir_open(ADDRESS("/dev"), EXTENT("/dev"), 1, &dev_stream) == 0);
+    unsigned long dev_device = 0;
+    unsigned long dev_inode = 0;
+    unsigned long dev_born = 7;
+    unsigned long dev_born_nanoseconds = 7;
+    assert(linea_dir_identity(dev_stream, &dev_device, &dev_inode, &dev_born, &dev_born_nanoseconds) == 1);
+    assert(dev_born == 0 && dev_born_nanoseconds == 0);
+    assert(linea_dir_close(dev_stream) == 0);
+#endif
 
     /* Opening a link to a directory without following it is refused; with
      * following, it lists the directory it names. */

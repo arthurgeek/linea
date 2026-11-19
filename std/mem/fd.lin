@@ -358,12 +358,6 @@ impl DirStream {
         _read_dir(self, &record, follow)
     }
 
-    // Answer the device and inode numbers of the directory, or the errno.
-    internal fn identity(self: Self) -> Result[(UInt64, UInt64), Int32] {
-        let (device, inode, _born) = self.lasting_identity()?
-        .Ok((device, inode))
-    }
-
     // Answer the device and inode numbers of the directory and its birth time,
     // as the seconds word and the nanoseconds word, or None for a file system
     // that keeps no birth time; or the errno. A device and an inode name a
@@ -383,6 +377,29 @@ impl DirStream {
             return .Ok((device, inode, .None))
         }
         .Ok((device, inode, .Some((seconds, nanoseconds))))
+    }
+
+    test "a directory's lasting identity is the same through two streams" {
+        let path = _terminated(system(), "/".as_bytes()).unwrap()
+        let first = _open_dir(path, follow: true).unwrap()
+        let second = _open_dir(path, follow: true).unwrap()
+        path.release()
+        let one = first.lasting_identity().unwrap()
+        let other = second.lasting_identity().unwrap()
+        let first_closed = first.close()
+        let second_closed = second.close()
+        testing.assert(first_closed == 0 && second_closed == 0, "closing a stream failed")?
+        let (device, inode, born) = one
+        let (other_device, other_inode, other_born) = other
+        testing.assert(device == other_device && inode == other_inode, "one directory had two device and inode numbers")?
+        let same_birth = match born {
+            Some((seconds, nanoseconds)) => match other_born {
+                Some((other_seconds, other_nanoseconds)) => seconds == other_seconds && nanoseconds == other_nanoseconds,
+                None => false,
+            },
+            None => other_born.is_none(),
+        }
+        testing.assert(same_birth, "one directory had two birth times")?
     }
 
     // Close the stream and answer zero or a negated errno.
@@ -405,7 +422,7 @@ test "a directory stream lists what a directory holds" {
     let stream = opened.unwrap()
     defer var record = system().acquire(dir_record_bytes).unwrap()
     let first = stream.next(&record, follow: false)
-    let identified = stream.identity().is_ok()
+    let identified = stream.lasting_identity().is_ok()
     testing.assert_eq(stream.close(), Int64(0), "closing a directory stream failed")?
     // The root directory of every supported system holds at least one entry,
     // and no name in it holds a slash (ASCII 47) or a NUL.

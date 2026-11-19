@@ -126,8 +126,13 @@ file system, ext4 and XFS reuse inodes readily, and `..` of a child moved
 into that new directory would lead there. So the walk records each
 directory's birth time with its device and inode when it enters it (`statx`'s
 `stx_btime` on Linux, `st_birthtimespec` on macOS), and the handover requires
-all three to match. On a file system that keeps no birth time (`STATX_BTIME`
-absent from `stx_mask`) the walk does not take the handover.
+all three to match. A birth time is taken as unknown, and the walk does not
+take the handover, when the file system keeps none (`STATX_BTIME` absent from
+`stx_mask`), when it reports zero (macOS reports `{0, 0}` on devfs and on
+network and FUSE file systems without a create time, which are the ones that
+reuse inodes), and when `statx` itself is refused, as a seccomp filter in an
+older container refuses it with `EPERM`, so that a walk the `fstat` before it
+could start is not stopped by it.
 
 When the handover is not taken, because the directory left was moved out of
 its parent, its parent's identity does not match, the file system keeps no
@@ -140,8 +145,12 @@ makes a stream only of the directory being entered. A directory found missing,
 not a directory, a link, or another directory under the same name has changed
 under the walk: it is reported once, by its own path, as `WalkCause.Changed`,
 and the walk leaves it and everything below it, so none of its remaining
-entries is reported. A failure to open the directory being entered is that
-directory's own `Io` error.
+entries is reported. A directory above that cannot be opened again for another
+reason, such as lost search permission or a full descriptor table, is reported
+the same way: once, by its own path, as the `Io` error of the open, and the
+walk leaves it and its subtree, since it cannot reach what is below it. A
+failure to open the directory being entered is that directory's own `Io`
+error, and the walk goes on with its siblings.
 
 Below the root the walk therefore opens no path of more than one name: nothing
 above can redirect it, and no path is too long for the system to open. A walk

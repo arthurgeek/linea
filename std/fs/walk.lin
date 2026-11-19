@@ -612,7 +612,8 @@ fn list_all[A: Allocator](allocator: A, sink stream: mem.DirStream, inout record
 
 // Why the walk could not open a directory to enter it: a cause it reports
 // for that directory; a cause it reports for a directory above it that could
-// not be opened again; or a directory above it that changed. A directory
+// not be opened again, which the walk then leaves; or a directory above it
+// that changed, which it leaves too. A directory
 // above is named by its index among the directories the walk is inside
 // (`parents.length()` names the current one).
 enum Refusal {
@@ -1058,27 +1059,9 @@ impl[A: Allocator] Walk[A] {
         }
     }
 
-    // Answer an error naming the directory at `index` among those the walk is
-    // inside, with a copy of its path, which stays with the walk.
-    fn error_at(self: Self, index: UInt64, sink cause: WalkCause) -> WalkError[A] where carries(self) {
-        var path: Vec[UInt8, A] = Vec.new_in(self.allocator)
-        let copied = if index < self.parents.length() {
-            &path.append_slice(self.parents[index].path.as_slice())
-        } else {
-            match read self.top {
-                Some(frame) => &path.append_slice(frame.path.as_slice()),
-                None => panic("a walk named a directory it is not inside"),
-            }
-        }
-        match copied {
-            Ok(_) => .{ path, cause },
-            Err(reason) => .{ path, cause = .Allocation(reason) },
-        }
-    }
-
     // Leave every directory from the current one up to the one at `index`
-    // among those the walk is inside, which changed, so nothing below it is
-    // walked, and answer that directory's path.
+    // among those the walk is inside, which changed or cannot be opened again,
+    // so nothing below it is walked, and answer that directory's path.
     fn abandon(inout self: Self, index: UInt64) -> Vec[UInt8, A] where carries(self), retains(self: self) {
         loop {
             let frame = taken_out(&self.top)
@@ -1116,7 +1099,8 @@ impl[A: Allocator] Walk[A] {
             Err(Failed(cause)) => return .Some(.{ path, cause }),
             Err(FailedAbove(index, cause)) => {
                 path.release()
-                return .Some(self.error_at(index, cause))
+                let failed = &self.abandon(index)
+                return .Some(.{ path = failed, cause })
             },
             Err(Changed(index)) => {
                 path.release()
