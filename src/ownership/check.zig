@@ -4349,6 +4349,9 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\    match storage { Some(view) => *view, None => 0 }
         \\}
         , .refused = false, .group = .targets },
+        // A callee may move what its `inout` parameter held between the
+        // parameter's parts; its caller takes every part to hold what any
+        // part held.
         .{ .source =
         \\struct Pair { left: borrow UInt8, right: borrow UInt8 }
         \\fn forward(sink value: Pair) -> Pair where carries(value) { value }
@@ -4362,7 +4365,7 @@ fn checkDependencyCases(group: DependencyGroup) !void {
         \\    swap(&pair)
         \\    return *pair.left + *pair.right
         \\}
-        , .refused = true, .group = .targets },
+        , .refused = false, .group = .targets },
         .{ .source =
         \\@linear struct Item { number: UInt8 }
         \\fn observe(item: Item) -> borrow Item where borrows(item) { borrow item }
