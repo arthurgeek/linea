@@ -1,0 +1,9 @@
+ok    count sources
+      2
+ok    compile
+      cc -c main.c
+      cc -c parse.c
+FAIL  unit tests (exited with code 1)
+      parse_test: expected 4 tokens, found 5
+skip  package
+the build failed

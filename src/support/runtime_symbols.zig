@@ -156,10 +156,11 @@ pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callbac
 
 /// What a number crossing to or from the runtime stands for, where a value
 /// must own it for the call to be safe: the address of bytes a buffer or a
-/// slice holds, a descriptor, an allocation, or a directory stream. The runtime trusts each such
+/// slice holds, a descriptor, an allocation, a directory stream, or the
+/// process ID of a child not yet reaped. The runtime trusts each such
 /// number, so a symbol taking or answering one is confined to the standard
 /// library module whose types keep it, which the table's test holds.
-pub const Held = enum { none, bytes, descriptor, allocation, stream };
+pub const Held = enum { none, bytes, descriptor, allocation, stream, child };
 
 /// Whether two parameters are the same as C declares them, a callback's shape
 /// compared by what it holds rather than by where it is. Which parameter is an
@@ -283,6 +284,12 @@ const descriptor: Parameter = .{ .scalar = .i32, .held = .descriptor };
 const dir_stream: Parameter = .{ .scalar = .u64, .held = .stream };
 /// The address of an allocation a buffer owns, which the runtime frees.
 const allocation: Parameter = .{ .scalar = .u64, .held = .allocation, .address = true };
+/// The parent's end of a child's pipe, which a spawn writes and a linear
+/// `process.PipeReader` or `process.PipeWriter` then owns.
+const spawned_pipe: Parameter = .{ .scalar = .i32, .passing = .inout, .held = .descriptor };
+/// The process ID of a child a linear `process.Child` owns: until `wait`
+/// reaps it, no other process can be given the number.
+const child: Parameter = .{ .scalar = .i32, .held = .child };
 
 /// What C's startup calls: the wrapper the emitted module defines around the
 /// program's entry. The runtime's `linea_set_args` receives what it is passed.
@@ -516,6 +523,13 @@ const fs_mode = heldBy("fs", "the standard library's `fs` operations");
 const net_listener = heldBy("net", "`net.listen` and the `net.Listener` it answers");
 const net_connection = heldBy("net", "`net.connect` and the `net.Connection` it answers");
 const net_close = heldBy("net", "`close` on a `net.Connection` or a `net.Listener`");
+// A spawn hands out a child's process ID and its pipes' descriptors, and
+// takes the address of the bytes of its arguments, environment and pointer
+// table; a child's ID is reaped and signalled only through the
+// `process.Child` that owns it.
+const mem_spawn = heldBy("mem", "`spawn` on a `process.Command`");
+const mem_pipe = heldBy("mem", "the reads and writes of a `process.PipeReader` and a `process.PipeWriter`");
+const process_child = heldBy("process", "`wait` and `kill` on a `process.Child`");
 // A loop's identity is a number an `io.Io` keeps, and a simulation's one a
 // linear `io.Simulation` keeps; switching the thread's loop is what
 // `Simulation.run` does around its body.
@@ -606,6 +620,14 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_net_shutdown_write", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection, .migration_contract = .neutral },
     .{ .symbol = "linea_net_reset", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_connection, .migration_contract = .neutral },
     .{ .symbol = "linea_net_close", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_close, .migration_contract = .neutral },
+    // A spawn is synchronous and leaves no state on the calling thread. A
+    // wait and a pipe transfer park a fiber through the runtime's descriptor
+    // wait, which retains no carrier, and block a thread in place.
+    .{ .symbol = "linea_process_spawn", .parameters = &.{ bytes_at, p(.u64), p(.u64), bytes_at, p(.u64), p(.u64), bytes_at, p(.u64), bytes_at, p(.u64), p(.u8), spawned_pipe, spawned_pipe, spawned_pipe }, .result = .i64, .answers = .child, .declared_by = mem_spawn, .migration_contract = .neutral },
+    .{ .symbol = "linea_process_wait", .parameters = &.{ child, written }, .result = .i64, .declared_by = process_child, .migration_contract = .runtime_guarded },
+    .{ .symbol = "linea_process_kill", .parameters = &.{child}, .result = .i64, .declared_by = process_child, .migration_contract = .neutral },
+    .{ .symbol = "linea_pipe_read", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_pipe, .migration_contract = .runtime_guarded },
+    .{ .symbol = "linea_pipe_write", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_pipe, .migration_contract = .runtime_guarded },
     // The loop table and the simulations in it.
     .{ .symbol = "linea_io_current", .parameters = &.{}, .result = .u64, .declared_by = io_execution, .migration_contract = .neutral },
     // A simulation run replaces carrier TLS and invokes arbitrary Linea on
@@ -789,6 +811,9 @@ test "an allocation, a descriptor and an address of bytes are confined to the mo
     }
     try testing.expectEqualStrings("fs", signatureOf("linea_set_mode").?.declared_by.home().?);
     try testing.expectEqualStrings("net", signatureOf("linea_net_accept").?.declared_by.home().?);
+    try testing.expectEqualStrings("mem", signatureOf("linea_process_spawn").?.declared_by.home().?);
+    try testing.expectEqualStrings("process", signatureOf("linea_process_wait").?.declared_by.home().?);
+    try testing.expectEqualStrings("process", signatureOf("linea_process_kill").?.declared_by.home().?);
     try testing.expect(signatureOf("linea_clock_sleep").?.declared_by == .granted);
 }
 

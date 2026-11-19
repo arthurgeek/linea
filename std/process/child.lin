@@ -1,0 +1,425 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.testing
+
+use io.Reader
+use session.Chan
+use session.End
+use session.Send
+use task.Unregistered
+use mem.Vec
+
+// The runtime reaps the child `pid`, writing its exit code or the number of
+// the signal that killed it to `status` and answering 0 or 1 respectively,
+// or a negated errno. A fiber parks until the child ends.
+extern fn linea_process_wait(pid: Int32, inout status: UInt64) -> Int64
+
+// The runtime sends SIGKILL to the child `pid` and answers 0 or a negated
+// errno.
+extern fn linea_process_kill(pid: Int32) -> Int64
+
+// A Child is a running child process, with the parent's end of each of its
+// standard streams that was piped. It is linear: the only way to settle it is
+// `wait` or `wait_with_output`, which reap the child, so no child a program
+// starts outlives the program as a zombie. To end a child early, `kill` it
+// and then wait for it.
+@(opaque, linear)
+struct Child {
+    pid: Int32,
+    stdin: Option[PipeWriter],
+    stdout: Option[PipeReader],
+    stderr: Option[PipeReader],
+}
+
+// Output is what a finished child left: how it ended and every byte it wrote
+// to its standard output and error.
+@derive(Release)
+pub struct Output[A: Allocator] {
+    status: ExitStatus,
+    stdout: Vec[UInt8, A],
+    stderr: Vec[UInt8, A],
+}
+
+// The bytes one read of a pipe asks for when output is captured.
+let read_chunk: UInt64 = 65536
+
+// Reap `pid` and answer how it ended.
+fn reap(pid: Int32) -> Result[ExitStatus, ProcessError] {
+    var status: UInt64 = 0
+    let answer = linea_process_wait(pid, &status)
+    if answer < 0 {
+        return .Err(ProcessError.from_answer(.Wait, answer))
+    }
+    if answer == 0 {
+        return .Ok(.Exited(UInt8(status)))
+    }
+    .Ok(.Signalled(Int32(status)))
+}
+
+// Close whichever pipes a child still holds, so the child sees the end of its
+// input and cannot wait forever to write output nobody reads.
+fn close_pipes(sink stdin: Option[PipeWriter], sink stdout: Option[PipeReader], sink stderr: Option[PipeReader]) {
+    match stdin {
+        Some(writer) => writer.release(),
+        None => {},
+    }
+    match stdout {
+        Some(reader) => reader.release(),
+        None => {},
+    }
+    match stderr {
+        Some(reader) => reader.release(),
+        None => {},
+    }
+}
+
+impl Child {
+    // Return the child's process ID.
+    pub fn id(self: Self) -> UInt32 {
+        UInt32(self.pid)
+    }
+
+    test "a child has a positive process ID" {
+        let child = Command.new("/bin/sh").arg("-c").arg("exit 0").spawn().unwrap()
+        let id = child.id()
+        let status = child.wait().unwrap()
+        testing.assert(id > 0, "a child had no process ID")?
+        testing.assert(status.success(), "the child failed")?
+        .Ok(())
+    }
+
+    // Take the parent's end of the child's standard input, when it was piped
+    // and has not been taken. The child holds no other copy, so it reads the
+    // end of its input once the writer is closed.
+    pub fn take_stdin(inout self: Self) -> Option[PipeWriter] where carries(.Some: self) {
+        let empty: Option[PipeWriter] = .None
+        mem.exchange(&self.stdin, empty)
+    }
+
+    test "input written to a child comes back through its output" {
+        var child = Command.new("cat").stdin(.Pipe).stdout(.Pipe).spawn().unwrap()
+        var input = &child.take_stdin().unwrap()
+        let wrote = "green tea".fmt(&input).is_ok()
+        input.close().unwrap()
+        let again = match &child.take_stdin() {
+            Some(writer) => {
+                writer.release()
+                false
+            },
+            None => true,
+        }
+        var output = &child.take_stdout().unwrap()
+        let received = io.read_text(&output, max_bytes: 64)
+        output.close().unwrap()
+        let status = child.wait().unwrap()
+        defer let text = received.unwrap()
+        testing.assert(wrote, "writing to the child failed")?
+        testing.assert(again, "standard input was taken twice")?
+        testing.assert_eq(text.view(), "green tea", "the child echoed something else")?
+        testing.assert(status.success(), "cat failed")?
+        .Ok(())
+    }
+
+    // Take the parent's end of the child's standard output, when it was piped
+    // and has not been taken.
+    pub fn take_stdout(inout self: Self) -> Option[PipeReader] where carries(.Some: self) {
+        let empty: Option[PipeReader] = .None
+        mem.exchange(&self.stdout, empty)
+    }
+
+    test "standard output is there only when it was piped" {
+        var piped = Command.new("/bin/sh").arg("-c").arg("printf oolong").stdout(.Pipe).spawn().unwrap()
+        var output = &piped.take_stdout().unwrap()
+        let received = io.read_text(&output, max_bytes: 64)
+        output.release()
+        let _piped = piped.wait().unwrap()
+        defer let text = received.unwrap()
+        testing.assert_eq(text.view(), "oolong", "the child's output was lost")?
+        var inherited = Command.new("/bin/sh").arg("-c").arg("exit 0").stdout(.Null).spawn().unwrap()
+        let none = match &inherited.take_stdout() {
+            Some(reader) => {
+                reader.release()
+                false
+            },
+            None => true,
+        }
+        let _inherited = inherited.wait().unwrap()
+        testing.assert(none, "an output that was not piped had a reader")?
+        .Ok(())
+    }
+
+    // Take the parent's end of the child's standard error, when it was piped
+    // and has not been taken.
+    pub fn take_stderr(inout self: Self) -> Option[PipeReader] where carries(.Some: self) {
+        let empty: Option[PipeReader] = .None
+        mem.exchange(&self.stderr, empty)
+    }
+
+    test "standard error is read apart from standard output" {
+        var child = Command.new("/bin/sh").arg("-c").arg("printf out; printf err >&2").stdout(.Null).stderr(.Pipe).spawn().unwrap()
+        var errors = &child.take_stderr().unwrap()
+        let received = io.read_text(&errors, max_bytes: 64)
+        errors.release()
+        let _status = child.wait().unwrap()
+        defer let text = received.unwrap()
+        testing.assert_eq(text.view(), "err", "standard error held something else")?
+        .Ok(())
+    }
+
+    // Send SIGKILL to the child. It still has to be waited for, and `wait`
+    // then reports it killed by signal 9, unless it had already exited.
+    pub fn kill(inout self: Self) -> Result[(), ProcessError] where carries() {
+        let answer = linea_process_kill(self.pid)
+        if answer < 0 {
+            return .Err(ProcessError.from_answer(.Kill, answer))
+        }
+        .Ok(())
+    }
+
+    test "a killed child is reported killed by signal nine" {
+        var child = Command.new("/bin/sh").arg("-c").arg("exec sleep 30").spawn().unwrap()
+        let killed = &child.kill().is_ok()
+        let status = child.wait().unwrap()
+        testing.assert(killed, "the child could not be killed")?
+        testing.assert_eq(status, ExitStatus.Signalled(9), "a killed child ended some other way")?
+        .Ok(())
+    }
+
+    // Close the pipes the child still holds, wait for it to end, reap it and
+    // answer how it ended. Closing them first means the child cannot wait
+    // forever for input, or for room to write output nobody reads. On a
+    // fiber the wait parks the fiber, leaving its carrier to other fibers; a
+    // task on its own thread blocks.
+    pub fn wait(sink self: Self) -> Result[ExitStatus, ProcessError] where carries() {
+        let Child { pid, stdin, stdout, stderr } = self
+        close_pipes(stdin, stdout, stderr)
+        reap(pid)
+    }
+
+    test "waiting reports the exit code" {
+        let child = Command.new("/bin/sh").arg("-c").arg("exit 3").spawn().unwrap()
+        let status = child.wait().unwrap()
+        testing.assert_eq(status, ExitStatus.Exited(3), "the exit code was lost")?
+        testing.assert(!process_test_zombies(), "a waited child was left a zombie")?
+        .Ok(())
+    }
+
+    test "a child blocked on a full pipe ends when it is waited for" {
+        // The child writes far more than a pipe holds and nobody reads it, so
+        // only the pipe's close lets it finish.
+        let child = Command.new("/bin/sh").arg("-c").arg("head -c 4000000 /dev/zero").stdout(.Pipe).spawn().unwrap()
+        let status = child.wait().unwrap()
+        testing.assert(!status.success(), "a child writing to a closed pipe succeeded")?
+        .Ok(())
+    }
+
+    // Close the child's standard input, read everything it writes to the
+    // piped standard output and error into vectors from `allocator`, both
+    // at once, so a child that fills one pipe while the parent waits on the
+    // other cannot stall, then reap it. A stream that was not piped, or was
+    // taken, answers no bytes. Each stream may hold at most `max_bytes`; when
+    // one passes it, or a read or an allocation fails, the child is killed and
+    // reaped and the error answered.
+    pub fn wait_with_output_in[A: Allocator](sink self: Self, allocator: A, max_bytes: UInt64) -> Result[Output[A], ProcessError] where carries(.Ok: allocator) {
+        let Child { pid, stdin, stdout, stderr } = self
+        close_pipes(stdin, .None, .None)
+        match drain(allocator, stdout, stderr, max_bytes) {
+            Ok((out, err)) => {
+                match reap(pid) {
+                    Ok(status) => .Ok(.{ status, stdout = out, stderr = err }),
+                    Err(reason) => {
+                        out.release()
+                        err.release()
+                        .Err(reason)
+                    },
+                }
+            },
+            Err(reason) => {
+                let _killed = linea_process_kill(pid)
+                let _status = reap(pid)
+                .Err(reason)
+            },
+        }
+    }
+
+    test "output too long kills and reaps the child" {
+        let child = Command.new("/bin/sh").arg("-c").arg("head -c 100000 /dev/zero; sleep 30").stdout(.Pipe).spawn().unwrap()
+        let refused = match child.wait_with_output_in(mem.system(), max_bytes: 1000) {
+            Ok(output) => {
+                output.release()
+                false
+            },
+            Err(reason) => match read reason { TooLong(limit) => limit == 1000, _ => false },
+        }
+        testing.assert(refused, "output past its limit was not refused")?
+        testing.assert(!process_test_zombies(), "a child killed for its output was left a zombie")?
+        .Ok(())
+    }
+
+    // Wait as `wait_with_output_in` does, keeping the output in the system
+    // allocator.
+    pub fn wait_with_output(sink self: Self, max_bytes: UInt64) -> Result[Output[mem.SystemAllocator], ProcessError] where carries() {
+        self.wait_with_output_in(mem.system(), max_bytes)
+    }
+
+    test "waiting with output reads both streams" {
+        let child = Command.new("/bin/sh").arg("-c").arg("printf black; printf white >&2; exit 4").stdout(.Pipe).stderr(.Pipe).spawn().unwrap()
+        defer let output = child.wait_with_output(max_bytes: 64).unwrap()
+        testing.assert_eq(output.status, ExitStatus.Exited(4), "the status was lost")?
+        testing.assert_eq(output.stdout.as_slice(), "black".as_bytes(), "standard output was lost")?
+        testing.assert_eq(output.stderr.as_slice(), "white".as_bytes(), "standard error was lost")?
+        .Ok(())
+    }
+
+    test "a fiber captures a child's output and waits for it on a loop" {
+        let one_carrier = io.Loop.open(carriers: 1).unwrap()
+        // The fiber parks while the child sleeps, in the reads and in the
+        // wait, so the loop's one carrier is not held.
+        let body = sink [] |sink me: Chan[Send[UInt64, End]]| {
+            let length = match Command.new("/bin/sh").arg("-c").arg("sleep 0.1; printf steeped; sleep 0.1").output(max_bytes: 64) {
+                Ok(output) => {
+                    let captured = output.stdout.length()
+                    output.release()
+                    captured
+                },
+                Err(_) => 0,
+            }
+            me.send(length).close()
+        }
+        let (length, done) = task.start(body, on: one_carrier).unwrap().recv()
+        done.close()
+        testing.assert_eq(length, UInt64(7), "the fiber captured something else")?
+        testing.assert(!process_test_zombies(), "a child waited for on a fiber was left a zombie")?
+        .Ok(())
+    }
+}
+
+// Which pipe a wait set delivered while output is captured.
+enum Drained {
+    StandardOutput(PipeReader),
+    StandardError(PipeReader),
+}
+
+// Releasing a message closes the pipe it holds.
+impl Release for Drained {
+    fn release(sink self: Self) {
+        match self {
+            StandardOutput(reader) => reader.release(),
+            StandardError(reader) => reader.release(),
+        }
+    }
+}
+
+// Register `reader` to be delivered once it has bytes or has ended.
+fn watch(inout waiting: task.WaitSet[Drained], sink reader: PipeReader, output: Bool) -> Result[(), ProcessError] {
+    let registered = if output {
+        &waiting.readable(reader, |sink ready| Drained.StandardOutput(ready))
+    } else {
+        &waiting.readable(reader, |sink ready| Drained.StandardError(ready))
+    }
+    match registered {
+        Ok(_key) => .Ok(()),
+        Err(refused) => {
+            let Unregistered { value, reason } = refused
+            value.release()
+            .Err(.Io(reason))
+        },
+    }
+}
+
+// Read once from a ready pipe into `into` through `chunk`, then watch it
+// again, or close it at its end.
+fn step[A: Allocator](inout waiting: task.WaitSet[Drained], sink reader: PipeReader, output: Bool, inout chunk: mem.Buffer[A], inout into: Vec[UInt8, A], max_bytes: UInt64) -> Result[(), ProcessError] {
+    var reading = reader
+    let size = chunk.length()
+    let count = match &reading.read_some(&chunk, 0, size) {
+        Ok(count) => count,
+        Err(reason) => {
+            reading.release()
+            return .Err(.Io(reason))
+        },
+    }
+    if count == 0 {
+        reading.release()
+        return .Ok(())
+    }
+    if count > max_bytes - into.length() {
+        reading.release()
+        return .Err(.TooLong(max_bytes))
+    }
+    match &into.append_slice(chunk.as_slice().subspan(start: 0, count: count).unwrap()) {
+        Ok(_) => {},
+        Err(reason) => {
+            reading.release()
+            return .Err(.Allocation(reason))
+        },
+    }
+    watch(&waiting, reading, output)
+}
+
+// Read both pipes to their ends at once, taking whichever has bytes first,
+// into vectors from `allocator`. Every pipe is closed when this returns.
+fn drain[A: Allocator](allocator: A, sink stdout: Option[PipeReader], sink stderr: Option[PipeReader], max_bytes: UInt64) -> Result[(Vec[UInt8, A], Vec[UInt8, A]), ProcessError] where carries(.Ok: allocator) {
+    let out: Vec[UInt8, A] = Vec.new_in(allocator)
+    let err: Vec[UInt8, A] = Vec.new_in(allocator)
+    if stdout.is_none() && stderr.is_none() {
+        close_pipes(.None, stdout, stderr)
+        return .Ok((out, err))
+    }
+    var chunk = allocator.acquire(read_chunk) else |reason| {
+        close_pipes(.None, stdout, stderr)
+        out.release()
+        err.release()
+        return .Err(.Allocation(reason))
+    }
+    var captured_out = out
+    var captured_err = err
+    var waiting: task.WaitSet[Drained] = task.WaitSet.open()
+    var outcome: Result[(), ProcessError] = .Ok(())
+    match stdout {
+        Some(reader) => outcome = watch(&waiting, reader, true),
+        None => {},
+    }
+    match stderr {
+        Some(reader) => {
+            let watched = watch(&waiting, reader, false)
+            if outcome.is_ok() {
+                outcome = watched
+            }
+        },
+        None => {},
+    }
+    if outcome.is_ok() {
+        loop {
+            let stepped = match &waiting.next() {
+                None => break,
+                Some(StandardOutput(reader)) => step(&waiting, reader, true, &chunk, &captured_out, max_bytes),
+                Some(StandardError(reader)) => step(&waiting, reader, false, &chunk, &captured_err, max_bytes),
+            }
+            if stepped.is_err() {
+                outcome = stepped
+                break
+            }
+        }
+    }
+    chunk.release()
+    waiting.close().release()
+    match outcome {
+        Ok(_) => .Ok((captured_out, captured_err)),
+        Err(reason) => {
+            captured_out.release()
+            captured_err.release()
+            .Err(reason)
+        },
+    }
+}
+
+// Whether this process has a child that ended and was never reaped, as `ps`
+// lists the process table: a zombie's state begins with `Z`.
+fn process_test_zombies() -> Bool {
+    let script = r"ps -A -o ppid= -o stat= | awk -v parent=$PPID '$1 == parent && $2 ~ /^Z/ { found = 1 } END { exit found }'"
+    let status = Command.new("/bin/sh").arg("-c").arg(script).status().unwrap()
+    !status.success()
+}

@@ -5228,14 +5228,17 @@ functions that copy typed bytes between tasks, the allocator's `linea_alloc`
 and `linea_free`, `linea_close` and every call that reads, writes, opens or
 names a file through a descriptor or the address of a buffer's bytes, the
 decimal parsers that read bytes at an address, and the argument and
-environment entries that answer one; `fs` for `linea_set_mode`; and `net` for
-the socket calls, each of which takes or answers a descriptor. Each such
-number is held by a linear value and each such address by a buffer or a
-slice, so a declaration anywhere else, in any root, is refused: through the
-runtime's own entry points it could free an allocation or a queue twice,
-close a descriptor the standard library still owns, have the runtime read or
-write bytes at a number no value holds, leave a parked thread unjoined or
-close an endpoint it made up. The rule reaches only the runtime's `linea_`
+environment entries that answer one, and the spawn of a child process and the
+reads and writes of its pipes; `fs` for `linea_set_mode`; `net` for the
+socket calls, each of which takes or answers a descriptor; and `process` for
+`linea_process_wait` and `linea_process_kill`, which take the process ID of a
+child not yet reaped. Each such number is held by a linear value and each such
+address by a buffer or a slice, so a declaration anywhere else, in any root,
+is refused: through the runtime's own entry points it could free an
+allocation or a queue twice, close a descriptor the standard library still
+owns, have the runtime read or write bytes at a number no value holds, leave a
+parked thread unjoined, close an endpoint it made up, or reap or signal a
+child twice, the second time a process that took its number. The rule reaches only the runtime's `linea_`
 symbols, so it is defence in depth and not a guarantee: a module granted
 `extern` may declare a C library function such as `close` or `free` itself
 and misuse a number through it, which no rule refuses. What the rule gives is

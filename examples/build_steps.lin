@@ -1,0 +1,128 @@
+// Run a project's build steps one after another, as a Makefile or a CI
+// script does. Each step is a shell command line, run as a child process with
+// its standard output and error captured. The run stops at the first step
+// that fails and shows what that step printed to standard error, so the
+// reader sees why. Every child is waited for: a `process.Child` cannot be
+// dropped, only waited for, so no step is left running or unreaped, even
+// when one fails.
+import std.io
+import std.mem
+import std.process
+import std.testing
+
+use io.IoError
+use io.println
+
+// A step has a name to report and the shell command line that performs it.
+@copyable
+struct Step {
+    name: Str,
+    script: Str,
+}
+
+// A step may print at most this many bytes to each of its two streams; one
+// that prints more is stopped and fails.
+let output_limit: UInt64 = 65536
+
+// Run `script` through `/bin/sh -c`, wait for it, and answer how it ended
+// with everything it printed. `output` reads both streams at once, so a step
+// that fills its error pipe while it is still writing its output does not
+// stall.
+fn run_script(script: Str) -> Result[process.Output[mem.SystemAllocator], process.ProcessError] {
+    process.Command.new("/bin/sh").arg("-c").arg(script).output(max_bytes: output_limit)
+}
+
+test "a step's output and status are captured" {
+    defer let output = run_script("printf 'compiled 2 files\n'; exit 0").unwrap()
+    testing.assert(output.status.success(), "a step that exited with 0 failed")?
+    testing.assert_eq(output.stdout.as_slice(), "compiled 2 files\n".as_bytes(), "the step's output was lost")?
+    .Ok(())
+}
+
+test "a failing step reports its code and its error output" {
+    defer let output = run_script("printf 'missing semicolon\n' >&2; exit 2").unwrap()
+    testing.assert_eq(output.status.code(), .Some(UInt8(2)), "the step's exit code was lost")?
+    testing.assert_eq(output.stderr.as_slice(), "missing semicolon\n".as_bytes(), "the step's error output was lost")?
+    .Ok(())
+}
+
+test "a step that prints past the limit is stopped" {
+    let stopped = match run_script("head -c 100000 /dev/zero") {
+        Ok(output) => {
+            output.release()
+            false
+        },
+        Err(reason) => match read reason { TooLong(_) => true, _ => false },
+    }
+    testing.assert(stopped, "a step printed past its limit")?
+    .Ok(())
+}
+
+// Print each line of what a step printed, indented under its name.
+fn show(bytes: mem.Slice[UInt8]) -> Result[(), IoError] {
+    match Str.from_bytes(bytes) {
+        Ok(text) => {
+            for line in text.lines() {
+                println("      {line}")?
+            }
+            .Ok(())
+        },
+        Err(_) => println("      ({bytes.length()} bytes that are not UTF-8 text)"),
+    }
+}
+
+// Report a finished step: a passing step shows what it printed, and a
+// failing one shows its errors.
+fn report(step: Step, output: process.Output[mem.SystemAllocator]) -> Result[(), IoError] {
+    if output.status.success() {
+        println("ok    {step.name}")?
+        show(output.stdout.as_slice())
+    } else {
+        println("FAIL  {step.name} ({output.status})")?
+        show(output.stderr.as_slice())
+    }
+}
+
+// Run one step, report it, and answer whether it passed.
+fn run_step(step: Step) -> Result[Bool, IoError] {
+    match run_script(step.script) {
+        Err(reason) => {
+            println("FAIL  {step.name}: {reason}")?
+            .Ok(false)
+        },
+        Ok(output) => {
+            let passed = output.status.success()
+            // The output is released before a failed report is passed on.
+            let reported = report(step, output)
+            output.release()
+            reported?
+            .Ok(passed)
+        },
+    }
+}
+
+fn plan() -> [Step; 4] {
+    [
+        .{ name = "count sources", script = "printf 'main.c\nparse.c\n' | wc -l | tr -d ' '" },
+        .{ name = "compile", script = "printf 'cc -c main.c\ncc -c parse.c\n'" },
+        .{ name = "unit tests", script = "printf '3 passed\n'; printf 'parse_test: expected 4 tokens, found 5\n' >&2; exit 1" },
+        .{ name = "package", script = "printf 'wrote release.tar\n'" },
+    ]
+}
+
+fn main() -> Result[UInt8, IoError] {
+    var failed = false
+    for step in plan() {
+        if failed {
+            println("skip  {step.name}")?
+        } else if !run_step(step)? {
+            failed = true
+        }
+    }
+    if failed {
+        println("the build failed")?
+        return .Ok(1)
+    }
+    println("the build passed")?
+    .Ok(0)
+}

@@ -462,6 +462,93 @@ test "opening a missing directory answers its errno" {
     }
 }
 
+// The runtime starts a child process and answers its process ID or a negated
+// errno, writing the parent's end of each piped stream to `stdin_fd`,
+// `stdout_fd` and `stderr_fd`, or -1 for a stream that is no pipe. The
+// argument and environment blocks are NUL-terminated strings; the runtime
+// writes the pointer arrays the system takes into `table`.
+extern fn linea_process_spawn(arguments_at: UInt64, arguments_extent: UInt64, argument_count: UInt64, environment_at: UInt64, environment_extent: UInt64, environment_count: UInt64, directory_at: UInt64, directory_extent: UInt64, table_at: UInt64, table_extent: UInt64, setup: UInt8, inout stdin_fd: Int32, inout stdout_fd: Int32, inout stderr_fd: Int32) -> Int64
+
+// The runtime reads or writes the parent's nonblocking end of a child's pipe,
+// waiting until it is ready, and returns the byte count or a negated errno.
+extern fn linea_pipe_read(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+extern fn linea_pipe_write(fd: Int32, at: UInt64, len: UInt64) -> Int64
+
+// SpawnedPipes holds the parent's end of each of a new child's piped
+// standard streams, or -1 for a stream that is no pipe.
+@copyable
+internal struct SpawnedPipes {
+    stdin: Int32,
+    stdout: Int32,
+    stderr: Int32,
+}
+
+// Start a child process from the NUL-terminated strings in `arguments`, the
+// program first, and in `environment` when `setup` says it replaces this
+// process's environment, in the NUL-terminated `directory` or this process's
+// own when it is empty, writing the system's pointer arrays into `table`.
+// Answer the child's process ID or a negated errno, and the pipes' ends.
+internal fn _spawn[A: Allocator](arguments: Slice[UInt8], argument_count: UInt64, environment: Slice[UInt8], environment_count: UInt64, directory: Slice[UInt8], inout table: Buffer[A], setup: UInt8) -> (Int64, SpawnedPipes) {
+    var stdin: Int32 = -1
+    var stdout: Int32 = -1
+    var stderr: Int32 = -1
+    let answer = linea_process_spawn(
+        address.raw(slice_address(arguments)),
+        arguments.length(),
+        argument_count,
+        address.raw(slice_address(environment)),
+        environment.length(),
+        environment_count,
+        address.raw(slice_address(directory)),
+        directory.length(),
+        address.raw(bytes_in(table, 0)),
+        table.length(),
+        setup,
+        &stdin,
+        &stdout,
+        &stderr,
+    )
+    (answer, .{ stdin, stdout, stderr })
+}
+
+// Read up to `count` bytes from the pipe `fd` into `buffer` at `offset`,
+// checking the range first, and return the runtime's count or negated errno.
+internal fn read_pipe[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset: UInt64, count: UInt64) -> Int64 {
+    if offset > buffer.length() || count > buffer.length() - offset {
+        panic("buffer I/O range is out of bounds")
+    }
+    linea_pipe_read(fd, address.raw(bytes_in(buffer, offset)), count)
+}
+
+test trap "pipe reads reject a range past the buffer" -> Result[(), testing.Failure] {
+    // The invalid descriptor -1 must never reach the runtime.
+    let allocator = system()
+    var bytes = allocator.acquire(1) else |_| {
+        return testing.assert(false, "test buffer allocation failed")
+    }
+    let _result = read_pipe(&bytes, -1, 1, UInt64.max)
+    bytes.release()
+    .Ok(())
+}
+
+// Write `bytes` to the pipe `fd` and return the count written or a negated
+// errno.
+internal fn write_slice_pipe(bytes: Slice[UInt8], fd: Int32) -> Int64 {
+    linea_pipe_write(fd, address.raw(slice_address(bytes)), bytes.length())
+}
+
+test "empty pipe requests do not access a descriptor" {
+    // -1 is invalid, so success proves that a zero-byte request bypasses I/O.
+    defer var bytes = system().acquire(1) else |_| {
+        return testing.assert(false, "test buffer allocation failed")
+    }
+    testing.assert_eq(read_pipe(&bytes, -1, 1, 0), 0, "an empty pipe read reached the descriptor")?
+    let empty = bytes.as_slice().subspan(start: 1, count: 0).unwrap()
+    testing.assert_eq(write_slice_pipe(empty, -1), 0, "an empty pipe write reached the descriptor")?
+    .Ok(())
+}
+
 // The runtime closes a descriptor and returns zero or a negated errno.
 extern fn linea_close(fd: Int32) -> Int64
 
