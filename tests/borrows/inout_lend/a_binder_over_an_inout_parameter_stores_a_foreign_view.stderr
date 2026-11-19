@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+  --> tests/borrows/inout_lend/a_binder_over_an_inout_parameter_stores_a_foreign_view.lin:13:15
+   |
+13 |         s.a = copy(x)
+   |               ^^^^^^^ escape observations only from the signature's declared sources
+   |
+   = help: `arr` keeps a value that comes from `x`; write `where retains(arr: x)` to say so

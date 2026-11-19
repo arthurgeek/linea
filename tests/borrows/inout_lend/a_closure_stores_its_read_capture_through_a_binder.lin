@@ -1,0 +1,26 @@
+// A closure holding `arr` lent `inout` writes the view it captured into an
+// element through a `for inout` binder, so after the call `arr` depends on
+// the owner of that view.
+import std.io
+
+struct Swap {
+    a: Str,
+    b: Str,
+}
+
+fn main() -> UInt8 {
+    let owned = "hello, freed world".to_owned().unwrap()
+    let x = owned.view()
+    var arr = [Swap { a = "static", b = "static" }]
+    var mv = inout [inout arr, x] || {
+        for inout p in arr {
+            p.a = copy(x)
+        }
+    }
+    &mv()
+    owned.release()
+    let _ = io.println(arr[0].a) else |_| {
+        return 1
+    }
+    0
+}
