@@ -247,6 +247,10 @@ extern fn linea_dir_open_at(parent: UInt64, at: UInt64, extent: UInt64, follow: 
 
 extern fn linea_dir_next(stream: UInt64, at: UInt64, len: UInt64, follow: UInt8) -> Int64
 
+extern fn linea_dir_reopen(anchor: UInt64, names_at: UInt64, names_extent: UInt64, identities_at: UInt64, identities_extent: UInt64, follow: UInt8, inout failed: UInt64, inout stream: UInt64) -> Int64
+
+extern fn linea_dir_open_up(stream: UInt64, inout parent: UInt64) -> Int64
+
 extern fn linea_dir_identity(stream: UInt64, inout device: UInt64, inout inode: UInt64) -> Int64
 
 extern fn linea_dir_close(stream: UInt64) -> Int64
@@ -306,6 +310,38 @@ internal fn _read_dir[A: Allocator](stream: DirStream, inout record: Buffer[A], 
         panic("a directory record buffer is smaller than a record")
     }
     linea_dir_next(stream.handle, address.raw(bytes_in(record, 0)), record.length(), follow_code(follow))
+}
+
+// Open each directory `names` names in turn, the first inside the one
+// `anchor` reads and each later one inside the one before, and answer a stream
+// over the last. `names` holds the names one after another, each ending in a
+// zero byte, and `identities` a device and an inode number, two words at byte
+// offsets 16 * i and 16 * i + 8, that the directory under name `i` must have,
+// for every name but the last. A failure answers the errno and the index of
+// the name that failed, or errno 0 and the index of a directory that has
+// another identity.
+internal fn _reopen_dir[A: Allocator, B: Allocator](anchor: DirStream, names: Buffer[A], identities: Buffer[B], follow: Bool) -> Result[DirStream, (Int32, UInt64)] {
+    var failed: UInt64 = 0
+    var handle: UInt64 = 0
+    let answer = linea_dir_reopen(anchor.handle, address.raw(bytes_in(names, 0)), names.length(), address.raw(bytes_in(identities, 0)), identities.length(), follow_code(follow), &failed, &handle)
+    if answer < 0 {
+        return .Err((Int32(-answer), failed))
+    }
+    if answer > 0 {
+        return .Err((0, failed))
+    }
+    .Ok(.{ handle })
+}
+
+// Open the parent of the directory `stream` reads, which ".." names and no
+// link can stand in for, and answer the stream or the errno.
+internal fn _open_dir_up(stream: DirStream) -> Result[DirStream, Int32] {
+    var handle: UInt64 = 0
+    let answer = linea_dir_open_up(stream.handle, &handle)
+    if answer < 0 {
+        return .Err(Int32(-answer))
+    }
+    .Ok(.{ handle })
 }
 
 impl DirStream {

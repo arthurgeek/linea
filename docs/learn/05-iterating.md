@@ -2494,8 +2494,8 @@ path the walk could not read, here the link, and `error.cause()` answers a
 `fs.WalkCause`: `Io` with the `io.IoError` of the call that failed (its
 `operation` is `Metadata` here, and `Open` or `Read` for a directory), `Loop`
 for a followed link that leads back into a directory the walk is inside,
-`Changed` for a directory the walk is inside that was moved or replaced while
-it walked, or `Allocation` when storage for a path was refused. Without
+`Changed` for a directory the walk had to find again by its name and found
+replaced or gone, or `Allocation` when storage for a path was refused. Without
 `follow_symlinks: true` the walk reports `gone` as an entry of kind `Symlink`
 and never looks at what it names, so there is no error to report. To stop at
 the first error instead of going on, `break` out of the loop there and settle
@@ -2570,9 +2570,9 @@ fn main() -> Result[UInt8, io.IoError] {
 ```
 
 A walk keeps the directories it is inside open, at most 16 of them by
-default (`max_open:` sets another number); a tree deeper than that is still
-walked whole, with each deeper directory read into memory and closed at once,
-so however deep the tree, the walk holds no more than that many open. The [disk usage
+default (`max_open:` sets another number); in a deeper tree it reads the
+shallowest of them into memory and closes it as it goes down, so however deep
+the tree, the walk holds no more than that many open. The [disk usage
 example](../../examples/disk_usage.lin) adds up what each part of a directory
 holds and lists its largest files.
 

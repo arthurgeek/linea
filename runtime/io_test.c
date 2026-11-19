@@ -547,6 +547,44 @@ static void directory_streams(void) {
     assert(linea_dir_close(child) == 0);
     assert(linea_dir_open_at(stream, ADDRESS("data"), 5, 1, &child) == -ENOTDIR);
     assert(linea_dir_open_at(stream, ADDRESS("a/b"), 4, 1, &child) == -EINVAL);
+
+    /* Reopening a chain holds each directory but the last to its identity. */
+    assert(linea_make_dir_at(parent, ADDRESS("sub/inner"), 10, 0700) == -EINVAL);
+    char inner[sizeof(directory) + 16];
+    assert(snprintf(inner, sizeof(inner), "%s/sub/inner", directory) > 0);
+    assert(mkdir(inner, 0700) == 0);
+    struct stat sub_info;
+    char sub[sizeof(directory) + 8];
+    assert(snprintf(sub, sizeof(sub), "%s/sub", directory) > 0);
+    assert(stat(sub, &sub_info) == 0);
+    uint64_t identity[2] = {(unsigned long)sub_info.st_dev, (unsigned long)sub_info.st_ino};
+    const char chain[] = "sub\0inner";
+    unsigned long failed = 99;
+    assert(linea_dir_reopen(stream, ADDRESS(chain), sizeof(chain), ADDRESS(identity), sizeof(identity), 0, &failed, &child) == 0);
+    assert(next_entry(child, record, 0, name) == 0);
+    assert(linea_dir_close(child) == 0);
+    identity[1] += 1;
+    assert(linea_dir_reopen(stream, ADDRESS(chain), sizeof(chain), ADDRESS(identity), sizeof(identity), 0, &failed, &child) == 1);
+    assert(failed == 0);
+    identity[1] -= 1;
+    const char missing[] = "sub\0none";
+    assert(linea_dir_reopen(stream, ADDRESS(missing), sizeof(missing), ADDRESS(identity), sizeof(identity), 0, &failed, &child) == -ENOENT);
+    assert(failed == 1);
+    const char through_link[] = "link\0inner";
+    const long refused_link = linea_dir_reopen(stream, ADDRESS(through_link), sizeof(through_link), ADDRESS(identity), sizeof(identity), 0, &failed, &child);
+    assert((refused_link == -ELOOP || refused_link == -ENOTDIR) && failed == 0);
+    assert(linea_dir_reopen(stream, ADDRESS(chain), sizeof(chain), ADDRESS(identity), 8, 0, &failed, &child) == -EINVAL);
+    /* The parent of `sub` is the directory the test made. */
+    unsigned long up = 0;
+    assert(linea_dir_reopen(stream, ADDRESS(chain), sizeof(chain), ADDRESS(identity), sizeof(identity), 0, &failed, &child) == 0);
+    assert(linea_dir_open_up(child, &up) == 0);
+    unsigned long up_device = 0;
+    unsigned long up_inode = 0;
+    assert(linea_dir_identity(up, &up_device, &up_inode) == 0);
+    assert(up_device == identity[0] && up_inode == identity[1]);
+    assert(linea_dir_close(up) == 0);
+    assert(linea_dir_close(child) == 0);
+    assert(rmdir(inner) == 0);
     assert(linea_dir_close(stream) == 0);
 
     /* Following links describes what each names, and a dangling link reports

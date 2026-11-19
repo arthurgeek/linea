@@ -443,6 +443,84 @@ long linea_dir_next(unsigned long stream, unsigned long at, unsigned long len, u
     return (long)name_length;
 }
 
+/* Whether `name` is one component: not empty, no slash, and neither "." nor "..". */
+static int single_component(const char *name) {
+    return name[0] != '\0' && strchr(name, '/') == NULL && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
+}
+
+long linea_dir_reopen(unsigned long anchor, unsigned long names_at, unsigned long names_extent,
+                      unsigned long identities_at, unsigned long identities_extent,
+                      uint8_t follow, unsigned long *failed, unsigned long *stream) {
+    int invalid = linea_io_byte_range(names_at, names_extent);
+    if (invalid == 0) invalid = linea_io_byte_range(identities_at, identities_extent);
+    if (invalid != 0) return -(long)invalid;
+    if (follow > 1 || names_extent == 0 || identities_extent % (2 * sizeof(uint64_t)) != 0) return -EINVAL;
+    const char *names = (const char *)(uintptr_t)names_at;
+    if (names[names_extent - 1] != '\0') return -EINVAL;
+    unsigned long count = 0;
+    for (unsigned long i = 0; i < names_extent; i++) {
+        if (names[i] == '\0') count++;
+    }
+    if (count != identities_extent / (2 * sizeof(uint64_t)) + 1) return -EINVAL;
+    const unsigned char *identities = (const unsigned char *)(uintptr_t)identities_at;
+    const int flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | (follow ? 0 : O_NOFOLLOW);
+    int current = dirfd((DIR *)(uintptr_t)anchor);
+    int owned = -1;
+    const char *name = names;
+    for (unsigned long index = 0;; index++) {
+        if (!single_component(name)) {
+            if (owned >= 0) close(owned);
+            return -EINVAL;
+        }
+        int fd;
+        do {
+            fd = openat(current, name, flags);
+        } while (fd < 0 && errno == EINTR);
+        if (fd < 0) {
+            const int error = errno;
+            if (owned >= 0) close(owned);
+            *failed = index;
+            return -(long)error;
+        }
+        if (owned >= 0) close(owned);
+        owned = fd;
+        current = fd;
+        if (index + 1 == count) break;
+        uint64_t want[2];
+        memcpy(want, identities + index * sizeof(want), sizeof(want));
+        struct stat info;
+        int result;
+        do {
+            result = fstat(fd, &info);
+        } while (result != 0 && errno == EINTR);
+        if (result != 0) {
+            const int error = errno;
+            close(owned);
+            *failed = index;
+            return -(long)error;
+        }
+        if ((unsigned long)info.st_dev != want[0] || (unsigned long)info.st_ino != want[1]) {
+            close(owned);
+            *failed = index;
+            return 1;
+        }
+        name += strlen(name) + 1;
+    }
+    DIR *dir = fdopendir(owned);
+    if (dir == NULL) {
+        const int error = errno;
+        close(owned);
+        *failed = count - 1;
+        return -(long)error;
+    }
+    *stream = (unsigned long)(uintptr_t)dir;
+    return 0;
+}
+
+long linea_dir_open_up(unsigned long stream, unsigned long *parent) {
+    return open_stream(dirfd((DIR *)(uintptr_t)stream), "..", 1, parent);
+}
+
 long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode) {
     struct stat info;
     int result;

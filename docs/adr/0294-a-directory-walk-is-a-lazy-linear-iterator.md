@@ -69,7 +69,8 @@ read, a directory whose close fails, a loop, and a refused allocation are each
 yielded as one `Err(WalkError)` naming the path (owned, empty only when the
 path's own storage was refused) and a `WalkCause` (`Io(io.IoError)` with the
 operation `Open`, `Read`, `Metadata` or `Close`; `Loop`; `Changed`, for a
-directory the walk is inside that was moved or replaced; or `Allocation`).
+directory the walk had to find again by its name and found replaced or
+gone; or `Allocation`).
 The entry or the directory's remaining entries are skipped and the next `next`
 continues with the rest of the tree. A caller that wants to stop at the first
 error stops its `for` there and settles the walk.
@@ -102,32 +103,56 @@ allocator it is released.
 
 ### 8. At most `max_open` directories stay open between steps
 
-A walk keeps one stream open for each directory down to the current one, up to
-`max_open` (16 by default; 0 is taken as 1). A directory entered when that many
-are already open is opened, read whole into memory with the metadata of every
-entry, and closed in the same step, so between steps no more than `max_open`
-streams are open.
+A walk holds its root and the directories nearest the current one open, at
+most `max_open` of them between steps (16 by default; 0 and 1 are taken as 2,
+the root and the current directory). Entering a directory when that many are
+open makes room: the shallowest open directory below the root has the rest of
+its entries read into memory, with their metadata, and is closed. So the open
+directories slide down with the walk, every directory is opened by its own
+name with `openat` inside its parent, which is open, and going down a chain
+costs one open per level however deep it is.
 
-A directory below one that was read into memory has no open parent. The walk
-never opens it by its path: it opens each directory from the deepest one it
-still holds open down to the parent again, one name at a time with `openat`
-relative to the one above (`O_NOFOLLOW` unless links are followed), and holds
-each reopened directory to the device and inode it recorded when it entered
-it. A directory moved or replaced since, a link put in its place included, is
-reported as `WalkCause.Changed` and its subtree is not walked. So below the
-root the walk opens no path of more than one name: nothing above can redirect
-it, and no path is too long for the system to open. At most two of the
-reopened streams are open at once, so during a step at most two more than
-`max_open` are open. Reopening costs one `openat` and one `fstat` per level
-past the deepest open directory, for each directory entered below the bound.
+Coming back up, the walk leaves an open directory whose parent was read into
+memory. Before closing it, it opens `..` of it, which no link can stand in
+for, and keeps that descriptor as the parent's when it has the device and
+inode the walk recorded for the parent; the parent's entries still come from
+memory, and the directories it holds are opened inside it. The count of open
+descriptors does not change, and making room closes such a descriptor first
+when it is the shallowest.
+
+Only when that is not possible, because the directory left was moved out of
+its parent, does the walk find a directory by name: one runtime call,
+`linea_dir_reopen`, opens each directory from the deepest one still open down
+to the parent again, one name at a time with `openat` relative to the one
+above (`O_NOFOLLOW` unless links are followed), as a bare descriptor held to
+the device and inode the walk recorded when it entered that directory, and
+makes a stream only of the directory being entered. A directory found missing,
+not a directory, a link, or another directory under the same name has changed
+under the walk: it is reported once, by its own path, as `WalkCause.Changed`,
+and the walk leaves it and everything below it, so none of its remaining
+entries is reported. A failure to open the directory being entered is that
+directory's own `Io` error.
+
+Below the root the walk therefore opens no path of more than one name: nothing
+above can redirect it, and no path is too long for the system to open. A walk
+follows the directories it entered, not their names: a directory moved while
+the walk is inside it is walked where it went. During a step at most two
+descriptors beyond `max_open` are open; a walk of a 500-deep chain needs
+`max_open` plus one beyond the three standard descriptors. A walk costs one
+`openat` per directory entered and one more per directory left whose parent
+was read into memory: a 500-deep chain takes about 0.1 s and a 500-deep chain
+with a second directory at every level about 0.2 s, at `max_open` 2 or 16, on
+an Apple-silicon Mac (a whole-chain reopen per directory took 9 s and 17 s).
 A listing is kept until the walk leaves its directory, so memory past the
-bound grows with the listings of the directories below the bound that the walk
-is inside.
+bound grows with the listings of the directories read into memory that the
+walk is inside.
 
 ### 9. The runtime exposes directory streams; the walk is Linea
 
 The runtime gains `linea_dir_open`, `linea_dir_open_at`, `linea_dir_next`,
-`linea_dir_identity` and `linea_dir_close` over `opendir`-style streams
+`linea_dir_reopen`, `linea_dir_open_up`, `linea_dir_identity` and
+`linea_dir_close` over
+`opendir`-style streams
 (`openat` with `O_DIRECTORY` and `fdopendir`), and `linea_make_dir_at`,
 `linea_remove_dir_at` and `linea_symlink_at`, which `fs.create_dir`,
 `fs.remove_dir` and `fs.create_symlink` call. A stream's handle crosses as a
@@ -149,9 +174,9 @@ calls there as `fs.File` does.
   caller reads the metadata.
 - Output that depends on order needs a sort, which a program writes
   explicitly.
-- A tree deeper than `max_open` costs the memory of the directories past that
-  depth, and every directory entered there costs one `openat` and one `fstat`
-  for each level between it and the deepest directory still open.
+- A tree deeper than `max_open` costs the memory of the listings of the
+  directories read into memory that the walk is inside, and nothing more per
+  level than a shallow one.
 - A directory removed, renamed or added to during a walk may be reported or
   missed; the walk answers what each read saw.
 
@@ -189,6 +214,14 @@ of its own; an `Iterator` already has both.
 deep exhausts the descriptor limit; bounding it follows Rust's `walkdir`
 (`max_open`, 10 there), which also reads the overflowing directory into
 memory.
+
+**Reading the directory being entered into memory at the bound, and opening
+what it holds again by name from the deepest open directory.** It keeps the
+directories near the root open, which the walk no longer needs, and makes
+every directory entered past the bound cost one open per level between it and
+the deepest open one: a 500-deep chain took 9 s and the same chain with a
+second directory at every level 17 s, against 0.1 s and 0.2 s when the open
+directories slide down with the walk.
 
 **Opening a directory below the bound by its whole path.** It is one call,
 but `O_NOFOLLOW` covers only the last name, so a directory above swapped for a

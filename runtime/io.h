@@ -90,6 +90,22 @@ long linea_dir_open_at(unsigned long parent, unsigned long at, unsigned long ext
 #define LINEA_DIR_RECORD_HEADER 48
 #define LINEA_DIR_RECORD_BYTES (LINEA_DIR_RECORD_HEADER + 1024)
 long linea_dir_next(unsigned long stream, unsigned long at, unsigned long len, uint8_t follow);
+/* Opens a chain of directories below the one the stream `anchor` reads and
+ * answers a stream over the last. `names_at` holds the names one after
+ * another, each a single component ending in NUL, `names_extent` bytes in
+ * all. `identities_at` holds a device and an inode number (two 64-bit words)
+ * for each name but the last, which the directory opened under that name must
+ * have. Each name is opened inside the one before it as a bare descriptor,
+ * following a final symbolic link only when `follow` is 1, and only the last
+ * becomes a stream. Answers zero; 1 with `*failed` set to the index of a
+ * directory that has another identity; or a negated errno with `*failed` set
+ * to the index of the name that failed. */
+long linea_dir_reopen(unsigned long anchor, unsigned long names_at, unsigned long names_extent,
+                      unsigned long identities_at, unsigned long identities_extent,
+                      uint8_t follow, unsigned long *failed, unsigned long *stream);
+/* Opens the parent of the directory the stream `stream` reads, "..", which is
+ * never a symbolic link, and writes a stream over it to `*parent`. */
+long linea_dir_open_up(unsigned long stream, unsigned long *parent);
 /* Writes the device and inode numbers of the directory the stream reads. */
 long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode);
 /* Closes the stream and its descriptor; the handle is invalid afterwards,
