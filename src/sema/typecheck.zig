@@ -29148,10 +29148,13 @@ const Checker = struct {
         // so nothing here settles: the place's type would be read off a number
         // this bracket does not name. That is the settling clause and not a
         // clause of its own, reported at the index the reader wrote.
-        const at = self.writtenRange(rhs) orelse return try self.unsettledBound(id, rhs);
+        const at = self.writtenRange(rhs) orelse return try self.unsettledBounds(id, rhs, null);
         const ends = self.ast.rangeEnds(at);
-        const lo = self.foldedBound(ends.lhs) orelse return try self.unsettledBound(id, ends.lhs);
-        const hi = self.foldedBound(ends.rhs) orelse return try self.unsettledBound(id, ends.rhs);
+        const folded_lo = self.foldedBound(ends.lhs);
+        const folded_hi = self.foldedBound(ends.rhs);
+        if (folded_lo == null and folded_hi == null) return try self.unsettledBounds(id, ends.lhs, ends.rhs);
+        const lo = folded_lo orelse return try self.unsettledBounds(id, ends.lhs, null);
+        const hi = folded_hi orelse return try self.unsettledBounds(id, ends.rhs, null);
 
         // The last element the place names, which is what the bounds are held
         // against: an inclusive end names it and an exclusive end names the one
@@ -29196,15 +29199,42 @@ const Checker = struct {
         return self.folds.get(self.ast.withoutGroups(end)).valueOf();
     }
 
-    /// [T-RangePlace]'s settling clause, reported at the bound that failed it.
-    fn unsettledBound(self: *Checker, id: ExprId, end: ExprId) std.mem.Allocator.Error!TypeId {
-        _ = try self.report(
-            .t_range_place,
-            end,
-            "a range place's bounds settle where the place is formed",
-            .{},
-            "this is not settled here, and the place's length is what the bounds name",
-        );
+    /// [T-RangePlace]'s settling clause, reported once for the bracket with a
+    /// label at each bound that failed it: `end`, and `other` where both did.
+    ///
+    /// The help carries no fix. A run chosen while the program runs is read
+    /// through a `Slice` instead of an array, which changes the value's type
+    /// and so every use of it, and written element by element; which of those
+    /// the program wants is the reader's choice.
+    fn unsettledBounds(self: *Checker, id: ExprId, end: ExprId, other: ?ExprId) std.mem.Allocator.Error!TypeId {
+        const arena = self.sink.arena;
+        const labels = try arena.alloc(Label, if (other == null) 1 else 2);
+        labels[0] = .{
+            .file = self.ast.fileOfExpr(end),
+            .span = self.ast.exprSpan(end),
+            .message = "this is not settled here, and the place's length is what the bounds name",
+        };
+        if (other) |second| labels[1] = .{
+            .file = self.ast.fileOfExpr(second),
+            .span = self.ast.exprSpan(second),
+            .message = "nor is this",
+            .style = .secondary,
+        };
+        const notes = try arena.alloc([]const u8, 1);
+        notes[0] = "a run's length is part of its type, so it is fixed where the place is formed; " ++
+            "read a run chosen while the program runs through a view, `as_slice().subspan(start, count)`, " ++
+            "and write one element by element in a loop";
+        const before = self.sink.items().len;
+        try self.sink.add(.{
+            .severity = .err,
+            .code = .t_range_place,
+            .message = "a range place's bounds settle where the place is formed",
+            .labels = labels,
+            .notes = notes,
+        });
+        try self.explainShadowedHead(end, before);
+        _ = try self.record(end, .poison);
+        if (other) |second| _ = try self.record(second, .poison);
         return try self.record(id, .poison);
     }
 

@@ -1,0 +1,19 @@
+// Inside `head`, `task` is the parameter, so `task.default_stack_bytes` reads
+// the field the caller passed and settles no bound. The report says the name
+// is the parameter, not the module, and how to reach the module there.
+import std.task
+
+struct Plan {
+    default_stack_bytes: UInt64,
+}
+
+fn head(a: [UInt8; 4], task: Plan) -> [UInt8; 2] {
+    copy(a[0..task.default_stack_bytes])
+}
+
+fn main() -> UInt8 {
+    let a: [UInt8; 4] = [1, 2, 3, 4]
+    let _stack = task.default_stack_bytes
+    let two = head(a, Plan { default_stack_bytes = 2 })
+    two[0] + two[1]
+}
