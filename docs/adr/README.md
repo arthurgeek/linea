@@ -188,8 +188,9 @@ true of a different implementation.
 | [0188](0188-the-unit-value-is-written-as-its-type.md) | The unit value is written as its type is, `()` | Accepted; supersedes the unit-expression clause of 0140 |
 | [0223](0223-a-function-returning-nothing-writes-no-result.md) | A function returning nothing writes no result | Accepted |
 | [0178](0178-a-constant-is-a-static-place.md) | A constant is a static place | Accepted; supersedes the materialization clause of 0140; extends 0123 and 0147; extended by 0227 |
-| [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted; same-allocator `from_value` sentence superseded by 0286 |
+| [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted; same-allocator `from_value` sentence superseded by 0286; extended by 0292 |
 | [0286](0286-a-document-decodes-into-any-allocator.md) | A JSON document decodes into an allocator of its own | Accepted; supersedes the same-allocator `from_value` sentence of 0141 |
+| [0292](0292-json-lines-are-read-lazily-one-bounded-line-at-a-time.md) | JSON Lines are read lazily, one bounded line at a time, and a failed line is an item | Accepted; extends 0141 |
 | [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222; arena-memory clause superseded by 0263 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |

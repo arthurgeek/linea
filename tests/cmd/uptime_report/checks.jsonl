@@ -1,0 +1,8 @@
+{"service":"checkout","ok":true,"ms":120}
+{"service":"search","ok":true,"ms":38}
+{"service":"checkout","ok":false,"ms":2950}
+
+{"service":"search","ok":true}
+{"service":"search","ok":true,"ms":41
+{"service":"checkout","ok":true,"ms":134}
+{"service":"login","ok":false,"ms":5000}

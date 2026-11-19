@@ -917,7 +917,10 @@ The library tests itself.
   ok    json.a decode error runs out of memory only when an allocation failed
   ok    json.a decode error written without an allocator is the system error
   ok    json.a decode_file error shows its variant and converts through question mark
+  ok    json.a decoded reader counts the lines it read
+  ok    json.a decoded reader hands its reader back
   ok    json.a document renders into an arena
+  ok    json.a failing stream ends reading with the line it was reading
   ok    json.a file is decoded into a typed value
   ok    json.a file is decoded into an arena
   ok    json.a file is read and parsed into a document
@@ -925,6 +928,12 @@ The library tests itself.
   ok    json.a file larger than the parse limits is refused at the read
   ok    json.a file that is missing or malformed names the step that failed
   ok    json.a file that is not utf8 fails to parse as invalid utf8
+  ok    json.a final carriage return ends the last line as a crlf does
+  ok    json.a line past the input limit is skipped and reported
+  ok    json.a line that does not decode names its line and the field
+  ok    json.a line that is not utf8 is skipped and reported
+  ok    json.a lines error displays its line and its problem
+  ok    json.a malformed line names its line and reading continues
   ok    json.a max depth holds at most the hard depth
   ok    json.a max members holds at most the hard member count
   ok    json.a max number bytes holds at most the hard token length
@@ -932,6 +941,8 @@ The library tests itself.
   ok    json.a parse error displays its problem and the byte it stopped at
   ok    json.a parsed number keeps its token in an arena
   ok    json.a writer error converts into an encoding failure
+  ok    json.a zero input limit reports every line that is not blank
+  ok    json.abandon returns the reader past what was read ahead
   ok    json.an empty file fails to parse and a directory fails to read
   ok    json.an integer number keeps its token in an arena
   ok    json.an object decoder records its fields in an arena
@@ -955,6 +966,7 @@ The library tests itself.
   ok    json.boolean makes a boolean value without allocating
   ok    json.boolean writes true or false
   ok    json.configured limits accept the boundary and reject the next value
+  ok    json.crlf and a missing final newline end lines
   ok    json.decode allocates from the system allocator
   ok    json.decode allocates the record from an arena
   ok    json.decode error allocation failure releases owned path segments
@@ -963,6 +975,7 @@ The library tests itself.
   ok    json.decode errors held in a vector release in generic code
   ok    json.decode parses then decodes and reports a parse error
   ok    json.decoded string owns storage and settles allocation failure
+  ok    json.decoded yields typed values
   ok    json.decoding a file keeps read and decode failures distinct
   ok    json.decoding a file that is not utf8 fails to parse
   ok    json.derived record encoding uses field order and null option values
@@ -972,7 +985,9 @@ The library tests itself.
   ok    json.document round trips preserve structure independent of member order
   ok    json.duplicate decoded names are refused before their values
   ok    json.each allocation failure covers every segment of a field path
+  ok    json.each allocation failure is reported or read
   ok    json.elements borrow only an arrays children
+  ok    json.encoded lines read back as the values written
   ok    json.encoder bounds nested containers at 128
   ok    json.encoding errors preserve writer details in debug output
   ok    json.end_array closes only an array
@@ -1009,6 +1024,7 @@ The library tests itself.
   ok    json.json typed map settles owned keys values and collisions on each refusal
   ok    json.key is refused outside an object
   ok    json.kind names every kind of value
+  ok    json.line_number counts blank lines
   ok    json.malformed documents report the first unusable byte
   ok    json.member limit refuses new names and allows replacement
   ok    json.members walk only an objects entries
@@ -1033,7 +1049,10 @@ The library tests itself.
   ok    json.object makes an empty object without allocating
   ok    json.only an allocation failure is running out of memory
   ok    json.open accepts only an object
+  ok    json.open reads a document from each line
   ok    json.open reads an object with the system allocator
+  ok    json.open_in hands the reader back when no buffer is made
+  ok    json.open_in holds each line and document in an arena
   ok    json.optional decodes a present member and answers none for an absent one
   ok    json.parse allocates the document from the system allocator
   ok    json.parse_bytes allocates the document from the system allocator
@@ -1077,6 +1096,7 @@ The library tests itself.
   ok    json.unicode escapes cover each utf8 width boundary
   ok    json.value writes one value through its own codec
   ok    json.write preserves borrowed writer failures and the document
+  ok    json.write_line writes one document on one line
   ok    json.wrong kind insertion returns the complete subtree
   ok    json.zero limits are restrictions and container depth excludes scalars
   ok    log.a descriptor sink reports a refused line
@@ -1683,4 +1703,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1680 passed, 0 failed
+  1700 passed, 0 failed

@@ -69,18 +69,13 @@ fn main() -> UInt8 {
         return 1
     }
     var output = io.stdout()
-    let _ = write_settings(&output, settings) else |error| {
+    // `encode_line` writes the settings as one line of compact JSON.
+    let _ = json.encode_line(&output, settings) else |error| {
         defer error.release()
         io.eprintln("{error:?}")
         return 1
     }
     0
-}
-
-fn write_settings[A: Allocator, W: Writer](inout writer: W, settings: Settings[A]) -> Result[(), json.EncodeError[W.Error]] where carries(.Err: writer) {
-    json.encode(&writer, settings)?
-    &writer.write_str("\n")?
-    .Ok(())
 }
 
 @copyable
@@ -94,7 +89,7 @@ struct Disk {
 }
 
 // `type Error = DiskFailure` chooses this writer's error type, so `W.Error`
-// in `write_settings` means DiskFailure when it writes here.
+// in `json.encode_line` means DiskFailure when it writes here.
 impl Writer for Disk {
     type Error = DiskFailure
 
@@ -112,7 +107,7 @@ test "settings output stops at the first writer error" {
     defer let settings: Settings = json.decode(r#"{"name":"catalog","ports":[8080]}"#).unwrap()
     // One byte of room takes the opening `{`, and the next write does not fit.
     var disk = Disk { free = 1, attempts = 0 }
-    let result = write_settings(&disk, settings)
+    let result = json.encode_line(&disk, settings)
     testing.assert(match result { Err(Writer(_)) => true, _ => false }, "output failure was hidden")?
     testing.assert_eq(disk.attempts, 2, "output continued after failure")?
     testing.assert_eq(settings.name.view(), "catalog", "output failure changed the settings")?

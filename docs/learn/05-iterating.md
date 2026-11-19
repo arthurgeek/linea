@@ -12,7 +12,8 @@ operations that answer the common questions in one call: `sum`, `min`,
 totals with `scan` and looking ahead with `peekable`. The later sections
 cover the less common tools: collecting into a `Vec`, callbacks that
 keep their state, and collections of values that must be consumed, such as
-payments, and how to empty them one by one.
+payments, and how to empty them one by one. The last section reads a file of
+JSON records one line at a time.
 
 ## Walking with `for`
 
@@ -2152,6 +2153,175 @@ two payments, and that held payment, as an `Option`; the program refunds all
 three and finishes the drain. Rust's `Peekable` would drop a held value
 without a word; here the held payment has to go somewhere.
 
+## A file of records, one on each line: JSON Lines
+
+A log that grows one record at a time is often written as JSON Lines, also
+called NDJSON: one JSON document on each line. `json.Lines` reads one as an
+iterator. It reads the file a line at a time, only as the walk asks for the
+next item, so a log of any length takes the memory of its longest line.
+`decoded[T]()` turns it into an iterator of `T` values, decoding each line as
+`json.decode` would, much as Rust's `BufRead::lines` feeding `serde_json`
+does in two steps. Each item is a `Result`: a line that holds no reading
+gives an error naming the line, and the walk goes on with the next one:
+
+```linea
+import std.fs
+import std.io
+import std.json
+import std.mem
+
+// `json.Decode[A]` builds a `Reading` from each line of the log.
+@derive(Release, json.Decode[A])
+struct Reading[A: Allocator = mem.SystemAllocator] {
+    room: String[A],
+    celsius: Int64,
+}
+
+// Four readings, one on each line. The third is missing its temperature.
+let log =
+    \\{"room":"kitchen","celsius":21}
+    \\{"room":"hall","celsius":17}
+    \\{"room":"cellar"}
+    \\{"room":"attic","celsius":26}
+    \\
+
+// Print each reading the log holds, and each line that is not one.
+fn show(inout readings: json.DecodedLines[Reading, fs.File]) -> Result[(), io.IoError] {
+    for item in &readings {
+        match item {
+            Ok(reading) => {
+                defer reading.release()
+                io.println("{reading.room.view()}: {reading.celsius} C")?
+            },
+            // The error names the line and what is wrong with it.
+            Err(error) => {
+                defer error.release()
+                io.println("skipped {error}")?
+            },
+        }
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let path = fs.Path.from_str("readings.jsonl").unwrap()
+    let _ = fs.write_file(path, log.as_bytes(), policy: .CreateNew) else |error| {
+        io.println("could not write the log: {error}")?
+        return .Ok(1)
+    }
+    let file = fs.File.open(path) else |error| {
+        io.println("could not open the log: {error}")?
+        return .Ok(1)
+    }
+    // `Lines.open` reads the file a line at a time, as the walk asks for
+    // readings, and `decoded[Reading]()` decodes each line into a `Reading`.
+    let lines = json.Lines.open(file) else |failure| {
+        failure.release()
+        return .Ok(1)
+    }
+    var readings = lines.decoded[Reading]()
+    let shown = show(&readings)
+    // `abandon` stops reading and hands the file back to be closed.
+    readings.abandon().close()?
+    let _ = fs.remove_file(path) else |error| {
+        io.println("could not remove the log: {error}")?
+        return .Ok(1)
+    }
+    shown?
+    .Ok(0)
+}
+```
+
+```
+kitchen: 21 C
+hall: 17 C
+skipped line 3: missing field at $["celsius"]
+attic: 26 C
+```
+
+Each item is owned by the loop body, so both arms settle theirs: a reading
+owns its room's text, and an error owns the path of the field it names. The
+walk lends the iterator, `for item in &readings`, because `json.Lines` holds
+the open file and must be ended on purpose: `abandon` stops reading and hands
+the file back, here to be closed. A walk that ends early leaves the rest of
+the file unread.
+
+A line longer than the parse limits' `max_input_bytes`, 8 MiB unless
+`limits:` says otherwise, is skipped and reported as `input too long`, so no
+line makes the reader take more memory than that. The memory is bounded but
+the wait is not: a reading comes only once its line ends, so a stream that
+never sends a line feed is read to its end before the walk sees anything. On
+a network connection, `set_deadline` bounds that wait; a read past it fails,
+and the failure is the last item. A blank line gives no item
+but is still counted, so the numbers match what an editor shows. Without
+`decoded`, the items are `json.Value` documents. When the file itself cannot
+be read, that error is the last item. `json.Lines.open_in(allocator, file)`
+reads the lines, and builds the values, in another allocator.
+
+`json.encode_line` writes the other way: a value as compact JSON followed by a
+line feed. A line feed inside a string is written as `\n`, so the value always
+takes exactly one line. `json.write_line` does the same for a `json.Value`. A
+write that fails partway leaves part of a line behind, and the next line would
+be appended to it, so a program stops writing to that writer after a failure.
+Writing through a buffer saves a system call for each line, and `flush` hands
+what the buffer holds on when the reader at the other end should see it:
+
+```linea
+import std.io
+import std.json
+
+use io.ByteWriter
+
+// `json.Encode` writes a `Reading` as one JSON object.
+@derive(json.Encode)
+struct Reading {
+    room: Str,
+    celsius: Int64,
+}
+
+// Standard output, written through a buffer.
+alias Output = io.BufferedWriter[io.Descriptor]
+
+// Send each reading as one line of JSON as soon as it is taken.
+fn send(inout output: Output) -> Result[(), json.EncodeError[io.WriteFailure[io.IoError]]] {
+    let readings = [Reading { room = "kitchen", celsius = 21 }, Reading { room = "hall", celsius = 17 }]
+    for reading in readings {
+        // `encode_line` writes the reading as compact JSON and a line feed
+        // into the buffer.
+        json.encode_line(&output, reading)?
+        // `flush` hands the buffered line to standard output now, so a program
+        // reading this one sees each reading without waiting for the buffer
+        // to fill. It answers how many bytes it handed on, which this
+        // program does not need.
+        let _sent = &output.flush()?
+    }
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    var output = Output.open(capacity: 4096, writer: io.stdout()) else |_| {
+        return 1
+    }
+    let sent = send(&output)
+    let _stdout = output.finish().settled() else |_| {
+        return 1
+    }
+    match sent {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+```
+
+```
+{"room":"kitchen","celsius":21}
+{"room":"hall","celsius":17}
+```
+
+`flush` comes from the `io.ByteWriter` trait, which `use io.ByteWriter`
+brings into reach. `finish` flushes whatever is left and hands standard output
+back.
+
 ## What you have seen
 
 | You want | Write |
@@ -2189,6 +2359,8 @@ without a word; here the held payment has to go somewhere.
 | a vector's last element | `&v.pop()` |
 | a vector's elements, first to last | `v.drain()` |
 | to walk a drain of values that must be consumed | `var pending = v.drain()`, `for x in &pending`, then `pending.finish()` |
+| the records of a JSON Lines file, one at a time | `json.Lines.open(file)`, `.decoded[T]()`, `for item in &lines`, then `lines.abandon()` |
+| to write a value as one line of JSON | `json.encode_line(&writer, value)`, or `json.write_line` for a `json.Value` |
 
 The [payment batch](../../examples/payment_batch.lin) commits or declines a
 queue of payments with a lent walk, the [savings
@@ -2197,7 +2369,9 @@ manifest](../../examples/parcel_manifest.lin) filters and collects a shipment,
 the [upcoming leap years](../../examples/upcoming_leap_years.lin) are taken
 from a walk of years that never ends, and the [trail
 profile](../../examples/trail_profile.lin) reports a hike with `windows`,
-`scan`, `peekable` and `rev`.
+`scan`, `peekable` and `rev`. The [uptime report](../../examples/uptime_report.lin)
+reads a log of health checks as JSON Lines and writes a summary for each
+service the same way.
 
 Next: [Borrowing](06-borrowing.md) — the views that chains hand out, and the
 `borrows`, `carries` and `retains` clauses that say where a view points.
