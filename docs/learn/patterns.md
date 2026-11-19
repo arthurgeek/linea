@@ -388,6 +388,12 @@ options:
 Every run but the first and the last exits with status 64; `--help` exits
 with 0, and its help goes to standard output, where a reader can page it.
 
+The [unit converter](../../examples/unit_converter.lin) uses the three calls
+with subcommands: `length`, `weight` and `temperature` each convert a value
+between two units, `--help` after a command shows only that command's help,
+and `usage_error` refuses a negative length or a unit of the wrong kind, which
+the parse accepts as a number and as text.
+
 Flags, options with defaults, optional and variadic positionals, and
 subcommands keep their definitions in one place. The [notes example](../../examples/notes/)
 builds a multi-command CLI with table rendering, JSON export, and config
