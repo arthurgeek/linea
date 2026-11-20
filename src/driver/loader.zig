@@ -7562,6 +7562,9 @@ test "implementationChoice runs an array's selection through its slice view" {
     while (rows.next()) |row| {
         const choice = row.value_ptr.* orelse continue;
         if (typing.get(row.key_ptr.receiver) != .array) continue;
+        // A row the compiler provides for `Index` answers for the array
+        // itself, with no view; a range place over an array selects one.
+        if (choice.declaredImplementation()) |supplier| if (typing.implementations[supplier.index()].ambient) continue;
         viewed += 1;
         // The call is typed with the array; the implementation runs for its
         // view, an instance of the library's `Slice`.
