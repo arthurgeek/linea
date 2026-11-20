@@ -7554,18 +7554,27 @@ test "implementationChoice runs an array's selection through its slice view" {
     defer arena.deinit();
     const gpa = arena.allocator();
     var sink: Sink = .init(gpa);
-    const semantics = try checkedWithLibrary(&prefix, gpa, &sink, "fn main() -> UInt8 { if [UInt8(1), 2] == [UInt8(1), 2] { 0 } else { 1 } }");
+    // Calling `same` with two arrays discharges its `Equatable` bound for
+    // `[UInt8; 2]`, which selects the implementation the comparison runs.
+    const semantics = try checkedWithLibrary(&prefix, gpa, &sink,
+        \\fn same[T: Equatable](a: T, b: T) -> Bool { a == b }
+        \\
+        \\fn main() -> UInt8 { if same([UInt8(1), 2], [UInt8(1), 2]) { 0 } else { 1 } }
+    );
     try testing.expect(!sink.hasErrors());
     const typing = &semantics.typing;
-    var viewed: usize = 0;
+    var compared = false;
     var rows = typing.implementation_selections.rows.iterator();
     while (rows.next()) |row| {
         const choice = row.value_ptr.* orelse continue;
-        if (typing.get(row.key_ptr.receiver) != .array) continue;
+        const array = switch (typing.get(row.key_ptr.receiver)) {
+            .array => |array| array,
+            else => continue,
+        };
         // A row the compiler provides for `Index` answers for the array
         // itself, with no view; a range place over an array selects one.
         if (choice.declaredImplementation()) |supplier| if (typing.implementations[supplier.index()].ambient) continue;
-        viewed += 1;
+        if (array.element == .u8 and array.count == 2) compared = true;
         // The call is typed with the array; the implementation runs for its
         // view, an instance of the library's `Slice`.
         try testing.expectEqual(row.key_ptr.receiver, choice.receiver);
@@ -7573,7 +7582,9 @@ test "implementationChoice runs an array's selection through its slice view" {
         try testing.expectEqual(choice.view, choice.implementedFor());
         try testing.expectEqual(typing.raw_accesses.slice, typing.instanceOf(choice.view).?.decl);
     }
-    try testing.expect(viewed > 0);
+    // The program's own `[UInt8; 2]` is among the arrays answered through
+    // a view, not only the library's.
+    try testing.expect(compared);
 }
 
 test "the answer a fix adds after a body's last statement takes that statement's indentation and follows its comment" {
