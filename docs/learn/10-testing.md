@@ -661,13 +661,107 @@ refuses it.
 
 ## Testing a server
 
-A router is a handler, so a test sends it a request. `http.new_request` builds a
-request in an arena you provide, exactly as `serve` would, and the test hands
-it to the router with a context of its own, which reads the extractors a
-handler's parameters name and calls it. These tests are for the station
-server of [Networking](09-networking.md#reading-inputs-sharing-state-and-logging);
-add them to the end of `stations.lin`, with `import std.testing`,
-`use http.Handler` and `use mem.Lender` at the top:
+A router is a handler, so a test sends it a request, as `serve` does, without
+opening a socket. `serve` reads each request into an arena of its own, the
+handler builds its response there, and the arena is rewound once the response
+is written. `http.TestExchange` is that arena for a test:
+`http.TestExchange.open()` opens it under the limits `serve` uses unless it is
+given others with `limits:`, and `exchange.request(method, target, body:,
+content_type:)` builds the request a client would send in it. The body is sent
+with its `Content-Length`, and the handler reads it through its
+`http.RequestBody`, as it reads one from a connection. `&sent.send_to(&router,
+&state)` hands the request to the router:
+
+`greeting.lin`:
+
+```linea
+import std.http
+import std.testing
+
+// Answer `hello, NAME` for the name the query holds, and refuse a request
+// that names nobody.
+fn greet(inout _: (), request: http.Request, inout _body: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_body), retains(_body: _body) {
+    let name = request.query() else {
+        return .Err(http.error(request, .BadRequest, "say who to greet"))
+    }
+    http.text(request, "hello, {name}")
+}
+
+// Count the bytes of the text a client posted.
+fn measure(inout _: (), request: http.Request, inout body: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(body), retains(body: body) {
+    let text = &body.text(request)?
+    http.text(request, "{text.length()} bytes")
+}
+
+fn routes() -> http.Router[()] {
+    var router: http.Router[()] = http.Router.new()
+    &router.route_raw("GET /greet", greet).unwrap()
+    &router.route_raw("POST /measure", measure).unwrap()
+    router
+}
+
+test "a greeting names the visitor" {
+    defer var router = routes()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/greet?Ada").unwrap()
+    var nothing = ()
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    testing.assert_ok_eq(response.text(), "hello, Ada", "the greeting changed")?
+}
+
+test "a greeting for nobody is refused" {
+    defer var router = routes()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/greet").unwrap()
+    var nothing = ()
+    let refused = match &sent.send_to(&router, &nothing) {
+        Ok(_) => return testing.assert(false, "a greeting for nobody was answered"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
+    testing.assert_eq(refused.message(), Option.Some("say who to greet"), "the message changed")?
+}
+
+// The exchange holds the request to its limits as `serve` does, so a body
+// past `max_body_bytes` is refused with 413 when the handler reads it.
+test "a body past the limit is refused" {
+    defer var router = routes()
+    defer let exchange = http.TestExchange.open(limits: http.Limits { max_body_bytes = 4, ..http.Limits.default() })
+    defer var fits = exchange.request("POST", "/measure", body: "tea").unwrap()
+    defer var long = exchange.request("POST", "/measure", body: "coffee").unwrap()
+    var nothing = ()
+    let measured = &fits.send_to(&router, &nothing).unwrap()
+    testing.assert_ok_eq(measured.text(), "3 bytes", "the body changed")?
+    let refused = match &long.send_to(&router, &nothing) {
+        Ok(_) => return testing.assert(false, "a body past the limit was read"),
+        Err(error) => error,
+    }
+    testing.assert_eq(refused.status(), http.Status.ContentTooLarge, "the status changed")?
+}
+```
+
+```sh
+linea test greeting.lin
+```
+
+```
+ok    a body past the limit is refused
+ok    a greeting for nobody is refused
+ok    a greeting names the visitor
+
+3 passed, 0 failed
+```
+
+The request and the response live in the exchange's arena, and the response
+may view the request and its body, so the test reads the response while all
+three live. Each is released by `defer`, last bound first: the request, then
+the exchange. A test that reads the response after the exchange is released
+does not compile, as a handler that keeps a request past its response does
+not.
+
+These tests are for the station server of
+[Networking](09-networking.md#reading-inputs-sharing-state-and-logging); add
+them to the end of `stations.lin`, with `import std.testing` at the top:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea
@@ -684,11 +778,10 @@ test "a reading is recorded and counted" {
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let owner = task.own(App { readings = 0 }).unwrap()
     defer var ctx = quiet(owner)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
     &sent.add_header("Authorization", "Bearer harbour").unwrap()
-    defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&ctx, sent.request(), &incoming_1).unwrap()
+    let response = &sent.send_to(&router, &ctx).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"station":"harbour","sky":"clear","count":1}"#, "the answer changed")?
     let readings = ctx.app.call(|inout app: App| app.readings)
     testing.assert_eq(readings, 1, "the reading was not counted")?
@@ -700,10 +793,9 @@ test "a reading without a station is refused" {
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let owner = task.own(App { readings = 0 }).unwrap()
     defer var ctx = quiet(owner)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_2) {
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/readings", body: r#"{"celsius":21,"sky":"clear"}"#, content_type: "application/json").unwrap()
+    let refused = match &sent.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a reading without a station was accepted"),
         Err(error) => error,
     }
@@ -719,10 +811,9 @@ test "the outlook streams one line a day" {
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let owner = task.own(App { readings = 0 }).unwrap()
     defer var ctx = quiet(owner)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/outlook?days=2", body: "").unwrap()
-    defer var incoming_3 = http.RequestBody.from_request(sent.request())
-    let body = &router.serve_http(&ctx, sent.request(), &incoming_3).unwrap().recorded_body().unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/outlook?days=2").unwrap()
+    let body = &sent.send_to(&router, &ctx).unwrap().recorded_body().unwrap()
     testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "day 1: sunny\nday 2: sunny\n", "the outlook changed")?
 }
 
@@ -732,10 +823,9 @@ test "the root answers with the greeting" {
     routes(&router, "Weather stations report here.\n").unwrap()
     defer let owner = task.own(App { readings = 0 }).unwrap()
     defer var ctx = quiet(owner)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    defer var incoming_4 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&ctx, sent.request(), &incoming_4).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
+    let response = &sent.send_to(&router, &ctx).unwrap()
     testing.assert_ok_eq(response.text(), "Weather stations report here.\n", "the greeting changed")?
 }
 ```
@@ -758,7 +848,7 @@ A few things to notice:
   closes.
 - `&sent.add_header(name, value)` adds a header to a built request, and
   `content_type:` sets its `Content-Type`.
-- `&router.serve_http(&ctx, request, &incoming)` runs the router as `serve` does: it reads
+- `&sent.send_to(&router, &ctx)` runs the router as `serve` does: it reads
   the extractors `record` names and calls it, and the test then asks the
   owning task for `readings` with `ctx.app.call` to see what it changed.
 - `response.text()` reads a held body as text, and answers an error instead
@@ -767,8 +857,7 @@ A few things to notice:
 - `response.recorded_body()` runs a streamed body into the arena, so a test can
   read what a client would receive.
 - Every test goes through the router, so a handler's extractors, its path
-  values and its refusals are exercised as `serve` exercises them. `use
-  http.Handler` brings `serve_http` into scope.
+  values and its refusals are exercised as `serve` exercises them.
 
 No socket is opened, so these tests run anywhere, quickly. The [JSON echo
 server](../../examples/http-json-echo/main.lin) and the [countdown
@@ -855,8 +944,9 @@ ok    1\.5 rounds up to 2
   what was not given back.
 - `testing.SharedTestAllocator` counts and refuses allocations made from many
   tasks at once, so a server under test can be refused the memory it asks for.
-- A handler is tested by calling it with a request from `http.new_request`,
-  or through the router with `&router.serve_http`.
+- `http.TestExchange.open()` holds the arena `serve` gives one request,
+  `exchange.request(…)` builds a request in it under the same limits, and
+  `&sent.send_to(&router, &state)` hands it to a handler as `serve` does.
 
 That is the end of the guide. [Errors the guide shows](errors.md) indexes
 every error code the chapters show. The [language

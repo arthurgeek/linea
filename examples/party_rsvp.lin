@@ -13,11 +13,7 @@ import std.http
 import std.io
 import std.json
 import std.log
-import std.mem
 import std.testing
-
-use http.Handler
-use mem.Lender
 
 // The most guests one reply may bring.
 let most_guests: UInt32 = 4
@@ -99,11 +95,10 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 test "the invitation is an html form" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     var nothing = ()
-    defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let page = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
+    let page = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_eq(page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the page is not HTML")?
     testing.assert(page.text().unwrap().find("<form").is_some(), "the page holds no form")?
     // The test process has no `SCRIPT_NAME`, so the form posts to `/reply`.
@@ -113,11 +108,10 @@ test "the invitation is an html form" {
 test "a reply is confirmed as json" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/reply", body: "name=+Ada+&guests=2", content_type: "application/x-www-form-urlencoded").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/reply", body: "name=+Ada+&guests=2", content_type: "application/x-www-form-urlencoded").unwrap()
     var nothing = ()
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let confirmed = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
+    let confirmed = &sent.send_to(&router, &nothing).unwrap()
     let body = confirmed.text().unwrap()
     testing.assert(body.starts_with(r#"{"name":"Ada","guests":2,"message":"see you "#), "the confirmation changed")?
 }
@@ -125,13 +119,11 @@ test "a reply is confirmed as json" {
 test "a reply without a name or with too many guests is refused" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let unnamed = http.new_request(arena.handle(), "POST", "/reply", body: "name=&guests=1", content_type: "application/x-www-form-urlencoded").unwrap()
-    let crowded = http.new_request(arena.handle(), "POST", "/reply", body: "name=Ada&guests=9", content_type: "application/x-www-form-urlencoded").unwrap()
+    defer let exchange = http.TestExchange.open()
     var nothing = ()
-    for sent in [unnamed, crowded] {
-        defer var incoming_3 = http.RequestBody.from_request(sent.request())
-        let refused = match &router.serve_http(&nothing, sent.request(), &incoming_3) {
+    for form in ["name=&guests=1", "name=Ada&guests=9"] {
+        defer var sent = exchange.request("POST", "/reply", body: form, content_type: "application/x-www-form-urlencoded").unwrap()
+        let refused = match &sent.send_to(&router, &nothing) {
             Ok(_) => return testing.assert(false, "a reply that breaks a rule was confirmed"),
             Err(error) => error,
         }

@@ -1,6 +1,5 @@
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.testing
 import std.time
@@ -131,8 +130,8 @@ pub fn logged[H, S: log.Sink, A: Allocator](sink logger: log.Logger[S, A], sink 
 }
 
 test "an exchange is logged at the level its status calls for" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/items/7?full=1", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/items/7?full=1").unwrap()
     let request = sent.request()
     let broken = io.IoError { operation = .Write, category = .BrokenPipe, code = .None, progress = 0 }
     let file = log.capture()

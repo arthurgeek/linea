@@ -929,10 +929,11 @@ fn served[P: Allocator](inout router: Router[(), P], method: Str, target: Str) -
 // serves as the parent the request's arena is carved from; `serve` carves it
 // from the parent it is given, which need not be the router's allocator.
 fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, method: Str, target: Str) -> String[mem.SystemAllocator] {
-    let arena = mem.Arena.open(router.allocator, size: 65536)
-    let sent = new_request(arena.handle(), method, target, body: "").unwrap()
-    var request_body1: RequestBody[P] = RequestBody.from_request(sent.request())
-    let described = match &router.serve_http(&state, sent.request(), &request_body1) {
+    // An arena over an arena takes its whole size from it, so this one is
+    // 64 KiB, within the routers' parent arenas.
+    defer let exchange = TestExchange.open_in(router.allocator, limits: Limits { request_arena_bytes = 65536, ..Limits.default() })
+    defer var sent = exchange.request(method, target).unwrap()
+    let described = match &sent.send_to(&router, &state) {
         Ok(response) => {
             let code = response.status().code()
             let body = response.text().unwrap()
@@ -947,8 +948,6 @@ fn served_with[P: Allocator, S](inout router: Router[S, P], inout state: S, meth
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
-    request_body1.release()
-    arena.release()
     described
 }
 

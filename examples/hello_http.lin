@@ -10,11 +10,6 @@ import std.mem
 import std.net
 import std.testing
 
-// `use` brings a trait's operations into scope; the tests call `arena.handle()`,
-// which `Lender` declares, and `router.serve_http`, which `Handler` declares.
-use http.Handler
-use mem.Lender
-
 // `Message` is the JSON object POST /echo expects. `json.Decode[A]` builds one
 // from a document and refuses an object that lacks `text`, gives it the wrong
 // kind of value, or has a field `Message` does not. `mem.Handle` is the memory
@@ -71,23 +66,21 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 test "health answers ok" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/health", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/health").unwrap()
     var nothing = ()
-    defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "ok", "the health answer changed")?
 }
 
 test "echo answers the text it was sent" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), "POST", "/echo", r#"{"text":"hello"}"#).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/echo", r#"{"text":"hello"}"#).unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
     testing.assert_ok_eq(response.text(), r#"{"echo":"hello"}"#, "the echo changed")?
 }
@@ -95,12 +88,11 @@ test "echo answers the text it was sent" {
 test "echo refuses a body without text" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), "POST", "/echo", r"{}").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/echo", r"{}").unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
-    defer var incoming_3 = http.RequestBody.from_request(sent.request())
-    let refused = match &router.serve_http(&nothing, sent.request(), &incoming_3) {
+    let refused = match &sent.send_to(&router, &nothing) {
         Ok(_) => return testing.assert(false, "a message without text was answered"),
         Err(error) => error,
     }

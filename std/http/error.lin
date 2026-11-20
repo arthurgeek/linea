@@ -82,8 +82,8 @@ impl[P: Allocator] Error[P] {
     }
 
     test "an error sends the headers it is given" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var refused = error(sent.request(), .Unauthorized, "who are you?")
         testing.assert_eq(refused.header("WWW-Authenticate"), .None, "a new error had a header")?
         &refused.set_header(sent.request(), "WWW-Authenticate", "Basic").unwrap()
@@ -105,8 +105,8 @@ impl[P: Allocator] Error[P] {
     }
 
     test "header compares names under ascii case folding" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var busy = error(sent.request(), .ServiceUnavailable, "try again soon")
         &busy.set_header(sent.request(), "Retry-After", "5").unwrap()
         testing.assert_eq(busy.header("retry-after"), Option.Some("5"), "a header name matched only in its own case")?
@@ -128,8 +128,8 @@ pub fn error[P: Allocator, M: Display](request: Request[P], status: Status, mess
 }
 
 test "an error renders its message into the arena" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "PUT", "/items/7", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("PUT", "/items/7").unwrap()
     let request = sent.request()
     let method = request.method_text()
     let error = error(request, .MethodNotAllowed, "only GET, not {method}")
@@ -141,8 +141,8 @@ test "an error renders its message into the arena" {
 // A message the arena cannot hold leaves the status with its reason phrase.
 test "an error whose message does not fit keeps its status" {
     // The request's head fills eight of this arena's 56 usable bytes.
-    defer let arena = mem.Arena.open(mem.system(), size: 64)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 64, ..Limits.default() })
+    defer var sent = exchange.request("GET", "/").unwrap()
     defer let long = Vec.filled(512, UInt8(120)).unwrap()
     let error = error(sent.request(), .BadRequest, Str.from_bytes(long.as_slice()).unwrap())
     testing.assert_eq(error.status(), Status.BadRequest, "the status changed")?
@@ -151,8 +151,8 @@ test "an error whose message does not fit keeps its status" {
 }
 
 test "an error reads its status and message" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     let explained = error(sent.request(), .Forbidden, "no entry")
     let bare: Error = Error.new(.Forbidden)
     testing.assert_eq(explained.status(), Status.Forbidden, "the status changed")?
@@ -180,8 +180,8 @@ impl[P: Allocator] Display for Error[P] {
 }
 
 test "an error displays its status and message" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "POST", "/echo", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/echo").unwrap()
     let plain: Error = Error.new(.NotFound)
     let unnamed: Error = Error.new(.Other(Code(299)))
     let explained = error(sent.request(), .BadRequest, "the body is not JSON")

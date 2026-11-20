@@ -11,9 +11,6 @@ import std.log
 import std.mem
 import std.testing
 
-use http.Handler
-use mem.Lender
-
 // `embed` keeps the text of `page.html`, beside this file, in the program. A
 // page is UTF-8 text, so it is a `Str`.
 let page = embed("page.html")
@@ -57,11 +54,10 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 test "the icon is answered byte for byte" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/favicon.ico", body: "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/favicon.ico").unwrap()
     var nothing = ()
-    defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let answer = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
+    let answer = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_eq(answer.header("Content-Type"), Option.Some("image/x-icon"), "the icon is not an icon")?
     let body = answer.body().unwrap()
     testing.assert_eq(body.length(), favicon.length(), "the icon lost bytes")?
@@ -72,11 +68,10 @@ test "the icon is answered byte for byte" {
 test "the page names the icon" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     var nothing = ()
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let answer = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
+    let answer = &sent.send_to(&router, &nothing).unwrap()
     testing.assert(answer.text().unwrap().find(r#"<link rel="icon" href="favicon.ico""#).is_some(), "the page names no icon")?
 }
 

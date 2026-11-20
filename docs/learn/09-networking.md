@@ -1234,9 +1234,6 @@ second time. `http.redirect` builds the redirect response:
 ```linea
 import std.http
 import std.io
-import std.mem
-
-use mem.Lender
 
 // A posted form is answered with 303, so the browser fetches `/` next with a GET.
 fn signed(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
@@ -1244,10 +1241,15 @@ fn signed(request: http.Request, inout _incoming: http.RequestBody) -> Result[ht
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
-    defer var incoming = http.RequestBody.from_request(sent.request())
-    let response = signed(sent.request(), &incoming).unwrap()
+    // `http.TestExchange` holds the arena `serve` gives one request, and
+    // `request` builds the request a client would send in it.
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/sign").unwrap()
+    // A function of a request and its body is a handler, and `send_to` hands
+    // it the request as `serve` would, with `()` for the state it takes.
+    var handler = signed
+    var nothing = ()
+    let response = &sent.send_to(&handler, &nothing).unwrap()
     let status = response.status()
     io.println("{status.code()} {status.reason()}, Location: {response.header("Location").unwrap()}")?
     .Ok(0)
@@ -1274,10 +1276,6 @@ tests a handler:
 ```linea
 import std.http
 import std.io
-import std.mem
-
-use http.Handler
-use mem.Lender
 
 // Everything this handler builds comes from `request.allocator()`, the
 // request's arena, so it releases nothing.
@@ -1297,17 +1295,17 @@ fn main() -> Result[UInt8, io.IoError] {
     }
     // `serve` does this for every request: carve an arena, read the request
     // into it, run the handler, write the response, and rewind the arena.
-    defer var arena = mem.Arena.open(mem.system(), size: 65536)
+    // Each pass of the loop opens an `http.TestExchange`, the arena of one
+    // request, and releases it when the pass ends.
     // The router's state is `()`, so the loop passes its one value, `()`.
     var nothing = ()
     let paths = ["/receipt/tea", "/receipt/scones"]
     for path in paths {
-        &arena.rewind()
-        let sent = http.new_request(arena.handle(), "GET", path, body: "") else |_| {
+        defer let exchange = http.TestExchange.open()
+        defer var sent = exchange.request("GET", path) else |_| {
             return .Ok(1)
         }
-        defer var incoming_1 = http.RequestBody.from_request(sent.request())
-        let response = &router.serve_http(&nothing, sent.request(), &incoming_1) else |_| {
+        let response = &sent.send_to(&router, &nothing) else |_| {
             return .Ok(1)
         }
         // `text()` reads the held body as text.
@@ -1335,32 +1333,71 @@ arena, so the body, and the response `http.bytes` wraps around it, live there.
 string ([Text](08-text.md#an-interpolation-is-a-value-not-a-str) explains why
 an interpolation is written this way rather than passed to `append`).
 
-The loop in `main` plays `serve`. `http.new_request` builds a request in the
-arena, and `&router.serve_http(&state, request, &incoming)` runs the router on it, as
-`serve` does for each connection; `serve_http` belongs to the `http.Handler`
-trait, hence `use http.Handler`. This router has no state, so the loop passes
-`()`, the unit type's one value, from a `var`, because the state is lent
-`inout`.
+The loop in `main` plays `serve`. `http.TestExchange.open()` opens the arena
+`serve` gives one request, as large as `serve`'s limits allow, and
+`exchange.request(method, target)` builds the request a client would send in
+it, held to the same limits. `&sent.send_to(&router, &state)` runs the router on
+it, as `serve` does for each connection: the router reads the request and the
+body it was sent with. The request holds the body the handler reads, so it is
+released like the exchange, here with `defer`. This router has no state, so the
+loop passes `()`, the unit type's one value, from a `var`, because the state is
+lent `inout`.
 `response.text()` reads the body held in the arena as text, and `io.print`
 writes that text without adding a line break. It answers an error for a
 streamed body, which exists only as it is written, and for bytes that are not
 UTF-8; `unwrap()` is right here because this router only holds text.
 
-The rewind protects every request the way it protected `first` in
-[Memory](07-memory.md#rewinding-one-arena-used-again-and-again). Build a
-request before the loop and read its path after the loop:
+Releasing the exchange at the end of each pass protects every request the way
+rewinding protected `first` in
+[Memory](07-memory.md#rewinding-one-arena-used-again-and-again). Keep the last
+receipt's text in a variable declared before the loop, and print it after:
 
-<!-- guide: unchecked the error an edit of the program above produces -->
+<!-- guide: edit after 26 let paths = ["/receipt/tea", "/receipt/scones"] -->
+```linea
+    var last = ""
+```
+
+<!-- guide: edit 38 io.print(body)? -->
+```linea
+        last = body
+```
+
+<!-- guide: edit 40 .Ok(0) -->
+```linea
+    io.print(last)?
+    .Ok(0)
+```
+
 ```
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
-  --> request_kept.lin:37:9
+  --> request_kept.lin:29:19
    |
-37 |         &arena.rewind()
-   |         ^^^^^^^^^^^^^^^ keep this place available until the last use of its observation
-49 |     io.println(first.request().path())?
-   |                ----- the observation is still used here
+29 |         defer let exchange = http.TestExchange.open()
+   |                   ^^^^^^^^ keep this place available until the last use of its observation
+41 |     io.print(last)?
+   |              ---- the observation is still used here
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> request_kept.lin:30:19
+   |
+30 |         defer var sent = exchange.request("GET", path) else |_| {
+   |                   ^^^^ keep this place available until the last use of its observation
+41 |     io.print(last)?
+   |              ---- the observation is still used here
+error[O-Borrow]: `response` ends while a value borrowing it is still used
+  --> request_kept.lin:40:5
+   |
+39 |         last = body
+   |                ---- borrowed here
+40 |     }
+   |     ^ `response` ends here
+41 |     io.print(last)?
+   |              ---- the observation is still used here
+   |
+   = help: keep the borrowing value inside the scope, or declare what it borrows outside it
 ```
 
+The text lives in the exchange's arena and may view the request, so neither
+can end while `last` is still read.
 Inside `serve`, the same check means a handler cannot keep a request's text or
 a response past the request it belongs to: the program would not compile.
 
@@ -1752,13 +1789,10 @@ browser to delete one, as the second program below shows.
 ```linea
 import std.http
 import std.io
-import std.mem
-
-use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    var sent = http.new_request(arena.handle(), "GET", "/", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     &sent.add_header("Cookie", "theme=dark; visits=3").unwrap()
     let request = sent.request()
 
@@ -1799,13 +1833,10 @@ went in.
 ```linea
 import std.http
 import std.io
-import std.mem
-
-use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let signing = http.new_request(arena.handle(), "POST", "/sign", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var signing = exchange.request("POST", "/sign").unwrap()
     var response = http.text(signing.request(), "signed").unwrap()
     &response.set_cookie("name", "Zoë Lovelace <b>", path: "/").unwrap()
     let header = response.header("Set-Cookie").unwrap()
@@ -1813,7 +1844,7 @@ fn main() -> Result[UInt8, io.IoError] {
 
     // The browser sends back the pair before the first `;` on the next visit.
     let (pair, _attributes) = header.split_once("; ").unwrap()
-    var visit = http.new_request(arena.handle(), "GET", "/", "").unwrap()
+    defer var visit = exchange.request("GET", "/").unwrap()
     &visit.add_header("Cookie", pair).unwrap()
     let name = visit.request().cookie("name").unwrap().unwrap()
     io.println("welcome back, {name}")?
@@ -1856,13 +1887,10 @@ handler that signs a visitor out clears both of its cookies:
 ```linea
 import std.http
 import std.io
-import std.mem
-
-use mem.Lender
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = http.new_request(arena.handle(), "POST", "/logout", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/logout").unwrap()
     let request = sent.request()
 
     // The theme cookie was set with `path: "/app", domain: "example.com"`.
@@ -1913,9 +1941,6 @@ import std.io
 import std.json
 import std.mem
 
-use http.Handler
-use mem.Lender
-
 @derive(Release, json.Decode[mem.Handle])
 struct Note {
     text: String[mem.Handle],
@@ -1944,14 +1969,12 @@ fn main() -> Result[UInt8, io.IoError] {
     if &router.route("POST /echo", echo).is_err() {
         return .Ok(2)
     }
-    var arena = mem.Arena.open(mem.system(), size: 65536)
-    defer arena.release()
+    defer let exchange = http.TestExchange.open()
     var nothing = ()
-    let sent = http.new_request(arena.handle(), "POST", "/echo", body: r#"{"text": "hello"}"#, content_type: "application/json") else |_| {
+    defer var sent = exchange.request("POST", "/echo", body: r#"{"text": "hello"}"#, content_type: "application/json") else |_| {
         return .Ok(1)
     }
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_2) else |_| {
+    let response = &sent.send_to(&router, &nothing) else |_| {
         return .Ok(1)
     }
     io.println(response.text().unwrap())?
@@ -2034,13 +2057,11 @@ an error. This handler counts the bytes without collecting them:
 ```linea
 import std.http
 import std.io
-import std.mem
 import std.testing
 
 use io.Reader
-use mem.Lender
 
-fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+fn count(request: http.Request, inout incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(incoming), retains(incoming: incoming) {
     var buffer = request.allocator().acquire(4096)?
     var total: UInt64 = 0
     loop {
@@ -2054,10 +2075,11 @@ fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBod
 }
 
 test "an upload is counted without collecting it" {
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/count", body: "").unwrap()
-    defer var incoming = http.RequestBody.from_slice("hello".as_bytes(), arena.handle())
-    let response = count(sent.request(), &incoming).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/count", body: "hello").unwrap()
+    var handler = count
+    var nothing = ()
+    let response = &sent.send_to(&handler, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "5 bytes", "the upload length changed")?
 }
 ```
@@ -2068,8 +2090,11 @@ ok    an upload is counted without collecting it
 1 passed, 0 failed
 ```
 
-Register this shape with `route_raw` by adding its leading `inout state`
-parameter. A route that wants the whole body instead calls
+The test sends `count` a request whose body is `hello`, built in an
+`http.TestExchange` as [Testing](10-testing.md#testing-a-server) shows: a
+function of a request and its body is a handler, so `send_to` hands it the
+request from a `var`, with `()` for its state. Register this shape with
+`route_raw` by adding its leading `inout state` parameter. A route that wants the whole body instead calls
 `&incoming.read_all(request)` for bytes or `&incoming.text(request)` for UTF-8
 text. These calls cache the remaining body; bytes already consumed by `read_some`
 are excluded. Repeated calls return the same cached view. `&incoming.materialize(request)` returns request metadata viewing that
@@ -2537,8 +2562,9 @@ application that runs both ways and stores its entries in SQLite.
 - `http.percent_encoded(text)` writes text safely into a path segment, a
   query value or a cookie, and `http.percent_decode` reads it back, refusing
   a malformed `%`.
-- Every request lives in an arena that `serve` rewinds; `http.new_request`
-  and `&router.serve_http(&state, request, &incoming)` drive the same steps by hand.
+- Every request lives in an arena that `serve` rewinds; `http.TestExchange`
+  holds one such arena, `exchange.request(…)` builds a request in it, and
+  `&sent.send_to(&router, &state)` drives the same steps by hand.
 - `listen_and_serve_with` keeps the state in an owning task, gives each
   serving task a client of it, and returns it when serving ends; a route
   reaches it through `call`. `listen_and_serve` serves a service that shares

@@ -4,7 +4,7 @@ import std.net
 import std.testing
 
 // The source owns the connection between requests. An in-memory body borrows
-// the bytes supplied by a constructed request or a test.
+// the bytes a CGI request was read with or a test request was sent with.
 enum BodySource {
     Held(mem.Slice[UInt8]),
     Reading(io.BufferedReader[net.Connection, mem.SystemAllocator]),
@@ -37,17 +37,16 @@ struct RequestBody[P: Allocator = mem.SystemAllocator] {
 }
 
 impl[P: Allocator] RequestBody[P] {
-    // Make an in-memory body over bytes whose owner remains live.
-    pub fn from_slice(bytes: mem.Slice[UInt8], memory: mem.Handle[P]) -> Self where carries(bytes, memory) {
-        .{ source = .Held(copy(bytes)), memory = copy(memory), cursor = 0, remaining = bytes.length(), failure = .None, limits = Limits.default(), cache = .None }
-    }
-
-    // Constructed messages lend their bytes and arena to the explicit body.
-    // Keep the limits used to parse the message when materializing its form.
-    pub fn from_request(request: Request[P], limits: Limits = standard_limits) -> Self where carries(request) {
-        var body = RequestBody.from_slice(request.body(), request.allocator())
-        body.limits = copy(limits)
-        body
+    // Make an in-memory body over `bytes`, whose owner outlives the body,
+    // bounded by `limits` as a body read from a connection is: one longer than
+    // `max_body_bytes` is refused with 413 when it is read.
+    fn from_held(bytes: mem.Slice[UInt8], memory: mem.Handle[P], limits: Limits) -> Self where carries(bytes, memory) {
+        let failure: Option[RequestError] = if bytes.length() > limits.max_body_bytes {
+            .Some(.Status(.ContentTooLarge))
+        } else {
+            .None
+        }
+        .{ source = .Held(copy(bytes)), memory = copy(memory), cursor = 0, remaining = bytes.length(), failure, limits = copy(limits), cache = .None }
     }
 
     // Move the buffered connection into a body bounded by its canonical length.
@@ -290,7 +289,7 @@ impl[P: Allocator] Release for RequestBody[P] {
 // keeps their owner alive until every response viewing them has been written.
 test "a body reader advances and stops at its boundary" {
     defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    defer var body = RequestBody.from_slice("hello".as_bytes(), arena.handle())
+    defer var body = RequestBody.from_held("hello".as_bytes(), arena.handle(), Limits.default())
     defer var bytes = mem.system().acquire(8).unwrap()
     let first = &body.read_some(&bytes, offset: 1, count: 2).unwrap()
     let second = &body.read_some(&bytes, offset: 3, count: 5).unwrap()
@@ -304,15 +303,15 @@ test "a body reader advances and stops at its boundary" {
 }
 
 test "materializing a body keeps its bytes for repeated readers" {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "POST", "/", body: "").unwrap()
-    defer var body = RequestBody.from_slice("hello".as_bytes(), arena.handle())
-    let first = &body.read_all(sent.request()).unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/", body: "hello").unwrap()
+    let request = sent.message.request()
+    let first = &sent.body.read_all(request).unwrap()
     let first_length = first.length()
-    let second = &body.read_all(sent.request()).unwrap()
+    let second = &sent.body.read_all(request).unwrap()
     testing.assert_eq(first_length, UInt64(5), "the materialized body changed length")?
     testing.assert_eq(second, "hello".as_bytes(), "materialization consumed the cached body")?
-    testing.assert_eq(body.remaining_bytes(), UInt64(0), "materialization left stream bytes unread")?
+    testing.assert_eq(sent.body.remaining_bytes(), UInt64(0), "materialization left stream bytes unread")?
     .Ok(())
 }
 
@@ -359,13 +358,13 @@ test "a truncated socket body reports a sticky bad request" {
 }
 
 test "an empty body materializes without arena headroom" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 4096, ..Limits.default() })
+    defer var sent = exchange.request("GET", "/").unwrap()
+    let request = sent.message.request()
     // Reservations remain in the arena until its rewind, so consume every
     // aligned slot before asking to cache an empty body.
-    while arena.handle().acquire(8).is_ok() {}
-    defer var body = RequestBody.from_slice("".as_bytes(), arena.handle())
-    let length = &body.read_all(sent.request()).unwrap().length()
+    while request.allocator().acquire(8).is_ok() {}
+    let length = &sent.body.read_all(request).unwrap().length()
     testing.assert_eq(length, UInt64(0), "materializing an empty body needed an allocation")?
     .Ok(())
 }

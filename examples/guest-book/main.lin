@@ -20,9 +20,7 @@ import std.process
 import std.testing
 
 use book.BookError
-use http.Handler
 use iter.Iterator
-use mem.Lender
 use page.Page
 use store.Store
 
@@ -72,7 +70,7 @@ test "the longest non ascii signature fits the body limit" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("the_longest_non_ascii_signature_fits_the_body_limit").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+    defer let exchange = http.TestExchange.open()
 
     // `😀` is four bytes of UTF-8, and a form writes each byte as `%XX`, so a
     // name of 60 and a message of 500 of them is the longest body a form sends.
@@ -87,10 +85,9 @@ test "the longest non ascii signature fits the body limit" {
     defer var body = String.new()
     "name={http.percent_encoded(name.view())}&message={http.percent_encoded(message.view())}".fmt(&body).unwrap()
     testing.assert_eq(body.length(), limits().max_body_bytes, "the longest signature does not fill the body limit")?
-    var longest = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var longest = exchange.request("POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &longest.add_header("Host", "example.test").unwrap()
-    defer var incoming_1 = http.RequestBody.from_request(longest.request())
-    let accepted = &router.serve_http(&app, longest.request(), &incoming_1).unwrap()
+    let accepted = &longest.send_to(&router, &app).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "the longest non-ASCII signature was refused")?
     .Ok(())
 }
@@ -273,10 +270,9 @@ test "signing redirects sets a cookie and renders on the home page" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("signing_redirects_sets_a_cookie_and_renders_on_the_home_page").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+    defer let exchange = http.TestExchange.open()
 
-    var post = http.new_request(
-        arena.handle(),
+    defer var post = exchange.request(
         "POST",
         "/sign",
         body: "name=Ren%C3%A9+%3Cscript%3E&message=Hello+%26+welcome",
@@ -285,17 +281,15 @@ test "signing redirects sets a cookie and renders on the home page" {
     &post.add_header("Host", "example.test").unwrap()
     &post.add_header("Origin", "http://example.test").unwrap()
     &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
-    defer var incoming_2 = http.RequestBody.from_request(post.request())
-    let redirect = &router.serve_http(&app, post.request(), &incoming_2).unwrap()
+    let redirect = &post.send_to(&router, &app).unwrap()
     testing.assert_eq(redirect.status(), http.Status.SeeOther, "POST /sign did not answer 303")?
     testing.assert_eq(redirect.header("Location"), Option.Some("/"), "Location header changed")?
     let set_cookie = redirect.header("Set-Cookie").unwrap()
     let (cookie_pair, _) = set_cookie.split_once(";").unwrap()
 
-    var get = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer var get = exchange.request("GET", "/").unwrap()
     &get.add_header("Cookie", cookie_pair).unwrap()
-    defer var incoming_3 = http.RequestBody.from_request(get.request())
-    let home_page = &router.serve_http(&app, get.request(), &incoming_3).unwrap()
+    let home_page = &get.send_to(&router, &app).unwrap()
     testing.assert_eq(home_page.status(), http.Status.Ok, "GET / did not answer 200")?
     testing.assert_eq(home_page.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "Content-Type was not HTML")?
     let html_body = home_page.text().unwrap()
@@ -310,7 +304,7 @@ test "exact length boundaries are accepted and one scalar past is refused" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+    defer let exchange = http.TestExchange.open()
 
     // 60 scalars (including a two-byte UTF-8 `é`) and 500 scalars are accepted.
     defer var ok_name = String.new()
@@ -324,11 +318,10 @@ test "exact length boundaries are accepted and one scalar past is refused" {
     }
     defer var ok_body = String.new()
     "name={http.percent_encoded(ok_name.view())}&message={ok_msg.view()}".fmt(&ok_body).unwrap()
-    var at_limit = http.new_request(arena.handle(), "POST", "/sign", body: ok_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var at_limit = exchange.request("POST", "/sign", body: ok_body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &at_limit.add_header("Host", "example.test").unwrap()
     &at_limit.add_header("Origin", "http://example.test").unwrap()
-    defer var incoming_4 = http.RequestBody.from_request(at_limit.request())
-    let accepted = &router.serve_http(&app, at_limit.request(), &incoming_4).unwrap()
+    let accepted = &at_limit.send_to(&router, &app).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "exact scalar limits were refused")?
 
     // 61 scalars for name and 501 for message: refused with 422.
@@ -336,17 +329,10 @@ test "exact length boundaries are accepted and one scalar past is refused" {
     "name={http.percent_encoded(ok_name.view())}a&message=hello".fmt(&over_name).unwrap()
     defer var over_msg = String.new()
     "name=Ada&message={ok_msg.view()}m".fmt(&over_msg).unwrap()
-    var empty_name = http.new_request(arena.handle(), "POST", "/sign", body: "name=+++&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &empty_name.add_header("Host", "example.test").unwrap()
-    var empty_message = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=+++", content_type: "application/x-www-form-urlencoded").unwrap()
-    &empty_message.add_header("Host", "example.test").unwrap()
-    var long_name = http.new_request(arena.handle(), "POST", "/sign", body: over_name.view(), content_type: "application/x-www-form-urlencoded").unwrap()
-    &long_name.add_header("Host", "example.test").unwrap()
-    var long_message = http.new_request(arena.handle(), "POST", "/sign", body: over_msg.view(), content_type: "application/x-www-form-urlencoded").unwrap()
-    &long_message.add_header("Host", "example.test").unwrap()
-    for sent in [empty_name, empty_message, long_name, long_message] {
-        defer var incoming_5 = http.RequestBody.from_request(sent.request())
-        let refused = match &router.serve_http(&app, sent.request(), &incoming_5) {
+    for body in ["name=+++&message=hi", "name=Ada&message=+++", over_name.view(), over_msg.view()] {
+        defer var sent = exchange.request("POST", "/sign", body, content_type: "application/x-www-form-urlencoded").unwrap()
+        &sent.add_header("Host", "example.test").unwrap()
+        let refused = match &sent.send_to(&router, &app) {
             Ok(_) => return testing.assert(false, "an invalid signature was accepted"),
             Err(error) => error,
         }
@@ -360,7 +346,7 @@ test "control and format characters are refused and line breaks in a message are
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("control_and_format_characters_are_refused_and_line_breaks_in_a_message_are_kept").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+    defer let exchange = http.TestExchange.open()
 
     let refused_bodies = [
         "name=a%00b&message=hi",
@@ -383,10 +369,9 @@ test "control and format characters are refused and line breaks in a message are
         "name=Ada&message=a%E2%80%8Eb",
     ]
     for read body in refused_bodies {
-        var sent = http.new_request(arena.handle(), "POST", "/sign", body: body, content_type: "application/x-www-form-urlencoded").unwrap()
+        defer var sent = exchange.request("POST", "/sign", body: body, content_type: "application/x-www-form-urlencoded").unwrap()
         &sent.add_header("Host", "example.test").unwrap()
-        defer var incoming_6 = http.RequestBody.from_request(sent.request())
-        let refused = match &router.serve_http(&app, sent.request(), &incoming_6) {
+        let refused = match &sent.send_to(&router, &app) {
             Ok(_) => return testing.assert(false, "a control character was accepted"),
             Err(error) => error,
         }
@@ -395,14 +380,12 @@ test "control and format characters are refused and line breaks in a message are
 
     // A browser sends a line break as CRLF; the message stores it as LF, as
     // it stores a lone CR.
-    var lines = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=one%0D%0Atwo%09three%0Dfour", content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var lines = exchange.request("POST", "/sign", body: "name=Ada&message=one%0D%0Atwo%09three%0Dfour", content_type: "application/x-www-form-urlencoded").unwrap()
     &lines.add_header("Host", "example.test").unwrap()
-    defer var incoming_7 = http.RequestBody.from_request(lines.request())
-    let accepted = &router.serve_http(&app, lines.request(), &incoming_7).unwrap()
+    let accepted = &lines.send_to(&router, &app).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "a message with line breaks and a tab was refused")?
-    var get = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    defer var incoming_8 = http.RequestBody.from_request(get.request())
-    let home_page = &router.serve_http(&app, get.request(), &incoming_8).unwrap()
+    defer var get = exchange.request("GET", "/").unwrap()
+    let home_page = &get.send_to(&router, &app).unwrap()
     let html_body = home_page.text().unwrap()
     testing.assert(html_body.find("<p>one\ntwo\tthree\nfour</p>").is_some(), "the message did not keep its line breaks as LF and its tab")?
     .Ok(())
@@ -413,7 +396,7 @@ test "a line break counts once towards the message limit" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("a_line_break_counts_once_towards_the_message_limit").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+    defer let exchange = http.TestExchange.open()
 
     // 250 lines of `a`, each ended by the CRLF a browser sends, are 500
     // characters as the form's `maxlength` counts them.
@@ -422,10 +405,9 @@ test "a line break counts once towards the message limit" {
     for _ in 0..250 {
         &body.append("a%0D%0A").unwrap()
     }
-    var lines = http.new_request(arena.handle(), "POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var lines = exchange.request("POST", "/sign", body: body.view(), content_type: "application/x-www-form-urlencoded").unwrap()
     &lines.add_header("Host", "example.test").unwrap()
-    defer var incoming_9 = http.RequestBody.from_request(lines.request())
-    let accepted = &router.serve_http(&app, lines.request(), &incoming_9).unwrap()
+    let accepted = &lines.send_to(&router, &app).unwrap()
     testing.assert_eq(accepted.status(), http.Status.SeeOther, "a message of 500 characters with CRLF line breaks was refused")?
     .Ok(())
 }
@@ -435,56 +417,34 @@ test "origin and fetch site spoofing attempts answer 403" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("origin_and_fetch_site_spoofing_attempts_answer_403").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 131072)
+    defer let exchange = http.TestExchange.open()
 
-    var cross_site = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &cross_site.add_header("Host", "example.test").unwrap()
-    &cross_site.add_header("Origin", "http://evil.test").unwrap()
-    &cross_site.add_header("Sec-Fetch-Site", "cross-site").unwrap()
-
-    var same_site_subdomain = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &same_site_subdomain.add_header("Host", "example.test").unwrap()
-    &same_site_subdomain.add_header("Origin", "http://sub.example.test").unwrap()
-    &same_site_subdomain.add_header("Sec-Fetch-Site", "same-site").unwrap()
-
-    // `Sec-Fetch-Site` alone refuses a post, with no `Origin` to compare and
-    // beside an `Origin` that matches `Host`.
-    var cross_site_fetch_only = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &cross_site_fetch_only.add_header("Host", "example.test").unwrap()
-    &cross_site_fetch_only.add_header("Sec-Fetch-Site", "cross-site").unwrap()
-
-    var same_site_fetch_only = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &same_site_fetch_only.add_header("Host", "example.test").unwrap()
-    &same_site_fetch_only.add_header("Sec-Fetch-Site", "same-site").unwrap()
-
-    var cross_site_matching_origin = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &cross_site_matching_origin.add_header("Host", "example.test").unwrap()
-    &cross_site_matching_origin.add_header("Origin", "http://example.test").unwrap()
-    &cross_site_matching_origin.add_header("Sec-Fetch-Site", "cross-site").unwrap()
-
-    var null_origin = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &null_origin.add_header("Host", "example.test").unwrap()
-    &null_origin.add_header("Origin", "null").unwrap()
-
-    var suffix_spoof = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &suffix_spoof.add_header("Host", "example.test").unwrap()
-    &suffix_spoof.add_header("Origin", "http://evil-example.test").unwrap()
-
-    var path_spoof = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &path_spoof.add_header("Host", "example.test").unwrap()
-    &path_spoof.add_header("Origin", "http://evil.test/example.test").unwrap()
-
-    var port_mismatch = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &port_mismatch.add_header("Host", "example.test:8080").unwrap()
-    &port_mismatch.add_header("Origin", "http://example.test:8081").unwrap()
-
-    var scheme_mismatch = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
-    &scheme_mismatch.add_header("Host", "example.test").unwrap()
-    &scheme_mismatch.add_header("Origin", "https://example.test").unwrap()
-
-    for sent in [cross_site, same_site_subdomain, cross_site_fetch_only, same_site_fetch_only, cross_site_matching_origin, null_origin, suffix_spoof, path_spoof, port_mismatch, scheme_mismatch] {
-        defer var incoming_10 = http.RequestBody.from_request(sent.request())
-        let refused = match &router.serve_http(&app, sent.request(), &incoming_10) {
+    // Each request names its `Host`, and its `Origin` and `Sec-Fetch-Site`
+    // where the text is not empty, as a browser posting from that page does.
+    let forged = [
+        ("example.test", "http://evil.test", "cross-site"),
+        ("example.test", "http://sub.example.test", "same-site"),
+        // `Sec-Fetch-Site` alone refuses a post, with no `Origin` to compare
+        // and beside an `Origin` that matches `Host`.
+        ("example.test", "", "cross-site"),
+        ("example.test", "", "same-site"),
+        ("example.test", "http://example.test", "cross-site"),
+        ("example.test", "null", ""),
+        ("example.test", "http://evil-example.test", ""),
+        ("example.test", "http://evil.test/example.test", ""),
+        ("example.test:8080", "http://example.test:8081", ""),
+        ("example.test", "https://example.test", ""),
+    ]
+    for (host, origin, fetch_site) in forged {
+        defer var sent = exchange.request("POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
+        &sent.add_header("Host", host).unwrap()
+        if origin.length() > 0 {
+            &sent.add_header("Origin", origin).unwrap()
+        }
+        if fetch_site.length() > 0 {
+            &sent.add_header("Sec-Fetch-Site", fetch_site).unwrap()
+        }
+        let refused = match &sent.send_to(&router, &app) {
             Ok(_) => return testing.assert(false, "a forged origin was accepted"),
             Err(error) => error,
         }
@@ -492,11 +452,10 @@ test "origin and fetch site spoofing attempts answer 403" {
     }
 
     // Matching origin with default port `:80` and uppercase host is accepted.
-    var matching_origin = http.new_request(arena.handle(), "POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
+    defer var matching_origin = exchange.request("POST", "/sign", body: "name=Ada&message=hi", content_type: "application/x-www-form-urlencoded").unwrap()
     &matching_origin.add_header("Host", "example.test").unwrap()
     &matching_origin.add_header("Origin", "HTTP://EXAMPLE.TEST:80").unwrap()
-    defer var incoming_11 = http.RequestBody.from_request(matching_origin.request())
-    let allowed = &router.serve_http(&app, matching_origin.request(), &incoming_11).unwrap()
+    let allowed = &matching_origin.send_to(&router, &app).unwrap()
     testing.assert_eq(allowed.status(), http.Status.SeeOther, "a matching origin with default port was refused")?
     .Ok(())
 }
@@ -506,11 +465,10 @@ test "favicon answers 204 no content" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("favicon_answers_204_no_content").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let arena = mem.Arena.open(mem.system(), size: 16384)
-    var req = http.new_request(arena.handle(), "GET", "/favicon.ico", body: "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var req = exchange.request("GET", "/favicon.ico").unwrap()
     &req.add_header("Host", "example.test").unwrap()
-    defer var incoming_12 = http.RequestBody.from_request(req.request())
-    let response = &router.serve_http(&app, req.request(), &incoming_12).unwrap()
+    let response = &req.send_to(&router, &app).unwrap()
     testing.assert_eq(response.status(), http.Status.NoContent, "favicon status was not 204")?
     testing.assert_ok_eq(response.text(), "", "favicon had a body")?
     .Ok(())
@@ -525,9 +483,8 @@ test "forwarded proto https is recognised for same origin" {
     defer var app_untrusted = Ctx { book = database_app_untrusted.client(), proxy_trust = .None }
     defer let database_app_trusted = Store.in_memory("forwarded_proto_https").unwrap()
     defer var app_trusted = Ctx { book = database_app_trusted.client(), proxy_trust = .All }
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var post = http.new_request(
-        arena.handle(),
+    defer let exchange = http.TestExchange.open()
+    defer var post = exchange.request(
         "POST",
         "/sign",
         body: "name=Grace&message=Hello",
@@ -539,16 +496,14 @@ test "forwarded proto https is recognised for same origin" {
     &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
 
     // Without proxy trust, client-supplied proxy headers are not trusted and 403 is answered.
-    defer var incoming_13 = http.RequestBody.from_request(post.request())
-    let refused = match &router.serve_http(&app_untrusted, post.request(), &incoming_13) {
+    let refused = match &post.send_to(&router, &app_untrusted) {
         Ok(_) => return testing.assert(false, "untrusted forwarded proto was accepted"),
         Err(err) => err,
     }
     testing.assert_eq(refused.status(), http.Status.Forbidden, "untrusted forwarded proto was not refused 403")?
 
     // With explicit proxy trust configured, forwarded https is recognized and 303 is answered.
-    defer var incoming_14 = http.RequestBody.from_request(post.request())
-    let response = &router.serve_http(&app_trusted, post.request(), &incoming_14).unwrap()
+    let response = &post.send_to(&router, &app_trusted).unwrap()
     testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused when trusted")?
     .Ok(())
 }

@@ -46,10 +46,10 @@ impl[P: Allocator] Request[P] {
 }
 
 test "a request extracts any type that implements extract" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    var named = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var named = exchange.request("GET", "/").unwrap()
     &named.add_header("X-Guest", "ada").unwrap()
-    let unnamed = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer var unnamed = exchange.request("GET", "/").unwrap()
     let visitor = named.request().extract[Guest]().unwrap()
     let refused = match unnamed.request().extract[Guest]() {
         Ok(_) => return testing.assert(false, "a request without a visitor was accepted"),
@@ -117,8 +117,8 @@ impl[P: Allocator, T: FromPath] Extract[P] for Path[T] {
 }
 
 test "a path is refused when no router matched" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/orders/42", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/orders/42").unwrap()
     let refused = match sent.request().extract[Path[UInt64]]() {
         Ok(_) => return testing.assert(false, "a request no router matched had a path value"),
         Err(error) => error,
@@ -358,11 +358,10 @@ fn signup_of[P: Allocator](inout _: (), request: Request[P], inout body: Request
 fn form_posted(content_type: Str, body: Str) -> String {
     var router = Router.new()
     &router.route_raw("POST /signup", signup_of).unwrap()
-    let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = new_request(arena.handle(), "POST", "/signup", body, content_type).unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/signup", body, content_type).unwrap()
     var nothing = ()
-    var incoming1 = RequestBody.from_request(sent.request())
-    let described = match &router.serve_http(&nothing, sent.request(), &incoming1) {
+    let described = match &sent.send_to(&router, &nothing) {
         Ok(response) => {
             let answer = response.text().unwrap()
             fmt.render_owned("200 {answer}").unwrap()
@@ -373,8 +372,6 @@ fn form_posted(content_type: Str, body: Str) -> String {
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
-    incoming1.release()
-    arena.release()
     router.release()
     described
 }
@@ -514,12 +511,11 @@ fn note_of[P: Allocator](inout _: (), request: Request[P], inout body: RequestBo
 fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
     var router = Router.new()
     &router.route_raw("POST /notes", note_of).unwrap()
-    let arena = mem.Arena.open(mem.system(), size: arena_bytes)
-    var sent = new_request(arena.handle(), "POST", "/notes", body).unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = arena_bytes, ..Limits.default() })
+    defer var sent = exchange.request("POST", "/notes", body).unwrap()
     &sent.add_header("Content-Type", content_type).unwrap()
     var nothing = ()
-    var incoming2 = RequestBody.from_request(sent.request())
-    let described = match &router.serve_http(&nothing, sent.request(), &incoming2) {
+    let described = match &sent.send_to(&router, &nothing) {
         Ok(response) => {
             let answer = response.text().unwrap()
             fmt.render_owned("200 {answer}").unwrap()
@@ -530,8 +526,6 @@ fn posted(content_type: Str, body: Str, arena_bytes: UInt64 = 65536) -> String {
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
-    incoming2.release()
-    arena.release()
     router.release()
     described
 }
@@ -580,24 +574,23 @@ test "a json body within the default limits decodes in the default arena" {
 
 // Request metadata and its streamed body are independent inputs.
 test "json reads the explicit body instead of the metadata payload" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "POST", "/notes", body: "", content_type: "application/json").unwrap()
-    defer var body = RequestBody.from_slice(r#"{"text":"streamed"}"#.as_bytes(), arena.handle())
-    let request = &body.materialize(sent.request()).unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/notes", body: r#"{"text":"streamed"}"#, content_type: "application/json").unwrap()
+    testing.assert_eq(sent.request().body().length(), UInt64(0), "the body was held in the request's metadata")?
+    let request = &sent.body.materialize(sent.message.request()).unwrap()
     defer let note = request.extract[Json[Note[mem.Handle]]]().unwrap()
     testing.assert_eq(note.text.view(), "streamed", "JSON ignored the streamed body")?
-    testing.assert_eq(body.remaining_bytes(), UInt64(0), "JSON did not consume the body")?
+    testing.assert_eq(sent.body.remaining_bytes(), UInt64(0), "JSON did not consume the body")?
     .Ok(())
 }
 
 test "form reads borrowed fields from the explicit body" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "POST", "/signup", body: "", content_type: "application/x-www-form-urlencoded").unwrap()
-    defer var body = RequestBody.from_slice("name=Ada+Lovelace&age=36".as_bytes(), arena.handle())
-    let request = &body.materialize(sent.request()).unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/signup", body: "name=Ada+Lovelace&age=36", content_type: "application/x-www-form-urlencoded").unwrap()
+    let request = &sent.body.materialize(sent.message.request()).unwrap()
     let Signup { name, age } = request.extract[Form[Signup]]().unwrap()
     testing.assert_eq(name, "Ada Lovelace", "the form ignored the streamed body")?
     testing.assert_eq(age, UInt32(36), "the form changed the numeric field")?
-    testing.assert_eq(body.remaining_bytes(), UInt64(0), "the form did not consume the body")?
+    testing.assert_eq(sent.body.remaining_bytes(), UInt64(0), "the form did not consume the body")?
     .Ok(())
 }

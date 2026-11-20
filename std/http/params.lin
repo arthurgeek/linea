@@ -34,8 +34,8 @@ impl ParamValues {
     }
 
     test "a param value is found by its exact name once" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/?year=2026&year=1999&Name=ada", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/?year=2026&year=1999&Name=ada").unwrap()
         let values = sent.request().query_params().unwrap()
         testing.assert_eq(values.get("Name"), .Ok(.Some("ada")), "a value was not found")?
         testing.assert_eq(values.get("name"), .Ok(.None), "a name matched another's case")?
@@ -50,9 +50,9 @@ impl ParamValues {
     }
 
     test "count includes every value a repeated name holds" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let repeated = new_request(arena.handle(), "GET", "/?tag=a&tag=b&page=2", body: "").unwrap()
-        let bare = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var repeated = exchange.request("GET", "/?tag=a&tag=b&page=2").unwrap()
+        defer var bare = exchange.request("GET", "/").unwrap()
         testing.assert_eq(repeated.request().query_params().unwrap().count(), UInt64(3), "a repeated name was counted once")?
         testing.assert_eq(bare.request().query_params().unwrap().count(), UInt64(0), "a request without a query had values")?
         .Ok(())
@@ -77,8 +77,8 @@ impl ParamValues {
     }
 
     test "a field reads its value or says why it cannot" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/?year=2026&page=x", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/?year=2026&page=x").unwrap()
         let values = sent.request().query_params().unwrap()
         let year: Result[UInt32, ParamError] = values.field("year")
         let absent: Result[Option[UInt32], ParamError] = values.field("limit")
@@ -88,7 +88,7 @@ impl ParamValues {
         testing.assert_eq(absent, .Ok(.None), "an absent optional value was not None")?
         testing.assert_eq(missing, .Err(.{ name = "limit", value = "", problem = .Missing }), "an absent value was not missing")?
         testing.assert_eq(invalid, .Err(.{ name = "page", value = "x", problem = .Invalid(.Syntax(0)) }), "an invalid value was read")?
-        let twice = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
+        defer var twice = exchange.request("GET", "/?page=1&page=2&id=7").unwrap()
         let repeated: Result[UInt32, ParamError] = twice.request().query_params().unwrap().field("page")
         testing.assert_eq(repeated, .Err(.{ name = "page", value = "2", problem = .Repeated }), "a repeated value was read")?
         .Ok(())
@@ -106,10 +106,10 @@ impl ParamValues {
     }
 
     test "only reads the single value whatever its name" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let several = new_request(arena.handle(), "GET", "/?page=1&page=2&id=7", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var several = exchange.request("GET", "/?page=1&page=2&id=7").unwrap()
         let refused: Result[UInt32, ParamError] = several.request().query_params().unwrap().only()
-        let one = new_request(arena.handle(), "GET", "/?id=42", body: "").unwrap()
+        defer var one = exchange.request("GET", "/?id=42").unwrap()
         let only: Result[UInt32, ParamError] = one.request().query_params().unwrap().only()
         testing.assert_eq(refused, .Err(.{ name = "", value = "", problem = .Count(3) }), "one of several values was read")?
         testing.assert_eq(only, .Ok(42), "the only value was not read")?
@@ -170,9 +170,9 @@ impl Params for DayRange {
 }
 
 test "a params of its own refuses a value with a reason" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let ordered = new_request(arena.handle(), "GET", "/?from=3&to=9", body: "").unwrap()
-    let reversed = new_request(arena.handle(), "GET", "/?from=9&to=3", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var ordered = exchange.request("GET", "/?from=3&to=9").unwrap()
+    defer var reversed = exchange.request("GET", "/?from=9&to=3").unwrap()
     let span: Result[DayRange, ParamError] = Params.from_params(ordered.request().query_params().unwrap())
     let refused: Result[DayRange, ParamError] = Params.from_params(reversed.request().query_params().unwrap())
     testing.assert(match read span { Ok(days) => days.from == 3 && days.to == 9, Err(_) => false }, "an ordered range was refused")?
@@ -284,14 +284,14 @@ struct Archive {
 }
 
 test "a derived params reads each field by its name" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/?title=Old+news&year=1999", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/?title=Old+news&year=1999").unwrap()
     let archive: Result[Archive, ParamError] = Params.from_params(sent.request().query_params().unwrap())
     let found = archive.unwrap()
     testing.assert_eq(found.year, UInt32(1999), "the year changed")?
     testing.assert_eq(found.month, .None, "an absent month was read")?
     testing.assert_eq(found.title, "Old news", "the title changed")?
-    let untitled = new_request(arena.handle(), "GET", "/?year=1999", body: "").unwrap()
+    defer var untitled = exchange.request("GET", "/?year=1999").unwrap()
     let refused: Result[Archive, ParamError] = Params.from_params(untitled.request().query_params().unwrap())
     testing.assert(match read refused { Err(error) => error.name == "title" && error.problem == ParamProblem.Missing, Ok(_) => false }, "a missing title was not named")?
     .Ok(())
@@ -381,11 +381,11 @@ impl FromPath for Float32 {
 }
 
 test "a path reads a struct by name or its only value" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/?year=1999&title=x", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/?year=1999&title=x").unwrap()
     let values = sent.request().query_params().unwrap()
     let archive: Result[Archive, ParamError] = FromPath.from_path(values)
-    let single = new_request(arena.handle(), "GET", "/?id=-3", body: "").unwrap()
+    defer var single = exchange.request("GET", "/?id=-3").unwrap()
     let signed: Result[Int16, ParamError] = FromPath.from_path(single.request().query_params().unwrap())
     let named: Result[Str, ParamError] = FromPath.from_path(single.request().query_params().unwrap())
     testing.assert_eq(archive.unwrap().year, UInt32(1999), "the struct was not filled")?
