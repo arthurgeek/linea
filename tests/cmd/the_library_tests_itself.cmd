@@ -45,12 +45,15 @@ The library tests itself.
   ok    cli.parse reports every refused allocation
   ok    cli.parse splits short clusters and attached short values
   ok    cli.parse takes a lone dash as a positional
+  ok    cli.parse takes a negative number as a value unless a short switch spells it
   ok    cli.parse takes an attached long option value
   ok    cli.parse_args parses process arguments
   ok    cli.peek inspects token without advancing
   ok    cli.positional registers positional arguments
   ok    cli.positional retrieves positional arguments
   ok    cli.positionals_all collects variadic positionals
+  ok    cli.print_help answers 0 once the help is written, and 1 when it cannot be
+  ok    cli.report answers the usage status, or 1 when memory runs out
   ok    cli.require_value extracts value or fails
   ok    cli.required_option extracts value or fails
   ok    cli.required_parsed converts present option or fails
@@ -62,6 +65,7 @@ The library tests itself.
   ok    cli.usage aligns columns by characters
   ok    cli.usage formats aligned help documentation
   ok    cli.usage lists positionals before the subcommand
+  ok    cli.usage_error answers the usage status
   ok    cmp.unit values are equivalent
   ok    collections.a deleted collision bucket is reused without allocation
   ok    collections.a drain settles linear values without a release implementation
@@ -1744,4 +1748,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1741 passed, 0 failed
+  1745 passed, 0 failed
