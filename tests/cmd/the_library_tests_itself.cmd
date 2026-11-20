@@ -469,7 +469,6 @@ The library tests itself.
   ok    http.a new error has its status and no message
   ok    http.a new header list is empty
   ok    http.a new router answers 404
-  ok    http.a new_request holds its method target and body
   ok    http.a newcomer at capacity closes the connection idle longest and keeps the rest
   ok    http.a param value is found by its exact name once
   ok    http.a param value parses borrows or is optional
@@ -520,9 +519,11 @@ The library tests itself.
   ok    http.a request gives its origin from the host header
   ok    http.a request gives its path_params once a router matched it
   ok    http.a request gives its query_params decoded
+  ok    http.a request is built as a client sends it
   ok    http.a request keeps its method token as sent
   ok    http.a request larger than the arena is answered 500
   ok    http.a request names its method
+  ok    http.a request sends its body to the handler
   ok    http.a request split into single bytes parses as one
   ok    http.a request that leaves no room for the response is answered 500
   ok    http.a request the handler never saw is logged without an id
@@ -567,6 +568,7 @@ The library tests itself.
   ok    http.a streamed body uses what its handler captured
   ok    http.a streamed response has no held body
   ok    http.a test request carries the headers added to it
+  ok    http.a test request is read through its request
   ok    http.a text response holds its rendered body
   ok    http.a text response past the arena is refused
   ok    http.a truncated socket body reports a sticky bad request
@@ -594,6 +596,8 @@ The library tests itself.
   ok    http.an error whose message does not fit keeps its status
   ok    http.an escape is a percent and two capital digits
   ok    http.an exchange is logged at the level its status calls for
+  ok    http.an exchange opened in an allocator takes its arena from it
+  ok    http.an exchange's arena holds what its limits allow
   ok    http.an expiry before 1601 is refused
   ok    http.an extractor the arena cannot hold answers 500 and releases what was read
   ok    http.an html response holds its rendered body and content type
