@@ -156,10 +156,10 @@ pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callbac
 
 /// What a number crossing to or from the runtime stands for, where a value
 /// must own it for the call to be safe: the address of bytes a buffer or a
-/// slice holds, a descriptor, or an allocation. The runtime trusts each such
+/// slice holds, a descriptor, an allocation, or a directory stream. The runtime trusts each such
 /// number, so a symbol taking or answering one is confined to the standard
 /// library module whose types keep it, which the table's test holds.
-pub const Held = enum { none, bytes, descriptor, allocation };
+pub const Held = enum { none, bytes, descriptor, allocation, stream };
 
 /// Whether two parameters are the same as C declares them, a callback's shape
 /// compared by what it holds rather than by where it is. Which parameter is an
@@ -278,6 +278,9 @@ const written: Parameter = .{ .scalar = .u64, .passing = .inout };
 const bytes_at: Parameter = .{ .scalar = .u64, .held = .bytes, .address = true };
 /// A descriptor a linear value owns.
 const descriptor: Parameter = .{ .scalar = .i32, .held = .descriptor };
+/// The address of the runtime's stream over one open directory, which a
+/// linear `mem.DirStream` keeps.
+const dir_stream: Parameter = .{ .scalar = .u64, .held = .stream };
 /// The address of an allocation a buffer owns, which the runtime frees.
 const allocation: Parameter = .{ .scalar = .u64, .held = .allocation, .address = true };
 
@@ -576,6 +579,19 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_set_mode", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .declared_by = fs_mode, .migration_contract = .neutral },
     .{ .symbol = "linea_publish_at", .parameters = &.{ descriptor, bytes_at, p(.u64), bytes_at, p(.u64), p(.u8) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     .{ .symbol = "linea_unlink_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_make_dir_at", .parameters = &.{ descriptor, bytes_at, p(.u64), p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_remove_dir_at", .parameters = &.{ descriptor, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_symlink_at", .parameters = &.{ descriptor, bytes_at, p(.u64), bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    // A directory stream is the address of the runtime's stream, which a
+    // linear `mem.DirStream` keeps from the open that writes it to the close
+    // that ends it. Reading one fills a buffer's bytes with the next record.
+    .{ .symbol = "linea_dir_open", .parameters = &.{ bytes_at, p(.u64), p(.u8), written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_open_at", .parameters = &.{ dir_stream, bytes_at, p(.u64), p(.u8), written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_next", .parameters = &.{ dir_stream, bytes_at, p(.u64), p(.u8) }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_reopen", .parameters = &.{ dir_stream, bytes_at, p(.u64), bytes_at, p(.u64), p(.u8), written, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_open_up", .parameters = &.{ dir_stream, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_identity", .parameters = &.{ dir_stream, written, written, written, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    .{ .symbol = "linea_dir_close", .parameters = &.{dir_stream}, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     // The descriptor limit is process-wide; errors are captured before return.
     .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted, .migration_contract = .neutral },
     // Socket setup and endpoint queries return descriptors or captured errors.

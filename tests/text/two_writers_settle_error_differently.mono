@@ -36,6 +36,7 @@ pub enum IoOperation {
     Flush,
     Close,
     Open,
+    Create,
     Metadata,
     Permissions,
     Publish,
@@ -70,6 +71,7 @@ pub enum IoCategory {
     ConnectionReset,
     ConnectionRefused,
     AddressInUse,
+    NameTooLong,
 }
 
 @(copyable, derive(Equatable, Equivalent, Debug, Release))
@@ -415,6 +417,7 @@ pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int
         16 => .ConnectionReset,
         17 => .ConnectionRefused,
         18 => .AddressInUse,
+        19 => .NameTooLong,
         _ => .Other,
     }
     .{ operation = operation, category = category, code = .Some(code), progress = progress }
@@ -542,10 +545,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2846_1_0_0) => {
+        Some(_linea_derive_2879_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2846_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2879_1_0_0)
                 }
             }
         },
@@ -582,6 +585,12 @@ fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Gathered](self: std.i
             {}
             {
                 "Open"
+            }
+        },
+        Create => {
+            {}
+            {
+                "Create"
             }
         },
         Metadata => {
@@ -768,6 +777,12 @@ fn std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Gathered](self: std.io
             {}
             {
                 "AddressInUse"
+            }
+        },
+        NameTooLong => {
+            {}
+            {
+                "NameTooLong"
             }
         },
     }

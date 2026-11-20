@@ -27,6 +27,7 @@ pub enum IoOperation {
     Flush,
     Close,
     Open,
+    Create,
     Metadata,
     Permissions,
     Publish,
@@ -61,6 +62,7 @@ pub enum IoCategory {
     ConnectionReset,
     ConnectionRefused,
     AddressInUse,
+    NameTooLong,
 }
 
 @(copyable, derive(Equatable, Equivalent, Debug, Release))
@@ -438,6 +440,7 @@ pub fn std.io.core;IoError.from_os(operation: std.io.core.IoOperation, code: Int
         16 => .ConnectionReset,
         17 => .ConnectionRefused,
         18 => .AddressInUse,
+        19 => .NameTooLong,
         _ => .Other,
     }
     .{ operation = operation, category = category, code = .Some(code), progress = progress }

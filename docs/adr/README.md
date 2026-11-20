@@ -200,6 +200,7 @@ true of a different implementation.
 | [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md) | An arena grows in chunks up to its size, and a rewind returns them | Accepted; supersedes the arena-memory clause of 0154; disposal clause superseded by 0283 |
 | [0283](0283-an-arena-disposes-without-rechecking-where-a-buffer-lies.md) | An arena disposes of a buffer without rechecking where it lies | Accepted; supersedes the disposal clause of 0263 |
 | [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
+| [0294](0294-a-directory-walk-is-a-lazy-linear-iterator.md) | A directory walk is a lazy, linear iterator with bounded open directories | Accepted |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted; extended by 0249 |
 | [0146](0146-payload-free-variants-are-constant-expressions.md) | Payload-free variants are constant expressions | Accepted; extends 0020, 0059 and 0127; refines 0033 and 0077 |

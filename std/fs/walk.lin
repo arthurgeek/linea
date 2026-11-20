@@ -1,0 +1,1980 @@
+import std.fmt
+import std.io
+import std.mem
+import std.testing
+import std.time
+
+use mem.PushFailure
+
+// EntryKind says what a directory entry is. A symbolic link the walk does not
+// follow is a `Symlink`; a device, a socket or a pipe is `Other`.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum EntryKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+impl Display for EntryKind {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            File => &w.write_str("file"),
+            Directory => &w.write_str("directory"),
+            Symlink => &w.write_str("symbolic link"),
+            Other => &w.write_str("other"),
+        }
+    }
+}
+
+test "an entry kind displays as a word" {
+    defer let shown = fmt.render_owned(EntryKind.Symlink).unwrap()
+    testing.assert_eq(shown.view(), "symbolic link", "a link kind displayed otherwise")?
+}
+
+// The runtime numbers kinds 0 for a regular file, 1 for a directory, 2 for a
+// symbolic link and 3 for anything else.
+fn kind_of(code: UInt64) -> EntryKind {
+    match code {
+        0 => .File,
+        1 => .Directory,
+        2 => .Symlink,
+        _ => .Other,
+    }
+}
+
+// Metadata is what one `stat` of an entry reports. `error` is the errno of a
+// read that failed, or 0.
+@(copyable, derive(Release))
+struct Metadata {
+    kind: EntryKind,
+    permissions: UInt64,
+    size: UInt64,
+    seconds: Int64,
+    nanoseconds: UInt64,
+    error: UInt64,
+}
+
+// A word above Int64.max holds a negative number in two's complement, such as
+// a modification time before 1970.
+fn signed(bits: UInt64) -> Int64 {
+    if bits > 9223372036854775807 {
+        -Int64(UInt64.max - bits) - 1
+    } else {
+        Int64(bits)
+    }
+}
+
+test "a word above the signed range reads as a negative number" {
+    testing.assert_eq(signed(UInt64.max), Int64(-1), "all ones did not read as -1")?
+    testing.assert_eq(signed(9223372036854775808), Int64.min, "the sign bit alone did not read as the minimum")?
+    testing.assert_eq(signed(42), Int64(42), "a small word changed")?
+}
+
+impl Metadata {
+    // Read the six metadata words of a directory record, in the runtime's
+    // order: kind, permissions, size, seconds, nanoseconds and the errno of a
+    // failed read.
+    fn of_record[A: Allocator](record: mem.Buffer[A]) -> Metadata {
+        .{
+            kind = kind_of(record.load(0)),
+            permissions = record.load(8),
+            size = record.load(16),
+            seconds = signed(record.load(24)),
+            nanoseconds = record.load(32),
+            error = record.load(40),
+        }
+    }
+
+    // Read the metadata words a listing kept for entry `index`.
+    fn of_listing[A: Allocator](words: Vec[UInt64, A], index: UInt64) -> Metadata {
+        let base = index * listing_stride
+        .{
+            kind = kind_of(words[base]),
+            permissions = words[base + 1],
+            size = words[base + 2],
+            seconds = signed(words[base + 3]),
+            nanoseconds = words[base + 4],
+            error = words[base + 5],
+        }
+    }
+}
+
+// An Entry is one file, directory or link a walk found. It owns its path, the
+// root it was found under joined to every name below it, from the walk's
+// allocator, so it outlives the step that found it. Its metadata was read once,
+// when the walk listed it.
+@(opaque, derive(Release))
+struct Entry[A: Allocator] {
+    path: Vec[UInt8, A],
+    name_start: UInt64,
+    depth: UInt64,
+    metadata: Metadata,
+}
+
+impl[A: Allocator] Entry[A] {
+    // Return the entry's path: the walk's root, then each directory below it
+    // and the entry's name, joined by slashes.
+    pub fn path(self: Self) -> Path where borrows(self) {
+        .{ bytes = self.path.as_slice() }
+    }
+
+    test "an entry's path joins the root to the names below it" {
+        defer let root = sample_tree()
+        defer let entry = sample_entry(root.view(), "c.txt")
+        defer var expected = root.view().to_owned().unwrap()
+        &expected.append("/docs/deep/c.txt").unwrap()
+        testing.assert_eq(entry.path().as_bytes(), expected.view().as_bytes(), "the path was not the root joined to its directories")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return the entry's own name, the last component of its path.
+    pub fn name(self: Self) -> Path where borrows(self) {
+        .{ bytes = self.path.as_slice().subspan(start: self.name_start, count: self.path.length() - self.name_start).unwrap() }
+    }
+
+    test "an entry's name is the last component of its path" {
+        defer let root = sample_tree()
+        defer let entry = sample_entry(root.view(), "deep")
+        testing.assert_eq(entry.name().as_bytes(), "deep".as_bytes(), "the name was not the last component")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return how many directories down from the root the entry is: 1 for an
+    // entry the root holds.
+    pub fn depth(self: Self) -> UInt64 {
+        self.depth
+    }
+
+    test "an entry's depth counts directories from the root" {
+        defer let root = sample_tree()
+        defer let top = sample_entry(root.view(), "a.txt")
+        defer let deep = sample_entry(root.view(), "c.txt")
+        testing.assert_eq(top.depth(), UInt64(1), "an entry of the root was not at depth 1")?
+        testing.assert_eq(deep.depth(), UInt64(3), "an entry two directories down was not at depth 3")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return what the entry is. A symbolic link is described by what it names
+    // when the walk follows links.
+    pub fn kind(self: Self) -> EntryKind {
+        self.metadata.kind
+    }
+
+    test "an entry's kind tells a file from a directory" {
+        defer let root = sample_tree()
+        defer let file = sample_entry(root.view(), "b.txt")
+        defer let directory = sample_entry(root.view(), "docs")
+        testing.assert_eq(file.kind(), EntryKind.File, "a file was not a file")?
+        testing.assert_eq(directory.kind(), EntryKind.Directory, "a directory was not a directory")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return whether the entry is a directory.
+    pub fn is_dir(self: Self) -> Bool {
+        self.metadata.kind == .Directory
+    }
+
+    test "is_dir holds of a directory alone" {
+        defer let root = sample_tree()
+        defer let file = sample_entry(root.view(), "a.txt")
+        defer let directory = sample_entry(root.view(), "deep")
+        testing.assert(directory.is_dir() && !file.is_dir(), "is_dir answered for the wrong entry")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return whether the entry is a regular file.
+    pub fn is_file(self: Self) -> Bool {
+        self.metadata.kind == .File
+    }
+
+    test "is_file holds of a regular file alone" {
+        defer let root = sample_tree()
+        defer let file = sample_entry(root.view(), "a.txt")
+        defer let directory = sample_entry(root.view(), "docs")
+        testing.assert(file.is_file() && !directory.is_file(), "is_file answered for the wrong entry")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return whether the entry is a symbolic link, which only a walk that does
+    // not follow links reports.
+    pub fn is_symlink(self: Self) -> Bool {
+        self.metadata.kind == .Symlink
+    }
+
+    test "is_symlink holds of a link the walk does not follow" {
+        defer let root = sample_tree()
+        defer let target = joined(root.view(), "a.txt")
+        defer let place = joined(root.view(), "docs/a-link")
+        create_symlink(Path.from_str(target.view()).unwrap(), Path.from_str(place.view()).unwrap()).unwrap()
+        defer let link = sample_entry(root.view(), "a-link")
+        defer let file = sample_entry(root.view(), "a.txt")
+        remove_file(Path.from_str(place.view()).unwrap()).unwrap()
+        testing.assert(link.is_symlink() && !file.is_symlink(), "is_symlink answered for the wrong entry")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return the entry's size in bytes. A directory's or a link's size is what
+    // the file system records for it.
+    pub fn size(self: Self) -> UInt64 {
+        self.metadata.size
+    }
+
+    test "an entry's size counts a file's bytes" {
+        defer let root = sample_tree()
+        defer let entry = sample_entry(root.view(), "b.txt")
+        testing.assert_eq(entry.size(), UInt64(5), "a five-byte file had another size")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return the entry's permission bits: the nine rwx bits (octal 0777) and
+    // the setuid, setgid and sticky bits above them.
+    pub fn permissions(self: Self) -> UInt64 {
+        self.metadata.permissions
+    }
+
+    test "an entry's permissions give its owner what created it took" {
+        defer let root = sample_tree()
+        defer let entry = sample_entry(root.view(), "a.txt")
+        // The owner's three bits are the third octal digit from the right, and
+        // 6 (rw-) or 7 (rwx) there lets the owner read and write. No umask
+        // removes them from a file created with octal 0666.
+        testing.assert(entry.permissions() / 64 % 8 >= 6, "a new file was not readable and writable by its owner")?
+        testing.assert(entry.permissions() <= 4095, "permissions held bits beyond the mode")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return when the entry's contents last changed, or None for a time outside
+    // the years 0000 to 9999 that a `time.Timestamp` holds.
+    pub fn modified(self: Self) -> Option[time.Timestamp] {
+        time.Timestamp.from_unix(self.metadata.seconds, UInt32(self.metadata.nanoseconds))
+    }
+
+    test "an entry's modification time is when it was written" {
+        let before = time.now()
+        defer let root = sample_tree()
+        defer let entry = sample_entry(root.view(), "a.txt")
+        let modified = entry.modified().unwrap()
+        // A file system may round a time down to its own resolution, so the
+        // time is compared to the second.
+        testing.assert(modified.unix_seconds() >= before.unix_seconds() - 1, "a new file was modified before it was written")?
+        testing.assert(modified <= time.now(), "a new file was modified in the future")?
+        remove_sample_tree(root.view())
+    }
+}
+
+// WalkCause says why a walk could not report an entry or enter a directory:
+// a system call failed, a followed link leads back into a directory the walk
+// is inside, a directory the walk had to find again by its name was replaced
+// or removed, or storage for a path was refused.
+@(copyable, derive(Debug, Release))
+pub enum WalkCause {
+    Io(io.IoError),
+    Loop,
+    Changed,
+    Allocation(mem.Oom),
+}
+
+impl WalkCause {
+    // Return whether the cause is a refused allocation, which an
+    // allocation-failure walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self {
+            Allocation(_) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Display for WalkCause {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            // An open or a `stat` moves no bytes, so no count is written.
+            Io(error) => {
+                "{error.operation} failed ({error.category})".fmt(&w)?
+                match read error.code {
+                    Some(code) => "; errno {code}".fmt(&w),
+                    None => .Ok(()),
+                }
+            },
+            Loop => &w.write_str("a symbolic link leads back to a directory the walk is inside"),
+            Changed => &w.write_str("a directory the walk is inside was replaced or removed"),
+            Allocation(error) => error.fmt(&w),
+        }
+    }
+}
+
+// A WalkError is the path a walk could not report or enter and why. The walk
+// goes on after it: an entry it could not read is skipped, and a directory it
+// could not open or read is not walked further.
+@(opaque, derive(Release))
+struct WalkError[A: Allocator] {
+    path: Vec[UInt8, A],
+    cause: WalkCause,
+}
+
+impl[A: Allocator] WalkError[A] {
+    // Return the path the walk could not report or enter. It is empty when
+    // storage for the path itself was refused.
+    pub fn path(self: Self) -> Path where borrows(self) {
+        .{ bytes = self.path.as_slice() }
+    }
+
+    test "a walk error names the path it could not read" {
+        defer let root = sample_tree()
+        defer let place = joined(root.view(), "gone")
+        create_symlink(Path.from_str("missing").unwrap(), Path.from_str(place.view()).unwrap()).unwrap()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap(), follow_symlinks: true).unwrap()
+        var named = false
+        for found in &walk {
+            match found {
+                Ok(entry) => entry.release(),
+                Err(error) => {
+                    named = error.path().as_bytes() == place.view().as_bytes()
+                    error.release()
+                },
+            }
+        }
+        walk.close().unwrap()
+        remove_file(Path.from_str(place.view()).unwrap()).unwrap()
+        testing.assert(named, "the error did not name the dangling link")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return why the walk could not report or enter the path.
+    pub fn cause(self: Self) -> WalkCause {
+        copy(self.cause)
+    }
+
+    test "a dangling link a walk follows is reported as not found" {
+        defer let root = sample_tree()
+        defer let place = joined(root.view(), "docs/gone")
+        create_symlink(Path.from_str("missing").unwrap(), Path.from_str(place.view()).unwrap()).unwrap()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap(), follow_symlinks: true).unwrap()
+        var found_entries = UInt64(0)
+        var missing = false
+        for found in &walk {
+            match found {
+                Ok(entry) => {
+                    found_entries += 1
+                    entry.release()
+                },
+                Err(error) => {
+                    missing = match read error.cause() { Io(reason) => reason.category == .NotFound && reason.operation == .Metadata, _ => false }
+                    error.release()
+                },
+            }
+        }
+        walk.close().unwrap()
+        remove_file(Path.from_str(place.view()).unwrap()).unwrap()
+        testing.assert(missing, "a dangling link was not reported as a missing target")?
+        // The walk went on past the error and found the five entries of the tree.
+        testing.assert_eq(found_entries, UInt64(5), "the walk stopped at the error")?
+        remove_sample_tree(root.view())
+    }
+}
+
+impl[A: Allocator] Display for WalkError[A] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.path().fmt(&w)?
+        &w.write_str(": ")?
+        self.cause.fmt(&w)
+    }
+}
+
+test "a walk error displays its path and its cause" {
+    var path: Vec[UInt8] = Vec.new()
+    &path.append_slice("notes/loop".as_bytes()).unwrap()
+    defer let error = WalkError[mem.SystemAllocator] { path, cause = .Loop }
+    defer let shown = fmt.render_owned(error).unwrap()
+    testing.assert_eq(shown.view(), "notes/loop: a symbolic link leads back to a directory the walk is inside", "the error displayed otherwise")?
+}
+
+// A listing holds a directory's entries read whole into memory, for a walk
+// that already holds as many open directories as it may. Each entry takes
+// `listing_stride` words: the six metadata words of its record and the length
+// of its name. The names follow one another in `names`.
+@derive(Release)
+struct Listing[A: Allocator] {
+    words: Vec[UInt64, A],
+    names: Vec[UInt8, A],
+    taken: UInt64,
+    name_at: UInt64,
+}
+
+let listing_stride: UInt64 = 7
+
+impl[A: Allocator] Listing[A] {
+    fn empty(allocator: A) -> Self where carries(allocator) {
+        .{ words = Vec.new_in(allocator), names = Vec.new_in(allocator), taken = 0, name_at = 0 }
+    }
+
+    // Keep the entry `record` holds, whose name is `length` bytes long.
+    fn keep(inout self: Self, record: mem.Buffer[A], length: UInt64) -> Result[(), mem.Oom] {
+        &self.words.reserve(listing_stride)?
+        for index in 0..6 {
+            match &self.words.push(record.load(index * 8)) {
+                Ok(_) => {},
+                Err(failure) => return .Err(failure.reason),
+            }
+        }
+        match &self.words.push(length) {
+            Ok(_) => {},
+            Err(failure) => return .Err(failure.reason),
+        }
+        &self.names.append_slice(record.as_slice().subspan(start: mem.dir_record_header, count: length).unwrap())
+    }
+}
+
+// A frame is one directory the walk is inside: its path, how deep it is, its
+// identity, and where its remaining entries come from. Its entries come from
+// its open stream until it is read into memory, and from its listing after.
+// A frame read into memory may still hold its directory open, so the walk can
+// open what it holds without opening the directories above it again.
+@linear
+struct Frame[A: Allocator] {
+    path: Vec[UInt8, A],
+    name_start: UInt64,
+    depth: UInt64,
+    device: UInt64,
+    inode: UInt64,
+    birth: Option[(UInt64, UInt64)],
+    stream: Option[mem.DirStream],
+    listing: Listing[A],
+    in_memory: Bool,
+}
+
+// Settle a frame's storage and close its directory, answering a failed close.
+fn finish_frame[A: Allocator](sink frame: Frame[A]) -> Option[io.IoError] {
+    let Frame { path, name_start: _, depth: _, device: _, inode: _, birth: _, stream, listing, in_memory: _ } = frame
+    path.release()
+    listing.release()
+    match stream {
+        Some(open) => {
+            let closed = open.close()
+            if closed < 0 {
+                return .Some(io.IoError.from_os(.Close, Int32(-closed)))
+            }
+            .None
+        },
+        None => .None,
+    }
+}
+
+impl[A: Allocator] Release for Frame[A] {
+    fn release(sink self: Self) {
+        let _closed = finish_frame(self)
+    }
+}
+
+// A directory the walk reported and enters at its next step, unless
+// `skip_children` drops it first.
+@derive(Release)
+struct Pending[A: Allocator] {
+    path: Vec[UInt8, A],
+    name_start: UInt64,
+    depth: UInt64,
+}
+
+// What one read from a frame found: an entry, an entry it could not report,
+// the end of the directory, or the errno of a read that failed.
+enum Step[A: Allocator] {
+    Found(Entry[A]),
+    Unreadable(WalkError[A]),
+    Ended,
+    Failed(Int32),
+}
+
+// Join `name` to the directory path `parent` with one slash, and answer the
+// path and the offset of the name in it.
+fn child_path[A: Allocator](allocator: A, parent: mem.Slice[UInt8], name: mem.Slice[UInt8]) -> Result[(Vec[UInt8, A], UInt64), mem.Oom] where carries(.Ok: allocator) {
+    var path: Vec[UInt8, A] = Vec.new_in(allocator)
+    // A parent ending in a slash (ASCII 47), such as the root "/", takes no
+    // second one.
+    let slash = parent.length() > 0 && parent[parent.length() - 1] != 47
+    let extra = if slash {
+        1
+    } else {
+        0
+    }
+    let reserved = &path.reserve(parent.length() + extra + name.length())
+    match reserved {
+        Ok(_) => {},
+        Err(reason) => {
+            path.release()
+            return .Err(reason)
+        },
+    }
+    // The room is reserved, so the appends below allocate nothing.
+    &path.append_slice(parent).unwrap()
+    if slash {
+        &path.append_slice("/".as_bytes()).unwrap()
+    }
+    let start = path.length()
+    &path.append_slice(name).unwrap()
+    .Ok((path, start))
+}
+
+test "a child path joins with one slash" {
+    let (path, start) = child_path(mem.system(), "/".as_bytes(), "tmp".as_bytes()).unwrap()
+    defer let joined_path = path
+    testing.assert_eq(joined_path.as_slice(), "/tmp".as_bytes(), "a root parent took a second slash")?
+    testing.assert_eq(start, UInt64(1), "the name did not start after the slash")?
+    let (nested, at) = child_path(mem.system(), "notes".as_bytes(), "a.txt".as_bytes()).unwrap()
+    defer let nested_path = nested
+    testing.assert_eq(nested_path.as_slice(), "notes/a.txt".as_bytes(), "a parent and a name were not joined by a slash")?
+    testing.assert_eq(at, UInt64(6), "the name did not start after the slash")?
+}
+
+// Make the step for the entry `name` of the directory `parent`, with the
+// metadata read for it.
+fn entry_step[A: Allocator](allocator: A, parent: mem.Slice[UInt8], name: mem.Slice[UInt8], sink metadata: Metadata, depth: UInt64) -> Step[A] where carries(allocator) {
+    let (path, name_start) = match child_path(allocator, parent, name) {
+        Ok(pair) => pair,
+        Err(reason) => return .Unreadable(.{ path = Vec.new_in(allocator), cause = .Allocation(reason) }),
+    }
+    if metadata.error != 0 {
+        return .Unreadable(.{ path, cause = .Io(io.IoError.from_os(.Metadata, Int32(metadata.error))) })
+    }
+    .Found(.{ path, name_start, depth, metadata })
+}
+
+// Read the next entry of `frame`, from its open stream until it is read into
+// memory and from its listing after.
+fn read_step[A: Allocator](allocator: A, inout frame: Frame[A], inout record: mem.Buffer[A], follow: Bool) -> Step[A] where carries(allocator) {
+    let depth = frame.depth + 1
+    if !frame.in_memory {
+        match read frame.stream {
+            Some(stream) => {
+                let answer = stream.next(&record, follow)
+                if answer == 0 {
+                    return .Ended
+                }
+                if answer < 0 {
+                    return .Failed(Int32(-answer))
+                }
+                let metadata = Metadata.of_record(record)
+                let name = record.as_slice().subspan(start: mem.dir_record_header, count: UInt64(answer)).unwrap()
+                return entry_step(allocator, frame.path.as_slice(), name, metadata, depth)
+            },
+            None => panic("a walk lost the directory it was reading"),
+        }
+    }
+    let index = frame.listing.taken
+    if index * listing_stride == frame.listing.words.length() {
+        return .Ended
+    }
+    let metadata = Metadata.of_listing(frame.listing.words, index)
+    let length = frame.listing.words[index * listing_stride + 6]
+    let name = frame.listing.names.as_slice().subspan(start: frame.listing.name_at, count: length).unwrap()
+    let step = entry_step(allocator, frame.path.as_slice(), name, metadata, depth)
+    frame.listing.taken = index + 1
+    frame.listing.name_at += length
+    step
+}
+
+// Read every remaining entry of `stream` into a listing and close it.
+fn list_all[A: Allocator](allocator: A, sink stream: mem.DirStream, inout record: mem.Buffer[A], follow: Bool) -> Result[Listing[A], WalkCause] where carries(.Ok: allocator) {
+    var listing = Listing.empty(allocator)
+    var failed: Option[WalkCause] = .None
+    loop {
+        let answer = stream.next(&record, follow)
+        if answer == 0 {
+            break
+        }
+        if answer < 0 {
+            failed = .Some(.Io(io.IoError.from_os(.Read, Int32(-answer))))
+            break
+        }
+        match &listing.keep(record, UInt64(answer)) {
+            Ok(_) => {},
+            Err(reason) => {
+                failed = .Some(.Allocation(reason))
+                break
+            },
+        }
+    }
+    match failed {
+        Some(cause) => {
+            stream.release()
+            listing.release()
+            return .Err(cause)
+        },
+        None => {},
+    }
+    let closed = stream.close()
+    if closed < 0 {
+        listing.release()
+        return .Err(.Io(io.IoError.from_os(.Close, Int32(-closed))))
+    }
+    .Ok(listing)
+}
+
+// Why the walk could not open a directory to enter it: a cause it reports
+// for that directory; a cause it reports for a directory above it that could
+// not be opened again, which the walk then leaves; or a directory above it
+// that changed, which it leaves too. A directory
+// above is named by its index among the directories the walk is inside
+// (`parents.length()` names the current one).
+enum Refusal {
+    Failed(WalkCause),
+    FailedAbove(UInt64, WalkCause),
+    Changed(UInt64),
+}
+
+// Return the frame's own name, the last component of its path.
+fn frame_name[A: Allocator](frame: Frame[A]) -> mem.Slice[UInt8] where borrows(frame) {
+    frame.path.as_slice().subspan(start: frame.name_start, count: frame.path.length() - frame.name_start).unwrap()
+}
+
+// Write `name` and a zero byte into `buffer` at `at`, and answer where the
+// next name goes.
+fn put_name[A: Allocator](inout buffer: mem.Buffer[A], at: UInt64, name: mem.Slice[UInt8]) -> UInt64 {
+    for index in 0..name.length() {
+        &buffer.store_byte(at + index, name[index])
+    }
+    &buffer.store_byte(at + name.length(), 0)
+    at + name.length() + 1
+}
+
+// Close `frame`'s open directory: drop it when its entries are in memory
+// already, and read the rest of them into its listing first otherwise.
+fn make_closed[A: Allocator](allocator: A, inout frame: Frame[A], inout record: mem.Buffer[A], follow: Bool) -> Option[WalkError[A]] where carries(.Some: allocator), retains(frame: allocator) {
+    if frame.in_memory {
+        let none: Option[mem.DirStream] = .None
+        let held = mem.exchange(&frame.stream, none)
+        held.release()
+        return .None
+    }
+    read_into_memory(allocator, &frame, &record, follow)
+}
+
+// Read the rest of the entries of `frame`'s open directory into its listing
+// and close it. A directory that cannot be read is closed all the same, and
+// answered as an error naming it, with no entries left to report.
+fn read_into_memory[A: Allocator](allocator: A, inout frame: Frame[A], inout record: mem.Buffer[A], follow: Bool) -> Option[WalkError[A]] where carries(.Some: allocator), retains(frame: allocator) {
+    let none: Option[mem.DirStream] = .None
+    let stream = match mem.exchange(&frame.stream, none) {
+        Some(stream) => stream,
+        None => panic("a walk read a closed directory into memory"),
+    }
+    match list_all(allocator, stream, &record, follow) {
+        Ok(listing) => {
+            let previous = mem.exchange(&frame.listing, listing)
+            previous.release()
+            frame.in_memory = true
+            .None
+        },
+        Err(cause) => {
+            frame.in_memory = true
+            var path: Vec[UInt8, A] = Vec.new_in(allocator)
+            match &path.append_slice(frame.path.as_slice()) {
+                Ok(_) => .Some(.{ path, cause }),
+                Err(reason) => .Some(.{ path, cause = .Allocation(reason) }),
+            }
+        },
+    }
+}
+
+// Take the value out of `holder`, which must hold one.
+fn taken_out[T](inout holder: Option[T]) -> T where carries(holder) {
+    let empty: Option[T] = .None
+    match mem.exchange(&holder, empty) {
+        Some(value) => value,
+        None => panic("a walk lost the directory it was reading"),
+    }
+}
+
+// Put `value` into the empty `holder`.
+fn put_back[T](inout holder: Option[T], sink value: T) where retains(holder: value) {
+    match mem.exchange(&holder, .Some(value)) {
+        None => {},
+        Some(_) => panic("a walk was reading two directories at once"),
+    }
+}
+
+// A Walk visits every entry below a root directory, one at a time and only as
+// it is asked: each step reads one directory entry and the metadata of that
+// entry (one `stat`), and a directory it reports is entered at the step after,
+// so nothing is read ahead. Entries come in the order the file system lists
+// them, a directory before what it holds, and the root itself is not reported.
+//
+// A walk holds its root and the directories nearest the current one open, at
+// most `max_open` of them between steps. Entering a directory at that bound
+// reads the rest of the shallowest open directory below the root into memory
+// and closes it, so each directory is opened by its own name inside its open
+// parent. Coming back up into a directory read into memory, the walk opens
+// `..` of the directory it leaves and keeps it as that directory's when its
+// device, inode and birth time are the ones recorded; otherwise, to enter a
+// directory inside it, the walk opens each directory again by its own name
+// from the deepest one still open. It opens no path of more than one name
+// below the root, and no more than two descriptors beyond `max_open` are open
+// during a step. Every entry's path and
+// every error's path are owned, from the walk's allocator.
+//
+// An entry or a directory the walk cannot read is reported as a `WalkError`
+// and skipped, and the walk goes on. A walk is linear: `close` closes every
+// directory it still holds and reports the first failure, and `release` closes
+// them and drops any failure.
+@(opaque, linear)
+struct Walk[A: Allocator] {
+    allocator: A,
+    top: Option[Frame[A]],
+    parents: Vec[Frame[A], A],
+    record: mem.Buffer[A],
+    descend: Option[Pending[A]],
+    max_depth: UInt64,
+    follow: Bool,
+    max_open: UInt64,
+    open_streams: UInt64,
+}
+
+impl[A: Allocator] Walk[A] {
+    // Open a walk of the directory `root`. It reports entries down to
+    // `max_depth` levels below the root: 1 is the root's own entries, and 0
+    // reports nothing. It
+    // follows symbolic links to directories only when `follow_symlinks` is
+    // set, and then reports a link that leads back into a directory the walk
+    // is inside as a `Loop` instead of entering it; the root is followed if it
+    // is a link either way. It keeps at most `max_open` directories open, and
+    // 0 and 1 are taken as 2, the root and the current directory. Paths and
+    // the walk's own storage come from `allocator`.
+    pub fn open_in(allocator: A, root: Path, max_depth: UInt64 = UInt64.max, follow_symlinks: Bool = false, max_open: UInt64 = 16) -> Result[Walk[A], FsError] where carries(.Ok: allocator) {
+        let terminated = mem._terminated(allocator, root.as_bytes()) else |reason| {
+            return .Err(.Allocation(reason))
+        }
+        let opened = mem._open_dir(terminated, follow: true)
+        terminated.release()
+        let stream = match opened {
+            Ok(stream) => stream,
+            Err(code) => return .Err(.Io(io.IoError.from_os(.Open, code))),
+        }
+        let (device, inode, birth) = match stream.lasting_identity() {
+            Ok(identity) => identity,
+            Err(code) => {
+                stream.release()
+                return .Err(.Io(io.IoError.from_os(.Metadata, code)))
+            },
+        }
+        var path: Vec[UInt8, A] = Vec.new_in(allocator)
+        match &path.append_slice(root.as_bytes()) {
+            Ok(_) => {},
+            Err(reason) => {
+                stream.release()
+                path.release()
+                return .Err(.Allocation(reason))
+            },
+        }
+        let record = match allocator.acquire(mem.dir_record_bytes) {
+            Ok(record) => record,
+            Err(reason) => {
+                stream.release()
+                path.release()
+                return .Err(.Allocation(reason))
+            },
+        }
+        let top = Frame[A] { path, name_start = 0, depth = 0, device, inode, birth, stream = .Some(stream), listing = Listing.empty(allocator), in_memory = false }
+        // The root and the current directory are open at least.
+        let streams_at_most = if max_open < 2 {
+            2
+        } else {
+            max_open
+        }
+        .Ok(.{
+            allocator = copy(allocator),
+            top = .Some(top),
+            parents = Vec.new_in(allocator),
+            record,
+            descend = .None,
+            max_depth,
+            follow = follow_symlinks,
+            max_open = streams_at_most,
+            open_streams = 1,
+        })
+    }
+
+    test "a walk over an arena counts every entry of the tree" {
+        defer let root = sample_tree()
+        defer let arena = mem.Arena.open(mem.system(), size: 65536)
+        var walk = Walk.open_in(arena.handle(), Path.from_str(root.view()).unwrap()).unwrap()
+        var count = UInt64(0)
+        // Entries in an arena owe nothing, so the walk drops them.
+        for found in &walk {
+            if found.is_ok() {
+                count += 1
+            }
+        }
+        walk.close().unwrap()
+        testing.assert_eq(count, UInt64(5), "a walk over an arena found another number of entries")?
+        remove_sample_tree(root.view())
+    }
+
+    test "each allocation failure of a walk is reported" -> Result[(), testing.Failure] {
+        defer let root = sample_tree()
+        let place = root.view()
+        // Two open directories, the fewest a walk keeps, make it read `docs`
+        // into memory to enter `docs/deep`, so every allocation a walk makes,
+        // a listing's included, is refused once.
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            [place] |allocator| -> Result[(), WalkCause] {
+                var walk = match Walk.open_in(allocator, Path.from_str(place).unwrap(), max_open: 2) {
+                    Ok(walk) => walk,
+                    Err(Allocation(reason)) => return .Err(.Allocation(reason)),
+                    Err(_) => panic("the sample tree did not open"),
+                }
+                var refused: Option[WalkCause] = .None
+                for found in &walk {
+                    match found {
+                        Ok(entry) => entry.release(),
+                        Err(error) => {
+                            refused = .Some(error.cause())
+                            error.release()
+                        },
+                    }
+                }
+                walk.close().unwrap()
+                match refused {
+                    Some(cause) => return .Err(cause),
+                    None => return .Ok(()),
+                }
+            },
+            WalkCause.is_refusal,
+        )
+        remove_sample_tree(root.view())
+        testing.assert(checked.is_ok(), "a refused allocation during a walk was lost or reported as another failure")?
+        .Ok(())
+    }
+
+    // Close every directory the walk still holds and report the first close
+    // that failed. Entries already handed out stay valid.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let Walk { allocator: _, top, parents, record, descend, max_depth: _, follow: _, max_open: _, open_streams: _ } = self
+        record.release()
+        descend.release()
+        var first: Option[io.IoError] = match top {
+            Some(frame) => finish_frame(frame),
+            None => .None,
+        }
+        var rest = parents
+        loop {
+            let frame = &rest.pop() else {
+                break
+            }
+            let failed = finish_frame(frame)
+            if first.is_none() {
+                first = failed
+            }
+        }
+        match rest.finish() {
+            Ok(_) => {},
+            Err(_) => panic("a walk kept a directory it closed"),
+        }
+        match first {
+            Some(error) => .Err(error),
+            None => .Ok(()),
+        }
+    }
+
+    test "closing a walk part-way closes the directories it is inside" {
+        defer let root = sample_tree()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap()).unwrap()
+        // Walking until the deepest file leaves the root and two directories
+        // below it open.
+        loop {
+            let found = &walk.next() else {
+                break
+            }
+            let deepest = match read found { Ok(entry) => entry.depth() == 3, Err(_) => false }
+            found.release()
+            if deepest {
+                break
+            }
+        }
+        testing.assert_ok_eq(walk.close(), (), "closing a walk part-way failed")?
+        remove_sample_tree(root.view())
+    }
+
+    // Do not enter the directory the walk reported last. Call it after `next`
+    // answers a directory, before the next call; at any other time it does
+    // nothing.
+    pub fn skip_children(inout self: Self) {
+        let empty: Option[Pending[A]] = .None
+        let skipped = mem.exchange(&self.descend, empty)
+        skipped.release()
+    }
+
+    test "skipping a directory's children leaves them out" {
+        defer let root = sample_tree()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap()).unwrap()
+        var names = UInt64(0)
+        loop {
+            let found = &walk.next() else {
+                break
+            }
+            let entry = found.unwrap()
+            names += 1
+            if entry.is_dir() {
+                &walk.skip_children()
+            }
+            entry.release()
+        }
+        walk.close().unwrap()
+        // Only the root's own `a.txt` and `docs` are reported.
+        testing.assert_eq(names, UInt64(2), "a skipped directory's entries were reported")?
+        remove_sample_tree(root.view())
+    }
+
+    // Return whether the directory with this device and inode is one the walk
+    // is inside. A walk is inside as many directories as it is deep, so this
+    // costs one comparison per level.
+    fn inside(self: Self, device: UInt64, inode: UInt64) -> Bool {
+        match read self.top {
+            Some(frame) => {
+                if frame.device == device && frame.inode == inode {
+                    return true
+                }
+            },
+            None => {},
+        }
+        for read frame in self.parents {
+            if frame.device == device && frame.inode == inode {
+                return true
+            }
+        }
+        false
+    }
+
+    // Open the directory `path`, whose own name starts at `name_start`, inside
+    // the current directory: through the current directory's stream when the
+    // walk holds it open, and otherwise through `reopen_child`. Only one name is
+    // ever opened at a time, relative to a directory already open, so no link
+    // in place of a directory above can redirect it and no path is too long
+    // to open.
+    fn open_below_top(self: Self, path: Vec[UInt8, A], name_start: UInt64) -> Result[mem.DirStream, Refusal] {
+        let name_bytes = path.as_slice().subspan(start: name_start, count: path.length() - name_start).unwrap()
+        match read self.top {
+            Some(frame) => match read frame.stream {
+                Some(stream) => {
+                    let name = mem._terminated(self.allocator, name_bytes) else |reason| {
+                        return .Err(.Failed(.Allocation(reason)))
+                    }
+                    let answer = stream.open_at(name, self.follow)
+                    name.release()
+                    match answer {
+                        Ok(child) => .Ok(child),
+                        Err(code) => .Err(.Failed(.Io(io.IoError.from_os(.Open, code)))),
+                    }
+                },
+                None => self.reopen_child(name_bytes),
+            },
+            None => panic("a walk entered a directory below none"),
+        }
+    }
+
+    // Open the directory `name` inside the current directory, which the walk
+    // read into memory and closed. The runtime opens each directory from the
+    // deepest one the walk still holds open down to the current one again, by
+    // its own name inside the one above, with a bare descriptor that is held to
+    // the device and inode the walk recorded when it entered that directory,
+    // and makes a stream only of `name`. A directory found missing, replaced by
+    // a link or by another directory is `Changed`, by its place among the
+    // directories the walk is inside.
+    fn reopen_child(self: Self, name: mem.Slice[UInt8]) -> Result[mem.DirStream, Refusal] {
+        // The root keeps its stream until the walk ends, so the search ends.
+        var anchor = self.parents.length()
+        loop {
+            if anchor == 0 {
+                panic("a walk holds no open directory")
+            }
+            anchor -= 1
+            if self.parents[anchor].stream.is_some() {
+                break
+            }
+        }
+        // The directories to open again are those below the anchor, the
+        // current one last, which `top` holds.
+        let reopened = self.parents.length() - anchor
+        var total = name.length() + 1
+        for index in anchor + 1..self.parents.length() {
+            total += frame_name(self.parents[index]).length() + 1
+        }
+        match read self.top {
+            Some(frame) => total += frame_name(frame).length() + 1,
+            None => panic("a walk reopened a directory it does not hold"),
+        }
+        var names = match self.allocator.acquire(total) {
+            Ok(buffer) => buffer,
+            Err(reason) => return .Err(.Failed(.Allocation(reason))),
+        }
+        // Each directory's device and inode take two words.
+        var identities = match self.allocator.acquire(reopened * 16) {
+            Ok(buffer) => buffer,
+            Err(reason) => {
+                names.release()
+                return .Err(.Failed(.Allocation(reason)))
+            },
+        }
+        var at = UInt64(0)
+        for index in anchor + 1..self.parents.length() {
+            at = put_name(&names, at, frame_name(self.parents[index]))
+            let slot = (index - anchor - 1) * 16
+            &identities.store(slot, self.parents[index].device)
+            &identities.store(slot + 8, self.parents[index].inode)
+        }
+        match read self.top {
+            Some(frame) => {
+                at = put_name(&names, at, frame_name(frame))
+                &identities.store((reopened - 1) * 16, frame.device)
+                &identities.store((reopened - 1) * 16 + 8, frame.inode)
+            },
+            None => {},
+        }
+        let _end = put_name(&names, at, name)
+        let answer = match read self.parents[anchor].stream {
+            Some(stream) => mem._reopen_dir(stream, names, identities, self.follow),
+            None => panic("a walk reopened below a closed directory"),
+        }
+        names.release()
+        identities.release()
+        match answer {
+            Ok(stream) => .Ok(stream),
+            Err((code, failed)) => {
+                // The last name is the directory being entered, opened for
+                // the first time; any other is one the walk is inside.
+                if failed < reopened {
+                    let moved = code == 0 || match read io.IoError.from_os(.Open, code).category {
+                        NotFound => true,
+                        NotDirectory => true,
+                        Symlink => true,
+                        _ => false,
+                    }
+                    if moved {
+                        return .Err(.Changed(anchor + 1 + failed))
+                    }
+                    return .Err(.FailedAbove(anchor + 1 + failed, .Io(io.IoError.from_os(.Open, code))))
+                }
+                .Err(.Failed(.Io(io.IoError.from_os(.Open, code))))
+            },
+        }
+    }
+
+    // Leave every directory from the current one up to the one at `index`
+    // among those the walk is inside, which changed or cannot be opened again,
+    // so nothing below it is walked, and answer that directory's path.
+    fn abandon(inout self: Self, index: UInt64) -> Vec[UInt8, A] where carries(self), retains(self: self) {
+        loop {
+            let frame = taken_out(&self.top)
+            let reached = self.parents.length() == index
+            let Frame { path, name_start: _, depth: _, device: _, inode: _, birth: _, stream, listing, in_memory: _ } = frame
+            listing.release()
+            match stream {
+                // Only directories read into memory are left here, so none
+                // holds a stream to close.
+                Some(open) => {
+                    self.open_streams -= 1
+                    open.release()
+                },
+                None => {},
+            }
+            match &self.parents.pop() {
+                Some(parent) => put_back(&self.top, parent),
+                None => {},
+            }
+            if reached {
+                return path
+            }
+            path.release()
+        }
+    }
+
+    // Enter the directory `pending` names: open it below the current
+    // directory and make it the current one, or answer why it cannot be
+    // walked. The loop check reads the identity of the directory opened, so a
+    // link swapped after the listing cannot lead the walk back unseen.
+    fn enter(inout self: Self, sink pending: Pending[A]) -> Option[WalkError[A]] where carries(.Some: self), carries(.Some: pending), retains(self: self), retains(self: pending) {
+        let Pending { path, name_start, depth } = pending
+        let stream = match self.open_below_top(path, name_start) {
+            Ok(stream) => stream,
+            Err(Failed(cause)) => return .Some(.{ path, cause }),
+            Err(FailedAbove(index, cause)) => {
+                path.release()
+                let failed = &self.abandon(index)
+                return .Some(.{ path = failed, cause })
+            },
+            Err(Changed(index)) => {
+                path.release()
+                let changed = &self.abandon(index)
+                return .Some(.{ path = changed, cause = .Changed })
+            },
+        }
+        let parent = taken_out(&self.top)
+        let (device, inode, birth) = match stream.lasting_identity() {
+            Ok(identity) => identity,
+            Err(code) => {
+                stream.release()
+                put_back(&self.top, parent)
+                return .Some(.{ path, cause = .Io(io.IoError.from_os(.Metadata, code)) })
+            },
+        }
+        // The parent is out of `top` while it is entered, so it is compared
+        // here and every directory above it by `inside`.
+        if (parent.device == device && parent.inode == inode) || self.inside(device, inode) {
+            stream.release()
+            put_back(&self.top, parent)
+            return .Some(.{ path, cause = .Loop })
+        }
+        // The new directory stays open. At the bound, the shallowest open
+        // directory below the root makes room: the rest of its entries are
+        // read into memory and it is closed, so the directories nearest the
+        // current one stay open and going down opens one name a level.
+        var above = parent
+        let shed: Option[WalkError[A]] = if self.open_streams >= self.max_open {
+            &self.make_room(&above)
+        } else {
+            .None
+        }
+        self.open_streams += 1
+        let frame = Frame[A] { path, name_start, depth, device, inode, birth, stream = .Some(stream), listing = Listing.empty(self.allocator), in_memory = false }
+        match &self.parents.push(above) {
+            Ok(_) => {
+                put_back(&self.top, frame)
+                shed
+            },
+            Err(failure) => {
+                let PushFailure { reason, value } = failure
+                put_back(&self.top, value)
+                self.open_streams -= 1
+                shed.release()
+                let Frame { path: kept, name_start: _, depth: _, device: _, inode: _, birth: _, stream: entered, listing: held, in_memory: _ } = frame
+                entered.release()
+                held.release()
+                .Some(.{ path = kept, cause = .Allocation(reason) })
+            },
+        }
+    }
+
+    // Close the shallowest open directory below the root, among the walk's
+    // parents and `parent`, the directory being entered from, after reading the
+    // rest of its entries into memory when they are not there already. A
+    // directory that cannot be read is an error naming it, and its remaining
+    // entries are skipped.
+    fn make_room(inout self: Self, inout parent: Frame[A]) -> Option[WalkError[A]] where carries(.Some: self), retains(self: self), retains(parent: self) {
+        var index = UInt64(1)
+        loop {
+            if index >= self.parents.length() {
+                break
+            }
+            if self.parents[index].stream.is_some() {
+                self.open_streams -= 1
+                return make_closed(self.allocator, &self.parents[index], &self.record, self.follow)
+            }
+            index += 1
+        }
+        // The bound is at least two, the root and one more, so the directory
+        // being entered from is open below the root when no parent is.
+        if self.parents.length() == 0 || parent.stream.is_none() {
+            panic("a walk at its bound held no directory below the root open")
+        }
+        self.open_streams -= 1
+        make_closed(self.allocator, &parent, &self.record, self.follow)
+    }
+
+    // Hold the current directory open again when its entries are in memory and
+    // it was closed, by opening ".." of `child`, the directory just left, and
+    // keeping it only when it is the directory the walk recorded. The walk then
+    // opens what the current directory holds inside it, instead of opening
+    // every directory above it again, and the open count is what it was before
+    // `child` closes. Nothing held the current directory while it was closed,
+    // so it may have been removed and its inode given to a directory made
+    // elsewhere, which `..` of a moved `child` can reach: the device, the inode
+    // and the birth time must all match, and a file system that keeps no birth
+    // time is not trusted with the handover. The walk then finds the directory
+    // again by name from the deepest one it holds open.
+    fn hold_open_from(inout self: Self, child: mem.DirStream) where retains(self: self) {
+        let wanted = match read self.top {
+            Some(frame) => frame.in_memory && frame.stream.is_none(),
+            None => false,
+        }
+        if !wanted {
+            return
+        }
+        let up = match mem._open_dir_up(child) {
+            Ok(up) => up,
+            Err(_) => return,
+        }
+        let same = match up.lasting_identity() {
+            Ok((device, inode, Some((seconds, nanoseconds)))) => match read self.top {
+                Some(frame) => frame.device == device && frame.inode == inode && match read frame.birth {
+                    Some((recorded_seconds, recorded_nanoseconds)) => recorded_seconds == seconds && recorded_nanoseconds == nanoseconds,
+                    None => false,
+                },
+                None => false,
+            },
+            _ => false,
+        }
+        if !same {
+            up.release()
+            return
+        }
+        var frame = taken_out(&self.top)
+        let none = mem.exchange(&frame.stream, .Some(up))
+        none.release()
+        put_back(&self.top, frame)
+        self.open_streams += 1
+    }
+
+    // Leave the exhausted directory `frame`, making its parent the current
+    // one, and answer the error that ended it: a failed read, or else a failed
+    // close.
+    fn leave(inout self: Self, sink frame: Frame[A], read_error: Option[Int32]) -> Option[WalkError[A]] where carries(.Some: frame), retains(self: self) {
+        let Frame { path, name_start: _, depth: _, device: _, inode: _, birth: _, stream, listing, in_memory: _ } = frame
+        listing.release()
+        match &self.parents.pop() {
+            Some(parent) => put_back(&self.top, parent),
+            None => {},
+        }
+        let closed = match stream {
+            Some(open) => {
+                self.open_streams -= 1
+                &self.hold_open_from(open)
+                let answer = open.close()
+                if answer < 0 {
+                    Option.Some(io.IoError.from_os(.Close, Int32(-answer)))
+                } else {
+                    .None
+                }
+            },
+            None => .None,
+        }
+        match read read_error {
+            Some(code) => return .Some(.{ path, cause = .Io(io.IoError.from_os(.Read, code)) }),
+            None => {},
+        }
+        match closed {
+            Some(error) => .Some(.{ path, cause = .Io(error) }),
+            None => {
+                path.release()
+                .None
+            },
+        }
+    }
+
+    // Take one step of the walk and answer what it found with the walk as it
+    // stands after. `next` hands the walk over and takes it back, because one
+    // step moves directories between the walk's own fields.
+    fn advanced(sink self: Self) -> (Option[Result[Entry[A], WalkError[A]]], Self) where carries(self) {
+        var walk = self
+        let item = &walk.step()
+        (item, walk)
+    }
+
+    // Find the next entry or error, as `next` answers it.
+    fn step(inout self: Self) -> Option[Result[Entry[A], WalkError[A]]] where carries(.Some: self), retains(self: self) {
+        if self.max_depth == 0 {
+            return .None
+        }
+        loop {
+            let waiting: Option[Pending[A]] = .None
+            match mem.exchange(&self.descend, waiting) {
+                Some(pending) => match &self.enter(pending) {
+                    Some(error) => return .Some(.Err(error)),
+                    None => {},
+                },
+                None => {},
+            }
+            let empty: Option[Frame[A]] = .None
+            var frame = match mem.exchange(&self.top, empty) {
+                Some(frame) => frame,
+                None => return .None,
+            }
+            match read_step(self.allocator, &frame, &self.record, self.follow) {
+                Found(entry) => {
+                    put_back(&self.top, frame)
+                    if entry.metadata.kind == .Directory && entry.depth < self.max_depth {
+                        return .Some(&self.report_directory(entry))
+                    }
+                    return .Some(.Ok(entry))
+                },
+                Unreadable(error) => {
+                    put_back(&self.top, frame)
+                    return .Some(.Err(error))
+                },
+                Ended => match &self.leave(frame, .None) {
+                    Some(error) => return .Some(.Err(error)),
+                    None => {},
+                },
+                Failed(code) => match &self.leave(frame, .Some(code)) {
+                    Some(error) => return .Some(.Err(error)),
+                    None => {},
+                },
+            }
+        }
+    }
+
+    // Answer the entry `entry` with the directory it is kept to be entered at
+    // the next step, or the error that storage for it was refused.
+    fn report_directory(inout self: Self, sink entry: Entry[A]) -> Result[Entry[A], WalkError[A]] where carries(.Ok: entry), carries(.Err: entry), retains(self: self) {
+        var copied: Vec[UInt8, A] = Vec.new_in(self.allocator)
+        match &copied.append_slice(entry.path.as_slice()) {
+            Ok(_) => {
+                let pending = Pending[A] { path = copied, name_start = entry.name_start, depth = entry.depth }
+                put_back(&self.descend, pending)
+                .Ok(entry)
+            },
+            Err(reason) => {
+                copied.release()
+                let Entry { path, name_start: _, depth: _, metadata: _ } = entry
+                .Err(.{ path, cause = .Allocation(reason) })
+            },
+        }
+    }
+}
+
+impl Walk[mem.SystemAllocator] {
+    // Open a walk of the directory `root`, as `open_in` does, with paths and
+    // the walk's storage from the system allocator.
+    pub fn open(root: Path, max_depth: UInt64 = UInt64.max, follow_symlinks: Bool = false, max_open: UInt64 = 16) -> Result[Walk[mem.SystemAllocator], FsError] {
+        Walk.open_in(mem.system(), root, max_depth, follow_symlinks, max_open)
+    }
+
+    test "a walk reports every entry below the root once" {
+        defer let root = sample_tree()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap()).unwrap()
+        var count = UInt64(0)
+        var bytes = UInt64(0)
+        var directories = UInt64(0)
+        for found in &walk {
+            defer let entry = found.unwrap()
+            count += 1
+            if entry.is_file() {
+                bytes += entry.size()
+            }
+            if entry.is_dir() {
+                directories += 1
+            }
+        }
+        walk.close().unwrap()
+        testing.assert_eq(count, UInt64(5), "the walk found another number of entries")?
+        testing.assert_eq(directories, UInt64(2), "the walk found another number of directories")?
+        testing.assert_eq(bytes, UInt64(9), "the files held another number of bytes")?
+        remove_sample_tree(root.view())
+    }
+
+    test "a walk stops at its depth limit" {
+        defer let root = sample_tree()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap(), max_depth: 1).unwrap()
+        var count = UInt64(0)
+        var deeper = false
+        for found in &walk {
+            defer let entry = found.unwrap()
+            deeper = deeper || entry.depth() != 1
+            count += 1
+        }
+        walk.close().unwrap()
+        testing.assert(!deeper, "an entry below the limit was reported")?
+        testing.assert_eq(count, UInt64(2), "the root's own entries were not all reported")?
+        var none = Walk.open(Path.from_str(root.view()).unwrap(), max_depth: 0).unwrap()
+        let first = &none.next()
+        let empty = first.is_none()
+        first.release()
+        none.close().unwrap()
+        testing.assert(empty, "a walk to depth 0 reported an entry")?
+        remove_sample_tree(root.view())
+    }
+
+    test "a walk holding one open directory lists the deeper ones" {
+        defer let root = sample_tree()
+        // `max_open: 0` and `1` are taken as 2, the root and the current
+        // directory, so every directory between them is read into memory.
+        for limit in [UInt64(0), 1, 2] {
+            var walk = Walk.open(Path.from_str(root.view()).unwrap(), max_open: limit).unwrap()
+            var count = UInt64(0)
+            var deepest = UInt64(0)
+            for found in &walk {
+                defer let entry = found.unwrap()
+                count += 1
+                if entry.depth() > deepest {
+                    deepest = entry.depth()
+                }
+            }
+            walk.close().unwrap()
+            testing.assert_eq(count, UInt64(5), "a bounded walk found another number of entries")?
+            testing.assert_eq(deepest, UInt64(3), "a bounded walk did not reach the deepest file")?
+        }
+        remove_sample_tree(root.view())
+    }
+
+    test "a walk reports a link without following it" {
+        defer let root = sample_tree()
+        defer let place = joined(root.view(), "docs/up")
+        // `docs/up` names the root, so following it would walk the tree again.
+        create_symlink(Path.from_str("..").unwrap(), Path.from_str(place.view()).unwrap()).unwrap()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap()).unwrap()
+        var count = UInt64(0)
+        var links = UInt64(0)
+        for found in &walk {
+            defer let entry = found.unwrap()
+            count += 1
+            if entry.is_symlink() {
+                links += 1
+            }
+        }
+        walk.close().unwrap()
+        remove_file(Path.from_str(place.view()).unwrap()).unwrap()
+        testing.assert_eq(links, UInt64(1), "the link was not reported as a link")?
+        testing.assert_eq(count, UInt64(6), "a link was followed")?
+        remove_sample_tree(root.view())
+    }
+
+    test "a followed link back into the walk is a loop and the walk goes on" {
+        defer let root = sample_tree()
+        defer let up = joined(root.view(), "docs/up")
+        defer let file_link = joined(root.view(), "b-link")
+        create_symlink(Path.from_str("..").unwrap(), Path.from_str(up.view()).unwrap()).unwrap()
+        create_symlink(Path.from_str("docs/b.txt").unwrap(), Path.from_str(file_link.view()).unwrap()).unwrap()
+        var walk = Walk.open(Path.from_str(root.view()).unwrap(), follow_symlinks: true).unwrap()
+        var count = UInt64(0)
+        var loops = UInt64(0)
+        var linked_size = UInt64(0)
+        for found in &walk {
+            match found {
+                Ok(entry) => {
+                    count += 1
+                    if entry.name().as_bytes() == "b-link".as_bytes() {
+                        linked_size = entry.size()
+                    }
+                    entry.release()
+                },
+                Err(error) => {
+                    if match read error.cause() { Loop => true, _ => false } {
+                        loops += 1
+                    }
+                    error.release()
+                },
+            }
+        }
+        walk.close().unwrap()
+        remove_file(Path.from_str(up.view()).unwrap()).unwrap()
+        remove_file(Path.from_str(file_link.view()).unwrap()).unwrap()
+        testing.assert_eq(loops, UInt64(1), "the link back to the root was not reported once as a loop")?
+        // The five entries, the link to the root reported as the directory it
+        // names, and the link to `b.txt`.
+        testing.assert_eq(count, UInt64(7), "the walk did not go on past the loop")?
+        testing.assert_eq(linked_size, UInt64(5), "a followed link to a file did not report the file's size")?
+        remove_sample_tree(root.view())
+    }
+
+    test "a directory swapped for a link during a walk is not followed" {
+        // `outside/b` holds what a walk of the tree must never reach.
+        defer let outside = scratch_path()
+        create_dir(Path.from_str(outside.view()).unwrap()).unwrap()
+        for directory in ["b", "b/SECRET_DIR"] {
+            defer let path = joined(outside.view(), directory)
+            create_dir(Path.from_str(path.view()).unwrap()).unwrap()
+        }
+        defer let secret = joined(outside.view(), "b/secret.txt")
+        let _written = write_file(Path.from_str(secret.view()).unwrap(), "x".as_bytes(), policy: .CreateNew).unwrap()
+        // With one open directory every directory below the root is read into
+        // memory, and with sixteen each is held open; neither may be led out.
+        for limit in [UInt64(1), 16] {
+            defer let root = scratch_path()
+            create_dir(Path.from_str(root.view()).unwrap()).unwrap()
+            for directory in ["a", "a/b", "a/b/c"] {
+                defer let path = joined(root.view(), directory)
+                create_dir(Path.from_str(path.view()).unwrap()).unwrap()
+            }
+            defer let file = joined(root.view(), "a/b/c/file.txt")
+            let _file = write_file(Path.from_str(file.view()).unwrap(), "x".as_bytes(), policy: .CreateNew).unwrap()
+            var walk = Walk.open(Path.from_str(root.view()).unwrap(), max_open: limit).unwrap()
+            var escaped = false
+            var swapped = false
+            loop {
+                let found = &walk.next() else {
+                    break
+                }
+                match found {
+                    Ok(entry) => {
+                        let name = entry.name().as_bytes()
+                        escaped = escaped || name == "secret.txt".as_bytes() || name == "SECRET_DIR".as_bytes()
+                        // The walk has reported `a/b` and enters it next: put a
+                        // link to `outside` where `a` was.
+                        if !swapped && name == "b".as_bytes() {
+                            swapped = true
+                            remove_file(Path.from_str(file.view()).unwrap()).unwrap()
+                            for directory in ["a/b/c", "a/b", "a"] {
+                                defer let path = joined(root.view(), directory)
+                                remove_dir(Path.from_str(path.view()).unwrap()).unwrap()
+                            }
+                            defer let link = joined(root.view(), "a")
+                            create_symlink(Path.from_str(outside.view()).unwrap(), Path.from_str(link.view()).unwrap()).unwrap()
+                        }
+                        entry.release()
+                    },
+                    Err(error) => error.release(),
+                }
+            }
+            walk.close().unwrap()
+            defer let link = joined(root.view(), "a")
+            remove_file(Path.from_str(link.view()).unwrap()).unwrap()
+            remove_dir(Path.from_str(root.view()).unwrap()).unwrap()
+            testing.assert(swapped, "the walk never reported the directory to swap")?
+            testing.assert(!escaped, "a walk followed a link put in place of a directory it was inside")?
+        }
+        remove_file(Path.from_str(secret.view()).unwrap()).unwrap()
+        for directory in ["b/SECRET_DIR", "b"] {
+            defer let path = joined(outside.view(), directory)
+            remove_dir(Path.from_str(path.view()).unwrap()).unwrap()
+        }
+        remove_dir(Path.from_str(outside.view()).unwrap()).unwrap()
+    }
+
+    test "a directory changed during a walk is reported once, by its own path" {
+        defer let outside = scratch_path()
+        create_dir(Path.from_str(outside.view()).unwrap()).unwrap()
+        for mode in [UInt64(0), 1, 2] {
+            defer let root = scratch_path()
+            create_dir(Path.from_str(root.view()).unwrap()).unwrap()
+            for directory in ["p", "p/a", "p/a/y"] {
+                defer let path = joined(root.view(), directory)
+                create_dir(Path.from_str(path.view()).unwrap()).unwrap()
+            }
+            // The walk is inside `p/a` with both read into memory and closed,
+            // and is about to enter `p/a/y`, so it must open `p` and `a`
+            // again by their names.
+            var walk = walk_inside_closed(root.view())
+            // `a` moves to `a_old`, and its name then holds a link, nothing,
+            // or a different directory.
+            defer let changed = joined(root.view(), "p/a")
+            let place = prepare(mem.system(), Path.from_str(changed.view()).unwrap()).unwrap()
+            let moved_name = mem._terminated(mem.system(), "a_old".as_bytes()).unwrap()
+            let moved = mem._publish_at_fd(place.name, moved_name, place.parent, 0)
+            moved_name.release()
+            complete(place, FsFailure.empty()).unwrap()
+            if moved != 0 {
+                panic("the test could not move `a`")
+            }
+            if mode == 0 {
+                create_symlink(Path.from_str(outside.view()).unwrap(), Path.from_str(changed.view()).unwrap()).unwrap()
+            } else if mode == 2 {
+                create_dir(Path.from_str(changed.view()).unwrap()).unwrap()
+            }
+            var errors = UInt64(0)
+            var first_named = false
+            var first = true
+            for found in &walk {
+                match found {
+                    Ok(entry) => entry.release(),
+                    Err(error) => {
+                        errors += 1
+                        if first {
+                            first_named = error.path().as_bytes() == changed.view().as_bytes() && match read error.cause() { Changed => true, _ => false }
+                        }
+                        error.release()
+                    },
+                }
+                first = false
+            }
+            walk.close().unwrap()
+            if mode == 0 {
+                remove_file(Path.from_str(changed.view()).unwrap()).unwrap()
+            } else if mode == 2 {
+                remove_dir(Path.from_str(changed.view()).unwrap()).unwrap()
+            }
+            for directory in ["p/a_old/y", "p/a_old", "p"] {
+                defer let path = joined(root.view(), directory)
+                remove_dir(Path.from_str(path.view()).unwrap()).unwrap()
+            }
+            remove_dir(Path.from_str(root.view()).unwrap()).unwrap()
+            testing.assert(first_named, "the walk did not first report `a` as changed")?
+            testing.assert_eq(errors, UInt64(1), "a changed directory was reported other than once")?
+        }
+        remove_dir(Path.from_str(outside.view()).unwrap()).unwrap()
+    }
+
+    test "a parent is held open again only when its birth time is the one recorded" {
+        // `p` holds `a`, empty, and `b`, which holds a file. The walk is inside
+        // `a` with `p` read into memory and closed; leaving `a` it opens `..`
+        // of it, which is `p`, and keeps that open only when `p` has the birth
+        // time the walk recorded for it.
+        for wrong_birth in [false, true] {
+            defer let root = scratch_path()
+            create_dir(Path.from_str(root.view()).unwrap()).unwrap()
+            for directory in ["p", "p/a", "p/b"] {
+                defer let path = joined(root.view(), directory)
+                create_dir(Path.from_str(path.view()).unwrap()).unwrap()
+            }
+            defer let file = joined(root.view(), "p/b/f.txt")
+            let _written = write_file(Path.from_str(file.view()).unwrap(), "x".as_bytes(), policy: .CreateNew).unwrap()
+            var walk = walk_leaving_child(root.view(), wrong_birth)
+            let recorded = match read walk.parents[1].birth {
+                Some(_) => true,
+                None => false,
+            }
+            // The first step leaves `a` and reports the first entry of `p`.
+            let first = &walk.next()
+            let held = match read walk.top {
+                Some(frame) => frame.stream.is_some(),
+                None => false,
+            }
+            var entries = UInt64(0)
+            var errors = UInt64(0)
+            match first {
+                Some(Ok(entry)) => {
+                    entries += 1
+                    entry.release()
+                },
+                Some(Err(error)) => {
+                    errors += 1
+                    error.release()
+                },
+                None => {},
+            }
+            for found in &walk {
+                match found {
+                    Ok(entry) => {
+                        entries += 1
+                        entry.release()
+                    },
+                    Err(error) => {
+                        errors += 1
+                        error.release()
+                    },
+                }
+            }
+            walk.close().unwrap()
+            remove_file(Path.from_str(file.view()).unwrap()).unwrap()
+            for directory in ["p/b", "p/a", "p"] {
+                defer let path = joined(root.view(), directory)
+                remove_dir(Path.from_str(path.view()).unwrap()).unwrap()
+            }
+            remove_dir(Path.from_str(root.view()).unwrap()).unwrap()
+            // A file system that keeps no birth time never takes the handover.
+            testing.assert_eq(held, recorded && !wrong_birth, "the parent was held open against its birth time")?
+            // Held open or found again by name, `p` gives `a`, `b` and `b/f.txt`.
+            testing.assert_eq(entries, UInt64(3), "the walk lost entries of the parent")?
+            testing.assert_eq(errors, UInt64(0), "finding the parent again by name failed")?
+        }
+    }
+
+    test "a walk enters a directory whose path is longer than the system opens" {
+        defer let root = scratch_path()
+        create_dir(Path.from_str(root.view()).unwrap()).unwrap()
+        // Directories are made one inside the next until the system refuses
+        // one because its parent's path is too long to open, so the last made
+        // has a path at least that long. Two hundred bytes a name keeps the
+        // chain short.
+        defer var name = String.new()
+        for _ in 0..200 {
+            &name.append("n").unwrap()
+        }
+        defer var made: Vec[String] = Vec.new()
+        var refused = false
+        // A chain of 64 names is longer than any supported system's limit.
+        for _ in 0..64 {
+            let next = if made.length() == 0 {
+                joined(root.view(), name.view())
+            } else {
+                joined(made[made.length() - 1].view(), name.view())
+            }
+            match create_dir(Path.from_str(next.view()).unwrap()) {
+                Ok(_) => &made.push(next).unwrap(),
+                Err(_) => {
+                    next.release()
+                    refused = true
+                    break
+                },
+            }
+        }
+        for limit in [UInt64(1), 16] {
+            var walk = Walk.open(Path.from_str(root.view()).unwrap(), max_open: limit).unwrap()
+            var entries = UInt64(0)
+            var errors = UInt64(0)
+            for found in &walk {
+                match found {
+                    Ok(entry) => {
+                        entries += 1
+                        entry.release()
+                    },
+                    Err(error) => {
+                        errors += 1
+                        error.release()
+                    },
+                }
+            }
+            walk.close().unwrap()
+            testing.assert_eq(errors, UInt64(0), "a directory with a long path could not be walked")?
+            testing.assert_eq(entries, made.length(), "the walk did not reach every directory of the chain")?
+        }
+        var index = made.length()
+        loop {
+            if index == 0 {
+                break
+            }
+            index -= 1
+            remove_dir(Path.from_str(made[index].view()).unwrap()).unwrap()
+        }
+        remove_dir(Path.from_str(root.view()).unwrap()).unwrap()
+        testing.assert(refused, "the system opened a chain of 64 two-hundred-byte names")?
+    }
+
+    test "opening a walk of a missing directory reports it" {
+        let refused = match Walk.open(Path.from_str("/no/such/linea/walk").unwrap()) {
+            Ok(walk) => {
+                walk.release()
+                false
+            },
+            Err(Io(reason)) => reason.category == .NotFound && reason.operation == .Open,
+            Err(_) => false,
+        }
+        testing.assert(refused, "a missing root was not reported as not found")?
+    }
+
+    test "a walk runs inside a simulation" {
+        defer let root = sample_tree()
+        let place = root.view()
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let count = &sim.run(
+            [place] |inout _world| {
+                var walk = Walk.open(Path.from_str(place).unwrap()).unwrap()
+                var found_entries = UInt64(0)
+                for found in &walk {
+                    found.unwrap().release()
+                    found_entries += 1
+                }
+                walk.close().unwrap()
+                found_entries
+            },
+        )
+        sim.close()
+        testing.assert_eq(count, UInt64(5), "a walk inside a simulation found another number of entries")?
+        remove_sample_tree(root.view())
+    }
+}
+
+impl[A: Allocator] Iterator for Walk[A] {
+    type Item = Result[Entry[A], WalkError[A]]
+
+    // Answer the next entry below the root, or the next error, entering the
+    // directory reported last first. None means every directory is exhausted.
+    fn next(inout self: Self) -> Option[Result[Entry[A], WalkError[A]]] where carries(.Some: self) {
+        let current = self
+        let (item, rest) = current.advanced()
+        self = rest
+        item
+    }
+}
+
+impl[A: Allocator] Release for Walk[A] {
+    // Close every directory the walk still holds, dropping a failed close.
+    fn release(sink self: Self) {
+        let _closed = self.close()
+    }
+}
+
+// Generic code closes a walk through `io.Close`; this forwards to `Walk.close`.
+impl[A: Allocator] io.Close for Walk[A] {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        self.close()
+    }
+}
+
+// Join `rest` to the directory `root` with a slash.
+internal fn joined(root: Str, rest: Str) -> String {
+    var path = root.to_owned().unwrap()
+    &path.append("/").unwrap()
+    &path.append(rest).unwrap()
+    path
+}
+
+// Build this tree under a new name in /tmp and answer its root:
+//
+//     a.txt              3 bytes
+//     docs/
+//     docs/b.txt         5 bytes
+//     docs/deep/
+//     docs/deep/c.txt    1 byte
+internal fn sample_tree() -> String {
+    let root = scratch_path()
+    create_dir(Path.from_str(root.view()).unwrap()).unwrap()
+    for directory in ["docs", "docs/deep"] {
+        defer let path = joined(root.view(), directory)
+        create_dir(Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for (name, contents) in [("a.txt", "tea"), ("docs/b.txt", "bread"), ("docs/deep/c.txt", "!")] {
+        defer let path = joined(root.view(), name)
+        let _written = write_file(Path.from_str(path.view()).unwrap(), contents.as_bytes(), policy: .CreateNew).unwrap()
+    }
+    root
+}
+
+// Remove the tree `sample_tree` built, files first and then each directory
+// after what it holds.
+internal fn remove_sample_tree(root: Str) {
+    for name in ["docs/deep/c.txt", "docs/b.txt", "a.txt"] {
+        defer let path = joined(root, name)
+        remove_file(Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for directory in ["docs/deep", "docs"] {
+        defer let path = joined(root, directory)
+        remove_dir(Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    remove_dir(Path.from_str(root).unwrap()).unwrap()
+}
+
+// Answer a walk of `root` that is inside `p` and `p/a`, both read into memory
+// with no entries left and closed, with `p/a/y` reported and entered next, as
+// a walk keeping two directories open stands after it reports `y`.
+internal fn walk_inside_closed(root: Str) -> Walk[mem.SystemAllocator] {
+    let system = mem.system()
+    let root_path = Path.from_str(root).unwrap()
+    let terminated = mem._terminated(system, root_path.as_bytes()).unwrap()
+    let opened = mem._open_dir(terminated, follow: true)
+    terminated.release()
+    let stream = opened.unwrap()
+    let (root_device, root_inode, root_birth) = stream.lasting_identity().unwrap()
+    var root_bytes: Vec[UInt8] = Vec.new()
+    &root_bytes.append_slice(root.as_bytes()).unwrap()
+    let root_frame = Frame[mem.SystemAllocator] { path = root_bytes, name_start = 0, depth = 0, device = root_device, inode = root_inode, birth = root_birth, stream = .Some(stream), listing = Listing.empty(system), in_memory = false }
+    var parents: Vec[Frame[mem.SystemAllocator]] = Vec.new()
+    match &parents.push(root_frame) {
+        Ok(_) => {},
+        Err(_) => panic("the test could not keep the root"),
+    }
+    let p_frame = closed_frame(root, "p", depth: 1)
+    match &parents.push(p_frame) {
+        Ok(_) => {},
+        Err(_) => panic("the test could not keep `p`"),
+    }
+    let a_frame = closed_frame(root, "p/a", depth: 2)
+    let (path, name_start) = child_path(system, a_frame.path.as_slice(), "y".as_bytes()).unwrap()
+    .{
+        allocator = system,
+        top = .Some(a_frame),
+        parents,
+        record = system.acquire(mem.dir_record_bytes).unwrap(),
+        descend = .Some(.{ path, name_start, depth = 3 }),
+        max_depth = UInt64.max,
+        follow = false,
+        max_open = 2,
+        open_streams = 1,
+    }
+}
+
+// Answer the frame of the directory `below` under `root`, read into memory
+// with no entries left and closed, with the identity it has now.
+internal fn closed_frame(root: Str, below: Str, depth: UInt64) -> Frame[mem.SystemAllocator] {
+    let system = mem.system()
+    let whole = joined(root, below)
+    let terminated = mem._terminated(system, whole.view().as_bytes()).unwrap()
+    let opened = mem._open_dir(terminated, follow: false)
+    terminated.release()
+    let stream = opened.unwrap()
+    let (device, inode, birth) = stream.lasting_identity().unwrap()
+    stream.release()
+    let bytes = whole.view().as_bytes()
+    var path: Vec[UInt8] = Vec.new()
+    &path.append_slice(bytes).unwrap()
+    whole.release()
+    // The frame's own name starts after the last slash (ASCII 47).
+    var name_start = UInt64(0)
+    for index in 0..path.length() {
+        if path[index] == 47 {
+            name_start = index + 1
+        }
+    }
+    .{ path, name_start, depth, device, inode, birth, stream = .None, listing = Listing.empty(system), in_memory = true }
+}
+
+// Answer a walk of `root` that is inside `p/a`, open, with `p` read into
+// memory with all its entries still to report and closed, and the root held
+// open with nothing left to report. With `wrong_birth`, the birth time the walk
+// recorded for `p` is a second later than its own.
+internal fn walk_leaving_child(root: Str, wrong_birth: Bool) -> Walk[mem.SystemAllocator] {
+    let system = mem.system()
+    var root_frame = open_frame(root, "", depth: 0)
+    root_frame.in_memory = true
+    var p_frame = open_frame(root, "p", depth: 1)
+    var record = system.acquire(mem.dir_record_bytes).unwrap()
+    let none: Option[mem.DirStream] = .None
+    let p_stream = match mem.exchange(&p_frame.stream, none) {
+        Some(stream) => stream,
+        None => panic("the test lost `p`"),
+    }
+    let listing = list_all(system, p_stream, &record, false).unwrap()
+    let empty = mem.exchange(&p_frame.listing, listing)
+    empty.release()
+    p_frame.in_memory = true
+    if wrong_birth {
+        let shifted = match read p_frame.birth {
+            Some((seconds, nanoseconds)) => Option.Some((seconds + 1, nanoseconds)),
+            None => .None,
+        }
+        p_frame.birth = shifted
+    }
+    var parents: Vec[Frame[mem.SystemAllocator]] = Vec.new()
+    match &parents.push(root_frame) {
+        Ok(_) => {},
+        Err(_) => panic("the test could not keep the root"),
+    }
+    match &parents.push(p_frame) {
+        Ok(_) => {},
+        Err(_) => panic("the test could not keep `p`"),
+    }
+    .{
+        allocator = system,
+        top = .Some(open_frame(root, "p/a", depth: 2)),
+        parents,
+        record,
+        descend = .None,
+        max_depth = UInt64.max,
+        follow = false,
+        max_open = 2,
+        open_streams = 2,
+    }
+}
+
+// Answer the frame of the directory `below` under `root` (the root itself
+// when `below` is empty), open, with the identity it has now.
+internal fn open_frame(root: Str, below: Str, depth: UInt64) -> Frame[mem.SystemAllocator] {
+    let system = mem.system()
+    let whole = if below.length() == 0 {
+        root.to_owned().unwrap()
+    } else {
+        joined(root, below)
+    }
+    let terminated = mem._terminated(system, whole.view().as_bytes()).unwrap()
+    let opened = mem._open_dir(terminated, follow: false)
+    terminated.release()
+    let stream = opened.unwrap()
+    let (device, inode, birth) = stream.lasting_identity().unwrap()
+    var path: Vec[UInt8] = Vec.new()
+    &path.append_slice(whole.view().as_bytes()).unwrap()
+    whole.release()
+    // The frame's own name starts after the last slash (ASCII 47).
+    var name_start = UInt64(0)
+    for index in 0..path.length() {
+        if path[index] == 47 {
+            name_start = index + 1
+        }
+    }
+    .{ path, name_start, depth, device, inode, birth, stream = .Some(stream), listing = Listing.empty(system), in_memory = false }
+}
+
+// Walk the tree at `root` and answer the entry called `name`.
+internal fn sample_entry(root: Str, name: Str) -> Entry[mem.SystemAllocator] {
+    var walk = Walk.open(Path.from_str(root).unwrap()).unwrap()
+    var kept: Option[Entry[mem.SystemAllocator]] = .None
+    for found in &walk {
+        let entry = found.unwrap()
+        if kept.is_none() && entry.name().as_bytes() == name.as_bytes() {
+            put_back(&kept, entry)
+        } else {
+            entry.release()
+        }
+    }
+    walk.close().unwrap()
+    kept.unwrap()
+}

@@ -1,0 +1,251 @@
+// Report how much space a directory's contents take: the bytes and files under
+// each of its entries, largest first, and its largest files. With no argument
+// the program builds a small sample project in a temporary directory, reports
+// on it and removes it again.
+import std.env
+import std.fmt
+import std.fs
+import std.io
+import std.testing
+import std.uuid
+
+// A Usage is what the walk found under one entry of the directory: the bytes
+// its files hold and how many there are. `@derive(Release)` releases its name
+// with it.
+@derive(Release)
+struct Usage {
+    name: String,
+    bytes: UInt64,
+    files: UInt64,
+}
+
+// A file the report lists among the largest, by its path below the directory.
+@derive(Release)
+struct LargeFile {
+    path: String,
+    bytes: UInt64,
+}
+
+// How many of the largest files the report lists.
+let largest_kept: UInt64 = 3
+
+// A Report is everything the walk found under one directory. Releasing it
+// releases every name and path it holds.
+@derive(Release)
+struct Report {
+    usages: Vec[Usage],
+    largest: Vec[LargeFile],
+    skipped: UInt64,
+}
+
+// Return the text of `path` below the directory `root`, without the slash
+// that joins them. A walk adds no slash after a root that ends in one, such as
+// `/`. A name that is not UTF-8 is written with escapes, as `fs.Path`
+// displays it.
+fn below(root: fs.Path, path: fs.Path) -> String {
+    let start = root.as_bytes()
+    // ASCII 47 is the slash.
+    let joined = start.length() > 0 && start[start.length() - 1] != 47
+    let skip = if joined {
+        start.length() + 1
+    } else {
+        start.length()
+    }
+    let rest = path.as_bytes().subspan(start: skip, count: path.as_bytes().length() - skip).unwrap()
+    fmt.render_owned(fs.Path.from_bytes(rest).unwrap()).unwrap()
+}
+
+// Add one file's bytes to the usage of the entry it sits under, the first
+// component of its path below the directory.
+fn count_file(inout usages: Vec[Usage], top: Str, bytes: UInt64) {
+    for inout usage in usages {
+        if usage.name.view() == top {
+            usage.bytes += bytes
+            usage.files += 1
+            return
+        }
+    }
+    &usages.push(Usage { name = top.to_owned().unwrap(), bytes, files = 1 }).unwrap()
+}
+
+// Keep `file` if it is among the largest seen so far.
+fn keep_if_large(inout largest: Vec[LargeFile], sink file: LargeFile) {
+    &largest.push(file).unwrap()
+    &largest.sort_by(|left, right| left.bytes > right.bytes || (left.bytes == right.bytes && left.path.view() < right.path.view()))
+    if largest.length() > largest_kept {
+        let dropped = &largest.pop().unwrap()
+        dropped.release()
+    }
+}
+
+// Walk everything under `root` and add up what each of its entries holds. A
+// file the walk cannot read is counted as skipped, and the walk goes on.
+fn measure(root: fs.Path) -> Result[Report, fs.FsError] {
+    // `Walk.open` opens the root; each step of the `for` reads one entry and
+    // its size, and the walk enters a directory only after reporting it.
+    var walk = fs.Walk.open(root)?
+    var usages: Vec[Usage] = Vec.new()
+    var largest: Vec[LargeFile] = Vec.new()
+    var skipped = 0
+    // `&walk` lends the walk to the loop, so it is still ours to close after.
+    for found in &walk {
+        // An entry the walk could not read arrives as an error, and the walk
+        // goes on with the next one.
+        defer let entry = found else |error| {
+            io.eprintln("skipped {error}")
+            error.release()
+            skipped += 1
+            continue
+        }
+        if !entry.is_file() {
+            continue
+        }
+        let path = below(root, entry.path())
+        let top = match path.view().split_once("/") {
+            Some((first, _)) => first,
+            None => path.view(),
+        }
+        count_file(&usages, top, entry.size())
+        keep_if_large(&largest, LargeFile { path, bytes = entry.size() })
+    }
+    // `close` closes the directories the walk still holds open, and says if
+    // one of them failed to close.
+    let _ = walk.close() else |error| {
+        io.eprintln("closing the walk failed: {error}")
+    }
+    &usages.sort_by(|left, right| left.bytes > right.bytes || (left.bytes == right.bytes && left.name.view() < right.name.view()))
+    .Ok(Report { usages, largest, skipped })
+}
+
+// Return "file" for one file and "files" for any other count.
+fn files_word(count: UInt64) -> Str {
+    if count == 1 {
+        "file"
+    } else {
+        "files"
+    }
+}
+
+fn print_report(root: fs.Path, report: Report) -> Result[(), io.IoError] {
+    var total = 0
+    var files = 0
+    io.println("{root}")?
+    for read usage in report.usages {
+        io.println("{usage.bytes:>8} bytes {usage.files:>3} {files_word(usage.files):<5}  {usage.name}")?
+        total += usage.bytes
+        files += usage.files
+    }
+    io.println("{total:>8} bytes {files:>3} {files_word(files):<5}  in all")?
+    io.println("largest files:")?
+    for read file in report.largest {
+        io.println("{file.bytes:>8} bytes  {file.path}")?
+    }
+    if report.skipped > 0 {
+        io.println("{report.skipped} entries could not be read")?
+    }
+    .Ok(())
+}
+
+// The sample project's files, by their path below its root, and how many
+// bytes each holds.
+let sample_files = [
+    ("README.md", UInt64(1200)),
+    ("src/main.lin", 2400),
+    ("src/parse/lexer.lin", 5100),
+    ("src/parse/parser.lin", 7300),
+    ("assets/logo.png", 18000),
+    ("assets/fonts/body.woff", 32000),
+]
+
+let sample_directories = ["src", "src/parse", "assets", "assets/fonts"]
+
+// Build the sample project under `root`.
+fn build_sample(root: Str) -> Result[(), fs.FsFailure] {
+    fs.create_dir(fs.Path.from_str(root).unwrap())?
+    for directory in sample_directories {
+        defer let path = fmt.render_owned("{root}/{directory}").unwrap()
+        fs.create_dir(fs.Path.from_str(path.view()).unwrap())?
+    }
+    for (name, size) in sample_files {
+        defer let path = fmt.render_owned("{root}/{name}").unwrap()
+        defer let contents = Vec.filled(count: size, value: UInt8(120)).unwrap()
+        let _ = fs.write_file(fs.Path.from_str(path.view()).unwrap(), contents.as_slice(), policy: .CreateNew)?
+    }
+    .Ok(())
+}
+
+// Remove the sample project: its files, then each directory after what it
+// holds.
+fn remove_sample(root: Str) -> Result[(), fs.FsFailure] {
+    for (name, _) in sample_files {
+        defer let path = fmt.render_owned("{root}/{name}").unwrap()
+        fs.remove_file(fs.Path.from_str(path.view()).unwrap())?
+    }
+    for directory in ["assets/fonts", "assets", "src/parse", "src"] {
+        defer let path = fmt.render_owned("{root}/{directory}").unwrap()
+        fs.remove_dir(fs.Path.from_str(path.view()).unwrap())?
+    }
+    fs.remove_dir(fs.Path.from_str(root).unwrap())
+}
+
+// Report on the directory `root`, naming it `shown` in the report.
+fn report_on(root: fs.Path, shown: fs.Path) -> UInt8 {
+    defer let report = measure(root) else |error| {
+        io.eprintln("cannot walk {shown}: {error}")
+        return 1
+    }
+    let _ = print_report(shown, report) else |_| {
+        return 1
+    }
+    0
+}
+
+fn main() -> UInt8 {
+    let args = env.args()
+    if args.count() > 2 {
+        io.eprintln("usage: disk_usage [directory]")
+        return 1
+    }
+    if args.count() == 2 {
+        let root = fs.Path.from_arg(args, 1) else {
+            io.eprintln("usage: disk_usage [directory]")
+            return 1
+        }
+        return report_on(root, shown: root)
+    }
+    // A fresh name keeps two runs of the program from meeting in /tmp.
+    defer let sample = fmt.render_owned("/tmp/disk-usage-{uuid.Uuid.v4()}").unwrap()
+    let _ = build_sample(sample.view()) else |error| {
+        io.eprintln("cannot build the sample project: {error}")
+        return 1
+    }
+    // The sample's place in /tmp changes with every run, so the report names
+    // it by what it is.
+    let status = report_on(fs.Path.from_str(sample.view()).unwrap(), shown: fs.Path.from_str("sample-project").unwrap())
+    let _ = remove_sample(sample.view()) else |error| {
+        io.eprintln("cannot remove the sample project: {error}")
+        return 1
+    }
+    status
+}
+
+test "a path below a root ending in a slash keeps its first letter" {
+    defer let text = below(fs.Path.from_str("/").unwrap(), fs.Path.from_str("/usr/lib").unwrap())
+    testing.assert_eq(text.view(), "usr/lib", "the first letter below the root was lost")?
+    defer let nested = below(fs.Path.from_str("notes").unwrap(), fs.Path.from_str("notes/a.txt").unwrap())
+    testing.assert_eq(nested.view(), "a.txt", "the joining slash was kept")?
+}
+
+test "the report adds up each entry's files and keeps the largest" {
+    defer let root = fmt.render_owned("/tmp/disk-usage-test-{uuid.Uuid.v4()}").unwrap()
+    build_sample(root.view()).unwrap()
+    defer let report = measure(fs.Path.from_str(root.view()).unwrap()).unwrap()
+    remove_sample(root.view()).unwrap()
+    testing.assert_eq(report.usages.length(), UInt64(3), "the report did not have one line per entry of the root")?
+    testing.assert_eq(report.usages[0].name.view(), "assets", "the largest entry was not first")?
+    testing.assert_eq(report.usages[0].bytes, UInt64(50000), "the assets did not add up")?
+    testing.assert_eq(report.usages[1].files, UInt64(3), "the sources were not three files")?
+    testing.assert_eq(report.largest[0].path.view(), "assets/fonts/body.woff", "the largest file was another")?
+    testing.assert_eq(report.largest.length(), largest_kept, "the report kept another number of large files")?
+    testing.assert_eq(report.skipped, UInt64(0), "a file of the sample could not be read")?
+}

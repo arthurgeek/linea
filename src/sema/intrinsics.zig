@@ -380,7 +380,9 @@ pub const RawAccesses = struct {
         "read_fd",            "write_slice_fd",     "read_fd_at",     "write_slice_fd_at",
         "read_socket",        "write_slice_socket", "_random_bytes",  "_open_parent_fd",
         "_open_at_fd",        "_mode_at_fd",        "_publish_at_fd", "_unlink_at_fd",
-        "parse_float64_bits", "parse_float32_bits",
+        "_make_dir_at",       "_remove_dir_at",     "_symlink_at",    "_open_dir",
+        "_open_dir_at",       "_read_dir",          "_reopen_dir",    "parse_float64_bits",
+        "parse_float32_bits",
     };
 
     /// Identify private storage declarations before checking their generic signatures.

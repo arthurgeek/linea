@@ -1,0 +1,71 @@
+import std.fmt
+import std.fs
+import std.io
+import std.uuid
+
+// The tree's directories and files, by their paths below its root.
+let directories = ["", "/docs", "/docs/deep"]
+
+let files = [("/a.txt", "tea"), ("/docs/b.txt", "bread"), ("/docs/deep/c.txt", "!")]
+
+// Build a small tree, walk it following links, and print each entry's path
+// below the root with its kind and size, sorted, then the one error.
+fn main() -> Result[UInt8, io.IoError] {
+    defer let root = fmt.render_owned("/tmp/linea-walk-{uuid.Uuid.v4()}").unwrap()
+    for directory in directories {
+        defer let path = fmt.render_owned("{root}{directory}").unwrap()
+        fs.create_dir(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for (name, contents) in files {
+        defer let path = fmt.render_owned("{root}{name}").unwrap()
+        let _ = fs.write_file(fs.Path.from_str(path.view()).unwrap(), contents.as_bytes(), policy: .CreateNew).unwrap()
+    }
+    defer let dangling = fmt.render_owned("{root}/docs/gone").unwrap()
+    fs.create_symlink(fs.Path.from_str("missing").unwrap(), fs.Path.from_str(dangling.view()).unwrap()).unwrap()
+
+    var walk = fs.Walk.open(fs.Path.from_str(root.view()).unwrap(), follow_symlinks: true).unwrap()
+    defer var lines: Vec[String] = Vec.new()
+    var errors = 0
+    var missing = 0
+    for found in &walk {
+        match found {
+            Ok(entry) => {
+                // The path below the root starts after the root and its slash.
+                let skip = root.length() + 1
+                let below = entry.path().as_bytes().subspan(start: skip, count: entry.path().as_bytes().length() - skip).unwrap()
+                // A directory's size is the file system's own, so only a file's is printed.
+                let line = if entry.is_file() {
+                    fmt.render_owned("{fs.Path.from_bytes(below).unwrap()} {entry.kind()} of {entry.size()} bytes at depth {entry.depth()}").unwrap()
+                } else {
+                    fmt.render_owned("{fs.Path.from_bytes(below).unwrap()} {entry.kind()} at depth {entry.depth()}").unwrap()
+                }
+                &lines.push(line).unwrap()
+                entry.release()
+            },
+            Err(error) => {
+                errors += 1
+                if match read error.cause() { Io(reason) => reason.category == .NotFound, _ => false } {
+                    missing += 1
+                }
+                error.release()
+            },
+        }
+    }
+    walk.close()?
+    &lines.sort_by(|left, right| left.view() < right.view())
+    for read line in lines {
+        io.println(line.view())?
+    }
+    io.println("{errors} error, {missing} of them a missing target")?
+
+    fs.remove_file(fs.Path.from_str(dangling.view()).unwrap()).unwrap()
+    for (name, _) in files {
+        defer let path = fmt.render_owned("{root}{name}").unwrap()
+        fs.remove_file(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    for directory in ["/docs/deep", "/docs", ""] {
+        defer let path = fmt.render_owned("{root}{directory}").unwrap()
+        fs.remove_dir(fs.Path.from_str(path.view()).unwrap()).unwrap()
+    }
+    .Ok(0)
+}

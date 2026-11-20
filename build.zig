@@ -1749,6 +1749,8 @@ pub fn build(b: *std.Build) void {
         "-Dwrite=linea_test_write",
         "-Dclose=linea_test_close",
         "-Dgetentropy=linea_test_getentropy",
+        "-DLINEA_READDIR=linea_test_readdir",
+        "-DLINEA_STATX=linea_test_statx",
         // glibc's fortified read would call the real read past the rename
         // above; `unfortified.h` turns it off.
         "-include",

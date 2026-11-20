@@ -2,6 +2,7 @@
 #include "io.h"
 #include "pipe_signal.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -21,6 +22,26 @@
 #endif
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
+#endif
+
+/* The fault tests read directories through a stand-in that is interrupted
+ * once. It is named here rather than by renaming `readdir` on the command
+ * line, because macOS's <dirent.h> binds `readdir` to its 64-bit inode
+ * symbol through an asm label that a rename would not reach. */
+#ifdef LINEA_READDIR
+struct dirent *LINEA_READDIR(DIR *dir);
+#else
+#define LINEA_READDIR readdir
+#endif
+
+/* The fault tests also read birth times through a stand-in that refuses
+ * `statx`, as a seccomp filter in an older container does. */
+#if defined(__linux__) && defined(STATX_BTIME)
+#ifdef LINEA_STATX
+int LINEA_STATX(int dirfd, const char *path, int flags, unsigned int mask, struct statx *buffer);
+#else
+#define LINEA_STATX statx
+#endif
 #endif
 
 /* The runtime's scalar address ABI targets LP64 Linux and macOS. */
@@ -53,6 +74,7 @@ uint8_t linea_io_category(int code) {
     case ECONNRESET: case ECONNABORTED: return LINEA_IO_CONNECTION_RESET;
     case ECONNREFUSED: return LINEA_IO_CONNECTION_REFUSED;
     case EADDRINUSE: return LINEA_IO_ADDRESS_IN_USE;
+    case ENAMETOOLONG: return LINEA_IO_NAME_TOO_LONG;
     default: return LINEA_IO_OTHER;
     }
 }
@@ -310,6 +332,249 @@ long linea_unlink_at(int parent, unsigned long at, unsigned long extent) {
     if (invalid != 0) return -(long)invalid;
     /* unlinkat does not block; Linux and macOS document no EINTR for it. */
     return unlinkat(parent, (const char *)(uintptr_t)at, 0) == 0 ? 0 : -(long)errno;
+}
+
+long linea_make_dir_at(int parent, unsigned long at, unsigned long extent, unsigned long mode) {
+    const int invalid = path_bytes(at, extent, 1);
+    if (invalid != 0) return -(long)invalid;
+    if (mode > 0777) return -EINVAL;
+    /* mkdirat does not block on a local file system; neither platform
+     * documents EINTR for it. */
+    return mkdirat(parent, (const char *)(uintptr_t)at, (mode_t)mode) == 0 ? 0 : -(long)errno;
+}
+
+long linea_remove_dir_at(int parent, unsigned long at, unsigned long extent) {
+    const int invalid = path_bytes(at, extent, 1);
+    if (invalid != 0) return -(long)invalid;
+    return unlinkat(parent, (const char *)(uintptr_t)at, AT_REMOVEDIR) == 0 ? 0 : -(long)errno;
+}
+
+long linea_symlink_at(int parent, unsigned long at, unsigned long extent,
+                      unsigned long target_at, unsigned long target_extent) {
+    int invalid = path_bytes(at, extent, 1);
+    if (invalid == 0) invalid = path_bytes(target_at, target_extent, 0);
+    if (invalid != 0) return -(long)invalid;
+    return symlinkat((const char *)(uintptr_t)target_at, parent, (const char *)(uintptr_t)at) == 0 ? 0 : -(long)errno;
+}
+
+/* Open `name` relative to `parent` (AT_FDCWD for a path) as a directory and
+ * wrap it in a stream, closing the descriptor when the wrap fails. */
+static long open_stream(int parent, const char *name, uint8_t follow, unsigned long *stream) {
+    if (follow > 1) return -EINVAL;
+    const int flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | (follow ? 0 : O_NOFOLLOW);
+    int fd;
+    do {
+        fd = openat(parent, name, flags);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0) return -(long)errno;
+    DIR *dir = fdopendir(fd);
+    if (dir == NULL) {
+        const int error = errno;
+        close(fd);
+        return -(long)error;
+    }
+    *stream = (unsigned long)(uintptr_t)dir;
+    return 0;
+}
+
+long linea_dir_open(unsigned long at, unsigned long extent, uint8_t follow, unsigned long *stream) {
+    const int invalid = path_bytes(at, extent, 0);
+    if (invalid != 0) return -(long)invalid;
+    return open_stream(AT_FDCWD, (const char *)(uintptr_t)at, follow, stream);
+}
+
+long linea_dir_open_at(unsigned long parent, unsigned long at, unsigned long extent,
+                       uint8_t follow, unsigned long *stream) {
+    const int invalid = path_bytes(at, extent, 1);
+    if (invalid != 0) return -(long)invalid;
+    DIR *dir = (DIR *)(uintptr_t)parent;
+    return open_stream(dirfd(dir), (const char *)(uintptr_t)at, follow, stream);
+}
+
+static uint64_t entry_kind(mode_t mode) {
+    if (S_ISREG(mode)) return 0;
+    if (S_ISDIR(mode)) return 1;
+    if (S_ISLNK(mode)) return 2;
+    return 3;
+}
+
+static uint64_t listed_kind(unsigned char type) {
+    switch (type) {
+    case DT_REG: return 0;
+    case DT_DIR: return 1;
+    case DT_LNK: return 2;
+    default: return 3;
+    }
+}
+
+long linea_dir_next(unsigned long stream, unsigned long at, unsigned long len, uint8_t follow) {
+    const int invalid = linea_io_byte_range(at, len);
+    if (invalid != 0) return -(long)invalid;
+    if (len < LINEA_DIR_RECORD_BYTES || follow > 1) return -EINVAL;
+    DIR *dir = (DIR *)(uintptr_t)stream;
+    struct dirent *entry;
+    for (;;) {
+        /* readdir answers NULL both at the end, leaving errno alone, and on
+         * failure, so errno is cleared first; an interrupted read is tried
+         * again, as every other blocking call here is. */
+        do {
+            errno = 0;
+            entry = LINEA_READDIR(dir);
+        } while (entry == NULL && errno == EINTR);
+        if (entry == NULL) return errno == 0 ? 0 : -(long)errno;
+        if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) break;
+    }
+    const size_t name_length = strlen(entry->d_name);
+    if (name_length > len - LINEA_DIR_RECORD_HEADER) return -ENAMETOOLONG;
+    uint64_t words[6] = {0};
+    struct stat info;
+    int result;
+    do {
+        result = fstatat(dirfd(dir), entry->d_name, &info, follow ? 0 : AT_SYMLINK_NOFOLLOW);
+    } while (result != 0 && errno == EINTR);
+    if (result != 0) {
+        words[0] = listed_kind(entry->d_type);
+        words[5] = (uint64_t)errno;
+    } else {
+        words[0] = entry_kind(info.st_mode);
+        words[1] = (uint64_t)(info.st_mode & 07777);
+        words[2] = (uint64_t)info.st_size;
+#if defined(__APPLE__)
+        words[3] = (uint64_t)(int64_t)info.st_mtimespec.tv_sec;
+        words[4] = (uint64_t)info.st_mtimespec.tv_nsec;
+#else
+        words[3] = (uint64_t)(int64_t)info.st_mtim.tv_sec;
+        words[4] = (uint64_t)info.st_mtim.tv_nsec;
+#endif
+    }
+    char *record = (char *)(uintptr_t)at;
+    memcpy(record, words, sizeof(words));
+    memcpy(record + LINEA_DIR_RECORD_HEADER, entry->d_name, name_length);
+    return (long)name_length;
+}
+
+/* Whether `name` is one component: not empty, no slash, and neither "." nor
+ * "..". `(strchr)` names the function, as `path_bytes` does for `memchr`. */
+static int single_component(const char *name) {
+    return name[0] != '\0' && (strchr)(name, '/') == NULL && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
+}
+
+long linea_dir_reopen(unsigned long anchor, unsigned long names_at, unsigned long names_extent,
+                      unsigned long identities_at, unsigned long identities_extent,
+                      uint8_t follow, unsigned long *failed, unsigned long *stream) {
+    int invalid = linea_io_byte_range(names_at, names_extent);
+    if (invalid == 0) invalid = linea_io_byte_range(identities_at, identities_extent);
+    if (invalid != 0) return -(long)invalid;
+    if (follow > 1 || names_extent == 0 || identities_extent % (2 * sizeof(uint64_t)) != 0) return -EINVAL;
+    const char *names = (const char *)(uintptr_t)names_at;
+    if (names[names_extent - 1] != '\0') return -EINVAL;
+    unsigned long count = 0;
+    for (unsigned long i = 0; i < names_extent; i++) {
+        if (names[i] == '\0') count++;
+    }
+    if (count != identities_extent / (2 * sizeof(uint64_t)) + 1) return -EINVAL;
+    const unsigned char *identities = (const unsigned char *)(uintptr_t)identities_at;
+    const int flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | (follow ? 0 : O_NOFOLLOW);
+    int current = dirfd((DIR *)(uintptr_t)anchor);
+    int owned = -1;
+    const char *name = names;
+    for (unsigned long index = 0;; index++) {
+        if (!single_component(name)) {
+            if (owned >= 0) close(owned);
+            return -EINVAL;
+        }
+        int fd;
+        do {
+            fd = openat(current, name, flags);
+        } while (fd < 0 && errno == EINTR);
+        if (fd < 0) {
+            const int error = errno;
+            if (owned >= 0) close(owned);
+            *failed = index;
+            return -(long)error;
+        }
+        if (owned >= 0) close(owned);
+        owned = fd;
+        current = fd;
+        if (index + 1 == count) break;
+        uint64_t want[2];
+        memcpy(want, identities + index * sizeof(want), sizeof(want));
+        struct stat info;
+        int result;
+        do {
+            result = fstat(fd, &info);
+        } while (result != 0 && errno == EINTR);
+        if (result != 0) {
+            const int error = errno;
+            close(owned);
+            *failed = index;
+            return -(long)error;
+        }
+        if ((unsigned long)info.st_dev != want[0] || (unsigned long)info.st_ino != want[1]) {
+            close(owned);
+            *failed = index;
+            return 1;
+        }
+        name += strlen(name) + 1;
+    }
+    DIR *dir = fdopendir(owned);
+    if (dir == NULL) {
+        const int error = errno;
+        close(owned);
+        *failed = count - 1;
+        return -(long)error;
+    }
+    *stream = (unsigned long)(uintptr_t)dir;
+    return 0;
+}
+
+long linea_dir_open_up(unsigned long stream, unsigned long *parent) {
+    return open_stream(dirfd((DIR *)(uintptr_t)stream), "..", 1, parent);
+}
+
+long linea_dir_identity(unsigned long stream, unsigned long *device, unsigned long *inode,
+                        unsigned long *birth_seconds, unsigned long *birth_nanoseconds) {
+    const int fd = dirfd((DIR *)(uintptr_t)stream);
+    struct stat info;
+    int result;
+    do {
+        result = fstat(fd, &info);
+    } while (result != 0 && errno == EINTR);
+    if (result != 0) return -(long)errno;
+    *device = (unsigned long)info.st_dev;
+    *inode = (unsigned long)info.st_ino;
+    *birth_seconds = 0;
+    *birth_nanoseconds = 0;
+    /* A birth time of zero is what a file system without one reports (macOS
+     * on devfs, NFS, SMB and FUSE), and tells no two directories apart. */
+#if defined(__APPLE__)
+    if (info.st_birthtimespec.tv_sec == 0 && info.st_birthtimespec.tv_nsec == 0) return 1;
+    *birth_seconds = (unsigned long)(long)info.st_birthtimespec.tv_sec;
+    *birth_nanoseconds = (unsigned long)info.st_birthtimespec.tv_nsec;
+    return 0;
+#elif defined(__linux__) && defined(STATX_BTIME)
+    /* Linux reports a birth time through statx alone, and only on file
+     * systems that keep one, which `stx_mask` says. The directory is already
+     * identified by fstat, so a statx that fails for any reason, refused by a
+     * seccomp filter included, leaves only the birth time unknown. */
+    struct statx extended;
+    do {
+        result = LINEA_STATX(fd, "", AT_EMPTY_PATH, STATX_BTIME, &extended);
+    } while (result != 0 && errno == EINTR);
+    if (result != 0) return 1;
+    if ((extended.stx_mask & STATX_BTIME) == 0) return 1;
+    if (extended.stx_btime.tv_sec == 0 && extended.stx_btime.tv_nsec == 0) return 1;
+    *birth_seconds = (unsigned long)(long)extended.stx_btime.tv_sec;
+    *birth_nanoseconds = (unsigned long)extended.stx_btime.tv_nsec;
+    return 0;
+#else
+    return 1;
+#endif
+}
+
+long linea_dir_close(unsigned long stream) {
+    /* closedir is not retried after EINTR, for the reason close is not. */
+    return closedir((DIR *)(uintptr_t)stream) == 0 ? 0 : -(long)errno;
 }
 
 /* An unlimited hard limit is capped here on a system that names no smaller
