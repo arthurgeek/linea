@@ -425,10 +425,12 @@ int main(void) {
     megabytes_on_both_pipes_arrive_whole();
     input_written_comes_back_and_a_closed_reader_is_a_broken_pipe();
     a_directory_and_an_environment_are_the_childs();
-    a_fiber_waiting_on_a_child_leaves_its_carrier();
     a_closed_standard_stream_stays_closed_in_the_child();
     a_runtime_descriptor_in_a_closed_stream_is_not_inherited();
     an_ignored_child_signal_refuses_a_spawn();
+    /* The cases on a loop come last: a loop's carriers live as long as the
+     * process, so every case before them runs with this one thread. */
+    a_fiber_waiting_on_a_child_leaves_its_carrier();
     a_wait_with_no_descriptor_left_still_reaps();
     puts("native process tests passed");
     return 0;

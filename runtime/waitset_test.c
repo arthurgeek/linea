@@ -1345,12 +1345,25 @@ static void wait_with_no_descriptor_left(unsigned long endpoint, unsigned long a
     linea_chan_close(endpoint);
 }
 
+/* The loop's carrier lives as long as the process and the descriptor limit
+ * is the process's, so the case runs in a child of its own: the tests after
+ * it, some of which fork, see neither the carrier thread nor the lowered
+ * limit. It is the first test, so the fork happens while this process has
+ * no thread but its main one. */
 static void a_full_descriptor_table_leaves_a_fiber_waiting_in_place(void) {
-    const long loop = linea_loop_open(1);
-    assert(loop > 0);
-    const long prepared = linea_task_prepare_on(1UL << 18, (unsigned long)loop);
-    assert(prepared > 0);
-    linea_chan_close(linea_task_start((unsigned long)prepared, wait_with_no_descriptor_left, release_nothing, 0, 0, 0));
+    const pid_t child = fork();
+    assert(child >= 0);
+    if (child == 0) {
+        const long loop = linea_loop_open(1);
+        if (loop <= 0) _exit(10);
+        const long prepared = linea_task_prepare_on(1UL << 18, (unsigned long)loop);
+        if (prepared <= 0) _exit(11);
+        linea_chan_close(linea_task_start((unsigned long)prepared, wait_with_no_descriptor_left, release_nothing, 0, 0, 0));
+        _exit(0);
+    }
+    int status = 0;
+    assert(waitpid(child, &status, 0) == child);
+    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
 int main(void) {
