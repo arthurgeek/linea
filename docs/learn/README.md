@@ -14,8 +14,8 @@
 12. [A guest book](12-a-guest-book.md)
 13. [Tasks and sessions](13-tasks-and-sessions.md)
 
-Appendices: [Patterns the standard library repeats](patterns.md) and
-[Errors the guide shows](errors.md).
+Appendices: [Patterns the standard library repeats](patterns.md),
+[Iterator recipes](iterator-recipes.md) and [Errors the guide shows](errors.md).
 
 See also the [language definition](../linea-semantics.md) and the
 [examples](../../examples/).
