@@ -3,3 +3,5 @@ error[T-RangePlace]: a range place's bounds settle where the place is formed
   |
 8 |     let head: [UInt8; 2] = copy(a[0..hi])
   |                                      ^^ this is not settled here, and the place's length is what the bounds name
+  |
+  = help: a run's length is part of its type, so it is fixed where the place is formed; read a run chosen while the program runs through a view, `as_slice().subspan(start, count)`, and write one element by element in a loop

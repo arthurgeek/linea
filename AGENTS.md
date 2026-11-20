@@ -207,8 +207,9 @@ until it is green.
   qualifier names, one per module it could mean (a loaded one, the library's
   included, that lets the file reach the name selected from it, or a
   directory of the root's that no import loaded); the `use`
-  [T-UnknownOperation] names, with its import; and `copy(value)` passed to a
-  call that both lends and takes a copyable value. `linea check
+  [T-UnknownOperation] names, with its import; `copy(value)` passed to a
+  call that both lends and takes a copyable value; and `copy(...)` around a
+  range place a `let` or `var` binds. `linea check
   --error-format=json` writes them under `fixes`, and the language server
   offers each as a quick fix. A help whose edit is fully determined but cannot
   be written says why in its text instead of carrying a fix: a `where` beside

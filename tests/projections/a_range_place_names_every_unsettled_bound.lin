@@ -1,0 +1,12 @@
+// Every bound that does not settle where the place is formed is named in the
+// one report, so the reader sees each that has to change. A parameter holds
+// whatever the caller passed, so neither end here says how long the run is.
+fn shift(inout a: [UInt8; 4], lo: UInt64, hi: UInt64) {
+    a[lo..hi] = [7, 8]
+}
+
+fn main() -> UInt8 {
+    var a: [UInt8; 4] = [1, 2, 3, 4]
+    shift(&a, 1, 3)
+    a[1] + a[2]
+}

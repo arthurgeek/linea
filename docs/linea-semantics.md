@@ -4278,11 +4278,17 @@ A range place has no value form: binding the place, passing it, or reading it as
 a value to write elsewhere is rejected here.
 
 Bounds must be known where the place is formed, before any later generic
-substitution: `[T; ?]` is not a type. Digits, constants and arithmetic over them
-can determine the bounds; a `var` cannot. [T-Index] checks the first and last
-elements selected by the range. An exclusive end may equal the array length; an
-inclusive end identifies that element itself. Empty and reversed ranges are
-rejected for range places. Range places do not reverse their elements.
+substitution: `[T; ?]` is not a type. A bound is determined exactly when it is a
+constant expression ([§4.1](#41-constant-expressions)), as an array length is:
+digits, module constants, block-local `let` bindings whose initialisers are
+constant expressions, `e.length()` on a constant array, and arithmetic over
+them, written in the bracket or through a binding alike. A `var`, a parameter,
+a binding initialised by an ordinary function call and a range that arrives as
+a value determine nothing, and the one report names every bound that is not
+determined. [T-Index] checks the first and last elements selected by the range.
+An exclusive end may equal the array length; an inclusive end identifies that
+element itself. Empty and reversed ranges are rejected for range places. Range
+places do not reverse their elements.
 
 Bounds are evaluated as indexes: `a[i]` reads `i` and `a[^k]` reads `k`. A range
 place uses two known numbers without constructing a range value, so using a

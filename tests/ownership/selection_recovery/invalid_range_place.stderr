@@ -3,3 +3,5 @@ error[T-RangePlace]: a range place is copied out of or assigned into whole
   |
 3 |     let _wrong = values[0..1]
   |                  ^^^^^^^^^^^^ this use is neither, and a part of a range place names nothing
+  |
+  = help: write `copy(values[0..1])` to bind a new array holding the run's elements
