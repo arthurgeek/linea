@@ -1,0 +1,15 @@
+error[T-Bound]: `Wrapper` takes 0 type argument(s), and was given 1
+ --> tests/traits/a_refused_implementation_head_answers_no_lookup_of_its_type.lin:9:48
+  |
+9 | impl[Wrapper: Index[UInt64]] Index[UInt64] for Wrapper[Wrapper] {
+  |                                                ^^^^^^^ this type takes no arguments
+error[T-Bound]: `Wrapper` takes 0 type argument(s), and was given 1
+  --> tests/traits/a_refused_implementation_head_answers_no_lookup_of_its_type.lin:12:25
+   |
+12 |     proj at(inout self: Wrapper[Wrapper], i: UInt64) -> Wrapper.Elem {
+   |                         ^^^^^^^ this type takes no arguments
+error[T-Bound]: `Plain` does not implement `Index[UInt64]`
+  --> tests/traits/a_refused_implementation_head_answers_no_lookup_of_its_type.lin:20:25
+   |
+20 |     return wrapped[0] + plain[0]
+   |                         ^^^^^ implement `Index[UInt64]` for `Plain`

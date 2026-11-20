@@ -1823,8 +1823,10 @@ its manifest, as any root's does. A dependency and its consumer are compiled tog
 and testing a root runs that root's tests alone.
 
 **[M-Dependency]** An entry under `dependencies` names a library this root may
-depend on. It is refused, at the entry in the manifest that writes it, when its
-`path` holds no manifest; when that manifest does not say `"kind": "library"`;
+depend on. Its `path` is read as the file system reads it, so a `..` after a symbolic link
+leaves the directory the link names. It is refused, at the entry in the
+manifest that writes it, when its `path` holds no manifest, or is a symbolic
+link that leads back to itself; when that manifest does not say `"kind": "library"`;
 when the library's own `"name"` is absent or differs from the entry's name;
 when the name is `std`, or is written twice in one manifest; when the name
 already names a library in another directory anywhere in the compilation; when

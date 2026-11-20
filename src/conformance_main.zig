@@ -11760,7 +11760,16 @@ fn checkImportable(
 
     var again = lsp_analysis.of(backing, backing, checked_library, with, program) catch return;
     defer again.deinit();
-    const after = try rulesReported(gpa, &again);
+    // Only what the probe's own lines report: a module offered may hold a
+    // mistake of its own, which importing it reports in that module, and
+    // which says nothing about whether the import can be written.
+    const probe = again.fileNamed(with[files.len].path) orelse return failures.append(gpa, .{
+        .path = display_path,
+        .what = "the index offers nothing the program cannot import",
+        .expected = try gpa.dupe(u8, "the probe's imports checked with the program"),
+        .actual = try gpa.dupe(u8, "the program checked without the probe file"),
+    });
+    const after = try rulesReportedIn(gpa, &again, probe);
 
     for (after.rules) |rule| {
         // An import nothing names is what every one of these is, which is the
@@ -11913,12 +11922,19 @@ const Reported = struct {
 /// Read off what the server publishes rather than off the sink, so what the
 /// property compares is what a reader is shown.
 fn rulesReported(gpa: std.mem.Allocator, checked: *const lsp_analysis.Analysis) !Reported {
+    return rulesReportedIn(gpa, checked, null);
+}
+
+/// What the server publishes against `only`, or against every file where it
+/// is null.
+fn rulesReportedIn(gpa: std.mem.Allocator, checked: *const lsp_analysis.Analysis, only: ?source_mod.FileId) !Reported {
     const publication = try lsp_publish.Publication.init(gpa, checked);
     var rules: std.ArrayList([]const u8) = .empty;
     var reports: std.ArrayList(Reported.Count) = .empty;
 
     var it = lsp_publish.files(&checked.program);
     while (it.next()) |file| {
+        if (only) |wanted| if (file != wanted) continue;
         for (try publication.forFile(gpa, file, .@"utf-16")) |d| {
             const code = d.code orelse continue;
             const rule = switch (code) {
@@ -17335,6 +17351,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     var levels_agreed: u32 = 0;
     var materialized_derives: u32 = 0;
     var renames_run: u32 = 0;
+    var renames_checked: u32 = 0;
     var made_rewrites: std.EnumMap(Transform, u32) = .{};
     var made_mutations: std.EnumMap(Mutation, u32) = .{};
     var made_damages: std.EnumMap(Damage, u32) = .{};
@@ -17737,6 +17754,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         levels_agreed += one.levels_agreed;
         materialized_derives += one.materialized_derives;
         renames_run += one.renames_run;
+        renames_checked += one.renames_checked;
         for (std.enums.values(Mutation)) |k| {
             if (one.mutations.get(k)) |n| mutations.put(k, (mutations.get(k) orelse 0) + n);
         }
@@ -17873,8 +17891,8 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         .{materialized_derives},
     );
     std.debug.print(
-        "conformance: {d} rename(s) the server accepted checked and run against the program renamed\n",
-        .{renames_run},
+        "conformance: {d} rename(s) the server accepted checked and run against the program renamed, and {d} checked in a case that records no run\n",
+        .{ renames_run, renames_checked },
     );
     // Below this, the sample stopped reaching the renames the `rename/` cases
     // alone accept.
@@ -19797,7 +19815,9 @@ fn retainFrom(keep: std.mem.Allocator, failures: *std.ArrayList(Failure), from: 
 const rename_walkers = 2;
 
 /// Property: a rename the server accepts leaves a program that checks and runs
-/// as the program it was made from did.
+/// as the program it was made from did. A case that records no run, which is
+/// every editor session case, has no outcome to compare against, so there an
+/// accepted rename is held to leaving a program that checks (`original` null).
 ///
 /// Every declaration the case's own files make is renamed, in turn, to every
 /// spelling another of them carries, which is where a rename can be captured
@@ -19827,7 +19847,7 @@ fn checkRenamesRun(
     display_path: []const u8,
     name: []const u8,
     case: Case,
-    original: Ran,
+    original: ?Ran,
     foreign: Foreign,
 ) !void {
     const rename_trials = 200;
@@ -19924,6 +19944,10 @@ fn checkRenamesRun(
             try retainFrom(gpa, failures, before);
             return;
         }
+        const recorded_run = original orelse {
+            count.* += 1;
+            continue;
+        };
         const mir = (try lower(a, &settled.expanded, &settled.res, &settled.typing, &settled.disposals, &sink, .program)) orelse return error.SourceRejected;
         var ir: std.Io.Writer.Allocating = .init(a);
         const before = failures.items.len;
@@ -19942,10 +19966,10 @@ fn checkRenamesRun(
         count.* += 1;
         // A derive prints the names it was written with, so the renamed
         // program may print the new name where the old one printed the old.
-        const respelled = try respelledOutcome(a, original, was, trial.to);
+        const respelled = try respelledOutcome(a, recorded_run, was, trial.to);
         if (outcomeDifferences(respelled, ran, .moved).count() == 0) continue;
         const recorded = failures.items.len;
-        if (try recordOutcomeDifferences(gpa, failures, display_path, what, original, ran, .moved)) {
+        if (try recordOutcomeDifferences(gpa, failures, display_path, what, recorded_run, ran, .moved)) {
             try retainFrom(gpa, failures, recorded);
             return;
         }
@@ -22243,6 +22267,8 @@ const Work = struct {
     rewrites: std.EnumMap(Transform, u32) = .{},
     materialized_derives: u32 = 0,
     renames_run: u32 = 0,
+    /// Renames checked in a case that records no run.
+    renames_checked: u32 = 0,
     damages: std.EnumMap(Damage, u32) = .{},
     mutations: std.EnumMap(Mutation, u32) = .{},
     /// The cases that carried a fix of each kind.
@@ -22846,10 +22872,12 @@ fn checkCase(
 
     // The mutations read spans against one file's text, so they run on a
     // case that is one file. A module of several is covered by the file
-    // order transform instead, which is what its counter reports.
-    if (alone) |*a| {
+    // order transform instead, which is what its counter reports. A mutant
+    // is compiled as that file alone, so a case whose file embeds another
+    // would have each mutant also refused for the embedded file it lacks.
+    if (alone) |*a| if (program.embeds.watched.len == 0) {
         try checkMutations(gpa, &w.failures, &w.mutations, display_path, &a.ast, &a.resolved.resolution, &a.typing, case.files[0].text, program.kind);
-    }
+    };
 
     // Property: formatting re-parses, preserves the token sequence and the
     // comments, is idempotent, and reaches the same bytes however the
@@ -23225,6 +23253,30 @@ fn checkCase(
                             .actual = try std.fmt.allocPrint(gpa, "a `{s}` golden nothing compares", .{s.ext}),
                         });
                     }
+                    // With no run to compare, an accepted rename is held to
+                    // leaving a program that checks.
+                    if (env.properties and env.sanitize == null) try checkRenamesRun(
+                        gpa,
+                        scratch_parent,
+                        io,
+                        env.cache,
+                        .{
+                            .scratch = env.scratch_dir,
+                            .runtime = env.runtime_path orelse "",
+                            .foreign_symbols = foreign_symbols,
+                            .sanitize = env.sanitize,
+                        },
+                        resumed_from,
+                        env.rename_sampled,
+                        env.rename_slots,
+                        &w.failures,
+                        &w.renames_checked,
+                        display_path,
+                        try scratchName(gpa, stem),
+                        case,
+                        null,
+                        case.foreign(&program),
+                    );
                 }
 
                 // Building is the expensive step, so it happens when a case asks

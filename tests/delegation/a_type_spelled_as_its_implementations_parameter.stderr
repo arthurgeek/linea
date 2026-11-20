@@ -8,18 +8,3 @@ error[T-Bound]: `C` takes 0 type argument(s), and was given 1
   |
 8 |     proj at(inout self: C[C], i: UInt64) -> C.Elem {
   |                         ^ this type takes no arguments
-error[T-Bound]: `C[[UInt8; 2]]` does not implement `Index[UInt64]`
-  --> tests/delegation/a_type_spelled_as_its_implementations_parameter.lin:15:5
-   |
-15 |     wrapped[0] += 1
-   |     ^^^^^^^ implement `Index[UInt64]` for `C[[UInt8; 2]]`
-error[T-Bound]: `C[[UInt8; 2]]` does not implement `Index[UInt64]`
-  --> tests/delegation/a_type_spelled_as_its_implementations_parameter.lin:16:12
-   |
-16 |     return wrapped[0] + wrapped[1] - 6
-   |            ^^^^^^^ implement `Index[UInt64]` for `C[[UInt8; 2]]`
-error[T-Bound]: `C[[UInt8; 2]]` does not implement `Index[UInt64]`
-  --> tests/delegation/a_type_spelled_as_its_implementations_parameter.lin:16:25
-   |
-16 |     return wrapped[0] + wrapped[1] - 6
-   |                         ^^^^^^^ implement `Index[UInt64]` for `C[[UInt8; 2]]`
