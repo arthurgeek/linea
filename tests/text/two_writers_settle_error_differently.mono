@@ -46,6 +46,9 @@ pub enum IoOperation {
     Accept,
     Connect,
     Configure,
+    Spawn,
+    Wait,
+    Kill,
 }
 
 @(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
@@ -545,10 +548,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2879_1_0_0) => {
+        Some(_linea_derive_2888_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2879_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2888_1_0_0)
                 }
             }
         },
@@ -645,6 +648,24 @@ fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Gathered](self: std.i
             {}
             {
                 "Configure"
+            }
+        },
+        Spawn => {
+            {}
+            {
+                "Spawn"
+            }
+        },
+        Wait => {
+            {}
+            {
+                "Wait"
+            }
+        },
+        Kill => {
+            {}
+            {
+                "Kill"
             }
         },
     }
