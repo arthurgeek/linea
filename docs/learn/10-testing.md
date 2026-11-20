@@ -668,8 +668,9 @@ is written. `http.TestExchange` is that arena for a test:
 `http.TestExchange.open()` opens it under the limits `serve` uses unless it is
 given others with `limits:`, and `exchange.request(method, target, body:,
 content_type:)` builds the request a client would send in it. The body is sent
-with its `Content-Length`, and the handler reads it through its
-`http.RequestBody`, as it reads one from a connection. `&sent.send_to(&router,
+with its `Content-Length`, a body longer than the limits allow is refused with
+413 before any handler sees it, as `serve` refuses it, and the handler reads
+the body through its `http.RequestBody`, as it reads one from a connection. `&sent.send_to(&router,
 &state)` hands the request to the router:
 
 `greeting.lin`:
@@ -723,20 +724,22 @@ test "a greeting for nobody is refused" {
 }
 
 // The exchange holds the request to its limits as `serve` does, so a body
-// past `max_body_bytes` is refused with 413 when the handler reads it.
+// past `max_body_bytes` is refused with 413 before any handler runs.
 test "a body past the limit is refused" {
     defer var router = routes()
     defer let exchange = http.TestExchange.open(limits: http.Limits { max_body_bytes = 4, ..http.Limits.default() })
     defer var fits = exchange.request("POST", "/measure", body: "tea").unwrap()
-    defer var long = exchange.request("POST", "/measure", body: "coffee").unwrap()
     var nothing = ()
     let measured = &fits.send_to(&router, &nothing).unwrap()
     testing.assert_ok_eq(measured.text(), "3 bytes", "the body changed")?
-    let refused = match &long.send_to(&router, &nothing) {
-        Ok(_) => return testing.assert(false, "a body past the limit was read"),
+    let refused = match exchange.request("POST", "/measure", body: "coffee") {
+        Ok(long) => {
+            long.release()
+            return testing.assert(false, "a body past the limit was sent")
+        },
         Err(error) => error,
     }
-    testing.assert_eq(refused.status(), http.Status.ContentTooLarge, "the status changed")?
+    testing.assert_eq(refused, http.RequestError.Status(.ContentTooLarge), "the refusal changed")?
 }
 ```
 

@@ -70,7 +70,7 @@ test "the longest non ascii signature fits the body limit" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("the_longest_non_ascii_signature_fits_the_body_limit").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
 
     // `😀` is four bytes of UTF-8, and a form writes each byte as `%XX`, so a
     // name of 60 and a message of 500 of them is the longest body a form sends.
@@ -270,7 +270,7 @@ test "signing redirects sets a cookie and renders on the home page" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("signing_redirects_sets_a_cookie_and_renders_on_the_home_page").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
 
     defer var post = exchange.request(
         "POST",
@@ -304,7 +304,7 @@ test "exact length boundaries are accepted and one scalar past is refused" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("exact_length_boundaries_are_accepted_and_one_scalar_past_is_refused").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
 
     // 60 scalars (including a two-byte UTF-8 `é`) and 500 scalars are accepted.
     defer var ok_name = String.new()
@@ -346,7 +346,7 @@ test "control and format characters are refused and line breaks in a message are
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("control_and_format_characters_are_refused_and_line_breaks_in_a_message_are_kept").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
 
     let refused_bodies = [
         "name=a%00b&message=hi",
@@ -396,7 +396,7 @@ test "a line break counts once towards the message limit" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("a_line_break_counts_once_towards_the_message_limit").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
 
     // 250 lines of `a`, each ended by the CRLF a browser sends, are 500
     // characters as the form's `maxlength` counts them.
@@ -417,7 +417,7 @@ test "origin and fetch site spoofing attempts answer 403" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("origin_and_fetch_site_spoofing_attempts_answer_403").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
 
     // Each request names its `Host`, and its `Origin` and `Sec-Fetch-Site`
     // where the text is not empty, as a browser posting from that page does.
@@ -465,7 +465,7 @@ test "favicon answers 204 no content" {
     routes(&router).unwrap()
     defer let database_app = Store.in_memory("favicon_answers_204_no_content").unwrap()
     defer var app = Ctx { book = database_app.client(), proxy_trust = .None }
-    defer let exchange = http.TestExchange.open()
+    defer let exchange = http.TestExchange.open(limits: limits())
     defer var req = exchange.request("GET", "/favicon.ico").unwrap()
     &req.add_header("Host", "example.test").unwrap()
     let response = &req.send_to(&router, &app).unwrap()
@@ -483,29 +483,33 @@ test "forwarded proto https is recognised for same origin" {
     defer var app_untrusted = Ctx { book = database_app_untrusted.client(), proxy_trust = .None }
     defer let database_app_trusted = Store.in_memory("forwarded_proto_https").unwrap()
     defer var app_trusted = Ctx { book = database_app_trusted.client(), proxy_trust = .All }
-    defer let exchange = http.TestExchange.open()
-    defer var post = exchange.request(
-        "POST",
-        "/sign",
-        body: "name=Grace&message=Hello",
-        content_type: "application/x-www-form-urlencoded",
-    ).unwrap()
-    &post.add_header("Host", "example.test").unwrap()
-    &post.add_header("Origin", "https://example.test").unwrap()
-    &post.add_header("X-Forwarded-Proto", "https").unwrap()
-    &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
+    defer let exchange = http.TestExchange.open(limits: limits())
+    // A request is sent once, as a browser sends it, so each context gets one.
+    defer var untrusted = forwarded_post(exchange)
+    defer var trusted = forwarded_post(exchange)
 
     // Without proxy trust, client-supplied proxy headers are not trusted and 403 is answered.
-    let refused = match &post.send_to(&router, &app_untrusted) {
+    let refused = match &untrusted.send_to(&router, &app_untrusted) {
         Ok(_) => return testing.assert(false, "untrusted forwarded proto was accepted"),
         Err(err) => err,
     }
     testing.assert_eq(refused.status(), http.Status.Forbidden, "untrusted forwarded proto was not refused 403")?
 
     // With explicit proxy trust configured, forwarded https is recognized and 303 is answered.
-    let response = &post.send_to(&router, &app_trusted).unwrap()
+    let response = &trusted.send_to(&router, &app_trusted).unwrap()
     testing.assert_eq(response.status(), http.Status.SeeOther, "forwarded https was refused when trusted")?
     .Ok(())
+}
+
+// `forwarded_post` builds a signature posted over HTTPS through a proxy in
+// front of the server, which names the scheme in `X-Forwarded-Proto`.
+fn forwarded_post(exchange: http.TestExchange) -> http.TestRequest where borrows(exchange) {
+    var post = exchange.request("POST", "/sign", body: "name=Grace&message=Hello", content_type: "application/x-www-form-urlencoded").unwrap()
+    &post.add_header("Host", "example.test").unwrap()
+    &post.add_header("Origin", "https://example.test").unwrap()
+    &post.add_header("X-Forwarded-Proto", "https").unwrap()
+    &post.add_header("Sec-Fetch-Site", "same-origin").unwrap()
+    post
 }
 
 // Build a serving task's router around a borrowed database client. A refused

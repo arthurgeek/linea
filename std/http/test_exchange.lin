@@ -5,9 +5,12 @@ import std.testing
 // A `TestExchange` holds the arena one exchange is served from, opened as
 // `serve` opens one for each of its tasks: an arena of
 // `limits.request_arena_bytes` over the system allocator, or over the
-// allocator `open_in` takes, which takes a 64 KiB first chunk when it opens
-// and more only as a request needs it. A test builds requests in it with
-// `request` and sends them to the handler under test. The requests, and the
+// allocator `open_in` takes. An arena larger than 64 KiB takes a 64 KiB first
+// chunk when it opens and more only as a request needs it; a smaller one, or
+// one over another arena's handle, takes its whole size at once. Unlike
+// `serve`, it accepts an arena smaller than the limits need, so a test can
+// reach an allocation failure. A test builds requests in it with `request`
+// and sends them to the handler under test. The requests, and the
 // responses a handler builds for them, live in the arena, so they are read
 // before the exchange is released, and a test releases it with `defer`.
 @opaque
@@ -47,7 +50,8 @@ impl[P: Allocator] TestExchange[P] {
     // `open_in` opens an exchange whose arena takes its memory from
     // `allocator`, as `serve_in` opens one over its `parent`, held to
     // `limits`. When `allocator` refuses the arena's first chunk, every
-    // request built in the exchange is refused with 500.
+    // request built in the exchange is refused with 500, where `serve`
+    // answers 503 before reading one.
     pub fn open_in(allocator: P, limits: Limits = standard_limits) -> TestExchange[P] where carries(allocator) {
         .{ arena = mem.Arena.open(allocator, limits.request_arena_bytes), limits = copy(limits) }
     }
@@ -65,16 +69,21 @@ impl[P: Allocator] TestExchange[P] {
     // `request` builds the request a client sends as `method` and `target`
     // with `body`, stored in this exchange's arena and held to its limits as a
     // request read from a connection is. A body is sent with its
-    // `Content-Length`, and `content_type` adds a `Content-Type` header; other
-    // headers are added with `add_header`. The handler reads the body through
-    // its `RequestBody`, as it reads a served one, so `Request.body` is empty
-    // until the handler materializes it. A method that is not a token or a
-    // target that is not visible ASCII is refused with 400, as a request line
-    // holding them is, and an arena that cannot hold the request answers 500.
+    // `Content-Length`, and one longer than `max_body_bytes` is refused with
+    // 413, as `serve` refuses it before any handler runs. `content_type` adds a
+    // `Content-Type` header; other headers, `Host` among them, are added with
+    // `add_header`. The handler reads the body through its `RequestBody`, as it
+    // reads a served one, so `Request.body` is empty until the handler
+    // materializes it. A method that is not a token or a target that is not
+    // visible ASCII is refused with 400, as a request line holding them is,
+    // and an arena that cannot hold the request answers 500.
     pub fn request(self: Self, method: Str, target: Str, body: Str = "", content_type: Str = "") -> Result[TestRequest[P], RequestError] where borrows(.Ok: self), carries(.Ok: body) {
         let memory = self.arena.handle()
         if !is_token(method) || !is_target(target) {
             return .Err(.Status(.BadRequest))
+        }
+        if body.length() > self.limits.max_body_bytes {
+            return .Err(.Status(.ContentTooLarge))
         }
         var head = String.new_in(memory)
         let method_token = stored_or_refused(&head, method)?
@@ -122,6 +131,15 @@ impl[P: Allocator] TestExchange[P] {
         }
         testing.assert_eq(spaced, Option.Some(RequestError.Status(.BadRequest)), "a target holding a space was accepted")?
         testing.assert_eq(unnamed, Option.Some(RequestError.Status(.BadRequest)), "an empty method was accepted")?
+        defer let small = TestExchange.open(limits: Limits { max_body_bytes = 4, ..Limits.default() })
+        let long = match small.request("POST", "/echo", body: "hello") {
+            Ok(refused) => {
+                refused.release()
+                Option.None
+            },
+            Err(error) => Option.Some(error),
+        }
+        testing.assert_eq(long, Option.Some(RequestError.Status(.ContentTooLarge)), "a body past max_body_bytes was sent")?
         .Ok(())
     }
 }
@@ -211,7 +229,9 @@ impl[P: Allocator] TestRequest[P] {
     // `send_to` sends this request to `handler` with `state`, as `serve` does:
     // the handler reads the request and its body, and answers with a response
     // or an error. The response lives in the exchange's arena and may view the
-    // request, its body and `handler`, so it is read while all three live.
+    // request, its body and `handler`, so it is read while all three live. A
+    // request is sent once, as a client's is: a second send finds the body
+    // the first one read.
     pub fn send_to[S, H: Handler[S, P]](inout self: Self, inout handler: H, inout state: S) -> Result[Response[P], Error[P]] where borrows(self, handler) {
         &handler.serve_http(&state, self.message.request(), &self.body)
     }
@@ -224,15 +244,6 @@ impl[P: Allocator] TestRequest[P] {
         defer var sent = exchange.request("POST", "/echo", body: "hello").unwrap()
         let response = &sent.send_to(&router, &nothing).unwrap()
         testing.assert_ok_eq(response.text(), "hello", "the handler read another body")?
-        // A body past `max_body_bytes` is refused with 413 when the handler
-        // reads it, as one a client sends is.
-        defer let small = TestExchange.open(limits: Limits { max_body_bytes = 4, ..Limits.default() })
-        defer var long = small.request("POST", "/echo", body: "hello").unwrap()
-        let refused = match &long.send_to(&router, &nothing) {
-            Ok(_) => Option.None,
-            Err(error) => Option.Some(error.status()),
-        }
-        testing.assert_eq(refused, Option.Some(Status.ContentTooLarge), "a body past max_body_bytes was read")?
         .Ok(())
     }
 }

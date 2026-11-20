@@ -8,6 +8,11 @@ the signature extractors that *Alternatives considered* declined are how
 `route` registers a handler, and `request.extract[T]()` remains the explicit
 form for a handler that owns what it reads or acts on a refusal.
 
+Its sentence that `Message.add_header` gives a test request its headers is
+superseded by
+[0297](0297-a-handler-test-sends-a-request-built-in-the-arena-serve-would-give-it.md):
+`TestRequest.add_header` does.
+
 ## Context
 
 A handler reads a few typed inputs from its request: a number from the path,

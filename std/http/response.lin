@@ -882,7 +882,7 @@ test "a streamed body may exceed the arena" {
     var accepting = listener
     let Accepted { connection, address: _ } = &accepting.accept().unwrap()
     // The message and the 4 KiB buffer fill most of this 8 KiB arena.
-    defer let exchange = TestExchange.open()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 8192, ..Limits.default() })
     defer var sent = exchange.request("GET", "/").unwrap()
     let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
     var body = BodyWriter.open_borrowed(reserved, connection.writer(), sent.request(), keep_alive: false)

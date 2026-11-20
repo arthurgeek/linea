@@ -1,7 +1,7 @@
 // A service that counts the lines, words and bytes of the text posted to it,
 // as `wc` does. POST /count answers the counts as JSON. A body is held to the
-// service's limits, so an upload larger than 64 KiB is refused with 413 when
-// the handler reads it. The service listens on 127.0.0.1 at the port its
+// service's limits, so an upload larger than 64 KiB is refused with 413
+// before the handler runs. The service listens on 127.0.0.1 at the port its
 // first argument names:
 //
 //     printf 'one two\nthree\n' | curl --data-binary @- http://127.0.0.1:8080/count
@@ -59,8 +59,8 @@ test "words are runs between blanks" {
 }
 
 // Read the posted text and answer its counts. `body.text` reads the whole
-// body into the request's arena, and `?` answers 413 for a body past the
-// limit and 400 for one that is not UTF-8.
+// body into the request's arena, and `?` answers 400 for one that is not
+// UTF-8. The server has already refused a body past the limit.
 fn count(inout _: (), request: http.Request, inout body: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(body), retains(body: body) {
     let text = &body.text(request)?
     http.json(request, counted(text))
@@ -85,25 +85,24 @@ test "a posted text is counted" {
     testing.assert_ok_eq(response.text(), r#"{"lines":2,"words":3,"bytes":14}"#, "the counts changed")?
 }
 
-// A body one byte past `max_body_bytes` is refused when the handler reads it,
-// as the server refuses it.
+// A body one byte past `max_body_bytes` is refused with 413 before any
+// handler runs, as the server refuses it.
 test "a text past the body limit is refused" {
-    defer var router: http.Router[()] = http.Router.new()
-    routes(&router).unwrap()
     let limits = service_limits()
     defer var long = String.new()
     for _ in 0..limits.max_body_bytes {
         &long.append("a").unwrap()
     }
-    &long.append(" b").unwrap()
+    &long.append("b").unwrap()
     defer let exchange = http.TestExchange.open(limits: limits)
-    defer var sent = exchange.request("POST", "/count", body: long.view()).unwrap()
-    var nothing = ()
-    let refused = match &sent.send_to(&router, &nothing) {
-        Ok(_) => return testing.assert(false, "a text past the limit was counted"),
+    let refused = match exchange.request("POST", "/count", body: long.view()) {
+        Ok(sent) => {
+            sent.release()
+            return testing.assert(false, "a text past the limit was sent")
+        },
         Err(error) => error,
     }
-    testing.assert_eq(refused.status(), http.Status.ContentTooLarge, "the status changed")?
+    testing.assert_eq(refused, http.RequestError.Status(.ContentTooLarge), "the refusal changed")?
 }
 
 // The router answers a path registered under another method with 405 and an

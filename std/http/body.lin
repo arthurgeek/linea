@@ -37,16 +37,11 @@ struct RequestBody[P: Allocator = mem.SystemAllocator] {
 }
 
 impl[P: Allocator] RequestBody[P] {
-    // Make an in-memory body over `bytes`, whose owner outlives the body,
-    // bounded by `limits` as a body read from a connection is: one longer than
-    // `max_body_bytes` is refused with 413 when it is read.
+    // Make an in-memory body over `bytes`, whose owner outlives the body. Its
+    // caller has already held `bytes` to `limits.max_body_bytes`; `limits`
+    // bounds the form a materialized body decodes.
     fn from_held(bytes: mem.Slice[UInt8], memory: mem.Handle[P], limits: Limits) -> Self where carries(bytes, memory) {
-        let failure: Option[RequestError] = if bytes.length() > limits.max_body_bytes {
-            .Some(.Status(.ContentTooLarge))
-        } else {
-            .None
-        }
-        .{ source = .Held(copy(bytes)), memory = copy(memory), cursor = 0, remaining = bytes.length(), failure, limits = copy(limits), cache = .None }
+        .{ source = .Held(copy(bytes)), memory = copy(memory), cursor = 0, remaining = bytes.length(), failure = .None, limits = copy(limits), cache = .None }
     }
 
     // Move the buffered connection into a body bounded by its canonical length.

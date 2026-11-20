@@ -4,8 +4,9 @@ Status: Accepted — 2026-11-19. Supersedes the test clause of
 [0154](0154-sockets-and-http-follow-go.md), that `http.new_request` builds a
 request for a test to hand to a handler, and the `http.new_request` example
 under *A parameter that is not any allocator* in
-[0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md).
-Builds on [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md)
+[0220](0220-a-constructor-or-function-that-allocates-pairs-a-system-form-with-an-in-form.md),
+and the sentence of [0185](0185-a-handler-reads-its-inputs-through-extractors.md)
+that `Message.add_header` gives a test request its headers. Builds on [0263](0263-an-arena-grows-in-chunks-up-to-its-size-and-a-rewind-returns-them.md)
 and the body clauses of
 [0265](0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md) §6.
 
@@ -50,9 +51,10 @@ test holds what it uses, not 48 MiB. It is released with `defer`.
 **`exchange.request(method, target, body:, content_type:)` builds a
 `TestRequest` in that arena, as a client sends it and as `serve` reads it.**
 The method and target are checked as a request line is, the headers are held
-to the exchange's limits, a body is sent with its `Content-Length`, and
-`content_type` adds the `Content-Type` header. The request's metadata holds
-no body: the handler reads it through the `RequestBody` the `TestRequest`
+to the exchange's limits, a body is sent with its `Content-Length` and one
+longer than `max_body_bytes` is refused with 413 before any handler runs, as
+`serve` refuses it, and `content_type` adds the `Content-Type` header. The
+request's metadata holds no body: the handler reads it through the `RequestBody` the `TestRequest`
 holds, bounded by `max_body_bytes`, and materializes it to reach forms and
 JSON, as it does in a served request. `&sent.add_header(name, value)` adds a
 header under the same limits. `TestRequest` is linear because the body it
@@ -85,6 +87,14 @@ from held bytes inside the library alone, by the fixture and by `serve_cgi`.
   `Content-Length` a client sends, and refusals at the same limits (413 for a
   body past `max_body_bytes`, 431 past `max_headers`), so a test that passes
   under a service's limits describes that service.
+- Four checks `serve` makes before a handler runs are not made: a request
+  carries the `Host` a test adds and none otherwise, where `serve` refuses an
+  HTTP/1.1 request without exactly one; a `Transfer-Encoding` header added by
+  hand is kept, where `serve` answers 501; `max_line_bytes` is not applied to
+  the request line or a header; and an arena smaller than the limits need is
+  opened, where `serve` refuses it with `ArenaTooSmall`. The last is what lets a
+  test reach an allocation failure, and the others keep a test of a handler
+  from writing headers the handler never reads.
 - A test that wants a smaller arena, to reach an allocation failure, says so
   through `limits: http.Limits { request_arena_bytes = n, ..http.Limits.default() }`;
   an exchange over another arena's handle takes its whole size from it at once,
