@@ -6,6 +6,7 @@ import std.net
 import std.session
 import std.task
 import std.testing
+import std.time
 import std.tls
 
 // An `Issue` is the part of an issue from GitHub's REST API that this program
@@ -168,6 +169,10 @@ impl From[http.ClientError] for FetchError {
 // with their bodies stays well under it.
 let max_page_bytes: UInt64 = 4194304
 
+// The longest one page may take, in seconds, from connecting to the last byte
+// of its body.
+let page_seconds: UInt64 = 30
+
 // Fetch the open issues of `repo` (`owner/name`) from the API at `api`, at
 // most `max_pages` pages of 100, sending `token` as a bearer token when
 // there is one. Each page's `Link` header names the next.
@@ -237,7 +242,9 @@ fn fetch_page(inout client: http.Client, url: Str, token: Option[Str], inout rep
         Some(secret) => request = request.with_header("Authorization", "Bearer {secret}")?,
         None => {},
     }
-    let response = &client.send(request)?
+    // One deadline bounds the page: connecting, the TLS handshake and
+    // reading its body together.
+    let response = &client.send(request, deadline: time.Deadline.after(time.Duration.from_seconds(page_seconds)))?
     let status = response.status().code()
     report.remaining = number_header(response, "X-RateLimit-Remaining")
     report.resets_at = number_header(response, "X-RateLimit-Reset")

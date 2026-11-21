@@ -167,6 +167,16 @@ impl Link {
         }
     }
 
+    // Whether the link holds input already received that no read has taken:
+    // over TLS, ciphertext the session has not taken or plaintext it has
+    // decrypted. A plain connection holds none.
+    fn holds_input(self: Self) -> Bool {
+        match read self.secure {
+            Some(stream) => stream.holds_input(),
+            None => false,
+        }
+    }
+
     // Write every byte of `bytes`, encrypted over TLS, or fail as the
     // stream did.
     fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[(), io.IoError] {
@@ -327,7 +337,11 @@ impl io.ByteWriter for LinkWriter {
 // Open a connection to `origin` for a client: resolve its host, connect by
 // the earlier of `deadline` and the connect timeout, and bound each later
 // read and write by the read and write timeouts and by `deadline`.
+// A bracketed IPv6 host is refused as `UnsupportedAddress` before any lookup.
 fn connect_origin(origin: Origin, limits: ClientLimits, deadline: time.Deadline) -> Result[net.Connection, ClientError] {
+    if origin.host().starts_with("[") {
+        return .Err(.UnsupportedAddress)
+    }
     let address = match net.resolve(origin.host(), origin.port()) {
         Ok(address) => address,
         Err(Io(error)) => return .Err(.Resolve(error)),
