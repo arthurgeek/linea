@@ -7,7 +7,11 @@
 // thousandths. Each measurement runs twice: on the system Io, where every
 // task is a thread of its own, and inside a task on a loop of eight carriers,
 // and of as many carriers as the machine has processors where that differs,
-// where every task is a fiber of that loop.
+// where every task is a fiber of that loop. A last measurement times session
+// round trips: two tasks pass a number back and forth, so each round trip is
+// two handoffs. On a loop the two tasks may share a carrier or not, and a
+// round trip between carriers waits for the kernel to wake one, so its
+// minimum and median can lie far apart.
 import std.env
 import std.io
 import std.mem
@@ -18,7 +22,10 @@ import std.time
 use io.IoError
 use io.println
 use session.Chan
+use session.Choose
 use session.End
+use session.Offer
+use session.Recv
 use session.Send
 
 // The cheap item: the work is so small that a design's cost is what it
@@ -189,11 +196,72 @@ fn handoffs(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
     .Ok(())
 }
 
+// An echo receives a number and sends it back one larger, as often as its
+// peer asks, until the peer stops.
+struct Echo {}
+
+impl Protocol for Echo {
+    type Dual = Pinger
+    type Step = Offer[Recv[UInt64, Send[UInt64, Echo]], End]
+}
+
+// The peer of an echo: it either sends a number and receives the answer, or
+// stops.
+struct Pinger {}
+
+impl Protocol for Pinger {
+    type Dual = Echo
+    type Step = Choose[Send[UInt64, Recv[UInt64, Pinger]], End]
+}
+
+// Answer every number the peer of `me` sends, one larger, until it stops.
+fn echo[H](sink me: Chan[Echo, H]) {
+    match me.enter().offer() {
+        Left(asked) => {
+            let (n, answering) = asked.recv()
+            echo(answering.send(n + 1))
+        },
+        Right(done) => done.close(),
+    }
+}
+
+// Send `left` numbers to the echo at `peer`, each once the one before has
+// been answered, and answer the session to go on with.
+fn ping[H](sink peer: Chan[Pinger, H], left: UInt64) -> Chan[Pinger, H] {
+    if left == 0 {
+        return peer
+    }
+    let (n, next) = peer.enter().choose_left().send(left).recv()
+    if n != left + 1 {
+        panic("the echo answered another number")
+    }
+    ping(next, left - 1)
+}
+
+// Time `count` round trips between a task and an echo it starts: every round
+// trip is two handoffs, one each way.
+fn round_trips(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
+    defer var times: mem.Vec[UInt64] = mem.Vec.new()
+    for _ in 0..rounds {
+        let body = sink [] |sink me: Chan[Echo]| echo(me)
+        let peer = task.start(body).unwrap()
+        let started = time.Instant.now()
+        let after = ping(peer, count)
+        &times.push(time.Instant.now().since(started).nanoseconds() / count).unwrap()
+        after.enter().choose_right().close()
+    }
+    sort(&times)
+    let n = times.length()
+    println("session round trip, {count} in a row: min {times[0]} ns, median {times[n / 2]} ns, max {times[n - 1]} ns")?
+    .Ok(())
+}
+
 // Every measurement, on whatever Io the caller runs on.
 fn measure_all() -> Result[(), IoError] {
     measure(10000, 200)?
     measure(100000, 60)?
-    handoffs(20000, 7)
+    handoffs(20000, 7)?
+    round_trips(20000, 7)
 }
 
 // Every measurement inside a task started on a loop of `carriers` carriers,

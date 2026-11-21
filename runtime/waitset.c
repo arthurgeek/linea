@@ -141,9 +141,11 @@ __attribute__((noinline)) static void wake(struct waitset *s) {
     const uint64_t one = 1;
     if (write(s->user_event, &one, sizeof one) < 0 && errno != EAGAIN) fail("linea: a wait set's user event could not be posted\n");
 #else
-    struct kevent trigger;
-    EV_SET(&trigger, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, (void *)user_cookie);
-    if (kevent(s->kernel, &trigger, 1, 0, 0, 0) != 0) fail("linea: a wait set's user event could not be posted\n");
+    struct kevent64_s trigger;
+    EV_SET64(&trigger, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, user_cookie, 0, 0);
+    int posted;
+    do { posted = kevent64(s->kernel, &trigger, 1, 0, 0, 0, 0); } while (posted < 0 && errno == EINTR);
+    if (posted != 0) fail("linea: a wait set's user event could not be posted\n");
 #endif
 }
 
@@ -364,9 +366,12 @@ static int ensure_kernel(struct waitset *s) {
         close(kernel);
         return error;
     }
-    struct kevent user;
-    EV_SET(&user, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, (void *)user_cookie);
-    if (kevent(kernel, &user, 1, 0, 0, 0) != 0) {
+    /* Every call on the set's kqueue goes through `kevent64`: a kqueue
+     * refuses the other interface once one has been used on it, and only
+     * `kevent64` can poll without waiting (see `wait_in_kernel`). */
+    struct kevent64_s user;
+    EV_SET64(&user, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, user_cookie, 0, 0);
+    if (kevent64(kernel, &user, 1, 0, 0, 0, 0) != 0) {
         const int error = errno;
         close(kernel);
         return error;
@@ -391,10 +396,12 @@ __attribute__((noinline)) static int arm(struct waitset *s, int fd, int writable
     watch.data.u64 = cookie;
     return epoll_ctl(s->kernel, EPOLL_CTL_ADD, fd, &watch) == 0 ? 0 : errno;
 #else
-    struct kevent change;
+    struct kevent64_s change;
     const unsigned short flags = remove ? EV_DELETE : (unsigned short)(EV_ADD | (once ? EV_ONESHOT : 0));
-    EV_SET(&change, (uintptr_t)fd, writable ? EVFILT_WRITE : EVFILT_READ, flags, 0, 0, (void *)cookie);
-    return kevent(s->kernel, &change, 1, 0, 0, 0) == 0 ? 0 : errno;
+    EV_SET64(&change, (uint64_t)fd, writable ? EVFILT_WRITE : EVFILT_READ, flags, 0, 0, cookie, 0, 0);
+    int answer;
+    do { answer = kevent64(s->kernel, &change, 1, 0, 0, 0, 0); } while (answer < 0 && errno == EINTR);
+    return answer == 0 ? 0 : errno;
 #endif
 }
 
@@ -527,16 +534,16 @@ __attribute__((noinline)) static int wait_in_kernel(struct waitset *s, unsigned 
     count = epoll_wait(s->kernel, events, batch, timeout_ms);
     for (int i = 0; i < count; i += 1) cookies[i] = (unsigned long)events[i].data.u64;
 #else
-    struct kevent events[batch];
+    struct kevent64_s events[batch];
     struct timespec timeout;
     struct timespec *bounded = 0;
-    if (poll_only) {
-        timeout.tv_sec = 0;
-        timeout.tv_nsec = 0;
-        bounded = &timeout;
-    } else if (deadline != 0) {
+    /* A zero timeout still makes Darwin arm and cancel a wait, about 12 us
+     * on an empty queue, where `KEVENT_FLAG_IMMEDIATE` answers in well under
+     * one. */
+    unsigned flags = poll_only ? KEVENT_FLAG_IMMEDIATE : 0;
+    if (!poll_only && deadline != 0) {
         const unsigned long now = now_on(s);
-        /* `kevent` refuses a timeout whose seconds do not fit 32 bits, so a
+        /* `kevent64` refuses a timeout whose seconds do not fit 32 bits, so a
          * wait lasts at most a day, after which `next` checks the deadline
          * again. */
         const unsigned long longest_wait_ns = 86400UL * 1000000000UL;
@@ -545,8 +552,9 @@ __attribute__((noinline)) static int wait_in_kernel(struct waitset *s, unsigned 
         timeout.tv_sec = (time_t)(remaining / 1000000000UL);
         timeout.tv_nsec = (long)(remaining % 1000000000UL);
         bounded = &timeout;
+        if (remaining == 0) flags = KEVENT_FLAG_IMMEDIATE;
     }
-    count = kevent(s->kernel, 0, 0, events, batch, bounded);
+    count = kevent64(s->kernel, 0, 0, events, batch, flags, bounded);
     for (int i = 0; i < count; i += 1) cookies[i] = (unsigned long)events[i].udata;
 #endif
     if (count < 0) {

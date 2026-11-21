@@ -181,6 +181,9 @@ struct carrier {
     size_t timer_count, timer_capacity;
     int kernel;
     int wake;
+    /* Set by the carrier's own thread while `poll_carrier` may block; see
+     * `wake_carrier`. */
+    int polling;
     struct linea_completion *completion;
     struct io_slot **pages;
     size_t page_count;
@@ -691,7 +694,8 @@ static void trace_dump(struct trace_counts counts) {
 #define TRACE_END(name) ((void)0)
 #endif
 
-static void wake_carrier(struct carrier *c) {
+/* Make the next kernel wait of `c` return, whichever thread asks. */
+static void post_wake(struct carrier *c) {
     if (c->simulation != 0) return;
 #if defined(__linux__)
     const uint64_t one = 1;
@@ -699,12 +703,25 @@ static void wake_carrier(struct carrier *c) {
     do { count = write(c->wake, &one, sizeof one); } while (count < 0 && errno == EINTR);
     if (count < 0 && errno != EAGAIN) fail("linea: a carrier could not be woken\n");
 #else
-    struct kevent event;
-    EV_SET(&event, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+    struct kevent64_s event;
+    EV_SET64(&event, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, 0, 0, 0);
     int result;
-    do { result = kevent(c->kernel, &event, 1, NULL, 0, NULL); } while (result < 0 && errno == EINTR);
+    do { result = kevent64(c->kernel, &event, 1, NULL, 0, 0, NULL); } while (result < 0 && errno == EINTR);
     if (result < 0) fail("linea: a carrier could not be woken\n");
 #endif
+}
+
+/* Wake `c` to run what was just queued on it. A carrier's own thread needs
+ * no wake while it is outside a blocking poll: its scheduler loop dequeues
+ * before it polls again, so whatever it queued for itself runs without a
+ * kernel round trip. Inside a blocking poll the wake is still posted, since
+ * that poll has already looked at its queue. A caller that needs a later
+ * kernel wait to return for some reason other than the queue uses
+ * `post_wake`. */
+static void wake_carrier(struct carrier *c) {
+    if (c->simulation != 0) return;
+    if (c == current_carrier() && !c->polling) return;
+    post_wake(c);
 }
 
 #if defined(LINEA_FIBER_CAN_MIGRATE)
@@ -790,6 +807,15 @@ static struct linea_fiber *dequeue(struct carrier *c) {
 #endif
     unlock_carrier(c);
     return f;
+}
+
+/* Whether runnable work is queued on `c`. Read after the poll that precedes
+ * a dispatch, so fibers its completions made runnable count. */
+static int has_queued_work(struct carrier *c) {
+    lock_carrier(c);
+    const int queued = c->simulation != 0 ? c->ready_count != 0 : c->first != NULL || c->stealable_first != NULL;
+    unlock_carrier(c);
+    return queued;
 }
 
 static int canonical_net_kind(enum linea_op_kind kind) {
@@ -1500,9 +1526,12 @@ static int make_poller(struct carrier *c) {
 #else
     c->kernel = kqueue();
     if (c->kernel < 0) return errno;
-    struct kevent event;
-    EV_SET(&event, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
-    if (kevent(c->kernel, &event, 1, NULL, 0, NULL) != 0) return errno;
+    /* Every call on a carrier's kqueue goes through `kevent64`: a kqueue
+     * refuses the other interface once one has been used on it, and only
+     * `kevent64` can poll without waiting (see `poll_carrier`). */
+    struct kevent64_s event;
+    EV_SET64(&event, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, 0, 0, 0);
+    if (kevent64(c->kernel, &event, 1, NULL, 0, 0, NULL) != 0) return errno;
 #endif
     return 0;
 }
@@ -1543,10 +1572,10 @@ static void disarm_operation(struct pending_operation *pending) {
         fail("linea: a carrier's operation could not be disarmed\n");
     }
 #else
-    struct kevent event;
-    EV_SET(&event, (uintptr_t)slot->fd, slot->writable ? EVFILT_WRITE : EVFILT_READ, EV_DELETE, 0, 0, NULL);
+    struct kevent64_s event;
+    EV_SET64(&event, (uint64_t)slot->fd, slot->writable ? EVFILT_WRITE : EVFILT_READ, EV_DELETE, 0, 0, 0, 0, 0);
     int answer;
-    do { answer = kevent(c->kernel, &event, 1, NULL, 0, NULL); } while (answer < 0 && errno == EINTR);
+    do { answer = kevent64(c->kernel, &event, 1, NULL, 0, 0, NULL); } while (answer < 0 && errno == EINTR);
     if (answer < 0 && errno != ENOENT && errno != EBADF) fail("linea: a carrier's operation could not be disarmed\n");
 #endif
     release_slot(pending);
@@ -1608,11 +1637,11 @@ static int arm_operation(struct pending_operation *pending) {
     event.data.u64 = cookie;
     if (epoll_ctl(c->kernel, EPOLL_CTL_ADD, slot->fd, &event) != 0) error = errno;
 #else
-    struct kevent event;
-    EV_SET(&event, (uintptr_t)slot->fd, slot->writable ? EVFILT_WRITE : EVFILT_READ,
-           EV_ADD | EV_ONESHOT, 0, 0, (void *)(uintptr_t)cookie);
+    struct kevent64_s event;
+    EV_SET64(&event, (uint64_t)slot->fd, slot->writable ? EVFILT_WRITE : EVFILT_READ,
+             EV_ADD | EV_ONESHOT, 0, 0, cookie, 0, 0);
     int answer;
-    do { answer = kevent(c->kernel, &event, 1, NULL, 0, NULL); } while (answer < 0 && errno == EINTR);
+    do { answer = kevent64(c->kernel, &event, 1, NULL, 0, 0, NULL); } while (answer < 0 && errno == EINTR);
     if (answer < 0) error = errno;
 #endif
     if (error != 0) release_slot(pending);
@@ -1839,8 +1868,9 @@ static void replay_stale_cookie(struct carrier *c) {
         replay_requested = 1;
         must(pthread_mutex_unlock(&handoff_lock));
         /* The next reader may already be dequeued but not yet submitted.
-         * Leave a wake for the scheduler turn after it parks. */
-        wake_carrier(c);
+         * Leave a wake for the scheduler turn after it parks; nothing it
+         * queues would end that turn's kernel wait. */
+        post_wake(c);
         return;
     }
 #else
@@ -1916,6 +1946,7 @@ static void drain_completions(struct carrier *c) {
 }
 
 static void poll_carrier(struct carrier *c, int poll_only) {
+    c->polling = !poll_only;
     drain_completions(c);
     enum { batch = 32 };
     lock_carrier(c);
@@ -1935,9 +1966,13 @@ static void poll_carrier(struct carrier *c, int poll_only) {
     const int count = epoll_wait(c->kernel, events, batch, timeout);
     for (int i = 0; i < count; i += 1) cookies[i] = events[i].data.u64;
 #else
-    struct kevent events[batch];
+    struct kevent64_s events[batch];
     struct timespec timeout = { 0, 0 };
-    struct timespec *limit = poll_only ? &timeout : NULL;
+    struct timespec *limit = NULL;
+    /* A zero timeout still makes Darwin arm and cancel a wait, about 12 us
+     * on an empty queue, where `KEVENT_FLAG_IMMEDIATE` answers in well under
+     * one. A poll before every dispatch would pay that each time. */
+    unsigned flags = poll_only ? KEVENT_FLAG_IMMEDIATE : 0;
     if (!poll_only && deadline != 0) {
         const unsigned long instant = now();
         unsigned long remaining = deadline > instant ? deadline - instant : 0;
@@ -1945,10 +1980,12 @@ static void poll_carrier(struct carrier *c, int poll_only) {
         timeout.tv_sec = (time_t)(remaining / 1000000000UL);
         timeout.tv_nsec = (long)(remaining % 1000000000UL);
         limit = &timeout;
+        if (remaining == 0) flags = KEVENT_FLAG_IMMEDIATE;
     }
-    const int count = kevent(c->kernel, NULL, 0, events, batch, limit);
-    for (int i = 0; i < count; i += 1) cookies[i] = events[i].filter == EVFILT_USER ? UINT64_MAX : (uint64_t)(uintptr_t)events[i].udata;
+    const int count = kevent64(c->kernel, NULL, 0, events, batch, flags, limit);
+    for (int i = 0; i < count; i += 1) cookies[i] = events[i].filter == EVFILT_USER ? UINT64_MAX : events[i].udata;
 #endif
+    c->polling = 0;
     if (count < 0 && errno != EINTR) fail("linea: a carrier's poller failed\n");
     for (int i = 0; i < count; i += 1) {
         const uint64_t cookie = cookies[i];
@@ -1968,10 +2005,22 @@ static void poll_carrier(struct carrier *c, int poll_only) {
 #endif
 }
 
-static void run_fiber(struct carrier *c, struct linea_fiber *f) {
+/* Run `f` on `c`. A completed wait is retired and queued again for stealing
+ * only when `queued_behind` says other work waits on `c`: otherwise `c` is
+ * the first carrier able to run it, and offering it would only wake idle
+ * peers to race for work `c` is about to run. */
+static void run_fiber(struct carrier *c, struct linea_fiber *f, int queued_behind) {
 #if defined(LINEA_FIBER_CAN_MIGRATE)
-    if (normalize_completed_io(c, f)) return;
-    if (normalize_completed_park(c, f)) return;
+#if defined(LINEA_FIBER_FORCED_HANDOFF_TEST)
+    (void)queued_behind;
+    const int offer = 1;
+#else
+    const int offer = queued_behind;
+#endif
+    if (offer && normalize_completed_io(c, f)) return;
+    if (offer && normalize_completed_park(c, f)) return;
+#else
+    (void)queued_behind;
 #endif
     timer_remove(f);
     lock_fiber(f);
@@ -2119,7 +2168,7 @@ static void *run_carrier(void *argument) {
             poll_carrier(c, 0);
         } else {
             poll_carrier(c, 1);
-            run_fiber(c, f);
+            run_fiber(c, f, has_queued_work(c));
         }
     }
     (void)linea_io_switch(0);
@@ -2426,7 +2475,7 @@ int linea_fiber_sim_step(unsigned long deadline) {
     struct linea_fiber *f = dequeue(c);
     if (f != NULL) {
         linea_thread_guard_bounds(&c->scheduler_guard_low, &c->scheduler_guard_high);
-        run_fiber(c, f);
+        run_fiber(c, f, has_queued_work(c));
         return 1;
     }
     unsigned long next = linea_sim_next_event();
