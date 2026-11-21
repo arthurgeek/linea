@@ -1741,10 +1741,8 @@ an item is pulled only when a job may start for it. The result does not say
 which item it came from, so a job whose caller needs that returns it, as
 `fetch` returns its page below.
 
-This program fetches four pages, two at a time, where each page takes as long
-as its name says. It runs in a
-[simulation](09-networking.md#testing-a-timeout-without-waiting), so the
-milliseconds are virtual and the order is the same on every run:
+This program fetches four pages, two at a time, where each page takes as many
+milliseconds as its name ends with, and prints each page as it comes back:
 
 `fastest_first.lin`:
 
@@ -1757,59 +1755,120 @@ import std.time
 // Pretend to fetch `page` by sleeping the milliseconds its name ends with,
 // and answer the page, so its caller knows which one finished.
 fn fetch(sink page: String) -> String {
-    let took_ms = if page.view() == "slow-50" {
-        UInt64(50)
-    } else if page.view() == "quick-20" {
-        20
-    } else if page.view() == "medium-40" {
-        40
+    let took_ms = if page.view() == "slow-300" {
+        UInt64(300)
+    } else if page.view() == "medium-400" {
+        400
     } else {
-        5
+        100
     }
     time.sleep(time.Duration.from_milliseconds(took_ms))
     page
 }
 
+// A page that came back, and the milliseconds since the first fetch started.
+@derive(Release)
+struct Arrival {
+    page: String,
+    after_ms: UInt64,
+}
+
+// Fetch `pages` two at a time and collect each one as it comes back.
+fn fetch_fastest_first(sink pages: mem.Vec[String, mem.SystemAllocator]) -> mem.Vec[Arrival, mem.SystemAllocator] {
+    let started = time.Instant.now()
+    var arrived: mem.Vec[Arrival, mem.SystemAllocator] = mem.Vec.new()
+    // Each page comes back as soon as its fetch finishes.
+    defer var fetched = task.lazy_map(.Threads(2), pages.drain(), fetch, order: .Completion)
+    for page in &fetched {
+        &arrived.push(Arrival { page, after_ms = started.elapsed().nanoseconds() / 1000000 }).unwrap()
+    }
+    arrived
+}
+
+// The pages to fetch, in the order they are listed.
+fn listed() -> mem.Vec[String, mem.SystemAllocator] {
+    var pages: mem.Vec[String, mem.SystemAllocator] = mem.Vec.new()
+    for page in ["slow-300", "quick-100", "medium-400", "short-100"] {
+        &pages.push(page.to_owned().unwrap()).unwrap()
+    }
+    pages
+}
+
 fn main() -> Result[UInt8, io.IoError] {
+    defer var arrived = fetch_fastest_first(listed())
+    for arrival in arrived.as_slice() {
+        io.println(arrival.page.view())?
+    }
+    .Ok(0)
+}
+```
+
+```sh
+linea run fastest_first.lin
+```
+
+```
+quick-100
+slow-300
+short-100
+medium-400
+```
+
+`main` really waits, so the program takes about half a second. Two pages are
+fetched at once, and each job that finishes takes the next page in the list.
+`slow-300` and `quick-100` start together; `quick-100` is back at 100 ms and
+its job takes `medium-400`, which is back at 500 ms. `slow-300` is back at
+300 ms and its job takes `short-100`, back at 400 ms, before `medium-400`.
+With the default `order: .Input` the same walk prints `slow-300`,
+`quick-100`, `medium-400` and `short-100`, each once the pages before it are
+back. Under `.Sequential` or `.Threads(1)` every job runs on the caller, one
+after another, so both orders are the items' order. Settling is the same in
+either order: `release()`, `stop()` and `finish()` wait for every job already
+started, so no result is lost.
+
+A test can pin that order without waiting. It runs the same
+`fetch_fastest_first` in a
+[simulation](09-networking.md#testing-a-timeout-without-waiting), whose clock
+is virtual, so the sleeps take no real time and every page comes back at the
+same millisecond on every run, so the test checks the order and the
+millisecond each page came back at. Add `import std.testing` after the other
+imports:
+
+<!-- guide: edit after 3 import std.task -->
+```linea
+import std.testing
+```
+
+and the test at the end of the file:
+
+<!-- guide: edit end -->
+```linea
+test "pages come back fastest first" {
     var sim = io.Simulation.open(seed: 1).unwrap()
     defer let report = &sim.run(
         |inout _world| -> String {
-            var pages: mem.Vec[String, mem.SystemAllocator] = mem.Vec.new()
-            for page in ["slow-50", "quick-20", "medium-40", "tiny-5"] {
-                &pages.push(page.to_owned().unwrap()).unwrap()
-            }
-            let started = time.Instant.now()
+            defer var arrived = fetch_fastest_first(listed())
             var report = String.new()
-            // Each page comes back as soon as its fetch finishes.
-            defer var fetched = task.lazy_map(.Threads(2), pages.drain(), fetch, order: .Completion)
-            for page in &fetched {
-                "{page.view()} after {started.elapsed().nanoseconds() / 1000000} ms\n".fmt(&report).unwrap()
-                page.release()
+            for arrival in arrived.as_slice() {
+                "{arrival.page.view()} at {arrival.after_ms} ms\n".fmt(&report).unwrap()
             }
             report
         },
     )
     sim.close()
-    io.print(report.view())?
-    .Ok(0)
+    testing.assert_eq(report.view(), "quick-100 at 100 ms\nslow-300 at 300 ms\nshort-100 at 400 ms\nmedium-400 at 500 ms\n", "the pages did not come back as their fetches finished")?
 }
 ```
 
-```
-quick-20 after 20 ms
-slow-50 after 50 ms
-tiny-5 after 55 ms
-medium-40 after 60 ms
+```sh
+linea test fastest_first.lin
 ```
 
-`quick-20` finishes first and frees its job for `medium-40`; `slow-50`
-finishes at 50 ms and frees its job for `tiny-5`, which is done at 55 ms,
-before `medium-40`. With the default `order: .Input` the same walk prints
-`slow-50`, `quick-20`, `medium-40` and `tiny-5`, each once the pages before
-it are done. Under `.Sequential` or `.Threads(1)` every job runs on the
-caller, one after another, so both orders are the items' order. Settling is
-the same in either order: `release()`, `stop()` and `finish()` wait for every
-job already started, so no result is lost.
+```
+ok    pages come back fastest first
+
+1 passed, 0 failed
+```
 
 ### Naming the allocator: the `_in` forms
 

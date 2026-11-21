@@ -113,7 +113,9 @@ guide's example returns the page it fetched.
    `std.io`. They hold one slow job tenfold apart from the rest, as the
    window's other tests do.
 3. The guide's chapter on tasks teaches `order: .Completion` with a program
-   run in a simulation, and `std/README.md` names `task.Order`.
+   that really waits, its finishes 100 ms apart, and a test of the same
+   function run in a simulation that pins the order and each finishing
+   millisecond; `std/README.md` names `task.Order`.
 4. A `LazyMap` carries one more field for the order and one counter, and the
    yield, collect and release paths each check the order where they read a
    place.
