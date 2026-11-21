@@ -1,0 +1,331 @@
+import std.fmt
+import std.mem
+import std.testing
+
+// Why a URL could not be read:
+// - `MissingScheme` when the text has no `scheme://`;
+// - `UnsupportedScheme` when the scheme is not `http` or `https`;
+// - `InvalidAuthority` when the host and port are malformed, or the URL
+//   carries a user name or password;
+// - `InvalidPort` when the port is not a decimal integer in 1..=65535;
+// - `InvalidTarget` when the path or query holds a space, a control byte or a
+//   byte above ASCII, which a URL carries percent-encoded.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum UrlError {
+    MissingScheme,
+    UnsupportedScheme,
+    InvalidAuthority,
+    InvalidPort,
+    InvalidTarget,
+}
+
+impl Display for UrlError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(match read self {
+            MissingScheme => "the URL has no scheme://",
+            UnsupportedScheme => "the URL's scheme is not http or https",
+            InvalidAuthority => "the URL's host is malformed",
+            InvalidPort => "the URL's port is not between 1 and 65535",
+            InvalidTarget => "the URL's path or query holds a byte it must percent-encode",
+        })
+    }
+}
+
+test "a url error displays its reason" {
+    defer let shown = fmt.render_owned(UrlError.InvalidPort).unwrap()
+    testing.assert_eq(shown.view(), "the URL's port is not between 1 and 65535", "the reason changed")
+}
+
+// `Url` is an `http` or `https` URL read from text it borrows: the origin it
+// names, the path, and the query after `?`. A fragment after `#` is dropped,
+// since it never travels to a server. The path is empty when the URL has
+// none, and a request names it as `/`. Two URLs are equal when their origins
+// are, under the origin's rules, and their paths and queries are byte for
+// byte.
+@(copyable, derive(Equatable, Debug, Release))
+pub struct Url {
+    origin: Origin,
+    path: Str,
+    query: Option[Str],
+}
+
+impl Display for Url {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.origin.fmt(&w)?
+        &w.write_str(self.target_path())?
+        match read self.query {
+            Some(query) => "?{query}".fmt(&w),
+            None => .Ok(()),
+        }
+    }
+}
+
+test "a url displays its origin path and query" {
+    defer let shown = fmt.render_owned(Url.parse("HTTP://Example.test:80/a/b?c=d#top").unwrap()).unwrap()
+    defer let bare = fmt.render_owned(Url.parse("http://example.test:8080").unwrap()).unwrap()
+    testing.assert_eq(shown.view(), "http://Example.test/a/b?c=d", "a url displayed differently")?
+    testing.assert_eq(bare.view(), "http://example.test:8080/", "a url without a path displayed differently")?
+    .Ok(())
+}
+
+impl Url {
+    // Read `scheme://host[:port][/path][?query][#fragment]`. The scheme is
+    // `http` or `https` in any case, and a port left out is the scheme's own.
+    pub fn parse(text: Str) -> Result[Url, UrlError] where carries(.Ok: text) {
+        let trimmed = text.trim_ascii()
+        let (scheme, rest) = trimmed.split_once("://") else {
+            return .Err(.MissingScheme)
+        }
+        let is_https = scheme.equals_ascii_folded("https")
+        if !is_https && !scheme.equals_ascii_folded("http") {
+            return .Err(.UnsupportedScheme)
+        }
+        let unfragmented = match rest.split_once("#") {
+            Some((before, _)) => before,
+            None => rest,
+        }
+        var end = unfragmented.length()
+        for at in 0..unfragmented.length() {
+            let byte = unfragmented.byte(at).unwrap()
+            if byte == ascii_slash || byte == ascii_question {
+                end = at
+                break
+            }
+        }
+        let authority = unfragmented.slice(0, end).unwrap()
+        let origin = match Origin.from_authority(authority, is_https) {
+            Ok(origin) => origin,
+            Err(InvalidPort) => return .Err(.InvalidPort),
+            Err(_) => return .Err(.InvalidAuthority),
+        }
+        let target = unfragmented.slice(end, unfragmented.length()).unwrap()
+        if target.length() > 0 && !is_target(target) {
+            return .Err(.InvalidTarget)
+        }
+        match target.split_once("?") {
+            Some((path, query)) => .Ok(.{ origin, path, query = .Some(query) }),
+            None => .Ok(.{ origin, path = target, query = .None }),
+        }
+    }
+
+    test "a url names its origin path and query" {
+        let url = Url.parse("https://api.example.test/repos/linea/issues?page=2#top").unwrap()
+        testing.assert(url.is_https(), "https was not recognised")?
+        testing.assert_eq(url.host(), "api.example.test", "the host changed")?
+        testing.assert_eq(url.port(), UInt16(443), "the default port changed")?
+        testing.assert_eq(url.path(), "/repos/linea/issues", "the path changed")?
+        testing.assert_eq(url.query(), Option.Some("page=2"), "the query changed")?
+        let bare = Url.parse("http://127.0.0.1:8080?q").unwrap()
+        testing.assert_eq(bare.path(), "", "a url without a path gained one")?
+        testing.assert_eq(bare.query(), Option.Some("q"), "a query straight after the host was lost")?
+        testing.assert_eq(bare.port(), UInt16(8080), "an explicit port was lost")?
+        .Ok(())
+    }
+
+    test "a malformed url is refused" {
+        testing.assert_eq(Url.parse("example.test/a"), .Err(UrlError.MissingScheme), "a url without a scheme was accepted")?
+        testing.assert_eq(Url.parse("ftp://example.test/a"), .Err(UrlError.UnsupportedScheme), "ftp was accepted")?
+        testing.assert_eq(Url.parse("http://user:secret@example.test/"), .Err(UrlError.InvalidAuthority), "a password was accepted")?
+        testing.assert_eq(Url.parse("http:///a"), .Err(UrlError.InvalidAuthority), "an empty host was accepted")?
+        testing.assert_eq(Url.parse("http://example.test:0/"), .Err(UrlError.InvalidPort), "port 0 was accepted")?
+        testing.assert_eq(Url.parse("http://example.test/a b"), .Err(UrlError.InvalidTarget), "a space in the path was accepted")?
+        testing.assert_eq(Url.parse("http://example.test/é"), .Err(UrlError.InvalidTarget), "a byte above ASCII was accepted")?
+        .Ok(())
+    }
+
+    // The origin the URL names: its scheme, host and port.
+    pub fn origin(self: Self) -> Origin where carries(self) {
+        copy(self.origin)
+    }
+
+    // Whether the URL's scheme is `https`.
+    pub fn is_https(self: Self) -> Bool {
+        self.origin.is_https()
+    }
+
+    // The host name, IPv4 address, or bracketed IPv6 address.
+    pub fn host(self: Self) -> Str where carries(self) {
+        self.origin.host()
+    }
+
+    // The port, the scheme's own when the URL names none.
+    pub fn port(self: Self) -> UInt16 {
+        self.origin.port()
+    }
+
+    // The path as written, which is empty when the URL has none.
+    pub fn path(self: Self) -> Str where carries(self) {
+        copy(self.path)
+    }
+
+    // The query after `?`, without it.
+    pub fn query(self: Self) -> Option[Str] where carries(.Some: self) {
+        copy(self.query)
+    }
+
+    // The path a request line names: the URL's path, or `/` for none.
+    fn target_path(self: Self) -> Str where carries(self) {
+        if self.path.length() == 0 {
+            return "/"
+        }
+        copy(self.path)
+    }
+
+    test "a url's members describe it" {
+        let url = Url.parse("http://example.test/a").unwrap()
+        testing.assert_eq(url.origin(), Origin.parse("http://example.test").unwrap(), "the origin changed")?
+        testing.assert(!url.is_https(), "http was read as https")?
+        testing.assert_eq(url.target_path(), "/a", "the request path changed")?
+        testing.assert_eq(Url.parse("http://example.test").unwrap().target_path(), "/", "an empty path was not /")?
+        .Ok(())
+    }
+}
+
+// Resolve `reference`, a redirect's `Location` or a link, against `base`,
+// into the absolute URL it names, owned by `allocator`. A reference with its
+// own scheme stands alone; one starting `//` keeps the base's scheme; one
+// starting `/` keeps the base's origin; one starting `?` keeps the base's
+// path; an empty one, or one that is only a fragment, names the base; and
+// any other replaces what follows the base path's last `/`. Dot
+// segments are kept as written, for the server to interpret. The answer is
+// checked as `Url.parse` checks a URL.
+pub fn resolve_url_in[A: Allocator](allocator: A, base: Url, reference: Str) -> Result[String[A], ResolveError] where carries(.Ok: allocator) {
+    var resolved = String.new_in(allocator)
+    let written = write_resolved(&resolved, base, reference.trim_ascii())
+    match written {
+        Ok(_) => {},
+        Err(_) => {
+            resolved.release()
+            return .Err(.Allocation)
+        },
+    }
+    match Url.parse(resolved.view()) {
+        Ok(_) => .Ok(resolved),
+        Err(error) => {
+            resolved.release()
+            .Err(.Url(error))
+        },
+    }
+}
+
+test "a reference resolves against its base" {
+    let base = Url.parse("http://example.test:8080/docs/guide/intro?x=1").unwrap()
+    defer let absolute = resolve_url_in(mem.system(), base, "https://other.test/a").unwrap()
+    defer let scheme_relative = resolve_url_in(mem.system(), base, "//cdn.test/lib.js").unwrap()
+    defer let rooted = resolve_url_in(mem.system(), base, "/login?next=1").unwrap()
+    defer let sibling = resolve_url_in(mem.system(), base, "setup#install").unwrap()
+    defer let query = resolve_url_in(mem.system(), base, "?page=2").unwrap()
+    testing.assert_eq(absolute.view(), "https://other.test/a", "an absolute reference changed")?
+    testing.assert_eq(scheme_relative.view(), "http://cdn.test/lib.js", "a scheme-relative reference lost the scheme")?
+    testing.assert_eq(rooted.view(), "http://example.test:8080/login?next=1", "a rooted reference lost the origin")?
+    testing.assert_eq(sibling.view(), "http://example.test:8080/docs/guide/setup", "a relative reference did not replace the last segment")?
+    testing.assert_eq(query.view(), "http://example.test:8080/docs/guide/intro?page=2", "a query reference lost the path")?
+    defer let fragment = resolve_url_in(mem.system(), base, "#top").unwrap()
+    testing.assert_eq(fragment.view(), "http://example.test:8080/docs/guide/intro?x=1", "a fragment reference lost the query")?
+    defer let refused = resolve_url_in(mem.system(), base, "ftp://files.test/a")
+    testing.assert(match read refused { Err(Url(UnsupportedScheme)) => true, _ => false }, "a reference to ftp resolved")
+}
+
+// Resolve `reference` against `base` with the system allocator.
+pub fn resolve_url(base: Url, reference: Str) -> Result[String[mem.SystemAllocator], ResolveError] {
+    resolve_url_in(mem.system(), base, reference)
+}
+
+test "resolve_url resolves with the system allocator" {
+    defer let resolved = resolve_url(Url.parse("http://example.test/a/b").unwrap(), "c").unwrap()
+    testing.assert_eq(resolved.view(), "http://example.test/a/c", "the reference resolved differently")
+}
+
+// Why a reference could not be resolved: the URL it names is malformed, or
+// its text could not be allocated.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum ResolveError {
+    Url(UrlError),
+    Allocation,
+}
+
+impl Display for ResolveError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Url(error) => error.fmt(&w),
+            Allocation => &w.write_str("the resolved URL could not be allocated"),
+        }
+    }
+}
+
+test "a resolve error displays its reason" {
+    defer let shown = fmt.render_owned(ResolveError.Url(.MissingScheme)).unwrap()
+    testing.assert_eq(shown.view(), "the URL has no scheme://", "the reason changed")
+}
+
+// Write the URL `reference` names, read against `base`, into `resolved`.
+fn write_resolved[A: Allocator](inout resolved: String[A], base: Url, reference: Str) -> Result[(), mem.Oom] where carries() {
+    let unfragmented = match reference.split_once("#") {
+        Some((before, _)) => before,
+        None => copy(reference),
+    }
+    if names_scheme(unfragmented) {
+        return &resolved.append(unfragmented)
+    }
+    if unfragmented.starts_with("//") {
+        &resolved.append(base.origin.scheme())?
+        &resolved.append(":")?
+        return &resolved.append(unfragmented)
+    }
+    base.origin.fmt(&resolved)?
+    if unfragmented.starts_with("/") {
+        return &resolved.append(unfragmented)
+    }
+    if unfragmented.length() == 0 {
+        &resolved.append(base.target_path())?
+        return match read base.query {
+            Some(query) => "?{query}".fmt(&resolved),
+            None => .Ok(()),
+        }
+    }
+    if unfragmented.starts_with("?") {
+        &resolved.append(base.target_path())?
+        return &resolved.append(unfragmented)
+    }
+    let path = base.target_path()
+    var last_slash: UInt64 = 0
+    for at in 0..path.length() {
+        if path.byte(at).unwrap() == ascii_slash {
+            last_slash = at
+        }
+    }
+    &resolved.append(path.slice(0, last_slash + 1).unwrap())?
+    &resolved.append(unfragmented)
+}
+
+// Whether `reference` starts with a scheme: letters, digits, `+`, `-` or `.`
+// after a first letter, then `:`, before any `/`, `?` or `#`.
+fn names_scheme(reference: Str) -> Bool {
+    for at in 0..reference.length() {
+        let byte = reference.byte(at).unwrap()
+        if byte == ascii_colon {
+            return at > 0
+        }
+        let letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        let other = (byte >= ascii_zero && byte <= ascii_nine) || byte == 43 || byte == 45 || byte == ascii_dot
+        if !letter && (at == 0 || !other) {
+            return false
+        }
+    }
+    false
+}
+
+test "a scheme is a letter then scheme characters then a colon" {
+    testing.assert(names_scheme("http://a"), "http was not a scheme")?
+    testing.assert(names_scheme("svn+ssh://a"), "svn+ssh was not a scheme")?
+    testing.assert(!names_scheme("/a:b"), "a rooted path was a scheme")?
+    testing.assert(!names_scheme("a/b:c"), "a colon after a slash made a scheme")?
+    testing.assert(!names_scheme(":a"), "an empty scheme was a scheme")?
+    testing.assert(!names_scheme("page"), "a path segment was a scheme")?
+    .Ok(())
+}
+
+// A URL is written with these ASCII bytes.
+let ascii_slash: UInt8 = 47
+
+let ascii_colon: UInt8 = 58

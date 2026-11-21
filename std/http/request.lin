@@ -342,8 +342,12 @@ impl[P: Allocator] Message[P] {
                 host_count += 1
             }
         }
-        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count }
-        add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), limits)
+        let trimmed = trim_optional_whitespace(value)
+        if name.equals_ascii_folded("Host") && (host_count > 0 || !Origin.is_valid_authority(trimmed)) {
+            return .Err(.Status(.BadRequest))
+        }
+        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count, invalid_host = false }
+        add_header_field(&self.head, &self.header_fields, &tally, name, trimmed, limits.max_headers)
     }
 }
 

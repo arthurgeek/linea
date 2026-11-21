@@ -1,0 +1,111 @@
+// List a GitHub repository's open issues through GitHub's REST API, page by
+// page, and report how many requests the rate limit leaves.
+//
+//     github-issues linea-lang/linea
+//     github-issues linea-lang/linea --api http://127.0.0.1:8080 --pages 2
+//
+// A token in `GITHUB_TOKEN` is sent as a bearer token, which raises the rate
+// limit and reaches private repositories. `--api` names another server that
+// answers as GitHub's API does, such as a GitHub Enterprise host or a local
+// server answering recorded responses. GitHub's API is served over HTTPS,
+// and `http.Client` checks its certificate against the operating system's
+// roots, so the default needs no setup.
+import std.cli
+import std.env
+import std.http
+import std.io
+
+// `Options` holds what the command line asked for.
+struct Options {
+    repo: String,
+    api: String,
+    pages: UInt64,
+}
+
+derive Release for Options
+
+fn main() -> UInt8 {
+    let options = parse_options(env.args()) else |status| {
+        return status
+    }
+    // A client keeps the connection to the API open between pages, so every
+    // page after the first is fetched without connecting again.
+    var client = http.Client.new()
+    let token = env.variable("GITHUB_TOKEN")
+    // Over plain `http` the token crosses the network unencrypted, where
+    // anyone between here and the server can read it.
+    if token.is_some() && options.api.view().starts_with("http://") {
+        io.eprintln("warning: GITHUB_TOKEN is sent unencrypted to {options.api.view()}")
+    }
+    let fetched = fetch_open_issues(&client, options.api.view(), options.repo.view(), token, options.pages)
+    client.release()
+    let report = match fetched {
+        Ok(report) => report,
+        Err(error) => {
+            io.eprintln("error: {error}")
+            options.release()
+            return 1
+        },
+    }
+    for issue in report.issues.as_slice() {
+        let kind = if issue.is_pull_request {
+            "pull request"
+        } else {
+            "issue"
+        }
+        io.println("#{issue.number} {issue.title.view()} ({kind} by {issue.author.view()})").unwrap()
+    }
+    io.println("{report.issues.length()} open in {options.repo.view()}, {report.pages} pages").unwrap()
+    match read report.remaining {
+        Some(remaining) => io.println("{remaining} requests left in this rate-limit window").unwrap(),
+        None => {},
+    }
+    report.release()
+    options.release()
+    0
+}
+
+// Read the repository, the API's address and the page limit from the
+// command line, or answer the exit status for a usage mistake or `--help`.
+fn parse_options(args: env.Args) -> Result[Options, UInt8] {
+    defer var cmd = cli.Command.new("github-issues", "List a GitHub repository's open issues")
+    &cmd.positional("repo", "the repository, as owner/name")
+    &cmd.option("api", "--api", "the API's address (default https://api.github.com)")
+    &cmd.option("pages", "--pages", "the most pages of 100 issues to fetch (default 10)")
+    var cursor = cli.ArgCursor.new(args)
+    defer let matches = cmd.parse(&cursor) else |error| {
+        return .Err(report(cmd, args, error))
+    }
+    if matches.is_help() {
+        let help = cmd.format_help(borrow matches) else |_| {
+            return .Err(1)
+        }
+        let _written = io.print(help.view())
+        help.release()
+        return .Err(0)
+    }
+    let repo = matches.required_positional("repo") else |error| {
+        return .Err(report(cmd, args, error))
+    }
+    let pages: Option[UInt64] = matches.get_optional("pages") else |error| {
+        return .Err(report(cmd, args, error))
+    }
+    let api = matches.option("api").unwrap_or("https://api.github.com")
+    .Ok(.{ repo = repo.to_owned().unwrap(), api = api.trim_ascii().to_owned().unwrap(), pages = pages.unwrap_or(10) })
+}
+
+// Print `error` and the command's usage to standard error, and answer 64, the
+// conventional status for a usage mistake, or 1 when memory ran out.
+fn report(cmd: cli.Command, args: env.Args, error: cli.CliError) -> UInt8 {
+    io.eprintln("error: {error}")
+    if match read error { Allocation(_) => true, _ => false } {
+        return 1
+    }
+    var cursor = cli.ArgCursor.new(args)
+    let help = cmd.help_for_arguments(&cursor, error) else |_| {
+        return 1
+    }
+    io.eprint(help.view())
+    help.release()
+    64
+}

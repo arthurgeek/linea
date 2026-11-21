@@ -42,6 +42,7 @@ pub enum IoOperation {
     Listen,
     Accept,
     Connect,
+    Resolve,
     Configure,
     Spawn,
     Wait,
@@ -608,10 +609,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_2968_1_0_0) => {
+        Some(_linea_derive_2973_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2968_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2973_1_0_0)
                 }
             }
         },
@@ -842,6 +843,12 @@ fn std.io.core.IoOperation;std.fmt;Display.fmt[std.io.core.Gathered](self: std.i
             {}
             {
                 "Connect"
+            }
+        },
+        Resolve => {
+            {}
+            {
+                "Resolve"
             }
         },
         Configure => {

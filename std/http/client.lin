@@ -1,0 +1,2637 @@
+import std.fmt
+import std.io
+import std.json as json_format
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.testing
+import std.text as strings
+import std.time
+import std.tls
+import std.uuid
+
+// `ClientLimits` bounds what a client holds and how long it waits. Lines and
+// headers bound a response's head as `Limits` bounds a request's. Timeouts are
+// milliseconds, and zero waits forever: `connect_timeout_ms` bounds opening a
+// connection, and `read_timeout_ms` and `write_timeout_ms` each read and
+// write separately. A whole request is bounded by the `deadline:` that
+// `send`, `send_from` and `get` take, not by a limit.
+// `max_idle_connections` bounds the connections the pool keeps open between
+// requests, `max_idle_per_host` how many of them may reach one origin, and
+// `idle_timeout_ms` how long one may sit unused before it is closed rather
+// than reused. Zero idle connections closes each connection after its
+// response. `max_outstanding` bounds the responses a client has answered and
+// not yet had settled, each of which holds a connection. `max_redirects`
+// bounds the redirects one `send` follows; zero answers a redirect as it is.
+// `drain_bytes` is the most unread body `finish` reads to keep a connection
+// for reuse, and `buffer_bytes` the size of each response's read-ahead
+// buffer.
+@copyable
+pub struct ClientLimits {
+    max_line_bytes: UInt64,
+    max_headers: UInt64,
+    connect_timeout_ms: UInt64,
+    read_timeout_ms: UInt64,
+    write_timeout_ms: UInt64,
+    max_idle_connections: UInt64,
+    max_idle_per_host: UInt64,
+    idle_timeout_ms: UInt64,
+    max_outstanding: UInt64,
+    max_redirects: UInt64,
+    drain_bytes: UInt64,
+    buffer_bytes: UInt64,
+}
+
+// The default limits allow 8 KiB lines and 100 headers in a response's head,
+// ten seconds to connect and thirty for each read and write, keep 16 idle
+// connections, at most 4 to one origin, for 4 seconds each, shorter than the
+// 5 seconds common servers keep an idle connection, since a request written on one they closed fails unless it is
+// idempotent, allow 16 outstanding responses, follow 10 redirects,
+// drain 64 KiB to keep a connection, and read ahead 16 KiB at a time.
+let standard_client_limits: ClientLimits = .{
+    max_line_bytes = 8192,
+    max_headers = 100,
+    connect_timeout_ms = 10000,
+    read_timeout_ms = 30000,
+    write_timeout_ms = 30000,
+    max_idle_connections = 16,
+    max_idle_per_host = 4,
+    idle_timeout_ms = 4000,
+    max_outstanding = 16,
+    max_redirects = 10,
+    drain_bytes = 65536,
+    buffer_bytes = 16384,
+}
+
+// `ClientLimits.default()` gives the limits described above; change one with
+// `ClientLimits { max_redirects = 0, ..ClientLimits.default() }`.
+impl Default for ClientLimits {
+    fn default() -> ClientLimits {
+        standard_client_limits
+    }
+}
+
+test "the default client limits bound the pool and the waits" {
+    let limits = ClientLimits.default()
+    testing.assert_eq(limits.max_idle_connections, UInt64(16), "the pool bound changed")?
+    testing.assert_eq(limits.max_idle_per_host, UInt64(4), "the per-origin bound changed")?
+    testing.assert_eq(limits.idle_timeout_ms, UInt64(4000), "the idle timeout changed")?
+    testing.assert_eq(limits.max_outstanding, UInt64(16), "the outstanding bound changed")?
+    testing.assert_eq(limits.max_redirects, UInt64(10), "the redirect bound changed")?
+    testing.assert_eq(limits.connect_timeout_ms, UInt64(10000), "the connect timeout changed")?
+}
+
+// Why a request failed, by category:
+// - `Url` when the URL, or a redirect's `Location`, is malformed;
+// - `Resolve` when the host name has no address;
+// - `UnsupportedAddress` when the host is a bracketed IPv6 address, which
+//   `net`, connecting over IPv4 only, cannot reach;
+// - `Connect` when the origin refused the connection or did not answer it in
+//   time, or the request's deadline had passed before it was sent;
+// - `Tls` when an `https` origin's TLS handshake failed: its certificate did
+//   not check out, the connection failed or timed out during it, or the
+//   client's TLS configuration could not be built;
+// - `Io` when an open connection failed, a read or write timing out included,
+//   which `is_timeout` tells apart;
+// - `Closed` when the server closed the connection before answering;
+// - `MalformedResponse` when the response is not HTTP/1.x or frames its body
+//   wrongly;
+// - `HeadTooLarge` when a response's line or headers pass the limits;
+// - `BodyTooLarge` when a body read whole passes the bound it was read with;
+// - `TooManyRedirects` when following one more redirect would pass
+//   `max_redirects`;
+// - `Saturated` when `max_outstanding` responses are already unsettled;
+// - `InvalidRequest` when a method, header or value cannot be sent, or a
+//   header the client writes itself was given;
+// - `Body` when the reader a streamed request body came from failed;
+// - `Allocation` when the client's allocator refused.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum ClientError {
+    Url(UrlError),
+    Tls(tls.TlsError),
+    Resolve(io.IoError),
+    UnsupportedAddress,
+    Connect(io.IoError),
+    Io(io.IoError),
+    Closed,
+    MalformedResponse,
+    HeadTooLarge,
+    BodyTooLarge,
+    TooManyRedirects,
+    Saturated,
+    InvalidRequest,
+    Body(io.IoError),
+    Allocation,
+}
+
+impl Display for ClientError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Url(error) => error.fmt(&w),
+            Tls(error) => "the TLS handshake failed: {error}".fmt(&w),
+            Resolve(error) => "the host name did not resolve: {error}".fmt(&w),
+            UnsupportedAddress => &w.write_str("the host is an IPv6 address, and the client connects over IPv4 only"),
+            Connect(error) => "the connection was not made: {error}".fmt(&w),
+            Io(error) => error.fmt(&w),
+            Closed => &w.write_str("the server closed the connection before answering"),
+            MalformedResponse => &w.write_str("the response is not well-formed HTTP/1.1"),
+            HeadTooLarge => &w.write_str("the response's head passes the client's limits"),
+            BodyTooLarge => &w.write_str("the response's body passes the bound it was read with"),
+            TooManyRedirects => &w.write_str("the response redirected more times than the client follows"),
+            Saturated => &w.write_str("the client already holds as many unsettled responses as it allows"),
+            InvalidRequest => &w.write_str("the request holds a method or header that cannot be sent"),
+            Body(error) => "the request body could not be read: {error}".fmt(&w),
+            Allocation => &w.write_str("the client's allocator refused"),
+        }
+    }
+}
+
+test "a client error displays its reason" {
+    let refused = io.IoError { operation = .Connect, category = .ConnectionRefused, code = .None, progress = 0 }
+    defer let connect = fmt.render_owned(ClientError.Connect(refused)).unwrap()
+    defer let closed = fmt.render_owned(ClientError.Closed).unwrap()
+    defer let url = fmt.render_owned(ClientError.Url(.MissingScheme)).unwrap()
+    testing.assert_eq(connect.view(), "the connection was not made: Connect failed (ConnectionRefused) after 0 bytes", "the connect reason changed")?
+    testing.assert_eq(closed.view(), "the server closed the connection before answering", "the closed reason changed")?
+    testing.assert_eq(url.view(), "the URL has no scheme://", "the url reason changed")?
+    .Ok(())
+}
+
+impl ClientError {
+    // Whether the request failed because a wait ran out of time: a connect,
+    // a handshake, a read or a write timeout, or the request's deadline.
+    pub fn is_timeout(self: Self) -> Bool {
+        match read self {
+            Connect(error) => error.category == .TimedOut,
+            Io(error) => error.category == .TimedOut,
+            Tls(Transport(error)) => error.category == .TimedOut,
+            _ => false,
+        }
+    }
+
+    test "only a timed out wait is a timeout" {
+        let timed_out = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
+        let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 0 }
+        testing.assert(ClientError.Io(copy(timed_out)).is_timeout(), "a timed out read was not a timeout")?
+        testing.assert(ClientError.Tls(.Transport(copy(timed_out))).is_timeout(), "a timed out handshake was not a timeout")?
+        testing.assert(ClientError.Connect(timed_out).is_timeout(), "a timed out connect was not a timeout")?
+        testing.assert(!ClientError.Io(reset).is_timeout(), "a reset was a timeout")?
+        testing.assert(!ClientError.Closed.is_timeout(), "a closed connection was a timeout")?
+        .Ok(())
+    }
+}
+
+// The failure of a request whose deadline passed before any of it was sent.
+fn timed_out_before_sending() -> ClientError {
+    .Connect(.{ operation = .Connect, category = .TimedOut, code = .None, progress = 0 })
+}
+
+// What a response's head said, read as the server's parser reads a
+// request's, in the client's words. A refusal the reader makes of its own
+// storage is the allocator's.
+fn response_failure(sink error: RequestError) -> ClientError {
+    match error {
+        Closed => .Closed,
+        Status(RequestHeaderFieldsTooLarge) => .HeadTooLarge,
+        Status(InternalServerError) => .Allocation,
+        Status(_) => .MalformedResponse,
+        Io(error) => .Io(error),
+    }
+}
+
+test "a refused head is a malformed or oversized response" {
+    let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 3 }
+    testing.assert_eq(response_failure(.Closed), ClientError.Closed, "a closed connection changed")?
+    testing.assert_eq(response_failure(.Status(.RequestHeaderFieldsTooLarge)), ClientError.HeadTooLarge, "an oversized head changed")?
+    testing.assert_eq(response_failure(.Status(.BadRequest)), ClientError.MalformedResponse, "a malformed head changed")?
+    testing.assert_eq(response_failure(.Io(copy(reset))), ClientError.Io(reset), "a reset changed")?
+    .Ok(())
+}
+
+// A `ClientRequest` is what a client sends: a method, a URL, the headers the
+// program adds, and a body held whole. It owns each of them, from its
+// allocator. A client writes `Host`, `Content-Length`, `Transfer-Encoding`
+// and `Connection` itself, so a request refuses them.
+@opaque
+struct ClientRequest[A: Allocator = mem.SystemAllocator] {
+    allocator: A,
+    method: String[A],
+    url: String[A],
+    head: String[A],
+    header_fields: Vec[Field, A],
+    body: Vec[UInt8, A],
+}
+
+derive[A: Allocator] Release for ClientRequest[A]
+
+impl ClientRequest[mem.SystemAllocator] {
+    // A request with no headers and no body, from the system allocator. The
+    // method is a token such as `GET`, and the URL, rendered with `Display`
+    // so an interpolation such as `"http://127.0.0.1:{port}/"` can name it,
+    // must parse as `Url.parse` reads one.
+    pub fn new[U: Display](method: Str, url: U) -> Result[ClientRequest[mem.SystemAllocator], ClientError] {
+        ClientRequest.new_in(mem.system(), method, url)
+    }
+
+    test "a request holds its method and url" {
+        defer let request = ClientRequest.new("GET", "http://example.test/a?b").unwrap()
+        testing.assert_eq(request.method(), "GET", "the method changed")?
+        testing.assert_eq(request.url(), "http://example.test/a?b", "the url changed")?
+        .Ok(())
+    }
+}
+
+impl[A: Allocator] ClientRequest[A] {
+    // A request with no headers and no body, owned by `allocator`.
+    pub fn new_in[U: Display](allocator: A, method: Str, url: U) -> Result[ClientRequest[A], ClientError] where carries(.Ok: allocator) {
+        if !is_token(method) {
+            return .Err(.InvalidRequest)
+        }
+        let rendered = fmt.render_owned_in(allocator, url) else |_| {
+            return .Err(.Allocation)
+        }
+        match Url.parse(rendered.view()) {
+            Ok(_) => {},
+            Err(error) => {
+                rendered.release()
+                return .Err(.Url(error))
+            },
+        }
+        var request: ClientRequest[A] = .{ allocator = copy(allocator), method = String.new_in(allocator), url = String.new_in(allocator), head = String.new_in(allocator), header_fields = Vec.new_in(allocator), body = Vec.new_in(allocator) }
+        let stored = &request.method.append(method).is_ok() && &request.url.append(rendered.view().trim_ascii()).is_ok()
+        rendered.release()
+        if !stored {
+            request.release()
+            return .Err(.Allocation)
+        }
+        .Ok(request)
+    }
+
+    test "a request refuses a method or url it cannot send" {
+        defer let spaced = ClientRequest.new_in(mem.system(), "G T", "http://example.test/")
+        defer let schemeless = ClientRequest.new_in(mem.system(), "GET", "example.test/")
+        testing.assert(match read spaced { Err(InvalidRequest) => true, _ => false }, "a method holding a space was accepted")?
+        testing.assert(match read schemeless { Err(Url(MissingScheme)) => true, _ => false }, "a url without a scheme was accepted")
+    }
+
+    // The method the request is sent with.
+    pub fn method(self: Self) -> Str where borrows(self) {
+        self.method.view()
+    }
+
+    // The URL the request is sent to.
+    pub fn url(self: Self) -> Str where borrows(self) {
+        self.url.view()
+    }
+
+    // Add the header `name: value` in place; `with_header` says what is
+    // refused.
+    fn push_header[V: Display](inout self: Self, name: Str, value: V) -> Result[(), ClientError] where carries() {
+        if !is_token(name) || is_framing_header(name) {
+            return .Err(.InvalidRequest)
+        }
+        let rendered = fmt.render_owned_in(self.allocator, value) else |_| {
+            return .Err(.Allocation)
+        }
+        if !is_field_value(rendered.view()) {
+            rendered.release()
+            return .Err(.InvalidRequest)
+        }
+        let stored = store_part(&self.head, name)
+        let value_stored = store_part(&self.head, rendered.view())
+        rendered.release()
+        let (name_span, value_span) = match (stored, value_stored) {
+            (Ok(name_span), Ok(value_span)) => (name_span, value_span),
+            _ => return .Err(.Allocation),
+        }
+        match &self.header_fields.push(.{ name = name_span, value = value_span }) {
+            Ok(_) => .Ok(()),
+            Err(_) => .Err(.Allocation),
+        }
+    }
+
+    // Answer the request with the header `name: value` added, rendering
+    // `value` with `Display`. A name that is not a token, a value holding a
+    // line break or another control byte, and a header the client writes
+    // itself are `InvalidRequest`; the request is released when it fails, so
+    // a chain of `with_` calls ends in one `?`.
+    pub fn with_header[V: Display](sink self: Self, name: Str, value: V) -> Result[ClientRequest[A], ClientError] where carries(.Ok: self) {
+        var request = self
+        match &request.push_header(name, value) {
+            Ok(_) => .Ok(request),
+            Err(error) => {
+                request.release()
+                .Err(error)
+            },
+        }
+    }
+
+    test "a request's headers are checked as they are added" {
+        defer let request = ClientRequest.new("GET", "http://example.test/").unwrap().with_header("Accept", "application/json").unwrap().with_header("X-Page", 2).unwrap()
+        testing.assert_eq(request.header("accept"), Option.Some("application/json"), "an added header was lost")?
+        testing.assert_eq(request.header("X-Page"), Option.Some("2"), "a rendered value was lost")?
+        let refused = |name: Str, value: Str| -> Bool match ClientRequest.new("GET", "http://example.test/").unwrap().with_header(name, value) {
+            Ok(kept) => {
+                kept.release()
+                false
+            },
+            Err(error) => error == ClientError.InvalidRequest,
+        }
+        testing.assert(refused("X-Note", "a\r\nb"), "a value holding a line break was accepted")?
+        testing.assert(refused("content-length", "4"), "a framing header was accepted")?
+        testing.assert(refused("Bad Name", "x"), "a name holding a space was accepted")?
+        .Ok(())
+    }
+
+    // The first value of the header `name`, compared under ASCII case
+    // folding.
+    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
+        header_value(self.head.view(), self.header_fields.as_slice(), name)
+    }
+
+    // Hold `bytes` as the body in place; `with_body` says how.
+    fn put_body(inout self: Self, content_type: Str, bytes: mem.Slice[UInt8]) -> Result[(), ClientError] where carries() {
+        &self.remove_headers("Content-Type")
+        &self.push_header("Content-Type", content_type)?
+        &self.body.clear()
+        match &self.body.append_slice(bytes) {
+            Ok(_) => .Ok(()),
+            Err(_) => .Err(.Allocation),
+        }
+    }
+
+    // Answer the request with `bytes` as its body, described by
+    // `content_type`, replacing any body it held; the request is released
+    // when this fails.
+    pub fn with_body(sink self: Self, content_type: Str, bytes: mem.Slice[UInt8]) -> Result[ClientRequest[A], ClientError] where carries(.Ok: self) {
+        var request = self
+        match &request.put_body(content_type, bytes) {
+            Ok(_) => .Ok(request),
+            Err(error) => {
+                request.release()
+                .Err(error)
+            },
+        }
+    }
+
+    test "a body replaces the one before it" {
+        defer let request = ClientRequest.new("POST", "http://example.test/notes").unwrap().with_body("text/plain", "first".as_bytes()).unwrap().with_body("text/plain; charset=utf-8", "second".as_bytes()).unwrap()
+        testing.assert_eq(request.header("Content-Type"), Option.Some("text/plain; charset=utf-8"), "the content type was not replaced")?
+        testing.assert(request.body.as_slice() == "second".as_bytes(), "the body was not replaced")?
+        .Ok(())
+    }
+
+    // Hold `value` encoded as JSON as the body in place; `with_json` says
+    // how.
+    fn put_json[T: json_format.Encode](inout self: Self, value: T) -> Result[(), ClientError] where carries() {
+        &self.remove_headers("Content-Type")
+        &self.push_header("Content-Type", "application/json")?
+        var text = String.new_in(self.allocator)
+        match json_format.encode(&text, value) {
+            Ok(_) => {},
+            Err(_) => {
+                text.release()
+                return .Err(.Allocation)
+            },
+        }
+        mem.exchange(&self.body, text.into_bytes()).release()
+        .Ok(())
+    }
+
+    // Answer the request with `value` encoded as JSON as its body, described
+    // as `application/json`; the request is released when this fails.
+    pub fn with_json[T: json_format.Encode](sink self: Self, value: T) -> Result[ClientRequest[A], ClientError] where carries(.Ok: self) {
+        var request = self
+        match &request.put_json(value) {
+            Ok(_) => .Ok(request),
+            Err(error) => {
+                request.release()
+                .Err(error)
+            },
+        }
+    }
+
+    test "a json body is encoded and described" {
+        defer let request = ClientRequest.new("POST", "http://example.test/notes").unwrap().with_json(PostedNote { title = "milk", done = false }).unwrap()
+        testing.assert_eq(request.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
+        testing.assert(request.body.as_slice() == r#"{"title":"milk","done":false}"#.as_bytes(), "the encoded body changed")?
+        .Ok(())
+    }
+
+    // Leave out every header named `name`. Its text stays in `head`, which
+    // nothing then ranges over.
+    fn remove_headers(inout self: Self, name: Str) {
+        var kept: UInt64 = 0
+        for at in 0..self.header_fields.length() {
+            let field = copy(self.header_fields[at])
+            if !stored_part(self.head.view(), field.name).equals_ascii_folded(name) {
+                self.header_fields[kept] = field
+                kept += 1
+            }
+        }
+        &self.header_fields.truncate(kept)
+    }
+
+    test "removing a header leaves the others in order" {
+        defer var request = ClientRequest.new("GET", "http://example.test/").unwrap().with_header("Authorization", "Bearer secret").unwrap().with_header("Accept", "text/plain").unwrap().with_header("authorization", "Bearer other").unwrap()
+        &request.remove_headers("Authorization")
+        testing.assert_eq(request.header("Authorization"), .None, "a removed header was kept")?
+        testing.assert_eq(request.header("Accept"), Option.Some("text/plain"), "a kept header was lost")?
+        testing.assert_eq(request.header_fields.length(), UInt64(1), "a removed header still counted")?
+        .Ok(())
+    }
+}
+
+// A client writes these headers itself, from the URL and the body.
+fn is_framing_header(name: Str) -> Bool {
+    name.equals_ascii_folded("Host") || name.equals_ascii_folded("Content-Length") || name.equals_ascii_folded("Transfer-Encoding") || name.equals_ascii_folded("Connection")
+}
+
+// Write the head of `request` to `url` into `out`: the request line, `Host`,
+// the request's own headers, how the body is framed, and `Connection: close`
+// when `closing`.
+fn write_request_head[A: Allocator, B: Allocator](inout out: String[B], request: ClientRequest[A], url: Url, framing: RequestFraming, closing: Bool) -> Result[(), mem.Oom] where carries() {
+    &out.append(request.method.view())?
+    &out.append(" ")?
+    &out.append(url.target_path())?
+    match read url.query {
+        Some(query) => {
+            &out.append("?")?
+            &out.append(query)?
+        },
+        None => {},
+    }
+    &out.append(" HTTP/1.1\r\nHost: ")?
+    &out.append(url.host())?
+    let default_port: UInt16 = if url.is_https() {
+        443
+    } else {
+        80
+    }
+    if url.port() != default_port {
+        ":{url.port()}".fmt(&out)?
+    }
+    &out.append("\r\n")?
+    for field in request.header_fields.as_slice() {
+        &out.append(stored_part(request.head.view(), field.name))?
+        &out.append(": ")?
+        &out.append(stored_part(request.head.view(), field.value))?
+        &out.append("\r\n")?
+    }
+    match read framing {
+        Length(count) => "Content-Length: {count}\r\n".fmt(&out)?,
+        Chunked => &out.append("Transfer-Encoding: chunked\r\n")?,
+        Bodiless => {},
+    }
+    if closing {
+        &out.append("Connection: close\r\n")?
+    }
+    &out.append("\r\n")
+}
+
+// How a request's body is framed: by a length, by chunks when its length is
+// not known before it is read, or not at all when a method sends none.
+@copyable
+enum RequestFraming {
+    Length(UInt64),
+    Chunked,
+    Bodiless,
+}
+
+// A whole body is framed by its length. A request without a body sends no
+// length, except for the methods that carry one, which send `0`.
+fn whole_framing[A: Allocator](request: ClientRequest[A]) -> RequestFraming {
+    let method = request.method.view()
+    if request.body.length() > 0 || method == "POST" || method == "PUT" || method == "PATCH" {
+        return .Length(request.body.length())
+    }
+    .Bodiless
+}
+
+test "a request head names the target host headers and framing" {
+    defer let request = ClientRequest.new("POST", "http://127.0.0.1:8080/notes?draft=1").unwrap().with_header("Accept", "application/json").unwrap().with_body("text/plain", "hello".as_bytes()).unwrap()
+    let url = Url.parse(request.url()).unwrap()
+    defer var head = String.new()
+    write_request_head(&head, request, url, whole_framing(request), closing: false).unwrap()
+    let expected = "POST /notes?draft=1 HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nAccept: application/json\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\n"
+    testing.assert_eq(head.view(), expected, "the request head changed")?
+    defer var bare = String.new()
+    defer let get = ClientRequest.new("GET", "http://example.test").unwrap()
+    write_request_head(&bare, get, Url.parse(get.url()).unwrap(), whole_framing(get), closing: true).unwrap()
+    testing.assert_eq(bare.view(), "GET / HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n", "a bodiless head changed")?
+    .Ok(())
+}
+
+// How the rest of a response's body arrives: none at all, a count of bytes
+// still to come, chunks (the next line holds a chunk's size, or some bytes of
+// a chunk remain before its line break), everything until the server closes
+// the connection, or nothing more because the body was read to its end.
+@(copyable, derive(Equatable, Debug))
+enum BodyMode {
+    Empty,
+    Length,
+    ChunkSize,
+    Chunk,
+    UntilClose,
+    Ended,
+}
+
+// A body's mode and, for `Length` and `Chunk`, how many bytes remain.
+@(copyable, derive(Equatable, Debug))
+struct Framed {
+    mode: BodyMode,
+    left: UInt64,
+}
+
+// A body framed as `mode` with `left` bytes to come.
+fn framed_as(mode: BodyMode, left: UInt64 = 0) -> Framed {
+    .{ mode, left }
+}
+
+// What a response's head said, read before its body: the status, the
+// headers as stored text and ranges, how the body is framed, and whether the
+// connection may carry another request once the body is read.
+struct ResponseHead[A: Allocator] {
+    status: Status,
+    head: String[A],
+    header_fields: Vec[Field, A],
+    framed: Framed,
+    reusable: Bool,
+}
+
+derive[A: Allocator] Release for ResponseHead[A]
+
+// A server may send interim `1xx` heads before the final one; a client skips
+// at most this many.
+let max_interim_heads: UInt64 = 8
+
+// Read a response's head with the server's own line and header readers.
+// Interim `1xx` heads are skipped. `bodiless_request` says the request was
+// `HEAD`, whose response has no body whatever its headers say, and `closing`
+// that the request asked to close the connection after it.
+fn read_response_head[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], allocator: B, limits: ClientLimits, bodiless_request: Bool, closing: Bool) -> Result[ResponseHead[B], ClientError] where R.Error: Into[io.IoError], carries(.Ok: allocator), retains(reader: reader) {
+    for _ in 0..=max_interim_heads {
+        let line = match read_status_line(&reader, limits.max_line_bytes) {
+            Ok(line) => line,
+            Err(error) => return .Err(response_failure(error)),
+        }
+        var head = String.new_in(allocator)
+        var header_fields: Vec[Field, B] = Vec.new_in(allocator)
+        let tally = match read_header_fields(&reader, &head, &header_fields, limits.max_line_bytes, limits.max_headers) {
+            Ok(tally) => tally,
+            Err(error) => {
+                head.release()
+                header_fields.release()
+                return .Err(response_failure(error))
+            },
+        }
+        let code = line.status.code()
+        if code >= 100 && code < 200 {
+            head.release()
+            header_fields.release()
+            if code == 101 {
+                return .Err(.MalformedResponse)
+            }
+            continue
+        }
+        let framed = match response_framing(line.status, head.view(), header_fields.as_slice(), tally, bodiless_request) {
+            Ok(framed) => framed,
+            Err(error) => {
+                head.release()
+                header_fields.release()
+                return .Err(error)
+            },
+        }
+        let closes = any_header_has_token(head.view(), header_fields.as_slice(), "Connection", "close")
+        let reusable = line.is_http_11 && !closing && !closes && framed.mode != BodyMode.UntilClose
+        return .Ok(.{ status = copy(line.status), head, header_fields, framed, reusable })
+    }
+    .Err(.MalformedResponse)
+}
+
+// How a response frames its body (RFC 9112 §6.3): a response to `HEAD`, and
+// one whose status has no body, has none; a transfer coding ending in
+// `chunked` sends chunks, and any other coding runs until the server closes;
+// a `Content-Length` counts the body; and a response with neither runs until
+// the server closes. A response framed both ways is malformed.
+fn response_framing(status: Status, head: Str, fields: mem.Slice[Field], tally: HeaderTally, bodiless_request: Bool) -> Result[Framed, ClientError] {
+    if bodiless_request || status.is_bodyless() {
+        return .Ok(framed_as(.Empty))
+    }
+    if tally.transfer_coded {
+        if tally.length.is_some() {
+            return .Err(.MalformedResponse)
+        }
+        if last_coding_is_chunked(last_header_value(head, fields, "Transfer-Encoding").unwrap_or("")) {
+            return .Ok(framed_as(.ChunkSize))
+        }
+        return .Ok(framed_as(.UntilClose))
+    }
+    match read tally.length {
+        Some(0) => .Ok(framed_as(.Ended)),
+        Some(count) => .Ok(framed_as(.Length, count)),
+        None => .Ok(framed_as(.UntilClose)),
+    }
+}
+
+// The last value of the header `name`. Codings sent across several
+// `Transfer-Encoding` headers form one list, so the last header holds the
+// final coding.
+fn last_header_value(head: Str, fields: mem.Slice[Field], name: Str) -> Option[Str] where carries(.Some: head) {
+    var last: Option[Str] = .None
+    for field in copy(fields) {
+        if stored_part(head, field.name).equals_ascii_folded(name) {
+            last = .Some(stored_part(head, field.value))
+        }
+    }
+    last
+}
+
+// Whether any header named `name` lists `token`, since options sent across
+// several headers form one list.
+fn any_header_has_token(head: Str, fields: mem.Slice[Field], name: Str, token: Str) -> Bool {
+    for field in copy(fields) {
+        if stored_part(head, field.name).equals_ascii_folded(name) && has_token(.Some(stored_part(head, field.value)), token) {
+            return true
+        }
+    }
+    false
+}
+
+// Whether the last of the comma-separated codings is `chunked`.
+fn last_coding_is_chunked(codings: Str) -> Bool {
+    var last = copy(codings)
+    for coding in codings.split(",").unwrap() {
+        last = coding
+    }
+    trim_optional_whitespace(last).equals_ascii_folded("chunked")
+}
+
+// Whether a comma-separated header value holds `token`, under ASCII case
+// folding.
+fn has_token(value: Option[Str], token: Str) -> Bool {
+    let listed = copy(value) else {
+        return false
+    }
+    for item in listed.split(",").unwrap() {
+        if trim_optional_whitespace(item).equals_ascii_folded(token) {
+            return true
+        }
+    }
+    false
+}
+
+test "codings and connection tokens are read from comma-separated values" {
+    testing.assert(last_coding_is_chunked("chunked"), "chunked alone was not chunked")?
+    testing.assert(last_coding_is_chunked("gzip, Chunked"), "a final chunked was missed")?
+    testing.assert(!last_coding_is_chunked("chunked, gzip"), "a coding after chunked was missed")?
+    testing.assert(has_token(.Some("keep-alive, Close"), "close"), "a close token was missed")?
+    testing.assert(!has_token(.Some("closed"), "close"), "a longer token matched")?
+    testing.assert(!has_token(.None, "close"), "an absent header held a token")?
+    .Ok(())
+}
+
+// Read the response `input` sends, `step` bytes at a time, as the client
+// reads one: its head, then its body to its end. Answers the status, the
+// body, and whether the connection may carry another request.
+fn read_whole_response(input: Str, step: UInt64, bodiless_request: Bool = false) -> Result[(Status, String, Bool), ClientError] {
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step, failure = .None }
+    var reader = io.BufferedReader.open(capacity: 16, reader: source).unwrap()
+    let outcome = read_head_and_body(&reader, bodiless_request)
+    let _source = reader.abandon()
+    outcome
+}
+
+fn read_head_and_body[R: io.Reader](inout reader: io.BufferedReader[R, mem.SystemAllocator], bodiless_request: Bool) -> Result[(Status, String, Bool), ClientError] where R.Error: Into[io.IoError] {
+    let ResponseHead { status, head, header_fields, framed, reusable } = read_response_head(&reader, mem.system(), ClientLimits.default(), bodiless_request, closing: false)?
+    head.release()
+    header_fields.release()
+    var framing = framed
+    var body = String.new()
+    var chunk = mem.system().acquire(3).unwrap()
+    let drained = append_framed(&reader, &framing, &chunk, &body)
+    chunk.release()
+    match drained {
+        Ok(_) => .Ok((status, body, reusable)),
+        Err(error) => {
+            body.release()
+            .Err(error)
+        },
+    }
+}
+
+// Append the rest of a body framed as `framing` to `body`, reading at most a
+// buffer's length at a time.
+fn append_framed[R: io.Reader](inout reader: io.BufferedReader[R, mem.SystemAllocator], inout framing: Framed, inout chunk: mem.Buffer[mem.SystemAllocator], inout body: String) -> Result[(), ClientError] where R.Error: Into[io.IoError] {
+    let capacity = chunk.length()
+    loop {
+        let count = read_framed(&reader, &framing, &chunk, 0, capacity, 64, 4)?
+        if count == 0 {
+            return .Ok(())
+        }
+        &body.append_bytes(chunk.as_slice().subspan(start: 0, count: count).unwrap()).unwrap()
+    }
+}
+
+test "a response framed by its length is read to its end" {
+    let (status, body, reusable) = read_whole_response("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello", 4).unwrap()
+    defer let text = body
+    testing.assert_eq(status, Status.Ok, "the status changed")?
+    testing.assert_eq(text.view(), "hello", "the body changed")?
+    testing.assert(reusable, "a framed HTTP/1.1 response closed its connection")?
+    .Ok(())
+}
+
+test "a chunked response is decoded and its trailers skipped" {
+    let input = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5;note=x\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0\r\nExpires: never\r\n\r\n"
+    let (_, body, reusable) = read_whole_response(input, 5).unwrap()
+    defer let text = body
+    testing.assert_eq(text.view(), "Wikipedia in\r\n\r\nchunks.", "the chunks were joined differently")?
+    testing.assert(reusable, "a chunked response closed its connection")?
+    .Ok(())
+}
+
+test "interim heads are skipped and a response to HEAD has no body" {
+    let (status, body, _) = read_whole_response("HTTP/1.1 103 Early Hints\r\nLink: </a.css>\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n", 7, bodiless_request: true).unwrap()
+    defer let text = body
+    testing.assert_eq(status, Status.Ok, "the interim status was answered")?
+    testing.assert_eq(text.view(), "", "a response to HEAD had a body")?
+    .Ok(())
+}
+
+test "a response without a length runs until the server closes" {
+    let (_, body, reusable) = read_whole_response("HTTP/1.0 200 OK\r\n\r\nall of it", 4).unwrap()
+    defer let text = body
+    testing.assert_eq(text.view(), "all of it", "a body read to the close changed")?
+    testing.assert(!reusable, "a body framed by the close kept its connection")?
+    let (_, closing_body, closing_reusable) = read_whole_response("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok", 4).unwrap()
+    closing_body.release()
+    testing.assert(!closing_reusable, "a response asking to close kept its connection")?
+    .Ok(())
+}
+
+test "codings and options sent across several headers are read as one list" {
+    let (_, body, reusable) = read_whole_response("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: gzip\r\n\r\nraw", 4).unwrap()
+    defer let text = body
+    testing.assert_eq(text.view(), "raw", "a final coding other than chunked was decoded as chunks")?
+    testing.assert(!reusable, "a body framed by the close kept its connection")?
+    let (_, kept, closing) = read_whole_response("HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok", 4).unwrap()
+    kept.release()
+    testing.assert(!closing, "a later Connection: close was missed")?
+    .Ok(())
+}
+
+test "a malformed response is refused" {
+    let refused = |input: Str| -> Bool match read_whole_response(input, 4) {
+        Ok((_, body, _)) => {
+            body.release()
+            false
+        },
+        Err(error) => error == ClientError.MalformedResponse,
+    }
+    testing.assert(refused("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n"), "a body framed two ways was accepted")?
+    testing.assert(refused("HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nshort"), "a body shorter than its length was accepted")?
+    testing.assert(refused("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n"), "a chunk size that is not hex was accepted")?
+    testing.assert(refused("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcX\r\n0\r\n\r\n"), "a chunk without its line break was accepted")?
+    testing.assert(refused("HTTP/1.1 101 Switching Protocols\r\n\r\n"), "a protocol switch was accepted")?
+    testing.assert(refused("HTTP/1.1 200 OK\r\nX : y\r\n\r\n"), "a malformed header was accepted")?
+    defer let silent = read_whole_response("", 4)
+    testing.assert(match read silent { Err(Closed) => true, _ => false }, "a silent server was not closed")?
+    .Ok(())
+}
+
+// Read up to `count` bytes of a body framed as `framed` into `buffer` at
+// `offset`, decoding chunks, and advance `framed`. Zero bytes means the body
+// has ended. Chunk lines are bounded by `max_line_bytes` and trailer fields
+// by `max_headers`.
+fn read_framed[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout framed: Framed, inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64, max_line_bytes: UInt64, max_headers: UInt64) -> Result[UInt64, ClientError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    if count == 0 {
+        return .Ok(0)
+    }
+    loop {
+        let left = framed.left
+        match framed.mode {
+            Empty => return .Ok(0),
+            Ended => return .Ok(0),
+            Length => {
+                let got = read_body_bytes(&reader, &buffer, offset, smaller(count, left))?
+                if got == 0 {
+                    return .Err(.MalformedResponse)
+                }
+                framed.left = left - got
+                if framed.left == 0 {
+                    framed.mode = .Ended
+                }
+                return .Ok(got)
+            },
+            UntilClose => {
+                let got = read_body_bytes(&reader, &buffer, offset, count)?
+                if got == 0 {
+                    framed.mode = .Ended
+                }
+                return .Ok(got)
+            },
+            ChunkSize => {
+                let size = read_chunk_size(&reader, max_line_bytes)?
+                if size == 0 {
+                    skip_trailers(&reader, max_line_bytes, max_headers)?
+                    framed.mode = .Ended
+                    return .Ok(0)
+                }
+                framed = framed_as(.Chunk, size)
+            },
+            Chunk => {
+                if left == 0 {
+                    read_chunk_end(&reader, max_line_bytes)?
+                    framed.mode = .ChunkSize
+                } else {
+                    let got = read_body_bytes(&reader, &buffer, offset, smaller(count, left))?
+                    if got == 0 {
+                        return .Err(.MalformedResponse)
+                    }
+                    framed.left = left - got
+                    return .Ok(got)
+                }
+            },
+        }
+    }
+}
+
+fn smaller(a: UInt64, b: UInt64) -> UInt64 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+// Read up to `count` body bytes the reader holds or can read.
+fn read_body_bytes[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64) -> Result[UInt64, ClientError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    match &reader.read_chunk(&buffer, offset, count) {
+        Ok(got) => .Ok(got),
+        Err(error) => .Err(response_failure(line_failure(error, .RequestHeaderFieldsTooLarge))),
+    }
+}
+
+// Read one line of a chunked body, without its line break.
+fn read_body_line[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], max_line_bytes: UInt64) -> Result[Str, ClientError] where R.Error: Into[io.IoError], borrows(.Ok: reader), retains(reader: reader) {
+    let line_read = &reader.read_raw_line_borrowed(max_line_bytes) else |error| {
+        return .Err(response_failure(line_failure(error, .RequestHeaderFieldsTooLarge)))
+    }
+    let raw = line_read else {
+        return .Err(.MalformedResponse)
+    }
+    match line_text(raw) {
+        Ok(line) => .Ok(line),
+        Err(error) => .Err(response_failure(error)),
+    }
+}
+
+// Read a chunk's size: hexadecimal digits, then optional whitespace and
+// extensions after `;`, which are ignored. More than 16 digits passes what a
+// size can hold.
+fn read_chunk_size[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], max_line_bytes: UInt64) -> Result[UInt64, ClientError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    let line = read_body_line(&reader, max_line_bytes)?
+    let digits = match line.split_once(";") {
+        Some((before, _)) => trim_optional_whitespace(before),
+        None => trim_optional_whitespace(line),
+    }
+    if digits.length() == 0 || digits.length() > 16 {
+        return .Err(.MalformedResponse)
+    }
+    var size: UInt64 = 0
+    for at in 0..digits.length() {
+        let value = strings.hex_digit_value(digits.byte(at).unwrap()) else {
+            return .Err(.MalformedResponse)
+        }
+        size = size * 16 + UInt64(value)
+    }
+    .Ok(size)
+}
+
+// Read the line break that ends a chunk's data.
+fn read_chunk_end[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], max_line_bytes: UInt64) -> Result[(), ClientError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    let line = read_body_line(&reader, max_line_bytes)?
+    if line.length() != 0 {
+        return .Err(.MalformedResponse)
+    }
+    .Ok(())
+}
+
+// Read and discard the trailer fields after the last chunk, up to the empty
+// line that ends the body.
+fn skip_trailers[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], max_line_bytes: UInt64, max_headers: UInt64) -> Result[(), ClientError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    for _ in 0..=max_headers {
+        let line = read_body_line(&reader, max_line_bytes)?
+        if line.length() == 0 {
+            return .Ok(())
+        }
+    }
+    .Err(.HeadTooLarge)
+}
+
+// A `ClientResponse` is a response a client has read the head of: its
+// status, its headers, and its body still on the connection, read through
+// `io.Reader` as it arrives and decoded from chunks where it was sent in
+// them. It holds that connection, so it is linear, and the client that sent
+// it settles it: `read_text` and `read_bytes` read the rest of the body,
+// `finish` reads what remains of a short one and `discard` closes the
+// connection. A connection whose body was read to its end goes back to the
+// client's pool for the next request to its origin.
+@(opaque, linear)
+struct ClientResponse[A: Allocator = mem.SystemAllocator] {
+    status: Status,
+    head: String[A],
+    header_fields: Vec[Field, A],
+    url: String[A],
+    reader: io.BufferedReader[Link, A],
+    framed: Framed,
+    reusable: Bool,
+    failure: Option[ClientError],
+    max_line_bytes: UInt64,
+    max_headers: UInt64,
+    // The identity of the client that sent the request, which alone may
+    // count the response or pool its connection.
+    sender: uuid.Uuid,
+}
+
+impl[A: Allocator] ClientResponse[A] {
+    // The response's status.
+    pub fn status(self: Self) -> Status {
+        copy(self.status)
+    }
+
+    // The first value of the header `name`, compared under ASCII case
+    // folding.
+    pub fn header(self: Self, name: Str) -> Option[Str] where borrows(.Some: self) {
+        header_value(self.head.view(), self.header_fields.as_slice(), name)
+    }
+
+    // The response's headers in the order they arrived.
+    pub fn headers(self: Self) -> Headers where borrows(self) {
+        .{ stored = self.head.view(), fields = self.header_fields.as_slice(), index = 0 }
+    }
+
+    // The URL that answered, after every redirect the client followed.
+    pub fn url(self: Self) -> Str where borrows(self) {
+        self.url.view()
+    }
+
+    // Whether the whole body has been read.
+    pub fn is_read(self: Self) -> Bool {
+        self.framed.mode == BodyMode.Empty || self.framed.mode == BodyMode.Ended
+    }
+
+    test "a response describes its status headers and url" {
+        defer let said = asked_while_serving(1, ask_described)
+        testing.assert_eq(said.view(), "200 OK read=false type=text/plain; charset=utf-8 headers=2 url=/hello read=true", "the response described itself differently")
+    }
+}
+
+// A response's body is read as it arrives, decoded from chunks. A read that
+// fails leaves the response failed, and each later read answers the same
+// failure, since the body's framing is lost.
+impl[A: Allocator] io.Reader for ClientResponse[A] {
+    type Error = ClientError
+
+    fn read_some[B: Allocator](inout self: Self, inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64) -> Result[UInt64, ClientError] where carries() {
+        match read self.failure {
+            Some(error) => return .Err(copy(error)),
+            None => {},
+        }
+        match read_framed(&self.reader, &self.framed, &buffer, offset, count, self.max_line_bytes, self.max_headers) {
+            Ok(got) => .Ok(got),
+            Err(error) => {
+                self.failure = .Some(copy(error))
+                .Err(error)
+            },
+        }
+    }
+}
+
+// A connection the pool keeps between requests: the origin it reaches, the
+// stream, and when it was put back.
+struct Idle[A: Allocator] {
+    host: String[A],
+    port: UInt16,
+    is_https: Bool,
+    link: Link,
+    since: time.Instant,
+}
+
+derive[A: Allocator] Release for Idle[A]
+
+// A `Client` sends requests and reads their responses over connections it
+// keeps open between them. It owns a pool of idle connections keyed by
+// origin (scheme, host and port), bounded by its limits, and counts the
+// responses it has answered and not yet settled. Its allocator holds the
+// pool, each response's head and buffer, and the bodies read whole. A client
+// is used by one task at a time; a program that fetches on several tasks
+// gives each its own. Closing it closes every idle connection.
+//
+// An `https` origin is reached over TLS with the client's `tls.ClientConfig`:
+// the one `with_tls` gave it, or else one built at the first `https` request
+// with `verify: .System`, which checks servers against the operating
+// system's roots. Every TLS connection of a client shares that
+// configuration's session cache, so reconnecting to a server resumes.
+@(opaque, linear)
+struct Client[A: Allocator = mem.SystemAllocator] {
+    allocator: A,
+    limits: ClientLimits,
+    idle: Vec[Idle[A], A],
+    outstanding: UInt64,
+    tls: Option[tls.ClientConfig],
+    // A random identity, recorded in each response the client answers.
+    id: uuid.Uuid,
+}
+
+impl Client[mem.SystemAllocator] {
+    // A client allocating from the system allocator, bounded by `limits`.
+    pub fn new(limits: ClientLimits = standard_client_limits) -> Client[mem.SystemAllocator] {
+        Client.new_in(mem.system(), limits)
+    }
+
+    // A client allocating from the system allocator, bounded by `limits`,
+    // that reaches `https` origins with `config`, such as one trusting a
+    // private certificate authority's roots. The client owns it and closes
+    // it when the client is closed.
+    pub fn with_tls(sink config: tls.ClientConfig, limits: ClientLimits = standard_client_limits) -> Client[mem.SystemAllocator] where carries(config) {
+        Client.with_tls_in(mem.system(), config, limits)
+    }
+
+    test "a client given a TLS configuration holds it until it is closed" {
+        let client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+        let held = client.tls.is_some()
+        let closed = client.close().is_ok()
+        testing.assert(held, "the client did not keep its TLS configuration")?
+        testing.assert(closed, "closing a client with a TLS configuration failed")?
+    }
+
+    test "a new client holds no connections" {
+        defer let client = Client.new()
+        testing.assert_eq(client.idle_connections(), UInt64(0), "a new client held a connection")?
+        testing.assert_eq(client.outstanding(), UInt64(0), "a new client held a response")?
+        .Ok(())
+    }
+}
+
+impl[A: Allocator] Client[A] {
+    // A client allocating from `allocator`, bounded by `limits`. Nothing is
+    // allocated or opened until the first request.
+    pub fn new_in(allocator: A, limits: ClientLimits = standard_client_limits) -> Client[A] where carries(allocator) {
+        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .None, id = uuid.Uuid.v4() }
+    }
+
+    // A client allocating from `allocator`, bounded by `limits`, that
+    // reaches `https` origins with `config`, as `with_tls` does.
+    pub fn with_tls_in(allocator: A, sink config: tls.ClientConfig, limits: ClientLimits = standard_client_limits) -> Client[A] where carries(allocator, config) {
+        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .Some(config), id = uuid.Uuid.v4() }
+    }
+
+    test "a client in an allocator keeps the TLS configuration it was given" {
+        let client = Client.with_tls_in(mem.system(), tls.ClientConfig.open(roots: test_root).unwrap())
+        let held = client.tls.is_some()
+        client.release()
+        testing.assert(held, "the client did not keep its TLS configuration")
+    }
+
+    test "a client keeps the limits it was given" {
+        defer let client = Client.new_in(mem.system(), ClientLimits { max_redirects = 2, ..ClientLimits.default() })
+        testing.assert_eq(client.limits().max_redirects, UInt64(2), "the limits changed")
+    }
+
+    // The limits the client was made with.
+    pub fn limits(self: Self) -> ClientLimits {
+        copy(self.limits)
+    }
+
+    // How many connections the pool holds open between requests.
+    pub fn idle_connections(self: Self) -> UInt64 {
+        self.idle.length()
+    }
+
+    test "a silent server times the read out" {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let port = listener.local_address().unwrap().port
+        defer var client = Client.new(ClientLimits { read_timeout_ms = 50, ..ClientLimits.default() })
+        let timed_out = match &client.get("http://127.0.0.1:{port}/") {
+            Ok(response) => {
+                &client.discard(response)
+                false
+            },
+            Err(error) => error.is_timeout(),
+        }
+        listener.release()
+        testing.assert(timed_out, "a server that never answered did not time out")?
+        testing.assert_eq(client.outstanding(), UInt64(0), "a failed request was counted")?
+        .Ok(())
+    }
+
+    test "a closed port refuses the connection" {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let port = listener.local_address().unwrap().port
+        listener.close().unwrap()
+        defer var client = Client.new()
+        let refused = match &client.get("http://127.0.0.1:{port}/") {
+            Ok(response) => {
+                &client.discard(response)
+                false
+            },
+            Err(Connect(error)) => error.category == .ConnectionRefused,
+            Err(_) => false,
+        }
+        testing.assert(refused, "a closed port did not refuse the connection")
+    }
+
+    // How many responses the client has answered and not yet settled.
+    pub fn outstanding(self: Self) -> UInt64 {
+        self.outstanding
+    }
+
+    test "a client refuses a request past its outstanding bound" {
+        defer let said = asked_while_serving(1, ask_saturated)
+        testing.assert_eq(said.view(), "saturated outstanding=1 then 0", "a request past the bound was sent")
+    }
+
+    // Send a `GET` of `url`, rendered with `Display`, with no headers, by
+    // `deadline` as `send` is.
+    pub fn get[U: Display](inout self: Self, url: U, deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        let request = ClientRequest.new_in(self.allocator, "GET", url)?
+        &self.send(request, deadline)
+    }
+
+    test "a get reads a local server's answer" {
+        let answer = asked_while_serving(1, ask_hello)
+        defer let said = answer
+        testing.assert_eq(said.view(), "200 text/plain; charset=utf-8 hello", "the answer changed")
+    }
+
+    // Send `request` and read its response's head, following redirects. A
+    // `301`, `302`, `303`, `307` or `308` with a `Location` is followed up to
+    // `max_redirects` times: `303` turns any method but `HEAD` into `GET`
+    // without a body, as `301` and `302` turn `POST`; `307` and `308` keep the
+    // method and the body. A redirect to another origin drops the
+    // `Authorization`, `Cookie` and `Proxy-Authorization` headers. One more
+    // redirect than the limit fails with `TooManyRedirects`, and a limit of
+    // zero answers the first redirect as it is.
+    //
+    // A connection taken from the pool that the server closed while it sat
+    // idle fails before any of the response arrives; the request is then sent
+    // once more on a new connection when its method is idempotent.
+    //
+    // `deadline` bounds the request: connecting, a TLS handshake, every
+    // redirect, and reading the response's body, which ends in `TimedOut`
+    // once it passes. Resolving the host name is outside it, bounded only by
+    // the system's resolver; a deadline that passes meanwhile ends the
+    // connect after it. A deadline already passed sends nothing.
+    // `time.never`, the default, leaves each wait bounded by the client's
+    // timeouts alone.
+    pub fn send(inout self: Self, sink request: ClientRequest[A], deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        &self.follow(request, 0, deadline)
+    }
+
+    test "two requests to one origin share a pooled connection" {
+        defer let said = asked_while_serving(1, ask_twice)
+        testing.assert_eq(said.view(), "hello hello idle=1 outstanding=0", "the second request did not reuse the connection")
+    }
+
+    test "a redirect is followed to its location" {
+        defer let said = asked_while_serving(1, ask_moved)
+        testing.assert_eq(said.view(), "200 /hello hello", "the redirect was not followed")
+    }
+
+    test "a redirect past the limit fails" {
+        defer let said = asked_while_serving(2, ask_in_circles)
+        testing.assert_eq(said.view(), "too many redirects; unfollowed 302", "a redirect loop was followed past the limit")
+    }
+
+    test "a get reads a local HTTPS server's answer" {
+        defer let said = asked_while_serving_securely(1, ask_hello_securely)
+        testing.assert_eq(said.view(), "200 hello https", "the HTTPS answer changed")
+    }
+
+    test "an https server whose certificate names another host is refused" {
+        defer let said = asked_while_serving_securely(1, ask_another_host)
+        testing.assert_eq(said.view(), "wrong name", "a certificate for another host was accepted")
+    }
+
+    test "a client given no TLS configuration verifies servers with the system's roots" {
+        defer let said = asked_while_serving_securely(1, ask_with_system_roots)
+        testing.assert_eq(said.view(), "refused", "the system's roots trusted the test root")
+    }
+
+    test "redirects between http and https drop credentials across origins" {
+        defer let said = asked_while_serving_both(2, 4, ask_across_schemes)
+        testing.assert_eq(said.view(), "https none; http none; https auth", "a redirect between schemes broke the origin rules")
+    }
+
+    test "a request whose deadline has passed is never sent" {
+        var listener = net.listen(net.loopback(0)).unwrap()
+        let port = listener.local_address().unwrap().port
+        defer var client = Client.new()
+        let refused = match &client.get("http://127.0.0.1:{port}/", deadline: time.Deadline.after(time.Duration.from_nanoseconds(0))) {
+            Ok(response) => {
+                &client.discard(response)
+                false
+            },
+            Err(error) => error.is_timeout(),
+        }
+        let reached = match &listener.accept_by(time.Deadline.after(time.Duration.from_milliseconds(20))) {
+            Ok(Accepted { connection, address: _ }) => {
+                connection.release()
+                true
+            },
+            Err(_) => false,
+        }
+        listener.release()
+        testing.assert(refused, "a request past its deadline was not refused as timed out")?
+        testing.assert(!reached, "a request past its deadline connected")?
+        .Ok(())
+    }
+
+    test "a deadline ends a body the server sends too slowly" {
+        // Each byte arrives well inside the read timeout, and all of them
+        // would take two seconds; the deadline ends the read first.
+        defer let said = asked_while_dribbling(ask_by_deadline)
+        testing.assert_eq(said.view(), "200 timed out", "a slow body outlived the request's deadline")
+    }
+
+    test "a response settled by another client never reaches that client's pool" {
+        defer let said = asked_while_serving_securely(2, ask_across_clients)
+        testing.assert_eq(said.view(), "strict refused; strict idle=0 outstanding=0; lax outstanding=1", "a connection another client verified entered the settling client's pool")
+    }
+
+    test "plaintext a TLS stream holds past a response keeps its connection out of the pool" {
+        defer let said = asked_while_serving_raw_tls(ask_past_the_body)
+        testing.assert_eq(said.view(), "ok idle=0", "a connection holding unread plaintext was pooled")
+    }
+
+    test "an IPv6 host is refused as an address the client cannot reach" {
+        defer var client = Client.new()
+        let refused = match &client.get("http://[::1]:8080/") {
+            Ok(response) => {
+                &client.discard(response)
+                false
+            },
+            Err(UnsupportedAddress) => true,
+            Err(_) => false,
+        }
+        testing.assert(refused, "an IPv6 host was not refused as unsupported")
+    }
+
+    test "a connection the server closed while idle is replaced" {
+        defer let said = asked_while_serving(2, ask_after_idle, server_idle_ms: 50)
+        testing.assert_eq(said.view(), "hello hello", "a stale pooled connection failed the request")
+    }
+
+    // Send `current`, which `followed` redirects led to, and follow the
+    // redirect it answers, if any. Each redirect is one call deeper, at most
+    // `max_redirects` of them.
+    fn follow(inout self: Self, sink current: ClientRequest[A], followed: UInt64, deadline: time.Deadline) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        let response = &self.exchange(current, deadline) else |error| {
+            current.release()
+            return .Err(error)
+        }
+        let status = response.status()
+        if self.limits.max_redirects == 0 || !is_redirect(status) {
+            current.release()
+            return .Ok(response)
+        }
+        let base = Url.parse(current.url.view()).unwrap()
+        let resolved: Option[Result[String[A], ResolveError]] = match response.header("Location") {
+            Some(location) => .Some(resolve_url_in(self.allocator, base, location)),
+            None => .None,
+        }
+        let target = match resolved {
+            None => {
+                current.release()
+                return .Ok(response)
+            },
+            Some(Err(error)) => {
+                &self.discard(response)
+                current.release()
+                return .Err(match error {
+                    Url(problem) => .Url(problem),
+                    Allocation => .Allocation,
+                })
+            },
+            Some(Ok(target)) => target,
+        }
+        if followed == self.limits.max_redirects {
+            target.release()
+            &self.discard(response)
+            current.release()
+            return .Err(.TooManyRedirects)
+        }
+        &self.finish(response)
+        let next = redirected(current, status, target)?
+        &self.follow(next, followed + 1, deadline)
+    }
+
+    // Send `request` with a body read from `body` as it is sent, rather than
+    // held whole: `length` bytes framed by `Content-Length` when it is given,
+    // and chunks of what the reader yields otherwise. A body that ends before
+    // `length` bytes is `InvalidRequest`. A streamed body cannot be read
+    // twice, so no redirect is followed and no request is sent again: a
+    // redirect is answered as it is. `deadline` bounds the request as it
+    // does for `send`, the reads of `body` excepted.
+    pub fn send_from[R: io.Reader](inout self: Self, sink request: ClientRequest[A], inout body: R, length: Option[UInt64] = .None, deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where R.Error: Into[io.IoError], carries(.Ok: self) {
+        let sending = request
+        let opened = &self.open_exchange(sending, deadline)
+        let (link, url) = match opened {
+            Ok(opened) => opened,
+            Err(error) => {
+                sending.release()
+                return .Err(error)
+            },
+        }
+        var link_open = link
+        let framing: RequestFraming = match read length {
+            Some(count) => .Length(count),
+            None => .Chunked,
+        }
+        let closing = self.limits.max_idle_connections == 0
+        let written = write_streamed(&link_open, sending, url, framing, closing, &body, self.allocator, self.limits.buffer_bytes)
+        let bodiless = sending.method.view() == "HEAD"
+        let outcome = match written {
+            Ok(_) => &self.await_response(link_open, sending.url.view(), bodiless, closing),
+            Err(error) => {
+                link_open.release()
+                .Err(error)
+            },
+        }
+        sending.release()
+        outcome
+    }
+
+    test "a streamed body is sent by its length" {
+        defer let said = asked_while_serving(1, ask_streamed)
+        testing.assert_eq(said.view(), "200 a streamed note", "the streamed body changed")
+    }
+
+    test "a streamed body of unknown length is sent in chunks" {
+        defer let said = asked_while_recording(ask_chunked)
+        let expected = "POST /notes HTTP/1.1\r\nHost: 127.0.0.1:PORT\r\nTransfer-Encoding: chunked\r\n\r\n9\r\nchunked n\r\n4\r\note!\r\n0\r\n\r\n"
+        testing.assert_eq(said.view(), expected, "the chunked request changed")
+    }
+
+    // Read the rest of `response`'s body, at most `max_bytes`, as UTF-8 text,
+    // and settle the response. A longer body is `BodyTooLarge` and text that
+    // is not UTF-8 `MalformedResponse`; either closes the connection.
+    pub fn read_text(inout self: Self, sink response: ClientResponse[A], max_bytes: UInt64) -> Result[String[A], ClientError] where carries(.Ok: self) {
+        let bytes = &self.read_bytes(response, max_bytes)?
+        match String.from_bytes(bytes) {
+            Ok(text) => .Ok(text),
+            Err(failure) => {
+                failure.release()
+                .Err(.MalformedResponse)
+            },
+        }
+    }
+
+    test "a body past its bound is refused and its connection closed" {
+        defer let said = asked_while_serving(1, ask_too_much)
+        testing.assert_eq(said.view(), "body too large idle=0 outstanding=0", "a body past its bound was read")
+    }
+
+    // Read the rest of `response`'s body, at most `max_bytes`, and settle the
+    // response. A longer body is `BodyTooLarge` and closes the connection.
+    pub fn read_bytes(inout self: Self, sink response: ClientResponse[A], max_bytes: UInt64) -> Result[Vec[UInt8, A], ClientError] where carries(.Ok: self) {
+        var reading = response
+        var collected: Vec[UInt8, A] = Vec.new_in(self.allocator)
+        let chunk = self.allocator.acquire(read_chunk_bytes) else |_| {
+            collected.release()
+            &self.discard(reading)
+            return .Err(.Allocation)
+        }
+        var buffer = chunk
+        let gathered = append_body(&reading, &buffer, &collected, max_bytes)
+        buffer.release()
+        match gathered {
+            Ok(_) => {
+                &self.finish(reading)
+                .Ok(collected)
+            },
+            Err(error) => {
+                collected.release()
+                &self.discard(reading)
+                .Err(error)
+            },
+        }
+    }
+
+    test "a body is read as bytes" {
+        defer let said = asked_while_serving(1, ask_bytes)
+        testing.assert_eq(said.view(), "5 bytes idle=1", "the bytes changed")
+    }
+
+    // Settle `response`: read the rest of its body when at most
+    // `drain_bytes` remain, and put its connection back in the pool when the
+    // body was read to its end and the server keeps the connection open.
+    // Otherwise the connection is closed.
+    pub fn finish(inout self: Self, sink response: ClientResponse[A]) {
+        var reading = response
+        let too_long = reading.framed.mode == BodyMode.Length && reading.framed.left > self.limits.drain_bytes
+        if reading.reusable && reading.failure.is_none() && !reading.is_read() && !too_long {
+            match self.allocator.acquire(read_chunk_bytes) {
+                Ok(chunk) => {
+                    var buffer = chunk
+                    let _drained = drain_body(&reading, &buffer, self.limits.drain_bytes)
+                    buffer.release()
+                },
+                Err(_) => {},
+            }
+        }
+        &self.settle(reading)
+    }
+
+    test "finishing a short unread body keeps its connection" {
+        defer let said = asked_while_serving(1, ask_finished)
+        testing.assert_eq(said.view(), "idle=1 outstanding=0", "a finished response lost its connection")
+    }
+
+    // Settle `response` without reading the rest of its body, closing its
+    // connection.
+    pub fn discard(inout self: Self, sink response: ClientResponse[A]) {
+        var closing = response
+        closing.reusable = false
+        &self.settle(closing)
+    }
+
+    test "discarding a response closes its connection" {
+        defer let said = asked_while_serving(1, ask_discarded)
+        testing.assert_eq(said.view(), "idle=0 outstanding=0", "a discarded response kept its connection")
+    }
+
+    // Close every idle connection and the TLS configuration, reporting the
+    // first close that fails.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] {
+        let Client { allocator: _, limits: _, idle, outstanding: _, tls: config, id: _ } = self
+        match config {
+            Some(config) => config.close(),
+            None => {},
+        }
+        var open = idle
+        var outcome: Result[(), io.IoError] = .Ok(())
+        loop {
+            let entry = &open.pop() else {
+                break
+            }
+            let Idle { host, port: _, is_https: _, link, since: _ } = entry
+            host.release()
+            match link.close() {
+                Ok(_) => {},
+                Err(error) => if outcome.is_ok() {
+                    outcome = .Err(error)
+                },
+            }
+        }
+        open.release()
+        outcome
+    }
+
+    test "closing a client closes its idle connections" {
+        defer let said = asked_while_serving(1, ask_closed)
+        testing.assert_eq(said.view(), "closed", "closing the client failed")
+    }
+
+    test "the pool keeps an https connection apart from an http one" {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let port = listener.local_address().unwrap().port
+        var client = Client.new()
+        let plain = Origin { is_https = false, host = "127.0.0.1", port }
+        let link = Link.plain(connect_origin(plain, ClientLimits.default(), time.never).unwrap())
+        let address = fmt.render_owned("http://127.0.0.1:{port}/").unwrap()
+        &client.give_back(link, Url.parse(address.view()).unwrap())
+        let secure = &client.take_idle(Origin { is_https = true, host = "127.0.0.1", port })
+        let apart = secure.is_none()
+        secure.release()
+        let same = &client.take_idle(plain)
+        let reused = same.is_some()
+        same.release()
+        client.release()
+        address.release()
+        listener.release()
+        testing.assert(apart, "an https request was given an http connection")?
+        testing.assert(reused, "an http request was not given its pooled connection")?
+    }
+
+    // Take the most recently returned idle connection to `origin` from the
+    // pool, the one least likely to have been closed by the server, closing
+    // every one found idle past `idle_timeout_ms` on the way. The pool holds at most
+    // `max_idle_connections`, so the walk is bounded by that.
+    fn take_idle(inout self: Self, origin: Origin) -> Option[Link] {
+        var taken: Option[Link] = .None
+        var at = self.idle.length()
+        while at > 0 {
+            at -= 1
+            let expired = self.limits.idle_timeout_ms != 0 && self.idle[at].since.elapsed() > time.Duration.from_milliseconds(self.limits.idle_timeout_ms)
+            let matches = taken.is_none() && self.idle[at].is_https == origin.is_https() && self.idle[at].port == origin.port() && self.idle[at].host.view().equals_ascii_folded(origin.host())
+            if expired || matches {
+                let Idle { host, port: _, is_https: _, link, since: _ } = &self.idle.remove(at).unwrap()
+                host.release()
+                if expired {
+                    link.release()
+                } else {
+                    mem.exchange(&taken, .Some(link)).release()
+                }
+            }
+        }
+        taken
+    }
+
+    // Put `link`, which reached `url`'s origin, back in the pool. When the
+    // origin already has `max_idle_per_host` idle connections, or the pool
+    // `max_idle_connections`, the oldest of them is closed to make room.
+    fn give_back(inout self: Self, sink link: Link, url: Url) {
+        if self.limits.max_idle_connections == 0 || self.limits.max_idle_per_host == 0 {
+            link.release()
+            return
+        }
+        let origin = url.origin()
+        var same: UInt64 = 0
+        var oldest_same: UInt64 = 0
+        for at in 0..self.idle.length() {
+            if self.idle[at].is_https == origin.is_https() && self.idle[at].port == origin.port() && self.idle[at].host.view().equals_ascii_folded(origin.host()) {
+                if same == 0 {
+                    oldest_same = at
+                }
+                same += 1
+            }
+        }
+        if same >= self.limits.max_idle_per_host {
+            &self.idle.remove(oldest_same).unwrap().release()
+        } else if self.idle.length() >= self.limits.max_idle_connections {
+            &self.idle.remove(0).unwrap().release()
+        }
+        var host = String.new_in(self.allocator)
+        match &host.append(origin.host()) {
+            Ok(_) => {},
+            Err(_) => {
+                host.release()
+                link.release()
+                return
+            },
+        }
+        let entry: Idle[A] = .{ host, port = origin.port(), is_https = origin.is_https(), link, since = time.Instant.now() }
+        match &self.idle.push(entry) {
+            Ok(_) => {},
+            Err(failure) => {
+                let PushFailure { reason: _, value } = failure
+                value.release()
+            },
+        }
+    }
+
+    // Send `current` once, on a pooled connection to its origin when there
+    // is one and a new connection otherwise, and read its response's head.
+    fn exchange(inout self: Self, current: ClientRequest[A], deadline: time.Deadline) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        if self.outstanding >= self.limits.max_outstanding {
+            return .Err(.Saturated)
+        }
+        let url = match Url.parse(current.url.view()) {
+            Ok(url) => url,
+            Err(error) => return .Err(.Url(error)),
+        }
+        if deadline.expired() {
+            return .Err(timed_out_before_sending())
+        }
+        match &self.take_idle(url.origin()) {
+            Some(pooled) => {
+                var reused = pooled
+                &reused.set_deadline(deadline)
+                match &self.attempt(reused, current, url) {
+                    Ok(response) => return .Ok(response),
+                    Err(failed) => if !failed.stale || !is_idempotent(current.method.view()) {
+                        return .Err(copy(failed.error))
+                    },
+                }
+            },
+            None => {},
+        }
+        let link = &self.open_link(url.origin(), deadline)?
+        match &self.attempt(link, current, url) {
+            Ok(response) => .Ok(response),
+            Err(failed) => .Err(copy(failed.error)),
+        }
+    }
+
+    // Open a link to `origin` by `deadline`: a connection, and over it a TLS
+    // stream for `https`, with the client's configuration, built with
+    // `verify: .System` at the first `https` origin when it was given none.
+    fn open_link(inout self: Self, origin: Origin, deadline: time.Deadline) -> Result[Link, ClientError] {
+        let connection = connect_origin(origin, self.limits, deadline)?
+        if !origin.is_https() {
+            return .Ok(Link.plain(connection))
+        }
+        if self.tls.is_none() {
+            match tls.ClientConfig.open() {
+                Ok(config) => mem.exchange(&self.tls, .Some(config)).release(),
+                Err(refused) => {
+                    connection.release()
+                    return .Err(.Tls(.Tls(refused)))
+                },
+            }
+        }
+        match read self.tls {
+            Some(config) => secure_link(config, connection, origin.host(), deadline),
+            None => panic("a client's TLS configuration was not kept"),
+        }
+    }
+
+    // Write `current` whole on `link` and read its response's head.
+    fn attempt(inout self: Self, sink link: Link, current: ClientRequest[A], url: Url) -> Result[ClientResponse[A], Attempted] where carries(.Ok: self) {
+        var sending = link
+        let closing = self.limits.max_idle_connections == 0
+        match write_whole(&sending, current, url, closing, self.allocator) {
+            Ok(_) => {},
+            Err(error) => {
+                sending.release()
+                return .Err(.{ stale = true, error })
+            },
+        }
+        let bodiless = current.method.view() == "HEAD"
+        match &self.await_response(sending, current.url.view(), bodiless, closing) {
+            Ok(response) => .Ok(response),
+            Err(error) => .Err(.{ stale = is_stale(error), error }),
+        }
+    }
+
+    // Take a connection for a streamed request: a pooled one to its origin
+    // or a new one, bounded for the exchange.
+    fn open_exchange(inout self: Self, current: ClientRequest[A], deadline: time.Deadline) -> Result[(Link, Url), ClientError] where borrows(current), carries(.Ok: current) {
+        if self.outstanding >= self.limits.max_outstanding {
+            return .Err(.Saturated)
+        }
+        let url = match Url.parse(current.url.view()) {
+            Ok(url) => url,
+            Err(error) => return .Err(.Url(error)),
+        }
+        if deadline.expired() {
+            return .Err(timed_out_before_sending())
+        }
+        match &self.take_idle(url.origin()) {
+            Some(pooled) => {
+                var link = pooled
+                &link.set_deadline(deadline)
+                .Ok((link, url))
+            },
+            None => .Ok((&self.open_link(url.origin(), deadline)?, url)),
+        }
+    }
+
+    // Read the head of the response arriving on `link` for a request to
+    // `url`, and hold the rest of it as a response the client counts.
+    fn await_response(inout self: Self, sink link: Link, url: Str, bodiless: Bool, closing: Bool) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        var reader = match io.BufferedReader.open_in(self.allocator, capacity: self.limits.buffer_bytes, reader: link) {
+            Ok(reader) => reader,
+            Err(failure) => {
+                let BufferOpenFailure { resource, reason: _ } = failure
+                resource.release()
+                return .Err(.Allocation)
+            },
+        }
+        let head = match read_response_head(&reader, self.allocator, self.limits, bodiless, closing) {
+            Ok(head) => head,
+            Err(error) => {
+                reader.abandon().release()
+                return .Err(error)
+            },
+        }
+        var answered = String.new_in(self.allocator)
+        match &answered.append(url) {
+            Ok(_) => {},
+            Err(_) => {
+                answered.release()
+                head.release()
+                reader.abandon().release()
+                return .Err(.Allocation)
+            },
+        }
+        let ResponseHead { status, head: text, header_fields, framed, reusable } = head
+        self.outstanding += 1
+        .Ok(.{ status, head = text, header_fields, url = answered, reader, framed, reusable, failure = .None, max_line_bytes = self.limits.max_line_bytes, max_headers = self.limits.max_headers, sender = copy(self.id) })
+    }
+
+    // Stop counting `response` and keep its connection when its body was read
+    // to its end, nothing past it arrived, and the server keeps it open;
+    // close it otherwise.
+    //
+    // A response another client sent has its connection closed and changes
+    // no count of this client: its connection was opened, and over TLS
+    // verified, under that client's configuration, so it never joins this
+    // pool.
+    fn settle(inout self: Self, sink response: ClientResponse[A]) {
+        let ClientResponse { status: _, head, header_fields, url, reader, framed, reusable, failure, max_line_bytes: _, max_headers: _, sender } = response
+        head.release()
+        header_fields.release()
+        let own = sender == self.id
+        if own {
+            self.outstanding -= 1
+        }
+        let ended = framed.mode == BodyMode.Empty || framed.mode == BodyMode.Ended
+        let read_ahead = reader.buffered_bytes() > 0
+        let link = reader.abandon()
+        let kept = own && reusable && failure.is_none() && ended && !read_ahead && !link.holds_input()
+        if kept {
+            match Url.parse(url.view()) {
+                Ok(answered) => &self.give_back(link, answered),
+                Err(_) => link.release(),
+            }
+        } else {
+            link.release()
+        }
+        url.release()
+    }
+}
+
+impl[A: Allocator] Release for Client[A] {
+    fn release(sink self: Self) {
+        let _closed = self.close()
+    }
+}
+
+// Bodies read whole are read this many bytes at a time.
+let read_chunk_bytes: UInt64 = 4096
+
+// Why one attempt at an exchange failed, and whether it failed before the
+// server answered anything on a connection it had already closed, so the
+// request never reached it.
+@copyable
+struct Attempted {
+    stale: Bool,
+    error: ClientError,
+}
+
+// A pooled connection the server closed while it was idle answers its next
+// request with an end of input, a reset or a broken pipe before any byte.
+fn is_stale(error: ClientError) -> Bool {
+    match read error {
+        Closed => true,
+        Io(failure) => failure.progress == 0 && (failure.category == .ConnectionReset || failure.category == .BrokenPipe),
+        _ => false,
+    }
+}
+
+// The methods RFC 9110 §9.2.2 makes idempotent, which a client may send a
+// second time.
+fn is_idempotent(method: Str) -> Bool {
+    method == "GET" || method == "HEAD" || method == "OPTIONS" || method == "TRACE" || method == "PUT" || method == "DELETE"
+}
+
+// The statuses a client follows to their `Location`.
+fn is_redirect(status: Status) -> Bool {
+    let code = status.code()
+    code == 301 || code == 302 || code == 303 || code == 307 || code == 308
+}
+
+test "redirects stale failures and idempotent methods are recognised" {
+    let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 0 }
+    let late = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 9 }
+    testing.assert(is_redirect(.SeeOther) && is_redirect(.PermanentRedirect), "a redirect was missed")?
+    testing.assert(!is_redirect(.NotModified), "304 was a redirect")?
+    testing.assert(is_stale(.Closed) && is_stale(.Io(reset)), "a stale connection was missed")?
+    testing.assert(!is_stale(.Io(late)), "a reset after the response began was stale")?
+    testing.assert(is_idempotent("PUT") && !is_idempotent("POST"), "idempotence changed")?
+    .Ok(())
+}
+
+// The request that follows a redirect answered `status` with `target`:
+// `303` makes it a `GET` without a body unless it was a `HEAD`, `301` and
+// `302` make a `POST` one, and a target on another origin drops the
+// credentials sent to this one.
+fn redirected[A: Allocator](sink request: ClientRequest[A], status: Status, sink target: String[A]) -> Result[ClientRequest[A], ClientError] where carries(.Ok: request, target) {
+    var next = request
+    let code = status.code()
+    let method = next.method.view()
+    let to_get = (code == 303 && method != "HEAD") || ((code == 301 || code == 302) && method == "POST")
+    let same_origin = match (Url.parse(next.url.view()), Url.parse(target.view())) {
+        (Ok(from), Ok(to)) => from.origin() == to.origin(),
+        _ => false,
+    }
+    if !same_origin {
+        &next.remove_headers("Authorization")
+        &next.remove_headers("Cookie")
+        &next.remove_headers("Proxy-Authorization")
+    }
+    if to_get {
+        &next.method.clear()
+        &next.body.clear()
+        &next.remove_headers("Content-Type")
+        match &next.method.append("GET") {
+            Ok(_) => {},
+            Err(_) => {
+                target.release()
+                next.release()
+                return .Err(.Allocation)
+            },
+        }
+    }
+    mem.exchange(&next.url, target).release()
+    .Ok(next)
+}
+
+test "a redirect changes the method and drops credentials as its status says" {
+    let posted = ClientRequest.new("POST", "http://example.test/form").unwrap().with_header("Authorization", "Bearer secret").unwrap().with_body("text/plain", "hello".as_bytes()).unwrap()
+    defer let seen = redirected(posted, .SeeOther, "http://example.test/done".to_owned().unwrap()).unwrap()
+    testing.assert_eq(seen.method(), "GET", "303 kept the method")?
+    testing.assert_eq(seen.header("Content-Type"), .None, "303 kept the body's type")?
+    testing.assert_eq(seen.header("Authorization"), Option.Some("Bearer secret"), "a same-origin redirect dropped credentials")?
+    testing.assert_eq(seen.url(), "http://example.test/done", "the target was not taken")?
+    let put = ClientRequest.new("PUT", "http://example.test/item").unwrap().with_header("Authorization", "Bearer secret").unwrap()
+    defer let moved = redirected(put, .TemporaryRedirect, "http://other.test/item".to_owned().unwrap()).unwrap()
+    testing.assert_eq(moved.method(), "PUT", "307 changed the method")?
+    testing.assert_eq(moved.header("Authorization"), .None, "a cross-origin redirect kept credentials")?
+    .Ok(())
+}
+
+// Write `request`'s head and its whole body on `link`, building the head in
+// `allocator`.
+fn write_whole[A: Allocator, B: Allocator](inout link: Link, request: ClientRequest[A], url: Url, closing: Bool, allocator: B) -> Result[(), ClientError] {
+    var head = String.new_in(allocator)
+    match write_request_head(&head, request, url, whole_framing(request), closing) {
+        Ok(_) => {},
+        Err(_) => {
+            head.release()
+            return .Err(.Allocation)
+        },
+    }
+    let sent = &link.send(head.as_bytes())
+    head.release()
+    match sent {
+        Ok(_) => {},
+        Err(error) => return .Err(.Io(error)),
+    }
+    if request.body.length() == 0 {
+        return .Ok(())
+    }
+    match &link.send(request.body.as_slice()) {
+        Ok(_) => .Ok(()),
+        Err(error) => .Err(.Io(error)),
+    }
+}
+
+// Write `request`'s head on `link`, then the body `body` yields, framed as
+// `framing`, through a buffer of `buffer_bytes` from `allocator`.
+fn write_streamed[A: Allocator, B: Allocator, R: io.Reader](inout link: Link, request: ClientRequest[A], url: Url, framing: RequestFraming, closing: Bool, inout body: R, allocator: B, buffer_bytes: UInt64) -> Result[(), ClientError] where R.Error: Into[io.IoError] {
+    var head = String.new_in(allocator)
+    match write_request_head(&head, request, url, framing, closing) {
+        Ok(_) => {},
+        Err(_) => {
+            head.release()
+            return .Err(.Allocation)
+        },
+    }
+    let sent = &link.send(head.as_bytes())
+    head.release()
+    match sent {
+        Ok(_) => {},
+        Err(error) => return .Err(.Io(error)),
+    }
+    let chunk = allocator.acquire(buffer_bytes) else |_| {
+        return .Err(.Allocation)
+    }
+    var buffer = chunk
+    let copied = copy_body(&link, &body, &buffer, framing)
+    buffer.release()
+    copied
+}
+
+// Copy what `body` yields to `link`: exactly the count `framing` names, or
+// chunks ended by an empty one.
+fn copy_body[R: io.Reader, B: Allocator](inout link: Link, inout body: R, inout buffer: mem.Buffer[B], framing: RequestFraming) -> Result[(), ClientError] where R.Error: Into[io.IoError] {
+    let capacity = buffer.length()
+    var left = match read framing {
+        Length(count) => count,
+        Chunked => UInt64.max,
+        Bodiless => 0,
+    }
+    let chunked = match read framing {
+        Chunked => true,
+        _ => false,
+    }
+    while left > 0 {
+        let got = match &body.read_some(&buffer, 0, smaller(capacity, left)) {
+            Ok(got) => got,
+            Err(error) => return .Err(.Body(error.into())),
+        }
+        if got == 0 {
+            if !chunked {
+                return .Err(.InvalidRequest)
+            }
+            break
+        }
+        let bytes = buffer.as_slice().subspan(start: 0, count: got).unwrap()
+        if chunked {
+            send_chunk(&link, got, bytes)?
+        } else {
+            match &link.send(bytes) {
+                Ok(_) => {},
+                Err(error) => return .Err(.Io(error)),
+            }
+            left -= got
+        }
+    }
+    if chunked {
+        match &link.send("0\r\n\r\n".as_bytes()) {
+            Ok(_) => {},
+            Err(error) => return .Err(.Io(error)),
+        }
+    }
+    .Ok(())
+}
+
+// Send one chunk of `count` bytes: its size in hexadecimal, the bytes and a
+// line break. The size line is at most 16 digits and its line break, written
+// into a fixed array, so sending a chunk allocates nothing.
+fn send_chunk(inout link: Link, count: UInt64, bytes: mem.Slice[UInt8]) -> Result[(), ClientError] {
+    var line: [UInt8; 18] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    var digits: UInt64 = 0
+    var rest = count
+    loop {
+        digits += 1
+        rest = rest / 16
+        if rest == 0 {
+            break
+        }
+    }
+    rest = count
+    for at in 0..digits {
+        line[digits - 1 - at] = hex_digit_byte(UInt8(rest % 16))
+        rest = rest / 16
+    }
+    line[digits] = 13
+    line[digits + 1] = 10
+    let size = line.as_slice().subspan(start: 0, count: digits + 2).unwrap()
+    for piece in [size, copy(bytes), "\r\n".as_bytes()] {
+        match &link.send(piece) {
+            Ok(_) => {},
+            Err(error) => return .Err(.Io(error)),
+        }
+    }
+    .Ok(())
+}
+
+// The ASCII byte of a hexadecimal digit, lowercase.
+fn hex_digit_byte(value: UInt8) -> UInt8 {
+    if value < 10 {
+        48 + value
+    } else {
+        87 + value
+    }
+}
+
+test "a hexadecimal digit is its lowercase ASCII byte" {
+    testing.assert_eq(hex_digit_byte(0), UInt8(48), "zero changed")?
+    testing.assert_eq(hex_digit_byte(15), UInt8(102), "f changed")?
+    .Ok(())
+}
+
+// Append the rest of `response`'s body to `collected`, failing with
+// `BodyTooLarge` past `max_bytes`.
+fn append_body[A: Allocator, B: Allocator, C: Allocator](inout response: ClientResponse[A], inout buffer: mem.Buffer[B], inout collected: Vec[UInt8, C], max_bytes: UInt64) -> Result[(), ClientError] {
+    let capacity = buffer.length()
+    loop {
+        let got = &response.read_some(&buffer, 0, capacity)?
+        if got == 0 {
+            return .Ok(())
+        }
+        if got > max_bytes - collected.length() {
+            return .Err(.BodyTooLarge)
+        }
+        match &collected.append_slice(buffer.as_slice().subspan(start: 0, count: got).unwrap()) {
+            Ok(_) => {},
+            Err(_) => return .Err(.Allocation),
+        }
+    }
+}
+
+// Read and discard the rest of `response`'s body, at most `max_bytes` of it.
+fn drain_body[A: Allocator, B: Allocator](inout response: ClientResponse[A], inout buffer: mem.Buffer[B], max_bytes: UInt64) -> Result[(), ClientError] {
+    let capacity = buffer.length()
+    var drained: UInt64 = 0
+    while drained <= max_bytes {
+        let got = &response.read_some(&buffer, 0, capacity)?
+        if got == 0 {
+            return .Ok(())
+        }
+        drained += got
+    }
+    .Err(.BodyTooLarge)
+}
+
+// A note a test posts as JSON.
+@derive(json_format.Encode)
+struct PostedNote {
+    title: Str,
+    done: Bool,
+}
+
+// Serve the client tests' routes on a loopback port, one connection at a
+// time, until `connections` connections have been served, while `ask` runs
+// on another task against that port, and answer what `ask` answered. A
+// connection idle for `server_idle_ms` is closed by the server.
+fn asked_while_serving(connections: UInt64, ask: fn(port: UInt16) -> String, server_idle_ms: UInt64 = 2000) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    let limits = Limits { connections = .Some(connections), idle_timeout_ms = server_idle_ms, ..Limits.default() }
+    let _served = serve(listener, client_test_router, limits: limits, policy: .Sequential)
+    let (answer, done) = asking.recv()
+    done.close()
+    answer
+}
+
+// The test certificate authority's root, and the certificate and key the
+// HTTPS tests' server presents, which that root issued for `localhost` and
+// `127.0.0.1`.
+let test_root: Str = embed("../tls/testdata/ca.pem")
+
+let test_server_chain: Str = embed("../tls/testdata/server.pem")
+
+let test_server_key: Str = embed("../tls/testdata/server_key.pem")
+
+// Serve the client tests' routes over TLS on a loopback port, as
+// `asked_while_serving` serves them in plain text, while `ask` runs on another
+// task against that port.
+fn asked_while_serving_securely(connections: UInt64, ask: fn(port: UInt16) -> String) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    let config = tls.ServerConfig.open(test_server_chain, test_server_key).unwrap()
+    let limits = Limits { connections = .Some(connections), idle_timeout_ms = 2000, ..Limits.default() }
+    let _served = serve(listener, client_test_router, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+    config.close()
+    let (answer, done) = asking.recv()
+    done.close()
+    answer
+}
+
+// Serve the client tests' routes in plain text on one loopback port, for
+// `plain_connections` connections, and over TLS on another, for
+// `secure_connections`, while `ask` runs against both.
+fn asked_while_serving_both(plain_connections: UInt64, secure_connections: UInt64, ask: fn(http_port: UInt16, https_port: UInt16) -> String) -> String {
+    let plain = net.listen(net.loopback(0)).unwrap()
+    let http_port = plain.local_address().unwrap().port
+    let secure = net.listen(net.loopback(0)).unwrap()
+    let https_port = secure.local_address().unwrap().port
+    let serving_plain = task.prepare(
+        sink [sink plain, plain_connections] |sink me: session.Chan[session.Send[Bool, session.End]]| {
+            let limits = Limits { connections = .Some(plain_connections), idle_timeout_ms = 2000, ..Limits.default() }
+            let served = serve(plain, client_test_router, limits: limits, policy: .Sequential)
+            me.send(served.is_ok()).close()
+        },
+    ).unwrap().start()
+    let asking = task.prepare(
+        sink [http_port, https_port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(http_port, https_port)).close()
+        },
+    ).unwrap().start()
+    let config = tls.ServerConfig.open(test_server_chain, test_server_key).unwrap()
+    let limits = Limits { connections = .Some(secure_connections), idle_timeout_ms = 2000, ..Limits.default() }
+    let _served = serve(secure, client_test_router, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+    config.close()
+    let (answer, done) = asking.recv()
+    done.close()
+    let (_plain_served, finished) = serving_plain.recv()
+    finished.close()
+    answer
+}
+
+// The answer `asked_while_serving_raw_tls` sends: a response whose
+// two-byte body is followed, in the same TLS record, by bytes no request
+// asked for.
+let answer_with_extra: Str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nokEXTRA"
+
+// The bytes of `answer_with_extra` up to the end of its body.
+let answer_before_extra: UInt64 = 40
+
+// Accept one connection on a loopback port over TLS, read a request's head,
+// and send `answer_with_extra` in one write, while `ask` runs on another task.
+fn asked_while_serving_raw_tls(ask: fn(port: UInt16) -> String) -> String {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    listener.close().unwrap()
+    let config = tls.ServerConfig.open(test_server_chain, test_server_key).unwrap()
+    let opened = tls.Stream.accept(config, connection)
+    config.close()
+    var stream = opened.unwrap()
+    defer var buffer = mem.system().acquire(1024).unwrap()
+    let _heard = &stream.read_some(&buffer, offset: 0, count: 1024)
+    let _sent = io.write_all(&stream, answer_with_extra.as_bytes())
+    let (answer, done) = asking.recv()
+    done.close()
+    let _closed = stream.close()
+    answer
+}
+
+// Accept one connection on a loopback port and answer its request with a
+// 100-byte body sent a byte every 20 milliseconds, while `ask` runs on
+// another task.
+fn asked_while_dribbling(ask: fn(port: UInt16) -> String) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    var handler = |sink connection: net.Connection, _peer: net.Address| {
+        dribble_body(connection)
+    }
+    let _served = net.serve(listener, &handler, connections: .Some(1))
+    let (answer, done) = asking.recv()
+    done.close()
+    answer
+}
+
+// Read a request's head and answer it a byte at a time, stopping when the
+// client has gone.
+fn dribble_body(sink connection: net.Connection) {
+    var reader = io.BufferedReader.open(capacity: 256, reader: connection).unwrap()
+    loop {
+        match &reader.read_line_borrowed(max_bytes: 256) {
+            Ok(Some(line)) => if line == "" {
+                break
+            },
+            _ => break,
+        }
+    }
+    var connection = reader.abandon()
+    var sending = io.write_all(&connection, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n".as_bytes()).is_ok()
+    var sent: UInt64 = 0
+    while sending && sent < 100 {
+        time.sleep(time.Duration.from_milliseconds(20))
+        sending = io.write_all(&connection, "x".as_bytes()).is_ok()
+        sent += 1
+    }
+    connection.release()
+}
+
+// Accept one connection on a loopback port, read a chunked request from it
+// up to its last chunk, and answer with the request's bytes as the body,
+// with the port written as `PORT`, while `ask` runs on another task.
+fn asked_while_recording(ask: fn(port: UInt16) -> String) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    var handler = [port] |sink connection: net.Connection, _peer: net.Address| {
+        echo_chunked_request(connection, port)
+    }
+    let _served = net.serve(listener, &handler, connections: .Some(1))
+    let (answer, done) = asking.recv()
+    done.close()
+    answer
+}
+
+// Read a request ending in a chunked body's last chunk and answer with its
+// bytes, the port written as `PORT`.
+fn echo_chunked_request(sink connection: net.Connection, port: UInt16) {
+    var reader = io.BufferedReader.open(capacity: 256, reader: connection).unwrap()
+    var seen = String.new()
+    var previous_was_last_chunk = false
+    var in_body = false
+    loop {
+        let line = match &reader.read_line_borrowed(max_bytes: 256) {
+            Ok(Some(line)) => line,
+            _ => break,
+        }
+        &seen.append(line).unwrap()
+        &seen.append("\r\n").unwrap()
+        if in_body && previous_was_last_chunk && line == "" {
+            break
+        }
+        if line == "" {
+            in_body = true
+        }
+        previous_was_last_chunk = in_body && line == "0"
+    }
+    var answered = String.new()
+    let port_text = fmt.render_owned(port).unwrap()
+    for part in seen.view().split(port_text.view()).unwrap() {
+        if answered.length() > 0 {
+            &answered.append("PORT").unwrap()
+        }
+        &answered.append(part).unwrap()
+    }
+    port_text.release()
+    seen.release()
+    var connection = reader.abandon()
+    let head = fmt.render_owned("HTTP/1.1 200 OK\r\nContent-Length: {answered.length()}\r\nConnection: close\r\n\r\n").unwrap()
+    let _sent = io.write_all(&connection, head.as_bytes()).is_ok() && io.write_all(&connection, answered.as_bytes()).is_ok()
+    head.release()
+    answered.release()
+    connection.release()
+}
+
+// The routes the client's tests ask: a greeting, a redirect to it, a
+// redirect to itself, an echo of the request's body, a long body, a
+// redirect to the URL its query holds, and whether a request carried
+// credentials.
+fn client_test_router() -> Router[()] {
+    var router = Router.new()
+    &router.route_raw("GET /hello", say_hello).unwrap()
+    &router.route_raw("GET /moved", say_moved).unwrap()
+    &router.route_raw("GET /circle", say_circle).unwrap()
+    &router.route_raw("POST /echo", say_echo).unwrap()
+    &router.route_raw("GET /long", say_long).unwrap()
+    &router.route_raw("GET /bounce", say_bounce).unwrap()
+    &router.route_raw("GET /auth", say_auth).unwrap()
+    router
+}
+
+fn say_hello[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    text(request, "hello")
+}
+
+fn say_moved[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    redirect(request, .Found, "/hello")
+}
+
+fn say_circle[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    redirect(request, .Found, "/circle")
+}
+
+fn say_echo[P: Allocator](inout _: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    let said = &body.text(request)?
+    text(request, said)
+}
+
+fn say_bounce[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    redirect(request, .Found, request.query().unwrap_or("/"))
+}
+
+fn say_auth[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    text(
+        request,
+        if request.header("Authorization").is_some() {
+            "auth"
+        } else {
+            "none"
+        },
+    )
+}
+
+fn say_long[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    text(request, "a body longer than the bound its reader gives")
+}
+
+// `ask_` functions run on a task of their own against the test server at
+// `port` and describe what they saw.
+fn ask_hello(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let status = response.status().code()
+    let kind = fmt.render_owned(response.header("content-type").unwrap_or("none")).unwrap()
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{status} {kind.view()} {body.view()}").unwrap()
+    kind.release()
+    body.release()
+    client.release()
+    said
+}
+
+fn ask_twice(port: UInt16) -> String {
+    var client = Client.new()
+    let first = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let one = &client.read_text(first, max_bytes: 64).unwrap()
+    let second = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let two = &client.read_text(second, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{one.view()} {two.view()} idle={client.idle_connections()} outstanding={client.outstanding()}").unwrap()
+    one.release()
+    two.release()
+    client.release()
+    said
+}
+
+fn ask_moved(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/moved").unwrap()
+    let status = response.status().code()
+    let path = fmt.render_owned(Url.parse(response.url()).unwrap().path()).unwrap()
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{status} {path.view()} {body.view()}").unwrap()
+    path.release()
+    body.release()
+    client.release()
+    said
+}
+
+fn ask_in_circles(port: UInt16) -> String {
+    var client = Client.new(ClientLimits { max_redirects = 3, ..ClientLimits.default() })
+    let looped = match &client.get("http://127.0.0.1:{port}/circle") {
+        Ok(response) => {
+            &client.discard(response)
+            "followed"
+        },
+        Err(TooManyRedirects) => "too many redirects",
+        Err(_) => "failed",
+    }
+    client.release()
+    var unfollowing = Client.new(ClientLimits { max_redirects = 0, ..ClientLimits.default() })
+    let unfollowed = match &unfollowing.get("http://127.0.0.1:{port}/circle") {
+        Ok(response) => {
+            let code = response.status().code()
+            &unfollowing.finish(response)
+            code
+        },
+        Err(_) => 0,
+    }
+    unfollowing.release()
+    fmt.render_owned("{looped}; unfollowed {unfollowed}").unwrap()
+}
+
+fn ask_after_idle(port: UInt16) -> String {
+    var client = Client.new()
+    let first = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let one = &client.read_text(first, max_bytes: 64).unwrap()
+    time.sleep(time.Duration.from_milliseconds(300))
+    let second = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let two = &client.read_text(second, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{one.view()} {two.view()}").unwrap()
+    one.release()
+    two.release()
+    client.release()
+    said
+}
+
+fn ask_streamed(port: UInt16) -> String {
+    var client = Client.new()
+    let request = ClientRequest.new("POST", "http://127.0.0.1:{port}/echo").unwrap()
+    let note = "a streamed note"
+    var source = Fragments { bytes = note.as_bytes(), position = 0, step = 4, failure = .None }
+    let response = &client.send_from(request, &source, length: .Some(note.length())).unwrap()
+    let status = response.status().code()
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{status} {body.view()}").unwrap()
+    body.release()
+    client.release()
+    said
+}
+
+fn ask_chunked(port: UInt16) -> String {
+    var client = Client.new()
+    let request = ClientRequest.new("POST", "http://127.0.0.1:{port}/notes").unwrap()
+    var source = Fragments { bytes = "chunked note!".as_bytes(), position = 0, step = 9, failure = .None }
+    let response = &client.send_from(request, &source).unwrap()
+    let body = &client.read_text(response, max_bytes: 256).unwrap()
+    client.release()
+    body
+}
+
+fn ask_too_much(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/long").unwrap()
+    let refused = match &client.read_text(response, max_bytes: 8) {
+        Ok(text) => {
+            text.release()
+            "read"
+        },
+        Err(BodyTooLarge) => "body too large",
+        Err(_) => "failed",
+    }
+    let said = fmt.render_owned("{refused} idle={client.idle_connections()} outstanding={client.outstanding()}").unwrap()
+    client.release()
+    said
+}
+
+fn ask_bytes(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let bytes = &client.read_bytes(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{bytes.length()} bytes idle={client.idle_connections()}").unwrap()
+    bytes.release()
+    client.release()
+    said
+}
+
+fn ask_finished(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    &client.finish(response)
+    let said = fmt.render_owned("idle={client.idle_connections()} outstanding={client.outstanding()}").unwrap()
+    client.release()
+    said
+}
+
+fn ask_discarded(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    &client.discard(response)
+    let said = fmt.render_owned("idle={client.idle_connections()} outstanding={client.outstanding()}").unwrap()
+    client.release()
+    said
+}
+
+fn ask_closed(port: UInt16) -> String {
+    var client = Client.new()
+    let response = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    &client.finish(response)
+    let closed = client.close().is_ok()
+    fmt.render_owned(
+        if closed {
+            "closed"
+        } else {
+            "not closed"
+        },
+    ).unwrap()
+}
+
+fn ask_saturated(port: UInt16) -> String {
+    var client = Client.new(ClientLimits { max_outstanding = 1, ..ClientLimits.default() })
+    let held = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let refused = match &client.get("http://127.0.0.1:{port}/hello") {
+        Ok(response) => {
+            &client.discard(response)
+            "sent"
+        },
+        Err(Saturated) => "saturated",
+        Err(_) => "failed",
+    }
+    let during = client.outstanding()
+    &client.finish(held)
+    let said = fmt.render_owned("{refused} outstanding={during} then {client.outstanding()}").unwrap()
+    client.release()
+    said
+}
+
+fn ask_described(port: UInt16) -> String {
+    var client = Client.new()
+    var response = &client.get("http://127.0.0.1:{port}/hello").unwrap()
+    let before = response.is_read()
+    var count: UInt64 = 0
+    for _ in response.headers() {
+        count += 1
+    }
+    let path = fmt.render_owned(Url.parse(response.url()).unwrap().path()).unwrap()
+    let kind = fmt.render_owned(response.header("Content-Type").unwrap_or("")).unwrap()
+    let named = fmt.render_owned(response.status().reason()).unwrap()
+    var chunk = mem.system().acquire(64).unwrap()
+    while &response.read_some(&chunk, 0, 64).unwrap() > 0 {}
+    chunk.release()
+    let after = response.is_read()
+    let said = fmt.render_owned("{response.status().code()} {named.view()} read={before} type={kind.view()} headers={count} url={path.view()} read={after}").unwrap()
+    &client.finish(response)
+    path.release()
+    kind.release()
+    named.release()
+    client.release()
+    said
+}
+
+fn ask_hello_securely(port: UInt16) -> String {
+    var client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+    let response = &client.get("https://127.0.0.1:{port}/hello").unwrap()
+    let status = response.status().code()
+    let scheme = if Url.parse(response.url()).unwrap().is_https() {
+        "https"
+    } else {
+        "http"
+    }
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{status} {body.view()} {scheme}").unwrap()
+    body.release()
+    client.release()
+    said
+}
+
+fn ask_another_host(port: UInt16) -> String {
+    let config = tls.ClientConfig.open(roots: test_root).unwrap()
+    let origin = Origin { is_https = true, host = "127.0.0.1", port }
+    let connection = connect_origin(origin, ClientLimits.default(), time.never).unwrap()
+    let said = match secure_link(config, connection, "example.test", time.never) {
+        Ok(link) => {
+            link.release()
+            "connected"
+        },
+        Err(Tls(Tls(refused))) => if refused.reason == .WrongName {
+            "wrong name"
+        } else {
+            "refused otherwise"
+        },
+        Err(_) => "failed",
+    }
+    config.close()
+    fmt.render_owned(said).unwrap()
+}
+
+fn ask_with_system_roots(port: UInt16) -> String {
+    var client = Client.new()
+    let said = match &client.get("https://127.0.0.1:{port}/hello") {
+        Ok(response) => {
+            &client.discard(response)
+            "answered"
+        },
+        Err(Tls(Tls(_))) => "refused",
+        Err(_) => "failed",
+    }
+    client.release()
+    fmt.render_owned(said).unwrap()
+}
+
+fn ask_across_schemes(http_port: UInt16, https_port: UInt16) -> String {
+    // Each request opens a connection of its own, so the servers count them.
+    var client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap(), ClientLimits { max_idle_connections = 0, ..ClientLimits.default() })
+    let up = followed_with_credentials(&client, "http://127.0.0.1:{http_port}/bounce?https://127.0.0.1:{https_port}/auth")
+    let down = followed_with_credentials(&client, "https://127.0.0.1:{https_port}/bounce?http://127.0.0.1:{http_port}/auth")
+    let same = followed_with_credentials(&client, "https://127.0.0.1:{https_port}/bounce?https://127.0.0.1:{https_port}/auth")
+    let said = fmt.render_owned("{up.view()}; {down.view()}; {same.view()}").unwrap()
+    up.release()
+    down.release()
+    same.release()
+    client.release()
+    said
+}
+
+// Send a `GET` of `url` with a bearer token, follow its redirects, and say
+// which scheme answered and whether the token reached it.
+fn followed_with_credentials[U: Display](inout client: Client, url: U) -> String {
+    let request = ClientRequest.new("GET", url).unwrap().with_header("Authorization", "Bearer secret").unwrap()
+    let response = &client.send(request).unwrap()
+    let scheme = if Url.parse(response.url()).unwrap().is_https() {
+        "https"
+    } else {
+        "http"
+    }
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{scheme} {body.view()}").unwrap()
+    body.release()
+    said
+}
+
+fn ask_by_deadline(port: UInt16) -> String {
+    var client = Client.new(ClientLimits { read_timeout_ms = 1000, ..ClientLimits.default() })
+    let response = &client.get("http://127.0.0.1:{port}/slow", deadline: time.Deadline.after(time.Duration.from_milliseconds(200))).unwrap()
+    let status = response.status().code()
+    let ended = match &client.read_text(response, max_bytes: 200) {
+        Ok(text) => {
+            text.release()
+            "read whole"
+        },
+        Err(error) => if error.is_timeout() {
+            "timed out"
+        } else {
+            "failed"
+        },
+    }
+    client.release()
+    fmt.render_owned("{status} {ended}").unwrap()
+}
+
+fn ask_across_clients(port: UInt16) -> String {
+    // `lax` accepts any certificate; `strict` verifies against the system's
+    // roots, which did not issue the test server's.
+    var lax = Client.with_tls(tls.ClientConfig.open(verify: .Insecure_AcceptAnyCertificate).unwrap())
+    var strict = Client.new()
+    let first = refused_by(&strict, port)
+    let got = &lax.get("https://127.0.0.1:{port}/hello").unwrap()
+    let text = &strict.read_text(got, max_bytes: 64).unwrap()
+    text.release()
+    let said = fmt.render_owned("strict {first}; strict idle={strict.idle_connections()} outstanding={strict.outstanding()}; lax outstanding={lax.outstanding()}").unwrap()
+    lax.release()
+    strict.release()
+    said
+}
+
+// Whether `client` refuses the test server at `port`'s certificate.
+fn refused_by(inout client: Client, port: UInt16) -> Str {
+    match &client.get("https://127.0.0.1:{port}/hello") {
+        Ok(response) => {
+            &client.discard(response)
+            "answered"
+        },
+        Err(Tls(_)) => "refused",
+        Err(_) => "failed",
+    }
+}
+
+fn ask_past_the_body(port: UInt16) -> String {
+    // The read-ahead buffer holds the response up to the end of its body,
+    // so what follows it stays in the TLS stream.
+    var client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap(), ClientLimits { buffer_bytes = answer_before_extra, ..ClientLimits.default() })
+    let response = &client.get("https://127.0.0.1:{port}/").unwrap()
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{body.view()} idle={client.idle_connections()}").unwrap()
+    body.release()
+    client.release()
+    said
+}

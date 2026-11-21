@@ -390,6 +390,28 @@ impl[R: Reader, A: Allocator] BufferedReader[R, A] {
         .Ok(())
     }
 
+    // How many bytes the reader has read ahead from its source that no read
+    // has returned yet. A source taken back by `abandon` while this is zero
+    // loses nothing.
+    pub fn buffered_bytes(self: Self) -> UInt64 {
+        self.available - self.cursor
+    }
+
+    test "buffered bytes count what was read ahead and not returned" {
+        let source = FragmentReader { bytes = "one\ntwo\n".as_bytes(), position = 0, step = 32, fail_at = UInt64.max }
+        var reader = BufferedReader.open_in(mem.system(), capacity: 32, reader: source).unwrap()
+        let before = reader.buffered_bytes()
+        let _first = &reader.read_line_borrowed(max_bytes: 8).unwrap()
+        let ahead = reader.buffered_bytes()
+        let _second = &reader.read_line_borrowed(max_bytes: 8).unwrap()
+        let after = reader.buffered_bytes()
+        let _source = reader.abandon()
+        testing.assert_eq(before, UInt64(0), "a reader that read nothing held bytes")?
+        testing.assert_eq(ahead, UInt64(4), "the second line was not held ahead")?
+        testing.assert_eq(after, UInt64(0), "a reader that returned everything still held bytes")?
+        .Ok(())
+    }
+
     // Inspect retained current-record bytes, including their terminator.
     pub fn pending(self: Self) -> mem.Slice[UInt8] where borrows(self) {
         match read self.record {
