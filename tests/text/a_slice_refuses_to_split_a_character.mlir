@@ -56,38 +56,39 @@ module {
   llvm.mlir.global internal constant @linea_str20("Listen") : !llvm.array<6 x i8>
   llvm.mlir.global internal constant @linea_str21("Accept") : !llvm.array<6 x i8>
   llvm.mlir.global internal constant @linea_str22("Connect") : !llvm.array<7 x i8>
-  llvm.mlir.global internal constant @linea_str23("Configure") : !llvm.array<9 x i8>
-  llvm.mlir.global internal constant @linea_str24("Spawn") : !llvm.array<5 x i8>
-  llvm.mlir.global internal constant @linea_str25("Wait") : !llvm.array<4 x i8>
-  llvm.mlir.global internal constant @linea_str26("Kill") : !llvm.array<4 x i8>
-  llvm.mlir.global internal constant @linea_str27("Other") : !llvm.array<5 x i8>
-  llvm.mlir.global internal constant @linea_str28("NotFound") : !llvm.array<8 x i8>
-  llvm.mlir.global internal constant @linea_str29("PermissionDenied") : !llvm.array<16 x i8>
-  llvm.mlir.global internal constant @linea_str30("AlreadyExists") : !llvm.array<13 x i8>
-  llvm.mlir.global internal constant @linea_str31("WouldBlock") : !llvm.array<10 x i8>
-  llvm.mlir.global internal constant @linea_str32("BrokenPipe") : !llvm.array<10 x i8>
-  llvm.mlir.global internal constant @linea_str33("Interrupted") : !llvm.array<11 x i8>
-  llvm.mlir.global internal constant @linea_str34("InvalidInput") : !llvm.array<12 x i8>
-  llvm.mlir.global internal constant @linea_str35("NotDirectory") : !llvm.array<12 x i8>
-  llvm.mlir.global internal constant @linea_str36("IsDirectory") : !llvm.array<11 x i8>
-  llvm.mlir.global internal constant @linea_str37("Unsupported") : !llvm.array<11 x i8>
-  llvm.mlir.global internal constant @linea_str38("NoSpace") : !llvm.array<7 x i8>
-  llvm.mlir.global internal constant @linea_str39("ResourceExhausted") : !llvm.array<17 x i8>
-  llvm.mlir.global internal constant @linea_str40("Symlink") : !llvm.array<7 x i8>
-  llvm.mlir.global internal constant @linea_str41("InvalidDescriptor") : !llvm.array<17 x i8>
-  llvm.mlir.global internal constant @linea_str42("NoProgress") : !llvm.array<10 x i8>
-  llvm.mlir.global internal constant @linea_str43("InvalidProgress") : !llvm.array<15 x i8>
-  llvm.mlir.global internal constant @linea_str44("TimedOut") : !llvm.array<8 x i8>
-  llvm.mlir.global internal constant @linea_str45("ConnectionReset") : !llvm.array<15 x i8>
-  llvm.mlir.global internal constant @linea_str46("ConnectionRefused") : !llvm.array<17 x i8>
-  llvm.mlir.global internal constant @linea_str47("AddressInUse") : !llvm.array<12 x i8>
-  llvm.mlir.global internal constant @linea_str48("NameTooLong") : !llvm.array<11 x i8>
-  llvm.mlir.global internal constant @linea_str49("-") : !llvm.array<1 x i8>
-  llvm.mlir.global internal constant @linea_str50("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899") : !llvm.array<200 x i8>
-  llvm.mlir.global internal constant @linea_str51("0") : !llvm.array<1 x i8>
+  llvm.mlir.global internal constant @linea_str23("Resolve") : !llvm.array<7 x i8>
+  llvm.mlir.global internal constant @linea_str24("Configure") : !llvm.array<9 x i8>
+  llvm.mlir.global internal constant @linea_str25("Spawn") : !llvm.array<5 x i8>
+  llvm.mlir.global internal constant @linea_str26("Wait") : !llvm.array<4 x i8>
+  llvm.mlir.global internal constant @linea_str27("Kill") : !llvm.array<4 x i8>
+  llvm.mlir.global internal constant @linea_str28("Other") : !llvm.array<5 x i8>
+  llvm.mlir.global internal constant @linea_str29("NotFound") : !llvm.array<8 x i8>
+  llvm.mlir.global internal constant @linea_str30("PermissionDenied") : !llvm.array<16 x i8>
+  llvm.mlir.global internal constant @linea_str31("AlreadyExists") : !llvm.array<13 x i8>
+  llvm.mlir.global internal constant @linea_str32("WouldBlock") : !llvm.array<10 x i8>
+  llvm.mlir.global internal constant @linea_str33("BrokenPipe") : !llvm.array<10 x i8>
+  llvm.mlir.global internal constant @linea_str34("Interrupted") : !llvm.array<11 x i8>
+  llvm.mlir.global internal constant @linea_str35("InvalidInput") : !llvm.array<12 x i8>
+  llvm.mlir.global internal constant @linea_str36("NotDirectory") : !llvm.array<12 x i8>
+  llvm.mlir.global internal constant @linea_str37("IsDirectory") : !llvm.array<11 x i8>
+  llvm.mlir.global internal constant @linea_str38("Unsupported") : !llvm.array<11 x i8>
+  llvm.mlir.global internal constant @linea_str39("NoSpace") : !llvm.array<7 x i8>
+  llvm.mlir.global internal constant @linea_str40("ResourceExhausted") : !llvm.array<17 x i8>
+  llvm.mlir.global internal constant @linea_str41("Symlink") : !llvm.array<7 x i8>
+  llvm.mlir.global internal constant @linea_str42("InvalidDescriptor") : !llvm.array<17 x i8>
+  llvm.mlir.global internal constant @linea_str43("NoProgress") : !llvm.array<10 x i8>
+  llvm.mlir.global internal constant @linea_str44("InvalidProgress") : !llvm.array<15 x i8>
+  llvm.mlir.global internal constant @linea_str45("TimedOut") : !llvm.array<8 x i8>
+  llvm.mlir.global internal constant @linea_str46("ConnectionReset") : !llvm.array<15 x i8>
+  llvm.mlir.global internal constant @linea_str47("ConnectionRefused") : !llvm.array<17 x i8>
+  llvm.mlir.global internal constant @linea_str48("AddressInUse") : !llvm.array<12 x i8>
+  llvm.mlir.global internal constant @linea_str49("NameTooLong") : !llvm.array<11 x i8>
+  llvm.mlir.global internal constant @linea_str50("-") : !llvm.array<1 x i8>
+  llvm.mlir.global internal constant @linea_str51("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899") : !llvm.array<200 x i8>
+  llvm.mlir.global internal constant @linea_str52("0") : !llvm.array<1 x i8>
   llvm.mlir.global internal constant @linea_static0() {addr_space = 0 : i32, alignment = 8 : i64} : !linea_static0 {
     %s0 = llvm.mlir.undef : !linea_static0
-    %a0 = llvm.mlir.addressof @linea_str50 : !llvm.ptr
+    %a0 = llvm.mlir.addressof @linea_str51 : !llvm.ptr
     %e0 = llvm.ptrtoint %a0 : !llvm.ptr to i64
     %s1 = llvm.insertvalue %e0, %s0[0] : !linea_static0
     %e1 = llvm.mlir.constant(200 : i64) : i64
@@ -3052,10 +3053,10 @@ module {
     %v3 = arith.cmpi eq, %v1, %v2 : i64 loc("std/io/core/error.lin":L:C)
     cf.cond_br %v3, ^b3, ^b2 loc("std/io/core/error.lin":L:C)
   ^b1:
-    %cl256 = arith.constant 16 : i64 loc("std/io/core/error.lin":L:C)
-    "llvm.intr.memcpy"(%s2, %s3, %cl256) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/io/core/error.lin":L:C)
-    %v257 = llvm.load %s1 : !llvm.ptr -> !llvm.ptr loc("std/io/core/error.lin":L:C)
-    func.call @"lin.std.io.core.Gathered;std.io.core;Writer.write_str"(%sret, %v257, %s2) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> () loc("std/io/core/error.lin":L:C)
+    %cl270 = arith.constant 16 : i64 loc("std/io/core/error.lin":L:C)
+    "llvm.intr.memcpy"(%s2, %s3, %cl270) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/io/core/error.lin":L:C)
+    %v271 = llvm.load %s1 : !llvm.ptr -> !llvm.ptr loc("std/io/core/error.lin":L:C)
+    func.call @"lin.std.io.core.Gathered;std.io.core;Writer.write_str"(%sret, %v271, %s2) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> () loc("std/io/core/error.lin":L:C)
     func.return loc("std/io/core/error.lin":L:C)
   ^b2:
     %v16 = arith.constant 1 : i64 loc("std/io/core/error.lin":L:C)
@@ -3277,7 +3278,7 @@ module {
     %v203 = llvm.ptrtoint %ba203 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v204 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v203, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
-    %v207 = arith.constant 9 : i64 loc("std/io/core/error.lin":L:C)
+    %v207 = arith.constant 7 : i64 loc("std/io/core/error.lin":L:C)
     %v208 = arith.constant 8 : i64 loc("std/io/core/error.lin":L:C)
     %v209 = llvm.getelementptr %s3[%v208] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/io/core/error.lin":L:C)
     llvm.store %v207, %v209 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3292,7 +3293,7 @@ module {
     %v217 = llvm.ptrtoint %ba217 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v218 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v217, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
-    %v221 = arith.constant 5 : i64 loc("std/io/core/error.lin":L:C)
+    %v221 = arith.constant 9 : i64 loc("std/io/core/error.lin":L:C)
     %v222 = arith.constant 8 : i64 loc("std/io/core/error.lin":L:C)
     %v223 = llvm.getelementptr %s3[%v222] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/io/core/error.lin":L:C)
     llvm.store %v221, %v223 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3307,19 +3308,15 @@ module {
     %v231 = llvm.ptrtoint %ba231 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v232 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v231, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
-    %v235 = arith.constant 4 : i64 loc("std/io/core/error.lin":L:C)
+    %v235 = arith.constant 5 : i64 loc("std/io/core/error.lin":L:C)
     %v236 = arith.constant 8 : i64 loc("std/io/core/error.lin":L:C)
     %v237 = llvm.getelementptr %s3[%v236] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/io/core/error.lin":L:C)
     llvm.store %v235, %v237 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
     cf.br ^b1 loc("std/io/core/error.lin":L:C)
   ^b36:
-    %tk1 = arith.constant 3 : i32 loc("std/io/core/error.lin":L:C)
-    %tf1 = llvm.mlir.addressof @linea_file12 : !llvm.ptr loc("std/io/core/error.lin":L:C)
-    %tl1 = arith.constant L : i32 loc("std/io/core/error.lin":L:C)
-    %tc1 = arith.constant C : i32 loc("std/io/core/error.lin":L:C)
-    func.call @linea_fiber_restrict_current() : () -> ()
-    func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/error.lin":L:C)
-    llvm.unreachable loc("std/io/core/error.lin":L:C)
+    %v254 = arith.constant 18 : i64 loc("std/io/core/error.lin":L:C)
+    %v255 = arith.cmpi eq, %v1, %v254 : i64 loc("std/io/core/error.lin":L:C)
+    cf.cond_br %v255, ^b39, ^b38 loc("std/io/core/error.lin":L:C)
   ^b37:
     %v244 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     %ba245 = llvm.mlir.addressof @linea_str26 : !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3330,6 +3327,25 @@ module {
     %v250 = arith.constant 8 : i64 loc("std/io/core/error.lin":L:C)
     %v251 = llvm.getelementptr %s3[%v250] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/io/core/error.lin":L:C)
     llvm.store %v249, %v251 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
+    cf.br ^b1 loc("std/io/core/error.lin":L:C)
+  ^b38:
+    %tk1 = arith.constant 3 : i32 loc("std/io/core/error.lin":L:C)
+    %tf1 = llvm.mlir.addressof @linea_file12 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %tl1 = arith.constant L : i32 loc("std/io/core/error.lin":L:C)
+    %tc1 = arith.constant C : i32 loc("std/io/core/error.lin":L:C)
+    func.call @linea_fiber_restrict_current() : () -> ()
+    func.call @linea_trap(%tk1, %tf1, %tl1, %tc1) : (i32, !llvm.ptr, i32, i32) -> () loc("std/io/core/error.lin":L:C)
+    llvm.unreachable loc("std/io/core/error.lin":L:C)
+  ^b39:
+    %v258 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
+    %ba259 = llvm.mlir.addressof @linea_str27 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %v259 = llvm.ptrtoint %ba259 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
+    %v260 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
+    llvm.store %v259, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %v263 = arith.constant 4 : i64 loc("std/io/core/error.lin":L:C)
+    %v264 = arith.constant 8 : i64 loc("std/io/core/error.lin":L:C)
+    %v265 = llvm.getelementptr %s3[%v264] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/io/core/error.lin":L:C)
+    llvm.store %v263, %v265 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
     cf.br ^b1 loc("std/io/core/error.lin":L:C)
   }
   func.func private @"lin.std.io.core.IoCategory;std.fmt;Display.fmt[std.io.core.Gathered]"(%sret: !llvm.ptr, %a0: i64, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -3361,7 +3377,7 @@ module {
     cf.cond_br %v17, ^b5, ^b4 loc("std/io/core/error.lin":L:C)
   ^b3:
     %v6 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba7 = llvm.mlir.addressof @linea_str27 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba7 = llvm.mlir.addressof @linea_str28 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v7 = llvm.ptrtoint %ba7 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v8 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v7, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3376,7 +3392,7 @@ module {
     cf.cond_br %v31, ^b7, ^b6 loc("std/io/core/error.lin":L:C)
   ^b5:
     %v20 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba21 = llvm.mlir.addressof @linea_str28 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba21 = llvm.mlir.addressof @linea_str29 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v21 = llvm.ptrtoint %ba21 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v22 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v21, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3391,7 +3407,7 @@ module {
     cf.cond_br %v45, ^b9, ^b8 loc("std/io/core/error.lin":L:C)
   ^b7:
     %v34 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba35 = llvm.mlir.addressof @linea_str29 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba35 = llvm.mlir.addressof @linea_str30 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v35 = llvm.ptrtoint %ba35 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v36 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v35, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3406,7 +3422,7 @@ module {
     cf.cond_br %v59, ^b11, ^b10 loc("std/io/core/error.lin":L:C)
   ^b9:
     %v48 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba49 = llvm.mlir.addressof @linea_str30 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba49 = llvm.mlir.addressof @linea_str31 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v49 = llvm.ptrtoint %ba49 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v50 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v49, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3421,7 +3437,7 @@ module {
     cf.cond_br %v73, ^b13, ^b12 loc("std/io/core/error.lin":L:C)
   ^b11:
     %v62 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba63 = llvm.mlir.addressof @linea_str31 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba63 = llvm.mlir.addressof @linea_str32 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v63 = llvm.ptrtoint %ba63 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v64 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v63, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3436,7 +3452,7 @@ module {
     cf.cond_br %v87, ^b15, ^b14 loc("std/io/core/error.lin":L:C)
   ^b13:
     %v76 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba77 = llvm.mlir.addressof @linea_str32 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba77 = llvm.mlir.addressof @linea_str33 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v77 = llvm.ptrtoint %ba77 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v78 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v77, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3451,7 +3467,7 @@ module {
     cf.cond_br %v101, ^b17, ^b16 loc("std/io/core/error.lin":L:C)
   ^b15:
     %v90 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba91 = llvm.mlir.addressof @linea_str33 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba91 = llvm.mlir.addressof @linea_str34 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v91 = llvm.ptrtoint %ba91 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v92 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v91, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3466,7 +3482,7 @@ module {
     cf.cond_br %v115, ^b19, ^b18 loc("std/io/core/error.lin":L:C)
   ^b17:
     %v104 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba105 = llvm.mlir.addressof @linea_str34 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba105 = llvm.mlir.addressof @linea_str35 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v105 = llvm.ptrtoint %ba105 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v106 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v105, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3481,7 +3497,7 @@ module {
     cf.cond_br %v129, ^b21, ^b20 loc("std/io/core/error.lin":L:C)
   ^b19:
     %v118 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba119 = llvm.mlir.addressof @linea_str35 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba119 = llvm.mlir.addressof @linea_str36 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v119 = llvm.ptrtoint %ba119 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v120 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v119, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3496,7 +3512,7 @@ module {
     cf.cond_br %v143, ^b23, ^b22 loc("std/io/core/error.lin":L:C)
   ^b21:
     %v132 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba133 = llvm.mlir.addressof @linea_str36 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba133 = llvm.mlir.addressof @linea_str37 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v133 = llvm.ptrtoint %ba133 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v134 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v133, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3511,7 +3527,7 @@ module {
     cf.cond_br %v157, ^b25, ^b24 loc("std/io/core/error.lin":L:C)
   ^b23:
     %v146 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba147 = llvm.mlir.addressof @linea_str37 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba147 = llvm.mlir.addressof @linea_str38 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v147 = llvm.ptrtoint %ba147 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v148 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v147, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3526,7 +3542,7 @@ module {
     cf.cond_br %v171, ^b27, ^b26 loc("std/io/core/error.lin":L:C)
   ^b25:
     %v160 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba161 = llvm.mlir.addressof @linea_str38 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba161 = llvm.mlir.addressof @linea_str39 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v161 = llvm.ptrtoint %ba161 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v162 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v161, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3541,7 +3557,7 @@ module {
     cf.cond_br %v185, ^b29, ^b28 loc("std/io/core/error.lin":L:C)
   ^b27:
     %v174 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba175 = llvm.mlir.addressof @linea_str39 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba175 = llvm.mlir.addressof @linea_str40 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v175 = llvm.ptrtoint %ba175 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v176 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v175, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3556,7 +3572,7 @@ module {
     cf.cond_br %v199, ^b31, ^b30 loc("std/io/core/error.lin":L:C)
   ^b29:
     %v188 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba189 = llvm.mlir.addressof @linea_str40 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba189 = llvm.mlir.addressof @linea_str41 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v189 = llvm.ptrtoint %ba189 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v190 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v189, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3571,7 +3587,7 @@ module {
     cf.cond_br %v213, ^b33, ^b32 loc("std/io/core/error.lin":L:C)
   ^b31:
     %v202 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba203 = llvm.mlir.addressof @linea_str41 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba203 = llvm.mlir.addressof @linea_str42 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v203 = llvm.ptrtoint %ba203 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v204 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v203, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3586,7 +3602,7 @@ module {
     cf.cond_br %v227, ^b35, ^b34 loc("std/io/core/error.lin":L:C)
   ^b33:
     %v216 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba217 = llvm.mlir.addressof @linea_str42 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba217 = llvm.mlir.addressof @linea_str43 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v217 = llvm.ptrtoint %ba217 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v218 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v217, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3601,7 +3617,7 @@ module {
     cf.cond_br %v241, ^b37, ^b36 loc("std/io/core/error.lin":L:C)
   ^b35:
     %v230 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba231 = llvm.mlir.addressof @linea_str43 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba231 = llvm.mlir.addressof @linea_str44 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v231 = llvm.ptrtoint %ba231 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v232 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v231, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3616,7 +3632,7 @@ module {
     cf.cond_br %v255, ^b39, ^b38 loc("std/io/core/error.lin":L:C)
   ^b37:
     %v244 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba245 = llvm.mlir.addressof @linea_str44 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba245 = llvm.mlir.addressof @linea_str45 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v245 = llvm.ptrtoint %ba245 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v246 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v245, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3631,7 +3647,7 @@ module {
     cf.cond_br %v269, ^b41, ^b40 loc("std/io/core/error.lin":L:C)
   ^b39:
     %v258 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba259 = llvm.mlir.addressof @linea_str45 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba259 = llvm.mlir.addressof @linea_str46 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v259 = llvm.ptrtoint %ba259 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v260 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v259, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3646,7 +3662,7 @@ module {
     cf.cond_br %v283, ^b43, ^b42 loc("std/io/core/error.lin":L:C)
   ^b41:
     %v272 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba273 = llvm.mlir.addressof @linea_str46 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba273 = llvm.mlir.addressof @linea_str47 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v273 = llvm.ptrtoint %ba273 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v274 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v273, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3661,7 +3677,7 @@ module {
     cf.cond_br %v297, ^b45, ^b44 loc("std/io/core/error.lin":L:C)
   ^b43:
     %v286 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba287 = llvm.mlir.addressof @linea_str47 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba287 = llvm.mlir.addressof @linea_str48 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v287 = llvm.ptrtoint %ba287 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v288 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v287, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -3680,7 +3696,7 @@ module {
     llvm.unreachable loc("std/io/core/error.lin":L:C)
   ^b45:
     %v300 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
-    %ba301 = llvm.mlir.addressof @linea_str48 : !llvm.ptr loc("std/io/core/error.lin":L:C)
+    %ba301 = llvm.mlir.addressof @linea_str49 : !llvm.ptr loc("std/io/core/error.lin":L:C)
     %v301 = llvm.ptrtoint %ba301 : !llvm.ptr to i64 loc("std/io/core/error.lin":L:C)
     %v302 = arith.constant 0 : i64 loc("std/io/core/error.lin":L:C)
     llvm.store %v301, %s3 : i64, !llvm.ptr loc("std/io/core/error.lin":L:C)
@@ -4681,7 +4697,7 @@ module {
     cf.cond_br %v2, ^b1, ^b2 loc("std/fmt/decimal.lin":L:C)
   ^b1:
     %v4 = llvm.load %s1 : !llvm.ptr -> !llvm.ptr loc("std/fmt/decimal.lin":L:C)
-    %ba6 = llvm.mlir.addressof @linea_str49 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %ba6 = llvm.mlir.addressof @linea_str50 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %v6 = llvm.ptrtoint %ba6 : !llvm.ptr to i64 loc("std/fmt/decimal.lin":L:C)
     %v7 = arith.constant 0 : i64 loc("std/fmt/decimal.lin":L:C)
     llvm.store %v6, %s2 : i64, !llvm.ptr loc("std/fmt/decimal.lin":L:C)
@@ -5999,7 +6015,7 @@ module {
     %p34 = arith.constant 0 : i64 loc("std/fmt/decimal.lin":L:C)
     %v34 = arith.addi %v33, %p34 : i64 loc("std/fmt/decimal.lin":L:C)
     func.call @"lin.std.text;Str.slice"(%rs35, %v29, %v30, %v34) : (!llvm.ptr, !llvm.ptr, i64, i64) -> () loc("std/fmt/decimal.lin":L:C)
-    %ba37 = llvm.mlir.addressof @linea_str51 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
+    %ba37 = llvm.mlir.addressof @linea_str52 : !llvm.ptr loc("std/fmt/decimal.lin":L:C)
     %v37 = llvm.ptrtoint %ba37 : !llvm.ptr to i64 loc("std/fmt/decimal.lin":L:C)
     %v38 = arith.constant 0 : i64 loc("std/fmt/decimal.lin":L:C)
     llvm.store %v37, %s6 : i64, !llvm.ptr loc("std/fmt/decimal.lin":L:C)
