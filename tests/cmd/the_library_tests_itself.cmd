@@ -1249,6 +1249,7 @@ The library tests itself.
   ok    mem.each allocation failure covers every growth step in a push sequence
   ok    mem.each allocation failure covers every growth step in an append_slice sequence
   ok    mem.empty fd requests do not access a descriptor
+  ok    mem.empty pipe requests do not access a descriptor
   ok    mem.equal slices hash equally
   ok    mem.fail_at refuses a later acquisition through live handles
   ok    mem.fd reads reject a count past the remaining buffer
@@ -1271,6 +1272,7 @@ The library tests itself.
   ok    mem.opening a missing directory answers its errno
   ok    mem.outstanding counts a dropped arena buffer until the end
   ok    mem.peak_bytes remembers the most bytes live at once
+  ok    mem.pipe reads reject a range past the buffer
   ok    mem.random_words differ between reads
   ok    mem.releasing a closure returns its bytes
   ok    mem.releasing a drain stopped early releases only what remains
@@ -1425,7 +1427,45 @@ The library tests itself.
   ok    option.unwrap_or returns some or the eager fallback
   ok    option.unwrap_or_else calls only for none
   ok    option.unwrap_or_else takes a fallback that changes a lent count
+  ok    process.a block's strings are walked in order
+  ok    process.a child blocked on a full pipe ends when it is waited for
+  ok    process.a child has a positive process ID
+  ok    process.a child starts in its directory
+  ok    process.a cleared environment holds only what was set
+  ok    process.a command keeps its text in its allocator
+  ok    process.a fiber captures a child's output and waits for it on a loop
+  ok    process.a killed child is reported killed by signal nine
+  ok    process.a new command runs its program
+  ok    process.a null error stream discards what the child reports
+  ok    process.a null input reads as empty
+  ok    process.a null output discards what the child writes
+  ok    process.a process error displays its reason
+  ok    process.a program that is not there is not found
+  ok    process.a removed variable does not reach the child
+  ok    process.a runtime answer keeps its operation and category
+  ok    process.a set variable reaches the child
+  ok    process.a signal is there only for a killed child
+  ok    process.a status reports how the child ended
+  ok    process.a variable name holding an equals sign is refused
+  ok    process.an argument holding a NUL byte is refused
+  ok    process.an exit code is there only for an exit
+  ok    process.an exit status displays how the child ended
+  ok    process.arguments reach the child in order
+  ok    process.closing a pipe reader consumes it and reports a bad descriptor
+  ok    process.closing a pipe writer consumes it and reports a bad descriptor
+  ok    process.each allocation failure covers capturing output
+  ok    process.each allocation failure covers starting a child
+  ok    process.input written to a child comes back through its output
+  ok    process.megabytes on both streams are read without stalling
+  ok    process.only an exit with code zero is a success
+  ok    process.output captures both streams and the status
+  ok    process.output too long kills and reaps the child
   ok    process.raising the open file limit twice answers the same limit
+  ok    process.standard error is read apart from standard output
+  ok    process.standard output is there only when it was piped
+  ok    process.streams have the runtime's codes
+  ok    process.waiting reports the exit code
+  ok    process.waiting with output reads both streams
   ok    range.a descending inclusive range yields the end it stops at
   ok    range.a descending range yields its values downwards
   ok    range.a range at the ends of its type walks back without stepping past them
@@ -1748,4 +1788,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1745 passed, 0 failed
+  1785 passed, 0 failed
