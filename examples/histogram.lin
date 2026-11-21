@@ -114,11 +114,10 @@ test "latency ranges include their lower bound" {
 
 fn main() -> Result[UInt8, IoError] {
     // `let … else` binds what `Ok` holds when `open` succeeds. Otherwise the
-    // `else` block runs and must leave `main`; `|_|` names the error and drops
-    // it, since the message below says all this program knows about it.
-    var h = Histogram.open(4) else |_| {
-        io.eprintln("could not allocate the request latency histogram")
-        return .Ok(1)
+    // `else` block runs and must leave `main`; `|refusal|` names the `Oom`, and
+    // `refusal.report` prints what the memory was for and answers status 1.
+    var h = Histogram.open(4) else |refusal| {
+        return .Ok(refusal.report("the request latency histogram"))
     }
     // `[UInt64; _]` lets the compiler count the ten durations.
     let durations: [UInt64; _] = [42, 87, 125, 98, 205, 310, 174, 63, 280, 520]

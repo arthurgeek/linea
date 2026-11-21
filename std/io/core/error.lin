@@ -168,9 +168,7 @@ impl Display for IoError {
 
 test "an io error displays its numeric reason" {
     let error = IoError.from_os(.Write, 9)
-    var writer = testing.Recorder.of(256) else |_| {
-        return testing.assert(false, "the display recorder was refused")
-    }
+    var writer = testing.allocated(testing.Recorder.of(256), "the display recorder was refused")?
     let wrote = error.fmt(&writer).is_ok()
     let equal = writer.holds("Write failed (InvalidDescriptor) after 0 bytes; errno 9")
     writer.release()

@@ -63,9 +63,8 @@ fn main() -> UInt8 {
                 None => config.default_priority,
             }
             let prio_str = priority.as_str()
-            let id = &store.add(title.view(), priority, tags) else |_| {
-                let _ = io.eprintln("error: failed to allocate new note")
-                return 1
+            let id = &store.add(title.view(), priority, tags) else |refusal| {
+                return refusal.report("the new note")
             }
             let saved = &store.save()
             match saved {
