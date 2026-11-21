@@ -1,0 +1,176 @@
+import std.io
+import std.mem
+import std.testing
+
+use io.ByteWriter
+
+// A PipeReader owns the parent's end of a pipe a child writes its standard
+// output or error into. A read waits until the child has written something or
+// closed its end, and answers 0 at the end. A fiber that waits leaves its
+// carrier to other fibers. Close it, or release it, once the child's output
+// is no longer wanted: a child writing to a closed pipe gets EPIPE, or dies of
+// SIGPIPE, rather than waiting forever for a reader.
+@(opaque, linear)
+struct PipeReader {
+    fd: Int32,
+}
+
+// A PipeWriter owns the parent's end of a pipe a child reads its standard
+// input from. A write waits until the pipe has room. Closing it tells the
+// child its input has ended. A write after the child closed its end fails
+// with category `BrokenPipe`, and no signal reaches this process.
+@(opaque, linear)
+struct PipeWriter {
+    fd: Int32,
+}
+
+// Close `fd`, reporting a failed close.
+fn close_pipe(fd: Int32) -> Result[(), io.IoError] {
+    let answer = mem._close_fd(fd)
+    if answer < 0 {
+        return .Err(io.IoError.from_os(.Close, Int32(0 - answer)))
+    }
+    .Ok(())
+}
+
+impl PipeReader {
+    // Close the pipe, reporting a failed close, which `Release` ignores.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let PipeReader { fd: fd } = self
+        close_pipe(fd)
+    }
+
+    test "closing a pipe reader consumes it and reports a bad descriptor" {
+        let reader = PipeReader { fd = -1 }
+        let refused = match reader.close() {
+            Ok(_) => false,
+            Err(error) => error.category == .InvalidDescriptor,
+        }
+        testing.assert(refused, "closing a descriptor the process lacks succeeded")?
+        .Ok(())
+    }
+}
+
+impl PipeWriter {
+    // Close the pipe, so the child reads the end of its input, reporting a
+    // failed close, which `Release` ignores.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let PipeWriter { fd: fd } = self
+        close_pipe(fd)
+    }
+
+    test "closing a pipe writer consumes it and reports a bad descriptor" {
+        let writer = PipeWriter { fd = -1 }
+        let refused = match writer.close() {
+            Ok(_) => false,
+            Err(error) => error.category == .InvalidDescriptor,
+        }
+        testing.assert(refused, "closing a descriptor the process lacks succeeded")?
+        .Ok(())
+    }
+}
+
+impl Release for PipeReader {
+    fn release(sink self: Self) {
+        let PipeReader { fd: fd } = self
+        let _closed = mem._close_fd(fd)
+    }
+}
+
+impl Release for PipeWriter {
+    fn release(sink self: Self) {
+        let PipeWriter { fd: fd } = self
+        let _closed = mem._close_fd(fd)
+    }
+}
+
+// Generic code closes a pipe through `io.Close`; these forward to `close`.
+impl io.Close for PipeReader {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        PipeReader.close(self)
+    }
+}
+
+impl io.Close for PipeWriter {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        PipeWriter.close(self)
+    }
+}
+
+impl io.Reader for PipeReader {
+    type Error = io.IoError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        let answer = mem.read_pipe(&buffer, self.fd, offset, count)
+        if answer < 0 {
+            .Err(io.IoError.from_os(.Read, Int32(0 - answer)))
+        } else {
+            .Ok(UInt64(answer))
+        }
+    }
+}
+
+impl io.ByteWriter for PipeWriter {
+    type Error = io.IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        let answer = mem.write_slice_pipe(bytes, self.fd)
+        if answer < 0 {
+            let error = io.IoError.from_os(.Write, Int32(0 - answer))
+            return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
+        }
+        .Ok(UInt64(answer))
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        .Ok(0)
+    }
+}
+
+impl Writer for PipeWriter {
+    type Error = io.IoError
+
+    fn write_str(inout self: Self, s: Str) -> Result[(), io.IoError] where carries() {
+        let _written = io.write_all(&self, s.as_bytes())?
+        .Ok(())
+    }
+}
+
+// A wait set (`task.WaitSet`) watches a pipe's own descriptor.
+impl io.Pollable for PipeReader {
+    fn readiness(self: Self, _interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        .Wait(io.source(self, self.fd))
+    }
+}
+
+impl io.Pollable for PipeWriter {
+    fn readiness(self: Self, _interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        .Wait(io.source(self, self.fd))
+    }
+}
+
+// The parent's end of a pipe the runtime answered, or None for -1.
+internal fn reader_of(fd: Int32) -> Option[PipeReader] {
+    if fd < 0 {
+        return .None
+    }
+    .Some(PipeReader { fd })
+}
+
+internal fn writer_of(fd: Int32) -> Option[PipeWriter] {
+    if fd < 0 {
+        return .None
+    }
+    .Some(PipeWriter { fd })
+}

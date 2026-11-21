@@ -18,7 +18,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "linea_float.o", "math.o" };
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -144,7 +144,7 @@ test "CI keeps native sanitizer tests in their matrix job before the corpus" {
     const corpus_at = std.mem.indexOf(u8, sanitize, "- name: Conformance suite under ${{ matrix.sanitizer }}") orelse return error.NoSanitizedCorpusStep;
     try testing.expect(native_at < corpus_at);
     try testing.expectEqualStrings(
-        "run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-clock test-native-runtime test-native-task test-fiber-completion-backend -Dsanitize=${{ matrix.sanitizer }}",
+        "run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-process test-native-clock test-native-runtime test-native-task test-fiber-completion-backend -Dsanitize=${{ matrix.sanitizer }}",
         try onlyLineWith(sanitize, "zig build test-native-math "),
     );
 }
@@ -155,7 +155,7 @@ test "both Linux fiber ABIs execute strict kernel completion regressions" {
     const fibers = try workflowJob(workflow, "fibers");
     try testing.expect(std.mem.indexOf(u8, fibers, "runner: [ubuntu-24.04, ubuntu-24.04-arm]") != null);
     try testing.expectEqualStrings(
-        "run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-clock test-fiber-completion-backend -Drelease",
+        "run: nix develop --command zig build test-native-task test-native-fiber-scale test-native-net test-native-process test-native-clock test-fiber-completion-backend -Drelease",
         try onlyLineWith(fibers, "zig build test-native-task "),
     );
 }

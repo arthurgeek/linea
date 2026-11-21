@@ -76,6 +76,12 @@ Reading input that may be malformed or never ends, and recovering from bad recor
 
 - [log_filter.lin](log_filter.lin): filters log records from stdin; buffered streams and recovery from bad records.
 
+## Child processes
+
+Starting other programs, reading what they print and learning how they ended.
+
+- [build_steps.lin](build_steps.lin): runs a project's build steps as shell commands, stopping at the first that fails; `process.Command`, captured output, exit statuses, and every child waited for.
+
 ## Tasks
 
 Work on several tasks at once, through sessions the compiler checks or through combinators that start and join the tasks for you.

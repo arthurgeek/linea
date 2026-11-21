@@ -1833,6 +1833,22 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/sim_fault_test.c", .flags = runtime_flags.items },
     });
 
+    const native_process_step = b.step("test-native-process", "Check child processes: spawning, piped streams, exit status, reaping, and waits that park a fiber");
+    native.add(native_process_step, "native-process-tests", &.{
+        .{ .file = "runtime/process.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/net.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/clock.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/task.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/park.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/waitset.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/signals.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/sim.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/loop.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/process_test.c", .flags = runtime_flags.items },
+    });
+
     const native_clock_step = b.step("test-native-clock", "Check native clock reads and the monotonic sleep");
     var clock_flags: std.ArrayList([]const u8) = .empty;
     clock_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
@@ -2125,6 +2141,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "linea_rt_sanitized", .file = "runtime/linea_rt.c", .flags = sanitized_runtime_flags.items },
             .{ .name = "io", .file = "runtime/io.c", .flags = runtime_flags.items },
             .{ .name = "net", .file = "runtime/net.c", .flags = runtime_flags.items },
+            .{ .name = "process", .file = "runtime/process.c", .flags = runtime_flags.items },
             .{ .name = "clock", .file = "runtime/clock.c", .flags = runtime_flags.items },
             .{ .name = "task", .file = "runtime/task.c", .flags = runtime_flags.items },
             .{ .name = "park", .file = "runtime/park.c", .flags = runtime_flags.items },
@@ -2158,6 +2175,7 @@ pub fn build(b: *std.Build) void {
             "io_fault_test",
             "net_test",
             "net_fault_test",
+            "process_test",
             "sim_test",
             "clock_test",
             "clock_fault_test",
@@ -2250,6 +2268,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "linea_rt", .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items, .checked_flags = checked_flags.items },
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
+        .{ .name = "process", .file = b.path("runtime/process.c"), .flags = runtime_flags.items },
         .{ .name = "clock", .file = b.path("runtime/clock.c"), .flags = runtime_flags.items },
         .{ .name = "task", .file = b.path("runtime/task.c"), .flags = runtime_flags.items },
         .{ .name = "park", .file = b.path("runtime/park.c"), .flags = runtime_flags.items },
@@ -3343,6 +3362,7 @@ pub fn build(b: *std.Build) void {
             if (test_filter == null) {
                 step.dependOn(native_io_step);
                 step.dependOn(native_net_step);
+                step.dependOn(native_process_step);
                 step.dependOn(native_clock_step);
                 step.dependOn(native_math_step);
                 step.dependOn(native_runtime_step);

@@ -1,0 +1,149 @@
+import std.io
+import std.mem
+import std.testing
+
+// ExitStatus says how a child process ended: it exited with a code, which
+// is 0 for success by convention, or a signal killed it.
+@(copyable, derive(Equatable, Debug))
+pub enum ExitStatus {
+    Exited(UInt8),
+    Signalled(Int32),
+}
+
+impl ExitStatus {
+    // Return whether the child exited with code 0.
+    pub fn success(self: Self) -> Bool {
+        match read self {
+            Exited(code) => code == 0,
+            Signalled(_) => false,
+        }
+    }
+
+    test "only an exit with code zero is a success" {
+        let ok: ExitStatus = .Exited(0)
+        let failed: ExitStatus = .Exited(1)
+        let killed: ExitStatus = .Signalled(9)
+        testing.assert(ok.success(), "exit code 0 was not a success")?
+        testing.assert(!failed.success(), "exit code 1 was a success")?
+        testing.assert(!killed.success(), "a killed child was a success")?
+        .Ok(())
+    }
+
+    // Return the exit code, or None when a signal killed the child.
+    pub fn code(self: Self) -> Option[UInt8] {
+        match read self {
+            Exited(code) => .Some(code),
+            Signalled(_) => .None,
+        }
+    }
+
+    test "an exit code is there only for an exit" {
+        let exited: ExitStatus = .Exited(3)
+        let killed: ExitStatus = .Signalled(15)
+        testing.assert_eq(exited.code(), .Some(UInt8(3)), "the exit code was lost")?
+        testing.assert_eq(killed.code(), .None, "a killed child had an exit code")?
+        .Ok(())
+    }
+
+    // Return the number of the signal that killed the child, or None when it
+    // exited.
+    pub fn signal(self: Self) -> Option[Int32] {
+        match read self {
+            Exited(_) => .None,
+            Signalled(number) => .Some(number),
+        }
+    }
+
+    test "a signal is there only for a killed child" {
+        let exited: ExitStatus = .Exited(0)
+        let killed: ExitStatus = .Signalled(9)
+        testing.assert_eq(exited.signal(), .None, "an exit had a signal")?
+        testing.assert_eq(killed.signal(), .Some(Int32(9)), "the signal was lost")?
+        .Ok(())
+    }
+}
+
+impl Display for ExitStatus {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Exited(code) => "exited with code {code}".fmt(&w),
+            Signalled(number) => "killed by signal {number}".fmt(&w),
+        }
+    }
+}
+
+test "an exit status displays how the child ended" {
+    let exited: ExitStatus = .Exited(2)
+    let killed: ExitStatus = .Signalled(9)
+    var writer = testing.Recorder.of(64).unwrap()
+    let wrote = "{exited}; {killed}".fmt(&writer).is_ok()
+    let equal = writer.holds("exited with code 2; killed by signal 9")
+    writer.release()
+    testing.assert(wrote && equal, "an exit status displayed something else")?
+    .Ok(())
+}
+
+// ProcessError says why starting, waiting for or talking to a child process
+// failed: refused storage, an argument, variable or directory the system
+// cannot take (one holding a NUL byte, a variable name holding `=`), captured
+// output longer than the limit the caller gave, or an operating-system error,
+// whose category says, for instance, that the program was not found
+// (`NotFound`) or may not be run (`PermissionDenied`).
+@(copyable, derive(Debug, Release, From[mem.Oom], From[io.IoError]))
+pub enum ProcessError {
+    Allocation(mem.Oom),
+    InvalidArgument,
+    TooLong(UInt64),
+    Io(io.IoError),
+}
+
+impl ProcessError {
+    // Return whether an allocation was refused, which an allocation-failure
+    // walk accepts from a refused run.
+    fn is_refusal(self: Self) -> Bool {
+        match read self {
+            Allocation(_) => true,
+            _ => false,
+        }
+    }
+
+    // Build the error for a failed `operation` from a negated errno the
+    // runtime answered.
+    internal fn from_answer(operation: io.IoOperation, answer: Int64) -> ProcessError {
+        .Io(io.IoError.from_os(operation, Int32(0 - answer)))
+    }
+
+    test "a runtime answer keeps its operation and category" {
+        // 2 is ENOENT on Linux and macOS.
+        let error = ProcessError.from_answer(.Spawn, -2)
+        let found = match read error {
+            Io(reason) => reason.operation == .Spawn && reason.category == .NotFound,
+            _ => false,
+        }
+        testing.assert(found, "a missing program lost its operation or category")?
+        testing.assert(!error.is_refusal(), "an operating-system error was a refusal")?
+        .Ok(())
+    }
+}
+
+impl Display for ProcessError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Allocation(error) => error.fmt(&w),
+            InvalidArgument => &w.write_str("an argument, variable or directory holds a byte the system cannot take"),
+            TooLong(limit) => "captured output passed its limit of {limit} bytes".fmt(&w),
+            Io(error) => error.fmt(&w),
+        }
+    }
+}
+
+test "a process error displays its reason" {
+    let long: ProcessError = .TooLong(16)
+    let missing = ProcessError.from_answer(.Spawn, -2)
+    var writer = testing.Recorder.of(128).unwrap()
+    let wrote = "{long}; {missing}".fmt(&writer).is_ok()
+    let equal = writer.holds("captured output passed its limit of 16 bytes; Spawn failed (NotFound) after 0 bytes; errno 2")
+    writer.release()
+    testing.assert(wrote && equal, "a process error displayed something else")?
+    .Ok(())
+}

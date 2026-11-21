@@ -18,6 +18,9 @@ pub enum IoOperation {
     Accept,
     Connect,
     Configure,
+    Spawn,
+    Wait,
+    Kill,
 }
 
 // IoCategory classifies a failure the same way on every platform; the native

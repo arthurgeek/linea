@@ -1,0 +1,15 @@
+// The runtime signals and reaps a child process by the number its spawn
+// answered. Only the standard library's `process` keeps that number, in a
+// linear `process.Child` that `wait` consumes, so a module granted `extern`
+// cannot reap a child twice, reap one the standard library still waits for,
+// or signal a process the number no longer names.
+extern fn linea_process_wait(pid: Int32, inout status: UInt64) -> Int64
+
+extern fn linea_process_kill(pid: Int32) -> Int64
+
+fn main() -> UInt8 {
+    var status: UInt64 = 0
+    let _killed = linea_process_kill(1)
+    let _waited = linea_process_wait(1, &status)
+    0
+}

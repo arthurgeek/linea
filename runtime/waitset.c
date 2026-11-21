@@ -654,8 +654,13 @@ long linea_waitset_next(unsigned long set) {
         } else if (s->kernel >= 0) {
             linea_park_unlock(&s->park);
             if (linea_fiber_active()) {
+                /* Parking takes a descriptor and carrier storage of its own.
+                 * When the system refuses them (a full descriptor table, no
+                 * memory), the set waits on its kernel queue in place: the
+                 * carrier is held until a source is ready, and no wait is
+                 * lost. */
                 const long result = linea_fiber_wait_descriptor(s->kernel, 0, deadline);
-                if (result < 0 && result != -(long)ETIMEDOUT) fail("linea: a wait set's queue could not be awaited\n");
+                if (result < 0 && result != -(long)ETIMEDOUT) (void)wait_in_kernel(s, deadline, 0);
             } else {
                 (void)wait_in_kernel(s, deadline, 0);
             }

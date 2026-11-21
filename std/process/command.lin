@@ -1,0 +1,563 @@
+import std.env
+import std.mem
+import std.testing
+
+use mem.Lender
+
+// Stdio says what one of a child's standard streams is connected to: this
+// process's own stream (`Inherit`), nothing (`Null`, which reads as empty
+// and discards what is written), or a new pipe whose other end the parent
+// holds (`Pipe`).
+@(copyable, derive(Equatable, Debug))
+pub enum Stdio {
+    Inherit,
+    Null,
+    Pipe,
+}
+
+// A Command describes a program to start: its name or path, its arguments,
+// changes to the environment it receives, the directory it starts in, and
+// where its standard streams go. Building one never fails: a refused
+// allocation, or an argument the system cannot take, is kept and answered by
+// `spawn`, `status` or `output`, each of which starts one child and
+// releases the command. The text is copied into storage from the command's
+// allocator.
+@opaque
+struct Command[A: Allocator = mem.SystemAllocator] {
+    allocator: A,
+    arguments: Vec[UInt8, A],
+    argument_count: UInt64,
+    changes: Vec[UInt8, A],
+    change_count: UInt64,
+    cleared: Bool,
+    directory: Vec[UInt8, A],
+    input: Stdio,
+    output: Stdio,
+    errors: Stdio,
+    refused: Option[ProcessError],
+}
+
+// The ASCII code of `=`, which ends a variable's name.
+let ascii_equals: UInt8 = 61
+
+// The runtime takes the environment bit of its setup byte with this value set
+// when the command's environment replaces this process's.
+let replaces_environment: UInt8 = 64
+
+// A pointer the runtime writes into the table it is handed is eight bytes on
+// every platform the runtime supports.
+let pointer_bytes: UInt64 = 8
+
+// Whether `bytes` holds a NUL byte, which ends a C string early.
+fn holds_nul(bytes: mem.Slice[UInt8]) -> Bool {
+    for index in 0..bytes.length() {
+        if bytes[index] == 0 {
+            return true
+        }
+    }
+    false
+}
+
+// The name of a variable change: the bytes before its first `=`, or all of it
+// for a removal.
+fn change_name(change: mem.Slice[UInt8]) -> mem.Slice[UInt8] where carries(change) {
+    var at: UInt64 = 0
+    while at < change.length() && change[at] != ascii_equals {
+        at += 1
+    }
+    change.subspan(start: 0, count: at).unwrap()
+}
+
+// Terminated walks the NUL-terminated strings of a block from `at`.
+struct Terminated {
+    bytes: mem.Slice[UInt8],
+    at: UInt64,
+}
+
+impl Iterator for Terminated {
+    type Item = mem.Slice[UInt8]
+
+    fn next(inout self: Self) -> Option[mem.Slice[UInt8]] where carries(.Some: self) {
+        if self.at >= self.bytes.length() {
+            return .None
+        }
+        var end = self.at
+        while self.bytes[end] != 0 {
+            end += 1
+        }
+        let found = self.bytes.subspan(start: self.at, count: end - self.at).unwrap()
+        self.at = end + 1
+        .Some(found)
+    }
+}
+
+// Walk the NUL-terminated strings of `bytes` from offset `at`.
+fn terminated(bytes: mem.Slice[UInt8], at: UInt64) -> Terminated where carries(bytes) {
+    .{ bytes = copy(bytes), at }
+}
+
+test "a block's strings are walked in order" {
+    var names: UInt64 = 0
+    var bytes: UInt64 = 0
+    for text in terminated("tea\0\0milk\0".as_bytes(), 0) {
+        names += 1
+        bytes += text.length()
+    }
+    testing.assert_eq((names, bytes), (UInt64(3), UInt64(7)), "a block's strings were walked wrongly")?
+    .Ok(())
+}
+
+// Whether a change after offset `from` of `changes` names `name`.
+fn named_after(changes: mem.Slice[UInt8], from: UInt64, name: mem.Slice[UInt8]) -> Bool {
+    for change in terminated(changes, from) {
+        if change_name(change) == name {
+            return true
+        }
+    }
+    false
+}
+
+// The two bits each stream takes in the runtime's setup byte.
+fn stream_code(stdio: Stdio) -> UInt8 {
+    match read stdio {
+        Inherit => 0,
+        Null => 1,
+        Pipe => 2,
+    }
+}
+
+test "streams have the runtime's codes" {
+    testing.assert_eq((stream_code(.Inherit), stream_code(.Null), stream_code(.Pipe)), (UInt8(0), UInt8(1), UInt8(2)), "a stream changed its code")?
+    .Ok(())
+}
+
+impl Command[mem.SystemAllocator] {
+    // Describe the program `program`, keeping the command's text in the
+    // system allocator. A name holding no `/` is searched for in this
+    // process's PATH; a path is used as it is, relative to the directory the
+    // child starts in.
+    pub fn new(program: Str) -> Command[mem.SystemAllocator] {
+        Command.new_in(mem.system(), program)
+    }
+
+    test "a new command runs its program" {
+        let status = Command.new("true").status().unwrap()
+        testing.assert(status.success(), "true did not succeed")?
+        .Ok(())
+    }
+}
+
+impl[A: Allocator] Command[A] {
+    // Describe the program `program`, keeping the command's text in storage
+    // from `allocator`, which `spawn` also takes its scratch storage from.
+    // Every stream is inherited until it is set.
+    pub fn new_in(allocator: A, program: Str) -> Command[A] where carries(allocator) {
+        let command: Command[A] = .{
+            allocator = copy(allocator),
+            arguments = Vec.new_in(allocator),
+            argument_count = 0,
+            changes = Vec.new_in(allocator),
+            change_count = 0,
+            cleared = false,
+            directory = Vec.new_in(allocator),
+            input = .Inherit,
+            output = .Inherit,
+            errors = .Inherit,
+            refused = .None,
+        }
+        command.arg(program)
+    }
+
+    test "a command keeps its text in its allocator" {
+        // The arena holds the command's text and the spawn's scratch.
+        defer let arena = mem.Arena.open(mem.system(), size: 4096)
+        let status = Command.new_in(arena.handle(), "/bin/sh").arg("-c").arg("exit 0").status().unwrap()
+        testing.assert(status.success(), "a command in an arena failed")?
+        .Ok(())
+    }
+
+    // Keep the first reason the command cannot be started.
+    fn refuse(inout self: Self, sink reason: ProcessError) {
+        if self.refused.is_none() {
+            self.refused = .Some(reason)
+        }
+    }
+
+    // Append `first`, `second` and `third` and a NUL byte to `block` as one
+    // string, all or nothing.
+    fn append_terminated(inout self: Self, inout block: Vec[UInt8, A], first: mem.Slice[UInt8], second: mem.Slice[UInt8], third: mem.Slice[UInt8]) -> Bool {
+        if holds_nul(first) || holds_nul(second) || holds_nul(third) {
+            &self.refuse(.InvalidArgument)
+            return false
+        }
+        // Room for every part is reserved first, so the appends that follow
+        // cannot be refused.
+        match &block.reserve(first.length() + second.length() + third.length() + 1) {
+            Ok(_) => {},
+            Err(reason) => {
+                &self.refuse(.Allocation(reason))
+                return false
+            },
+        }
+        let appended = &block.append_slice(first).is_ok() && &block.append_slice(second).is_ok() && &block.append_slice(third).is_ok() && &block.append_slice("\0".as_bytes()).is_ok()
+        if !appended {
+            panic("an append into reserved room was refused")
+        }
+        true
+    }
+
+    // Add `argument` after the arguments already given.
+    pub fn arg(sink self: Self, argument: Str) -> Self where carries(self) {
+        var command = self
+        let empty: Vec[UInt8, A] = Vec.new_in(command.allocator)
+        var arguments = mem.exchange(&command.arguments, empty)
+        if &command.append_terminated(&arguments, argument.as_bytes(), "".as_bytes(), "".as_bytes()) {
+            command.argument_count += 1
+        }
+        mem.exchange(&command.arguments, arguments).release()
+        command
+    }
+
+    test "arguments reach the child in order" {
+        let output = Command.new("/bin/sh").arg("-c").arg("printf '%s|' \"$@\"").arg("sh").arg("one").arg("two words").output(max_bytes: 64).unwrap()
+        let equal = output.stdout.as_slice() == "one|two words|".as_bytes()
+        output.release()
+        testing.assert(equal, "the arguments arrived changed")?
+        .Ok(())
+    }
+
+    test "an argument holding a NUL byte is refused" {
+        let refused = match Command.new("true").arg("a\0b").spawn() {
+            Ok(child) => {
+                let _status = child.wait()
+                false
+            },
+            Err(reason) => match read reason { InvalidArgument => true, _ => false },
+        }
+        testing.assert(refused, "an argument holding a NUL byte was passed on")?
+        .Ok(())
+    }
+
+    // Add a change to the child's environment: `name=value` to set a
+    // variable, or the name alone to remove one.
+    fn change(sink self: Self, name: mem.Slice[UInt8], separator: mem.Slice[UInt8], value: mem.Slice[UInt8]) -> Self where carries(self) {
+        var command = self
+        let empty: Vec[UInt8, A] = Vec.new_in(command.allocator)
+        var changes = mem.exchange(&command.changes, empty)
+        if &command.append_terminated(&changes, name, separator, value) {
+            command.change_count += 1
+        }
+        mem.exchange(&command.changes, changes).release()
+        command
+    }
+
+    // Set the variable `name` to `value` in the child's environment. A name
+    // that is empty or holds `=` is refused when the command starts.
+    pub fn env(sink self: Self, name: Str, value: Str) -> Self where carries(self) {
+        var command = self
+        if name.length() == 0 || name.find("=").is_some() {
+            &command.refuse(.InvalidArgument)
+            return command
+        }
+        command.change(name.as_bytes(), "=".as_bytes(), value.as_bytes())
+    }
+
+    test "a set variable reaches the child" {
+        let output = Command.new("/bin/sh").arg("-c").arg(r"printf %s $LINEA_TEA").env("LINEA_TEA", "sencha").env("LINEA_TEA", "matcha").output(max_bytes: 64).unwrap()
+        let equal = output.stdout.as_slice() == "matcha".as_bytes()
+        output.release()
+        testing.assert(equal, "the last value set did not reach the child")?
+        .Ok(())
+    }
+
+    test "a variable name holding an equals sign is refused" {
+        let refused = match Command.new("true").env("A=B", "c").spawn() {
+            Ok(child) => {
+                let _status = child.wait()
+                false
+            },
+            Err(reason) => match read reason { InvalidArgument => true, _ => false },
+        }
+        testing.assert(refused, "a name holding `=` was passed on")?
+        .Ok(())
+    }
+
+    // Leave the variable `name` out of the child's environment.
+    pub fn env_remove(sink self: Self, name: Str) -> Self where carries(self) {
+        var command = self
+        if name.length() == 0 || name.find("=").is_some() {
+            &command.refuse(.InvalidArgument)
+            return command
+        }
+        command.change(name.as_bytes(), "".as_bytes(), "".as_bytes())
+    }
+
+    test "a removed variable does not reach the child" {
+        let output = Command.new("/bin/sh").arg("-c").arg(r"printf %s ${LINEA_TEA-unset}").env("LINEA_TEA", "sencha").env_remove("LINEA_TEA").output(max_bytes: 64).unwrap()
+        let equal = output.stdout.as_slice() == "unset".as_bytes()
+        output.release()
+        testing.assert(equal, "a removed variable reached the child")?
+        .Ok(())
+    }
+
+    // Start the child with no variables but those set on this command.
+    pub fn env_clear(sink self: Self) -> Self where carries(self) {
+        var command = self
+        command.cleared = true
+        command
+    }
+
+    test "a cleared environment holds only what was set" {
+        let output = Command.new("/bin/sh").arg("-c").arg(r"printf '%s %s' ${HOME-unset} $LINEA_TEA").env_clear().env("LINEA_TEA", "hojicha").output(max_bytes: 64).unwrap()
+        let equal = output.stdout.as_slice() == "unset hojicha".as_bytes()
+        output.release()
+        testing.assert(equal, "a cleared environment kept this process's variables")?
+        .Ok(())
+    }
+
+    // Start the child in the directory `path` instead of this process's.
+    pub fn directory(sink self: Self, path: Str) -> Self where carries(self) {
+        var command = self
+        var directory: Vec[UInt8, A] = Vec.new_in(command.allocator)
+        if &command.append_terminated(&directory, path.as_bytes(), "".as_bytes(), "".as_bytes()) {
+            let previous = mem.exchange(&command.directory, directory)
+            previous.release()
+        } else {
+            directory.release()
+        }
+        command
+    }
+
+    test "a child starts in its directory" {
+        let output = Command.new("pwd").directory("/").output(max_bytes: 64).unwrap()
+        let equal = output.stdout.as_slice() == "/\n".as_bytes()
+        output.release()
+        testing.assert(equal, "the child started elsewhere")?
+        .Ok(())
+    }
+
+    // Connect the child's standard input as `stdio` says.
+    pub fn stdin(sink self: Self, stdio: Stdio) -> Self where carries(self) {
+        var command = self
+        command.input = stdio
+        command
+    }
+
+    test "a null input reads as empty" {
+        let output = Command.new("cat").stdin(.Null).output(max_bytes: 64).unwrap()
+        let empty = output.stdout.length() == 0 && output.status.success()
+        output.release()
+        testing.assert(empty, "cat read something from a null input")?
+        .Ok(())
+    }
+
+    // Connect the child's standard output as `stdio` says.
+    pub fn stdout(sink self: Self, stdio: Stdio) -> Self where carries(self) {
+        var command = self
+        command.output = stdio
+        command
+    }
+
+    test "a null output discards what the child writes" {
+        let status = Command.new("/bin/sh").arg("-c").arg("printf discarded").stdout(.Null).status().unwrap()
+        testing.assert(status.success(), "writing to a null output failed")?
+        .Ok(())
+    }
+
+    // Connect the child's standard error as `stdio` says.
+    pub fn stderr(sink self: Self, stdio: Stdio) -> Self where carries(self) {
+        var command = self
+        command.errors = stdio
+        command
+    }
+
+    test "a null error stream discards what the child reports" {
+        let status = Command.new("/bin/sh").arg("-c").arg("printf discarded >&2").stderr(.Null).status().unwrap()
+        testing.assert(status.success(), "writing to a null error stream failed")?
+        .Ok(())
+    }
+
+    // Build the child's environment into `block`: this process's variables
+    // unless the command cleared them, less those the command changes, then
+    // the last value set for each variable the command sets. Answer how many
+    // variables it holds.
+    fn environment_block(self: Self, inout block: Vec[UInt8, A]) -> Result[UInt64, mem.Oom] {
+        var count: UInt64 = 0
+        let changes = self.changes.as_slice()
+        if !self.cleared {
+            for entry in env.entries() {
+                if !named_after(changes, 0, entry.name) {
+                    &block.append_slice(entry.name)?
+                    &block.append_slice("=".as_bytes())?
+                    &block.append_slice(entry.value)?
+                    &block.append_slice("\0".as_bytes())?
+                    count += 1
+                }
+            }
+        }
+        var at: UInt64 = 0
+        for change in terminated(changes, 0) {
+            at += change.length() + 1
+            let name = change_name(change)
+            if name.length() < change.length() && !named_after(changes, at, name) {
+                &block.append_slice(change)?
+                &block.append_slice("\0".as_bytes())?
+                count += 1
+            }
+        }
+        .Ok(count)
+    }
+
+    // Start the child the command describes, with its streams connected as
+    // `input`, `output` and `errors` say.
+    fn start(self: Self, input: Stdio, output: Stdio, errors: Stdio) -> Result[Child, ProcessError] where carries() {
+        match read self.refused {
+            Some(reason) => return .Err(copy(reason)),
+            None => {},
+        }
+        let replaces = self.cleared || self.change_count > 0
+        var environment: Vec[UInt8, A] = Vec.new_in(self.allocator)
+        var environment_count: UInt64 = 0
+        if replaces {
+            match self.environment_block(&environment) {
+                Ok(count) => environment_count = count,
+                Err(reason) => {
+                    environment.release()
+                    return .Err(.Allocation(reason))
+                },
+            }
+        }
+        var pointers = self.argument_count + 1
+        var setup = stream_code(input) + stream_code(output) * 4 + stream_code(errors) * 16
+        if replaces {
+            pointers += environment_count + 1
+            setup += replaces_environment
+        }
+        var table = self.allocator.acquire(pointers * pointer_bytes) else |reason| {
+            environment.release()
+            return .Err(.Allocation(reason))
+        }
+        let (answer, pipes) = mem._spawn(self.arguments.as_slice(), self.argument_count, environment.as_slice(), environment_count, self.directory.as_slice(), &table, setup)
+        table.release()
+        environment.release()
+        if answer < 0 {
+            return .Err(ProcessError.from_answer(.Spawn, answer))
+        }
+        .Ok(Child { pid = Int32(answer), stdin = writer_of(pipes.stdin), stdout = reader_of(pipes.stdout), stderr = reader_of(pipes.stderr) })
+    }
+
+    // Start the child the command describes, with its streams as set, and
+    // answer it, releasing the command. Its arguments, environment and
+    // pointer tables take scratch storage from the command's allocator,
+    // released before this returns. A program that cannot be found fails
+    // with category `NotFound`, and one that may not be run with
+    // `PermissionDenied`. While SIGCHLD is ignored, so the kernel would reap
+    // the child before anyone could wait for it, nothing starts and the
+    // spawn fails with errno ECHILD.
+    pub fn spawn(sink self: Self) -> Result[Child, ProcessError] where carries() {
+        let started = self.start(self.input, self.output, self.errors)
+        self.release()
+        started
+    }
+
+    test "a program that is not there is not found" {
+        let missing = match Command.new("linea-no-such-program-anywhere").spawn() {
+            Ok(child) => {
+                let _status = child.wait()
+                false
+            },
+            Err(reason) => match read reason { Io(error) => error.category == .NotFound && error.operation == .Spawn, _ => false },
+        }
+        testing.assert(missing, "a missing program was not reported as not found")?
+        .Ok(())
+    }
+
+    test "each allocation failure covers starting a child" -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), ProcessError] {
+                let child = Command.new_in(allocator, "/bin/sh").arg("-c").arg("exit 0").env("LINEA_TEA", "genmaicha").spawn()?
+                let _status = child.wait()?
+                return .Ok(())
+            },
+            ProcessError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "starting a child failed, or took storage from another allocator")?
+        testing.assert(!process_test_zombies(), "a walk of refused allocations left a zombie")?
+        .Ok(())
+    }
+
+    // Start the child with its streams as set, wait for it to end and answer
+    // how it ended, releasing the command. A stream set to `Pipe` is closed
+    // at once.
+    pub fn status(sink self: Self) -> Result[ExitStatus, ProcessError] where carries() {
+        self.spawn()?.wait()
+    }
+
+    test "a status reports how the child ended" {
+        let status = Command.new("/bin/sh").arg("-c").arg("exit 7").status().unwrap()
+        testing.assert_eq(status, ExitStatus.Exited(7), "the status was lost")?
+        .Ok(())
+    }
+
+    // Start the child with its standard output and error piped, read both
+    // at once into vectors from `allocator` as the child writes them, wait
+    // for it and answer its status and both outputs, releasing the command.
+    // Standard input is as set, and a piped one is closed at once. Each
+    // output may hold at most `max_bytes`; see `Child.wait_with_output_in`.
+    pub fn output_in[B: Allocator](sink self: Self, allocator: B, max_bytes: UInt64) -> Result[Output[B], ProcessError] where carries(.Ok: allocator) {
+        let started = self.start(self.input, .Pipe, .Pipe)
+        self.release()
+        started?.wait_with_output_in(allocator, max_bytes)
+    }
+
+    test "megabytes on both streams are read without stalling" {
+        // Standard error is written first, so a parent reading standard output
+        // alone would wait forever on a child blocked on a full error pipe.
+        defer let output = Command.new("/bin/sh").arg("-c").arg("head -c 3000000 /dev/zero >&2; head -c 5000000 /dev/zero").output(max_bytes: 8000000).unwrap()
+        testing.assert_eq((output.stdout.length(), output.stderr.length()), (UInt64(5000000), UInt64(3000000)), "the child's output was cut short")?
+        testing.assert(output.status.success(), "the child failed")?
+        .Ok(())
+    }
+
+    test "each allocation failure covers capturing output" -> Result[(), testing.Failure] {
+        let checked = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), ProcessError] {
+                let output = Command.new_in(allocator, "/bin/sh").arg("-c").arg("printf hello; printf oops >&2").output_in(allocator, max_bytes: 64)?
+                let equal = output.stdout.as_slice() == "hello".as_bytes() && output.stderr.as_slice() == "oops".as_bytes()
+                output.release()
+                if !equal {
+                    panic("the captured output changed")
+                }
+                return .Ok(())
+            },
+            ProcessError.is_refusal,
+        )
+        testing.assert(checked.is_ok(), "capturing output failed, or took storage from another allocator")?
+        testing.assert(!process_test_zombies(), "a walk of refused allocations left a zombie")?
+        .Ok(())
+    }
+
+    // Capture output as `output_in` does, into the system allocator.
+    pub fn output(sink self: Self, max_bytes: UInt64) -> Result[Output[mem.SystemAllocator], ProcessError] where carries() {
+        self.output_in(mem.system(), max_bytes)
+    }
+
+    test "output captures both streams and the status" {
+        defer let output = Command.new("/bin/sh").arg("-c").arg("printf brewed; printf steeped >&2; exit 2").output(max_bytes: 64).unwrap()
+        testing.assert_eq(output.status, ExitStatus.Exited(2), "the status was lost")?
+        testing.assert_eq(output.stdout.as_slice(), "brewed".as_bytes(), "standard output was lost")?
+        testing.assert_eq(output.stderr.as_slice(), "steeped".as_bytes(), "standard error was lost")?
+        .Ok(())
+    }
+}
+
+impl[A: Allocator] Release for Command[A] {
+    fn release(sink self: Self) {
+        let Command { allocator: _allocator, arguments, argument_count: _arguments, changes, change_count: _changes, cleared: _cleared, directory, input: _input, output: _output, errors: _errors, refused: _refused } = self
+        arguments.release()
+        changes.release()
+        directory.release()
+    }
+}

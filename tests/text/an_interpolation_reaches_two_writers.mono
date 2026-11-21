@@ -37,6 +37,9 @@ pub enum IoOperation {
     Accept,
     Connect,
     Configure,
+    Spawn,
+    Wait,
+    Kill,
 }
 
 @(copyable, derive(Equatable, Equivalent, Display, Debug, Release))

@@ -1,0 +1,10 @@
+error[T-ExternRuntime]: `linea_process_wait` takes or answers what only the standard library's `process` keeps in a type, so only that module declares it
+ --> tests/library/a_child_process_is_signalled_and_reaped_only_through_its_library_module/main.lin:6:11
+  |
+6 | extern fn linea_process_wait(pid: Int32, inout status: UInt64) -> Int64
+  |           ^^^^^^^^^^^^^^^^^^ reach it through `wait` and `kill` on a `process.Child`
+error[T-ExternRuntime]: `linea_process_kill` takes or answers what only the standard library's `process` keeps in a type, so only that module declares it
+ --> tests/library/a_child_process_is_signalled_and_reaped_only_through_its_library_module/main.lin:8:11
+  |
+8 | extern fn linea_process_kill(pid: Int32) -> Int64
+  |           ^^^^^^^^^^^^^^^^^^ reach it through `wait` and `kill` on a `process.Child`
