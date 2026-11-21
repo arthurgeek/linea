@@ -407,6 +407,212 @@ test "a sleep lasts at least its duration" {
     .Ok(())
 }
 
+// `Deadline` is a moment on the monotonic clock by which something must be
+// done, or `never`. It is absolute, so one deadline made at the start of a
+// piece of work, such as a request, is handed to every step of it, the
+// connect, the writes, the reads and each retry, and they all share one budget
+// instead of each getting a time of its own. An operation that would wait past
+// its deadline fails with an `io.IoError` whose category is `TimedOut`. Like an
+// `Instant`, a deadline made inside a simulation is on its virtual clock and
+// means nothing outside it.
+@(opaque, copyable, derive(Equatable, Comparable, Debug))
+struct Deadline {
+    // The monotonic clock's reading at the deadline, in nanoseconds, or
+    // `never_nanoseconds`.
+    nanoseconds: UInt64,
+}
+
+// The largest reading stands for the deadline that never passes. It sorts
+// after every other, so the earlier of two deadlines is the smaller.
+let never_nanoseconds: UInt64 = UInt64.max
+
+// `never` is the deadline that never passes. An operation given it waits as
+// long as it takes.
+pub let never = Deadline { nanoseconds = never_nanoseconds }
+
+impl Deadline {
+    // `Deadline.after` makes the deadline `duration` from now on the monotonic
+    // clock. A moment past the clock's range, about 584 years from its start,
+    // is `never`.
+    pub fn after(duration: Duration) -> Deadline {
+        let now = Instant.now().nanoseconds
+        if duration.nanoseconds >= never_nanoseconds - now {
+            return never
+        }
+        .{ nanoseconds = now + duration.nanoseconds }
+    }
+
+    test "a deadline after no time has already passed" {
+        let deadline = Deadline.after(Duration.from_nanoseconds(0))
+        testing.assert(deadline.expired(), "a deadline after no time had not passed")?
+        testing.assert_eq(deadline.remaining(), Option.Some(Duration.from_nanoseconds(0)), "a passed deadline had time left")?
+    }
+
+    test "a deadline too far away never passes" {
+        testing.assert_eq(Deadline.after(Duration.from_nanoseconds(UInt64.max)), never, "a deadline past the clock's range was not never")?
+    }
+
+    // `remaining` returns how long is left until the deadline: zero once it
+    // has passed, and `None` for `never`, which has no end to count to.
+    pub fn remaining(self: Self) -> Option[Duration] {
+        self.left_at(Instant.now().nanoseconds)
+    }
+
+    test "a deadline an hour away has about an hour left" {
+        let deadline = Deadline.after(Duration.from_seconds(3600))
+        let left = deadline.remaining().unwrap()
+        testing.assert(left <= Duration.from_seconds(3600) && left > Duration.from_seconds(3500), "an hour's deadline had other than about an hour left")?
+        testing.assert_eq(never.remaining(), .None, "never had a time left")?
+    }
+
+    // The time left at the monotonic reading `now`.
+    fn left_at(self: Self, now: UInt64) -> Option[Duration] {
+        if self.nanoseconds == never_nanoseconds {
+            return .None
+        }
+        if now >= self.nanoseconds {
+            return .Some(.{ nanoseconds = 0 })
+        }
+        .Some(.{ nanoseconds = self.nanoseconds - now })
+    }
+
+    test "a deadline's time left counts down to zero" {
+        let deadline = Deadline { nanoseconds = 5000 }
+        testing.assert_eq(deadline.left_at(3000), Option.Some(Duration.from_nanoseconds(2000)), "the time left changed")?
+        testing.assert_eq(deadline.left_at(5000), Option.Some(Duration.from_nanoseconds(0)), "a deadline reached had time left")?
+        testing.assert_eq(deadline.left_at(9000), Option.Some(Duration.from_nanoseconds(0)), "a deadline passed had time left")?
+        testing.assert_eq(never.left_at(9000), .None, "never had a time left")?
+    }
+
+    // `expired` says whether the deadline has passed: the monotonic clock has
+    // reached it. `never` never expires.
+    pub fn expired(self: Self) -> Bool {
+        Instant.now().nanoseconds >= self.nanoseconds && self.nanoseconds != never_nanoseconds
+    }
+
+    test "a deadline an hour away has not expired" {
+        testing.assert(!Deadline.after(Duration.from_seconds(3600)).expired(), "a deadline an hour away had passed")?
+        testing.assert(!never.expired(), "never passed")?
+    }
+
+    // `earlier` returns whichever of the two deadlines comes first, so a step
+    // with a limit of its own still stops when the whole piece of work must.
+    pub fn earlier(self: Self, other: Deadline) -> Deadline {
+        if other.nanoseconds < self.nanoseconds {
+            return copy(other)
+        }
+        copy(self)
+    }
+
+    test "the earlier of two deadlines is the nearer one" {
+        let near = Deadline { nanoseconds = 10 }
+        let far = Deadline { nanoseconds = 20 }
+        testing.assert_eq(near.earlier(far), near, "the nearer deadline lost")?
+        testing.assert_eq(far.earlier(near), near, "the order of the deadlines changed the answer")?
+        testing.assert_eq(never.earlier(far), far, "never was nearer than a deadline")?
+    }
+
+    // The deadline in nanoseconds of the monotonic clock, as the runtime takes
+    // it: 0 means no deadline, which is how it writes `never`. No reading of
+    // either clock is 0, so no deadline the runtime is given is mistaken for
+    // none.
+    internal fn monotonic_nanoseconds(self: Self) -> UInt64 {
+        if self.nanoseconds == never_nanoseconds {
+            return 0
+        }
+        self.nanoseconds
+    }
+
+    test "the runtime is given never as no deadline" {
+        testing.assert_eq(never.monotonic_nanoseconds(), UInt64(0), "never was a deadline")?
+        testing.assert_eq(Deadline { nanoseconds = 42 }.monotonic_nanoseconds(), UInt64(42), "a deadline changed its reading")?
+    }
+}
+
+// `Backoff` spaces the attempts of a retry loop: the first pause is `first`,
+// and each one after doubles, up to `longest`. Given the deadline the work
+// must finish by, it gives no pause that would end at or past it, so the loop
+// stops retrying while there is still time to report why, instead of sleeping
+// into the deadline and failing then.
+@(opaque, copyable, derive(Equatable, Debug))
+struct Backoff {
+    first: Duration,
+    longest: Duration,
+    // The pause given last, zero before the first.
+    last: Duration,
+}
+
+impl Backoff {
+    // `Backoff.new` makes a backoff whose first pause is `first` and whose
+    // pauses double up to `longest`.
+    pub fn new(first: Duration, longest: Duration) -> Backoff {
+        .{ first = copy(first), longest = copy(longest), last = .{ nanoseconds = 0 } }
+    }
+
+    test "a new backoff starts at its first pause" {
+        var backoff = Backoff.new(first: Duration.from_milliseconds(5), longest: Duration.from_seconds(1))
+        testing.assert_eq(&backoff.next_pause(never), Option.Some(Duration.from_milliseconds(5)), "the first pause changed")?
+    }
+
+    // `next_pause` returns how long to wait before the next attempt: the first
+    // pause, or double the last, up to the longest. It answers `None`, and
+    // gives no pause, when the deadline would pass before the pause ends, so
+    // the next attempt could not start in time.
+    pub fn next_pause(inout self: Self, deadline: Deadline) -> Option[Duration] {
+        let pause = if self.last.nanoseconds == 0 {
+            copy(self.first)
+        } else if self.last.nanoseconds >= self.longest.nanoseconds / 2 {
+            copy(self.longest)
+        } else {
+            Duration { nanoseconds = self.last.nanoseconds * 2 }
+        }
+        match deadline.remaining() {
+            Some(left) => if pause >= left {
+                return .None
+            },
+            None => {},
+        }
+        self.last = copy(pause)
+        .Some(pause)
+    }
+
+    test "a backoff doubles its pause up to the longest" {
+        var backoff = Backoff.new(first: Duration.from_milliseconds(5), longest: Duration.from_milliseconds(15))
+        let first = &backoff.next_pause(never)
+        let second = &backoff.next_pause(never)
+        let third = &backoff.next_pause(never)
+        let fourth = &backoff.next_pause(never)
+        testing.assert_eq(first, Option.Some(Duration.from_milliseconds(5)), "the first pause changed")?
+        testing.assert_eq(second, Option.Some(Duration.from_milliseconds(10)), "the pause did not double")?
+        testing.assert_eq(third, Option.Some(Duration.from_milliseconds(15)), "the pause passed the longest")?
+        testing.assert_eq(fourth, Option.Some(Duration.from_milliseconds(15)), "the longest pause grew")?
+    }
+
+    test "a backoff gives no pause that would end past the deadline" {
+        var backoff = Backoff.new(first: Duration.from_seconds(1), longest: Duration.from_seconds(60))
+        let soon = Deadline.after(Duration.from_milliseconds(500))
+        let passed = Deadline.after(Duration.from_nanoseconds(0))
+        let later = Deadline.after(Duration.from_seconds(3600))
+        testing.assert_eq(&backoff.next_pause(soon), .None, "a pause past the deadline was given")?
+        testing.assert_eq(&backoff.next_pause(passed), .None, "a pause after the deadline was given")?
+        testing.assert_eq(&backoff.next_pause(later), Option.Some(Duration.from_seconds(1)), "a refused pause still grew the next one")?
+    }
+
+    // `reset` starts the pauses again from the first, as a retry loop does once
+    // an attempt succeeds.
+    pub fn reset(inout self: Self) {
+        self.last = .{ nanoseconds = 0 }
+    }
+
+    test "a reset backoff starts again at its first pause" {
+        var backoff = Backoff.new(first: Duration.from_milliseconds(5), longest: Duration.from_seconds(1))
+        let _first = &backoff.next_pause(never)
+        let _second = &backoff.next_pause(never)
+        &backoff.reset()
+        testing.assert_eq(&backoff.next_pause(never), Option.Some(Duration.from_milliseconds(5)), "a reset did not start the pauses again")?
+    }
+}
+
 impl Display for Duration {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         let length = self.nanoseconds

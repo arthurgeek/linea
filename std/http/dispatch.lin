@@ -269,7 +269,7 @@ struct Dispatch[L, E, F] {
     open: UInt64,
     accepted: UInt64,
     serial: UInt64,
-    pause_ms: UInt64,
+    accept_backoff: time.Backoff,
     stopped: Bool,
     terminate: Option[task.Registered[io.SignalShare]],
     interrupt: Option[task.Registered[io.SignalShare]],
@@ -655,7 +655,7 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Isolated + 
                     continue
                 }
                 var listener = mem.exchange(&state.listener, .None).unwrap()
-                let attempt = net.accept_attempt(&listener, &state.pause_ms)
+                let attempt = net.accept_attempt(&listener, &state.accept_backoff)
                 &state.put_listener(.Some(listener))
                 match attempt {
                     Connected(Accepted { connection, address: _ }) => {
@@ -682,10 +682,10 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Isolated + 
             Reader(ticket, reader) => {
                 let _entry = &state.forget_idle(ticket)
                 var reading = reader
-                let started = time.Instant.now()
-                let configure = [limits, started] |inout connection: net.Connection| {
+                let deadline = net.bound_after(limits.read_timeout_ms)
+                let configure = [limits, deadline] |inout connection: net.Connection| {
                     &connection.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms)
-                    &connection.set_deadline(started, limits.read_timeout_ms)
+                    &connection.set_read_deadline(deadline)
                 }
                 &reading.update_reader(configure)
                 &state.ready.push(reading)
@@ -738,7 +738,7 @@ fn dispatch_remember_failure[E: Owned + Isolated + Release](inout failed: Option
 }
 
 // Withdrawal returns values even when they are signalled; every owner is settled.
-fn dispatch_finish[L: io.Close, E: Owned + Isolated + Release, F](sink state { waiting, listener, listening: _, idle, ready, free, busy: _, open: _, accepted: _, serial: _, pause_ms: _, stopped: _, terminate: _, interrupt: _, failed, retry: _, backoff: _ }: Dispatch[L, E, F]) -> Result[(), ServeError[E]] where L.CloseError: Into[io.IoError] {
+fn dispatch_finish[L: io.Close, E: Owned + Isolated + Release, F](sink state { waiting, listener, listening: _, idle, ready, free, busy: _, open: _, accepted: _, serial: _, accept_backoff: _, stopped: _, terminate: _, interrupt: _, failed, retry: _, backoff: _ }: Dispatch[L, E, F]) -> Result[(), ServeError[E]] where L.CloseError: Into[io.IoError] {
     var failure = failed
     var withdrawn = waiting.close().drain()
     for woke in &withdrawn {
@@ -813,7 +813,7 @@ fn dispatch_open[L, E, F](sink listener: L) -> Dispatch[L, E, F] where carries(l
         open = 0,
         accepted = 0,
         serial = 0,
-        pause_ms = 0,
+        accept_backoff = net.accept_backoff(),
         stopped = false,
         terminate = .None,
         interrupt = .None,

@@ -9,12 +9,6 @@ use io.Close
 use task.Unowned
 use task.Unstarted
 
-// The first retry of a transient accept failure waits 5 ms; each further
-// failure doubles the wait, up to one second.
-let first_pause_ms: UInt64 = 5
-
-let longest_pause_ms: UInt64 = 1000
-
 // `serve` stops with `Accept` when accepting a connection fails with an
 // error that retrying does not answer, and with `Close` when closing the
 // listener fails.
@@ -95,22 +89,23 @@ fn seen(sink attempt: Attempt) -> Seen {
     }
 }
 
-// Try once to accept the next connection from `listener`. `pause_ms` is how
-// long the last retry waited: it resets to zero when a connection arrives and
-// grows through `accept_pause` while a failure that `retryable` repeats. The
-// caller waits the retry's pause, so it can report the retry first.
-pub fn accept_attempt[L: Acceptor](inout listener: L, inout pause_ms: UInt64) -> Attempt {
+// Try once to accept the next connection from `listener`. `backoff` spaces
+// the retries: it starts again when a connection arrives and its pause grows
+// while a failure that `retryable` repeats. Serving has no deadline, so every
+// such failure is retried. The caller waits the retry's pause, so it can
+// report the retry first.
+pub fn accept_attempt[L: Acceptor](inout listener: L, inout backoff: time.Backoff) -> Attempt {
     match &listener.accept() {
         Ok(accepted) => {
-            pause_ms = 0
+            &backoff.reset()
             .Connected(accepted)
         },
         Err(error) => {
             if !retryable(error) {
                 return .Failed(error)
             }
-            pause_ms = accept_pause(pause_ms)
-            .Retry(.{ error, pause = time.Duration.from_milliseconds(pause_ms) })
+            let pause = &backoff.next_pause(time.never).unwrap()
+            .Retry(.{ error, pause })
         },
     }
 }
@@ -121,18 +116,18 @@ test "an accept_attempt retries failures with a growing pause that a connection 
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
     var script = scripted(listener, [.Some(.Io(copy(exhausted))), .Some(.Io(exhausted)), .None, .Some(.Io(copy(invalid)))], .None)
-    var pause_ms: UInt64 = 0
-    let first = seen(accept_attempt(&script, &pause_ms))
-    let second = seen(accept_attempt(&script, &pause_ms))
-    let third = seen(accept_attempt(&script, &pause_ms))
-    let reset = pause_ms
-    let fourth = seen(accept_attempt(&script, &pause_ms))
+    var backoff = accept_backoff()
+    let first = seen(accept_attempt(&script, &backoff))
+    let second = seen(accept_attempt(&script, &backoff))
+    let third = seen(accept_attempt(&script, &backoff))
+    let reset = copy(backoff)
+    let fourth = seen(accept_attempt(&script, &backoff))
     script.close().unwrap()
     client.close().unwrap()
     testing.assert_eq(first, Seen.Retried(5), "the first retry did not wait 5 ms")?
     testing.assert_eq(second, Seen.Retried(10), "the second retry did not wait 10 ms")?
     testing.assert_eq(third, Seen.Connected, "the connection was not accepted")?
-    testing.assert_eq(reset, UInt64(0), "a connection did not reset the pause")?
+    testing.assert_eq(reset, accept_backoff(), "a connection did not start the pauses again")?
     testing.assert_eq(fourth, Seen.Failed(.Io(invalid)), "a failure retrying does not answer was retried")?
     .Ok(())
 }
@@ -192,10 +187,10 @@ test "finish closes the listener and reports the accept failure before the close
 pub fn serve[L: Acceptor + io.Close, H: inout fn(sink connection: Connection, peer: Address)](sink listener: L, inout handler: H, connections: Option[UInt64] = .None) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
     var accepting = listener
     var served: UInt64 = 0
-    var pause_ms: UInt64 = 0
+    var backoff = accept_backoff()
     var stopped: Option[NetError] = .None
     while stopped.is_none() && !reached(connections, served) {
-        match accept_attempt(&accepting, &pause_ms) {
+        match accept_attempt(&accepting, &backoff) {
             Connected(Accepted { connection, address }) => {
                 &handler(connection, address)
                 served += 1
@@ -476,15 +471,15 @@ fn serve_connections[L: Acceptor + Owned + Shareable + Isolated, H: Owned + Shar
 }
 
 // What a listener's owning task holds while tasks serve it: the listener, how
-// many connections it has handed out, the most it hands out, the pause after
-// a transient accept failure and when that failure was seen, and the failure
-// that ended accepting.
+// many connections it has handed out, the most it hands out, the backoff
+// between transient accept failures and the deadline before which the
+// listener is not asked again, and the failure that ended accepting.
 internal struct Accepting[L] {
     listener: L,
     served: UInt64,
     limit: Option[UInt64],
-    pause_ms: UInt64,
-    retried_at: Option[time.Instant],
+    backoff: time.Backoff,
+    resume: Option[time.Deadline],
     stopped: Option[NetError],
 }
 
@@ -525,7 +520,7 @@ impl[L: Acceptor] Accepting[L] {
     // Keep `listener`, to hand out at most `limit` connections, or any number
     // when that is `.None`.
     internal fn open(sink listener: L, limit: Option[UInt64]) -> Accepting[L] where carries(listener) {
-        .{ listener, served = 0, limit = copy(limit), pause_ms = 0, retried_at = .None, stopped = .None }
+        .{ listener, served = 0, limit = copy(limit), backoff = accept_backoff(), resume = .None, stopped = .None }
     }
 
     // Accept the next connection, unless accepting has stopped, handed out
@@ -534,24 +529,22 @@ impl[L: Acceptor] Accepting[L] {
         if self.stopped.is_some() || reached(self.limit, self.served) {
             return .Stop
         }
-        match read self.retried_at {
-            Some(at) => {
-                let waited = at.elapsed()
-                let pause = time.Duration.from_milliseconds(self.pause_ms)
-                if waited < pause {
-                    return .Wait(time.Duration.from_nanoseconds(pause.nanoseconds() - waited.nanoseconds()))
+        match read self.resume {
+            Some(resume) => {
+                if !resume.expired() {
+                    return .Wait(resume.remaining().unwrap())
                 }
             },
             None => {},
         }
-        self.retried_at = .None
-        match accept_attempt(&self.listener, &self.pause_ms) {
+        self.resume = .None
+        match accept_attempt(&self.listener, &self.backoff) {
             Connected(accepted) => {
                 self.served += 1
                 .Connection(accepted)
             },
             Retry(retry) => {
-                self.retried_at = .Some(time.Instant.now())
+                self.resume = .Some(time.Deadline.after(retry.pause))
                 .Retried(retry)
             },
             Failed(error) => {
@@ -572,7 +565,7 @@ impl[L: Acceptor] Accepting[L] {
         var accepting = Accepting.open(script, limit: .None)
         let retried = told(&accepting.next())
         let early = told(&accepting.next())
-        time.sleep(time.Duration.from_milliseconds(first_pause_ms))
+        time.sleep(accept_backoff().next_pause(time.never).unwrap())
         let later = told(&accepting.next())
         accepting.finish().unwrap()
         client.close().unwrap()
@@ -585,7 +578,7 @@ impl[L: Acceptor] Accepting[L] {
     // The listener, for a thread that serves it alone because its owning
     // task could not be made.
     internal fn close_alone(sink self: Self) -> L where carries(self.listener) {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped: _ } = self
+        let Accepting { listener, served: _, limit: _, backoff: _, resume: _, stopped: _ } = self
         listener
     }
 }
@@ -594,7 +587,7 @@ impl[L: Acceptor + io.Close] Accepting[L] {
     // Close the listener and report the accept failure that ended serving,
     // or the failure to close it.
     internal fn finish(sink self: Self) -> Result[(), ServeError] where L.CloseError: Into[io.IoError] {
-        let Accepting { listener, served: _, limit: _, pause_ms: _, retried_at: _, stopped } = self
+        let Accepting { listener, served: _, limit: _, backoff: _, resume: _, stopped } = self
         finish(listener, stopped)
     }
 }
@@ -783,22 +776,18 @@ test "a reset or exhausted accept is retried" {
     .Ok(())
 }
 
-// `accept_pause` returns the wait in milliseconds before the next retry, after
-// waiting `previous`. `http.serve` shares the schedule.
-pub fn accept_pause(previous: UInt64) -> UInt64 {
-    if previous == 0 {
-        return first_pause_ms
-    }
-    if previous >= longest_pause_ms / 2 {
-        return longest_pause_ms
-    }
-    previous * 2
+// `accept_backoff` spaces the retries of a transient accept failure: the
+// first waits 5 ms and each further one doubles the wait, up to one second.
+// `http.serve` shares the schedule.
+pub fn accept_backoff() -> time.Backoff {
+    time.Backoff.new(first: time.Duration.from_milliseconds(5), longest: time.Duration.from_seconds(1))
 }
 
-test "the accept_pause doubles to one second" {
-    testing.assert_eq(accept_pause(0), 5, "the first pause changed")?
-    testing.assert_eq(accept_pause(5), 10, "the pause did not double")?
-    testing.assert_eq(accept_pause(640), 1000, "the pause passed one second")?
-    testing.assert_eq(accept_pause(1000), 1000, "the longest pause grew")?
+test "the accept_backoff doubles from 5 ms to one second" {
+    var backoff = accept_backoff()
+    for milliseconds in [UInt64(5), 10, 20, 40, 80, 160, 320, 640, 1000, 1000] {
+        let pause = &backoff.next_pause(time.never)
+        testing.assert_eq(pause, Option.Some(time.Duration.from_milliseconds(milliseconds)), "a pause changed")?
+    }
     .Ok(())
 }
