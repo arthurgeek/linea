@@ -351,6 +351,7 @@ ones most likely to be superseded as the compiler grows.
 | [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 and 0245; `_inout` forms superseded by 0267 |
 | [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050; extended by 0246 |
 | [0257](0257-the-driver-keeps-the-checked-standard-library-on-disk.md) | The driver keeps the checked standard library on disk | Accepted |
+| [0296](0296-a-command-answers-main-for-a-mistake-and-for-help.md) | A command answers `main` for a mistake and for help | Accepted |
 
 ## Open questions
 

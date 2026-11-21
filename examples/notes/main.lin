@@ -9,7 +9,7 @@ fn main() -> UInt8 {
         Ok(inv) => inv,
         Err(err) => {
             defer var cmd = build_cli()
-            return report(cmd, args, err)
+            return cmd.report(args, err)
         },
     }
 

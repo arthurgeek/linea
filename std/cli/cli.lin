@@ -867,6 +867,11 @@ impl[A: Allocator] Matches[A] {
     }
 }
 
+// The exit status a program answers with when it was called wrongly: 64,
+// `EX_USAGE` in the BSD `sysexits.h` convention, which the `linea` command
+// follows too.
+pub let usage_status: UInt8 = 64
+
 // Errors produced during command-line argument parsing. A `Str` payload is
 // the argument or the schema text the error is about; `NotText` holds the
 // index of an argument that is not UTF-8, counting the executable as 0.
@@ -1064,10 +1069,16 @@ impl[A: Allocator] ParseState[A] {
             return true
         }
         if token.starts_with("-") && token.length() > 1 {
-            let letter = token.slice(1, character_end(token, 1)).unwrap()
-            return self.short_flag(letter).is_some() || self.short_option(letter).is_some()
+            return self.declares_short(token)
         }
         false
+    }
+
+    // Return whether the first character after the dash of `token` is the
+    // name of a declared short flag or option.
+    fn declares_short(self: Self, token: Str) -> Bool {
+        let letter = token.slice(1, character_end(token, 1)).unwrap()
+        self.short_flag(letter).is_some() || self.short_option(letter).is_some()
     }
 
     // Return whether option `name` of the command at `depth` was supplied.
@@ -1185,6 +1196,66 @@ fn names_short(short: Option[Str], letter: Str) -> Bool {
         Some(s) => s.length() == letter.length() + 1 && s.starts_with("-") && s.ends_with(letter),
         None => false,
     }
+}
+
+// ASCII codes the negative-number scanner compares bytes with.
+let ascii_zero: UInt8 = 48
+
+let ascii_nine: UInt8 = 57
+
+let ascii_point: UInt8 = 46
+
+let ascii_plus: UInt8 = 43
+
+let ascii_minus: UInt8 = 45
+
+let ascii_upper_e: UInt8 = 69
+
+let ascii_lower_e: UInt8 = 101
+
+// Return the byte of `token` at `at`, or 0, which no number holds, past
+// its end.
+fn byte_at(token: Str, at: UInt64) -> UInt8 {
+    token.byte(at).unwrap_or(0)
+}
+
+// Return whether `token` is a dash and a decimal number: digits, then
+// optionally a point and digits, then optionally `e` or `E`, a sign and
+// digits. These are the numbers `Float64` reads that start with a digit.
+fn reads_as_negative_number(token: Str) -> Bool {
+    if byte_at(token, 0) != ascii_minus {
+        return false
+    }
+    var at = digits_end(token, 1)
+    var has_digits = at > 1
+    if has_digits && byte_at(token, at) == ascii_point {
+        let start = at + 1
+        at = digits_end(token, start)
+        has_digits = at > start
+    }
+    let marker = byte_at(token, at)
+    if has_digits && (marker == ascii_lower_e || marker == ascii_upper_e) {
+        var start = at + 1
+        let sign = byte_at(token, start)
+        if sign == ascii_plus || sign == ascii_minus {
+            start += 1
+        }
+        at = digits_end(token, start)
+        has_digits = at > start
+    }
+    has_digits && at == token.length()
+}
+
+// Return the offset of the first byte at or after `start` that is not an
+// ASCII digit.
+fn digits_end(token: Str, start: UInt64) -> UInt64 {
+    var end = start
+    var digit = byte_at(token, end)
+    while digit >= ascii_zero && digit <= ascii_nine {
+        end += 1
+        digit = byte_at(token, end)
+    }
+    end
 }
 
 // Return the byte offset just past the character that starts at `start`.
@@ -1773,7 +1844,9 @@ impl[A: Allocator] Command[A] {
                     }
                     continue
                 }
-                if arg.starts_with("-") && arg.length() > 1 {
+                // A negative number such as `-2` is a value unless a declared short
+                // switch is named by its first character after the dash.
+                if arg.starts_with("-") && arg.length() > 1 && (state.declares_short(arg) || !reads_as_negative_number(arg)) {
                     match &state.take_short(arg, &cursor) {
                         Ok(_) => {},
                         Err(error) => {
@@ -1875,6 +1948,51 @@ impl[A: Allocator] Command[A] {
         var cursor = ArgCursor.from_slice(input.as_slice())
         defer let matches = cmd.parse(&cursor).unwrap()
         testing.assert(matches.flag("dry_run"), "dry_run flag not set")?
+        .Ok(())
+    }
+
+    test "parse takes a negative number as a value unless a short switch spells it" {
+        defer var cmd = Command.new("convert")
+        &cmd.option("offset", "--offset", "added to the value")
+        &cmd.flag("verbose", "--verbose", short: .Some("-v"))
+        &cmd.positional("value")
+        &cmd.positional("rest", required: false, variadic: true)
+
+        let numbers = ["-2", "-0.5", "-1e3", "-2.5E-4", "--offset", "-3"]
+        var numbers_cursor = ArgCursor.from_slice(numbers.as_slice())
+        defer let matches = cmd.parse(&numbers_cursor).unwrap()
+        testing.assert_eq(matches.positional("value"), Option.Some("-2"), "a negative integer was not a positional")?
+        defer let rest = matches.positionals_all("rest").unwrap()
+        testing.assert_eq(rest.length(), UInt64(3), "a negative fraction or exponent was not a positional")?
+        testing.assert_eq(rest[2], "-2.5E-4", "a number with a signed exponent was not a positional")?
+        testing.assert_eq(matches.option("offset"), Option.Some("-3"), "a negative option value was lost")?
+
+        for unknown in ["-x", "-2x", "-.5", "-1.", "-1e"] {
+            let input = [copy(unknown)]
+            var cursor = ArgCursor.from_slice(input.as_slice())
+            let refused = match cmd.parse(&cursor) {
+                Ok(m) => {
+                    m.release()
+                    false
+                },
+                Err(e) => e == CliError.UnknownOption(unknown),
+            }
+            testing.assert(refused, "an argument that is not a number was taken as a value")?
+        }
+
+        let ended = ["--", "-2"]
+        var ended_cursor = ArgCursor.from_slice(ended.as_slice())
+        defer let after_end = cmd.parse(&ended_cursor).unwrap()
+        testing.assert_eq(after_end.positional("value"), Option.Some("-2"), "a negative number after `--` was lost")?
+
+        defer var digits = Command.new("tail")
+        &digits.flag("one", "--one", short: .Some("-1"))
+        &digits.positional("value", required: false)
+        let declared = ["-1"]
+        var declared_cursor = ArgCursor.from_slice(declared.as_slice())
+        defer let switched = digits.parse(&declared_cursor).unwrap()
+        testing.assert(switched.flag("one"), "a declared short switch spelled as a digit was not the switch")?
+        testing.assert(switched.positional("value").is_none(), "a declared short switch was also a positional")?
         .Ok(())
     }
 
@@ -2615,6 +2733,94 @@ impl[A: Allocator] Command[A] {
             Err(e) => e.release(),
         }
         testing.assert(res.is_ok(), "parse_args refused the test runner's arguments")?
+        .Ok(())
+    }
+
+    // Write `error` to standard error as `error: ` and the error, followed by
+    // the help of the command it is about (see `help_for_arguments`), and
+    // return the exit status for `main` to answer: `usage_status` for a
+    // mistake in the arguments, or 1 when memory ran out. `args` are the
+    // arguments the refused parse read; the help is built in the command's
+    // allocator and released before `report` returns.
+    pub fn report(self: Self, args: env.Args, error: CliError) -> UInt8 {
+        io.eprintln("error: {error}")
+        match read error {
+            Allocation(_) => return 1,
+            _ => {},
+        }
+        var cursor = ArgCursor.new(args)
+        let help = self.help_for_arguments(&cursor, error) else |reason| {
+            let refused: CliError = .Allocation(reason)
+            io.eprintln("error: {refused}")
+            return 1
+        }
+        io.eprint(help.view())
+        help.release()
+        usage_status
+    }
+
+    test "report answers the usage status, or 1 when memory runs out" {
+        defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+        defer var root = Command.new_in(log.handle(), "tool")
+        var serve_cmd = Command.new_in(log.handle(), "serve", "serve requests")
+        &serve_cmd.option("port", "--port", "port to listen on", required: true)
+        &root.subcommand(serve_cmd)
+        testing.assert_eq(root.report(env.args(), CliError.MissingOption("--port")), usage_status, "a usage mistake did not answer the usage status")?
+        testing.assert_eq(root.report(env.args(), CliError.Allocation(.Exhausted)), UInt8(1), "a refused allocation did not answer 1")?
+        log.fail_at(.Some(log.attempts() + 1))
+        testing.assert_eq(root.report(env.args(), CliError.MissingOption("--port")), UInt8(1), "a help that could not be built did not answer 1")?
+        .Ok(())
+    }
+
+    // Write the help of the command `matches` reached to standard output, as
+    // `format_help` builds it from this command's declarations, and return
+    // the exit status for `main` to answer: 0, or 1 after writing to standard
+    // error why the help could not be built or written.
+    pub fn print_help(self: Self, matches: borrow Matches[A]) -> UInt8 {
+        let help = self.format_help(matches) else |reason| {
+            let refused: CliError = .Allocation(reason)
+            io.eprintln("error: {refused}")
+            return 1
+        }
+        let written = io.print(help.view())
+        help.release()
+        match written {
+            Ok(_) => 0,
+            Err(error) => {
+                io.eprintln("error: cannot write the help: {error}")
+                1
+            },
+        }
+    }
+
+    test "print_help answers 0 once the help is written, and 1 when it cannot be" {
+        defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+        defer var cmd = Command.new_in(log.handle(), "tool", "a tool")
+        &cmd.flag("json", "--json", "print JSON")
+        let input = ["--help"]
+        var cursor = ArgCursor.from_slice(input.as_slice())
+        defer let matches = cmd.parse(&cursor).unwrap()
+        testing.assert_eq(cmd.print_help(borrow matches), UInt8(0), "writing the help did not answer 0")?
+        log.fail_at(.Some(log.attempts() + 1))
+        testing.assert_eq(cmd.print_help(borrow matches), UInt8(1), "a refused allocation did not answer 1")?
+        .Ok(())
+    }
+
+    // Report `message` as a mistake in how the program was called, one that
+    // the parse accepted but the program refuses, such as a missing
+    // subcommand or two options that exclude each other. It is written as
+    // `report` writes a `CliError`: `error: ` and the message, then the help
+    // of the deepest command the arguments reached; the answer is
+    // `usage_status`, or 1 when memory ran out.
+    pub fn usage_error(self: Self, args: env.Args, message: Str) -> UInt8 {
+        self.report(args, .InvalidValue(copy(message)))
+    }
+
+    test "usage_error answers the usage status" {
+        defer var root = Command.new("tool", "a tool")
+        let serve_cmd = Command.new("serve", "serve requests")
+        &root.subcommand(serve_cmd)
+        testing.assert_eq(root.usage_error(env.args(), "no command given"), usage_status, "a usage error did not answer the usage status")?
         .Ok(())
     }
 }

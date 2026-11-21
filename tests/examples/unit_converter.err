@@ -1,0 +1,10 @@
+error: no command given
+usage: unit_converter <command>
+
+Convert a measurement from one unit to another
+
+commands:
+  length <value> <from> <to>         convert mm, cm, m, km, in, ft or mi
+  weight <value> <from> <to>         convert g, kg, oz or lb
+  temperature <value> <from> <to>    convert C, F or K
+  units                              list the units of each kind

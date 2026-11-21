@@ -1,3 +1,4 @@
+error: no command given
 usage: bounded_echo <command>
 
 Bounded echo server and client
@@ -5,4 +6,3 @@ Bounded echo server and client
 commands:
   serve                run the bounded echo server
   send <message>...    send lines to an echo server
-
