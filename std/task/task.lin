@@ -1,5 +1,4 @@
 import std.mem
-import std.io
 import std.io.core
 import std.mem.address
 import std.release
@@ -1945,58 +1944,26 @@ test "a refused allocation moves work to the caller and keeps every result" {
     }
 }
 
-// Sleep a time `n` chooses, so jobs started together finish in a known
-// order on a simulation's clock: item 1 takes 50 ms, item 2 20 ms, item 3
-// 40 ms, item 4 5 ms and any other 10 ms.
-fn lazy_test_finishing(sink n: UInt64) -> UInt64 {
-    let pause = match n {
-        1 => UInt64(50),
-        2 => 20,
-        3 => 40,
-        4 => 5,
-        _ => 10,
-    }
-    time.sleep(time.Duration.from_milliseconds(pause))
-    n
-}
-
-// Walk a lazy map of the items 1 to `count` under `policy` and `order` inside
-// a simulation, and answer the results as the digits of one number, in the
-// order they were yielded, with the virtual milliseconds the walk took.
-fn lazy_test_order(policy: Policy, order: Order, count: UInt64) -> (UInt64, UInt64) {
-    var sim = io.Simulation.open(seed: 1).unwrap()
-    let answer = &sim.run(
-        [policy, order, count] |inout _world| -> (UInt64, UInt64) {
-            let started = time.Instant.now()
-            defer var mapped = lazy_map(copy(policy), UInt64(1)..=count, lazy_test_finishing, order: order)
-            var digits = UInt64(0)
-            for n in &mapped {
-                digits = digits * 10 + n
-            }
-            (digits, started.elapsed().nanoseconds() / 1000000)
-        },
-    )
-    sim.close()
-    answer
-}
-
 test "a lazy_map in completion order yields each result as its job finishes" {
-    // Four jobs at once finish shortest first. Two at once: item 2 finishes
-    // at 20 ms and item 3 starts; item 1 finishes at 50 ms and item 4
-    // starts, finishing at 55 ms, before item 3 at 60 ms.
-    let (all_at_once, _) = lazy_test_order(Policy.Threads(4), Order.Completion, 4)
-    let (two_at_once, took) = lazy_test_order(Policy.Threads(2), Order.Completion, 4)
-    let (in_input_order, _) = lazy_test_order(Policy.Threads(2), Order.Input, 4)
-    testing.assert_eq(all_at_once, UInt64(4231), "four jobs were not yielded as they finished")?
-    testing.assert_eq(two_at_once, UInt64(2143), "two jobs at once were not yielded as they finished")?
-    testing.assert_eq(took, UInt64(60), "a job did not start as soon as a worker was free")?
-    testing.assert_eq(in_input_order, UInt64(1234), "input order changed")?
+    // Item 1 takes six tenths of a second and every other item a twentieth,
+    // so while item 1 runs the other worker maps items 2 to 6, each yielded
+    // as it finishes, and item 1 is yielded last. In input order item 1 is
+    // yielded first.
+    defer var finishing = lazy_map(Policy.Threads(2), UInt64(1)..=6, lazy_test_slow_item, order: .Completion)
+    var completed = UInt64(0)
+    for n in &finishing {
+        completed = completed * 10 + n
+    }
+    defer var in_input = lazy_map(Policy.Threads(2), UInt64(1)..=6, lazy_test_slow_item)
+    var input = UInt64(0)
+    for n in &in_input {
+        input = input * 10 + n
+    }
+    testing.assert_eq(completed, UInt64(234561), "the slow job's result was not yielded after the faster ones")?
+    testing.assert_eq(input, UInt64(123456), "input order changed")?
 }
 
 test "a lazy_map in completion order runs no more jobs at once than its bound" {
-    // Two at once, each job starts when one before it finishes, and the
-    // last, item 9, finishes at 85 ms; every job at once would take 50.
-    let (_, two) = lazy_test_order(Policy.Threads(2), Order.Completion, 9)
     let log = testing.TestAllocator.open(mem.system()).unwrap()
     var mapped = lazy_map_in(log.handle(), Policy.Threads(2), UInt64(1)..=12, |sink n| n, order: .Completion)
     var total = UInt64(0)
@@ -2007,64 +1974,11 @@ test "a lazy_map in completion order runs no more jobs at once than its bound" {
     let attempts = log.attempts()
     let settled = log.all_disposed()
     log.release()
-    testing.assert_eq(two, UInt64(85), "more jobs ran at once than the bound")?
     testing.assert_eq(total, UInt64(78), "a result was lost")?
     // Six allocations hold the places and the room for the workers; one more
     // for each worker started, at most two.
     testing.assert(attempts <= 6 + 2, "the map started more workers than its bound")?
     testing.assert(settled, "a finished map kept an allocation")?
-}
-
-// Take the first result of a lazy map in completion order over items 1 to
-// 100, three at once inside a simulation, then stop it, walk what it had
-// started and finish it. Answer the first result, how many came after it,
-// the item the source gives next, and whether every allocation was disposed
-// of.
-fn lazy_test_completion_stopped() -> (UInt64, UInt64, UInt64, Bool) {
-    var log = testing.TestAllocator.open(mem.system()).unwrap()
-    var sim = io.Simulation.open(seed: 1).unwrap()
-    let (first, after, next_item) = &sim.run(
-        inout [inout log] |inout _world| -> (UInt64, UInt64, UInt64) {
-            var mapped = lazy_map_in(log.handle(), Policy.Threads(3), UInt64(1)..=100, lazy_test_finishing, order: .Completion)
-            var first = UInt64(0)
-            for n in &mapped {
-                first = n
-                break
-            }
-            &mapped.stop()
-            var after = UInt64(0)
-            for _ in &mapped {
-                after += 1
-            }
-            var source = match mapped.finish() {
-                Ok(source) => source,
-                Err(still) => {
-                    still.release()
-                    panic("a walked stopped map still held results")
-                },
-            }
-            let next_item = match &source.next() {
-                Some(n) => n,
-                None => 0,
-            }
-            (first, after, next_item)
-        },
-    )
-    sim.close()
-    let settled = log.all_disposed()
-    log.release()
-    (first, after, next_item, settled)
-}
-
-test "a lazy_map in completion order left early settles every job it started" {
-    // Items 1, 2 and 3 start together and item 2 finishes first; the window
-    // has pulled item 4 for the worker item 2 freed, so the three still
-    // mapped are yielded after it and the source resumes at item 5.
-    let (first, after, next_item, settled) = lazy_test_completion_stopped()
-    testing.assert_eq(first, UInt64(2), "the first job to finish was not yielded first")?
-    testing.assert_eq(after, UInt64(3), "a stopped map lost or added a result")?
-    testing.assert_eq(next_item, UInt64(5), "the map pulled past what it started")?
-    testing.assert(settled, "a map left early kept an allocation")?
 }
 
 test "a refused allocation leaves a lazy_map in completion order settled" {
@@ -2088,11 +2002,23 @@ test "a refused allocation leaves a lazy_map in completion order settled" {
     testing.assert(settled, "a refused allocation left another one undisposed")?
 }
 
+// Walk a lazy map in completion order of the items 1 to `count` under
+// `policy`, and answer the results as the digits of one number, in the
+// order they were yielded.
+fn lazy_test_digits(sink policy: Policy, count: UInt64) -> UInt64 {
+    defer var mapped = lazy_map(policy, UInt64(1)..=count, |sink n| n, order: .Completion)
+    var digits = UInt64(0)
+    for n in &mapped {
+        digits = digits * 10 + n
+    }
+    digits
+}
+
 test "a sequential lazy_map in completion order yields in input order" {
     // On the caller each job finishes before the next starts, so finishing
     // order is input order and nothing is allocated.
-    let (sequential, _) = lazy_test_order(Policy.Sequential, Order.Completion, 4)
-    let (one_task, _) = lazy_test_order(Policy.Threads(1), Order.Completion, 4)
+    let sequential = lazy_test_digits(Policy.Sequential, 4)
+    let one_task = lazy_test_digits(Policy.Threads(1), 4)
     let log = testing.TestAllocator.open(mem.system()).unwrap()
     var mapped = lazy_map_in(log.handle(), Policy.Sequential, UInt64(1)..=8, |sink n| n * 3, order: .Completion)
     var position = UInt64(0)

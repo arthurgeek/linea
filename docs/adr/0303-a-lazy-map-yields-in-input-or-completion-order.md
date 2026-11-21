@@ -104,8 +104,14 @@ guide's example returns the page it fetched.
 1. `examples/link-checker` passes `order: .Completion` and prints that each
    link is reported as its check finishes; its test asks that every link is
    reported once, in any order, since real sockets finish in no fixed order.
-2. The library's tests force a finishing order on a simulation's virtual
-   clock, so the order a test asserts is the same on every run.
+2. A corpus program,
+   `tests/tasks/a_lazy_map_in_completion_order_yields_results_as_jobs_finish_on_a_simulated_clock.lin`,
+   forces a finishing order on a simulation's virtual clock, so the order
+   and the virtual time it asserts are the same on every run. The tests in
+   `std/task/task.lin` cannot open a simulation: every program loads
+   `task`, which imports only `std.io.core`, and the simulation lives in
+   `std.io`. They hold one slow job tenfold apart from the rest, as the
+   window's other tests do.
 3. The guide's chapter on tasks teaches `order: .Completion` with a program
    run in a simulation, and `std/README.md` names `task.Order`.
 4. A `LazyMap` carries one more field for the order and one counter, and the

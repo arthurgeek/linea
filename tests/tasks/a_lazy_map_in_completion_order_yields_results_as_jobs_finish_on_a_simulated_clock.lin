@@ -1,0 +1,126 @@
+import std.io
+import std.mem
+import std.task
+import std.testing
+import std.time
+
+use task.Order
+use task.Policy
+
+// Sleep a time `n` chooses, so jobs started together finish in a known
+// order on a simulation's clock: item 1 takes 50 ms, item 2 20 ms, item 3
+// 40 ms, item 4 5 ms and any other 10 ms.
+fn finishing(sink n: UInt64) -> UInt64 {
+    let pause = match n {
+        1 => UInt64(50),
+        2 => 20,
+        3 => 40,
+        4 => 5,
+        _ => 10,
+    }
+    time.sleep(time.Duration.from_milliseconds(pause))
+    n
+}
+
+// Walk a lazy map of the items 1 to `count` under `policy` and `order` inside
+// a simulation, and answer the results as the digits of one number, in the
+// order they were yielded, with the virtual milliseconds the walk took.
+fn walked(policy: Policy, order: Order, count: UInt64) -> (UInt64, UInt64) {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let answer = &sim.run(
+        [policy, order, count] |inout _world| -> (UInt64, UInt64) {
+            let started = time.Instant.now()
+            defer var mapped = task.lazy_map(copy(policy), UInt64(1)..=count, finishing, order: order)
+            var digits = UInt64(0)
+            for n in &mapped {
+                digits = digits * 10 + n
+            }
+            (digits, started.elapsed().nanoseconds() / 1000000)
+        },
+    )
+    sim.close()
+    answer
+}
+
+fn test_each_result_is_yielded_as_its_job_finishes() {
+    // Four jobs at once finish shortest first. Two at once: item 2 finishes
+    // at 20 ms and item 3 starts; item 1 finishes at 50 ms and item 4
+    // starts, finishing at 55 ms, before item 3 at 60 ms.
+    let (all_at_once, _) = walked(Policy.Threads(4), Order.Completion, 4)
+    let (two_at_once, took) = walked(Policy.Threads(2), Order.Completion, 4)
+    let (in_input_order, _) = walked(Policy.Threads(2), Order.Input, 4)
+    testing.assert_eq(all_at_once, UInt64(4231), "four jobs were not yielded as they finished").unwrap()
+    testing.assert_eq(two_at_once, UInt64(2143), "two jobs at once were not yielded as they finished").unwrap()
+    testing.assert_eq(took, UInt64(60), "a job did not start as soon as a worker was free").unwrap()
+    testing.assert_eq(in_input_order, UInt64(1234), "input order changed").unwrap()
+}
+
+fn test_no_more_jobs_run_at_once_than_the_bound() {
+    // Two at once, each job starts when one before it finishes, and the
+    // last, item 9, finishes at 85 ms; every job at once would take 50.
+    let (_, two) = walked(Policy.Threads(2), Order.Completion, 9)
+    testing.assert_eq(two, UInt64(85), "more jobs ran at once than the bound").unwrap()
+}
+
+// Take the first result of a lazy map in completion order over items 1 to
+// 100, three at once inside a simulation, then stop it, walk what it had
+// started and finish it. Answer the first result, how many came after it,
+// the item the source gives next, and whether every allocation was disposed
+// of.
+fn stopped_after_the_first() -> (UInt64, UInt64, UInt64, Bool) {
+    var log = testing.TestAllocator.open(mem.system()).unwrap()
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let (first, after, next_item) = &sim.run(
+        inout [inout log] |inout _world| -> (UInt64, UInt64, UInt64) {
+            var mapped = task.lazy_map_in(log.handle(), Policy.Threads(3), UInt64(1)..=100, finishing, order: .Completion)
+            var first = UInt64(0)
+            for n in &mapped {
+                first = n
+                break
+            }
+            &mapped.stop()
+            var after = UInt64(0)
+            for _ in &mapped {
+                after += 1
+            }
+            var source = match mapped.finish() {
+                Ok(source) => source,
+                Err(still) => {
+                    still.release()
+                    panic("a walked stopped map still held results")
+                },
+            }
+            let next_item = match &source.next() {
+                Some(n) => n,
+                None => 0,
+            }
+            (first, after, next_item)
+        },
+    )
+    sim.close()
+    let settled = log.all_disposed()
+    log.release()
+    (first, after, next_item, settled)
+}
+
+fn test_a_map_left_early_settles_every_job_it_started() {
+    // Items 1, 2 and 3 start together and item 2 finishes first; the window
+    // has pulled item 4 for the worker item 2 freed, so the three still
+    // mapped are yielded after it and the source resumes at item 5.
+    let (first, after, next_item, settled) = stopped_after_the_first()
+    testing.assert_eq(first, UInt64(2), "the first job to finish was not yielded first").unwrap()
+    testing.assert_eq(after, UInt64(3), "a stopped map lost or added a result").unwrap()
+    testing.assert_eq(next_item, UInt64(5), "the map pulled past what it started").unwrap()
+    testing.assert(settled, "a map left early kept an allocation").unwrap()
+}
+
+// A lazy map in completion order yields each result when its job finishes.
+// Each job sleeps on a simulation's clock, so the order they finish in, and
+// the virtual time the walk takes, is the same on every run.
+fn main() -> Result[UInt8, io.IoError] {
+    test_each_result_is_yielded_as_its_job_finishes()
+    test_no_more_jobs_run_at_once_than_the_bound()
+    test_a_map_left_early_settles_every_job_it_started()
+    io.println("ok")?
+    .Ok(0)
+}
