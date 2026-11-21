@@ -11,9 +11,13 @@
  *
  * The creator's endpoint is the record's address and the task's own endpoint
  * is that address with its lowest bit set, which an allocation's alignment
- * leaves clear. The record is freed by the creator's `linea_chan_close`, after
- * the join, or by `linea_task_cancel`; the task's own end never frees it.
- * The creator's close waits for the body and its execution to finish.
+ * leaves clear. The body may send its own end away, so another task can hold
+ * and close it after the body has returned and after the creator has closed.
+ * The creator's close waits for the body and its execution to finish, then
+ * frees the execution's stack; the record itself is freed by whichever end's
+ * `linea_chan_close` comes last, once both ends have closed, so neither close
+ * reads the record after the other freed it. A task cancelled before it
+ * started never had an end of its own, and `linea_task_cancel` frees it.
  *
  * Every wait is a park on the record's park (`park.h`), and every change to
  * the record's state is made with the park's lock held and followed by an
@@ -140,6 +144,11 @@ struct task {
     struct linea_registration *watching[2];
     int watching_return;
 
+    /* The ends that have been closed, as a bit for each endpoint's lowest
+     * bit, under the park's lock. The end that sets the second bit frees the
+     * record. */
+    unsigned ends_closed;
+
     /* The mapping the thread's stack lives in, guard pages first. */
     void *stack;
     unsigned long stack_mapping;
@@ -169,13 +178,18 @@ static unsigned long round_up(unsigned long n, unsigned long to) {
     return (n + to - 1) / to * to;
 }
 
-/* Frees what `linea_task_prepare_on` made, once no execution uses it. */
-static void destroy(struct task *t) {
+/* Frees the fiber or the stacks `linea_task_prepare_on` made, once no
+ * execution uses them. */
+static void destroy_execution(struct task *t) {
     if (t->fiber != NULL) {
         linea_fiber_destroy(t->fiber);
     } else if (munmap(t->stack, t->stack_mapping) != 0 || munmap(t->signal_stack, signal_stack_bytes) != 0) {
         fail("linea: a task's stack could not be unmapped\n");
     }
+}
+
+/* Frees the record, once no end can reach it. */
+static void destroy_record(struct task *t) {
     linea_park_destroy(&t->park);
     free(t);
 }
@@ -307,7 +321,8 @@ static void run_fiber_body(void *argument) {
 }
 
 /* Only the scheduler calls this, after it has left the finished stack. The
- * last unlock can release a joiner which immediately destroys the task. */
+ * last unlock can release a joiner which immediately destroys the fiber and,
+ * when the task's own end is already closed, the record. */
 static void fiber_body_finished(void *argument) {
     struct task *t = argument;
     linea_park_lock(&t->park);
@@ -366,13 +381,15 @@ unsigned long linea_task_start_migratable(unsigned long task, linea_task_entry e
 
 void linea_task_cancel(unsigned long task) {
     struct task *t = task_of(task);
-    if (t->fiber != NULL) { destroy(t); return; }
-    linea_park_lock(&t->park);
-    t->state = cancelled;
-    linea_unpark(&t->park);
-    linea_park_unlock(&t->park);
-    join(t);
-    destroy(t);
+    if (t->fiber == NULL) {
+        linea_park_lock(&t->park);
+        t->state = cancelled;
+        linea_unpark(&t->park);
+        linea_park_unlock(&t->park);
+        join(t);
+    }
+    destroy_execution(t);
+    destroy_record(t);
 }
 
 void linea_chan_send(unsigned long endpoint, unsigned long at, unsigned long len) {
@@ -470,18 +487,29 @@ void linea_chan_unwatch(unsigned long endpoint) {
     linea_park_unlock(&t->park);
 }
 
+/* The creator's close joins the body, releases what the body captured and
+ * frees its execution; the task's own end has nothing to wait for. Each
+ * then records its end as closed, and the end that closes second frees the
+ * record. Until this end is recorded closed the record is alive, because the
+ * other end cannot free it before then. */
 void linea_chan_close(unsigned long endpoint) {
-    execution_context(task_of(endpoint)->loop);
-    /* The task's own end has nothing to wait for: the creator's close waits
-     * for the thread itself. */
-    if ((endpoint & 1UL) != 0) return;
     struct task *t = task_of(endpoint);
-    join(t);
+    execution_context(t->loop);
+    const unsigned side = (unsigned)(endpoint & 1UL);
+    if (side == 0) {
+        join(t);
+        t->release(t->release_at, t->len);
+        destroy_execution(t);
+    }
+    linea_park_lock(&t->park);
+    t->ends_closed |= 1U << side;
+    const int last = t->ends_closed == 3U;
+    linea_park_unlock(&t->park);
+    if (!last) return;
     /* Dual protocols receive every value before both ends close, and the
      * runtime cannot release what a value owns. */
     if (t->count != 0) fail("linea: a session ended holding a value its receiver never took\n");
-    t->release(t->release_at, t->len);
-    destroy(t);
+    destroy_record(t);
 }
 
 /* An owning task's call queue. One request slot is filled by a caller and

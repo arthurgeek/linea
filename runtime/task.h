@@ -62,10 +62,11 @@ void linea_chan_choose(unsigned long endpoint, uint8_t branch);
 uint8_t linea_chan_offer(unsigned long endpoint);
 
 /* Finish one end of a session at its end state. The task's own end returns
- * at once. The handle's returns only once the body has returned and the
- * execution has retired, and it then releases the bytes the body was kept
- * in, in the calling task, before freeing the session. A session freed with
- * a value still queued stops the program. */
+ * at once, wherever its body sent it. The handle's returns only once the body
+ * has returned and the execution has retired, and it then releases the bytes
+ * the body was kept in, in the calling task. The session is freed by the
+ * second of the two ends to close, and a session freed with a value still
+ * queued stops the program. */
 void linea_chan_close(unsigned long endpoint);
 
 struct linea_registration;
