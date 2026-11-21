@@ -80,14 +80,29 @@ the client's own.
 
 Each settles the same way: the client stops counting the response and puts its
 connection back in the pool when the body was read to its end, nothing past it
-was read ahead (`io.BufferedReader.buffered_bytes`, added here, says so), the
-response was HTTP/1.1 without `Connection: close`, and no read failed;
-otherwise it closes the connection. Since nothing else can end a response,
-`client.outstanding()` is exact as long as each response goes back to the
-client that sent it, which the type does not check: two clients of one
-allocator type accept each other's responses, and a count that would go below
-zero stops at zero. Within that, and `send` refuses a request with `Saturated`
-when `max_outstanding` responses are unsettled, before it connects.
+was read ahead, the response was HTTP/1.1 without `Connection: close`, and no
+read failed; otherwise it closes the connection. Nothing read ahead means
+nothing in the response's reader (`io.BufferedReader.buffered_bytes`, added
+here) and nothing in a TLS stream under it, which can hold ciphertext the
+session has not taken and plaintext it decrypted and no read has asked for
+(`tls.Stream.holds_input`); either would be read as the next response.
+
+A response settles only through the client that sent it, and the type cannot
+say which client that is. A response borrowing its client would say it, and
+would also forbid a second request while one response is held, since a
+request takes its client `inout`, which leaves `max_outstanding` nothing to
+bound. So each client draws a random 128-bit identity (`uuid.Uuid.v4`) when
+it is made, and each response records its sender's. A response settled
+through another client has its connection closed, never pooled, so a
+connection verified under one client's TLS configuration, or presenting its
+client certificate, never serves another client; and the settling client's
+count does not change. The sender's count cannot come down then: the settling
+client holds nothing that reaches its sender, so the response stays counted
+there, and a sender whose responses are settled elsewhere reaches
+`Saturated` once `max_outstanding` of them are. Within each client's own
+responses `client.outstanding()` is exact, and `send` refuses a request with
+`Saturated` when `max_outstanding` responses are unsettled, before it
+connects.
 
 ### 3. The server's readers read the response's head
 
@@ -159,13 +174,14 @@ call does, and no timeout bounds it: `connect_timeout_ms` starts once the
 address is known, so a resolver that does not answer holds the request for as
 long as the system's resolver retries; inside a simulation only a dotted address resolves. A failure is an
 `io.IoError` of the new operation `Resolve`, `NotFound` when the name has no
-IPv4 address. `net.Address` holds IPv4 only, so a bracketed IPv6 host does not
-resolve.
+IPv4 address. `net.Address` holds IPv4 only, so the client refuses a bracketed
+IPv6 host with `UnsupportedAddress` before any lookup, rather than as a name
+that did not resolve.
 
 ### 8. Errors are categories
 
 `ClientError` says which step failed: `Url`, `Tls` (an `https` handshake
-failed, carrying the `tls.TlsError`), `Resolve`,
+failed, carrying the `tls.TlsError`), `Resolve`, `UnsupportedAddress`,
 `Connect`, `Io`, `Closed`, `MalformedResponse`, `HeadTooLarge`,
 `BodyTooLarge`, `TooManyRedirects`, `Saturated`, `InvalidRequest`, `Body` (the
 streamed body's reader failed) and `Allocation`. It is copyable and
@@ -211,11 +227,13 @@ origin, so it drops credentials (§5).
 ### 10. One deadline bounds a whole request
 
 `send`, `send_from` and `get` take `deadline: time.Deadline = time.never`. The
-deadline is one budget for the whole request: resolving and connecting,
-the TLS handshake, every redirect `send` follows, writing the request and
-reading the response's head and body, which fail as `TimedOut` once it
-passes. A deadline already passed sends nothing and fails with
-`Connect(TimedOut)` before the host is resolved. A pooled link is given the
+deadline is one budget for the request: connecting, the TLS handshake, every
+redirect `send` follows, writing the request and reading the response's head
+and body, which fail as `TimedOut` once it passes. Resolving the host name is
+outside it: `net.resolve` blocks the thread in the system's resolver, which
+keeps timeouts of its own and cannot be interrupted, so a deadline that passes
+while it works is seen by the connect after it. A deadline already passed
+sends nothing and fails with `Connect(TimedOut)` before the host is resolved. A pooled link is given the
 deadline with `Link.set_deadline`, a new one with the connection it is opened
 on. The per-operation timeouts of `ClientLimits` still bound each wait, and
 a wait ends at whichever comes first, so `time.never` leaves a request

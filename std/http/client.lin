@@ -9,6 +9,7 @@ import std.testing
 import std.text as strings
 import std.time
 import std.tls
+import std.uuid
 
 // `ClientLimits` bounds what a client holds and how long it waits. Lines and
 // headers bound a response's head as `Limits` bounds a request's. Timeouts are
@@ -84,6 +85,8 @@ test "the default client limits bound the pool and the waits" {
 // Why a request failed, by category:
 // - `Url` when the URL, or a redirect's `Location`, is malformed;
 // - `Resolve` when the host name has no address;
+// - `UnsupportedAddress` when the host is a bracketed IPv6 address, which
+//   `net`, connecting over IPv4 only, cannot reach;
 // - `Connect` when the origin refused the connection or did not answer it in
 //   time, or the request's deadline had passed before it was sent;
 // - `Tls` when an `https` origin's TLS handshake failed: its certificate did
@@ -108,6 +111,7 @@ pub enum ClientError {
     Url(UrlError),
     Tls(tls.TlsError),
     Resolve(io.IoError),
+    UnsupportedAddress,
     Connect(io.IoError),
     Io(io.IoError),
     Closed,
@@ -127,6 +131,7 @@ impl Display for ClientError {
             Url(error) => error.fmt(&w),
             Tls(error) => "the TLS handshake failed: {error}".fmt(&w),
             Resolve(error) => "the host name did not resolve: {error}".fmt(&w),
+            UnsupportedAddress => &w.write_str("the host is an IPv6 address, and the client connects over IPv4 only"),
             Connect(error) => "the connection was not made: {error}".fmt(&w),
             Io(error) => error.fmt(&w),
             Closed => &w.write_str("the server closed the connection before answering"),
@@ -946,6 +951,9 @@ struct ClientResponse[A: Allocator = mem.SystemAllocator] {
     failure: Option[ClientError],
     max_line_bytes: UInt64,
     max_headers: UInt64,
+    // The identity of the client that sent the request, which alone may
+    // count the response or pool its connection.
+    sender: uuid.Uuid,
 }
 
 impl[A: Allocator] ClientResponse[A] {
@@ -1034,6 +1042,8 @@ struct Client[A: Allocator = mem.SystemAllocator] {
     idle: Vec[Idle[A], A],
     outstanding: UInt64,
     tls: Option[tls.ClientConfig],
+    // A random identity, recorded in each response the client answers.
+    id: uuid.Uuid,
 }
 
 impl Client[mem.SystemAllocator] {
@@ -1070,13 +1080,13 @@ impl[A: Allocator] Client[A] {
     // A client allocating from `allocator`, bounded by `limits`. Nothing is
     // allocated or opened until the first request.
     pub fn new_in(allocator: A, limits: ClientLimits = standard_client_limits) -> Client[A] where carries(allocator) {
-        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .None }
+        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .None, id = uuid.Uuid.v4() }
     }
 
     // A client allocating from `allocator`, bounded by `limits`, that
     // reaches `https` origins with `config`, as `with_tls` does.
     pub fn with_tls_in(allocator: A, sink config: tls.ClientConfig, limits: ClientLimits = standard_client_limits) -> Client[A] where carries(allocator, config) {
-        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .Some(config) }
+        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .Some(config), id = uuid.Uuid.v4() }
     }
 
     test "a client in an allocator keeps the TLS configuration it was given" {
@@ -1170,9 +1180,11 @@ impl[A: Allocator] Client[A] {
     // idle fails before any of the response arrives; the request is then sent
     // once more on a new connection when its method is idempotent.
     //
-    // `deadline` bounds the whole request: resolving and connecting, a TLS
-    // handshake, every redirect, and reading the response's body, which ends
-    // in `TimedOut` once it passes. A deadline already passed sends nothing.
+    // `deadline` bounds the request: connecting, a TLS handshake, every
+    // redirect, and reading the response's body, which ends in `TimedOut`
+    // once it passes. Resolving the host name is outside it, bounded only by
+    // the system's resolver; a deadline that passes meanwhile ends the
+    // connect after it. A deadline already passed sends nothing.
     // `time.never`, the default, leaves each wait bounded by the client's
     // timeouts alone.
     pub fn send(inout self: Self, sink request: ClientRequest[A], deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
@@ -1243,6 +1255,29 @@ impl[A: Allocator] Client[A] {
         // would take two seconds; the deadline ends the read first.
         defer let said = asked_while_dribbling(ask_by_deadline)
         testing.assert_eq(said.view(), "200 timed out", "a slow body outlived the request's deadline")
+    }
+
+    test "a response settled by another client never reaches that client's pool" {
+        defer let said = asked_while_serving_securely(2, ask_across_clients)
+        testing.assert_eq(said.view(), "strict refused; strict idle=0 outstanding=0; lax outstanding=1", "a connection another client verified entered the settling client's pool")
+    }
+
+    test "plaintext a TLS stream holds past a response keeps its connection out of the pool" {
+        defer let said = asked_while_serving_raw_tls(ask_past_the_body)
+        testing.assert_eq(said.view(), "ok idle=0", "a connection holding unread plaintext was pooled")
+    }
+
+    test "an IPv6 host is refused as an address the client cannot reach" {
+        defer var client = Client.new()
+        let refused = match &client.get("http://[::1]:8080/") {
+            Ok(response) => {
+                &client.discard(response)
+                false
+            },
+            Err(UnsupportedAddress) => true,
+            Err(_) => false,
+        }
+        testing.assert(refused, "an IPv6 host was not refused as unsupported")
     }
 
     test "a connection the server closed while idle is replaced" {
@@ -1432,7 +1467,7 @@ impl[A: Allocator] Client[A] {
     // Close every idle connection and the TLS configuration, reporting the
     // first close that fails.
     pub fn close(sink self: Self) -> Result[(), io.IoError] {
-        let Client { allocator: _, limits: _, idle, outstanding: _, tls: config } = self
+        let Client { allocator: _, limits: _, idle, outstanding: _, tls: config, id: _ } = self
         match config {
             Some(config) => config.close(),
             None => {},
@@ -1676,24 +1711,29 @@ impl[A: Allocator] Client[A] {
         }
         let ResponseHead { status, head: text, header_fields, framed, reusable } = head
         self.outstanding += 1
-        .Ok(.{ status, head = text, header_fields, url = answered, reader, framed, reusable, failure = .None, max_line_bytes = self.limits.max_line_bytes, max_headers = self.limits.max_headers })
+        .Ok(.{ status, head = text, header_fields, url = answered, reader, framed, reusable, failure = .None, max_line_bytes = self.limits.max_line_bytes, max_headers = self.limits.max_headers, sender = copy(self.id) })
     }
 
     // Stop counting `response` and keep its connection when its body was read
     // to its end, nothing past it arrived, and the server keeps it open;
     // close it otherwise.
+    //
+    // A response another client sent has its connection closed and changes
+    // no count of this client: its connection was opened, and over TLS
+    // verified, under that client's configuration, so it never joins this
+    // pool.
     fn settle(inout self: Self, sink response: ClientResponse[A]) {
-        // A response settled by a client that did not send it would take
-        // this count below zero; it stops at zero instead.
-        if self.outstanding > 0 {
-            self.outstanding -= 1
-        }
-        let ClientResponse { status: _, head, header_fields, url, reader, framed, reusable, failure, max_line_bytes: _, max_headers: _ } = response
+        let ClientResponse { status: _, head, header_fields, url, reader, framed, reusable, failure, max_line_bytes: _, max_headers: _, sender } = response
         head.release()
         header_fields.release()
+        let own = sender == self.id
+        if own {
+            self.outstanding -= 1
+        }
         let ended = framed.mode == BodyMode.Empty || framed.mode == BodyMode.Ended
-        let kept = reusable && failure.is_none() && ended && reader.buffered_bytes() == 0
+        let read_ahead = reader.buffered_bytes() > 0
         let link = reader.abandon()
+        let kept = own && reusable && failure.is_none() && ended && !read_ahead && !link.holds_input()
         if kept {
             match Url.parse(url.view()) {
                 Ok(answered) => &self.give_back(link, answered),
@@ -2064,6 +2104,39 @@ fn asked_while_serving_both(plain_connections: UInt64, secure_connections: UInt6
     done.close()
     let (_plain_served, finished) = serving_plain.recv()
     finished.close()
+    answer
+}
+
+// The answer `asked_while_serving_raw_tls` sends: a response whose
+// two-byte body is followed, in the same TLS record, by bytes no request
+// asked for.
+let answer_with_extra: Str = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nokEXTRA"
+
+// The bytes of `answer_with_extra` up to the end of its body.
+let answer_before_extra: UInt64 = 40
+
+// Accept one connection on a loopback port over TLS, read a request's head,
+// and send `answer_with_extra` in one write, while `ask` runs on another task.
+fn asked_while_serving_raw_tls(ask: fn(port: UInt16) -> String) -> String {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    listener.close().unwrap()
+    let config = tls.ServerConfig.open(test_server_chain, test_server_key).unwrap()
+    let opened = tls.Stream.accept(config, connection)
+    config.close()
+    var stream = opened.unwrap()
+    defer var buffer = mem.system().acquire(1024).unwrap()
+    let _heard = &stream.read_some(&buffer, offset: 0, count: 1024)
+    let _sent = io.write_all(&stream, answer_with_extra.as_bytes())
+    let (answer, done) = asking.recv()
+    done.close()
+    let _closed = stream.close()
     answer
 }
 
@@ -2522,4 +2595,43 @@ fn ask_by_deadline(port: UInt16) -> String {
     }
     client.release()
     fmt.render_owned("{status} {ended}").unwrap()
+}
+
+fn ask_across_clients(port: UInt16) -> String {
+    // `lax` accepts any certificate; `strict` verifies against the system's
+    // roots, which did not issue the test server's.
+    var lax = Client.with_tls(tls.ClientConfig.open(verify: .Insecure_AcceptAnyCertificate).unwrap())
+    var strict = Client.new()
+    let first = refused_by(&strict, port)
+    let got = &lax.get("https://127.0.0.1:{port}/hello").unwrap()
+    let text = &strict.read_text(got, max_bytes: 64).unwrap()
+    text.release()
+    let said = fmt.render_owned("strict {first}; strict idle={strict.idle_connections()} outstanding={strict.outstanding()}; lax outstanding={lax.outstanding()}").unwrap()
+    lax.release()
+    strict.release()
+    said
+}
+
+// Whether `client` refuses the test server at `port`'s certificate.
+fn refused_by(inout client: Client, port: UInt16) -> Str {
+    match &client.get("https://127.0.0.1:{port}/hello") {
+        Ok(response) => {
+            &client.discard(response)
+            "answered"
+        },
+        Err(Tls(_)) => "refused",
+        Err(_) => "failed",
+    }
+}
+
+fn ask_past_the_body(port: UInt16) -> String {
+    // The read-ahead buffer holds the response up to the end of its body,
+    // so what follows it stays in the TLS stream.
+    var client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap(), ClientLimits { buffer_bytes = answer_before_extra, ..ClientLimits.default() })
+    let response = &client.get("https://127.0.0.1:{port}/").unwrap()
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{body.view()} idle={client.idle_connections()}").unwrap()
+    body.release()
+    client.release()
+    said
 }

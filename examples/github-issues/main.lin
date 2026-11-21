@@ -32,6 +32,11 @@ fn main() -> UInt8 {
     // page after the first is fetched without connecting again.
     var client = http.Client.new()
     let token = env.variable("GITHUB_TOKEN")
+    // Over plain `http` the token crosses the network unencrypted, where
+    // anyone between here and the server can read it.
+    if token.is_some() && options.api.view().starts_with("http://") {
+        io.eprintln("warning: GITHUB_TOKEN is sent unencrypted to {options.api.view()}")
+    }
     let fetched = fetch_open_issues(&client, options.api.view(), options.repo.view(), token, options.pages)
     client.release()
     let report = match fetched {

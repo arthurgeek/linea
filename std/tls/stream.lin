@@ -436,6 +436,12 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
         testing.assert_eq(server_reason, .Some(Reason.NoProtocol), "a client sharing no protocol was served")?
     }
 
+    // Whether the stream holds input no read has taken: ciphertext received
+    // and not yet given to the session, or plaintext the session decrypted.
+    internal fn holds_input(self: Self) -> Bool {
+        self.held > 0 || self.handshaken && self.session.pending()
+    }
+
     // Bound a handshake that has not yet run, as one accepted later runs at
     // its first read or write, by `deadline`: it fails as `TimedOut` once
     // the deadline passes. A stream that has shaken hands is unchanged.
@@ -777,7 +783,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
 impl[S: Transport + io.Pollable, A: Allocator] io.Pollable for Stream[S, A] {
     fn readiness(self: Self, interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
         let held = match interest {
-            Readable => self.held > 0 || self.handshaken && self.session.pending(),
+            Readable => self.holds_input(),
             Writable => false,
         }
         if held {

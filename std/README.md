@@ -1217,7 +1217,8 @@ makes one client and sends every request through it:
   `io.Reader`, by its length or in chunks, and follows no redirect. Each
   takes `deadline: time.Deadline` (`time.never` by default), one budget for
   connecting, the TLS handshake, every redirect and the response's body,
-  which fail as `TimedOut` once it passes; a deadline already passed sends
+  which fail as `TimedOut` once it passes; resolving the host name is bounded
+  by the system's resolver alone, and a deadline already passed sends
   nothing.
 - A response answers `status()`, `header(name)`, `headers()` and `url()`, the
   URL that answered. Its body is an `io.Reader` that decodes chunks and stops
@@ -1225,9 +1226,11 @@ makes one client and sends every request through it:
   only its client settles it: `client.read_text(response, max_bytes)` and
   `client.read_bytes(…)` read the rest, `client.finish(response)` drains a
   short remainder, and `client.discard(response)` closes the connection. A
-  body read to its end puts its connection back in the pool.
+  body read to its end, with nothing read past it, puts its connection back
+  in the pool. A response settled through a client that did not send it has
+  its connection closed and stays counted by its sender.
 - A non-`2xx` status is an answer; `ClientError` is a failure to get one,
-  by category (`Url`, `Tls`, `Resolve`, `Connect`, `Io`, `Closed`,
+  by category (`Url`, `Tls`, `Resolve`, `UnsupportedAddress` for an IPv6 host, `Connect`, `Io`, `Closed`,
   `MalformedResponse`, `HeadTooLarge`, `BodyTooLarge`, `TooManyRedirects`,
   `Saturated`, `InvalidRequest`, `Body`, `Allocation`), and `is_timeout()`
   says whether a wait ran out of time. A pooled connection the server closed
