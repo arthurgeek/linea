@@ -560,9 +560,7 @@ internal fn foreign_word(at: address.Address[UInt8], offset: UInt64) -> UInt64 {
 }
 
 test "a foreign_word is read at its offset" {
-    var words = system().acquire(16) else |_| {
-        return testing.assert(false, "a buffer of sixteen bytes was refused")
-    }
+    var words = testing.allocated(system().acquire(16), "a buffer of sixteen bytes was refused")?
     &words.store(8, 20)
     let loaded = foreign_word(foreign_address(words.as_slice()), 8)
     words.release()

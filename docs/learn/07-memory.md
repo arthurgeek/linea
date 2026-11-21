@@ -35,9 +35,8 @@ fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oo
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    let heading = banner_in(mem.system(), "Daily report") else |_| {
-        io.eprintln("out of memory")
-        return .Ok(1)
+    let heading = banner_in(mem.system(), "Daily report") else |refusal| {
+        return .Ok(refusal.report("the banner"))
     }
     defer heading.release()
     io.println(heading.view())?
@@ -61,7 +60,9 @@ Four things to notice:
   C's `malloc`. `main` chooses it.
 - Allocation can fail. `append` returns `Result[(), mem.Oom]`, and `?` passes
   an out-of-memory error up. No allocation in Linea aborts the program on its
-  own.
+  own. `main` is where the error stops: `else |refusal|` names the `mem.Oom`,
+  and `refusal.report("the banner")` writes `error: not enough memory for the
+  banner` to standard error and answers 1, the exit status `main` returns.
 - `defer line.release()` inside `banner_in` frees the half-built line if a `?`
   leaves early. On the path that returns the line, the line is handed to the
   caller instead, so the `defer` does not run there
@@ -195,9 +196,8 @@ fn main() -> Result[UInt8, io.IoError] {
     let titles = ["Morning", "Afternoon", "Evening"]
     for title in titles {
         // Nothing here is released by hand: the arena takes it all back at once.
-        let heading = banner_in(arena.handle(), title) else |_| {
-            io.eprintln("the arena is full")
-            return .Ok(1)
+        let heading = banner_in(arena.handle(), title) else |refusal| {
+            return .Ok(refusal.report("the {title} heading"))
         }
         io.println(heading.view())?
     }
@@ -504,9 +504,8 @@ fn main() -> Result[UInt8, io.IoError] {
     for title in titles {
         // Each pass reuses the same 64 bytes: `rewind` takes back what the last pass used.
         &arena.rewind()
-        let heading = banner_in(arena.handle(), title) else |_| {
-            io.eprintln("the arena is full")
-            return .Ok(1)
+        let heading = banner_in(arena.handle(), title) else |refusal| {
+            return .Ok(refusal.report("the {title} heading"))
         }
         io.println(heading.view())?
     }
@@ -523,7 +522,7 @@ fn main() -> Result[UInt8, io.IoError] {
 
 Sixty-four bytes are enough for any one heading, but not for four at once:
 remove the `&arena.rewind()` and the program prints `== Morning ==` and then
-`the arena is full`. `rewind` takes the arena `inout`, so it is marked with
+`error: not enough memory for the Afternoon heading`. `rewind` takes the arena `inout`, so it is marked with
 `&`, and the arena is declared with `var` rather than the `let` of the arenas
 above, which are never changed. It only zeroes the bytes that were used, so
 its cost is what the pass used rather than the arena's size.
@@ -543,9 +542,8 @@ fn main() -> Result[UInt8, io.IoError] {
     for title in titles {
         // Each pass reuses the same 64 bytes: `rewind` takes back what the last pass used.
         &arena.rewind()
-        let heading = banner_in(arena.handle(), title) else |_| {
-            io.eprintln("the arena is full")
-            return .Ok(1)
+        let heading = banner_in(arena.handle(), title) else |refusal| {
+            return .Ok(refusal.report("the {title} heading"))
         }
         io.println(heading.view())?
     }
@@ -1069,9 +1067,7 @@ pub fn shout(word: Str) -> Result[String, mem.Oom] where carries() {
 }
 
 test "a word is shouted" {
-    defer let loud = shout("hi") else |_| {
-        return .Err(testing.refused("the word fits"))
-    }
+    defer let loud = testing.allocated(shout("hi"), "the word fits")?
     testing.assert_eq(loud.view(), "hi!", "the word is shouted")?
 }
 ```

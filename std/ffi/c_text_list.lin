@@ -31,9 +31,7 @@ impl CTextList {
         defer let first = CString.open("Ada").unwrap()
         defer let second = CString.open("Grace").unwrap()
         let system = mem.system()
-        var words = system.acquire(16) else |_| {
-            return testing.assert(false, "a list of two pointers was refused")
-        }
+        var words = testing.allocated(system.acquire(16), "a list of two pointers was refused")?
         let CText(first_at) = first.text()
         let CText(second_at) = second.text()
         &words.store(0, first_at)

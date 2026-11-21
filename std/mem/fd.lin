@@ -33,9 +33,7 @@ test trap "fd reads reject an offset past the buffer" -> Result[(), testing.Fail
     // Offset two exceeds a one-byte extent, even for an empty request.
     // The invalid descriptor -1 must never reach the runtime.
     let allocator = system()
-    var bytes = allocator.acquire(1) else |_| {
-        return testing.assert(false, "test buffer allocation failed")
-    }
+    var bytes = testing.allocated(allocator.acquire(1), "test buffer allocation failed")?
     let _result = read_fd(&bytes, -1, 2, 0)
     bytes.release()
     .Ok(())
@@ -45,9 +43,7 @@ test trap "fd reads reject a count past the remaining buffer" -> Result[(), test
     // Offset one leaves no bytes; UInt64.max also exposes unchecked offset+count.
     // The invalid descriptor -1 must never reach the runtime.
     let allocator = system()
-    var bytes = allocator.acquire(1) else |_| {
-        return testing.assert(false, "test buffer allocation failed")
-    }
+    var bytes = testing.allocated(allocator.acquire(1), "test buffer allocation failed")?
     let _result = read_fd(&bytes, -1, 1, UInt64.max)
     bytes.release()
     .Ok(())
@@ -75,9 +71,7 @@ internal fn read_socket[A: Allocator](inout buffer: Buffer[A], fd: Int32, offset
 test trap "socket reads reject a range past the buffer" -> Result[(), testing.Failure] {
     // The invalid descriptor -1 must never reach the runtime.
     let allocator = system()
-    var bytes = allocator.acquire(1) else |_| {
-        return testing.assert(false, "test buffer allocation failed")
-    }
+    var bytes = testing.allocated(allocator.acquire(1), "test buffer allocation failed")?
     let _result = read_socket(&bytes, -1, 1, UInt64.max, 0)
     bytes.release()
     .Ok(())
@@ -106,9 +100,7 @@ internal fn write_slice_fd_at(bytes: Slice[UInt8], fd: Int32, file_offset: UInt6
 test "empty fd requests do not access a descriptor" {
     // -1 is invalid, so success proves that a zero-byte request bypasses I/O.
     let allocator = system()
-    defer var bytes = allocator.acquire(1) else |_| {
-        return testing.assert(false, "test buffer allocation failed")
-    }
+    defer var bytes = testing.allocated(allocator.acquire(1), "test buffer allocation failed")?
     testing.assert_eq(read_fd(&bytes, -1, 1, 0), 0, "an empty read reached the descriptor")?
     testing.assert_eq(read_fd_at(&bytes, -1, 1, 0, 0), 0, "an empty positional read reached the descriptor")?
     let empty = bytes.as_slice().subspan(start: 1, count: 0).unwrap()

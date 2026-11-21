@@ -100,9 +100,8 @@ fn price(rules: Rules, cents: UInt64) -> UInt64 {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let rules = checkout_rules() else |_| {
-        io.eprintln("pricing rules: out of memory")
-        return .Ok(1)
+    defer let rules = checkout_rules() else |refusal| {
+        return .Ok(refusal.report("the pricing rules"))
     }
     var total: UInt64 = 6000
     io.println("cart: {total} cents")?

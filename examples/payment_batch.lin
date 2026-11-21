@@ -30,9 +30,8 @@ fn main() -> Result[UInt8, io.IoError] {
             1 => .{ recipient = "equipment", amount = 5000 },
             _ => .{ recipient = "internet", amount = 1200 },
         },
-    ) else |_| {
-        io.eprintln("not enough memory for the payment batch")
-        return .Ok(1)
+    ) else |refusal| {
+        return .Ok(refusal.report("the payment batch"))
     }
 
     var balance: UInt64 = 10000

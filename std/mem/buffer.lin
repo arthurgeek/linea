@@ -1,3 +1,4 @@
+import std.io.core
 import std.mem.address
 import std.testing
 
@@ -106,16 +107,12 @@ impl[A: Allocator] Buffer[A] {
     // Empty buffers have length zero but still reserve storage that must be freed.
     test "an empty buffer is allocated rather than refused" {
         let a = system()
-        match a.acquire(0) {
-            Err(_) => testing.assert(false, "a buffer of no bytes is refused")?,
-            Ok(b) => {
-                let size = b.length()
-                let reserved = b.allocated
-                b.release()
-                testing.assert_eq(size, 0, "a buffer of no bytes has a length")?
-                testing.assert(reserved != 0, "a buffer of no bytes reserves nothing to give back")?
-            },
-        }
+        let b = testing.allocated(a.acquire(0), "a buffer of no bytes is refused")?
+        let size = b.length()
+        let reserved = b.allocated
+        b.release()
+        testing.assert_eq(size, 0, "a buffer of no bytes has a length")?
+        testing.assert(reserved != 0, "a buffer of no bytes reserves nothing to give back")?
 
         .Ok(())
     }
@@ -146,9 +143,7 @@ impl[A: Allocator] Buffer[A] {
 
     test trap "store traps past the end" -> Result[(), testing.Failure] {
         let a = system()
-        var b = a.acquire(16) else |_| {
-            return testing.assert(false, "a buffer of sixteen bytes was refused")
-        }
+        var b = testing.allocated(a.acquire(16), "a buffer of sixteen bytes was refused")?
         &b.store(16, 1)
         b.release()
         .Ok(())
@@ -156,9 +151,7 @@ impl[A: Allocator] Buffer[A] {
 
     test trap "store traps at a misaligned offset" -> Result[(), testing.Failure] {
         let a = system()
-        var b = a.acquire(16) else |_| {
-            return testing.assert(false, "a buffer of sixteen bytes was refused")
-        }
+        var b = testing.allocated(a.acquire(16), "a buffer of sixteen bytes was refused")?
         &b.store(1, 1)
         b.release()
         .Ok(())
@@ -167,9 +160,7 @@ impl[A: Allocator] Buffer[A] {
     // Dispose the buffer before assertions so failure cannot skip cleanup.
     test "a buffer arrives zeroed and holds what it is given" {
         let a = system()
-        var b = a.acquire(32) else |_| {
-            return testing.assert(false, "a buffer of thirty-two bytes was refused")
-        }
+        var b = testing.allocated(a.acquire(32), "a buffer of thirty-two bytes was refused")?
         let size = Buffer.length(self: b)
 
         // Four UInt64 words occupy byte offsets 0, 8, 16 and 24.
@@ -203,25 +194,17 @@ impl[A: Allocator] Buffer[A] {
 
     test trap "load traps past the end" -> Result[(), testing.Failure] {
         let a = system()
-        match a.acquire(16) {
-            Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
-            Ok(b) => {
-                let _loaded = b.load(16)
-                b.release()
-            },
-        }
+        let b = testing.allocated(a.acquire(16), "a buffer of sixteen bytes was refused")?
+        let _loaded = b.load(16)
+        b.release()
         .Ok(())
     }
 
     test trap "load traps at a misaligned offset" -> Result[(), testing.Failure] {
         let a = system()
-        match a.acquire(16) {
-            Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
-            Ok(b) => {
-                let _loaded = b.load(1)
-                b.release()
-            },
-        }
+        let b = testing.allocated(a.acquire(16), "a buffer of sixteen bytes was refused")?
+        let _loaded = b.load(1)
+        b.release()
         .Ok(())
     }
 
@@ -232,9 +215,7 @@ impl[A: Allocator] Buffer[A] {
 
     test trap "store_byte traps past the end" -> Result[(), testing.Failure] {
         let a = system()
-        var b = a.acquire(8) else |_| {
-            return testing.assert(false, "a buffer of eight bytes was refused")
-        }
+        var b = testing.allocated(a.acquire(8), "a buffer of eight bytes was refused")?
         &b.store_byte(8, 1)
         b.release()
         .Ok(())
@@ -242,9 +223,7 @@ impl[A: Allocator] Buffer[A] {
 
     test "a byte store reaches one byte" {
         let a = system()
-        var b = a.acquire(8) else |_| {
-            return testing.assert(false, "a buffer of eight bytes was refused")
-        }
+        var b = testing.allocated(a.acquire(8), "a buffer of eight bytes was refused")?
         // Use a nonzero byte above the signed-byte range and inspect
         // its immediate neighbors at offsets four and six.
         &b.store_byte(5, 200)
@@ -267,13 +246,9 @@ impl[A: Allocator] Buffer[A] {
 
     test trap "load_byte traps past the end" -> Result[(), testing.Failure] {
         let a = system()
-        match a.acquire(8) {
-            Err(_) => testing.assert(false, "a buffer of eight bytes was refused")?,
-            Ok(b) => {
-                let _loaded = b.load_byte(8)
-                b.release()
-            },
-        }
+        let b = testing.allocated(a.acquire(8), "a buffer of eight bytes was refused")?
+        let _loaded = b.load_byte(8)
+        b.release()
         .Ok(())
     }
 }
@@ -283,5 +258,38 @@ impl Oom {
     // allocation-failure walk accepts from a refused run.
     internal fn is_refusal(self: Self) -> Bool {
         match read self { Exhausted => true }
+    }
+
+    // Write `error: not enough memory for` and `what` to standard error, and
+    // return exit status 1, the status a `main` that returns an error
+    // answers. A `main` answers a refused allocation with
+    // `else |refusal| { return refusal.report("the parcel manifest") }`.
+    pub fn report[T: Display](self: Self, what: T) -> UInt8 {
+        var w = core.stderr()
+        self.report_to(what, &w)
+    }
+
+    // Write the report `report` writes to `w`, ignoring a failed write since
+    // the status is the answer, and return status 1.
+    internal fn report_to[T: Display, W: core.Writer](_self: Self, what: T, inout w: W) -> UInt8 where W.Error: Discardable {
+        match core.line("error: not enough memory for {what}", &w) {
+            _ => {},
+        }
+        1
+    }
+
+    test "a refused allocation reports what it was for and answers status 1" {
+        var recorder = testing.allocated(testing.Recorder.of(128), "the recorder was refused")?
+        let status = Oom.Exhausted.report_to("the latency histogram", &recorder)
+        let written = recorder.holds("error: not enough memory for the latency histogram\n")
+        recorder.release()
+        testing.assert_eq(status, UInt8(1), "a refused allocation did not answer status 1")?
+        testing.assert(written, "a refused allocation did not report what it was for")?
+    }
+
+    test "report answers status 1" {
+        // The test runner shows what a test wrote to standard error only when
+        // it fails.
+        testing.assert_eq(Oom.Exhausted.report("the checked report"), UInt8(1), "report did not answer status 1")?
     }
 }
