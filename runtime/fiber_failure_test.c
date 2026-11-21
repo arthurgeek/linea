@@ -191,15 +191,15 @@ static int test_kqueue(void) {
     if (should_refuse(poller_failure)) { errno = EMFILE; return -1; }
     return track_fd(kqueue());
 }
-static int test_kevent(int fd, const struct kevent *changes, int change_count,
-                       struct kevent *events, int count, const struct timespec *timeout) {
+static int test_kevent64(int fd, const struct kevent64_s *changes, int change_count,
+                         struct kevent64_s *events, int count, unsigned flags, const struct timespec *timeout) {
     if (change_count > 0 && (changes[0].flags & EV_ADD) != 0) kernel_add_calls += 1;
     if (change_count > 0 && (changes[0].flags & EV_DELETE) != 0) kernel_delete_calls += 1;
     if (change_count > 0 && (changes[0].flags & EV_ADD) != 0 && reject_next_add != 0) {
         rejected_fd = (int)changes[0].ident; rejected_error = reject_next_add; reject_next_add = 0;
         errno = rejected_error; return -1;
     }
-    if (change_count > 0 && (changes[0].flags & EV_DELETE) != 0 && changes[0].ident == (uintptr_t)rejected_fd) {
+    if (change_count > 0 && (changes[0].flags & EV_DELETE) != 0 && changes[0].ident == (uint64_t)rejected_fd) {
         unexpected_deletes += 1;
         if (rejected_error == EPERM) { errno = EPERM; return -1; }
     }
@@ -209,10 +209,10 @@ static int test_kevent(int fd, const struct kevent *changes, int change_count,
     if (inject_event && events != NULL) {
         assert(count > 0);
         inject_event = 0;
-        EV_SET(events, 0, EVFILT_READ, 0, 0, 0, (void *)(uintptr_t)injected_cookie);
+        EV_SET64(events, 0, EVFILT_READ, 0, 0, 0, injected_cookie, 0, 0);
         return 1;
     }
-    return kevent(fd, changes, change_count, events, count, timeout);
+    return kevent64(fd, changes, change_count, events, count, flags, timeout);
 }
 #endif
 
@@ -239,7 +239,7 @@ static int test_kevent(int fd, const struct kevent *changes, int change_count,
 #define epoll_wait test_epoll_wait
 #else
 #define kqueue test_kqueue
-#define kevent(...) test_kevent(__VA_ARGS__)
+#define kevent64(...) test_kevent64(__VA_ARGS__)
 #endif
 #include "fiber.c"
 #undef fcntl
@@ -265,7 +265,7 @@ static int test_kevent(int fd, const struct kevent *changes, int change_count,
 #undef epoll_wait
 #else
 #undef kqueue
-#undef kevent
+#undef kevent64
 #endif
 
 static void balanced(void) {

@@ -308,10 +308,12 @@ static void check_queue_lane_progress(void) {
         unlock_fiber(&work[i]);
     }
     struct linea_fiber *first = dequeue(&carrier);
+    assert(has_queued_work(&carrier));
     struct linea_fiber *second = dequeue(&carrier);
+    assert(has_queued_work(&carrier));
     assert(first == &work[2] || second == &work[2]);
     assert(first == &work[0] || second == &work[0]);
-    assert(first != second && dequeue(&carrier) == &work[1]);
+    assert(first != second && dequeue(&carrier) == &work[1] && !has_queued_work(&carrier));
     assert(dequeue(&carrier) == NULL);
 }
 
