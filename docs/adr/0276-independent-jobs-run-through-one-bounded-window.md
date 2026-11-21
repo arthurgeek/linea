@@ -9,6 +9,9 @@ Extended by
 [0288](0288-a-session-send-leaves-its-value-queued-and-returns.md), whose
 queued sends remove the handoff's wait for the receiver and under which
 `finish` tells every worker to stop before it joins the first.
+Extended by
+[0303](0303-a-lazy-map-yields-in-input-or-completion-order.md), which adds
+completion order to `task.lazy_map`.
 
 ## Context
 

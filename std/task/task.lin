@@ -1,4 +1,5 @@
 import std.mem
+import std.io
 import std.io.core
 import std.mem.address
 import std.release
@@ -298,6 +299,17 @@ pub enum Policy {
     Threads(UInt64),
 }
 
+// Order says when a lazy map yields each result. `.Input` yields them in the
+// order of the items, so a result that finishes early waits for the items
+// before it. `.Completion` yields each result as soon as its job finishes,
+// the first to finish first. Jobs run on the caller one after another under
+// `.Sequential` and `.Threads(1)`, so there both orders are the items' order.
+@(copyable, derive(Equatable, Equivalent, Display, Debug))
+pub enum Order {
+    Input,
+    Completion,
+}
+
 // Join two independent calculations according to policy and return both results
 // in parameter order once both have finished. Under `.Threads(max)` with `max`
 // above 1, `f1` runs on a new task while the caller runs `f2`.
@@ -589,7 +601,8 @@ struct Busy[I: Iterator, R, A: Allocator] {
 }
 
 // A LazyMap applies `transform` to the items of `source` on at most
-// `running_at_most` worker tasks and yields the results in the items' order.
+// `running_at_most` worker tasks and yields the results in the items' order,
+// or, when `order` is `.Completion`, in the order their chunks finish.
 // A worker is started only when a chunk of items is ready for it and no
 // started worker is free, and it holds that chunk from the start, so its
 // first chunk costs no handoff; it then maps chunk after chunk until the map
@@ -603,13 +616,16 @@ struct Busy[I: Iterator, R, A: Allocator] {
 // eighth, and the eighths left go out in chunks of `chunk` items, an eighth
 // of a share, to whichever worker finishes first.
 //
-// `places` keeps a place for every chunk handed out and not yet yielded, the
-// chunk handed out `n`th at `n % places.length()`, and `head` the results of
-// the chunk being yielded. `busy` holds a worker for each chunk being mapped
-// and `idle` the workers waiting for one, `free` the busy entries not
-// in use, taken and given back from its end, and `stopping` the workers told
-// to stop, from when the source is spent until `finish` joins them; each has
-// room for `running_at_most`. A runtime wait set, `set`, watches every busy
+// `places` keeps a place for every chunk handed out and not yet yielded, and
+// `head` the results of the chunk being yielded. In input order the chunk
+// handed out `n`th has its place at `n % places.length()` from when it is
+// handed out; in completion order the chunk that finishes `n`th, counted by
+// `finished`, takes its place at `n % places.length()` when its results come
+// back, so the places are a queue of finished chunks. `busy` holds a worker
+// for each chunk being mapped and `idle` the workers waiting for one, `free`
+// the busy entries not in use, taken and given back from its end, and
+// `stopping` the workers told to stop, from when the source is spent until
+// `finish` joins them; each has room for `running_at_most`. A runtime wait set, `set`, watches every busy
 // worker from when it takes a chunk until it answers, and `waiting` names the
 // busy entry each of the set's slots watches, so handing out a chunk and waiting
 // for an answer each cost the same however many workers there are. The set
@@ -634,6 +650,7 @@ struct LazyMap[I: Iterator, R, F, A: Allocator = mem.SystemAllocator] {
     first_chunk: UInt64,
     chunk: UInt64,
     chunks_at_most: UInt64,
+    order: Order,
     places: mem.Vec[Option[Ahead[R]], A],
     head: Option[mem.Drain[R, mem.SystemAllocator]],
     busy: mem.Vec[Option[Busy[I, R, A]], A],
@@ -648,6 +665,7 @@ struct LazyMap[I: Iterator, R, F, A: Allocator = mem.SystemAllocator] {
     running: UInt64,
     handed_out: UInt64,
     taken: UInt64,
+    finished: UInt64,
     pulled: UInt64,
     yielded: UInt64,
     pulling: Bool,
@@ -730,9 +748,10 @@ fn work[I: Iterator, R: Owned, F: fn(sink item: I.Item) -> R](sink session: Chan
 
 // Build a lazy map that runs at most `running_at_most` workers and keeps at
 // most `ahead_at_most` pulled items waiting to be yielded. `left` is how many
-// items the source holds, or 0 when that is unknown. A bound below 2 maps
-// every item on the caller, as `.Threads(1)` does everywhere.
-fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator](allocator: A, sink source: I, sink transform: F, running_at_most: UInt64, ahead_at_most: UInt64, left: UInt64) -> LazyMap[I, R, F, A] where
+// items the source holds, or 0 when that is unknown, and `order` when each
+// result is yielded. A bound below 2 maps every item on the caller, as
+// `.Threads(1)` does everywhere.
+fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: I.Item) -> R, A: Allocator](allocator: A, sink source: I, sink transform: F, running_at_most: UInt64, ahead_at_most: UInt64, left: UInt64, order: Order) -> LazyMap[I, R, F, A] where
     carries(allocator, source, transform),
     I.Item: Owned
 {
@@ -782,6 +801,7 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
         } else {
             chunks_at_most
         },
+        order,
         places = mem.Vec.new_in(allocator),
         head = .None,
         busy = mem.Vec.new_in(allocator),
@@ -796,6 +816,7 @@ fn lazy_window[I: Iterator, R: Owned, F: Owned + Copyable + Shareable + fn(sink 
         running = 0,
         handed_out = 0,
         taken = 0,
+        finished = 0,
         pulled = 0,
         yielded = 0,
         pulling = true,
@@ -946,7 +967,9 @@ where I.Item: Owned {
                     let { handout } = body.into_captures()
                     let Handout { chunk: first, transform: _ } = handout
                     let results = mapped_chunk(first, me.transform)
-                    put_place(&me.places, place, .Done(results))
+                    let at = me.finished_place(number)
+                    me.finished += 1
+                    put_place(&me.places, at, .Done(results))
                     .None
                 },
             }
@@ -977,7 +1000,9 @@ where I.Item: Owned {
                 let entry: Busy[I, R, A] = .{ worker = waiting, chunk = number }
                 put_back(&me.busy[spot], entry)
                 me.running += 1
-                put_place(&me.places, place, .Running)
+                if me.order == Order.Input {
+                    put_place(&me.places, place, .Running)
+                }
             },
             None => {},
         }
@@ -988,7 +1013,8 @@ where I.Item: Owned {
     // their place, and keep the worker free for the next chunk. The wait set
     // answers the slot the worker was registered in, and `waiting` names its
     // busy entry. Without a set, the map waits for the worker mapping the
-    // next chunk to be yielded.
+    // next chunk to be yielded in input order, and for the worker mapping the
+    // earliest chunk handed out in completion order.
     fn collected_one(sink self: Self) -> Self where carries(self) {
         var me = self
         var spot = UInt64(0)
@@ -1004,20 +1030,26 @@ where I.Item: Owned {
             me.visits += 1
         } else {
             var found = false
+            var earliest = UInt64(0)
             for at in 0..me.busy.length() {
                 me.visits += 1
                 let empty: Option[Busy[I, R, A]] = .None
                 match mem.exchange(&me.busy[at], empty) {
                     None => {},
                     Some(entry) => {
-                        if entry.chunk == me.taken {
+                        let wanted = match me.order {
+                            Input => entry.chunk == me.taken,
+                            Completion => !found || entry.chunk < earliest,
+                        }
+                        if wanted {
                             spot = at
+                            earliest = entry.chunk
                             found = true
                         }
                         put_back(&me.busy[at], entry)
                     },
                 }
-                if found {
+                if found && me.order == Order.Input {
                     break
                 }
             }
@@ -1039,8 +1071,20 @@ where I.Item: Owned {
         }
         &me.free.push(spot).unwrap()
         me.running -= 1
-        put_place(&me.places, chunk % me.chunks_at_most, .Done(results))
+        let at = me.finished_place(chunk)
+        me.finished += 1
+        put_place(&me.places, at, .Done(results))
         me
+    }
+
+    // The place the results of `chunk`, the chunk handed out `chunk`th, are
+    // kept in once it is mapped: its own in input order, and the next in the
+    // queue of finished chunks in completion order.
+    fn finished_place(self: Self, chunk: UInt64) -> UInt64 {
+        match self.order {
+            Input => chunk % self.chunks_at_most,
+            Completion => self.finished % self.chunks_at_most,
+        }
     }
 
     // Answer the next item's result and the map, waiting for the item's
@@ -1114,7 +1158,14 @@ where I.Item: Owned {
                     // the next chunk before the head is waited for again.
                     put_back(&holder, current.collected_one().filled())
                 },
-                None => panic("a lazy map lost the place of a chunk it handed out"),
+                // In completion order an empty place means no chunk has
+                // finished since the last was yielded, so the map waits for
+                // whichever finishes first.
+                None => if current.order == Order.Completion {
+                    put_back(&holder, current.collected_one().filled())
+                } else {
+                    panic("a lazy map lost the place of a chunk it handed out")
+                },
             }
         }
         match holder {
@@ -1165,7 +1216,11 @@ where I.Item: Owned {
                         put_back(&current.places[place], .Running)
                         break
                     },
-                    None => panic("a lazy map lost the place of a chunk it handed out"),
+                    None => if current.order == Order.Completion {
+                        break
+                    } else {
+                        panic("a lazy map lost the place of a chunk it handed out")
+                    },
                 }
             }
             if current.running == 0 {
@@ -1185,8 +1240,8 @@ where I.Item: Owned {
     }
 
     // Pull no more items. The chunks already handed out are still mapped,
-    // and walking the map yields their results in order and then ends, so a
-    // result that has no `Release` can be taken before `finish`.
+    // and walking the map yields their results in the map's order and then
+    // ends, so a result that has no `Release` can be taken before `finish`.
     pub fn stop(inout self: Self) {
         self.pulling = false
     }
@@ -1234,7 +1289,7 @@ where I.Item: Owned {
         if self.pulled != self.yielded {
             return .Err(self)
         }
-        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, places, head, busy, idle, stopping, free: free_spots, set, waiting, visits: _, opened: _, workers: _, running: _, handed_out: _, taken: _, pulled: _, yielded: _, pulling: _ } = self
+        let LazyMap { source, transform: _, allocator: _, running_at_most: _, ahead_at_most: _, first_chunk: _, chunk: _, chunks_at_most: _, order: _, places, head, busy, idle, stopping, free: free_spots, set, waiting, visits: _, opened: _, workers: _, running: _, handed_out: _, taken: _, finished: _, pulled: _, yielded: _, pulling: _ } = self
         match head {
             None => {},
             Some(results) => match results.finish() {
@@ -1384,7 +1439,11 @@ where I.Item: Owned {
                     put_back(&current.places[place], .Running)
                     put_back(&holder, current.collected_one())
                 },
-                None => panic("a lazy map lost the place of a chunk it handed out"),
+                None => if current.order == Order.Completion {
+                    put_back(&holder, current.collected_one())
+                } else {
+                    panic("a lazy map lost the place of a chunk it handed out")
+                },
             }
         }
         let ending = match holder {
@@ -1409,21 +1468,24 @@ fn ahead_of(max: UInt64) -> UInt64 {
 }
 
 // Apply `f` to the items of `items` on demand, under `policy`, and answer a
-// linear iterator over the results in the items' order. Building it pulls
-// nothing and starts nothing. Under `.Threads(max)` it maps the items on at
-// most `max` worker tasks started on the current Io, one item at a time, and
-// pulls an item only when a worker may take it: each time a worker finishes
-// its result is kept and the worker takes the next item, while at most
-// `2 * max` pulled items, being mapped or answered, wait to be yielded.
-// `.Sequential` and `.Threads(1)` call `f` on the caller, one item for each
-// `next`, and start no task. A `max` of 0 stops the program. The workers'
-// bytes come from the system allocator; `lazy_map_in` says what a refused
-// allocation does.
-pub fn lazy_map[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: S.Iter.Item) -> R](sink policy: Policy, sink items: S, sink f: F) -> LazyMap[S.Iter, R, F, mem.SystemAllocator] where
+// linear iterator over the results. Building it pulls nothing and starts
+// nothing. Under `.Threads(max)` it maps the items on at most `max` worker
+// tasks started on the current Io, one item at a time, and pulls an item only
+// when a worker may take it: each time a worker finishes its result is kept
+// and the worker takes the next item, while at most `2 * max` pulled items,
+// being mapped or answered, wait to be yielded. With `order: .Input`, the
+// default, results are yielded in the items' order; with
+// `order: .Completion` each is yielded as soon as its job finishes, and a
+// caller that needs to know which item a result came from has `f` return
+// it. `.Sequential` and `.Threads(1)` call `f` on the caller, one item for
+// each `next`, and start no task, so both orders are the items' order there.
+// A `max` of 0 stops the program. The workers' bytes come from the system
+// allocator; `lazy_map_in` says what a refused allocation does.
+pub fn lazy_map[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: S.Iter.Item) -> R](sink policy: Policy, sink items: S, sink f: F, order: Order = .Input) -> LazyMap[S.Iter, R, F, mem.SystemAllocator] where
     carries(items, f),
     S.Iter.Item: Owned
 {
-    lazy_map_in(mem.system(), policy, items, f)
+    lazy_map_in(mem.system(), policy, items, f, order: order)
 }
 
 test "a lazy_map yields every result in input order" {
@@ -1629,7 +1691,7 @@ fn map_test_visits(count: UInt64, max: UInt64) -> (UInt64, UInt64) {
     } else {
         max
     }
-    let window = lazy_window(mem.system(), items.drain(), |sink n: UInt64| n, running, count, count)
+    let window = lazy_window(mem.system(), items.drain(), |sink n: UInt64| n, running, count, count, Order.Input)
     var results: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
     let walked = window.drained_into(&results)
     let counted = (walked.visits, walked.handed_out)
@@ -1653,7 +1715,7 @@ fn map_test_visits(count: UInt64, max: UInt64) -> (UInt64, UInt64) {
 // refusal changes where the work runs and never which results are yielded.
 // The items handed to a worker and the results it answers move between
 // tasks in vectors from the system allocator.
-pub fn lazy_map_in[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: S.Iter.Item) -> R, A: Allocator](allocator: A, sink policy: Policy, sink items: S, sink f: F) -> LazyMap[S.Iter, R, F, A] where
+pub fn lazy_map_in[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(sink item: S.Iter.Item) -> R, A: Allocator](allocator: A, sink policy: Policy, sink items: S, sink f: F, order: Order = .Input) -> LazyMap[S.Iter, R, F, A] where
     carries(allocator, items, f),
     S.Iter.Item: Owned
 {
@@ -1666,7 +1728,7 @@ pub fn lazy_map_in[S: Sequence, R: Owned, F: Owned + Copyable + Shareable + fn(s
             max
         },
     }
-    lazy_window(allocator, items.iterate(), f, running_at_most, ahead_of(running_at_most), 0)
+    lazy_window(allocator, items.iterate(), f, running_at_most, ahead_of(running_at_most), 0, order)
 }
 
 test "a map visits each worker entry a fixed number of times per chunk" {
@@ -1883,6 +1945,171 @@ test "a refused allocation moves work to the caller and keeps every result" {
     }
 }
 
+// Sleep a time `n` chooses, so jobs started together finish in a known
+// order on a simulation's clock: item 1 takes 50 ms, item 2 20 ms, item 3
+// 40 ms, item 4 5 ms and any other 10 ms.
+fn lazy_test_finishing(sink n: UInt64) -> UInt64 {
+    let pause = match n {
+        1 => UInt64(50),
+        2 => 20,
+        3 => 40,
+        4 => 5,
+        _ => 10,
+    }
+    time.sleep(time.Duration.from_milliseconds(pause))
+    n
+}
+
+// Walk a lazy map of the items 1 to `count` under `policy` and `order` inside
+// a simulation, and answer the results as the digits of one number, in the
+// order they were yielded, with the virtual milliseconds the walk took.
+fn lazy_test_order(policy: Policy, order: Order, count: UInt64) -> (UInt64, UInt64) {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let answer = &sim.run(
+        [policy, order, count] |inout _world| -> (UInt64, UInt64) {
+            let started = time.Instant.now()
+            defer var mapped = lazy_map(copy(policy), UInt64(1)..=count, lazy_test_finishing, order: order)
+            var digits = UInt64(0)
+            for n in &mapped {
+                digits = digits * 10 + n
+            }
+            (digits, started.elapsed().nanoseconds() / 1000000)
+        },
+    )
+    sim.close()
+    answer
+}
+
+test "a lazy_map in completion order yields each result as its job finishes" {
+    // Four jobs at once finish shortest first. Two at once: item 2 finishes
+    // at 20 ms and item 3 starts; item 1 finishes at 50 ms and item 4
+    // starts, finishing at 55 ms, before item 3 at 60 ms.
+    let (all_at_once, _) = lazy_test_order(Policy.Threads(4), Order.Completion, 4)
+    let (two_at_once, took) = lazy_test_order(Policy.Threads(2), Order.Completion, 4)
+    let (in_input_order, _) = lazy_test_order(Policy.Threads(2), Order.Input, 4)
+    testing.assert_eq(all_at_once, UInt64(4231), "four jobs were not yielded as they finished")?
+    testing.assert_eq(two_at_once, UInt64(2143), "two jobs at once were not yielded as they finished")?
+    testing.assert_eq(took, UInt64(60), "a job did not start as soon as a worker was free")?
+    testing.assert_eq(in_input_order, UInt64(1234), "input order changed")?
+}
+
+test "a lazy_map in completion order runs no more jobs at once than its bound" {
+    // Two at once, each job starts when one before it finishes, and the
+    // last, item 9, finishes at 85 ms; every job at once would take 50.
+    let (_, two) = lazy_test_order(Policy.Threads(2), Order.Completion, 9)
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var mapped = lazy_map_in(log.handle(), Policy.Threads(2), UInt64(1)..=12, |sink n| n, order: .Completion)
+    var total = UInt64(0)
+    for n in &mapped {
+        total += n
+    }
+    mapped.release()
+    let attempts = log.attempts()
+    let settled = log.all_disposed()
+    log.release()
+    testing.assert_eq(two, UInt64(85), "more jobs ran at once than the bound")?
+    testing.assert_eq(total, UInt64(78), "a result was lost")?
+    // Six allocations hold the places and the room for the workers; one more
+    // for each worker started, at most two.
+    testing.assert(attempts <= 6 + 2, "the map started more workers than its bound")?
+    testing.assert(settled, "a finished map kept an allocation")?
+}
+
+// Take the first result of a lazy map in completion order over items 1 to
+// 100, three at once inside a simulation, then stop it, walk what it had
+// started and finish it. Answer the first result, how many came after it,
+// the item the source gives next, and whether every allocation was disposed
+// of.
+fn lazy_test_completion_stopped() -> (UInt64, UInt64, UInt64, Bool) {
+    var log = testing.TestAllocator.open(mem.system()).unwrap()
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let (first, after, next_item) = &sim.run(
+        inout [inout log] |inout _world| -> (UInt64, UInt64, UInt64) {
+            var mapped = lazy_map_in(log.handle(), Policy.Threads(3), UInt64(1)..=100, lazy_test_finishing, order: .Completion)
+            var first = UInt64(0)
+            for n in &mapped {
+                first = n
+                break
+            }
+            &mapped.stop()
+            var after = UInt64(0)
+            for _ in &mapped {
+                after += 1
+            }
+            var source = match mapped.finish() {
+                Ok(source) => source,
+                Err(still) => {
+                    still.release()
+                    panic("a walked stopped map still held results")
+                },
+            }
+            let next_item = match &source.next() {
+                Some(n) => n,
+                None => 0,
+            }
+            (first, after, next_item)
+        },
+    )
+    sim.close()
+    let settled = log.all_disposed()
+    log.release()
+    (first, after, next_item, settled)
+}
+
+test "a lazy_map in completion order left early settles every job it started" {
+    // Items 1, 2 and 3 start together and item 2 finishes first; the window
+    // has pulled item 4 for the worker item 2 freed, so the three still
+    // mapped are yielded after it and the source resumes at item 5.
+    let (first, after, next_item, settled) = lazy_test_completion_stopped()
+    testing.assert_eq(first, UInt64(2), "the first job to finish was not yielded first")?
+    testing.assert_eq(after, UInt64(3), "a stopped map lost or added a result")?
+    testing.assert_eq(next_item, UInt64(5), "the map pulled past what it started")?
+    testing.assert(settled, "a map left early kept an allocation")?
+}
+
+test "a refused allocation leaves a lazy_map in completion order settled" {
+    let outer = testing.TestAllocator.open(mem.system()).unwrap()
+    let checked = testing.each_allocation_failure(
+        outer.handle(),
+        |allocator| -> Result[(), testing.Failure] {
+            var mapped = lazy_map_in(allocator, Policy.Threads(2), UInt64(1)..=5, |sink n| n * n, order: .Completion)
+            var sum = UInt64(0)
+            for n in &mapped {
+                sum += n
+            }
+            mapped.release()
+            testing.assert_eq(sum, UInt64(55), "a refused allocation changed the results")
+        },
+        |error| error.is_refusal(),
+    )
+    let settled = outer.all_disposed()
+    outer.release()
+    testing.assert(checked.is_ok(), "a refused allocation changed what the map yields")?
+    testing.assert(settled, "a refused allocation left another one undisposed")?
+}
+
+test "a sequential lazy_map in completion order yields in input order" {
+    // On the caller each job finishes before the next starts, so finishing
+    // order is input order and nothing is allocated.
+    let (sequential, _) = lazy_test_order(Policy.Sequential, Order.Completion, 4)
+    let (one_task, _) = lazy_test_order(Policy.Threads(1), Order.Completion, 4)
+    let log = testing.TestAllocator.open(mem.system()).unwrap()
+    var mapped = lazy_map_in(log.handle(), Policy.Sequential, UInt64(1)..=8, |sink n| n * 3, order: .Completion)
+    var position = UInt64(0)
+    var same = true
+    for result in &mapped {
+        position += 1
+        same = same && result == position * 3
+    }
+    mapped.release()
+    let attempts = log.attempts()
+    log.release()
+    testing.assert_eq(sequential, UInt64(1234), "a sequential map changed the order")?
+    testing.assert_eq(one_task, UInt64(1234), "a map on the caller changed the order")?
+    testing.assert(same && position == 8, "a sequential map yielded other results")?
+    testing.assert_eq(attempts, 0, "a map that runs on the caller allocated")?
+}
+
 // Map every item of `items` through a lazy map that runs at most
 // `running_at_most` workers and may keep every result ahead, and
 // collect the results in the items' order into a vector from `allocator`.
@@ -1901,7 +2128,7 @@ fn collected[T: Owned, R: Owned, F: Owned + Copyable + Shareable + fn(sink item:
     } else {
         running_at_most
     }
-    let mapped = lazy_window(allocator, items.drain(), f, running, ahead, total)
+    let mapped = lazy_window(allocator, items.drain(), f, running, ahead, total, Order.Input)
     let walked = mapped.drained_into(&results)
     match walked.finish() {
         Ok(drained) => drained.finish().unwrap(),

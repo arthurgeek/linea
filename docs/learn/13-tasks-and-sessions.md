@@ -1555,7 +1555,7 @@ without a back-and-forth conversation, and return owned results.
 Linea provides four combinators for independent work:
 - `task.all(policy, jobs)` runs a collection of homogeneous jobs (like `Promise.all` in JavaScript or `futures::future::join_all` in Rust) and returns a `Vec[T]` in job order.
 - `task.map(policy, items, f)` applies `f` to every element of a `Vec[T]`, a bounded number at a time, and returns the results in the items' order.
-- `task.lazy_map(policy, items, f)` does the same for any sequence, but hands the results back one at a time, as you ask for them (see [Results one at a time](#results-one-at-a-time-tasklazy_map)).
+- `task.lazy_map(policy, items, f)` does the same for any sequence, but hands the results back one at a time, as you ask for them, in the items' order or, with `order: .Completion`, as each finishes (see [Results one at a time](#results-one-at-a-time-tasklazy_map)).
 - `task.join(policy, f1, f2)` (and `join3`, `join4`) gathers distinct computations of different types into a tuple `(T1, T2)` (like `tokio::join!` in Rust).
 
 Each takes a `policy: task.Policy`:
@@ -1728,6 +1728,88 @@ and the source; `defer var` calls it on every path, the `break` above
 included. Results that have no `Release` are taken by their owner instead:
 `stop()` stops pulling, a walk after it yields only what was already started,
 and `finish()` then hands back the source with the items it never pulled.
+
+### Results as they finish: `order: .Completion`
+
+By default a lazy map hands results back in the items' order, so a result
+that is ready early waits for the slower items before it. When the order of
+the items does not matter, as for a list of downloads or checks reported as
+they come in, pass `order: .Completion`: each result is handed back as soon
+as its job finishes, the fastest first, much as a Rust stream run through
+`buffer_unordered` does. The window is the same: at most `max` jobs run, and
+an item is pulled only when a job may start for it. The result does not say
+which item it came from, so a job whose caller needs that returns it, as
+`fetch` returns its page below.
+
+This program fetches four pages, two at a time, where each page takes as long
+as its name says. It runs in a
+[simulation](09-networking.md#testing-a-timeout-without-waiting), so the
+milliseconds are virtual and the order is the same on every run:
+
+`fastest_first.lin`:
+
+```linea
+import std.io
+import std.mem
+import std.task
+import std.time
+
+// Pretend to fetch `page` by sleeping the milliseconds its name ends with,
+// and answer the page, so its caller knows which one finished.
+fn fetch(sink page: String) -> String {
+    let took_ms = if page.view() == "slow-50" {
+        UInt64(50)
+    } else if page.view() == "quick-20" {
+        20
+    } else if page.view() == "medium-40" {
+        40
+    } else {
+        5
+    }
+    time.sleep(time.Duration.from_milliseconds(took_ms))
+    page
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    defer let report = &sim.run(
+        |inout _world| -> String {
+            var pages: mem.Vec[String, mem.SystemAllocator] = mem.Vec.new()
+            for page in ["slow-50", "quick-20", "medium-40", "tiny-5"] {
+                &pages.push(page.to_owned().unwrap()).unwrap()
+            }
+            let started = time.Instant.now()
+            var report = String.new()
+            // Each page comes back as soon as its fetch finishes.
+            defer var fetched = task.lazy_map(.Threads(2), pages.drain(), fetch, order: .Completion)
+            for page in &fetched {
+                "{page.view()} after {started.elapsed().nanoseconds() / 1000000} ms\n".fmt(&report).unwrap()
+                page.release()
+            }
+            report
+        },
+    )
+    sim.close()
+    io.print(report.view())?
+    .Ok(0)
+}
+```
+
+```
+quick-20 after 20 ms
+slow-50 after 50 ms
+tiny-5 after 55 ms
+medium-40 after 60 ms
+```
+
+`quick-20` finishes first and frees its job for `medium-40`; `slow-50`
+finishes at 50 ms and frees its job for `tiny-5`, which is done at 55 ms,
+before `medium-40`. With the default `order: .Input` the same walk prints
+`slow-50`, `quick-20`, `medium-40` and `tiny-5`, each once the pages before
+it are done. Under `.Sequential` or `.Threads(1)` every job runs on the
+caller, one after another, so both orders are the items' order. Settling is
+the same in either order: `release()`, `stop()` and `finish()` wait for every
+job already started, so no result is lost.
 
 ### Naming the allocator: the `_in` forms
 
