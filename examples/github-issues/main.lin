@@ -8,9 +8,8 @@
 // limit and reaches private repositories. `--api` names another server that
 // answers as GitHub's API does, such as a GitHub Enterprise host or a local
 // server answering recorded responses. GitHub's API is served over HTTPS,
-// which `http.Client` reaches once it has a TLS stream; until then it answers
-// `https` URLs with an error that says so, and `--api` with an `http` URL is
-// the way to run this program.
+// and `http.Client` checks its certificate against the operating system's
+// roots, so the default needs no setup.
 import std.cli
 import std.env
 import std.http

@@ -9,8 +9,8 @@
 // Each check runs on a task of its own with an `http.Client` of its own, and
 // asks for the link without following a redirect, so a moved page is
 // reported with where it moved to. A blank line or one starting with `#` is
-// skipped. `https` links are reported as failed until `http.Client` has a TLS
-// stream.
+// skipped. An `https` link is checked over TLS, its certificate against the
+// operating system's roots.
 import std.cli
 import std.env
 import std.fmt

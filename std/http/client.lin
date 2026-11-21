@@ -8,13 +8,14 @@ import std.task
 import std.testing
 import std.text as strings
 import std.time
+import std.tls
 
 // `ClientLimits` bounds what a client holds and how long it waits. Lines and
 // headers bound a response's head as `Limits` bounds a request's. Timeouts are
 // milliseconds, and zero waits forever: `connect_timeout_ms` bounds opening a
-// connection, `read_timeout_ms` and `write_timeout_ms` each read and write
-// separately, and `request_timeout_ms` every read of one exchange together,
-// from when its request starts to be written to the last byte of its body.
+// connection, and `read_timeout_ms` and `write_timeout_ms` each read and
+// write separately. A whole request is bounded by the `deadline:` that
+// `send`, `send_from` and `get` take, not by a limit.
 // `max_idle_connections` bounds the connections the pool keeps open between
 // requests, `max_idle_per_host` how many of them may reach one origin, and
 // `idle_timeout_ms` how long one may sit unused before it is closed rather
@@ -32,7 +33,6 @@ pub struct ClientLimits {
     connect_timeout_ms: UInt64,
     read_timeout_ms: UInt64,
     write_timeout_ms: UInt64,
-    request_timeout_ms: UInt64,
     max_idle_connections: UInt64,
     max_idle_per_host: UInt64,
     idle_timeout_ms: UInt64,
@@ -43,10 +43,9 @@ pub struct ClientLimits {
 }
 
 // The default limits allow 8 KiB lines and 100 headers in a response's head,
-// ten seconds to connect, thirty for each read and write and no bound on an
-// exchange as a whole, keep 16 idle connections, at most 4 to one origin,
-// for 4 seconds each, shorter than the 5 seconds common servers keep an idle
-// connection, since a request written on one they closed fails unless it is
+// ten seconds to connect and thirty for each read and write, keep 16 idle
+// connections, at most 4 to one origin, for 4 seconds each, shorter than the
+// 5 seconds common servers keep an idle connection, since a request written on one they closed fails unless it is
 // idempotent, allow 16 outstanding responses, follow 10 redirects,
 // drain 64 KiB to keep a connection, and read ahead 16 KiB at a time.
 let standard_client_limits: ClientLimits = .{
@@ -55,7 +54,6 @@ let standard_client_limits: ClientLimits = .{
     connect_timeout_ms = 10000,
     read_timeout_ms = 30000,
     write_timeout_ms = 30000,
-    request_timeout_ms = 0,
     max_idle_connections = 16,
     max_idle_per_host = 4,
     idle_timeout_ms = 4000,
@@ -81,15 +79,16 @@ test "the default client limits bound the pool and the waits" {
     testing.assert_eq(limits.max_outstanding, UInt64(16), "the outstanding bound changed")?
     testing.assert_eq(limits.max_redirects, UInt64(10), "the redirect bound changed")?
     testing.assert_eq(limits.connect_timeout_ms, UInt64(10000), "the connect timeout changed")?
-    testing.assert_eq(limits.request_timeout_ms, UInt64(0), "an exchange was bounded by default")?
 }
 
 // Why a request failed, by category:
 // - `Url` when the URL, or a redirect's `Location`, is malformed;
-// - `HttpsUnsupported` when the URL is `https`, which needs a TLS stream;
 // - `Resolve` when the host name has no address;
 // - `Connect` when the origin refused the connection or did not answer it in
-//   time;
+//   time, or the request's deadline had passed before it was sent;
+// - `Tls` when an `https` origin's TLS handshake failed: its certificate did
+//   not check out, the connection failed or timed out during it, or the
+//   client's TLS configuration could not be built;
 // - `Io` when an open connection failed, a read or write timing out included,
 //   which `is_timeout` tells apart;
 // - `Closed` when the server closed the connection before answering;
@@ -107,7 +106,7 @@ test "the default client limits bound the pool and the waits" {
 @(copyable, derive(Equatable, Debug, Release))
 pub enum ClientError {
     Url(UrlError),
-    HttpsUnsupported,
+    Tls(tls.TlsError),
     Resolve(io.IoError),
     Connect(io.IoError),
     Io(io.IoError),
@@ -126,7 +125,7 @@ impl Display for ClientError {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
         match read self {
             Url(error) => error.fmt(&w),
-            HttpsUnsupported => &w.write_str("https needs a TLS stream, which this client does not have"),
+            Tls(error) => "the TLS handshake failed: {error}".fmt(&w),
             Resolve(error) => "the host name did not resolve: {error}".fmt(&w),
             Connect(error) => "the connection was not made: {error}".fmt(&w),
             Io(error) => error.fmt(&w),
@@ -156,11 +155,12 @@ test "a client error displays its reason" {
 
 impl ClientError {
     // Whether the request failed because a wait ran out of time: a connect,
-    // a read or a write timeout, or the exchange's deadline.
+    // a handshake, a read or a write timeout, or the request's deadline.
     pub fn is_timeout(self: Self) -> Bool {
         match read self {
             Connect(error) => error.category == .TimedOut,
             Io(error) => error.category == .TimedOut,
+            Tls(Transport(error)) => error.category == .TimedOut,
             _ => false,
         }
     }
@@ -169,11 +169,17 @@ impl ClientError {
         let timed_out = io.IoError { operation = .Read, category = .TimedOut, code = .None, progress = 0 }
         let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 0 }
         testing.assert(ClientError.Io(copy(timed_out)).is_timeout(), "a timed out read was not a timeout")?
+        testing.assert(ClientError.Tls(.Transport(copy(timed_out))).is_timeout(), "a timed out handshake was not a timeout")?
         testing.assert(ClientError.Connect(timed_out).is_timeout(), "a timed out connect was not a timeout")?
         testing.assert(!ClientError.Io(reset).is_timeout(), "a reset was a timeout")?
         testing.assert(!ClientError.Closed.is_timeout(), "a closed connection was a timeout")?
         .Ok(())
     }
+}
+
+// The failure of a request whose deadline passed before any of it was sent.
+fn timed_out_before_sending() -> ClientError {
+    .Connect(.{ operation = .Connect, category = .TimedOut, code = .None, progress = 0 })
 }
 
 // What a response's head said, read as the server's parser reads a
@@ -1015,18 +1021,41 @@ derive[A: Allocator] Release for Idle[A]
 // pool, each response's head and buffer, and the bodies read whole. A client
 // is used by one task at a time; a program that fetches on several tasks
 // gives each its own. Closing it closes every idle connection.
+//
+// An `https` origin is reached over TLS with the client's `tls.ClientConfig`:
+// the one `with_tls` gave it, or else one built at the first `https` request
+// with `verify: .System`, which checks servers against the operating
+// system's roots. Every TLS connection of a client shares that
+// configuration's session cache, so reconnecting to a server resumes.
 @(opaque, linear)
 struct Client[A: Allocator = mem.SystemAllocator] {
     allocator: A,
     limits: ClientLimits,
     idle: Vec[Idle[A], A],
     outstanding: UInt64,
+    tls: Option[tls.ClientConfig],
 }
 
 impl Client[mem.SystemAllocator] {
     // A client allocating from the system allocator, bounded by `limits`.
     pub fn new(limits: ClientLimits = standard_client_limits) -> Client[mem.SystemAllocator] {
         Client.new_in(mem.system(), limits)
+    }
+
+    // A client allocating from the system allocator, bounded by `limits`,
+    // that reaches `https` origins with `config`, such as one trusting a
+    // private certificate authority's roots. The client owns it and closes
+    // it when the client is closed.
+    pub fn with_tls(sink config: tls.ClientConfig, limits: ClientLimits = standard_client_limits) -> Client[mem.SystemAllocator] where carries(config) {
+        Client.with_tls_in(mem.system(), config, limits)
+    }
+
+    test "a client given a TLS configuration holds it until it is closed" {
+        let client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+        let held = client.tls.is_some()
+        let closed = client.close().is_ok()
+        testing.assert(held, "the client did not keep its TLS configuration")?
+        testing.assert(closed, "closing a client with a TLS configuration failed")?
     }
 
     test "a new client holds no connections" {
@@ -1041,7 +1070,20 @@ impl[A: Allocator] Client[A] {
     // A client allocating from `allocator`, bounded by `limits`. Nothing is
     // allocated or opened until the first request.
     pub fn new_in(allocator: A, limits: ClientLimits = standard_client_limits) -> Client[A] where carries(allocator) {
-        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0 }
+        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .None }
+    }
+
+    // A client allocating from `allocator`, bounded by `limits`, that
+    // reaches `https` origins with `config`, as `with_tls` does.
+    pub fn with_tls_in(allocator: A, sink config: tls.ClientConfig, limits: ClientLimits = standard_client_limits) -> Client[A] where carries(allocator, config) {
+        .{ allocator = copy(allocator), limits = copy(limits), idle = Vec.new_in(allocator), outstanding = 0, tls = .Some(config) }
+    }
+
+    test "a client in an allocator keeps the TLS configuration it was given" {
+        let client = Client.with_tls_in(mem.system(), tls.ClientConfig.open(roots: test_root).unwrap())
+        let held = client.tls.is_some()
+        client.release()
+        testing.assert(held, "the client did not keep its TLS configuration")
     }
 
     test "a client keeps the limits it was given" {
@@ -1102,10 +1144,11 @@ impl[A: Allocator] Client[A] {
         testing.assert_eq(said.view(), "saturated outstanding=1 then 0", "a request past the bound was sent")
     }
 
-    // Send a `GET` of `url`, rendered with `Display`, with no headers.
-    pub fn get[U: Display](inout self: Self, url: U) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+    // Send a `GET` of `url`, rendered with `Display`, with no headers, by
+    // `deadline` as `send` is.
+    pub fn get[U: Display](inout self: Self, url: U, deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
         let request = ClientRequest.new_in(self.allocator, "GET", url)?
-        &self.send(request)
+        &self.send(request, deadline)
     }
 
     test "a get reads a local server's answer" {
@@ -1126,8 +1169,14 @@ impl[A: Allocator] Client[A] {
     // A connection taken from the pool that the server closed while it sat
     // idle fails before any of the response arrives; the request is then sent
     // once more on a new connection when its method is idempotent.
-    pub fn send(inout self: Self, sink request: ClientRequest[A]) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
-        &self.follow(request, 0)
+    //
+    // `deadline` bounds the whole request: resolving and connecting, a TLS
+    // handshake, every redirect, and reading the response's body, which ends
+    // in `TimedOut` once it passes. A deadline already passed sends nothing.
+    // `time.never`, the default, leaves each wait bounded by the client's
+    // timeouts alone.
+    pub fn send(inout self: Self, sink request: ClientRequest[A], deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        &self.follow(request, 0, deadline)
     }
 
     test "two requests to one origin share a pooled connection" {
@@ -1145,6 +1194,57 @@ impl[A: Allocator] Client[A] {
         testing.assert_eq(said.view(), "too many redirects; unfollowed 302", "a redirect loop was followed past the limit")
     }
 
+    test "a get reads a local HTTPS server's answer" {
+        defer let said = asked_while_serving_securely(1, ask_hello_securely)
+        testing.assert_eq(said.view(), "200 hello https", "the HTTPS answer changed")
+    }
+
+    test "an https server whose certificate names another host is refused" {
+        defer let said = asked_while_serving_securely(1, ask_another_host)
+        testing.assert_eq(said.view(), "wrong name", "a certificate for another host was accepted")
+    }
+
+    test "a client given no TLS configuration verifies servers with the system's roots" {
+        defer let said = asked_while_serving_securely(1, ask_with_system_roots)
+        testing.assert_eq(said.view(), "refused", "the system's roots trusted the test root")
+    }
+
+    test "redirects between http and https drop credentials across origins" {
+        defer let said = asked_while_serving_both(2, 4, ask_across_schemes)
+        testing.assert_eq(said.view(), "https none; http none; https auth", "a redirect between schemes broke the origin rules")
+    }
+
+    test "a request whose deadline has passed is never sent" {
+        var listener = net.listen(net.loopback(0)).unwrap()
+        let port = listener.local_address().unwrap().port
+        defer var client = Client.new()
+        let refused = match &client.get("http://127.0.0.1:{port}/", deadline: time.Deadline.after(time.Duration.from_nanoseconds(0))) {
+            Ok(response) => {
+                &client.discard(response)
+                false
+            },
+            Err(error) => error.is_timeout(),
+        }
+        let reached = match &listener.accept_by(time.Deadline.after(time.Duration.from_milliseconds(20))) {
+            Ok(Accepted { connection, address: _ }) => {
+                connection.release()
+                true
+            },
+            Err(_) => false,
+        }
+        listener.release()
+        testing.assert(refused, "a request past its deadline was not refused as timed out")?
+        testing.assert(!reached, "a request past its deadline connected")?
+        .Ok(())
+    }
+
+    test "a deadline ends a body the server sends too slowly" {
+        // Each byte arrives well inside the read timeout, and all of them
+        // would take two seconds; the deadline ends the read first.
+        defer let said = asked_while_dribbling(ask_by_deadline)
+        testing.assert_eq(said.view(), "200 timed out", "a slow body outlived the request's deadline")
+    }
+
     test "a connection the server closed while idle is replaced" {
         defer let said = asked_while_serving(2, ask_after_idle, server_idle_ms: 50)
         testing.assert_eq(said.view(), "hello hello", "a stale pooled connection failed the request")
@@ -1153,8 +1253,8 @@ impl[A: Allocator] Client[A] {
     // Send `current`, which `followed` redirects led to, and follow the
     // redirect it answers, if any. Each redirect is one call deeper, at most
     // `max_redirects` of them.
-    fn follow(inout self: Self, sink current: ClientRequest[A], followed: UInt64) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
-        let response = &self.exchange(current) else |error| {
+    fn follow(inout self: Self, sink current: ClientRequest[A], followed: UInt64, deadline: time.Deadline) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+        let response = &self.exchange(current, deadline) else |error| {
             current.release()
             return .Err(error)
         }
@@ -1191,7 +1291,7 @@ impl[A: Allocator] Client[A] {
         }
         &self.finish(response)
         let next = redirected(current, status, target)?
-        &self.follow(next, followed + 1)
+        &self.follow(next, followed + 1, deadline)
     }
 
     // Send `request` with a body read from `body` as it is sent, rather than
@@ -1199,10 +1299,11 @@ impl[A: Allocator] Client[A] {
     // and chunks of what the reader yields otherwise. A body that ends before
     // `length` bytes is `InvalidRequest`. A streamed body cannot be read
     // twice, so no redirect is followed and no request is sent again: a
-    // redirect is answered as it is.
-    pub fn send_from[R: io.Reader](inout self: Self, sink request: ClientRequest[A], inout body: R, length: Option[UInt64] = .None) -> Result[ClientResponse[A], ClientError] where R.Error: Into[io.IoError], carries(.Ok: self) {
+    // redirect is answered as it is. `deadline` bounds the request as it
+    // does for `send`, the reads of `body` excepted.
+    pub fn send_from[R: io.Reader](inout self: Self, sink request: ClientRequest[A], inout body: R, length: Option[UInt64] = .None, deadline: time.Deadline = time.never) -> Result[ClientResponse[A], ClientError] where R.Error: Into[io.IoError], carries(.Ok: self) {
         let sending = request
-        let opened = &self.open_exchange(sending)
+        let opened = &self.open_exchange(sending, deadline)
         let (link, url) = match opened {
             Ok(opened) => opened,
             Err(error) => {
@@ -1328,9 +1429,14 @@ impl[A: Allocator] Client[A] {
         testing.assert_eq(said.view(), "idle=0 outstanding=0", "a discarded response kept its connection")
     }
 
-    // Close every idle connection, reporting the first close that fails.
+    // Close every idle connection and the TLS configuration, reporting the
+    // first close that fails.
     pub fn close(sink self: Self) -> Result[(), io.IoError] {
-        let Client { allocator: _, limits: _, idle, outstanding: _ } = self
+        let Client { allocator: _, limits: _, idle, outstanding: _, tls: config } = self
+        match config {
+            Some(config) => config.close(),
+            None => {},
+        }
         var open = idle
         var outcome: Result[(), io.IoError] = .Ok(())
         loop {
@@ -1353,6 +1459,27 @@ impl[A: Allocator] Client[A] {
     test "closing a client closes its idle connections" {
         defer let said = asked_while_serving(1, ask_closed)
         testing.assert_eq(said.view(), "closed", "closing the client failed")
+    }
+
+    test "the pool keeps an https connection apart from an http one" {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let port = listener.local_address().unwrap().port
+        var client = Client.new()
+        let plain = Origin { is_https = false, host = "127.0.0.1", port }
+        let link = Link.plain(connect_origin(plain, ClientLimits.default(), time.never).unwrap())
+        let address = fmt.render_owned("http://127.0.0.1:{port}/").unwrap()
+        &client.give_back(link, Url.parse(address.view()).unwrap())
+        let secure = &client.take_idle(Origin { is_https = true, host = "127.0.0.1", port })
+        let apart = secure.is_none()
+        secure.release()
+        let same = &client.take_idle(plain)
+        let reused = same.is_some()
+        same.release()
+        client.release()
+        address.release()
+        listener.release()
+        testing.assert(apart, "an https request was given an http connection")?
+        testing.assert(reused, "an http request was not given its pooled connection")?
     }
 
     // Take the most recently returned idle connection to `origin` from the
@@ -1424,7 +1551,7 @@ impl[A: Allocator] Client[A] {
 
     // Send `current` once, on a pooled connection to its origin when there
     // is one and a new connection otherwise, and read its response's head.
-    fn exchange(inout self: Self, current: ClientRequest[A]) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
+    fn exchange(inout self: Self, current: ClientRequest[A], deadline: time.Deadline) -> Result[ClientResponse[A], ClientError] where carries(.Ok: self) {
         if self.outstanding >= self.limits.max_outstanding {
             return .Err(.Saturated)
         }
@@ -1432,11 +1559,13 @@ impl[A: Allocator] Client[A] {
             Ok(url) => url,
             Err(error) => return .Err(.Url(error)),
         }
-        let deadline = net.bound_after(self.limits.request_timeout_ms)
+        if deadline.expired() {
+            return .Err(timed_out_before_sending())
+        }
         match &self.take_idle(url.origin()) {
             Some(pooled) => {
                 var reused = pooled
-                &reused.bound_exchange(deadline)
+                &reused.set_deadline(deadline)
                 match &self.attempt(reused, current, url) {
                     Ok(response) => return .Ok(response),
                     Err(failed) => if !failed.stale || !is_idempotent(current.method.view()) {
@@ -1446,11 +1575,33 @@ impl[A: Allocator] Client[A] {
             },
             None => {},
         }
-        var link = open_link(url.origin(), self.limits)?
-        &link.bound_exchange(deadline)
+        let link = &self.open_link(url.origin(), deadline)?
         match &self.attempt(link, current, url) {
             Ok(response) => .Ok(response),
             Err(failed) => .Err(copy(failed.error)),
+        }
+    }
+
+    // Open a link to `origin` by `deadline`: a connection, and over it a TLS
+    // stream for `https`, with the client's configuration, built with
+    // `verify: .System` at the first `https` origin when it was given none.
+    fn open_link(inout self: Self, origin: Origin, deadline: time.Deadline) -> Result[Link, ClientError] {
+        let connection = connect_origin(origin, self.limits, deadline)?
+        if !origin.is_https() {
+            return .Ok(Link.plain(connection))
+        }
+        if self.tls.is_none() {
+            match tls.ClientConfig.open() {
+                Ok(config) => mem.exchange(&self.tls, .Some(config)).release(),
+                Err(refused) => {
+                    connection.release()
+                    return .Err(.Tls(.Tls(refused)))
+                },
+            }
+        }
+        match read self.tls {
+            Some(config) => secure_link(config, connection, origin.host(), deadline),
+            None => panic("a client's TLS configuration was not kept"),
         }
     }
 
@@ -1474,7 +1625,7 @@ impl[A: Allocator] Client[A] {
 
     // Take a connection for a streamed request: a pooled one to its origin
     // or a new one, bounded for the exchange.
-    fn open_exchange(inout self: Self, current: ClientRequest[A]) -> Result[(Link, Url), ClientError] where borrows(current), carries(.Ok: current) {
+    fn open_exchange(inout self: Self, current: ClientRequest[A], deadline: time.Deadline) -> Result[(Link, Url), ClientError] where borrows(current), carries(.Ok: current) {
         if self.outstanding >= self.limits.max_outstanding {
             return .Err(.Saturated)
         }
@@ -1482,13 +1633,17 @@ impl[A: Allocator] Client[A] {
             Ok(url) => url,
             Err(error) => return .Err(.Url(error)),
         }
-        let deadline = net.bound_after(self.limits.request_timeout_ms)
-        var link = match &self.take_idle(url.origin()) {
-            Some(pooled) => pooled,
-            None => open_link(url.origin(), self.limits)?,
+        if deadline.expired() {
+            return .Err(timed_out_before_sending())
         }
-        &link.bound_exchange(deadline)
-        .Ok((link, url))
+        match &self.take_idle(url.origin()) {
+            Some(pooled) => {
+                var link = pooled
+                &link.set_deadline(deadline)
+                .Ok((link, url))
+            },
+            None => .Ok((&self.open_link(url.origin(), deadline)?, url)),
+        }
     }
 
     // Read the head of the response arriving on `link` for a request to
@@ -1852,6 +2007,109 @@ fn asked_while_serving(connections: UInt64, ask: fn(port: UInt16) -> String, ser
     answer
 }
 
+// The test certificate authority's root, and the certificate and key the
+// HTTPS tests' server presents, which that root issued for `localhost` and
+// `127.0.0.1`.
+let test_root: Str = embed("../tls/testdata/ca.pem")
+
+let test_server_chain: Str = embed("../tls/testdata/server.pem")
+
+let test_server_key: Str = embed("../tls/testdata/server_key.pem")
+
+// Serve the client tests' routes over TLS on a loopback port, as
+// `asked_while_serving` serves them in plain text, while `ask` runs on another
+// task against that port.
+fn asked_while_serving_securely(connections: UInt64, ask: fn(port: UInt16) -> String) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    let config = tls.ServerConfig.open(test_server_chain, test_server_key).unwrap()
+    let limits = Limits { connections = .Some(connections), idle_timeout_ms = 2000, ..Limits.default() }
+    let _served = serve(listener, client_test_router, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+    config.close()
+    let (answer, done) = asking.recv()
+    done.close()
+    answer
+}
+
+// Serve the client tests' routes in plain text on one loopback port, for
+// `plain_connections` connections, and over TLS on another, for
+// `secure_connections`, while `ask` runs against both.
+fn asked_while_serving_both(plain_connections: UInt64, secure_connections: UInt64, ask: fn(http_port: UInt16, https_port: UInt16) -> String) -> String {
+    let plain = net.listen(net.loopback(0)).unwrap()
+    let http_port = plain.local_address().unwrap().port
+    let secure = net.listen(net.loopback(0)).unwrap()
+    let https_port = secure.local_address().unwrap().port
+    let serving_plain = task.prepare(
+        sink [sink plain, plain_connections] |sink me: session.Chan[session.Send[Bool, session.End]]| {
+            let limits = Limits { connections = .Some(plain_connections), idle_timeout_ms = 2000, ..Limits.default() }
+            let served = serve(plain, client_test_router, limits: limits, policy: .Sequential)
+            me.send(served.is_ok()).close()
+        },
+    ).unwrap().start()
+    let asking = task.prepare(
+        sink [http_port, https_port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(http_port, https_port)).close()
+        },
+    ).unwrap().start()
+    let config = tls.ServerConfig.open(test_server_chain, test_server_key).unwrap()
+    let limits = Limits { connections = .Some(secure_connections), idle_timeout_ms = 2000, ..Limits.default() }
+    let _served = serve(secure, client_test_router, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+    config.close()
+    let (answer, done) = asking.recv()
+    done.close()
+    let (_plain_served, finished) = serving_plain.recv()
+    finished.close()
+    answer
+}
+
+// Accept one connection on a loopback port and answer its request with a
+// 100-byte body sent a byte every 20 milliseconds, while `ask` runs on
+// another task.
+fn asked_while_dribbling(ask: fn(port: UInt16) -> String) -> String {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let asking = task.prepare(
+        sink [port, ask] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    var handler = |sink connection: net.Connection, _peer: net.Address| {
+        dribble_body(connection)
+    }
+    let _served = net.serve(listener, &handler, connections: .Some(1))
+    let (answer, done) = asking.recv()
+    done.close()
+    answer
+}
+
+// Read a request's head and answer it a byte at a time, stopping when the
+// client has gone.
+fn dribble_body(sink connection: net.Connection) {
+    var reader = io.BufferedReader.open(capacity: 256, reader: connection).unwrap()
+    loop {
+        match &reader.read_line_borrowed(max_bytes: 256) {
+            Ok(Some(line)) => if line == "" {
+                break
+            },
+            _ => break,
+        }
+    }
+    var connection = reader.abandon()
+    var sending = io.write_all(&connection, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n".as_bytes()).is_ok()
+    var sent: UInt64 = 0
+    while sending && sent < 100 {
+        time.sleep(time.Duration.from_milliseconds(20))
+        sending = io.write_all(&connection, "x".as_bytes()).is_ok()
+        sent += 1
+    }
+    connection.release()
+}
+
 // Accept one connection on a loopback port, read a chunked request from it
 // up to its last chunk, and answer with the request's bytes as the body,
 // with the port written as `PORT`, while `ask` runs on another task.
@@ -1913,7 +2171,9 @@ fn echo_chunked_request(sink connection: net.Connection, port: UInt16) {
 }
 
 // The routes the client's tests ask: a greeting, a redirect to it, a
-// redirect to itself, an echo of the request's body, and a long body.
+// redirect to itself, an echo of the request's body, a long body, a
+// redirect to the URL its query holds, and whether a request carried
+// credentials.
 fn client_test_router() -> Router[()] {
     var router = Router.new()
     &router.route_raw("GET /hello", say_hello).unwrap()
@@ -1921,6 +2181,8 @@ fn client_test_router() -> Router[()] {
     &router.route_raw("GET /circle", say_circle).unwrap()
     &router.route_raw("POST /echo", say_echo).unwrap()
     &router.route_raw("GET /long", say_long).unwrap()
+    &router.route_raw("GET /bounce", say_bounce).unwrap()
+    &router.route_raw("GET /auth", say_auth).unwrap()
     router
 }
 
@@ -1939,6 +2201,21 @@ fn say_circle[P: Allocator](inout _: (), request: Request[P], inout _body: Reque
 fn say_echo[P: Allocator](inout _: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
     let said = &body.text(request)?
     text(request, said)
+}
+
+fn say_bounce[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    redirect(request, .Found, request.query().unwrap_or("/"))
+}
+
+fn say_auth[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    text(
+        request,
+        if request.header("Authorization").is_some() {
+            "auth"
+        } else {
+            "none"
+        },
+    )
 }
 
 fn say_long[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
@@ -2146,4 +2423,103 @@ fn ask_described(port: UInt16) -> String {
     named.release()
     client.release()
     said
+}
+
+fn ask_hello_securely(port: UInt16) -> String {
+    var client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+    let response = &client.get("https://127.0.0.1:{port}/hello").unwrap()
+    let status = response.status().code()
+    let scheme = if Url.parse(response.url()).unwrap().is_https() {
+        "https"
+    } else {
+        "http"
+    }
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{status} {body.view()} {scheme}").unwrap()
+    body.release()
+    client.release()
+    said
+}
+
+fn ask_another_host(port: UInt16) -> String {
+    let config = tls.ClientConfig.open(roots: test_root).unwrap()
+    let origin = Origin { is_https = true, host = "127.0.0.1", port }
+    let connection = connect_origin(origin, ClientLimits.default(), time.never).unwrap()
+    let said = match secure_link(config, connection, "example.test", time.never) {
+        Ok(link) => {
+            link.release()
+            "connected"
+        },
+        Err(Tls(Tls(refused))) => if refused.reason == .WrongName {
+            "wrong name"
+        } else {
+            "refused otherwise"
+        },
+        Err(_) => "failed",
+    }
+    config.close()
+    fmt.render_owned(said).unwrap()
+}
+
+fn ask_with_system_roots(port: UInt16) -> String {
+    var client = Client.new()
+    let said = match &client.get("https://127.0.0.1:{port}/hello") {
+        Ok(response) => {
+            &client.discard(response)
+            "answered"
+        },
+        Err(Tls(Tls(_))) => "refused",
+        Err(_) => "failed",
+    }
+    client.release()
+    fmt.render_owned(said).unwrap()
+}
+
+fn ask_across_schemes(http_port: UInt16, https_port: UInt16) -> String {
+    // Each request opens a connection of its own, so the servers count them.
+    var client = Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap(), ClientLimits { max_idle_connections = 0, ..ClientLimits.default() })
+    let up = followed_with_credentials(&client, "http://127.0.0.1:{http_port}/bounce?https://127.0.0.1:{https_port}/auth")
+    let down = followed_with_credentials(&client, "https://127.0.0.1:{https_port}/bounce?http://127.0.0.1:{http_port}/auth")
+    let same = followed_with_credentials(&client, "https://127.0.0.1:{https_port}/bounce?https://127.0.0.1:{https_port}/auth")
+    let said = fmt.render_owned("{up.view()}; {down.view()}; {same.view()}").unwrap()
+    up.release()
+    down.release()
+    same.release()
+    client.release()
+    said
+}
+
+// Send a `GET` of `url` with a bearer token, follow its redirects, and say
+// which scheme answered and whether the token reached it.
+fn followed_with_credentials[U: Display](inout client: Client, url: U) -> String {
+    let request = ClientRequest.new("GET", url).unwrap().with_header("Authorization", "Bearer secret").unwrap()
+    let response = &client.send(request).unwrap()
+    let scheme = if Url.parse(response.url()).unwrap().is_https() {
+        "https"
+    } else {
+        "http"
+    }
+    let body = &client.read_text(response, max_bytes: 64).unwrap()
+    let said = fmt.render_owned("{scheme} {body.view()}").unwrap()
+    body.release()
+    said
+}
+
+fn ask_by_deadline(port: UInt16) -> String {
+    var client = Client.new(ClientLimits { read_timeout_ms = 1000, ..ClientLimits.default() })
+    let response = &client.get("http://127.0.0.1:{port}/slow", deadline: time.Deadline.after(time.Duration.from_milliseconds(200))).unwrap()
+    let status = response.status().code()
+    let ended = match &client.read_text(response, max_bytes: 200) {
+        Ok(text) => {
+            text.release()
+            "read whole"
+        },
+        Err(error) => if error.is_timeout() {
+            "timed out"
+        } else {
+            "failed"
+        },
+    }
+    client.release()
+    fmt.render_owned("{status} {ended}").unwrap()
 }

@@ -12,7 +12,7 @@ use tls.OpenFailure
 use task.Unstarted
 
 // A connection keeps its read-ahead across requests and across serving tasks.
-alias Reading = io.BufferedReader[ServerLink, mem.SystemAllocator]
+alias Reading = io.BufferedReader[Link, mem.SystemAllocator]
 
 enum ExchangeRead {
     Idle(Reading),
@@ -664,13 +664,13 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Isolated + 
                         state.accepted += 1
                         let link = match read secure {
                             Some(config) => match tls.Stream.accept_later_in(mem.system(), *config, connection) {
-                                Ok(stream) => ServerLink.secure(stream),
+                                Ok(stream) => Link.secure(stream),
                                 Err(OpenFailure { transport, error: _ }) => {
                                     let _closed = transport.close()
                                     continue
                                 },
                             },
-                            None => ServerLink.plain(connection),
+                            None => Link.plain(connection),
                         }
                         match Reading.open(capacity: request_buffer_bytes, reader: link) {
                             Ok(reading) => {
@@ -695,7 +695,7 @@ fn dispatch_run[L: net.Acceptor + io.Close + io.Pollable, E: Owned + Isolated + 
                 let _entry = &state.forget_idle(ticket)
                 var reading = reader
                 let deadline = net.bound_after(limits.read_timeout_ms)
-                let configure = [limits, deadline] |inout connection: ServerLink| {
+                let configure = [limits, deadline] |inout connection: Link| {
                     &connection.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms)
                     &connection.set_read_deadline(deadline)
                 }

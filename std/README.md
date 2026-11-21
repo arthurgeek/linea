@@ -1185,15 +1185,19 @@ connections in a closure's captured state.
 
 ## Call an HTTP service
 
-`http.Client` sends requests and reads their responses over HTTP/1.1,
-keeping connections open between requests to the same origin. A program
+`http.Client` sends requests and reads their responses over HTTP/1.1, to
+`http` origins over TCP and `https` origins over TLS, keeping connections
+open between requests to the same origin. A program
 makes one client and sends every request through it:
 
 - `http.Client.new(limits)` or `Client.new_in(allocator, limits)` makes a
-  client; nothing is opened until the first request. `ClientLimits` states
-  every bound: response line and header limits, connect, read and write
-  timeouts, `request_timeout_ms` for every read of one exchange together, the
-  pool (16 idle connections, 4 per origin, each reused within 4 seconds),
+  client; nothing is opened until the first request. Its first `https`
+  request builds a `tls.ClientConfig` with `verify: .System`, checking servers
+  against the operating system's roots; `Client.with_tls(config, limits)` and
+  `with_tls_in` give it a configuration of the program's, such as one naming
+  a private authority's `roots:`. The client owns the configuration and
+  closes it with itself. `ClientLimits` states every bound: response line and
+  header limits, connect, read and write timeouts, the pool (16 idle connections, 4 per origin, each reused within 4 seconds),
   `max_outstanding` unsettled responses (16), `max_redirects` (10),
   `drain_bytes` and the read-ahead size.
 - `http.ClientRequest.new(method, url)` builds a request; the URL is any
@@ -1207,9 +1211,14 @@ makes one client and sends every request through it:
   arrived, following `301`, `302`, `303`, `307` and `308` redirects (`303`,
   and `301` and `302` after a `POST`, become a `GET` without a body; a
   redirect to another origin drops `Authorization`, `Cookie` and
-  `Proxy-Authorization`). `client.get(url)` sends a `GET`.
+  `Proxy-Authorization`; one between `http` and `https` is to another
+  origin). `client.get(url)` sends a `GET`.
   `client.send_from(request, &reader, length:)` streams the body from any
-  `io.Reader`, by its length or in chunks, and follows no redirect.
+  `io.Reader`, by its length or in chunks, and follows no redirect. Each
+  takes `deadline: time.Deadline` (`time.never` by default), one budget for
+  connecting, the TLS handshake, every redirect and the response's body,
+  which fail as `TimedOut` once it passes; a deadline already passed sends
+  nothing.
 - A response answers `status()`, `header(name)`, `headers()` and `url()`, the
   URL that answered. Its body is an `io.Reader` that decodes chunks and stops
   at `Content-Length`. The response holds its connection and is linear, and
@@ -1218,13 +1227,12 @@ makes one client and sends every request through it:
   short remainder, and `client.discard(response)` closes the connection. A
   body read to its end puts its connection back in the pool.
 - A non-`2xx` status is an answer; `ClientError` is a failure to get one,
-  by category (`Url`, `Resolve`, `Connect`, `Io`, `Closed`,
+  by category (`Url`, `Tls`, `Resolve`, `Connect`, `Io`, `Closed`,
   `MalformedResponse`, `HeadTooLarge`, `BodyTooLarge`, `TooManyRedirects`,
   `Saturated`, `InvalidRequest`, `Body`, `Allocation`), and `is_timeout()`
   says whether a wait ran out of time. A pooled connection the server closed
   while it was idle is replaced once for an idempotent request.
-- `https` URLs fail with `HttpsUnsupported`: the client has no TLS stream
-  yet. A client is used by one task; a program fetching on several tasks
+- A client is used by one task; a program fetching on several tasks
   gives each its own, as the [link checker](../examples/link-checker/main.lin)
   does under `task.lazy_map`.
 

@@ -6,6 +6,7 @@ import std.net
 import std.session
 import std.task
 import std.testing
+import std.tls
 
 // An `Issue` is the part of an issue from GitHub's REST API that this program
 // reports: its number, title and author, and whether it is a pull request,
@@ -296,7 +297,7 @@ let first_page = embed("fixtures/issues-page-1.json")
 let second_page = embed("fixtures/issues-page-2.json")
 
 test "the open issues are fetched page by page from recorded responses" {
-    let fetched = fetched_from_recording(token: .Some("test-token"))
+    let fetched = fetched_from_recording(token: .Some("test-token"), secure: false)
     defer let report = fetched.unwrap()
     testing.assert_eq(report.pages, UInt64(2), "the pages were not followed")?
     testing.assert_eq(report.issues.length(), UInt64(3), "an issue was lost")?
@@ -306,8 +307,16 @@ test "the open issues are fetched page by page from recorded responses" {
     .Ok(())
 }
 
+test "the open issues are fetched over HTTPS from recorded responses" {
+    let fetched = fetched_from_recording(token: .Some("test-token"), secure: true)
+    defer let report = fetched.unwrap()
+    testing.assert_eq(report.pages, UInt64(2), "the pages were not followed over HTTPS")?
+    testing.assert_eq(report.issues.length(), UInt64(3), "an issue was lost over HTTPS")?
+    .Ok(())
+}
+
 test "a missing token is answered 401" {
-    let fetched = fetched_from_recording(token: .None)
+    let fetched = fetched_from_recording(token: .None, secure: false)
     let refused = match read fetched {
         Err(Status(code)) => code == 401,
         _ => false,
@@ -316,9 +325,19 @@ test "a missing token is answered 401" {
     testing.assert(refused, "a request without a token was answered")
 }
 
-// Serve the recorded pages on a loopback port while a client on another task
-// fetches every open issue from it with `token`, and answer what it fetched.
-fn fetched_from_recording(token: Option[Str]) -> Result[Report, FetchError] {
+// A certificate for `localhost` and `127.0.0.1`, its private key, and the
+// test root that issued it, so a test serves the recorded pages over HTTPS
+// as GitHub serves its API.
+let localhost_certificate = embed("fixtures/localhost.pem")
+
+let localhost_key = embed("fixtures/localhost_key.pem")
+
+let test_root = embed("fixtures/test_ca.pem")
+
+// Serve the recorded pages on a loopback port, over HTTPS when `secure` is
+// true, while a client on another task fetches every open issue from it with
+// `token`, and answer what it fetched.
+fn fetched_from_recording(token: Option[Str], secure: Bool) -> Result[Report, FetchError] {
     let listener = net.listen(net.loopback(0)).unwrap()
     let port = listener.local_address().unwrap().port
     let secret = match read token {
@@ -327,9 +346,20 @@ fn fetched_from_recording(token: Option[Str]) -> Result[Report, FetchError] {
     }
     let has_token = token.is_some()
     let asking = task.prepare(
-        sink [port, has_token, sink secret] |sink me: session.Chan[session.Send[Result[Report, FetchError], session.End]]| {
-            var client = http.Client.new()
-            let api = fmt.render_owned("http://127.0.0.1:{port}").unwrap()
+        sink [port, has_token, secure, sink secret] |sink me: session.Chan[session.Send[Result[Report, FetchError], session.End]]| {
+            // A client given the test root trusts it alone, in place of the
+            // operating system's roots.
+            var client = if secure {
+                http.Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+            } else {
+                http.Client.new()
+            }
+            let scheme = if secure {
+                "https"
+            } else {
+                "http"
+            }
+            let api = fmt.render_owned("{scheme}://localhost:{port}").unwrap()
             let sent: Option[Str] = if has_token {
                 .Some(secret.view())
             } else {
@@ -343,7 +373,13 @@ fn fetched_from_recording(token: Option[Str]) -> Result[Report, FetchError] {
         },
     ).unwrap().start()
     let limits = http.Limits { connections = .Some(1), idle_timeout_ms = 2000, ..http.Limits.default() }
-    let _served = http.serve(listener, recorded_api, limits: limits, policy: .Sequential)
+    if secure {
+        let config = tls.ServerConfig.open(localhost_certificate, localhost_key).unwrap()
+        let _served = http.serve(listener, recorded_api_over_tls, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+        config.close()
+    } else {
+        let _served = http.serve(listener, recorded_api, limits: limits, policy: .Sequential)
+    }
     let (fetched, done) = asking.recv()
     done.close()
     fetched
@@ -359,7 +395,24 @@ fn recorded_api() -> http.Router[()] {
     router
 }
 
+// The same server over HTTPS, whose `Link` header names `https` pages.
+fn recorded_api_over_tls() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /repos/linea-lang/linea/issues", recorded_issues_over_tls).unwrap()
+    router
+}
+
 fn recorded_issues[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    recorded_page(request, "http")
+}
+
+fn recorded_issues_over_tls[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    recorded_page(request, "https")
+}
+
+// Answer `request` with the recorded page it asks for, naming the next page
+// under `scheme`.
+fn recorded_page[P: Allocator](request: http.Request[P], scheme: Str) -> Result[http.Response[P], http.Error[P]] where carries(request) {
     if request.header("Authorization") != Option.Some("Bearer test-token") {
         return .Err(http.error(request, .Unauthorized, "Bad credentials"))
     }
@@ -384,7 +437,7 @@ fn recorded_issues[P: Allocator](inout _: (), request: http.Request[P], inout _b
     &response.set_header("X-RateLimit-Reset", "1795180800")?
     if !second {
         let host = request.header("Host").unwrap_or("")
-        &response.set_header("Link", "<http://{host}/repos/linea-lang/linea/issues?state=open&per_page=100&page=2>; rel=\"next\", <http://{host}/repos/linea-lang/linea/issues?state=open&per_page=100&page=2>; rel=\"last\"")?
+        &response.set_header("Link", "<{scheme}://{host}/repos/linea-lang/linea/issues?state=open&per_page=100&page=2>; rel=\"next\", <{scheme}://{host}/repos/linea-lang/linea/issues?state=open&per_page=100&page=2>; rel=\"last\"")?
     }
     .Ok(response)
 }

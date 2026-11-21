@@ -2,7 +2,9 @@
 
 Status: Accepted — 2026-11-20. Extends
 [0154](0154-sockets-and-http-follow-go.md), whose server this client shares
-its parser with.
+its parser with, and [0300](0300-tls-runs-over-rustls-linked-into-the-runtime.md),
+whose TLS stream it reaches `https` origins over; its requests are bounded by
+the deadline of [0299](0299-a-deadline-is-an-absolute-moment-passed-explicitly.md).
 
 ## Context
 
@@ -33,7 +35,10 @@ another:
 ### 1. `http.Client` owns a pool and counts its responses
 
 `Client.new(limits)` and `Client.new_in(allocator, limits)` make a client with
-no connections; nothing is allocated or opened before the first request. The
+no connections; nothing is allocated or opened before the first request.
+`Client.with_tls(config, limits)` and `with_tls_in(allocator, config, limits)`
+make one that reaches `https` origins with the `tls.ClientConfig` it is given
+(§9). The
 allocator holds the pool, each response's head and read-ahead buffer, and
 bodies read whole. A `Client` is linear: `close()` closes every idle
 connection and reports the first close that fails, and `Release` does the
@@ -41,9 +46,7 @@ same, best effort.
 
 `ClientLimits` states every bound, with these defaults: 8 KiB lines and 100
 headers in a response head (the server's request defaults); 10 s to connect,
-30 s for each read and each write, and no bound on an exchange as a whole
-(`request_timeout_ms`, which bounds every read of one exchange together, from
-the request's first byte to the body's last); 16 idle connections, at most 4
+30 s for each read and each write; 16 idle connections, at most 4
 to one origin, each reused only within 4 s of its return, shorter than the
 5 s common servers hold an idle connection; 16 outstanding
 responses; 10 redirects; 64 KiB drained to keep a connection; and 16 KiB of
@@ -161,29 +164,66 @@ resolve.
 
 ### 8. Errors are categories
 
-`ClientError` says which step failed: `Url`, `HttpsUnsupported`, `Resolve`,
+`ClientError` says which step failed: `Url`, `Tls` (an `https` handshake
+failed, carrying the `tls.TlsError`), `Resolve`,
 `Connect`, `Io`, `Closed`, `MalformedResponse`, `HeadTooLarge`,
 `BodyTooLarge`, `TooManyRedirects`, `Saturated`, `InvalidRequest`, `Body` (the
 streamed body's reader failed) and `Allocation`. It is copyable and
-`Equatable`, and `is_timeout()` tells a wait that ran out of time from any
-other failure. A non-`2xx` status is an answer, not an error: the program
+`Equatable`, and `is_timeout()` tells a wait that ran out of time, a
+handshake's included, from any other failure. A non-`2xx` status is an answer, not an error: the program
 reads `status()`.
 
-### 9. Every stream operation is in one file
+### 9. One link type for the server and the client, over TCP or TLS
 
-`link.lin` holds the only code that touches the connection: `open_link`
-resolves, connects within the connect timeout and sets the read and write
-timeouts; `Link.bound_exchange` sets the exchange's deadline; `Link.send`,
-`read_some`, `close` and `Release`. An `https` origin is refused there with
-`HttpsUnsupported`, so the TLS stream (`tls.Stream`, built in parallel) is added in that file:
-`Link` becomes an enum with a variant over `tls.Stream[net.Connection]`, made
-by a handshake naming the URL's host, with the client's TLS configuration
-passed to `open_link`. The pool already keys `https` apart.
+`link.lin` holds the only code that touches a connection, and one type,
+`Link`, for both ends of HTTP: a plain `net.Connection`, or a
+`tls.Stream[net.Connection]` over one. The server's link and the client's
+answer the same question (which byte stream an HTTP/1.1 exchange runs over,
+and how a read, a write, a close and a bound reach it), so they are one type:
+the server opens one per accepted connection and the client one per origin
+it connects to, and `read_some`, `send`, `writer`, `close`, `Release`,
+`set_timeouts` and `set_deadline` are the same code for both.
+`connect_origin` resolves the host, connects by the earlier of the connect
+timeout and the request's deadline, and sets the read and write timeouts and
+the deadline on the connection; `secure_link` runs the TLS handshake over it,
+naming the URL's host as the server name the certificate must state, by the
+same deadline.
 
-The deadline is `request_timeout_ms` over `Connection.set_deadline` until a
-shared `time.Deadline` lands; then `send`, `send_from` and `get` take a
-`deadline:` argument that `Link.bound_exchange` sets on the stream for reads
-and writes, and `request_timeout_ms` goes.
+An `https` origin is reached with the client's `tls.ClientConfig`, which the
+client owns and closes with itself. `with_tls` gives it one, such as a
+configuration trusting a private authority's roots; otherwise the client
+builds one with `verify: .System` at its first `https` request and keeps it.
+A `tls:` parameter with a default on `Client.new` was the first choice, and
+it cannot be written: a `tls.ClientConfig` is linear, and a default of a type
+that must be settled is refused ([T-Default]), as it is for `http.serve`'s
+`tls:`. A required parameter would make every client name TLS whether or
+not it reaches an `https` origin, and a lazily built default makes
+`Client.new()` reach the public internet's servers with the operating
+system's roots, as a browser does. Keeping one configuration per client
+keeps its session cache, so a second connection to a server resumes. A
+configuration that cannot be built fails that request with
+`Tls(.Tls(refusal))`.
+
+The pool keys `https` apart from `http` (§1), so a pooled TLS stream serves
+only its own origin. A redirect between schemes is a redirect to another
+origin, so it drops credentials (§5).
+
+### 10. One deadline bounds a whole request
+
+`send`, `send_from` and `get` take `deadline: time.Deadline = time.never`. The
+deadline is one budget for the whole request: resolving and connecting,
+the TLS handshake, every redirect `send` follows, writing the request and
+reading the response's head and body, which fail as `TimedOut` once it
+passes. A deadline already passed sends nothing and fails with
+`Connect(TimedOut)` before the host is resolved. A pooled link is given the
+deadline with `Link.set_deadline`, a new one with the connection it is opened
+on. The per-operation timeouts of `ClientLimits` still bound each wait, and
+a wait ends at whichever comes first, so `time.never` leaves a request
+bounded by the timeouts alone. A limit on an exchange's length in
+milliseconds was the first shape, and it lost: it starts again at each
+exchange, so a request that follows redirects or a program that retries
+cannot share one budget across them, which a deadline the caller made once
+can.
 
 ## Consequences
 
@@ -196,8 +236,9 @@ and writes, and `request_timeout_ms` goes.
   refused now and none newly, but a duplicate or invalid `Host` is refused
   once the whole head is read, so a later refusal of the same head (an
   over-long line, too many headers, a full arena) now answers first.
-- `https://` URLs are refused until the TLS stream lands; the examples' tests
-  run over plain HTTP against local servers.
+- `https://` URLs work with the operating system's roots by default, so the
+  GitHub example reaches `https://api.github.com`; the tests run against local
+  servers over HTTP and over TLS with the test root.
 - A client is not shared between tasks, so connections are not reused across
   tasks.
 
@@ -221,5 +262,9 @@ and writes, and `request_timeout_ms` goes.
   generic client would need a trait of its own that every stream implements.
   A closed set of streams in one file is simpler and is all `http` and
   `https` need.
+- **A client link apart from the server's.** It would be a second type
+  answering which stream an exchange runs over, with its own reads, writes
+  and closes over the same two streams; every change to one would have to be
+  made to the other.
 - **Treating a non-`2xx` status as an error.** It hides the body of a `404`
   or a `422`, which APIs fill with the reason.
