@@ -1,0 +1,450 @@
+import std.fmt
+import std.http
+import std.json
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.testing
+import std.time
+import std.tls
+
+// An `Issue` is the part of an issue from GitHub's REST API that this program
+// reports: its number, title and author, and whether it is a pull request,
+// which the issues list includes too. The API sends dozens of other fields
+// and adds more over time, so `Issue` decodes the fields it reads and leaves
+// the rest, where a derived `json.Decode` would refuse a field it does not
+// declare.
+pub struct Issue[A: Allocator] {
+    number: UInt64,
+    title: String[A],
+    author: String[A],
+    is_pull_request: Bool,
+}
+
+derive[A: Allocator] Release for Issue[A]
+
+impl[A: Allocator] json.Decode[A] for Issue[A] {
+    fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+        var fields = json.ObjectDecoder.open_in(allocator, value)?
+        defer fields.release()
+        let number: UInt64 = json.ObjectDecoder.required(&fields, value, "number")?
+        let title: String[A] = json.ObjectDecoder.required(&fields, value, "title")?
+        defer title.release()
+        let user: Author[A] = json.ObjectDecoder.required(&fields, value, "user")?
+        let Author { login } = user
+        // A pull request carries a `pull_request` object; an issue has none.
+        let is_pull_request = value.get("pull_request").is_some()
+        .Ok(.{ number, title, author = login, is_pull_request })
+    }
+
+    fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+    }
+}
+
+test "an issue decodes the fields it reads and leaves the rest" {
+    let decoded: Result[mem.Vec[Issue[mem.SystemAllocator], mem.SystemAllocator], json.DecodeError] = json.decode(first_page)
+    defer let issues = decoded.unwrap()
+    testing.assert_eq(issues.length(), UInt64(2), "the page held another number of issues")?
+    testing.assert_eq(issues[UInt64(0)].number, UInt64(212), "the first number changed")?
+    testing.assert_eq(issues[UInt64(0)].author.view(), "ada", "the first author changed")?
+    testing.assert(!issues[UInt64(0)].is_pull_request, "an issue was read as a pull request")?
+    testing.assert(issues[UInt64(1)].is_pull_request, "a pull request was read as an issue")?
+    .Ok(())
+}
+
+// The author of an issue, of which only the login is read.
+struct Author[A: Allocator] {
+    login: String[A],
+}
+
+derive[A: Allocator] Release for Author[A]
+
+impl[A: Allocator] json.Decode[A] for Author[A] {
+    fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+        var fields = json.ObjectDecoder.open_in(allocator, value)?
+        defer fields.release()
+        let login: String[A] = json.ObjectDecoder.required(&fields, value, "login")?
+        .Ok(.{ login })
+    }
+
+    fn missing(allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
+        .Err(json.DecodeError.failure_in(allocator, .MissingField))
+    }
+}
+
+// The URL a `Link` header names as `rel="next"`: GitHub pages a long list
+// and names the page after this one, and the last, as
+// `<https://…&page=2>; rel="next", <https://…&page=5>; rel="last"`. The last
+// page names no next one.
+pub fn next_link(link: Str) -> Option[Str] where carries(.Some: link) {
+    for entry in link.split(",").unwrap() {
+        let (target, parameters) = entry.split_once(";") else {
+            continue
+        }
+        let url = target.trim_ascii()
+        if url.starts_with("<") && url.ends_with(">") && has_next_relation(parameters) {
+            return url.slice(1, url.length() - 1)
+        }
+    }
+    .None
+}
+
+test "the next page is the link whose relation is next" {
+    let link = r#"<http://api.test/repos/a/b/issues?page=2>; rel="next", <http://api.test/repos/a/b/issues?page=5>; rel="last""#
+    testing.assert_eq(next_link(link), Option.Some("http://api.test/repos/a/b/issues?page=2"), "the next page changed")?
+    testing.assert_eq(next_link(r#"<http://api.test/x?page=1>; rel="first", <http://api.test/x?page=4>; rel="prev""#), .None, "the last page named a next one")?
+    testing.assert_eq(next_link(""), .None, "an empty header named a page")?
+    .Ok(())
+}
+
+// Whether the parameters after a link's URL say `rel="next"`. A relation may
+// list several types separated by spaces.
+fn has_next_relation(parameters: Str) -> Bool {
+    for parameter in parameters.split(";").unwrap() {
+        let (name, value) = parameter.split_once("=") else {
+            continue
+        }
+        if name.trim_ascii().equals_ascii_folded("rel") {
+            let quoted = value.trim_ascii()
+            let types = if quoted.starts_with(r#"""#) && quoted.ends_with(r#"""#) && quoted.length() >= 2 {
+                quoted.slice(1, quoted.length() - 1).unwrap()
+            } else {
+                quoted
+            }
+            for kind in types.split(" ").unwrap() {
+                if kind.equals_ascii_folded("next") {
+                    return true
+                }
+            }
+        }
+    }
+    false
+}
+
+// What fetching a repository's open issues found: the issues in the order
+// GitHub listed them, how many pages that took, and the rate limit GitHub
+// reported with the last page: requests left in the current window and the
+// Unix time the window resets.
+pub struct Report {
+    issues: mem.Vec[Issue[mem.SystemAllocator], mem.SystemAllocator],
+    pages: UInt64,
+    remaining: Option[UInt64],
+    resets_at: Option[UInt64],
+}
+
+derive Release for Report
+
+// Why fetching failed: the request did not get an answer, GitHub answered
+// with a status other than `200` (`401` for a bad token, `404` for a
+// repository that does not exist or that the token cannot see, `403` once
+// the rate limit is spent), or a page was not the JSON list of issues the API
+// documents.
+@(copyable, derive(Debug, Release))
+pub enum FetchError {
+    Request(http.ClientError),
+    Status(UInt16),
+    NotIssues,
+}
+
+impl Display for FetchError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Request(error) => error.fmt(&w),
+            Status(code) => "GitHub answered {code}".fmt(&w),
+            NotIssues => &w.write_str("GitHub answered something other than a list of issues"),
+        }
+    }
+}
+
+// `?` turns a client's failure into a fetch's through this conversion.
+impl From[http.ClientError] for FetchError {
+    fn from(sink source: http.ClientError) -> FetchError {
+        .Request(source)
+    }
+}
+
+// Pages larger than this are refused rather than read: a page of 100 issues
+// with their bodies stays well under it.
+let max_page_bytes: UInt64 = 4194304
+
+// The longest one page may take, in seconds, from connecting to the last byte
+// of its body.
+let page_seconds: UInt64 = 30
+
+// Fetch the open issues of `repo` (`owner/name`) from the API at `api`, at
+// most `max_pages` pages of 100, sending `token` as a bearer token when
+// there is one. Each page's `Link` header names the next.
+pub fn fetch_open_issues(inout client: http.Client, api: Str, repo: Str, token: Option[Str], max_pages: UInt64) -> Result[Report, FetchError] {
+    var report = Report { issues = mem.Vec.new(), pages = 0, remaining = .None, resets_at = .None }
+    let first = fmt.render_owned("{api}/repos/{repo}/issues?state=open&per_page=100").unwrap()
+    let fetched = fetch_pages(&client, api, first.view(), token, max_pages, &report)
+    first.release()
+    match fetched {
+        Ok(_) => .Ok(report),
+        Err(error) => {
+            report.release()
+            .Err(error)
+        },
+    }
+}
+
+// Fetch the page at `url` into `report`, then the pages after it, at most
+// `pages_left` in all. Each page is one call deeper, so the depth is bounded
+// by the page limit.
+fn fetch_pages(inout client: http.Client, api: Str, url: Str, token: Option[Str], pages_left: UInt64, inout report: Report) -> Result[(), FetchError] {
+    if pages_left == 0 {
+        return .Ok(())
+    }
+    // The token goes only to the API it was given for: a `Link` header could
+    // name a page on another host, which must not receive it.
+    let sent: Option[Str] = if same_origin(api, url) {
+        copy(token)
+    } else {
+        .None
+    }
+    let next = fetch_page(&client, url, sent, &report)?
+    report.pages += 1
+    match next {
+        Some(following) => {
+            let fetched = fetch_pages(&client, api, following.view(), token, pages_left - 1, &report)
+            following.release()
+            fetched
+        },
+        None => .Ok(()),
+    }
+}
+
+// Whether two URLs name the same scheme, host and port.
+fn same_origin(first: Str, second: Str) -> Bool {
+    match (http.Url.parse(first), http.Url.parse(second)) {
+        (Ok(a), Ok(b)) => a.origin() == b.origin(),
+        _ => false,
+    }
+}
+
+test "only a url on the API's own origin is sent the token" {
+    testing.assert(same_origin("http://127.0.0.1:8080", "http://127.0.0.1:8080/repos/a/b/issues?page=2"), "the API's own page was another origin")?
+    testing.assert(!same_origin("http://127.0.0.1:8080", "http://elsewhere.test/repos/a/b/issues?page=2"), "another host was the API's origin")?
+    .Ok(())
+}
+
+// Fetch the page at `url`, add its issues to `report` with the rate limit
+// it reported, and answer the next page's URL, if any.
+fn fetch_page(inout client: http.Client, url: Str, token: Option[Str], inout report: Report) -> Result[Option[String], FetchError] {
+    // GitHub refuses a request without a `User-Agent`, and answers in the
+    // version of its API that `X-GitHub-Api-Version` names. Each `with_`
+    // call answers the request with one more header, and releases it if the
+    // header is refused, so one `?` ends the chain.
+    var request = http.ClientRequest.new("GET", url)?.with_header("User-Agent", "linea-github-issues")?.with_header("Accept", "application/vnd.github+json")?.with_header("X-GitHub-Api-Version", "2022-11-28")?
+    match read token {
+        Some(secret) => request = request.with_header("Authorization", "Bearer {secret}")?,
+        None => {},
+    }
+    // One deadline bounds the page: connecting, the TLS handshake and
+    // reading its body together.
+    let response = &client.send(request, deadline: time.Deadline.after(time.Duration.from_seconds(page_seconds)))?
+    let status = response.status().code()
+    report.remaining = number_header(response, "X-RateLimit-Remaining")
+    report.resets_at = number_header(response, "X-RateLimit-Reset")
+    let next: Option[String] = match response.header("Link") {
+        Some(link) => match next_link(link) {
+            Some(url) => .Some(url.to_owned().unwrap()),
+            None => .None,
+        },
+        None => .None,
+    }
+    if status != 200 {
+        &client.discard(response)
+        next.release()
+        return .Err(.Status(status))
+    }
+    let body = match &client.read_text(response, max_page_bytes) {
+        Ok(body) => body,
+        Err(error) => {
+            next.release()
+            return .Err(.Request(error))
+        },
+    }
+    let decoded: Result[mem.Vec[Issue[mem.SystemAllocator], mem.SystemAllocator], json.DecodeError] = json.decode(body.view())
+    body.release()
+    let issues = match decoded {
+        Ok(issues) => issues,
+        Err(error) => {
+            error.release()
+            next.release()
+            return .Err(.NotIssues)
+        },
+    }
+    // `drain` hands each issue over once; walking it lent and releasing it
+    // after settles whatever a failed push would leave.
+    var pending = issues.drain()
+    for issue in &pending {
+        &report.issues.push(issue).unwrap()
+    }
+    pending.release()
+    .Ok(next)
+}
+
+// A header's value read as a whole number, or `.None` when it is absent or
+// is not one.
+fn number_header(response: http.ClientResponse, name: Str) -> Option[UInt64] {
+    let value = response.header(name)?
+    match value.parse[UInt64]() {
+        Ok(number) => .Some(number),
+        Err(_) => .None,
+    }
+}
+
+// The two pages a recorded run of `GET /repos/linea-lang/linea/issues`
+// answered, kept as GitHub sent them.
+let first_page = embed("fixtures/issues-page-1.json")
+
+let second_page = embed("fixtures/issues-page-2.json")
+
+test "the open issues are fetched page by page from recorded responses" {
+    let fetched = fetched_from_recording(token: .Some("test-token"), secure: false)
+    defer let report = fetched.unwrap()
+    testing.assert_eq(report.pages, UInt64(2), "the pages were not followed")?
+    testing.assert_eq(report.issues.length(), UInt64(3), "an issue was lost")?
+    testing.assert_eq(report.issues[UInt64(2)].number, UInt64(201), "the second page's issue changed")?
+    testing.assert_eq(report.remaining, Option.Some(UInt64(4998)), "the rate limit was not read")?
+    testing.assert_eq(report.resets_at, Option.Some(UInt64(1795180800)), "the reset time was not read")?
+    .Ok(())
+}
+
+test "the open issues are fetched over HTTPS from recorded responses" {
+    let fetched = fetched_from_recording(token: .Some("test-token"), secure: true)
+    defer let report = fetched.unwrap()
+    testing.assert_eq(report.pages, UInt64(2), "the pages were not followed over HTTPS")?
+    testing.assert_eq(report.issues.length(), UInt64(3), "an issue was lost over HTTPS")?
+    .Ok(())
+}
+
+test "a missing token is answered 401" {
+    let fetched = fetched_from_recording(token: .None, secure: false)
+    let refused = match read fetched {
+        Err(Status(code)) => code == 401,
+        _ => false,
+    }
+    fetched.release()
+    testing.assert(refused, "a request without a token was answered")
+}
+
+// A certificate for `localhost` and `127.0.0.1`, its private key, and the
+// test root that issued it, so a test serves the recorded pages over HTTPS
+// as GitHub serves its API.
+let localhost_certificate = embed("fixtures/localhost.pem")
+
+let localhost_key = embed("fixtures/localhost_key.pem")
+
+let test_root = embed("fixtures/test_ca.pem")
+
+// Serve the recorded pages on a loopback port, over HTTPS when `secure` is
+// true, while a client on another task fetches every open issue from it with
+// `token`, and answer what it fetched.
+fn fetched_from_recording(token: Option[Str], secure: Bool) -> Result[Report, FetchError] {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let secret = match read token {
+        Some(text) => text.to_owned().unwrap(),
+        None => "".to_owned().unwrap(),
+    }
+    let has_token = token.is_some()
+    let asking = task.prepare(
+        sink [port, has_token, secure, sink secret] |sink me: session.Chan[session.Send[Result[Report, FetchError], session.End]]| {
+            // A client given the test root trusts it alone, in place of the
+            // operating system's roots.
+            var client = if secure {
+                http.Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+            } else {
+                http.Client.new()
+            }
+            let scheme = if secure {
+                "https"
+            } else {
+                "http"
+            }
+            let api = fmt.render_owned("{scheme}://localhost:{port}").unwrap()
+            let sent: Option[Str] = if has_token {
+                .Some(secret.view())
+            } else {
+                .None
+            }
+            let fetched = fetch_open_issues(&client, api.view(), "linea-lang/linea", sent, max_pages: 10)
+            api.release()
+            secret.release()
+            client.release()
+            me.send(fetched).close()
+        },
+    ).unwrap().start()
+    let limits = http.Limits { connections = .Some(1), idle_timeout_ms = 2000, ..http.Limits.default() }
+    if secure {
+        let config = tls.ServerConfig.open(localhost_certificate, localhost_key).unwrap()
+        let _served = http.serve(listener, recorded_api_over_tls, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+        config.close()
+    } else {
+        let _served = http.serve(listener, recorded_api, limits: limits, policy: .Sequential)
+    }
+    let (fetched, done) = asking.recv()
+    done.close()
+    fetched
+}
+
+// A server that answers as GitHub answered the recorded run: the first page
+// names the second in its `Link` header, the second names no next page, and
+// both report the rate limit. A request without the recorded token is
+// answered 401, as GitHub answers a bad one.
+fn recorded_api() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /repos/linea-lang/linea/issues", recorded_issues).unwrap()
+    router
+}
+
+// The same server over HTTPS, whose `Link` header names `https` pages.
+fn recorded_api_over_tls() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /repos/linea-lang/linea/issues", recorded_issues_over_tls).unwrap()
+    router
+}
+
+fn recorded_issues[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    recorded_page(request, "http")
+}
+
+fn recorded_issues_over_tls[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    recorded_page(request, "https")
+}
+
+// Answer `request` with the recorded page it asks for, naming the next page
+// under `scheme`.
+fn recorded_page[P: Allocator](request: http.Request[P], scheme: Str) -> Result[http.Response[P], http.Error[P]] where carries(request) {
+    if request.header("Authorization") != Option.Some("Bearer test-token") {
+        return .Err(http.error(request, .Unauthorized, "Bad credentials"))
+    }
+    let second = request.query().unwrap_or("").ends_with("page=2")
+    var response = http.text(
+        request,
+        if second {
+            second_page
+        } else {
+            first_page
+        },
+    )?
+    &response.set_header("Content-Type", "application/json; charset=utf-8")?
+    &response.set_header(
+        "X-RateLimit-Remaining",
+        if second {
+            "4998"
+        } else {
+            "4999"
+        },
+    )?
+    &response.set_header("X-RateLimit-Reset", "1795180800")?
+    if !second {
+        let host = request.header("Host").unwrap_or("")
+        &response.set_header("Link", "<{scheme}://{host}/repos/linea-lang/linea/issues?state=open&per_page=100&page=2>; rel=\"next\", <{scheme}://{host}/repos/linea-lang/linea/issues?state=open&per_page=100&page=2>; rel=\"last\"")?
+    }
+    .Ok(response)
+}

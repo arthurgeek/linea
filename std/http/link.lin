@@ -7,25 +7,25 @@ import std.tls
 
 use io.Pollable
 
-// A ServerLink is the connection a served exchange runs over: a plain
-// connection, or a TLS stream over one when the server was given a
-// `tls.ServerConfig`. It
-// holds exactly one of the two, and its operations reach the connection
-// either way, so reading requests and writing answers is the same over both.
+// A Link is the byte stream HTTP/1.1 runs over, for a server and a client
+// alike: a plain connection, or a TLS stream over one, which a server opens
+// when it was given a `tls.ServerConfig` and a client for an `https` origin.
+// It holds exactly one of the two, and its operations reach the connection
+// either way, so reading and writing messages is the same over both.
 @linear
-struct ServerLink {
+struct Link {
     plain: Option[net.Connection],
     secure: Option[tls.Stream[net.Connection]],
 }
 
-impl ServerLink {
+impl Link {
     // A link over a plain connection.
-    fn plain(sink connection: net.Connection) -> ServerLink where carries(connection) {
+    fn plain(sink connection: net.Connection) -> Link where carries(connection) {
         .{ plain = .Some(connection), secure = .None }
     }
 
     // A link over a TLS stream.
-    fn secure(sink stream: tls.Stream[net.Connection]) -> ServerLink where carries(stream) {
+    fn secure(sink stream: tls.Stream[net.Connection]) -> Link where carries(stream) {
         .{ plain = .None, secure = .Some(stream) }
     }
 
@@ -48,6 +48,12 @@ impl ServerLink {
             },
             None => {},
         }
+    }
+
+    // End every later read and write once `deadline` passes, as
+    // `net.Connection.set_deadline` does.
+    fn set_deadline(inout self: Self, deadline: time.Deadline) {
+        &self.configure([deadline] |inout connection: net.Connection| &connection.set_deadline(deadline))
     }
 
     // The deadline every read of the connection under the link must finish
@@ -114,7 +120,7 @@ impl ServerLink {
 
     // Close the link: over TLS, send close_notify, then close the connection.
     fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
-        let ServerLink { plain, secure } = self
+        let Link { plain, secure } = self
         let closed_plain = match plain {
             Some(connection) => connection.close(),
             None => .Ok(()),
@@ -135,7 +141,7 @@ impl ServerLink {
     // Close so the peer receives a reset rather than an orderly end, sending
     // no close_notify.
     fn reset(sink self: Self) -> Result[(), io.IoError] {
-        let ServerLink { plain, secure } = self
+        let Link { plain, secure } = self
         let connection = match plain {
             Some(connection) => connection,
             None => match secure {
@@ -151,13 +157,33 @@ impl ServerLink {
     }
 
     // Lend output access while the link keeps its connection.
-    fn writer(self: Self) -> ServerLinkWriter where borrows(self) {
+    fn writer(self: Self) -> LinkWriter where borrows(self) {
         match read self.secure {
             Some(stream) => .{ plain = .None, secure = .Some(stream.writer()) },
             None => match read self.plain {
                 Some(connection) => .{ plain = .Some(connection.writer()), secure = .None },
                 None => panic("a link holds no connection"),
             },
+        }
+    }
+
+    // Whether the link holds input already received that no read has taken:
+    // over TLS, ciphertext the session has not taken or plaintext it has
+    // decrypted. A plain connection holds none.
+    fn holds_input(self: Self) -> Bool {
+        match read self.secure {
+            Some(stream) => stream.holds_input(),
+            None => false,
+        }
+    }
+
+    // Write every byte of `bytes`, encrypted over TLS, or fail as the
+    // stream did.
+    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[(), io.IoError] {
+        var writer = self.writer()
+        match io.write_all(&writer, bytes) {
+            Ok(_) => .Ok(()),
+            Err(failure) => .Err(failure.into()),
         }
     }
 }
@@ -188,7 +214,7 @@ test "a plain link carries bytes both ways and closes" {
     var listener = net.listen(net.loopback(0)).unwrap()
     var client = net.connect(listener.local_address().unwrap()).unwrap()
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    var link = ServerLink.plain(connection)
+    var link = Link.plain(connection)
     &link.set_timeouts(read_ms: 2000, write_ms: 2000)
     var writer = link.writer()
     let _sent = io.write_all(&writer, "hi".as_bytes()).unwrap()
@@ -204,7 +230,7 @@ test "a plain link carries bytes both ways and closes" {
     testing.assert(closed, "closing the link failed")?
 }
 
-impl io.Reader for ServerLink {
+impl io.Reader for Link {
     type Error = io.IoError
 
     fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
@@ -228,7 +254,7 @@ impl io.Reader for ServerLink {
     }
 }
 
-impl io.ByteWriter for ServerLink {
+impl io.ByteWriter for Link {
     type Error = io.IoError
 
     fn pending_bytes(_self: Self) -> UInt64 {
@@ -245,7 +271,7 @@ impl io.ByteWriter for ServerLink {
     }
 }
 
-impl io.Pollable for ServerLink {
+impl io.Pollable for Link {
     fn readiness(self: Self, interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
         match read self.secure {
             Some(stream) => stream.readiness(interest).within(self),
@@ -257,30 +283,30 @@ impl io.Pollable for ServerLink {
     }
 }
 
-impl io.Close for ServerLink {
+impl io.Close for Link {
     type CloseError = io.IoError
 
     fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
-        ServerLink.close(self)
+        Link.close(self)
     }
 }
 
-impl Release for ServerLink {
+impl Release for Link {
     fn release(sink self: Self) {
         let _closed = self.close()
     }
 }
 
-// A ServerLinkWriter borrows a link for output, as `net.ConnectionWriter` borrows a
+// A LinkWriter borrows a link for output, as `net.ConnectionWriter` borrows a
 // connection: it writes through the link's connection, encrypted when the
 // link is a TLS stream, while the link is kept elsewhere.
 @(copyable, derive(Release))
-struct ServerLinkWriter {
+struct LinkWriter {
     plain: Option[net.ConnectionWriter],
     secure: Option[tls.StreamWriter[mem.SystemAllocator]],
 }
 
-impl io.ByteWriter for ServerLinkWriter {
+impl io.ByteWriter for LinkWriter {
     type Error = io.IoError
 
     fn pending_bytes(_self: Self) -> UInt64 {
@@ -305,5 +331,55 @@ impl io.ByteWriter for ServerLinkWriter {
 
     fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
         .Ok(0)
+    }
+}
+
+// Open a connection to `origin` for a client: resolve its host, connect by
+// the earlier of `deadline` and the connect timeout, and bound each later
+// read and write by the read and write timeouts and by `deadline`.
+// A bracketed IPv6 host is refused as `UnsupportedAddress` before any lookup.
+fn connect_origin(origin: Origin, limits: ClientLimits, deadline: time.Deadline) -> Result[net.Connection, ClientError] {
+    if origin.host().starts_with("[") {
+        return .Err(.UnsupportedAddress)
+    }
+    let address = match net.resolve(origin.host(), origin.port()) {
+        Ok(address) => address,
+        Err(Io(error)) => return .Err(.Resolve(error)),
+        Err(_) => return .Err(.Resolve(io.IoError.from_os(.Resolve, 0))),
+    }
+    var connection = match net.connect(address, deadline: net.bound_after(limits.connect_timeout_ms).earlier(deadline)) {
+        Ok(connection) => connection,
+        Err(Io(error)) => return .Err(.Connect(error)),
+        Err(_) => return .Err(.Connect(io.IoError.from_os(.Connect, 0))),
+    }
+    &connection.set_timeouts(read_ms: limits.read_timeout_ms, write_ms: limits.write_timeout_ms)
+    &connection.set_deadline(deadline)
+    .Ok(connection)
+}
+
+test "a connection reaches a listening origin" {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let origin = Origin { is_https = false, host = "127.0.0.1", port }
+    let reached = match connect_origin(origin, ClientLimits.default(), time.never) {
+        Ok(connection) => {
+            connection.release()
+            true
+        },
+        Err(_) => false,
+    }
+    listener.release()
+    testing.assert(reached, "a connection did not reach its origin")
+}
+
+// Run a client's TLS handshake over `connection` with `config`, checking
+// that the server's certificate names `server_name`, by `deadline`.
+fn secure_link(config: tls.ClientConfig, sink connection: net.Connection, server_name: Str, deadline: time.Deadline) -> Result[Link, ClientError] {
+    match tls.Stream.connect(config, connection, server_name, deadline) {
+        Ok(stream) => .Ok(Link.secure(stream)),
+        Err(OpenFailure { transport, error }) => {
+            transport.release()
+            .Err(.Tls(error))
+        },
     }
 }

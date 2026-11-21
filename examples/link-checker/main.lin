@@ -1,0 +1,212 @@
+// Check the links a file lists, one URL per line, and report each one that is
+// broken or redirects elsewhere.
+//
+//     link-checker links.txt
+//     link-checker links.txt --jobs 16
+//
+// The links are fetched in parallel through `task.lazy_map`, at most `--jobs`
+// at a time (8 by default), and reported in the order the file lists them.
+// Each check runs on a task of its own with an `http.Client` of its own, and
+// asks for the link without following a redirect, so a moved page is
+// reported with where it moved to. A blank line or one starting with `#` is
+// skipped. An `https` link is checked over TLS, its certificate against the
+// operating system's roots.
+import std.cli
+import std.env
+import std.fmt
+import std.fs
+import std.http
+import std.io
+import std.mem
+import std.net
+import std.session
+import std.task
+import std.testing
+
+// What checking one link found: the page answered, moved to another URL, was
+// missing or failing on the server, or could not be fetched at all.
+enum Outcome {
+    Fine(UInt16),
+    Moved(UInt16, String),
+    Broken(UInt16),
+    Unreachable(http.ClientError),
+}
+
+derive Release for Outcome
+
+// A link and what checking it found.
+struct Checked {
+    url: String,
+    outcome: Outcome,
+}
+
+derive Release for Checked
+
+impl Display for Checked {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self.outcome {
+            Fine(code) => "ok      {code} {self.url.view()}".fmt(&w),
+            Moved(code, location) => "moved   {code} {self.url.view()} -> {location.view()}".fmt(&w),
+            Broken(code) => "broken  {code} {self.url.view()}".fmt(&w),
+            Unreachable(error) => "failed      {self.url.view()}: {error}".fmt(&w),
+        }
+    }
+}
+
+// Fetch `url` once, without following a redirect, and say what it answered.
+fn check(sink url: String) -> Checked {
+    var client = http.Client.new(http.ClientLimits { max_redirects = 0, max_idle_connections = 0, read_timeout_ms = 10000, ..http.ClientLimits.default() })
+    let outcome = match &client.get(url.view()) {
+        Ok(response) => {
+            let code = response.status().code()
+            let moved_to: Option[String] = match response.header("Location") {
+                Some(location) => match http.resolve_url(http.Url.parse(response.url()).unwrap(), location) {
+                    Ok(resolved) => .Some(resolved),
+                    Err(_) => .Some(location.to_owned().unwrap()),
+                },
+                None => .None,
+            }
+            &client.discard(response)
+            if code >= 300 && code < 400 {
+                match moved_to {
+                    Some(location) => Outcome.Moved(code, location),
+                    None => .Broken(code),
+                }
+            } else {
+                moved_to.release()
+                if code >= 400 {
+                    Outcome.Broken(code)
+                } else {
+                    .Fine(code)
+                }
+            }
+        },
+        Err(error) => .Unreachable(error),
+    }
+    client.release()
+    .{ url, outcome }
+}
+
+// The URLs `text` lists: one per line, skipping blank lines and `#` comments.
+fn listed(text: Str) -> mem.Vec[String, mem.SystemAllocator] {
+    var urls: mem.Vec[String, mem.SystemAllocator] = mem.Vec.new()
+    for line in text.lines() {
+        let url = line.trim_ascii()
+        if url.length() > 0 && !url.starts_with("#") {
+            &urls.push(url.to_owned().unwrap()).unwrap()
+        }
+    }
+    urls
+}
+
+test "a list skips blank lines and comments" {
+    defer let urls = listed("# the docs\nhttp://a.test/\n\n  http://b.test/x  \n")
+    testing.assert_eq(urls.length(), UInt64(2), "a blank line or a comment was listed")?
+    testing.assert_eq(urls[UInt64(1)].view(), "http://b.test/x", "a link kept its spaces")?
+    .Ok(())
+}
+
+// Check every link in `urls`, at most `jobs` at once, and call `report` with
+// each result in the order the links were listed. Answers how many links
+// were broken or unreachable.
+fn check_all[F: inout fn(checked: Checked)](sink urls: mem.Vec[String, mem.SystemAllocator], jobs: UInt64, inout report: F) -> UInt64 {
+    // `lazy_map` starts a check only when one of its `jobs` tasks is free,
+    // and hands the results back in the order of the list, however they
+    // finish.
+    defer var checks = task.lazy_map(.Threads(jobs), urls.drain(), check)
+    var failed: UInt64 = 0
+    for checked in &checks {
+        if match read checked.outcome { Broken(_) => true, Unreachable(_) => true, _ => false } {
+            failed += 1
+        }
+        &report(checked)
+        checked.release()
+    }
+    failed
+}
+
+test "links are reported in order as fine moved or broken" {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let checking = task.prepare(
+        sink [port] |sink me: session.Chan[session.Send[String, session.End]]| {
+            let base = fmt.render_owned("http://127.0.0.1:{port}").unwrap()
+            let list = fmt.render_owned("{base.view()}/guide\n{base.view()}/old-guide\n{base.view()}/gone\n").unwrap()
+            let urls = listed(list.view())
+            list.release()
+            base.release()
+            var lines = String.new()
+            var report = inout [inout lines] |checked: Checked| {
+                "{checked}\n".fmt(&lines).unwrap()
+            }
+            let failed = check_all(urls, 2, &report)
+            "{failed} failed".fmt(&lines).unwrap()
+            me.send(lines).close()
+        },
+    ).unwrap().start()
+    let limits = http.Limits { connections = .Some(3), ..http.Limits.default() }
+    let _served = http.serve(listener, site, limits: limits, policy: .Threads(3))
+    let (lines, done) = checking.recv()
+    done.close()
+    defer let shown = lines
+    let port_text = fmt.render_owned(port).unwrap()
+    defer let expected = fmt.render_owned("ok      200 http://127.0.0.1:{port_text.view()}/guide\nmoved   301 http://127.0.0.1:{port_text.view()}/old-guide -> http://127.0.0.1:{port_text.view()}/guide\nbroken  404 http://127.0.0.1:{port_text.view()}/gone\n1 failed").unwrap()
+    port_text.release()
+    testing.assert_eq(shown.view(), expected.view(), "the links were reported differently")
+}
+
+// A site whose guide moved: `/guide` answers, `/old-guide` redirects to it,
+// and anything else is answered 404 by the router.
+fn site() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /guide", guide).unwrap()
+    &router.route_raw("GET /old-guide", old_guide).unwrap()
+    router
+}
+
+fn guide[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.text(request, "the guide")
+}
+
+fn old_guide[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.redirect(request, .MovedPermanently, "/guide")
+}
+
+fn main() -> UInt8 {
+    defer var cmd = cli.Command.new("link-checker", "Report the broken and moved links a file lists")
+    &cmd.positional("file", "a file listing one URL per line")
+    &cmd.option("jobs", "--jobs", "the most links fetched at once (default 8)")
+    let args = env.args()
+    var cursor = cli.ArgCursor.new(args)
+    defer let matches = cmd.parse(&cursor) else |error| {
+        io.eprintln("error: {error}")
+        return 64
+    }
+    let file = matches.required_positional("file") else |error| {
+        io.eprintln("error: {error}")
+        return 64
+    }
+    let jobs: Option[UInt64] = matches.get_optional("jobs") else |error| {
+        io.eprintln("error: {error}")
+        return 64
+    }
+    let path = fs.Path.from_str(file) else |error| {
+        io.eprintln("error: {error}")
+        return 64
+    }
+    // A list of links longer than a mebibyte is refused rather than read.
+    let text = fs.read_text(path, max_bytes: 1048576) else |error| {
+        io.eprintln("error: {file}: {error}")
+        return 1
+    }
+    let urls = listed(text.view())
+    text.release()
+    var report = |checked: Checked| {
+        io.println("{checked}").unwrap()
+    }
+    let failed = check_all(urls, jobs.unwrap_or(8), &report)
+    if failed > 0 {
+        return 1
+    }
+    0
+}

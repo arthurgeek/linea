@@ -1,3 +1,5 @@
+import std.io
+import std.mem
 import std.testing
 
 // `Address` holds an IPv4 address and a port. Port 0 asks the operating system
@@ -53,6 +55,31 @@ pub fn any(port: UInt16) -> Address {
 test "any names every interface" {
     testing.assert_eq(any(0), Address.v4(0, 0, 0, 0, 0), "any is not 0.0.0.0")?
     .Ok(())
+}
+
+// Look up `host` through the system's resolver and answer its first IPv4
+// address with `port`. A dotted IPv4 address answers itself without a lookup,
+// and `localhost` is answered from the hosts file as other names are. A name
+// with no IPv4 address fails as `NotFound` of operation `Resolve`, and a
+// resolver that cannot answer as `Other`. The lookup blocks the task's thread
+// until the resolver answers. Inside `io.Simulation.run` only a dotted IPv4
+// address resolves, so a simulated program never consults the network.
+pub fn resolve(host: Str, port: UInt16) -> Result[Address, NetError] {
+    let answer = mem.resolve_name(host.as_bytes())
+    if answer < 0 {
+        return .Err(.Io(io.IoError.from_os(.Resolve, Int32(-answer))))
+    }
+    .Ok(Address { port, ..Address.unpacked(answer) })
+}
+
+test "resolving a dotted address or localhost needs no network" {
+    testing.assert_ok_eq(resolve("127.0.0.1", 8080), loopback(8080), "a dotted address did not answer itself")?
+    testing.assert_ok_eq(resolve("localhost", 80), loopback(80), "localhost was not the loopback address")?
+    let empty = match resolve("", 80) {
+        Err(Io(error)) => error.operation == .Resolve && error.category == .NotFound,
+        _ => false,
+    }
+    testing.assert(empty, "an empty name was not refused as not found")?
 }
 
 impl Address {

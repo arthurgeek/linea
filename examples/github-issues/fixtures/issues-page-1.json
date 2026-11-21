@@ -1,0 +1,50 @@
+[
+  {
+    "url": "https://api.github.com/repos/linea-lang/linea/issues/212",
+    "html_url": "https://github.com/linea-lang/linea/issues/212",
+    "id": 3001212,
+    "number": 212,
+    "title": "Formatter keeps a trailing comma inside a one-line match",
+    "user": {
+      "login": "ada",
+      "id": 101,
+      "type": "User",
+      "site_admin": false
+    },
+    "labels": [
+      { "id": 7, "name": "formatter", "color": "1d76db", "default": false }
+    ],
+    "state": "open",
+    "locked": false,
+    "comments": 3,
+    "created_at": "2026-11-02T09:14:51Z",
+    "updated_at": "2026-11-18T16:02:10Z",
+    "author_association": "CONTRIBUTOR",
+    "body": "A match written on one line keeps its last comma after formatting."
+  },
+  {
+    "url": "https://api.github.com/repos/linea-lang/linea/issues/209",
+    "html_url": "https://github.com/linea-lang/linea/pull/209",
+    "id": 3001209,
+    "number": 209,
+    "title": "Teach the guide's networking chapter the HTTP client",
+    "user": {
+      "login": "grace",
+      "id": 102,
+      "type": "User",
+      "site_admin": false
+    },
+    "labels": [],
+    "state": "open",
+    "locked": false,
+    "comments": 0,
+    "created_at": "2026-10-28T11:40:00Z",
+    "updated_at": "2026-11-17T08:30:44Z",
+    "author_association": "MEMBER",
+    "pull_request": {
+      "url": "https://api.github.com/repos/linea-lang/linea/pulls/209",
+      "merged_at": null
+    },
+    "body": null
+  }
+]

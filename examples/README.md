@@ -103,7 +103,7 @@ Sockets, connections, and what a server owes each one.
 
 ## Web services
 
-HTTP routing, request bodies, and responses, from two routes to a full JSON service.
+HTTP routing, request bodies, and responses, from two routes to a full JSON service, and clients that call such services.
 
 - [hello_http.lin](hello_http.lin): an HTTP service with two routes; routing and JSON bodies.
 - [party_rsvp.lin](party_rsvp.lin): collects party replies from a web form; a handler run as a CGI program with `http.serve_cgi`.
@@ -112,6 +112,8 @@ HTTP routing, request bodies, and responses, from two routes to a full JSON serv
 - [welcome_back.lin](welcome_back.lin): greets a visitor by name and counts visits in a cookie; reading and setting cookies, and escaping user text in HTML.
 - [calendar-export](calendar-export/main.lin): serves a year's calendar as CSV; writing a response as it is produced.
 - [http-json-echo](http-json-echo/main.lin): a JSON service with headers, forms, and shared counters; the largest example.
+- [github-issues](github-issues/main.lin): lists a GitHub repository's open issues page by page; an `http.Client` reusing one connection, a token from the environment, JSON decoded into types that read only the fields they need, the `Link` header and rate-limit headers, tested against a local server answering recorded responses.
+- [link-checker](link-checker/main.lin): reports the broken and moved links a file lists; fetching in parallel through `task.lazy_map` with a bounded number in flight, and redirects reported rather than followed.
 
 ## A whole application
 

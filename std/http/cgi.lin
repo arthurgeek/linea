@@ -355,13 +355,15 @@ fn is_header_variable(name: mem.Slice[UInt8]) -> Bool {
 }
 
 // `add_cgi_header` adds the header `name: value` as a header line holding it
-// is added, and refuses with 431 a header longer than a header line may be.
+// is added, and refuses with 431 a header longer than a header line may be,
+// and with 400 a second `Host` or one that is not a valid authority.
 fn add_cgi_header[A: Allocator](inout head: String[A], inout header_fields: Vec[Field, A], inout tally: HeaderTally, name: Str, value: Str, limits: Limits) -> Result[(), RequestError] where carries() {
     let trimmed = trim_optional_whitespace(value)
     if name.length() + trimmed.length() + header_line_framing_bytes > limits.max_line_bytes {
         return .Err(.Status(.RequestHeaderFieldsTooLarge))
     }
-    add_header_field(&head, &header_fields, &tally, name, trimmed, limits)
+    add_header_field(&head, &header_fields, &tally, name, trimmed, limits.max_headers)?
+    refuse_hosts(tally)
 }
 
 // `described_line` stores the request line the variables describe in `head`:

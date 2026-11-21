@@ -249,11 +249,11 @@ With a configuration, the task that accepts a connection opens a server
 stream over it with `Stream.accept_later_in`, which creates the session and
 runs no handshake: the handshake runs at the stream's first read, on the
 serving task that answers the connection, bounded by the request's read
-deadline, which `ServerLink.set_read_deadline` also gives the stream's
+deadline, which `Link.set_read_deadline` also gives the stream's
 handshake so its writes end by it too, so a slow or hostile client holds one
 serving task until then and never the acceptor. A handshake that fails fails that read, and the
 connection is closed as a request that could not be read. Inside serving a
-connection is a `ServerLink`, the plain connection or the TLS stream over
+connection is a `Link`, the plain connection or the TLS stream over
 it, so
 the request parser, request bodies and response writers are the same code
 over both; a response writer borrows the stream as `tls.StreamWriter`, which

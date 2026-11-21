@@ -385,8 +385,11 @@ The library tests itself.
   ok    http.a bare lf ends a line
   ok    http.a body cut short after the answer is observed as unread
   ok    http.a body holds exactly its length
+  ok    http.a body is read as bytes
   ok    http.a body is text only when it is utf8
+  ok    http.a body past its bound is refused and its connection closed
   ok    http.a body reader advances and stops at its boundary
+  ok    http.a body replaces the one before it
   ok    http.a body shorter than its length is malformed
   ok    http.a body that is not json answers 400
   ok    http.a body that is not utf8 answers 400
@@ -395,9 +398,19 @@ The library tests itself.
   ok    http.a cgi error displays its cause
   ok    http.a cgi head request is answered_with the head alone
   ok    http.a cgi request answers each limits status one past the bound
+  ok    http.a chunked response is decoded and its trailers skipped
+  ok    http.a client error displays its reason
+  ok    http.a client given a TLS configuration holds it until it is closed
+  ok    http.a client given no TLS configuration verifies servers with the system's roots
+  ok    http.a client in an allocator keeps the TLS configuration it was given
+  ok    http.a client keeps the limits it was given
+  ok    http.a client refuses a request past its outstanding bound
   ok    http.a client reset before accept never stops serving and the next is served
   ok    http.a client that fails the handshake is closed and serving goes on
   ok    http.a close token in a second connection header closes after the response
+  ok    http.a closed port refuses the connection
+  ok    http.a connection reaches a listening origin
+  ok    http.a connection the server closed while idle is replaced
   ok    http.a cookie error displays its reason
   ok    http.a cookie is cleared with an empty expired value
   ok    http.a cookie is set with the attributes given
@@ -405,6 +418,7 @@ The library tests itself.
   ok    http.a cookie that does not decode reads as none
   ok    http.a cookie value reads back as it was set
   ok    http.a dead end literal gives way to a parameter
+  ok    http.a deadline ends a body the server sends too slowly
   ok    http.a decode error answers by whose mistake it is
   ok    http.a decoded path is encoded again into the target
   ok    http.a derived params reads each field by its name
@@ -423,6 +437,8 @@ The library tests itself.
   ok    http.a form of the most pairs is answered in the smallest arena
   ok    http.a generated id takes nothing from the request allocator
   ok    http.a get is answered_with a status header
+  ok    http.a get reads a local HTTPS server's answer
+  ok    http.a get reads a local server's answer
   ok    http.a handler a sequential server cannot make closes the listener
   ok    http.a handler cannot set the status as a header
   ok    http.a handler error before headers answers its status
@@ -439,6 +455,8 @@ The library tests itself.
   ok    http.a header is spelled from its variable
   ok    http.a header_value is found by its folded name
   ok    http.a held body follows the head
+  ok    http.a hexadecimal digit is its lowercase ASCII byte
+  ok    http.a json body is encoded and described
   ok    http.a json body within the default limits decodes in the default arena
   ok    http.a json response holds its encoded value
   ok    http.a known length frames a persistent response
@@ -459,6 +477,9 @@ The library tests itself.
   ok    http.a malformed request is answered and serving continues
   ok    http.a malformed request is refused before the handler
   ok    http.a malformed request line is refused
+  ok    http.a malformed response is refused
+  ok    http.a malformed status line is refused
+  ok    http.a malformed url is refused
   ok    http.a match visits only nodes whose prefix matches
   ok    http.a media_type is the value without its parameters
   ok    http.a message is read through its request
@@ -468,6 +489,7 @@ The library tests itself.
   ok    http.a missing request method answers nothing
   ok    http.a name that is not a token is refused
   ok    http.a named code finds its variant
+  ok    http.a new client holds no connections
   ok    http.a new error has its status and no message
   ok    http.a new header list is empty
   ok    http.a new router answers 404
@@ -503,12 +525,17 @@ The library tests itself.
   ok    http.a query that is not percent encoded utf8 has no pairs
   ok    http.a read timeout answers 408
   ok    http.a recorded_body is what a client would read
+  ok    http.a redirect changes the method and drops credentials as its status says
+  ok    http.a redirect is followed to its location
+  ok    http.a redirect past the limit fails
   ok    http.a redirect sets its status and location and refuses a control byte
+  ok    http.a reference resolves against its base
   ok    http.a refused arena is answered 503
   ok    http.a refused body left unread does not lose the answer
   ok    http.a refused buffer answers 500 before the handler
   ok    http.a refused cookie answers 500
   ok    http.a refused document change answers 500
+  ok    http.a refused head is a malformed or oversized response
   ok    http.a refused header answers 500
   ok    http.a replacement refused for memory keeps the old value
   ok    http.a request allocates in its arena
@@ -523,19 +550,29 @@ The library tests itself.
   ok    http.a request gives its origin from the host header
   ok    http.a request gives its path_params once a router matched it
   ok    http.a request gives its query_params decoded
+  ok    http.a request head names the target host headers and framing
+  ok    http.a request holds its method and url
   ok    http.a request keeps its method token as sent
   ok    http.a request larger than the arena is answered 500
   ok    http.a request names its method
   ok    http.a request no server reads has no deadline
+  ok    http.a request refuses a method or url it cannot send
   ok    http.a request split into single bytes parses as one
   ok    http.a request that leaves no room for the response is answered 500
   ok    http.a request the handler never saw is logged without an id
+  ok    http.a request whose deadline has passed is never sent
   ok    http.a request with a body parses
   ok    http.a request without a cookie header has no cookies
+  ok    http.a request's headers are checked as they are added
+  ok    http.a resolve error displays its reason
   ok    http.a response body is text only when it is held utf8
+  ok    http.a response describes its status headers and url
+  ok    http.a response framed by its length is read to its end
   ok    http.a response reads its held body and no streamed one
   ok    http.a response reads its status
+  ok    http.a response settled by another client never reaches that client's pool
   ok    http.a response takes another status
+  ok    http.a response without a length runs until the server closes
   ok    http.a retried accept is logged as a warning
   ok    http.a rewound request arena keeps only its first chunk
   ok    http.a route closure reads what it captured
@@ -545,6 +582,7 @@ The library tests itself.
   ok    http.a router built in an allocator answers 404
   ok    http.a router keeps its routes in an arena
   ok    http.a router written without an allocator is the system router
+  ok    http.a scheme is a letter then scheme characters then a colon
   ok    http.a segment ends at the next slash
   ok    http.a segment is a literal a parameter or a remainder
   ok    http.a serve error displays its cause
@@ -552,6 +590,7 @@ The library tests itself.
   ok    http.a short header after a long line is answered in the smallest arena
   ok    http.a silent client times out and the next is served
   ok    http.a silent close is closed not an error
+  ok    http.a silent server times the read out
   ok    http.a socket body preserves the next requests read ahead
   ok    http.a stated handler reads its state
   ok    http.a stateful function is lent the state with each count of extractors
@@ -561,12 +600,15 @@ The library tests itself.
   ok    http.a status equals the same code spelled as other
   ok    http.a status has its code
   ok    http.a status has its reason phrase
+  ok    http.a status line names its code and version
   ok    http.a status response has no body
   ok    http.a stream that fails stops where it stands
   ok    http.a stream the arena cannot hold is refused
   ok    http.a streamed answer goes out as it is written
   ok    http.a streamed body follows the head
+  ok    http.a streamed body is sent by its length
   ok    http.a streamed body may exceed the arena
+  ok    http.a streamed body of unknown length is sent in chunks
   ok    http.a streamed body reads its request
   ok    http.a streamed body uses what its handler captured
   ok    http.a streamed response has no held body
@@ -574,6 +616,10 @@ The library tests itself.
   ok    http.a text response holds its rendered body
   ok    http.a text response past the arena is refused
   ok    http.a truncated socket body reports a sticky bad request
+  ok    http.a url displays its origin path and query
+  ok    http.a url error displays its reason
+  ok    http.a url names its origin path and query
+  ok    http.a url's members describe it
   ok    http.a value may hold equals signs and quotes around it are dropped
   ok    http.a variable that is not utf8 is read as its bytes
   ok    http.a walk of the headers shows one id
@@ -582,6 +628,7 @@ The library tests itself.
   ok    http.add_header keeps the values a name already has
   ok    http.adding a header keeps earlier values
   ok    http.ambiguous framing is rejected before the body size
+  ok    http.an IPv6 host is refused as an address the client cannot reach
   ok    http.an announced server answers the connection queued for it
   ok    http.an arena below the metadata requirement is refused before serving
   ok    http.an arena too small for the limits is refused
@@ -603,6 +650,7 @@ The library tests itself.
   ok    http.an html response holds its rendered body and content type
   ok    http.an html response past the arena is refused
   ok    http.an http variable is a header
+  ok    http.an https server whose certificate names another host is refused
   ok    http.an id is kept only when it is short visible ascii
   ok    http.an identified exchange is logged with its id
   ok    http.an identified request keeps the rest of the request
@@ -620,6 +668,9 @@ The library tests itself.
   ok    http.bodyless statuses emit no content type and no body
   ok    http.buffers in an arena last for any number of requests
   ok    http.cgi reserves full body storage while http streams it
+  ok    http.closing a client closes its idle connections
+  ok    http.codings and connection tokens are read from comma-separated values
+  ok    http.codings and options sent across several headers are read as one list
   ok    http.content length alone frames the body
   ok    http.content_length must be digits and agree
   ok    http.cookie decodes the percent encoded value
@@ -628,6 +679,7 @@ The library tests itself.
   ok    http.count includes every value a repeated name holds
   ok    http.cross site use requires secure
   ok    http.decoding appends the bytes escapes spell
+  ok    http.discarding a response closes its connection
   ok    http.each accept retry is observed with its pause
   ok    http.each allocation failure covers every acquisition from the parent
   ok    http.each allocation failure covers every buffer identifying grows
@@ -639,6 +691,7 @@ The library tests itself.
   ok    http.every connection is answered 503 while the parent refuses the arena
   ok    http.every exchange returns its arena to the parent
   ok    http.every shape releases its extractors last first and stops at a refusal
+  ok    http.finishing a short unread body keeps its connection
   ok    http.form reads borrowed fields from the explicit body
   ok    http.get answers head
   ok    http.header compares names under ascii case folding
@@ -649,6 +702,7 @@ The library tests itself.
   ok    http.headers walk in arrival order
   ok    http.http 11 host header is strictly enforced
   ok    http.identical shapes are a duplicate
+  ok    http.interim heads are skipped and a response to HEAD has no body
   ok    http.into_state returns the state and releases the handler
   ok    http.json decodes the body or names what is wrong
   ok    http.json is named by its media type
@@ -661,6 +715,7 @@ The library tests itself.
   ok    http.no match is 404
   ok    http.non ascii values without escapes read as sent
   ok    http.one connection is served and serve returns
+  ok    http.only a timed out wait is a timeout
   ok    http.only reads the single value whatever its name
   ok    http.path values belong to the request answered
   ok    http.percent decoding reads escapes in either case and keeps plus
@@ -672,10 +727,15 @@ The library tests itself.
   ok    http.percent_encoded text reads in an interpolation
   ok    http.pipelined requests keep their order on a sequential dispatcher
   ok    http.pipelined requests keep their order with one worker
+  ok    http.plaintext a TLS stream holds past a response keeps its connection out of the pool
+  ok    http.redirects between http and https drop credentials across origins
+  ok    http.redirects stale failures and idempotent methods are recognised
   ok    http.remove_header drops every value of a name
   ok    http.removing a header drops every value
+  ok    http.removing a header leaves the others in order
   ok    http.request is_https checks forwarded headers and env
   ok    http.request is_https reads a quoted Forwarded value whole
+  ok    http.resolve_url resolves with the system allocator
   ok    http.running out of memory answers 500
   ok    http.same_origin policy validates requests
   ok    http.sequential routing with path parameters
@@ -693,11 +753,13 @@ The library tests itself.
   ok    http.text that does not decode answers 400
   ok    http.the bound address is logged as listening
   ok    http.the default arena holds every request the default limits admit
+  ok    http.the default client limits bound the pool and the waits
   ok    http.the default limits bound lines headers and bodies
   ok    http.the first cookie of a repeated name wins across headers
   ok    http.the first of a repeated variable is read
   ok    http.the first refusing extractor answers the request
   ok    http.the library extractors and a type that reads itself are arguments
+  ok    http.the pool keeps an https connection apart from an http one
   ok    http.the protocol the client spoke is not the programs
   ok    http.the root pattern matches the root alone
   ok    http.the shared state counts every request from every task
@@ -705,6 +767,7 @@ The library tests itself.
   ok    http.the unreserved bytes are letters digits and four marks
   ok    http.transfer encoding is not implemented
   ok    http.transient accept failures are retried until a connection is served
+  ok    http.two requests to one origin share a pooled connection
   ok    http.two tasks failing with owned reasons report one and release the other
   ok    http.typed cgi endpoints keep the configured form limit
   ok    http.unescaping keeps bytes that are not utf8
@@ -753,6 +816,7 @@ The library tests itself.
   ok    io.an incomplete utf8 prefix is retained after input failure
   ok    io.an input failure can_resume an owned line
   ok    io.an oversized line retains its consumed prefix
+  ok    io.buffered bytes count what was read ahead and not returned
   ok    io.buffered output retries only its unsent suffix
   ok    io.chunk reads keep read ahead for the next line
   ok    io.core.a line is the value and the ending after it
@@ -1189,6 +1253,7 @@ The library tests itself.
   ok    mem.a directory stream lists what a directory holds
   ok    mem.a directory stream opens a directory inside the one it reads
   ok    mem.a directory's lasting identity is the same through two streams
+  ok    mem.a dotted name resolves to itself and an empty one to nothing
   ok    mem.a drain stopped early is returned by finish and resumes
   ok    mem.a foreign_address is where the bytes are
   ok    mem.a foreign_byte is read at its offset
@@ -1408,6 +1473,7 @@ The library tests itself.
   ok    net.next asks the listener nothing until a retry has waited its pause
   ok    net.on_tasks answers what every task answered
   ok    net.only a timed_out accept is timed_out
+  ok    net.resolving a dotted address or localhost needs no network
   ok    net.serve runs the handler once for each connection and returns
   ok    net.serve_workers handles connections concurrently
   ok    net.serve_workers sequential policy
@@ -1864,4 +1930,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1861 passed, 0 failed
+  1927 passed, 0 failed

@@ -5,7 +5,8 @@ TCP: listening, accepting and connecting. `std.http` builds an HTTP/1.1 server
 on top of it: handlers that return responses, a router that picks the handler,
 extractors that read a request's inputs, state that every handler shares,
 logging, bodies streamed as they are written, and the same handlers run as CGI
-programs.
+programs. The chapter ends on the other side of HTTP: `http.Client`, which
+calls a service and reuses its connections.
 
 Three ideas from earlier chapters carry most of the weight here. Sockets are
 **linear** ([Copying, settling and
@@ -2912,6 +2913,339 @@ program: an HTML form, a reply checked and confirmed as JSON, and a date read
 with `env.variable`. [A guest book](12-a-guest-book.md) builds a complete web
 application that runs both ways and stores its entries in SQLite.
 
+## Calling a service with `http.Client`
+
+A server answers requests; a client sends them. `http.Client` sends a request,
+reads the head of its response, and hands you the body to read as it arrives.
+It keeps each connection open after its response, in a pool keyed by the
+server's scheme, host and port, so the next request to the same server skips
+connecting. In Rust this is `reqwest::Client`, and in JavaScript `fetch` with
+a keep-alive agent.
+
+The program below serves two routes on one task and calls them from another:
+`/hi` redirects to `/hello`, and the client follows the redirect on the same
+connection.
+
+```linea
+import std.http
+import std.io
+import std.net
+import std.session
+import std.task
+
+// `GET /hello` answers a greeting, and `GET /hi` redirects to it.
+fn routes() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /hello", hello).unwrap()
+    &router.route_raw("GET /hi", hi).unwrap()
+    router
+}
+
+fn hello[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.text(request, "hello from the server")
+}
+
+fn hi[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.redirect(request, .Found, "/hello")
+}
+
+// Ask the server at `port` for `/hi`, follow its redirect, and print what
+// came back. The client is released on every path out, which closes the
+// connection it kept.
+fn ask(port: UInt16) -> Result[(), http.ClientError] {
+    var client = http.Client.new()
+    defer client.release()
+    let request = http.ClientRequest.new("GET", "http://127.0.0.1:{port}/hi")?.with_header("Accept", "text/plain")?
+    let response = &client.send(request)?
+    let path = http.Url.parse(response.url()).unwrap().path()
+    io.println("{response.status().code()} from {path}").unwrap()
+    // `read_text` reads the rest of the body and settles the response, which
+    // puts its connection back in the client's pool.
+    let body = &client.read_text(response, max_bytes: 1024)?
+    io.println(body.view()).unwrap()
+    body.release()
+    io.println("idle connections: {client.idle_connections()}").unwrap()
+    .Ok(())
+}
+
+fn main() -> UInt8 {
+    // Port 0 asks the operating system for any free port.
+    let listener = net.listen(net.loopback(0)) else |error| {
+        io.eprintln("cannot listen: {error}")
+        return 1
+    }
+    let port = listener.local_address().unwrap().port
+    // The client runs on a task of its own while `main` serves, and sends
+    // back what it found when it is done.
+    let asking = task.prepare(
+        sink [port] |sink me: session.Chan[session.Send[Result[(), http.ClientError], session.End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap().start()
+    // The client asks twice on one connection, so serving ends after one.
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    let served = http.serve(listener, routes, limits: limits, policy: .Sequential)
+    let (asked, done) = asking.recv()
+    done.close()
+    match (served, asked) {
+        (Ok(_), Ok(_)) => 0,
+        (Err(error), _) => {
+            io.eprintln("serving failed: {error}")
+            1
+        },
+        (_, Err(error)) => {
+            io.eprintln("asking failed: {error}")
+            1
+        },
+    }
+}
+```
+
+```
+200 from /hello
+hello from the server
+idle connections: 1
+```
+
+Reading it from the top:
+
+- `http.ClientRequest.new("GET", url)` builds a request; the URL is any value
+  that displays as one, so an interpolation names it. Each `with_header`
+  answers the request with one more header, or releases it and answers why
+  the header was refused, so a chain of them ends in one `?`.
+- `&client.send(request)` sends it and waits for the head of the response.
+  A redirect is followed to its `Location`: `response.url()` is the URL that
+  finally answered.
+- `client.read_text(response, max_bytes:)` reads the rest of the body as
+  text, refusing one longer than `max_bytes`, and gives the connection back to
+  the pool. That is why the pool holds one idle connection at the end.
+- A status such as `404` is an answer, not an error: read `status()` and
+  decide. `http.ClientError` is a failure to get an answer at all: the host
+  did not resolve, the connection was refused, a wait timed out
+  (`error.is_timeout()`), or the response was malformed.
+
+### Settling every response
+
+A response holds the connection its body is still arriving on, so it is
+linear, like the connection itself. The client that sent it is the only thing
+that can end it, because ending it decides what happens to the connection:
+`read_text` and `read_bytes` read the body and keep the connection,
+`finish` reads what remains of a short body and keeps it, and `discard`
+closes it. Forget, and the compiler says so:
+
+```linea
+import std.http
+import std.io
+
+// Answer the status `url` answers with.
+fn status_of(url: Str) -> Result[UInt16, http.ClientError] {
+    var client = http.Client.new()
+    defer client.release()
+    let response = &client.get(url)?
+    .Ok(response.status().code())
+}
+
+fn main() -> UInt8 {
+    // Port 1 on this machine has no server, so the connection is refused.
+    match status_of("http://127.0.0.1:1/") {
+        Ok(code) => io.println("answered {code}").unwrap(),
+        Err(error) => io.println("no answer, timed out: {error.is_timeout()}").unwrap(),
+    }
+    0
+}
+```
+
+```
+error[O-Leak]: `response` (a linear `http.ClientResponse[mem.SystemAllocator]`) is still owned when this path leaves
+  --> response_forgot.lin:8:9
+   |
+8  |     let response = &client.get(url)?
+   |         ^^^^^^^^ never settled on the path that reaches the end of this block
+10 | }
+   | - the block ends here
+   |
+   = help: give it to something that takes it
+```
+
+The status is all this function wants, so `finish` settles the response,
+reading the little that remains of its body so the connection can be reused:
+
+<!-- guide: edit 9 .Ok(response.status().code()) -->
+```linea
+    let code = response.status().code()
+    &client.finish(response)
+    .Ok(code)
+```
+
+```
+no answer, timed out: false
+```
+
+No server listens there, so the connection is refused: a failure to get an
+answer, which `is_timeout()` tells apart from a server that is too slow.
+
+Because only the client ends a response, it knows how many are still open.
+`ClientLimits.max_outstanding` bounds them (16 by default), and a request
+past the bound fails with `Saturated` before it connects. The other limits
+bound the pool (16 idle connections, at most 4 to one server, each reused
+within 4 seconds, before a server is likely to close it), the time to connect and each read and write, the
+redirects followed, and the size of a response's head; `ClientLimits {
+max_redirects = 0, ..http.ClientLimits.default() }` changes one.
+
+### Sending a body
+
+`with_body(content_type, bytes)` sends bytes you hold, and `with_json(value)`
+encodes a value that derives `json.Encode`. A body too large to hold, such as
+a file, is read as it is sent: `client.send_from(request, &reader, length:)`
+copies any `io.Reader`, framed by its length when you give one and in chunks
+when you do not. A streamed body cannot be read twice, so `send_from` never
+follows a redirect.
+
+### Calling an `https` service
+
+An `https` URL is reached over TLS, as [Serving over HTTPS](#serving-over-https)
+described: the client runs the handshake on each new connection and checks
+that the server's certificate names the URL's host. `http.Client.new()`
+checks it against the operating system's roots, as a browser does, so
+`client.get("https://api.github.com/")` works with no setup. A service whose
+certificate a private authority issued needs that authority's root:
+`http.Client.with_tls(config)` hands the client a `tls.ClientConfig` of your
+own, which the client owns and closes when it is released.
+
+Every request also takes `deadline:`, one `time.Deadline` for the whole of
+it: connecting, the handshake, each redirect and the body. The per-read
+timeouts of `ClientLimits` still bound each wait; the deadline bounds what
+they add up to. The program below serves over TLS with a certificate for
+`localhost` and asks it with a client that trusts the root that issued it,
+within two seconds:
+
+```linea
+import std.http
+import std.io
+import std.net
+import std.session
+import std.task
+import std.time
+import std.tls
+
+use session.Chan
+use session.End
+use session.Send
+
+// A certificate for `localhost`, its private key, and the root that issued
+// it. A real server reads its own from files; these are pasted in so the
+// program runs anywhere.
+let certificate: Str =
+    \\-----BEGIN CERTIFICATE-----
+    \\MIIBuDCCAV6gAwIBAgIJAMVQ5RDbfb9KMAoGCCqGSM49BAMCMBgxFjAUBgNVBAMM
+    \\DUxpbmVhIFRlc3QgQ0EwIBcNMjYwMTAxMDAwMDAwWhgPMjEyNTEyMzEyMzU5NTla
+    \\MBQxEjAQBgNVBAMMCWxvY2FsaG9zdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA
+    \\BOyx5sbcw+iUIs0UqLFbnpr3vgse/wrS2UoTlUFKA5ZbD3Vdu8UXLmvlPpZKrRDT
+    \\5IqWePA+hM0X7WTSKnxB62ejgZIwgY8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/
+    \\AAABMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/
+    \\BAQDAgeAMB0GA1UdDgQWBBS2m5l8kcWT9Da37xG0QIB7t2fG2TAfBgNVHSMEGDAW
+    \\gBRLW1Af/7FrpsGiqajDBfwqxer3kjAKBggqhkjOPQQDAgNIADBFAiEAjqD3xaN8
+    \\oO5ByC4U1QaklyYvCm3goPCbmUw5wG4BvfUCIDoVC8ealPJVorXb1QPQT2DbJGHV
+    \\Z/jbpJn7fLH7oa8U
+    \\-----END CERTIFICATE-----
+
+let private_key: Str =
+    \\-----BEGIN PRIVATE KEY-----
+    \\MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggEEoZtZ9TXxAOrXi
+    \\t/0JeoHsjNCeNuvwnxonOKD6tCWhRANCAATssebG3MPolCLNFKixW56a974LHv8K
+    \\0tlKE5VBSgOWWw91XbvFFy5r5T6WSq0Q0+SKlnjwPoTNF+1k0ip8Qetn
+    \\-----END PRIVATE KEY-----
+
+let test_root: Str =
+    \\-----BEGIN CERTIFICATE-----
+    \\MIIBljCCAT2gAwIBAgIUSsW4seiSOjcP87a6c80h5oIQZcIwCgYIKoZIzj0EAwIw
+    \\GDEWMBQGA1UEAwwNTGluZWEgVGVzdCBDQTAgFw0yNjAxMDEwMDAwMDBaGA8yMTI1
+    \\MTIzMTIzNTk1OVowGDEWMBQGA1UEAwwNTGluZWEgVGVzdCBDQTBZMBMGByqGSM49
+    \\AgEGCCqGSM49AwEHA0IABGX08dXM0oDGkm2iJBmKV6Z6rRQFLVyr+nGlD+SIirLZ
+    \\FqZSteBNDRmNcqlE7MqjWu7Sc+MON5BW1PHMJ/YtV3KjYzBhMB0GA1UdDgQWBBRL
+    \\W1Af/7FrpsGiqajDBfwqxer3kjAfBgNVHSMEGDAWgBRLW1Af/7FrpsGiqajDBfwq
+    \\xer3kjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQD
+    \\AgNHADBEAiBu8ZmGCoWd3LhEC8dEhZDU+12d8N/vaHelmxOXWHdZQAIgUSy+MKux
+    \\NSBuwOQ5B7jtGQuVfweQHDoZ6GttBacU8oo=
+    \\-----END CERTIFICATE-----
+
+fn hello[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.text(request, "hello over TLS")
+}
+
+fn routes() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /hello", hello).unwrap()
+    router
+}
+
+// Ask the server at `port` over HTTPS and answer the body. The client trusts
+// `test_root` alone, and the request has two seconds in all.
+fn ask(port: UInt16) -> Result[String, http.ClientError] {
+    var client = http.Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+    defer client.release()
+    let response = &client.get("https://localhost:{port}/hello", deadline: time.Deadline.after(time.Duration.from_seconds(2)))?
+    &client.read_text(response, max_bytes: 1024)
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let config = tls.ServerConfig.open(certificate, private_key).unwrap()
+    let asking = task.start(
+        sink [port] |sink me: Chan[Send[Result[String, http.ClientError], End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap()
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    let served = http.serve(listener, routes, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+    config.close()
+    let (asked, done) = asking.recv()
+    done.close()
+    let served_whole = match served {
+        Ok(_) => true,
+        Err(error) => {
+            io.eprintln("serving failed: {error}")
+            false
+        },
+    }
+    match asked {
+        Ok(body) => {
+            io.println(body.view()).unwrap()
+            body.release()
+            if served_whole {
+                0
+            } else {
+                1
+            }
+        },
+        Err(error) => {
+            io.eprintln("asking failed: {error}")
+            1
+        },
+    }
+}
+```
+
+```
+hello over TLS
+```
+
+A certificate that does not check out fails the request with
+`http.ClientError.Tls`, holding the `tls.TlsError` that says why, before a
+byte of the request is sent. The pool keeps `https` connections apart from
+`http` ones to the same host, and a redirect from one scheme to the other is
+a redirect to another server, so it drops the credentials the request
+carried.
+
+The [GitHub issues](../../examples/github-issues/main.lin) example is a
+client for a real API: a token from the environment, pages followed through
+the `Link` header, the rate limit read from the response's headers, and tests
+that run against a local server answering recorded responses, over HTTP and
+over HTTPS. The [link
+checker](../../examples/link-checker/main.lin) checks many links at once, one
+client per task, through `task.lazy_map`.
+
 ## What you have seen
 
 - A TCP listener and connection are linear and `@opaque`: `close` them on every
@@ -2964,6 +3298,11 @@ application that runs both ways and stores its entries in SQLite.
 - `http.serve_cgi(handler)` answers the one request a web server started the
   program for, read from the environment and standard input, on standard
   output; `env.variable(name)` reads any other variable the server sets.
+- `http.Client` sends requests and pools their connections by server;
+  `send` follows redirects, and a response, which holds its connection, is
+  settled only by its client: `read_text`, `read_bytes`, `finish` or
+  `discard`. `https` URLs go over TLS, checked against the system's roots or
+  the configuration `with_tls` gives, and `deadline:` bounds a whole request.
 
 Handlers are ordinary functions, so they are tested by calling them:
 [Testing](10-testing.md#testing-a-server) shows how. The [JSON echo
