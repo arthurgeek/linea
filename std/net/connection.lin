@@ -6,10 +6,8 @@ import std.time
 use io.ByteWriter
 use io.Reader
 
-let nanoseconds_per_millisecond: UInt64 = 1000000
-
 // The runtime connects to a packed address, by a deadline on the monotonic
-// clock in nanoseconds (0 waits forever), reports a peer's packed address, shuts
+// clock in nanoseconds (0 waits forever, as `time.Deadline` writes `never`), reports a peer's packed address, shuts
 // down writing, and resets a connection. Each returns its answer, or a negated
 // errno.
 extern fn linea_net_connect(address: UInt64, deadline_ns: UInt64) -> Int64
@@ -29,31 +27,22 @@ struct Connection {
     // The per-operation timeouts `set_timeouts` configured, in milliseconds.
     read_ms: UInt64,
     write_ms: UInt64,
-    deadline: Option[Deadline],
-}
-
-// A deadline ends every read once `budget_ms` milliseconds have passed since
-// `started`.
-@copyable
-struct Deadline {
-    started: time.Instant,
-    budget_ms: UInt64,
+    // The deadlines every read and every write must finish by.
+    read_deadline: time.Deadline,
+    write_deadline: time.Deadline,
 }
 
 // Wrap a connected descriptor with no timeouts and no deadline.
 fn adopt(fd: Int32) -> Connection {
-    Connection { fd, read_ms = 0, write_ms = 0, deadline = .None }
+    Connection { fd, read_ms = 0, write_ms = 0, read_deadline = time.never, write_deadline = time.never }
 }
 
 // Open a connection and wait until the peer accepts it or refuses it, or
-// until `within_ms` milliseconds have passed, which fails as timed out. Zero
-// waits as long as the handshake takes.
-pub fn connect(address: Address, within_ms: UInt64 = 0) -> Result[Connection, NetError] {
-    var deadline: UInt64 = 0
-    if within_ms != 0 {
-        deadline = deadline_after(time.Instant.now().monotonic_nanoseconds(), within_ms)
-    }
-    let answer = linea_net_connect(address.packed(), deadline)
+// until `deadline` passes, which fails as timed out. `time.never`, the
+// default, waits as long as the handshake takes. A deadline already passed
+// fails without connecting.
+pub fn connect(address: Address, deadline: time.Deadline = time.never) -> Result[Connection, NetError] {
+    let answer = linea_net_connect(address.packed(), deadline.monotonic_nanoseconds())
     if answer < 0 {
         return .Err(failure(.Connect, answer))
     }
@@ -85,7 +74,7 @@ test "a connect whose handshake ends at its deadline connects" {
     let (early, on_time) = &sim.run(
         |inout _world| {
             let listener = listen(loopback(80)).unwrap()
-            let early = match connect(loopback(80), within_ms: 29) {
+            let early = match connect(loopback(80), deadline: time.Deadline.after(time.Duration.from_milliseconds(29))) {
                 Ok(connection) => {
                     connection.close().unwrap()
                     false
@@ -93,7 +82,7 @@ test "a connect whose handshake ends at its deadline connects" {
                 Err(Io(reason)) => match read reason.category { TimedOut => true, _ => false },
                 Err(_) => false,
             }
-            let on_time = match connect(loopback(80), within_ms: 30) {
+            let on_time = match connect(loopback(80), deadline: time.Deadline.after(time.Duration.from_milliseconds(30))) {
                 Ok(connection) => {
                     connection.close().unwrap()
                     true
@@ -109,14 +98,37 @@ test "a connect whose handshake ends at its deadline connects" {
     testing.assert(on_time, "a connect whose handshake ended at its deadline was not connected")?
 }
 
-test "a connect with no bound waits for the handshake" {
+test "a connect whose deadline is never waits for the handshake" {
     let listener = listen(loopback(0)).unwrap()
-    let connected = match connect(listener.local_address().unwrap(), within_ms: 0) {
+    let connected = match connect(listener.local_address().unwrap(), deadline: time.never) {
         Ok(connection) => connection.close().is_ok(),
         Err(_) => false,
     }
     listener.close().unwrap()
-    testing.assert(connected, "a connect with no bound did not connect")?
+    testing.assert(connected, "a connect whose deadline is never did not connect")?
+}
+
+test "a connect whose deadline has passed times out" {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let expired = &sim.run(
+        |inout world| {
+            let listener = listen(loopback(80)).unwrap()
+            let deadline = time.Deadline.after(time.Duration.from_milliseconds(10))
+            &world.advance(time.Duration.from_milliseconds(10))
+            let expired = match connect(loopback(80), deadline: deadline) {
+                Ok(connection) => {
+                    connection.close().unwrap()
+                    false
+                },
+                Err(Io(reason)) => match read reason.category { TimedOut => true, _ => false },
+                Err(_) => false,
+            }
+            listener.close().unwrap()
+            expired
+        },
+    )
+    sim.close()
+    testing.assert(expired, "a connect whose deadline had passed did not time out")?
 }
 
 test "a simulated connection kept past its simulation closes" {
@@ -133,28 +145,30 @@ test "a simulated connection kept past its simulation closes" {
     testing.assert(made.close().is_ok(), "closing a connection its simulation outlived failed")?
 }
 
-// The moment `ms` milliseconds after `base`, on the monotonic clock in
-// nanoseconds. A sum too large to represent is the same as waiting forever, and
-// answers the runtime's 0, no deadline.
-fn deadline_after(base: UInt64, ms: UInt64) -> UInt64 {
-    if ms > (UInt64.max - base) / nanoseconds_per_millisecond {
-        return 0
+// The deadline `ms` milliseconds from now, for a bound written in milliseconds
+// with zero for none, as `set_timeouts` and `http.Limits` write theirs. Zero,
+// and a bound too long for a duration to hold, about 584 years, is
+// `time.never`.
+internal fn bound_after(ms: UInt64) -> time.Deadline {
+    if ms == 0 || ms > UInt64.max / 1000000 {
+        return time.never
     }
-    base + ms * nanoseconds_per_millisecond
+    time.Deadline.after(time.Duration.from_milliseconds(ms))
 }
 
-test "a deadline too far ahead means no deadline" {
-    testing.assert_eq(deadline_after(5, 2), UInt64(2000005), "a deadline was not 2 ms after its base")?
-    testing.assert_eq(deadline_after(5, UInt64.max), UInt64(0), "an overflowing deadline did not answer none")?
+test "an operation bound of zero or too far ahead is never" {
+    testing.assert_eq(bound_after(0), time.never, "a bound of zero was a deadline")?
+    testing.assert_eq(bound_after(UInt64.max), time.never, "an overflowing bound was a deadline")?
+    testing.assert(bound_after(2) != time.never, "a 2 ms bound was never")?
 }
 
 impl Connection {
-    // Bound each later read and send attempt separately, in milliseconds, and end
-    // any deadline. Zero waits forever.
+    // Bound each later read and send attempt separately, in milliseconds. Zero
+    // waits forever. The deadlines `set_deadline` and `set_read_deadline` set
+    // still apply: an operation ends at whichever comes first.
     pub fn set_timeouts(inout self: Self, read_ms: UInt64, write_ms: UInt64) {
         self.read_ms = read_ms
         self.write_ms = write_ms
-        self.deadline = .None
     }
 
     test "a silent peer times out the read" {
@@ -219,19 +233,17 @@ impl Connection {
         testing.assert_eq(received, UInt64(1), "a read whose byte arrived at its deadline did not read it")?
     }
 
-    // Bound all later reads together: once `within_ms` milliseconds have passed
-    // since `started`, every read fails as timed out, even one whose bytes have
-    // arrived, and a read that would wait past that moment is cut short at it.
-    // Each read also keeps its own `set_timeouts` bound. A client that sends
-    // a byte at a time therefore cannot keep a reader waiting beyond the
-    // deadline, as it can with per-read timeouts alone. Zero sets no deadline.
-    // `set_timeouts` ends the deadline.
-    pub fn set_deadline(inout self: Self, started: time.Instant, within_ms: UInt64) {
-        if within_ms == 0 {
-            self.deadline = .None
-        } else {
-            self.deadline = .Some(Deadline { started = copy(started), budget_ms = within_ms })
-        }
+    // Bound every later read and write by `deadline`: once it has passed, each
+    // fails as timed out, even a read whose bytes have arrived, and one that
+    // would wait past it is cut short at it. Each operation also keeps its own
+    // `set_timeouts` bound. A client that sends a byte at a time therefore
+    // cannot keep a reader waiting beyond the deadline, as it can with
+    // per-operation timeouts alone. Passing the deadline a whole exchange was
+    // given makes its reads and writes share that budget with its connect and
+    // its retries. `time.never` ends the bound.
+    pub fn set_deadline(inout self: Self, deadline: time.Deadline) {
+        self.read_deadline = copy(deadline)
+        self.write_deadline = copy(deadline)
     }
 
     test "a deadline ends reads that each arrive in time" {
@@ -246,7 +258,7 @@ impl Connection {
                 // 150 ms a single read may wait, yet the third read starts after
                 // the 200 ms deadline, which spans them all.
                 &server.set_timeouts(read_ms: 150, write_ms: 150)
-                &server.set_deadline(time.Instant.now(), within_ms: 200)
+                &server.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(200)))
                 defer var buffer = mem.system().acquire(8).unwrap()
                 var arrived: UInt64 = 0
                 var expired = false
@@ -271,7 +283,7 @@ impl Connection {
         testing.assert_eq(arrived, UInt64(2), "the deadline did not end the reads after the second byte")?
     }
 
-    test "a deadline of zero leaves reads unbounded" {
+    test "a deadline of never leaves reads unbounded" {
         var sim = io.Simulation.open(seed: 1).unwrap()
         let received = &sim.run(
             |inout world| {
@@ -279,7 +291,7 @@ impl Connection {
                 var client = connect(loopback(80)).unwrap()
                 let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
                 var server = accepted
-                &server.set_deadline(time.Instant.now(), within_ms: 0)
+                &server.set_deadline(time.never)
                 &world.advance(time.Duration.from_seconds(30))
                 let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
                 defer var buffer = mem.system().acquire(8).unwrap()
@@ -294,7 +306,120 @@ impl Connection {
             },
         )
         sim.close()
-        testing.assert_eq(received, UInt64(1), "a zero deadline bounded the read")?
+        testing.assert_eq(received, UInt64(1), "a deadline of never bounded the read")?
+    }
+
+    test "a deadline ends a write the peer never reads" {
+        // The network holds 4 KiB each way, so the second write has nowhere to
+        // put its bytes until the deadline, 50 ms after the first, ends it.
+        let network = io.Network { buffer_bytes = 4096, ..io.Network.default() }
+        var sim = io.Simulation.open(seed: 1, network: network).unwrap()
+        let (expired, waited) = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                let started = time.Instant.now()
+                &server.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(50)))
+                defer var bytes = mem.system().acquire(65536).unwrap()
+                let _first = &server.write_some(bytes.as_slice())
+                let expired = match &server.write_some(bytes.as_slice()) {
+                    Ok(_) => false,
+                    Err(WriteFailure { kind: _, reason: reason, written: _ }) => match reason {
+                        Some(error) => match read error.category { TimedOut => true, _ => false },
+                        None => false,
+                    },
+                }
+                let waited = started.elapsed()
+                client.close().unwrap()
+                server.close().unwrap()
+                listener.close().unwrap()
+                (expired, waited)
+            },
+        )
+        sim.close()
+        testing.assert(expired, "a write past its deadline did not time out")?
+        testing.assert_eq(waited, time.Duration.from_milliseconds(50), "the write waited other than until its deadline")?
+    }
+
+    test "set_timeouts keeps the deadline" {
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let expired = &sim.run(
+            |inout world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                &server.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(10)))
+                &server.set_timeouts(read_ms: 1000, write_ms: 1000)
+                &world.advance(time.Duration.from_milliseconds(20))
+                let _sent = io.write_all(&client, "x".as_bytes()).unwrap()
+                defer var buffer = mem.system().acquire(8).unwrap()
+                let expired = match &server.read_some(&buffer, offset: 0, count: 8) {
+                    Ok(_) => false,
+                    Err(error) => match read error.category { TimedOut => true, _ => false },
+                }
+                server.close().unwrap()
+                client.close().unwrap()
+                listener.close().unwrap()
+                expired
+            },
+        )
+        sim.close()
+        testing.assert(expired, "setting timeouts ended the deadline")?
+    }
+
+    // Bound every later read by `deadline`, as `set_deadline` does, and leave
+    // writes as they were. A server bounds reading a request this way while
+    // its response is written under the write timeouts alone.
+    pub fn set_read_deadline(inout self: Self, deadline: time.Deadline) {
+        self.read_deadline = copy(deadline)
+    }
+
+    test "a read deadline leaves writes unbounded" {
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let (read_expired, wrote) = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                var client = connect(loopback(80)).unwrap()
+                let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
+                var server = accepted
+                &server.set_read_deadline(time.Deadline.after(time.Duration.from_nanoseconds(0)))
+                defer var buffer = mem.system().acquire(8).unwrap()
+                let read_expired = match &server.read_some(&buffer, offset: 0, count: 8) {
+                    Ok(_) => false,
+                    Err(error) => match read error.category { TimedOut => true, _ => false },
+                }
+                let wrote = io.write_all(&server, "ok".as_bytes()).is_ok()
+                server.close().unwrap()
+                client.close().unwrap()
+                listener.close().unwrap()
+                (read_expired, wrote)
+            },
+        )
+        sim.close()
+        testing.assert(read_expired, "a read past the read deadline did not time out")?
+        testing.assert(wrote, "a read deadline bounded a write")?
+    }
+
+    // The deadline every read must finish by, as `set_deadline` or
+    // `set_read_deadline` last set it.
+    internal fn read_deadline(self: Self) -> time.Deadline {
+        copy(self.read_deadline)
+    }
+
+    test "a connection reports its read deadline" {
+        var listener = listen(loopback(0)).unwrap()
+        var client = connect(listener.local_address().unwrap()).unwrap()
+        let unset = client.read_deadline()
+        let deadline = time.Deadline.after(time.Duration.from_seconds(5))
+        &client.set_read_deadline(deadline)
+        let set = client.read_deadline()
+        client.close().unwrap()
+        listener.close().unwrap()
+        testing.assert_eq(unset, time.never, "a new connection had a read deadline")?
+        testing.assert_eq(set, deadline, "the read deadline set was not reported")?
     }
 
     // Report the address of the peer at the other end of the connection.
@@ -351,7 +476,7 @@ impl Connection {
 
     // Close the connection, reporting a failed close, which `Release` ignores.
     pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
-        let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
+        let Connection { fd: fd, read_ms: _, write_ms: _, read_deadline: _, write_deadline: _ } = self
         close_descriptor(fd)
     }
 
@@ -371,7 +496,7 @@ impl Connection {
     // discarding what is unsent. The descriptor is closed even when the reset
     // cannot be arranged, and that failure is the one reported.
     pub fn reset(sink self: Self) -> Result[(), io.IoError] {
-        let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
+        let Connection { fd: fd, read_ms: _, write_ms: _, read_deadline: _, write_deadline: _ } = self
         let answer = linea_net_reset(fd)
         if answer < 0 {
             return .Err(io.IoError.from_os(.Close, Int32(-answer)))
@@ -404,53 +529,38 @@ impl Connection {
         .Ok(())
     }
 
-    // The monotonic moment the next read must finish by: its own per-read
-    // bound or the session's deadline, whichever comes first, 0 for neither.
-    fn read_deadline(self: Self) -> UInt64 {
-        var ends: UInt64 = 0
-        if self.read_ms != 0 {
-            ends = deadline_after(time.Instant.now().monotonic_nanoseconds(), self.read_ms)
-        }
-        match read self.deadline {
-            Some(deadline) => {
-                let session = deadline_after(deadline.started.monotonic_nanoseconds(), deadline.budget_ms)
-                if session != 0 && (ends == 0 || session < ends) {
-                    ends = session
-                }
-            },
-            None => {},
-        }
-        ends
+    // The monotonic moment in nanoseconds the next read must finish by, as the
+    // runtime takes it: its own per-read bound or the read deadline, whichever
+    // comes first, 0 for neither.
+    fn read_by(self: Self) -> UInt64 {
+        bound_after(self.read_ms).earlier(self.read_deadline).monotonic_nanoseconds()
     }
 
-    test "a read_deadline is the nearer of the read bound and the session" {
+    test "a read_by is the nearer of the read bound and the deadline" {
         var listener = listen(loopback(0)).unwrap()
         var server_side = connect(listener.local_address().unwrap()).unwrap()
         let Accepted { connection: peer, address: _ } = &listener.accept().unwrap()
         var client = peer
-        let unbounded = client.read_deadline()
+        let unbounded = client.read_by()
         &client.set_timeouts(read_ms: 1000, write_ms: 0)
-        let before = time.Instant.now().monotonic_nanoseconds()
-        let bound = client.read_deadline()
-        &client.set_deadline(time.Instant.now(), within_ms: 5)
-        let nearer = client.read_deadline()
+        let bound = client.read_by()
+        &client.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(5)))
+        let nearer = client.read_by()
         let client_closed = client.close().is_ok()
         let server_closed = server_side.close().is_ok()
         let listener_closed = listener.close().is_ok()
         testing.assert_eq(unbounded, UInt64(0), "no bound was a deadline")?
-        testing.assert(bound >= before + 1000 * nanoseconds_per_millisecond, "the per-read bound was not applied")?
+        testing.assert(bound != 0, "the per-read bound was not applied")?
         testing.assert(nearer < bound, "the nearer deadline did not win")?
         testing.assert(client_closed && server_closed && listener_closed, "a close failed")?
         .Ok(())
     }
 
-    // The monotonic moment one send attempt must finish by, 0 for no bound. A
-    // send that makes progress answers at once, so each attempt gets a fresh bound.
-    fn write_deadline(self: Self) -> UInt64 {
-        if self.write_ms == 0 {
-            return 0
-        }
-        deadline_after(time.Instant.now().monotonic_nanoseconds(), self.write_ms)
+    // The monotonic moment one send attempt must finish by, 0 for no bound: its
+    // own per-write bound or the write deadline, whichever comes first. A send
+    // that makes progress answers at once, so each attempt gets a fresh bound.
+    fn write_by(self: Self) -> UInt64 {
+        bound_after(self.write_ms).earlier(self.write_deadline).monotonic_nanoseconds()
     }
 
     // Owning and borrowed writers use the same timeout and error policy.
@@ -458,7 +568,7 @@ impl Connection {
         if bytes.length() == 0 {
             return .Ok(0)
         }
-        let answer = mem.write_slice_socket(bytes, self.fd, self.write_deadline())
+        let answer = mem.write_slice_socket(bytes, self.fd, self.write_by())
         if answer < 0 {
             let error = io.IoError.from_os(.Write, Int32(0 - answer))
             return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
@@ -538,19 +648,19 @@ impl io.Close for Connection {
 
 impl Release for Connection {
     fn release(sink self: Self) {
-        let Connection { fd: fd, read_ms: _, write_ms: _, deadline: _ } = self
+        let Connection { fd: fd, read_ms: _, write_ms: _, read_deadline: _, write_deadline: _ } = self
         let _closed = close_descriptor(fd)
     }
 }
 
 // A read waits until its bytes arrive or the nearer of the per-read timeout and
-// the deadline passes, which reports TimedOut; a deadline already past is
+// the read deadline passes, which reports TimedOut; a deadline already past is
 // reported without reading.
 impl io.Reader for Connection {
     type Error = io.IoError
 
     fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
-        let answer = mem.read_socket(&buffer, self.fd, offset, count, self.read_deadline())
+        let answer = mem.read_socket(&buffer, self.fd, offset, count, self.read_by())
         if answer < 0 {
             return .Err(io.IoError.from_os(.Read, Int32(0 - answer)))
         }

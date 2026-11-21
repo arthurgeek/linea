@@ -3,12 +3,13 @@
 // every line back to whoever sent it; `bounded_echo send` connects, sends each
 // argument as a line, and prints what comes back.
 //
-// It adds three limits to the basic `tcp_echo` program: a timeout on every read
-// and write, a deadline on the whole session, and a cap on how much text one
+// It adds two limits to the basic `tcp_echo` program: a deadline on the whole
+// session, which every read and write shares, and a cap on how much text one
 // connection may send. A server that answers one connection at a time needs
 // them, because a client that stays silent, sends a byte at a time, or never
-// stops would otherwise hold every client queued behind it. The server logs
-// what happens to standard error.
+// stops would otherwise hold every client queued behind it. The client gives
+// its whole exchange, the connect, the writes and the reads, one deadline too.
+// The server logs what happens to standard error.
 import std.cli
 import std.env
 import std.io
@@ -129,12 +130,11 @@ fn run_serve(options: ServeOptions) -> UInt8 {
 // it can read from that connection until reading finishes. Each connection
 // logs one line: how many lines it echoed to `peer`, or why it failed.
 fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: log.Logger[io.Descriptor], bounds: Bounds) {
-    // `set_timeouts` bounds each read and each send attempt, and `set_deadline` bounds
-    // all the reads together, so a client that stays silent, or sends a
-    // byte at a time, cannot hold the server past `session_ms`.
+    // `set_deadline` bounds every read and write together, so a client that
+    // stays silent, sends a byte at a time, or never reads its echo cannot hold
+    // the server past `session_ms`.
     var bounded = connection
-    &bounded.set_timeouts(read_ms: bounds.session_ms, write_ms: bounds.session_ms)
-    &bounded.set_deadline(time.Instant.now(), within_ms: bounds.session_ms)
+    &bounded.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(bounds.session_ms)))
     // A refused buffer hands the connection back. `settled()` closes it and
     // keeps why the buffer was refused, together with a failed close, so the
     // log line reports both.
@@ -183,10 +183,15 @@ fn echo_connection(sink connection: net.Connection, peer: net.Address, logger: l
 
 fn run_send(port: UInt16, messages: Vec[Str]) -> UInt8 {
     let target = net.loopback(port)
-    var connection = net.connect(target) else |error| {
+    // One deadline covers the whole exchange: the connect, sending the lines
+    // and reading them back share ten seconds, however that time divides
+    // between them.
+    let deadline = time.Deadline.after(time.Duration.from_seconds(10))
+    var connection = net.connect(target, deadline: deadline) else |error| {
         io.eprintln("bounded_echo: cannot connect to {target}: {error}")
         return 1
     }
+    &connection.set_deadline(deadline)
     // `&connection` lends the connection to `send_messages`, so it is still
     // here to close whether or not every message went out.
     if !send_messages(messages, &connection) {

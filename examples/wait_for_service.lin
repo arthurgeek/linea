@@ -1,0 +1,121 @@
+// Wait until a service on this machine accepts connections, as a deployment
+// script does before it starts the program that needs a database or a cache.
+// `wait_for_service PORT [SECONDS]` connects to PORT and, while the service is
+// not there yet, tries again after a pause that doubles each time, until it
+// connects or SECONDS (30 unless given) have passed. It exits 0 once connected
+// and 1 when it gives up.
+//
+// The whole wait has one `time.Deadline`. Every connect is given it, so an
+// attempt that hangs cannot outlast the wait, and `time.Backoff` gives no
+// pause that would end past it, so the program gives up while it still has
+// time to say why, instead of sleeping into the deadline.
+import std.env
+import std.io
+import std.net
+import std.testing
+import std.time
+
+// How a wait ended: connected on the given attempt, or gave up after that many
+// attempts with the last failure.
+enum Waited {
+    Ready(UInt64),
+    GaveUp(UInt64, net.NetError),
+}
+
+// Connect to `address`, retrying until `deadline`. The first pause is 50 ms
+// and each after doubles, up to two seconds.
+fn wait_for(address: net.Address, deadline: time.Deadline) -> Waited {
+    var backoff = time.Backoff.new(first: time.Duration.from_milliseconds(50), longest: time.Duration.from_seconds(2))
+    var attempts: UInt64 = 0
+    loop {
+        attempts += 1
+        match net.connect(address, deadline: deadline) {
+            Ok(connection) => {
+                let _closed = connection.close()
+                return .Ready(attempts)
+            },
+            // `next_pause` answers `None` once a pause would end past the
+            // deadline: no further attempt could start in time.
+            Err(error) => match &backoff.next_pause(deadline) {
+                Some(pause) => time.sleep(pause),
+                None => return .GaveUp(attempts, error),
+            },
+        }
+    }
+}
+
+// A simulation runs these tests on a virtual clock, so a wait of a second
+// takes no time and every run makes the same attempts at the same moments.
+test "a service that is listening is ready at the first attempt" {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let waited = &sim.run(
+        |inout _world| {
+            let listener = net.listen(net.loopback(5432)).unwrap()
+            let waited = wait_for(net.loopback(5432), time.Deadline.after(time.Duration.from_seconds(1)))
+            listener.close().unwrap()
+            waited
+        },
+    )
+    sim.close()
+    testing.assert(match read waited { Ready(attempts) => attempts == 1, GaveUp(_, _) => false }, "a listening service was not ready at once")?
+}
+
+// The attempts start at 0, 50, 150, 350 and 750 ms. The next pause, 800 ms,
+// would end past the one-second deadline, so the wait gives up after five.
+test "a service that never listens is given up on before the deadline" {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    let (waited, took) = &sim.run(
+        |inout _world| {
+            let started = time.Instant.now()
+            let waited = wait_for(net.loopback(5432), time.Deadline.after(time.Duration.from_seconds(1)))
+            (waited, started.elapsed())
+        },
+    )
+    sim.close()
+    testing.assert(match read waited { GaveUp(attempts, _) => attempts == 5, Ready(_) => false }, "the wait did not give up after five attempts")?
+    testing.assert_eq(took, time.Duration.from_milliseconds(750), "the wait took other than its four pauses")?
+}
+
+// Read a whole number of seconds, or 30 when none is given.
+fn seconds_given(sink text: Option[Str]) -> Option[UInt64] {
+    let written = text else {
+        return .Some(30)
+    }
+    match written.parse[UInt64]() {
+        Ok(seconds) => .Some(seconds),
+        Err(_) => .None,
+    }
+}
+
+test "the wait is 30 seconds unless given" {
+    testing.assert_eq(seconds_given(.None), Option.Some(UInt64(30)), "the default wait changed")?
+    testing.assert_eq(seconds_given(.Some("5")), Option.Some(UInt64(5)), "a given wait was not read")?
+    testing.assert_eq(seconds_given(.Some("soon")), .None, "a wait that is not a number was read")?
+}
+
+fn main() -> UInt8 {
+    let given = env.args()
+    let port_text = given.at(1) else {
+        io.eprintln("usage: wait_for_service PORT [SECONDS]")
+        return 64
+    }
+    let port = port_text.parse[UInt16]() else |_| {
+        io.eprintln("usage: wait_for_service PORT [SECONDS]")
+        return 64
+    }
+    let seconds = seconds_given(given.at(2)) else {
+        io.eprintln("usage: wait_for_service PORT [SECONDS]")
+        return 64
+    }
+    let address = net.loopback(port)
+    match wait_for(address, time.Deadline.after(time.Duration.from_seconds(seconds))) {
+        Ready(attempts) => {
+            io.eprintln("{address} is accepting connections (attempt {attempts})")
+            0
+        },
+        GaveUp(attempts, error) => {
+            io.eprintln("gave up on {address} after {attempts} attempts in {seconds}s: {error}")
+            1
+        },
+    }
+}

@@ -27,7 +27,7 @@ pub fn run(mode: UInt8) -> UInt8 {
         let first = task.current_carrier().unwrap()
         if timed {
             // Start the deadline inside the already-running continuation.
-            &stream.set_deadline(time.Instant.now(), within_ms: 5000)
+            &stream.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(5000)))
         }
         let expected = match &stream.read_some(&buffer, offset: 0, count: 1) {
             Ok(count) => expected_mode == 3 && count == 0,

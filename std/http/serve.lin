@@ -1431,7 +1431,7 @@ fn served_at_limits(sink limits: Limits, header_lines: UInt64, line_length: UInt
 fn answer_one[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits, exhaust_after_head: Bool = false) {
     var configured = connection
     &configured.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms)
-    &configured.set_deadline(time.Instant.now(), limits.read_timeout_ms)
+    &configured.set_read_deadline(net.bound_after(limits.read_timeout_ms))
     let reader = io.BufferedReader.open(capacity: request_buffer_bytes, reader: configured) else |failure| {
         let BufferOpenFailure { resource, reason: _ } = failure
         close_connection(resource)
@@ -1607,6 +1607,9 @@ fn linger[A: Allocator](inout connection: net.Connection, inout discarded: mem.B
     if !&connection.shutdown_write().is_ok() {
         return
     }
+    // The request's read deadline may have passed, as it has for a 408, so
+    // each linger read is bounded by its own wait alone.
+    &connection.set_read_deadline(time.never)
     &connection.set_timeouts(linger_wait(read_timeout_ms), 0)
     var reads: UInt64 = 0
     while reads < linger_reads {
@@ -1735,7 +1738,8 @@ fn broken_stream[P: Allocator](inout _: (), request: Request[P], inout _body: Re
 
 // `exchanges_router` builds a router that answers `GET /health` with "ok",
 // `/count` with a stream of three lines, `/broken` with a stream that fails after
-// one line, `/fill` by filling the arena, and `/echo/{name}` with the name.
+// one line, `/fill` by filling the arena, `/echo/{name}` with the name, and
+// `/budget` with how long is left of the request's deadline.
 fn exchanges_router[A: Allocator](allocator: A) -> Router[(), A] where carries(allocator) {
     var router = Router.new_in(allocator)
     &router.route_raw("GET /health", health).unwrap()
@@ -1743,7 +1747,40 @@ fn exchanges_router[A: Allocator](allocator: A) -> Router[(), A] where carries(a
     &router.route_raw("GET /broken", broken_stream).unwrap()
     &router.route_raw("GET /fill", fill_the_arena).unwrap()
     &router.route_raw(r"GET /echo/{name}", named_value).unwrap()
+    &router.route_raw("GET /budget", budget).unwrap()
     router
+}
+
+// `budget` answers "within" when the request's deadline is at most two
+// seconds away, the read timeout the exchange tests give, and "outside"
+// otherwise.
+fn budget[P: Allocator](inout _: (), request: Request[P], inout _body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    let answer = match request.deadline().remaining() {
+        Some(left) => if left <= time.Duration.from_seconds(2) {
+            "within"
+        } else {
+            "outside"
+        },
+        None => "outside",
+    }
+    text(request, answer)
+}
+
+test "a handler is given the request's read deadline" {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    let client = send(listener.local_address().unwrap(), "GET /budget HTTP/1.1\r\nHost: loopback\r\nConnection: close\r\n\r\n")
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    var router = system_exchanges_router()
+    let arena = mem.Arena.open(mem.system(), 65536)
+    var refusal = mem.system().acquire(request_buffer_bytes).unwrap()
+    answer_one(connection, &router, arena.handle(), &refusal, Limits { read_timeout_ms = 2000, ..serving(1) })
+    refusal.release()
+    arena.release()
+    router.release()
+    listener.close().unwrap()
+    defer let received = read_to_end(client)
+    testing.assert(received.ends_with("\r\n\r\nwithin"), "the handler was not given the request's deadline")?
+    .Ok(())
 }
 
 // A `LoggedRouter` is an `exchanges_router` whose tables, and the responses
@@ -1912,7 +1949,8 @@ fn answer_reading[H: Handler[(), P] + Observer, P: Allocator](sink reading: Read
 
 // Settle the parsed message, response and body before returning the connection.
 fn answer_message[H: Handler[(), P] + Observer, P: Allocator](sink reader: Reading, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits, closing: Bool, stopping: Option[task.Client[Bool]], sink message: Message[P], length: UInt64) -> ExchangeRead where carries() {
-    let request = message.request()
+    let deadline = reader.inspect_reader(|connection: net.Connection| connection.read_deadline())
+    let request = Request[P] { deadline, ..message.request() }
     var incoming: RequestBody[P] = RequestBody.from_reader(reader, length, limits, memory)
     var note = String.new_in(memory)
     let start = time.Instant.now()

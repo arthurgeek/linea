@@ -353,9 +353,9 @@ error[O-Leak]: `visitor` (a linear `net.Connection`) is still owned when this pa
 - `serve` handles one connection at a time. The handler finishes with a
   connection before the next is accepted, so a slow client holds up the
   clients queued behind it. A server that must not wait needs a different
-  design, and one that waits bounds each connection: `set_timeouts` limits
-  every read and send attempt, and `set_deadline` limits all the reads together, so a
-  client that sends a byte at a time cannot hold the server either.
+  design, and one that waits bounds each connection: `set_deadline` limits
+  every read and write together, so a client that stays silent or sends a
+  byte at a time cannot hold the server either.
 - When accepting fails because the peer reset the connection or the process ran
   out of descriptors, `serve` waits and tries again, starting at 5
   milliseconds and doubling up to a second, without telling anyone. Any other
@@ -689,15 +689,15 @@ commands:
 That server trusts its clients. It answers one at a time, so a client that
 connects and says nothing, or sends a byte at a time, holds every client queued
 behind it. The [bounded echo](../../examples/bounded_echo.lin) is the same
-server and client with three limits added, and `net.serve` in place of the
+server and client with two limits added, and `net.serve` in place of the
 accept loop:
 
-- `set_timeouts` bounds each read and each send attempt on a connection. An operation
-  that passes its bound answers `TimedOut` and leaves the connection usable,
-  and a byte that arrives just as the bound passes is delivered rather than lost.
-- `set_deadline` bounds all the reads of a session together, so a byte at a
-  time cannot stretch it. Once the deadline has passed a read answers `TimedOut`
-  without taking any waiting bytes.
+- `set_deadline` bounds every read and write of the connection together. Its
+  argument is a `time.Deadline`, a moment on the monotonic clock, and
+  `time.Deadline.after(duration)` makes the one `duration` from now. Once it
+  has passed, a read or write answers `TimedOut` without taking any waiting
+  bytes and leaves the connection usable, so a client that sends a byte at a
+  time cannot stretch it.
 - A cap on the text a connection may send, past which nothing is echoed.
 
 It also logs what happens, and reads lines through an `io.BufferedReader`
@@ -707,8 +707,7 @@ of its connection handler:
 <!-- guide: excerpt examples/bounded_echo.lin -->
 ```linea
     var bounded = connection
-    &bounded.set_timeouts(read_ms: bounds.session_ms, write_ms: bounds.session_ms)
-    &bounded.set_deadline(time.Instant.now(), within_ms: bounds.session_ms)
+    &bounded.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(bounds.session_ms)))
 ```
 
 Run it the same way. It takes its port with a `--port` flag, and its log goes
@@ -728,55 +727,144 @@ hello
 two words
 ```
 
-### Waiting a bounded time to connect or accept
+`set_timeouts(read_ms:, write_ms:)` bounds something else: how long each
+single read or send attempt may wait, however long the connection lives.
+A stream that sends for an hour, each write prompt, needs that bound and no
+deadline. When a connection has both, an operation ends at whichever comes
+first.
 
-`set_timeouts` and `set_deadline` bound the reads and writes of a connection
-you already hold. The two waits that come before it take a bound of their own:
-`net.connect(address, within_ms: 1000)` gives up once a second has passed
-without the listener answering, and `listener.accept_within(ms: 50)` gives up
-once 50 milliseconds have passed without a client. Both fail with an
-`io.IoError` whose category is `TimedOut`, and a listener whose accept timed
-out keeps listening: a client that connects later waits for the next accept.
-Leaving `within_ms` out, or passing 0 to either, waits as long as it takes,
-as `connect` and `accept` do:
+### One deadline for a whole exchange
+
+A deadline is absolute: it names the moment the work must be done by, not how
+long one step may take. Made once, at the start of an exchange, it is passed
+to every wait in it, and they all share its budget. Rust's and JavaScript's
+socket APIs give each call a timeout of its own, so an exchange of three steps
+with a one-second timeout each may take three seconds; with one deadline it
+takes one.
+
+`net.connect(address, deadline:)` gives up connecting when its deadline
+passes, and `listener.accept_by(deadline)` gives up waiting for a client.
+`time.never` is the deadline that never passes, and `connect` waits that long
+unless told otherwise, as `accept` does. Each fails with an `io.IoError` whose
+category is `TimedOut` (inside `net.NetError.Io` for `connect` and
+`accept_by`), and a listener whose accept timed out keeps listening:
+a client that connects later waits for the next accept. Here a client connects
+with a deadline 100 milliseconds away and hands the same deadline to the
+connection, so its read shares what is left of it:
 
 ```linea
 import std.io
+import std.mem
 import std.net
+import std.time
 
+use io.Reader
 use net.Accepted
 
 fn main() -> Result[UInt8, io.IoError] {
     defer var listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
 
-    // Nobody has connected yet, so the accept gives up after 50 milliseconds.
-    match &listener.accept_within(ms: 50) {
+    // Nobody has connected yet, so this accept gives up once its deadline,
+    // 50 milliseconds from now, has passed.
+    match &listener.accept_by(time.Deadline.after(time.Duration.from_milliseconds(50))) {
         Ok(Accepted { connection, address: _ }) => connection.close()?,
-        Err(_) => io.println("no client within 50 ms")?,
+        Err(Io(error)) => io.println("accept: {error.category}")?,
+        Err(_) => io.println("accept failed")?,
     }
 
-    // The connect waits at most a second for the listener to answer, and the
-    // accept at most a second for the connection.
-    defer let _client = net.connect(address, within_ms: 1000).unwrap()
-    match &listener.accept_within(ms: 1000) {
-        Ok(Accepted { connection, address: _ }) => {
-            connection.close()?
-            io.println("accepted a client")?
-        },
-        Err(_) => io.println("no client within a second")?,
+    // One deadline bounds the client's whole exchange: the connect, then
+    // every read and write on the connection.
+    let deadline = time.Deadline.after(time.Duration.from_milliseconds(100))
+    defer var client = net.connect(address, deadline: deadline).unwrap()
+    &client.set_deadline(deadline)
+    let Accepted { connection, address: _ } = &listener.accept_by(deadline).unwrap()
+    defer let _server = connection
+
+    // The server says nothing, so the read waits until the deadline passes.
+    defer var buffer = mem.system().acquire(16).unwrap()
+    match &client.read_some(&buffer, offset: 0, count: 16) {
+        Ok(count) => io.println("read {count} bytes")?,
+        Err(error) => io.println("read: {error.category}")?,
+    }
+    io.println("deadline passed: {deadline.expired()}")?
+    .Ok(0)
+}
+```
+
+```text
+accept: TimedOut
+read: TimedOut
+deadline passed: true
+```
+
+A connection that is ready just as the deadline passes is accepted, not
+dropped, and bytes that arrive just then are read. `deadline.remaining()`
+answers how long is left, zero once it has passed, and `.None` for
+`time.never`, which has no end to count to. `a.earlier(b)` is whichever of two
+deadlines comes first, for a step that has a limit of its own but must still
+finish when the whole exchange must.
+
+### Retrying until the deadline
+
+A service that is still starting refuses connections for a moment, and a
+client that waits for it tries again. Trying again at once floods the
+service; a pause that doubles after each failure does not. `time.Backoff`
+holds that schedule, and is given the deadline: `next_pause(deadline)` answers
+the pause before the next attempt, and `.None` once the pause would end past
+the deadline, since no attempt could start in time. The loop then stops while
+it can still say why, instead of sleeping into the deadline:
+
+```linea
+import std.io
+import std.net
+import std.time
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Listen on a free port and close it, so nothing listens there.
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let address = listener.local_address().unwrap()
+    listener.close()?
+
+    let deadline = time.Deadline.after(time.Duration.from_seconds(1))
+    var backoff = time.Backoff.new(first: time.Duration.from_milliseconds(50), longest: time.Duration.from_seconds(1))
+    var attempts: UInt64 = 0
+    loop {
+        attempts += 1
+        match net.connect(address, deadline: deadline) {
+            Ok(connection) => {
+                connection.close()?
+                io.println("connected after {attempts} attempts")?
+                break
+            },
+            Err(error) => match &backoff.next_pause(deadline) {
+                Some(pause) => time.sleep(pause),
+                None => {
+                    let reason = match error {
+                        Io(failure) => failure.category,
+                        _ => io.IoCategory.Other,
+                    }
+                    io.println("gave up after {attempts} attempts: {reason}")?
+                    break
+                },
+            },
+        }
     }
     .Ok(0)
 }
 ```
 
 ```text
-no client within 50 ms
-accepted a client
+gave up after 5 attempts: ConnectionRefused
 ```
 
-The second accept finds the client already queued, so it answers at once. A
-connection that is ready just as the time runs out is accepted, not dropped.
+The attempts start 0, 50, 150, 350 and 750 milliseconds in. The next pause
+would be 800 milliseconds and end past the one-second deadline, so the loop
+gives up a quarter of a second early, with its reason. `backoff.reset()` starts
+the pauses again from the first, as a loop that keeps a connection open does
+after each success. The [wait for service](../../examples/wait_for_service.lin)
+example is this loop as a tool, the kind a deployment script runs before it
+starts a program that needs a database.
 
 ### Testing a timeout without waiting
 
@@ -2284,6 +2372,32 @@ every request.
 | `write_timeout_ms` | 5000 | how long one write may wait, in milliseconds |
 | `connections` | `.None` | how many connections to serve before `serve` returns; `.None` serves until the program ends |
 
+The read timeout is the request's deadline: the server reads the head and
+body by it, and the handler reads the same moment as `request.deadline()`. A
+handler that waits on something else for the request, such as another
+service, passes it on, or the earlier of it and a deadline of its own, so the
+whole exchange has one budget:
+
+```linea
+import std.http
+import std.net
+import std.time
+
+// Check that the inventory service on port 7000 accepts connections, giving
+// it half a second at most, and never longer than the request has left.
+fn stock(request: http.Request, inout _incoming: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
+    let half_second = time.Deadline.after(time.Duration.from_milliseconds(500))
+    let deadline = request.deadline().earlier(half_second)
+    match net.connect(net.loopback(7000), deadline: deadline) {
+        Ok(connection) => {
+            let _closed = connection.close()
+            http.text(request, "the inventory service is up\n")
+        },
+        Err(_) => .Err(http.error(request, .ServiceUnavailable, "the inventory service did not answer in time")),
+    }
+}
+```
+
 `connections = .Some(n)` is how tests and examples run a server for a fixed
 number of connections. `serve` refuses to start, with `ArenaTooSmall`, when the
 arena cannot hold the bounded request head and server reservations. A streamed
@@ -2521,8 +2635,13 @@ application that runs both ways and stores its entries in SQLite.
 
 - A TCP listener and connection are linear and `@opaque`: `close` them on every
   path, and `&&` does not count as every path.
-- `net.connect(address, within_ms:)` and `listener.accept_within(ms:)` give up
-  as `TimedOut` once their milliseconds pass.
+- A `time.Deadline` is a moment, not a length: one made with
+  `time.Deadline.after(duration)` is passed to `net.connect(address,
+  deadline:)`, `listener.accept_by(deadline)` and `connection.set_deadline`,
+  and each gives up as `TimedOut` once it passes, so the whole exchange shares
+  one budget.
+- `time.Backoff` spaces retries and stops them when the next pause would end
+  past the deadline.
 - `io.Simulation` runs a test against a virtual clock and network, so a
   timeout takes no time and a seed repeats the same run.
 - A handler's parameters name what it reads: an optional `inout` state, up to
