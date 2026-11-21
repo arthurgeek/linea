@@ -524,6 +524,7 @@ const mem_arguments = heldBy("mem", "`env.args`");
 const mem_environment = heldBy("mem", "`env.variable` and `env.variables`");
 const mem_parse = heldBy("mem", "parsing a `Float64` or a `Float32` from text");
 const mem_tls = heldBy("mem", "`tls.ClientConfig`, `tls.ServerConfig` and `tls.Stream`");
+const mem_resolve = heldBy("mem", "`net.resolve`");
 const fs_mode = heldBy("fs", "the standard library's `fs` operations");
 const net_listener = heldBy("net", "`net.listen` and the `net.Listener` it answers");
 const net_connection = heldBy("net", "`net.connect` and the `net.Connection` it answers");
@@ -640,6 +641,9 @@ pub const runtime_functions = [_]Signature{
     // OS thread; only the async operations need invocation-level guards.
     .{ .symbol = "linea_net_listen", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener, .migration_contract = .neutral },
     .{ .symbol = "linea_net_accept", .parameters = &.{ descriptor, p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_listener, .migration_contract = .runtime_guarded },
+    // A lookup reads the name's bytes and the system's resolver; it changes no
+    // native state the calling thread keeps.
+    .{ .symbol = "linea_net_resolve", .parameters = &.{ bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_resolve, .migration_contract = .neutral },
     .{ .symbol = "linea_net_connect", .parameters = &.{ p(.u64), p(.u64) }, .result = .i64, .answers = .descriptor, .declared_by = net_connection, .migration_contract = .runtime_guarded },
     .{ .symbol = "linea_net_local_address", .parameters = &.{descriptor}, .result = .i64, .declared_by = net_listener, .migration_contract = .neutral },
     // Accept's synchronous endpoint lookup retains no OS-thread dependency.

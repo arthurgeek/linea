@@ -149,7 +149,7 @@ pub fn new_request[P: Allocator](memory: mem.Handle[P], method: Str, target: Str
     var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
     if content_type.length() > 0 {
         var tally = no_headers
-        add_header_field(&head, &header_fields, &tally, "Content-Type", trim_optional_whitespace(content_type), standard_limits)?
+        add_header_field(&head, &header_fields, &tally, "Content-Type", trim_optional_whitespace(content_type), standard_limits.max_headers)?
     }
     var payload = String.new_in(memory)
     match &payload.append(body) {
@@ -394,8 +394,12 @@ impl[P: Allocator] Message[P] {
                 host_count += 1
             }
         }
-        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count }
-        add_header_field(&self.head, &self.header_fields, &tally, name, trim_optional_whitespace(value), standard_limits)
+        let trimmed = trim_optional_whitespace(value)
+        if name.equals_ascii_folded("Host") && (host_count > 0 || !Origin.is_valid_authority(trimmed)) {
+            return .Err(.Status(.BadRequest))
+        }
+        var tally = HeaderTally { count = self.header_fields.length(), length, transfer_coded = false, host_count, invalid_host = false }
+        add_header_field(&self.head, &self.header_fields, &tally, name, trimmed, standard_limits.max_headers)
     }
 
     test "a test request carries the headers added to it" {

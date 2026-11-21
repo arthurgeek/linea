@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdint.h>
@@ -359,4 +360,52 @@ long linea_net_close(int fd) {
     /* close is not retried after EINTR, for the reason `linea_net_reset`
      * gives. */
     return close(fd) == 0 ? 0 : -(long)errno;
+}
+
+/* A DNS name is at most 253 bytes written without its trailing dot. */
+#define LINEA_HOST_NAME_LIMIT 253
+
+long linea_net_resolve(unsigned long at, unsigned long len) {
+    const int invalid = linea_io_byte_range(at, len);
+    if (invalid != 0) return -(long)invalid;
+    if (len == 0) return -(long)ENOENT;
+    if (len > LINEA_HOST_NAME_LIMIT) return -(long)ENAMETOOLONG;
+    char name[LINEA_HOST_NAME_LIMIT + 1];
+    memcpy(name, (const void *)(uintptr_t)at, (size_t)len);
+    name[len] = 0;
+    for (unsigned long i = 0; i < len; i++) {
+        if (name[i] == 0) return -(long)EINVAL;
+    }
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (linea_sim_running()) hints.ai_flags = AI_NUMERICHOST;
+    struct addrinfo *found = NULL;
+    const int status = getaddrinfo(name, NULL, &hints, &found);
+    if (status != 0) {
+        if (status == EAI_NONAME
+#if defined(EAI_NODATA) && EAI_NODATA != EAI_NONAME
+            || status == EAI_NODATA
+#endif
+#if defined(EAI_ADDRFAMILY)
+            || status == EAI_ADDRFAMILY
+#endif
+        ) return -(long)ENOENT;
+        if (status == EAI_MEMORY) return -(long)ENOMEM;
+        if (status == EAI_SYSTEM && errno != 0) return -(long)errno;
+        return -(long)EIO;
+    }
+    long answer = -(long)ENOENT;
+    for (const struct addrinfo *entry = found; entry != NULL; entry = entry->ai_next) {
+        if (entry->ai_family == AF_INET && entry->ai_addr != NULL) {
+            struct sockaddr_in a;
+            memcpy(&a, entry->ai_addr, sizeof a);
+            a.sin_port = 0;
+            answer = pack(&a);
+            break;
+        }
+    }
+    freeaddrinfo(found);
+    return answer;
 }

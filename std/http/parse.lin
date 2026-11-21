@@ -364,28 +364,114 @@ fn read_request_line[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.
     .Ok(.{ method = method_of(method), method_token = method_token, target = target_span, is_http_11 })
 }
 
-// A `HeaderTally` is what a request's headers have said so far: how many
+// A `StatusLine` holds a response's status and whether it was sent as
+// HTTP/1.1 rather than HTTP/1.0.
+@(copyable, derive(Equatable, Debug))
+struct StatusLine {
+    status: Status,
+    is_http_11: Bool,
+}
+
+// `read_status_line` reads a response's `version SP code SP reason` line.
+// The reason phrase may be empty or absent, and it is not kept: a client
+// acts on the code. The code is three digits from 100 to 999. A connection
+// that ends before the line's first byte is `Closed`; a line past
+// `max_line_bytes` answers 431 and any other malformed line 400, and a
+// version other than HTTP/1.1 or HTTP/1.0 505.
+fn read_status_line[R: io.Reader, A: Allocator](inout reader: io.BufferedReader[R, A], max_line_bytes: UInt64) -> Result[StatusLine, RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    let line_read = &reader.read_raw_line_borrowed(max_line_bytes) else |error| {
+        return .Err(line_failure(error, .RequestHeaderFieldsTooLarge))
+    }
+    let raw = line_read else {
+        return .Err(.Closed)
+    }
+    let line = line_text(raw)?
+    let (version, rest) = line.split_once(" ") else {
+        return .Err(.Status(.BadRequest))
+    }
+    if version != "HTTP/1.1" && version != "HTTP/1.0" {
+        if is_version(version) {
+            return .Err(.Status(.HttpVersionNotSupported))
+        }
+        return .Err(.Status(.BadRequest))
+    }
+    let (digits, _reason) = rest.split_once(" ") else {
+        (rest, "")
+    }
+    if digits.length() != 3 {
+        return .Err(.Status(.BadRequest))
+    }
+    var value: UInt16 = 0
+    for at in 0..digits.length() {
+        let byte = digits.byte(at).unwrap()
+        if byte < ascii_zero || byte > ascii_nine {
+            return .Err(.Status(.BadRequest))
+        }
+        value = value * 10 + UInt16(byte - ascii_zero)
+    }
+    let code = Code?(value) else {
+        return .Err(.Status(.BadRequest))
+    }
+    .Ok(.{ status = Status.of(code), is_http_11 = version == "HTTP/1.1" })
+}
+
+// Read a status line delivered `step` bytes at a time, as a test sends it.
+fn status_line_of(input: Str, step: UInt64) -> Result[StatusLine, RequestError] {
+    let source = Fragments { bytes = input.as_bytes(), position = 0, step, failure = .None }
+    var reader = io.BufferedReader.open(capacity: 16, reader: source).unwrap()
+    let outcome = read_status_line(&reader, 64)
+    let _source = reader.abandon()
+    outcome
+}
+
+test "a status line names its code and version" {
+    let found = status_line_of("HTTP/1.1 404 Not Found\r\n", 5).unwrap()
+    testing.assert_eq(found.status, Status.NotFound, "the code changed")?
+    testing.assert(found.is_http_11, "HTTP/1.1 was not recognised")?
+    let bare = status_line_of("HTTP/1.0 299\n", 3).unwrap()
+    testing.assert_eq(bare.status, Status.Other(Code(299)), "a code without a reason was lost")?
+    testing.assert(!bare.is_http_11, "HTTP/1.0 was read as 1.1")?
+    let empty_reason = status_line_of("HTTP/1.1 200 \r\n", 4).unwrap()
+    testing.assert_eq(empty_reason.status, Status.Ok, "an empty reason was refused")?
+    .Ok(())
+}
+
+test "a malformed status line is refused" {
+    testing.assert_eq(status_line_of("", 4), .Err(RequestError.Closed), "an empty connection was not closed")?
+    testing.assert_eq(status_line_of("HTTP/1.1 20 OK\r\n", 4), .Err(RequestError.Status(.BadRequest)), "a two-digit code was accepted")?
+    testing.assert_eq(status_line_of("HTTP/1.1 2x0 OK\r\n", 4), .Err(RequestError.Status(.BadRequest)), "a code with a letter was accepted")?
+    testing.assert_eq(status_line_of("HTTP/1.1 099 OK\r\n", 4), .Err(RequestError.Status(.BadRequest)), "a code below 100 was accepted")?
+    testing.assert_eq(status_line_of("HTTP/2.0 200 OK\r\n", 4), .Err(RequestError.Status(.HttpVersionNotSupported)), "HTTP/2.0 was accepted")?
+    testing.assert_eq(status_line_of("ICY 200 OK\r\n", 4), .Err(RequestError.Status(.BadRequest)), "a foreign version was accepted")?
+    testing.assert_eq(status_line_of("HTTP/1.1 200 OK", 4), .Err(RequestError.Status(.BadRequest)), "a line cut short was accepted")?
+    .Ok(())
+}
+
+// A `HeaderTally` is what a message's headers have said so far: how many
 // there were, the body length `Content-Length` gave, whether a
-// `Transfer-Encoding` was sent, and how many `Host` headers arrived.
+// `Transfer-Encoding` was sent, how many `Host` headers arrived, and whether
+// one of them was not a valid authority. Requests and responses are read
+// through the same tally; only a request's reader refuses what it says about
+// `Host`.
 @copyable
 struct HeaderTally {
     count: UInt64,
     length: Option[UInt64],
     transfer_coded: Bool,
     host_count: UInt64,
+    invalid_host: Bool,
 }
 
 // `no_headers` is the tally before the first header.
-let no_headers: HeaderTally = .{ count = 0, length = .None, transfer_coded = false, host_count = 0 }
+let no_headers: HeaderTally = .{ count = 0, length = .None, transfer_coded = false, host_count = 0, invalid_host = false }
 
 // `add_header_field` stores the header `name: value` in `stored` and records
-// its ranges in `header_fields`. A header past `limits.max_headers` answers
-// 431, a name that is not a token or a value holding a control byte 400, a
-// `Host` header whose value is not a valid authority 400, and a
+// its ranges in `header_fields`. A header past `max_headers` answers 431, a
+// name that is not a token or a value holding a control byte 400, and a
 // `Content-Length` that is not digits or disagrees with an earlier one 400.
-fn add_header_field[A: Allocator](inout stored: String[A], inout header_fields: Vec[Field, A], inout tally: HeaderTally, name: Str, value: Str, limits: Limits) -> Result[(), RequestError] where carries() {
+fn add_header_field[A: Allocator](inout stored: String[A], inout header_fields: Vec[Field, A], inout tally: HeaderTally, name: Str, value: Str, max_headers: UInt64) -> Result[(), RequestError] where carries() {
     tally.count += 1
-    if tally.count > limits.max_headers {
+    if tally.count > max_headers {
         return .Err(.Status(.RequestHeaderFieldsTooLarge))
     }
     // A name is a token, which holds no whitespace, so this also refuses
@@ -395,8 +481,8 @@ fn add_header_field[A: Allocator](inout stored: String[A], inout header_fields: 
     }
     if name.equals_ascii_folded("Host") {
         tally.host_count += 1
-        if tally.host_count > 1 || !Origin.is_valid_authority(value) {
-            return .Err(.Status(.BadRequest))
+        if !Origin.is_valid_authority(value) {
+            tally.invalid_host = true
         }
     }
     if name.equals_ascii_folded("Content-Length") {
@@ -426,13 +512,15 @@ fn body_length(tally: HeaderTally) -> Result[Option[UInt64], RequestError] {
     .Ok(copy(tally.length))
 }
 
-// Read `name: value` lines up to an empty line and answer the body's length:
-// `.None` when no `Content-Length` was sent. An HTTP/1.1 request requires
-// exactly one `Host` header; an HTTP/1.0 request permits zero or one.
-fn read_headers[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[B], inout header_fields: Vec[Field, B], is_http_11: Bool, limits: Limits) -> Result[Option[UInt64], RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+// Read `name: value` lines up to the empty line that ends a message's head,
+// storing each in `stored` and `header_fields`, and answer what they said.
+// A line past `max_line_bytes` answers 431, as does a header past
+// `max_headers`; a connection that ends inside the head 400. A request and a
+// response share this reader, so both are held to one grammar.
+fn read_header_fields[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[B], inout header_fields: Vec[Field, B], max_line_bytes: UInt64, max_headers: UInt64) -> Result[HeaderTally, RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
     var tally = no_headers
     loop {
-        let line_read = &reader.read_raw_line_borrowed(limits.max_line_bytes) else |error| {
+        let line_read = &reader.read_raw_line_borrowed(max_line_bytes) else |error| {
             return .Err(line_failure(error, .RequestHeaderFieldsTooLarge))
         }
         let raw = line_read else {
@@ -446,8 +534,27 @@ fn read_headers[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.Buffe
             return .Err(.Status(.BadRequest))
         }
         let value = trim_optional_whitespace(raw_value)
-        add_header_field(&stored, &header_fields, &tally, name, value, limits)?
+        add_header_field(&stored, &header_fields, &tally, name, value, max_headers)?
     }
+    .Ok(tally)
+}
+
+// A message holds at most one `Host` header, and it names a valid authority;
+// either refusal answers 400.
+fn refuse_hosts(tally: HeaderTally) -> Result[(), RequestError] {
+    if tally.host_count > 1 || tally.invalid_host {
+        return .Err(.Status(.BadRequest))
+    }
+    .Ok(())
+}
+
+// Read a request's headers and answer the body's length: `.None` when no
+// `Content-Length` was sent. An HTTP/1.1 request requires exactly one `Host`
+// header; an HTTP/1.0 request permits zero or one. Each must be a valid
+// authority.
+fn read_headers[R: io.Reader, A: Allocator, B: Allocator](inout reader: io.BufferedReader[R, A], inout stored: String[B], inout header_fields: Vec[Field, B], is_http_11: Bool, limits: Limits) -> Result[Option[UInt64], RequestError] where R.Error: Into[io.IoError], carries(), retains(reader: reader) {
+    let tally = read_header_fields(&reader, &stored, &header_fields, limits.max_line_bytes, limits.max_headers)?
+    refuse_hosts(tally)?
     if is_http_11 && tally.host_count != 1 {
         return .Err(.Status(.BadRequest))
     }
