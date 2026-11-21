@@ -50,7 +50,7 @@ impl ClientConfig {
     // system's: a private certificate authority, for one. An empty `roots`
     // trusts the operating system's roots, which verify through the
     // Security framework on macOS and the distribution's bundle on Linux.
-    // trusted beside the system's. `certificate_chain` and `private_key`,
+    // `certificate_chain` and `private_key`,
     // both PEM, are the certificate this client presents to a server that
     // asks for one; give both or neither. `alpn` lists the protocols the
     // client offers, most preferred first, separated by commas, such as

@@ -96,10 +96,14 @@ struct PipeEnd {
 
 impl Transport for PipeEnd {
     // Wait, a millisecond at a time, until the other end has sent bytes or
-    // closed.
-    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+    // closed, or until `deadline` passes. A send always finds room, so it
+    // never waits.
+    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64, deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
         let side = self.side
         loop {
+            if deadline.expired() {
+                return .Err(.{ operation = .Read, category = .TimedOut, code = .None, progress = 0 })
+            }
             let (bytes, ended) = self.pipe.call([sink side, sink count] |inout state: PipeState| &state.taken(side, count))
             let length = bytes.length()
             for i in 0..length {
@@ -113,7 +117,7 @@ impl Transport for PipeEnd {
         }
     }
 
-    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.IoError] where carries() {
+    fn send(inout self: Self, bytes: mem.Slice[UInt8], _deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
         var copied: Vec[UInt8] = Vec.new()
         &copied.append_slice(bytes).unwrap()
         let side = self.side
@@ -359,4 +363,22 @@ fn truncated_read() -> Option[Reason] {
         },
     )
     reason
+}
+
+// Whether opening a stream failed because its handshake's deadline passed.
+// The stream or the transport handed back is closed.
+fn timed_out[S: Transport + io.Close](sink opened: Result[Stream[S], OpenFailure[S]]) -> Bool where S.CloseError: Into[io.IoError] {
+    match opened {
+        Ok(stream) => {
+            let _closed = stream.close()
+            false
+        },
+        Err(OpenFailure { transport, error }) => {
+            let _closed = transport.close()
+            match error {
+                Transport(reason) => reason.category == .TimedOut,
+                _ => false,
+            }
+        },
+    }
 }

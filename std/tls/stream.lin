@@ -18,20 +18,25 @@ use net.Connection
 // stream runs over this one trait instead.
 pub trait Transport {
     // Read up to `count` bytes into `buffer` from `offset` and answer how
-    // many, 0 at the end of the stream.
-    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries()
+    // many, 0 at the end of the stream. A read still waiting when `deadline`
+    // passes fails as `TimedOut`; `time.never` adds no bound.
+    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64, deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries()
 
-    // Write a prefix of `bytes` and answer its length.
-    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.IoError] where carries()
+    // Write a prefix of `bytes` and answer its length, failing as
+    // `TimedOut` when `deadline` passes first.
+    fn send(inout self: Self, bytes: mem.Slice[UInt8], deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries()
 }
 
+// A connection bounds each read and write by `deadline` as well as by its
+// own timeouts and deadlines, whichever comes first, and keeps those for the
+// operations after.
 impl Transport for Connection {
-    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
-        &self.read_some(&buffer, offset, count)
+    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64, deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        self.read_before(&buffer, offset, count, deadline)
     }
 
-    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.IoError] where carries() {
-        match &self.write_some(bytes) {
+    fn send(inout self: Self, bytes: mem.Slice[UInt8], deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        match self.write_bytes(bytes, deadline) {
             Ok(count) => .Ok(count),
             Err(failure) => .Err(failure.into()),
         }
@@ -65,7 +70,8 @@ let lent_protocol: UInt8 = 2
 // A Stream is a TLS connection over `S`, a transport it owns. Its handshake
 // runs when it is opened, with `connect` as a client or `accept` as a
 // server; reading answers the peer's plaintext and writing sends it
-// encrypted. It is linear, since closing it sends the close_notify that tells
+// encrypted. A handshake still running when the deadline it was given
+// passes fails as `TimedOut`. It is linear, since closing it sends the close_notify that tells
 // the peer the stream ended whole: `close` sends it and closes the
 // transport.
 @(opaque, linear)
@@ -83,6 +89,8 @@ struct Stream[S: Transport, A: Allocator = mem.SystemAllocator] {
     protocol_length: UInt64,
     operation: io.IoOperation,
     handshaken: Bool,
+    // The moment the handshake must finish by; `time.never` once it has.
+    deadline: time.Deadline,
 }
 
 // An OpenFailure hands back the transport a stream could not be opened
@@ -95,10 +103,11 @@ pub struct OpenFailure[S] {
 impl[S: Transport] Stream[S, mem.SystemAllocator] {
     // Open a client stream over `transport` to the server `server_name`
     // names, a DNS name or an IP address the server's certificate must
-    // state, and run the handshake. The stream's buffers come from the system
+    // state, and run the handshake, which fails as `TimedOut` once
+    // `deadline` passes. The stream's buffers come from the system
     // allocator.
-    pub fn connect(config: ClientConfig, sink transport: S, server_name: Str) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
-        Stream.connect_in(mem.system(), config, transport, server_name)
+    pub fn connect(config: ClientConfig, sink transport: S, server_name: Str, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        Stream.connect_in(mem.system(), config, transport, server_name, deadline)
     }
 
     test "a client and a server exchange bytes over a pipe" {
@@ -109,10 +118,11 @@ impl[S: Transport] Stream[S, mem.SystemAllocator] {
         testing.assert_eq(said.view(), "pong", "the client did not read the server's answer")?
     }
 
-    // Open a server stream over `transport` and run the handshake. The
-    // stream's buffers come from the system allocator.
-    pub fn accept(config: ServerConfig, sink transport: S) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
-        Stream.accept_in(mem.system(), config, transport)
+    // Open a server stream over `transport` and run the handshake, which
+    // fails as `TimedOut` once `deadline` passes. The stream's buffers come
+    // from the system allocator.
+    pub fn accept(config: ServerConfig, sink transport: S, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        Stream.accept_in(mem.system(), config, transport, deadline)
     }
 
     // Open a server stream whose handshake runs at its first read or
@@ -143,11 +153,11 @@ impl[S: Transport] Stream[S, mem.SystemAllocator] {
 impl[S: Transport, A: Allocator] Stream[S, A] {
     // Open a client stream as `connect` does, with its buffers from
     // `allocator`.
-    pub fn connect_in(allocator: A, config: ClientConfig, sink transport: S, server_name: Str) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+    pub fn connect_in(allocator: A, config: ClientConfig, sink transport: S, server_name: Str, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
         let session = config.built.open_session(server_name.as_bytes()) else |answer| {
             return .Err(.{ transport, error = .Tls(refusal(.Connect, answer)) })
         }
-        Stream.opened(allocator, session, transport, .Connect, eager: true)
+        Stream.opened(allocator, session, transport, .Connect, deadline, eager: true)
     }
 
     test "a client refuses a server whose certificate names another host" {
@@ -213,25 +223,68 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
         testing.assert_eq(reason, .Some(Reason.InvalidInput), "a server name with a space was used")?
     }
 
+    test "a connect whose deadline has passed times out before shaking hands" {
+        let client = client_config()
+        let opened = Stream.connect_in(mem.system(), client, Unread { reads = 0 }, "localhost", deadline: time.Deadline.after(time.Duration.from_nanoseconds(0)))
+        client.close()
+        testing.assert(timed_out(opened), "a handshake past its deadline did not time out")?
+    }
+
+    test "a handshake the server never answers ends at its deadline" {
+        // The listener's backlog completes the TCP connection, and nothing
+        // ever answers the client's hello.
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let connection = net.connect(listener.local_address().unwrap()).unwrap()
+        let client = client_config()
+        let opened = Stream.connect(client, connection, "localhost", deadline: time.Deadline.after(time.Duration.from_milliseconds(50)))
+        client.close()
+        let ended = timed_out(opened)
+        listener.close().unwrap()
+        testing.assert(ended, "a handshake nobody answered outlived its deadline")?
+    }
+
+    test "an accept whose deadline has passed times out before shaking hands" {
+        let server = server_config()
+        let opened = Stream.accept_in(mem.system(), server, Unread { reads = 0 }, deadline: time.Deadline.after(time.Duration.from_nanoseconds(0)))
+        server.close()
+        testing.assert(timed_out(opened), "an accept past its deadline did not time out")?
+    }
+
+    test "a stream accepted later shakes hands by the deadline it is given" {
+        let server = server_config()
+        let opened = Stream.accept_later(server, Unread { reads = 0 })
+        server.close()
+        var stream = opened.unwrap()
+        &stream.set_handshake_deadline(time.Deadline.after(time.Duration.from_nanoseconds(0)))
+        defer var buffer = mem.system().acquire(8).unwrap()
+        let answered = &stream.read_plain(&buffer, offset: 0, count: 8)
+        let (_transport, _sent) = stream.finish()
+        let expired = match answered {
+            Err(Transport(error)) => error.category == .TimedOut,
+            _ => false,
+        }
+        testing.assert(expired, "a handshake run later ignored its deadline")?
+    }
+
     // Open a server stream as `accept` does, with its buffers from
     // `allocator`.
-    pub fn accept_in(allocator: A, config: ServerConfig, sink transport: S) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+    pub fn accept_in(allocator: A, config: ServerConfig, sink transport: S, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
         let session = config.built.open_session("".as_bytes()) else |answer| {
             return .Err(.{ transport, error = .Tls(refusal(.Accept, answer)) })
         }
-        Stream.opened(allocator, session, transport, .Accept, eager: true)
+        Stream.opened(allocator, session, transport, .Accept, deadline, eager: true)
     }
 
     // Open a server stream over `transport` whose handshake runs at its first
     // read or write, with its buffers from `allocator`, so a program can
     // accept on one task and leave the handshake, which waits for the
     // client, to the task that serves the connection. A handshake that fails
-    // fails that read or write.
+    // fails that read or write; `set_handshake_deadline` bounds it.
     pub fn accept_later_in(allocator: A, config: ServerConfig, sink transport: S) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
         let session = config.built.open_session("".as_bytes()) else |answer| {
             return .Err(.{ transport, error = .Tls(refusal(.Accept, answer)) })
         }
-        Stream.opened(allocator, session, transport, .Accept, eager: false)
+        Stream.opened(allocator, session, transport, .Accept, time.never, eager: false)
     }
 
     test "a stream accepted later shakes hands at its first read" {
@@ -291,7 +344,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
     }
 
     // Wrap a session over `transport` and run its handshake.
-    fn opened(allocator: A, sink session: mem.TlsSession, sink transport: S, operation: io.IoOperation, eager: Bool) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+    fn opened(allocator: A, sink session: mem.TlsSession, sink transport: S, operation: io.IoOperation, deadline: time.Deadline, eager: Bool) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
         let flight = allocator.acquire(flight_bytes) else |_| {
             session.close()
             return .Err(.{ transport, error = .Memory(.Exhausted) })
@@ -307,14 +360,14 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
             session.close()
             return .Err(.{ transport, error = .Memory(.Exhausted) })
         }
-        var stream: Self = .{ session, transport, allocator = copy(allocator), flight = mem.vector_from_buffer(flight, flight_bytes), incoming = mem.vector_from_buffer(incoming, flight_bytes), held_start = 0, held = 0, protocol = mem.vector_from_buffer(protocol, max_protocol_bytes), protocol_length = 0, operation, handshaken = false }
+        var stream: Self = .{ session, transport, allocator = copy(allocator), flight = mem.vector_from_buffer(flight, flight_bytes), incoming = mem.vector_from_buffer(incoming, flight_bytes), held_start = 0, held = 0, protocol = mem.vector_from_buffer(protocol, max_protocol_bytes), protocol_length = 0, operation, handshaken = false, deadline = copy(deadline) }
         if !eager {
             return .Ok(stream)
         }
         match &stream.shake_hands() {
             Ok(_) => {},
             Err(error) => {
-                let Stream { session: ended, transport: carried, allocator: _, flight: used, incoming: received, held_start: _, held: _, protocol: named, protocol_length: _, operation: _, handshaken: _ } = stream
+                let Stream { session: ended, transport: carried, allocator: _, flight: used, incoming: received, held_start: _, held: _, protocol: named, protocol_length: _, operation: _, handshaken: _, deadline: _ } = stream
                 ended.close()
                 used.release()
                 received.release()
@@ -326,13 +379,18 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
     }
 
     // Run the handshake unless it has run, and keep the protocol it agreed.
+    // A deadline already passed fails before any byte is sent.
     fn shake_hands(inout self: Self) -> Result[(), TlsError] {
         if self.handshaken {
             return .Ok(())
         }
         let operation = self.operation
+        if self.deadline.expired() {
+            return .Err(.Transport(.{ operation, category = .TimedOut, code = .None, progress = 0 }))
+        }
         &self.handshake(operation)?
         self.handshaken = true
+        self.deadline = time.never
         var named = &self.lend(lent_protocol)
         let agreed = self.session.alpn(&named)
         &self.restore(lent_protocol, named)
@@ -378,6 +436,15 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
         testing.assert_eq(server_reason, .Some(Reason.NoProtocol), "a client sharing no protocol was served")?
     }
 
+    // Bound a handshake that has not yet run, as one accepted later runs at
+    // its first read or write, by `deadline`: it fails as `TimedOut` once
+    // the deadline passes. A stream that has shaken hands is unchanged.
+    pub fn set_handshake_deadline(inout self: Self, deadline: time.Deadline) {
+        if !self.handshaken {
+            self.deadline = copy(deadline)
+        }
+    }
+
     // Whether the handshake resumed a session this client's configuration
     // kept from an earlier connection to the same server, rather than
     // running in full.
@@ -421,7 +488,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
     // Send the ciphertext the session holds until it holds none.
     fn transmit(inout self: Self) -> Result[(), TlsError] {
         var flight = &self.lend(lent_flight)
-        let sent = transmit_through(self.session, &self.transport, &flight)
+        let sent = transmit_through(self.session, &self.transport, &flight, self.deadline)
         &self.restore(lent_flight, flight)
         sent
     }
@@ -435,7 +502,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
     fn take_flight(inout self: Self, operation: io.IoOperation) -> Result[Bool, TlsError] {
         var incoming = &self.lend(lent_incoming)
         if self.held == 0 {
-            let received = &self.transport.receive(&incoming, offset: 0, count: flight_bytes)
+            let received = &self.transport.receive(&incoming, offset: 0, count: flight_bytes, deadline: self.deadline)
             let count = match received {
                 Ok(count) => count,
                 Err(error) => {
@@ -531,7 +598,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
                 // Six thousand bytes of what looks like application data
                 // follow the close_notify.
                 defer let junk = Vec.filled(count: 6000, value: UInt8(23)).unwrap()
-                let _junk_sent = &after.send(junk.as_slice()).unwrap()
+                let _junk_sent = &after.send(junk.as_slice(), deadline: time.never).unwrap()
                 after.close().unwrap()
                 "".to_owned().unwrap()
             },
@@ -587,7 +654,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
     // transport, still open, as an end that fails would leave it. The peer
     // reads the stream as cut short.
     pub fn abandon(sink self: Self) -> S where carries(self), carries(self.transport) {
-        let Stream { session, transport, allocator: _, flight, incoming, held_start: _, held: _, protocol, protocol_length: _, operation: _, handshaken: _ } = self
+        let Stream { session, transport, allocator: _, flight, incoming, held_start: _, held: _, protocol, protocol_length: _, operation: _, handshaken: _, deadline: _ } = self
         session.close()
         flight.release()
         incoming.release()
@@ -605,7 +672,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
         var ending = self
         ending.session.close_notify()
         let sent = &ending.transmit()
-        let Stream { session, transport, allocator: _, flight, incoming, held_start: _, held: _, protocol, protocol_length: _, operation: _, handshaken: _ } = ending
+        let Stream { session, transport, allocator: _, flight, incoming, held_start: _, held: _, protocol, protocol_length: _, operation: _, handshaken: _, deadline: _ } = ending
         session.close()
         flight.release()
         incoming.release()
@@ -649,7 +716,7 @@ impl[S: Transport, A: Allocator] Stream[S, A] {
 
 // Send the ciphertext `session` holds over `transport` through `flight`
 // until the session holds none.
-fn transmit_through[S: Transport, A: Allocator](session: mem.TlsSession, inout transport: S, inout flight: mem.Buffer[A]) -> Result[(), TlsError] {
+fn transmit_through[S: Transport, A: Allocator](session: mem.TlsSession, inout transport: S, inout flight: mem.Buffer[A], deadline: time.Deadline) -> Result[(), TlsError] {
     loop {
         let pending = session.transmit(&flight)
         if pending <= 0 {
@@ -658,7 +725,7 @@ fn transmit_through[S: Transport, A: Allocator](session: mem.TlsSession, inout t
         var sent: UInt64 = 0
         while sent < UInt64(pending) {
             let rest = flight.as_slice().subspan(start: sent, count: UInt64(pending) - sent).unwrap()
-            let count = &transport.send(rest) else |error| {
+            let count = &transport.send(rest, deadline) else |error| {
                 return .Err(.Transport(error))
             }
             if count == 0 {
@@ -924,11 +991,11 @@ struct Unread {
 }
 
 impl Transport for Unread {
-    fn receive[A: Allocator](inout _self: Self, inout _buffer: mem.Buffer[A], _offset: UInt64, _count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+    fn receive[A: Allocator](inout _self: Self, inout _buffer: mem.Buffer[A], _offset: UInt64, _count: UInt64, _deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
         .Ok(0)
     }
 
-    fn send(inout _self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.IoError] where carries() {
+    fn send(inout _self: Self, bytes: mem.Slice[UInt8], _deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
         .Ok(bytes.length())
     }
 }

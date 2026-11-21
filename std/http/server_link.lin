@@ -36,9 +36,18 @@ impl ServerLink {
     }
 
     // End every later read once `deadline` passes, as
-    // `net.Connection.set_read_deadline` does.
+    // `net.Connection.set_read_deadline` does. Over TLS, a handshake that
+    // has not yet run must also finish by it, its writes included.
     fn set_read_deadline(inout self: Self, deadline: time.Deadline) {
         &self.configure([deadline] |inout connection: net.Connection| &connection.set_read_deadline(deadline))
+        match mem.exchange(&self.secure, .None) {
+            Some(stream) => {
+                var held = stream
+                &held.set_handshake_deadline(deadline)
+                put_secure(&self.secure, held)
+            },
+            None => {},
+        }
     }
 
     // The deadline every read of the connection under the link must finish

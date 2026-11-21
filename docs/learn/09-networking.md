@@ -2638,6 +2638,66 @@ remembers the sessions of the servers it connected to, so a second
 connection to the same server resumes and skips most of the handshake's
 work; `stream.resumed()` says whether it did.
 
+### A handshake that never finishes
+
+A handshake waits for the other end, so a server that accepts the TCP
+connection and never answers would hold the client forever.
+`tls.Stream.connect` takes the same `deadline:` as `net.connect`, and a
+handshake still running when it passes fails as timed out:
+
+```linea
+import std.io
+import std.net
+import std.time
+import std.tls
+
+use tls.OpenFailure
+
+fn main() -> UInt8 {
+    // The listener's queue completes the TCP connection, but nothing reads
+    // the client's hello, so the server never answers it.
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let connection = net.connect(listener.local_address().unwrap()).unwrap()
+    let client = tls.ClientConfig.open().unwrap()
+    let opened = tls.Stream.connect(client, connection, server_name: "localhost", deadline: time.Deadline.after(time.Duration.from_milliseconds(100)))
+    client.close()
+    let status: UInt8 = match opened {
+        Ok(stream) => {
+            let _closed = stream.close()
+            io.println("the handshake finished").unwrap()
+            1
+        },
+        Err(OpenFailure { transport, error }) => {
+            let _closed = transport.close()
+            // A transport failure carries the `io.IoError` that ended it.
+            let timed_out = match read error {
+                Transport(reason) => reason.category == .TimedOut,
+                _ => false,
+            }
+            if timed_out {
+                io.println("the handshake timed out").unwrap()
+                0
+            } else {
+                io.println("{error}").unwrap()
+                1
+            }
+        },
+    }
+    listener.close().unwrap()
+    status
+}
+```
+
+```text
+the handshake timed out
+```
+
+One deadline made before `net.connect` and passed to both bounds the
+connection and its handshake together. `accept` takes `deadline:` too, and
+`http.serve` bounds each handshake by the request's read deadline, so a
+client that starts a handshake and stops answering is closed when its first
+request would have been.
+
 ### Reading the certificate from files
 
 A real server reads its certificate and key from files, which

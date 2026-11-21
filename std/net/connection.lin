@@ -530,45 +530,50 @@ impl Connection {
     }
 
     // The monotonic moment in nanoseconds the next read must finish by, as the
-    // runtime takes it: its own per-read bound or the read deadline, whichever
-    // comes first, 0 for neither.
-    fn read_by(self: Self) -> UInt64 {
-        bound_after(self.read_ms).earlier(self.read_deadline).monotonic_nanoseconds()
+    // runtime takes it: its own per-read bound, the read deadline or `also`,
+    // whichever comes first, 0 for none of them.
+    fn read_by(self: Self, also: time.Deadline) -> UInt64 {
+        bound_after(self.read_ms).earlier(self.read_deadline).earlier(also).monotonic_nanoseconds()
     }
 
-    test "a read_by is the nearer of the read bound and the deadline" {
+    test "a read_by is the nearest of the read bound, the deadline and the caller's" {
         var listener = listen(loopback(0)).unwrap()
         var server_side = connect(listener.local_address().unwrap()).unwrap()
         let Accepted { connection: peer, address: _ } = &listener.accept().unwrap()
         var client = peer
-        let unbounded = client.read_by()
+        let unbounded = client.read_by(time.never)
         &client.set_timeouts(read_ms: 1000, write_ms: 0)
-        let bound = client.read_by()
+        let bound = client.read_by(time.never)
         &client.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(5)))
-        let nearer = client.read_by()
+        let nearer = client.read_by(time.never)
+        let added = client.read_by(time.Deadline.after(time.Duration.from_nanoseconds(0)))
         let client_closed = client.close().is_ok()
         let server_closed = server_side.close().is_ok()
         let listener_closed = listener.close().is_ok()
         testing.assert_eq(unbounded, UInt64(0), "no bound was a deadline")?
         testing.assert(bound != 0, "the per-read bound was not applied")?
         testing.assert(nearer < bound, "the nearer deadline did not win")?
+        testing.assert(added < nearer, "the caller's nearer deadline did not win")?
         testing.assert(client_closed && server_closed && listener_closed, "a close failed")?
         .Ok(())
     }
 
     // The monotonic moment one send attempt must finish by, 0 for no bound: its
-    // own per-write bound or the write deadline, whichever comes first. A send
-    // that makes progress answers at once, so each attempt gets a fresh bound.
-    fn write_by(self: Self) -> UInt64 {
-        bound_after(self.write_ms).earlier(self.write_deadline).monotonic_nanoseconds()
+    // own per-write bound, the write deadline or `also`, whichever comes
+    // first. A send that makes progress answers at once, so each attempt gets
+    // a fresh bound.
+    fn write_by(self: Self, also: time.Deadline) -> UInt64 {
+        bound_after(self.write_ms).earlier(self.write_deadline).earlier(also).monotonic_nanoseconds()
     }
 
     // Owning and borrowed writers use the same timeout and error policy.
-    fn write_bytes(self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+    // A send also ends once `also` passes, as a TLS handshake bounds its
+    // writes without changing the connection's own deadlines.
+    internal fn write_bytes(self: Self, bytes: mem.Slice[UInt8], also: time.Deadline) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
         if bytes.length() == 0 {
             return .Ok(0)
         }
-        let answer = mem.write_slice_socket(bytes, self.fd, self.write_by())
+        let answer = mem.write_slice_socket(bytes, self.fd, self.write_by(also))
         if answer < 0 {
             let error = io.IoError.from_os(.Write, Int32(0 - answer))
             return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
@@ -660,7 +665,16 @@ impl io.Reader for Connection {
     type Error = io.IoError
 
     fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
-        let answer = mem.read_socket(&buffer, self.fd, offset, count, self.read_by())
+        self.read_before(&buffer, offset, count, time.never)
+    }
+}
+
+impl Connection {
+    // Read as `read_some` does, ending also once `also` passes, so a TLS
+    // handshake bounds its reads without changing the connection's own
+    // deadlines.
+    internal fn read_before[A: Allocator](self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64, also: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        let answer = mem.read_socket(&buffer, self.fd, offset, count, self.read_by(also))
         if answer < 0 {
             return .Err(io.IoError.from_os(.Read, Int32(0 - answer)))
         }
@@ -677,7 +691,7 @@ impl io.ByteWriter for Connection {
     }
 
     fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
-        self.write_bytes(bytes)
+        self.write_bytes(bytes, time.never)
     }
 
     fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
@@ -716,7 +730,7 @@ impl io.ByteWriter for ConnectionWriter {
     }
 
     fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
-        self.owner.write_bytes(bytes)
+        self.owner.write_bytes(bytes, time.never)
     }
 
     fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
