@@ -194,7 +194,7 @@ true of a different implementation.
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted; same-allocator `from_value` sentence superseded by 0286; extended by 0292 |
 | [0286](0286-a-document-decodes-into-any-allocator.md) | A JSON document decodes into an allocator of its own | Accepted; supersedes the same-allocator `from_value` sentence of 0141 |
 | [0292](0292-json-lines-are-read-lazily-one-bounded-line-at-a-time.md) | JSON Lines are read lazily, one bounded line at a time, and a failed line is an item | Accepted; extends 0141 |
-| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180 and 0185; subtree clause superseded by 0222; arena-memory clause superseded by 0263 |
+| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180, 0185 and 0300; subtree clause superseded by 0222; arena-memory clause superseded by 0263 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214 |
@@ -203,6 +203,7 @@ true of a different implementation.
 | [0283](0283-an-arena-disposes-without-rechecking-where-a-buffer-lies.md) | An arena disposes of a buffer without rechecking where it lies | Accepted; supersedes the disposal clause of 0263 |
 | [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
 | [0294](0294-a-directory-walk-is-a-lazy-linear-iterator.md) | A directory walk is a lazy, linear iterator with bounded open directories | Accepted |
+| [0300](0300-tls-runs-over-rustls-linked-into-the-runtime.md) | TLS runs over rustls, linked into the runtime, and drives any transport from Linea | Accepted; extends 0154 |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
 | [0143](0143-checked-decimal-conversion-uses-integer-rounding.md) | Checked decimal conversion uses bounded integer rounding | Accepted; extended by 0249 |
 | [0146](0146-payload-free-variants-are-constant-expressions.md) | Payload-free variants are constant expressions | Accepted; extends 0020, 0059 and 0127; refines 0033 and 0077 |

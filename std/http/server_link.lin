@@ -1,0 +1,300 @@
+import std.io
+import std.mem
+import std.net
+import std.testing
+import std.time
+import std.tls
+
+use io.Pollable
+
+// A ServerLink is the connection a served exchange runs over: a plain
+// connection, or a TLS stream over one when the server was given a
+// `tls.ServerConfig`. It
+// holds exactly one of the two, and its operations reach the connection
+// either way, so reading requests and writing answers is the same over both.
+@linear
+struct ServerLink {
+    plain: Option[net.Connection],
+    secure: Option[tls.Stream[net.Connection]],
+}
+
+impl ServerLink {
+    // A link over a plain connection.
+    fn plain(sink connection: net.Connection) -> ServerLink where carries(connection) {
+        .{ plain = .Some(connection), secure = .None }
+    }
+
+    // A link over a TLS stream.
+    fn secure(sink stream: tls.Stream[net.Connection]) -> ServerLink where carries(stream) {
+        .{ plain = .None, secure = .Some(stream) }
+    }
+
+    // Bound each later read and send separately, in milliseconds, as
+    // `net.Connection.set_timeouts` does.
+    fn set_timeouts(inout self: Self, read_ms: UInt64, write_ms: UInt64) {
+        &self.configure([read_ms, write_ms] |inout connection: net.Connection| &connection.set_timeouts(read_ms, write_ms))
+    }
+
+    // End every later read once `deadline` passes, as
+    // `net.Connection.set_read_deadline` does.
+    fn set_read_deadline(inout self: Self, deadline: time.Deadline) {
+        &self.configure([deadline] |inout connection: net.Connection| &connection.set_read_deadline(deadline))
+    }
+
+    // The deadline every read of the connection under the link must finish
+    // by.
+    fn read_deadline(self: Self) -> time.Deadline {
+        match read self.secure {
+            Some(stream) => stream.inspect_transport(|connection: net.Connection| connection.read_deadline()),
+            None => match read self.plain {
+                Some(connection) => connection.read_deadline(),
+                None => time.never,
+            },
+        }
+    }
+
+    // Run `update` on the connection under the link.
+    fn configure[F: fn(inout connection: net.Connection)](inout self: Self, update: F) {
+        match mem.exchange(&self.plain, .None) {
+            Some(connection) => {
+                var held = connection
+                update(&held)
+                put_plain(&self.plain, held)
+            },
+            None => {},
+        }
+        match mem.exchange(&self.secure, .None) {
+            Some(stream) => {
+                var held = stream
+                &held.update_transport(update)
+                put_secure(&self.secure, held)
+            },
+            None => {},
+        }
+    }
+
+    // Tell the peer no more bytes follow while reads stay open: over TLS,
+    // send close_notify first.
+    fn shutdown_write(inout self: Self) -> Result[(), io.IoError] {
+        match mem.exchange(&self.secure, .None) {
+            Some(stream) => {
+                var held = stream
+                let notified = &held.notify_close()
+                &held.update_transport(
+                    |inout connection: net.Connection| {
+                        let _shut = &connection.shutdown_write()
+                    },
+                )
+                put_secure(&self.secure, held)
+                match notified {
+                    Ok(_) => .Ok(()),
+                    Err(error) => .Err(error.io_error()),
+                }
+            },
+            None => match mem.exchange(&self.plain, .None) {
+                Some(connection) => {
+                    var held = connection
+                    let shut = &held.shutdown_write()
+                    put_plain(&self.plain, held)
+                    shut
+                },
+                None => .Ok(()),
+            },
+        }
+    }
+
+    // Close the link: over TLS, send close_notify, then close the connection.
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let ServerLink { plain, secure } = self
+        let closed_plain = match plain {
+            Some(connection) => connection.close(),
+            None => .Ok(()),
+        }
+        let closed_secure = match secure {
+            Some(stream) => stream.close(),
+            None => .Ok(()),
+        }
+        match closed_plain {
+            Err(error) => {
+                let _other = closed_secure
+                .Err(error)
+            },
+            Ok(_) => closed_secure,
+        }
+    }
+
+    // Close so the peer receives a reset rather than an orderly end, sending
+    // no close_notify.
+    fn reset(sink self: Self) -> Result[(), io.IoError] {
+        let ServerLink { plain, secure } = self
+        let connection = match plain {
+            Some(connection) => connection,
+            None => match secure {
+                Some(stream) => return stream.abandon().reset(),
+                None => return .Ok(()),
+            },
+        }
+        let _secure = match secure {
+            Some(stream) => stream.abandon().reset(),
+            None => .Ok(()),
+        }
+        connection.reset()
+    }
+
+    // Lend output access while the link keeps its connection.
+    fn writer(self: Self) -> ServerLinkWriter where borrows(self) {
+        match read self.secure {
+            Some(stream) => .{ plain = .None, secure = .Some(stream.writer()) },
+            None => match read self.plain {
+                Some(connection) => .{ plain = .Some(connection.writer()), secure = .None },
+                None => panic("a link holds no connection"),
+            },
+        }
+    }
+}
+
+// Put `connection` back in a slot a link emptied to use it.
+fn put_plain(inout slot: Option[net.Connection], sink connection: net.Connection) where retains(slot: connection) {
+    match mem.exchange(&slot, .Some(connection)) {
+        Some(previous) => {
+            let _closed = previous.close()
+            panic("a link's connection was put back twice")
+        },
+        None => {},
+    }
+}
+
+// Put `stream` back in a slot a link emptied to use it.
+fn put_secure(inout slot: Option[tls.Stream[net.Connection]], sink stream: tls.Stream[net.Connection]) where retains(slot: stream) {
+    match mem.exchange(&slot, .Some(stream)) {
+        Some(previous) => {
+            let _closed = previous.close()
+            panic("a link's stream was put back twice")
+        },
+        None => {},
+    }
+}
+
+test "a plain link carries bytes both ways and closes" {
+    var listener = net.listen(net.loopback(0)).unwrap()
+    var client = net.connect(listener.local_address().unwrap()).unwrap()
+    let Accepted { connection, address: _ } = &listener.accept().unwrap()
+    var link = ServerLink.plain(connection)
+    &link.set_timeouts(read_ms: 2000, write_ms: 2000)
+    var writer = link.writer()
+    let _sent = io.write_all(&writer, "hi".as_bytes()).unwrap()
+    defer var buffer = mem.system().acquire(8).unwrap()
+    let got = &client.read_some(&buffer, offset: 0, count: 8).unwrap()
+    let _echoed = io.write_all(&client, "yo".as_bytes()).unwrap()
+    let back = &link.read_some(&buffer, offset: 2, count: 6).unwrap()
+    let closed = link.close().is_ok()
+    client.close().unwrap()
+    listener.close().unwrap()
+    testing.assert_eq(got, UInt64(2), "the link's writer lost bytes")?
+    testing.assert_eq(back, UInt64(2), "the link lost the peer's bytes")?
+    testing.assert(closed, "closing the link failed")?
+}
+
+impl io.Reader for ServerLink {
+    type Error = io.IoError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        match mem.exchange(&self.secure, .None) {
+            Some(stream) => {
+                var held = stream
+                let got = &held.read_some(&buffer, offset, count)
+                put_secure(&self.secure, held)
+                got
+            },
+            None => match mem.exchange(&self.plain, .None) {
+                Some(connection) => {
+                    var held = connection
+                    let got = &held.read_some(&buffer, offset, count)
+                    put_plain(&self.plain, held)
+                    got
+                },
+                None => .Ok(0),
+            },
+        }
+    }
+}
+
+impl io.ByteWriter for ServerLink {
+    type Error = io.IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        var writer = self.writer()
+        &writer.write_some(bytes)
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        .Ok(0)
+    }
+}
+
+impl io.Pollable for ServerLink {
+    fn readiness(self: Self, interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        match read self.secure {
+            Some(stream) => stream.readiness(interest).within(self),
+            None => match read self.plain {
+                Some(connection) => connection.readiness(interest).within(self),
+                None => .Now,
+            },
+        }
+    }
+}
+
+impl io.Close for ServerLink {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        ServerLink.close(self)
+    }
+}
+
+impl Release for ServerLink {
+    fn release(sink self: Self) {
+        let _closed = self.close()
+    }
+}
+
+// A ServerLinkWriter borrows a link for output, as `net.ConnectionWriter` borrows a
+// connection: it writes through the link's connection, encrypted when the
+// link is a TLS stream, while the link is kept elsewhere.
+@(copyable, derive(Release))
+struct ServerLinkWriter {
+    plain: Option[net.ConnectionWriter],
+    secure: Option[tls.StreamWriter[mem.SystemAllocator]],
+}
+
+impl io.ByteWriter for ServerLinkWriter {
+    type Error = io.IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        match copy(self.secure) {
+            Some(writer) => {
+                var output = writer
+                &output.write_some(bytes)
+            },
+            None => match copy(self.plain) {
+                Some(writer) => {
+                    var output = writer
+                    &output.write_some(bytes)
+                },
+                None => .Ok(0),
+            },
+        }
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        .Ok(0)
+    }
+}

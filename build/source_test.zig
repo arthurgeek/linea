@@ -18,7 +18,10 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "tls.o", "tls_config.o", "linea_float.o", "math.o" };
+    // The members of rustls-ffi's archive follow the runtime's own, which
+    // `build.zig` appends after them; none takes a runtime member's name.
+    var appended: usize = 0;
     var member: usize = 0;
     var offset: usize = 8;
     var long_names: []const u8 = "";
@@ -50,11 +53,17 @@ test "runtime archive members have stable names and separate linkage" {
             name = std.mem.trimEnd(u8, name, "/");
         }
         if (std.mem.startsWith(u8, name, "__.SYMDEF")) continue;
-        try testing.expect(member < expected.len);
+        if (member == expected.len) {
+            for (expected) |own| try testing.expect(!std.mem.eql(u8, own, name));
+            try testing.expect(std.mem.endsWith(u8, name, ".o"));
+            appended += 1;
+            continue;
+        }
         try testing.expectEqualStrings(expected[member], name);
         member += 1;
     }
     try testing.expectEqual(expected.len, member);
+    try testing.expect(appended > 0);
 }
 
 test "CI outcome snapshots preserve restore and save contracts" {

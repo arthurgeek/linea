@@ -1,0 +1,362 @@
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.testing
+import std.time
+
+use io.Close
+use session.Chan
+use session.End
+use session.Send
+
+// The tests run a client and a server over a pipe in memory, with no socket:
+// an owning task holds the bytes each end has sent and not yet read, and
+// each end is a `Transport` over a client of that task.
+
+// Which end of a pipe an end is.
+@(copyable, derive(Equatable, Release))
+enum Side {
+    Client,
+    Server,
+}
+
+// The bytes in flight each way, and whether each end has closed.
+@derive(Release)
+struct PipeState {
+    to_server: Vec[UInt8],
+    to_client: Vec[UInt8],
+    client_closed: Bool,
+    server_closed: Bool,
+}
+
+impl PipeState {
+    fn new() -> PipeState {
+        .{ to_server = Vec.new(), to_client = Vec.new(), client_closed = false, server_closed = false }
+    }
+
+    // Append `bytes`, which the end `from` sent, for the other end to read.
+    fn sent(inout self: Self, from: Side, bytes: mem.Slice[UInt8]) {
+        match from {
+            Client => &self.to_server.append_slice(bytes).unwrap(),
+            Server => &self.to_client.append_slice(bytes).unwrap(),
+        }
+    }
+
+    // Take up to `count` of the bytes sent to the end `to`, and say whether
+    // the other end has closed.
+    fn taken(inout self: Self, to: Side, count: UInt64) -> (Vec[UInt8], Bool) {
+        match to {
+            Client => (take_front(&self.to_client, count), self.server_closed),
+            Server => (take_front(&self.to_server, count), self.client_closed),
+        }
+    }
+
+    // Record that the end `side` closed.
+    fn closed(inout self: Self, side: Side) {
+        match side {
+            Client => self.client_closed = true,
+            Server => self.server_closed = true,
+        }
+    }
+}
+
+// Remove up to `count` bytes from the front of `queue` and answer them.
+fn take_front(inout queue: Vec[UInt8], count: UInt64) -> Vec[UInt8] {
+    var amount = queue.length()
+    if amount > count {
+        amount = count
+    }
+    var front: Vec[UInt8] = Vec.new()
+    &front.append_slice(queue.as_slice().subspan(start: 0, count: amount).unwrap()).unwrap()
+    var rest: Vec[UInt8] = Vec.new()
+    &rest.append_slice(queue.as_slice().subspan(start: amount, count: queue.length() - amount).unwrap()).unwrap()
+    &queue.clear()
+    &queue.append_slice(rest.as_slice()).unwrap()
+    rest.release()
+    front
+}
+
+test "taking from the front of a queue keeps the rest in order" {
+    var queue: Vec[UInt8] = Vec.new()
+    &queue.append_slice("abcde".as_bytes()).unwrap()
+    let front = take_front(&queue, 2)
+    let taken = front.as_slice() == "ab".as_bytes() && queue.as_slice() == "cde".as_bytes()
+    front.release()
+    queue.release()
+    testing.assert(taken, "taking from a queue lost or reordered bytes")?
+}
+
+// One end of a pipe.
+@copyable
+struct PipeEnd {
+    pipe: task.Client[PipeState],
+    side: Side,
+}
+
+impl Transport for PipeEnd {
+    // Wait, a millisecond at a time, until the other end has sent bytes or
+    // closed.
+    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        let side = self.side
+        loop {
+            let (bytes, ended) = self.pipe.call([sink side, sink count] |inout state: PipeState| &state.taken(side, count))
+            let length = bytes.length()
+            for i in 0..length {
+                &buffer.store_byte(offset + i, bytes[i])
+            }
+            bytes.release()
+            if length > 0 || ended {
+                return .Ok(length)
+            }
+            time.sleep(time.Duration.from_milliseconds(1))
+        }
+    }
+
+    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.IoError] where carries() {
+        var copied: Vec[UInt8] = Vec.new()
+        &copied.append_slice(bytes).unwrap()
+        let side = self.side
+        self.pipe.call([sink side, sink copied] |inout state: PipeState| &state.sent(side, copied.as_slice()))
+        .Ok(bytes.length())
+    }
+}
+
+impl io.Close for PipeEnd {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let side = self.side
+        self.pipe.call([sink side] |inout state: PipeState| &state.closed(side))
+        .Ok(())
+    }
+}
+
+impl Release for PipeEnd {
+    fn release(sink self: Self) {
+        let _closed = self.close()
+    }
+}
+
+// The server configuration most tests use: the certificate for `localhost`.
+fn server_config() -> ServerConfig {
+    ServerConfig.open(server_chain, server_key).unwrap()
+}
+
+// The client configuration most tests use: the test root alone, in place
+// of the system's.
+fn client_config() -> ClientConfig {
+    ClientConfig.open(roots: test_ca).unwrap()
+}
+
+// Run `serve` on a task of its own with the server end of a new pipe while
+// `client` runs here with the client end, and answer both results.
+fn over_pipe[R: Owned, T: Owned, F: Owned + sink fn(sink end: PipeEnd) -> R, C: sink fn(sink end: PipeEnd) -> T](sink serve: F, sink client: C) -> (R, T) where carries(serve, client) {
+    let owner = task.own(PipeState.new()).unwrap()
+    let server_end = PipeEnd { pipe = owner.client(), side = .Server }
+    let client_end = PipeEnd { pipe = owner.client(), side = .Client }
+    let body = sink [sink serve, sink server_end] |sink me: Chan[Send[R, End]]| {
+        me.send(serve(server_end)).close()
+    }
+    let handle = task.prepare(body).unwrap().start()
+    let answered = client(client_end)
+    let (served, done) = handle.recv()
+    done.close()
+    owner.close().release()
+    (served, answered)
+}
+
+// Read everything the peer sends over `stream` until its close_notify.
+fn read_all_plain[S: Transport](inout stream: Stream[S]) -> Result[String, TlsError] {
+    var text: String = String.new()
+    defer var buffer = mem.system().acquire(4096).unwrap()
+    var failed: Option[TlsError] = .None
+    var reading = true
+    while reading {
+        match &stream.read_plain(&buffer, offset: 0, count: 4096) {
+            Ok(count) => if count == 0 {
+                reading = false
+            } else {
+                &text.append(Str.from_bytes(buffer.as_slice().subspan(start: 0, count: count).unwrap()).unwrap()).unwrap()
+            },
+            Err(error) => {
+                failed = .Some(error)
+                reading = false
+            },
+        }
+    }
+    match failed {
+        Some(error) => {
+            text.release()
+            .Err(error)
+        },
+        None => .Ok(text),
+    }
+}
+
+// Write all of `bytes` to `stream`.
+fn write_all_plain[S: Transport](inout stream: Stream[S], bytes: mem.Slice[UInt8]) -> Result[(), TlsError] {
+    var sent: UInt64 = 0
+    while sent < bytes.length() {
+        sent += &stream.write_plain(bytes.subspan(start: sent, count: bytes.length() - sent).unwrap())?
+    }
+    .Ok(())
+}
+
+// Accept one client over a pipe with `server`; the client connects to `name`
+// with `client` and sends `message` and closes, and the server answers
+// "pong" and closes. Answers what the server read and what the client read.
+fn exchanged(sink server: ServerConfig, sink client: ClientConfig, name: Str, message: Str) -> (String, String) {
+    let (served, said) = over_pipe(
+        sink [sink server] |sink end: PipeEnd| -> String {
+            let opened = Stream.accept(server, end)
+            server.close()
+            var stream = opened.unwrap()
+            let heard = read_all_plain(&stream).unwrap()
+            write_all_plain(&stream, "pong".as_bytes()).unwrap()
+            stream.close().unwrap()
+            heard
+        },
+        sink [sink client, read name, read message] |sink end: PipeEnd| -> String {
+            let opened = Stream.connect(client, end, name)
+            client.close()
+            var stream = opened.unwrap()
+            write_all_plain(&stream, message.as_bytes()).unwrap()
+            &stream.notify_close().unwrap()
+            let heard = read_all_plain(&stream).unwrap()
+            stream.close().unwrap()
+            heard
+        },
+    )
+    (served, said)
+}
+
+// Why the handshake failed at each end, or none where it succeeded.
+fn handshake_reasons(sink server: ServerConfig, sink client: ClientConfig, name: Str) -> (Option[Reason], Option[Reason]) {
+    over_pipe(
+        sink [sink server] |sink end: PipeEnd| -> Option[Reason] {
+            let opened = Stream.accept(server, end)
+            server.close()
+            opened_reason(opened)
+        },
+        sink [sink client, read name] |sink end: PipeEnd| -> Option[Reason] {
+            let opened = Stream.connect(client, end, name)
+            client.close()
+            opened_reason(opened)
+        },
+    )
+}
+
+// Why opening a stream failed, closing whatever it opened.
+fn opened_reason(sink opened: Result[Stream[PipeEnd], OpenFailure[PipeEnd]]) -> Option[Reason] {
+    match opened {
+        Ok(stream) => {
+            let _closed = stream.close()
+            .None
+        },
+        Err(OpenFailure { transport, error }) => {
+            let _closed = transport.close()
+            match error {
+                Tls(refused) => .Some(refused.reason),
+                _ => .Some(.Protocol),
+            }
+        },
+    }
+}
+
+// Why the client refused the server, connecting to `name`.
+fn refused_reason(sink server: ServerConfig, sink client: ClientConfig, name: Str) -> Option[Reason] {
+    let (_server_reason, client_reason) = handshake_reasons(server, client, name)
+    client_reason
+}
+
+// Why the server refused the client, and whether the client failed too.
+fn refused_both(sink server: ServerConfig, sink client: ClientConfig) -> (Option[Reason], Bool) {
+    let (server_reason, client_reason) = handshake_reasons(server, client, "localhost")
+    (server_reason, client_reason.is_some())
+}
+
+// The protocol each end saw agreed, empty for none.
+fn protocols(sink server: ServerConfig, sink client: ClientConfig) -> (String, String) {
+    over_pipe(
+        sink [sink server] |sink end: PipeEnd| -> String {
+            let opened = Stream.accept(server, end)
+            server.close()
+            let stream = opened.unwrap()
+            let agreed = stream.alpn_protocol().unwrap_or("").to_owned().unwrap()
+            stream.close().unwrap()
+            agreed
+        },
+        sink [sink client] |sink end: PipeEnd| -> String {
+            let opened = Stream.connect(client, end, "localhost")
+            client.close()
+            let stream = opened.unwrap()
+            let agreed = stream.alpn_protocol().unwrap_or("").to_owned().unwrap()
+            stream.close().unwrap()
+            agreed
+        },
+    )
+}
+
+// Connect twice with one client configuration to a server with one server
+// configuration, each over a pipe of its own, and answer whether each
+// client handshake resumed. A TLS 1.3 server sends the ticket a client
+// resumes with after the handshake, so each client reads the server's
+// close before closing.
+fn resumed_twice() -> (Bool, Bool) {
+    let client = client_config()
+    let (server, first) = resumed_once(server_config(), client)
+    let (kept, second) = resumed_once(server, client)
+    kept.close()
+    client.close()
+    (first, second)
+}
+
+// Connect once over a new pipe with `client` to a server using `server`, and
+// answer the server configuration back with whether the client resumed.
+fn resumed_once(sink server: ServerConfig, client: ClientConfig) -> (ServerConfig, Bool) {
+    over_pipe(
+        sink [sink server] |sink end: PipeEnd| -> ServerConfig {
+            let stream = Stream.accept(server, end).unwrap()
+            stream.close().unwrap()
+            server
+        },
+        sink [read client] |sink end: PipeEnd| -> Bool {
+            var stream = Stream.connect(client, end, "localhost").unwrap()
+            read_all_plain(&stream).unwrap().release()
+            let resumed = stream.resumed()
+            stream.close().unwrap()
+            resumed
+        },
+    )
+}
+
+// Read from a client stream whose server closes the pipe without
+// close_notify, and answer why the read failed.
+fn truncated_read() -> Option[Reason] {
+    let server = server_config()
+    let client = client_config()
+    let (_served, reason) = over_pipe(
+        sink [sink server] |sink end: PipeEnd| -> Bool {
+            let opened = Stream.accept(server, end)
+            server.close()
+            let stream = opened.unwrap()
+            stream.abandon().close().is_ok()
+        },
+        sink [sink client] |sink end: PipeEnd| -> Option[Reason] {
+            let opened = Stream.connect(client, end, "localhost")
+            client.close()
+            var stream = opened.unwrap()
+            defer var buffer = mem.system().acquire(16).unwrap()
+            let reason: Option[Reason] = match &stream.read_plain(&buffer, offset: 0, count: 16) {
+                Ok(_) => .None,
+                Err(Tls(refused)) => .Some(refused.reason),
+                Err(_) => .None,
+            }
+            let (transport, _sent) = stream.finish()
+            let _closed = transport.close()
+            reason
+        },
+    )
+    reason
+}

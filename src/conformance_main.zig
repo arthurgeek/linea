@@ -21693,8 +21693,10 @@ fn checkLibrary(
     var on_disk: usize = 0;
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        // The sources and the manifest that names them the library.
-        if (!std.mem.endsWith(u8, entry.basename, ".lin") and !std.mem.eql(u8, entry.path, loader.manifest_name)) continue;
+        // Every file but the documentation, as the build carries them: the
+        // sources, the manifest that names them the library, and the files
+        // their `embed`s read, such as the TLS tests' certificates.
+        if (std.mem.endsWith(u8, entry.basename, ".md")) continue;
         on_disk += 1;
 
         var carried = false;

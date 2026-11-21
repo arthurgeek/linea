@@ -156,11 +156,12 @@ pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callbac
 
 /// What a number crossing to or from the runtime stands for, where a value
 /// must own it for the call to be safe: the address of bytes a buffer or a
-/// slice holds, a descriptor, an allocation, a directory stream, or the
-/// process ID of a child not yet reaped. The runtime trusts each such
+/// slice holds, a descriptor, an allocation, a directory stream, the
+/// process ID of a child not yet reaped, or a TLS configuration or session.
+/// The runtime trusts each such
 /// number, so a symbol taking or answering one is confined to the standard
 /// library module whose types keep it, which the table's test holds.
-pub const Held = enum { none, bytes, descriptor, allocation, stream, child };
+pub const Held = enum { none, bytes, descriptor, allocation, stream, child, tls };
 
 /// Whether two parameters are the same as C declares them, a callback's shape
 /// compared by what it holds rather than by where it is. Which parameter is an
@@ -282,6 +283,9 @@ const descriptor: Parameter = .{ .scalar = .i32, .held = .descriptor };
 /// The address of the runtime's stream over one open directory, which a
 /// linear `mem.DirStream` keeps.
 const dir_stream: Parameter = .{ .scalar = .u64, .held = .stream };
+/// The address of the runtime's rustls configuration or session, which a
+/// linear `mem.TlsConfig` or `mem.TlsSession` keeps.
+const tls_object: Parameter = .{ .scalar = .u64, .held = .tls };
 /// The address of an allocation a buffer owns, which the runtime frees.
 const allocation: Parameter = .{ .scalar = .u64, .held = .allocation, .address = true };
 /// The parent's end of a child's pipe, which a spawn writes and a linear
@@ -519,6 +523,7 @@ const mem_files = heldBy("mem", "the standard library's `fs` operations");
 const mem_arguments = heldBy("mem", "`env.args`");
 const mem_environment = heldBy("mem", "`env.variable` and `env.variables`");
 const mem_parse = heldBy("mem", "parsing a `Float64` or a `Float32` from text");
+const mem_tls = heldBy("mem", "`tls.ClientConfig`, `tls.ServerConfig` and `tls.Stream`");
 const fs_mode = heldBy("fs", "the standard library's `fs` operations");
 const net_listener = heldBy("net", "`net.listen` and the `net.Listener` it answers");
 const net_connection = heldBy("net", "`net.connect` and the `net.Connection` it answers");
@@ -606,6 +611,28 @@ pub const runtime_functions = [_]Signature{
     .{ .symbol = "linea_dir_open_up", .parameters = &.{ dir_stream, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     .{ .symbol = "linea_dir_identity", .parameters = &.{ dir_stream, written, written, written, written }, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
     .{ .symbol = "linea_dir_close", .parameters = &.{dir_stream}, .result = .i64, .declared_by = mem_files, .migration_contract = .neutral },
+    // A TLS configuration or session is the address of the runtime's rustls
+    // object, which a linear `mem.TlsConfig` or `mem.TlsSession` keeps from
+    // the call that writes it to the one that frees it. Sessions read and
+    // write no descriptor: ciphertext crosses as a buffer's or a slice's
+    // bytes, and each call computes over the session alone and returns.
+    .{ .symbol = "linea_tls_client_config", .parameters = &.{ bytes_at, p(.u64), p(.u8), bytes_at, p(.u64), bytes_at, p(.u64), bytes_at, p(.u64), written }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_server_config", .parameters = &.{ bytes_at, p(.u64), bytes_at, p(.u64), bytes_at, p(.u64), p(.u8), bytes_at, p(.u64), written }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_client_config_free", .parameters = &.{tls_object}, .result = .unit, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_server_config_free", .parameters = &.{tls_object}, .result = .unit, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_client_open", .parameters = &.{ tls_object, bytes_at, p(.u64), written }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_server_open", .parameters = &.{ tls_object, written }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_receive", .parameters = &.{ tls_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_transmit", .parameters = &.{ tls_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_state", .parameters = &.{tls_object}, .result = .u8, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_read", .parameters = &.{ tls_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_pending", .parameters = &.{tls_object}, .result = .u8, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_write", .parameters = &.{ tls_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_close_notify", .parameters = &.{tls_object}, .result = .unit, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_alpn", .parameters = &.{ tls_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = mem_tls, .migration_contract = .neutral },
+    .{ .symbol = "linea_tls_free", .parameters = &.{tls_object}, .result = .unit, .declared_by = mem_tls, .migration_contract = .neutral },
+    // Classifying a result code reads no object.
+    .{ .symbol = "linea_tls_reason", .parameters = &.{p(.i64)}, .result = .u8, .declared_by = .granted, .migration_contract = .neutral },
     // The descriptor limit is process-wide; errors are captured before return.
     .{ .symbol = "linea_raise_open_files", .parameters = &.{}, .result = .i64, .declared_by = .granted, .migration_contract = .neutral },
     // Socket setup and endpoint queries return descriptors or captured errors.
