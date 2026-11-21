@@ -70,9 +70,7 @@ test "parse_tags_in keeps every tag or reports the refusal" {
     let checked = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), testing.Failure] {
-            let tags = parse_tags_in(allocator, "home, ,work") else |_| {
-                return .Err(testing.refused("a tag was refused"))
-            }
+            let tags = testing.allocated(parse_tags_in(allocator, "home, ,work"), "a tag was refused")?
             let kept = tags.length()
             tags.release()
             testing.assert_eq(kept, UInt64(2), "a tag was lost")

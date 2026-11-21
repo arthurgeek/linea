@@ -40,23 +40,15 @@ pub fn system() -> SystemAllocator {
 test "one handle serves more than one allocation" {
     let a = system()
 
-    match a.acquire(16) {
-        Err(_) => testing.assert(false, "a buffer of sixteen bytes was refused")?,
-        Ok(first) => {
-            let n = first.length()
-            first.release()
-            testing.assert_eq(n, 16, "a buffer did not arrive at the size asked for")?
-        },
-    }
+    let first = testing.allocated(a.acquire(16), "a buffer of sixteen bytes was refused")?
+    let n = first.length()
+    first.release()
+    testing.assert_eq(n, 16, "a buffer did not arrive at the size asked for")?
 
-    match a.acquire(8) {
-        Err(_) => testing.assert(false, "a second buffer was refused")?,
-        Ok(second) => {
-            let m = second.length()
-            second.release()
-            testing.assert_eq(m, 8, "a handle did not serve a second allocation")?
-        },
-    }
+    let second = testing.allocated(a.acquire(8), "a second buffer was refused")?
+    let m = second.length()
+    second.release()
+    testing.assert_eq(m, 8, "a handle did not serve a second allocation")?
 
     .Ok(())
 }

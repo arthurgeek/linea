@@ -94,22 +94,18 @@ impl[T, A: Allocator] Storage[T, A] {
     test "typed slots move an aggregate to independent storage" {
         let allocator = system()
         let shape: SlotType[SlotTestPair] = .Type
-        match allocator.acquire(slot_stride(shape)) {
-            Err(_) => testing.assert(false, "slot allocation failed")?,
-            Ok(acquired) => {
-                var storage: Storage[SlotTestPair, SystemAllocator] = Storage.from_buffer(acquired)
-                let initial = SlotTestPair { first = 7, second = 900 }
-                slot_put(&storage, 0, initial)
-                let first: SlotTestPair = slot_take(&storage, 0)
-                let replacement = SlotTestPair { first = 8, second = 901 }
-                slot_put(&storage, 0, replacement)
-                let second: SlotTestPair = slot_take(&storage, 0)
-                storage.dispose()
-                let SlotTestPair { first: a, second: b } = first
-                let SlotTestPair { first: c, second: d } = second
-                testing.assert(a == 7 && b == 900 && c == 8 && d == 901, "typed slot transfer aliased its source")?
-            },
-        }
+        let acquired = testing.allocated(allocator.acquire(slot_stride(shape)), "slot allocation failed")?
+        var storage: Storage[SlotTestPair, SystemAllocator] = Storage.from_buffer(acquired)
+        let initial = SlotTestPair { first = 7, second = 900 }
+        slot_put(&storage, 0, initial)
+        let first: SlotTestPair = slot_take(&storage, 0)
+        let replacement = SlotTestPair { first = 8, second = 901 }
+        slot_put(&storage, 0, replacement)
+        let second: SlotTestPair = slot_take(&storage, 0)
+        storage.dispose()
+        let SlotTestPair { first: a, second: b } = first
+        let SlotTestPair { first: c, second: d } = second
+        testing.assert(a == 7 && b == 900 && c == 8 && d == 901, "typed slot transfer aliased its source")?
         .Ok(())
     }
 }

@@ -32,9 +32,7 @@ on the library chooses one per call.
   > }
   > 
   > test "a word is shouted from the system allocator" {
-  >     defer let loud = shout("hi") else |_| {
-  >         return .Err(testing.refused("the system allocator holds the word"))
-  >     }
+  >     defer let loud = testing.allocated(shout("hi"), "the system allocator holds the word")?
   >     testing.assert_eq(loud.view(), "hi!", "the word is shouted")?
   > }
   > LIN
