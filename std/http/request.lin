@@ -587,8 +587,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "a request no server reads has no deadline" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         testing.assert_eq(sent.request().deadline(), time.never, "a test request had a deadline")?
     }
 
