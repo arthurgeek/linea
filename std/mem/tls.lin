@@ -1,0 +1,297 @@
+import std.mem.address
+import std.testing
+
+// The runtime builds rustls configurations and sessions from bytes at raw
+// addresses and answers zero or a count, or a negated rustls result code. A
+// configuration or a session is the address of the runtime's object, written
+// to the last parameter of the call that makes it.
+extern fn linea_tls_client_config(roots_at: UInt64, roots_len: UInt64, verify: UInt8, chain_at: UInt64, chain_len: UInt64, key_at: UInt64, key_len: UInt64, alpn_at: UInt64, alpn_len: UInt64, inout config: UInt64) -> Int64
+
+extern fn linea_tls_server_config(chain_at: UInt64, chain_len: UInt64, key_at: UInt64, key_len: UInt64, clients_at: UInt64, clients_len: UInt64, client_auth: UInt8, alpn_at: UInt64, alpn_len: UInt64, inout config: UInt64) -> Int64
+
+extern fn linea_tls_client_config_free(config: UInt64)
+
+extern fn linea_tls_server_config_free(config: UInt64)
+
+extern fn linea_tls_client_open(config: UInt64, name_at: UInt64, name_len: UInt64, inout session: UInt64) -> Int64
+
+extern fn linea_tls_server_open(config: UInt64, inout session: UInt64) -> Int64
+
+extern fn linea_tls_receive(session: UInt64, at: UInt64, len: UInt64) -> Int64
+
+extern fn linea_tls_transmit(session: UInt64, at: UInt64, cap: UInt64) -> Int64
+
+extern fn linea_tls_state(session: UInt64) -> UInt8
+
+extern fn linea_tls_read(session: UInt64, at: UInt64, cap: UInt64) -> Int64
+
+extern fn linea_tls_pending(session: UInt64) -> UInt8
+
+extern fn linea_tls_write(session: UInt64, at: UInt64, len: UInt64) -> Int64
+
+extern fn linea_tls_close_notify(session: UInt64)
+
+extern fn linea_tls_alpn(session: UInt64, at: UInt64, cap: UInt64) -> Int64
+
+extern fn linea_tls_free(session: UInt64)
+
+extern fn linea_tls_reason(code: Int64) -> UInt8
+
+// The runtime answers this negated code from `linea_tls_read` when no
+// plaintext has arrived yet.
+internal let tls_empty: Int64 = -1
+
+// The state bits `TlsSession.state` answers, which `tls_holds` tests.
+internal let tls_handshaking: UInt8 = 1
+
+internal let tls_wants_read: UInt8 = 2
+
+internal let tls_wants_write: UInt8 = 4
+
+internal let tls_resumed: UInt8 = 8
+
+// Whether the state `state` holds the bit `bit`, a power of two.
+internal fn tls_holds(state: UInt8, bit: UInt8) -> Bool {
+    (state / bit) % 2 == 1
+}
+
+test "a state holds the bits it was made of" {
+    let state = tls_handshaking + tls_wants_write
+    testing.assert(tls_holds(state, tls_handshaking) && tls_holds(state, tls_wants_write), "a state lost a bit")?
+    testing.assert(!tls_holds(state, tls_wants_read) && !tls_holds(state, tls_resumed), "a state gained a bit")?
+}
+
+// A TlsConfig owns a client or a server configuration the runtime built. Its
+// handle is valid from the call that built it to the close that consumes it.
+// The runtime trusts the handle, so only `mem` builds one or reads its
+// field; `std.tls` is trusted to keep to that.
+@linear
+internal struct TlsConfig {
+    handle: UInt64,
+    server: Bool,
+}
+
+// Build a client configuration trusting the PEM certificates `roots` beside
+// the system's, or accepting any certificate when `verify` is 1, presenting
+// the PEM chain `chain` with its PEM private key `key` when both are given,
+// and offering the comma-separated protocols `alpn`. Answers the
+// configuration, or the negated rustls code that refused it.
+internal fn _tls_client_config(roots: Slice[UInt8], verify: UInt8, chain: Slice[UInt8], key: Slice[UInt8], alpn: Slice[UInt8]) -> Result[TlsConfig, Int64] {
+    var handle: UInt64 = 0
+    let answer = linea_tls_client_config(address.raw(slice_address(roots)), roots.length(), verify, address.raw(slice_address(chain)), chain.length(), address.raw(slice_address(key)), key.length(), address.raw(slice_address(alpn)), alpn.length(), &handle)
+    if answer < 0 {
+        return .Err(answer)
+    }
+    .Ok(.{ handle, server = false })
+}
+
+// Build a server configuration presenting the PEM chain `chain` with its PEM
+// private key `key`, asking clients for no certificate when `client_auth` is
+// 0, verifying an offered one against the PEM roots `clients` when it is 1
+// and requiring one when it is 2, and accepting the protocols `alpn`.
+internal fn _tls_server_config(chain: Slice[UInt8], key: Slice[UInt8], clients: Slice[UInt8], client_auth: UInt8, alpn: Slice[UInt8]) -> Result[TlsConfig, Int64] {
+    var handle: UInt64 = 0
+    let answer = linea_tls_server_config(address.raw(slice_address(chain)), chain.length(), address.raw(slice_address(key)), key.length(), address.raw(slice_address(clients)), clients.length(), client_auth, address.raw(slice_address(alpn)), alpn.length(), &handle)
+    if answer < 0 {
+        return .Err(answer)
+    }
+    .Ok(.{ handle, server = true })
+}
+
+// What a negated rustls code means, as the runtime classifies it.
+internal fn _tls_reason(code: Int64) -> UInt8 {
+    linea_tls_reason(code)
+}
+
+test "a configuration from text that is not PEM is refused" {
+    let refused = match _tls_server_config("x".as_bytes(), "y".as_bytes(), "".as_bytes(), 0, "".as_bytes()) {
+        Ok(config) => {
+            config.close()
+            false
+        },
+        Err(code) => code < 0,
+    }
+    testing.assert(refused, "a server configuration from text that is not PEM was built")?
+}
+
+impl TlsConfig {
+    // Open a session over this configuration: a client session for the
+    // server `name` names, or a server session. The session keeps what it
+    // needs, so the configuration may be closed while it lives.
+    internal fn open_session(self: Self, name: Slice[UInt8]) -> Result[TlsSession, Int64] {
+        var handle: UInt64 = 0
+        let answer = if self.server {
+            linea_tls_server_open(self.handle, &handle)
+        } else {
+            _tls_client_open(self.handle, name, &handle)
+        }
+        if answer < 0 {
+            return .Err(answer)
+        }
+        .Ok(.{ handle })
+    }
+
+    test "a client session starts handshaking" {
+        let config = _tls_client_config("".as_bytes(), 1, "".as_bytes(), "".as_bytes(), "".as_bytes()).unwrap()
+        let session = config.open_session("localhost".as_bytes()).unwrap()
+        config.close()
+        let state = session.state()
+        session.close()
+        testing.assert(tls_holds(state, tls_handshaking), "a new client session was not handshaking")?
+        testing.assert(tls_holds(state, tls_wants_write), "a new client session had no hello to send")?
+    }
+
+    // Free the configuration.
+    internal fn close(sink self: Self) {
+        let TlsConfig { handle, server } = self
+        if server {
+            linea_tls_server_config_free(handle)
+        } else {
+            linea_tls_client_config_free(handle)
+        }
+    }
+}
+
+impl Release for TlsConfig {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+
+// Open a client session over the configuration `config` for the server
+// `name` names, writing it to `session`.
+internal fn _tls_client_open(config: UInt64, name: Slice[UInt8], inout session: UInt64) -> Int64 {
+    linea_tls_client_open(config, address.raw(slice_address(name)), name.length(), &session)
+}
+
+// Hand `session` the ciphertext `bytes` and answer how many it took.
+internal fn _tls_receive(session: UInt64, bytes: Slice[UInt8]) -> Int64 {
+    linea_tls_receive(session, address.raw(slice_address(bytes)), bytes.length())
+}
+
+// Write the ciphertext `session` holds to the front of `buffer`.
+internal fn _tls_transmit[A: Allocator](session: UInt64, inout buffer: Buffer[A]) -> Int64 {
+    linea_tls_transmit(session, address.raw(bytes_in(buffer, 0)), buffer.length())
+}
+
+// Read plaintext from `session` into `count` bytes of `buffer` from `offset`.
+internal fn _tls_decrypt[A: Allocator](session: UInt64, inout buffer: Buffer[A], offset: UInt64, count: UInt64) -> Int64 {
+    if offset > buffer.length() || count > buffer.length() - offset {
+        panic("buffer I/O range is out of bounds")
+    }
+    linea_tls_read(session, address.raw(bytes_in(buffer, offset)), count)
+}
+
+// Hand `session` the plaintext `bytes` to send.
+internal fn _tls_encrypt(session: UInt64, bytes: Slice[UInt8]) -> Int64 {
+    linea_tls_write(session, address.raw(slice_address(bytes)), bytes.length())
+}
+
+// Write the protocol `session` agreed on to the front of `buffer`.
+internal fn _tls_alpn[A: Allocator](session: UInt64, inout buffer: Buffer[A]) -> Int64 {
+    linea_tls_alpn(session, address.raw(bytes_in(buffer, 0)), buffer.length())
+}
+
+// A TlsSession owns one rustls connection: the handshake and record state of
+// one TLS stream. It reads and writes no transport itself: ciphertext comes
+// in through `receive` and goes out through `transmit`.
+@linear
+internal struct TlsSession {
+    handle: UInt64,
+}
+
+impl TlsSession {
+    // Hand the session ciphertext the peer sent and answer how many bytes it
+    // took, or the negated code of the error they revealed.
+    internal fn receive(self: Self, bytes: Slice[UInt8]) -> Int64 {
+        _tls_receive(self.handle, bytes)
+    }
+
+    // Write ciphertext waiting to be sent to the front of `buffer` and answer
+    // how many bytes.
+    internal fn transmit[A: Allocator](self: Self, inout buffer: Buffer[A]) -> Int64 {
+        _tls_transmit(self.handle, &buffer)
+    }
+
+    // The session's state bits: `tls_handshaking`, `tls_wants_read`,
+    // `tls_wants_write` and `tls_resumed`.
+    internal fn state(self: Self) -> UInt8 {
+        linea_tls_state(self.handle)
+    }
+
+    // Read plaintext into `count` bytes of `buffer` from `offset` and answer
+    // how many, 0 after the peer's close_notify, `tls_empty` when none has
+    // arrived, or a negated code.
+    internal fn decrypted[A: Allocator](self: Self, inout buffer: Buffer[A], offset: UInt64, count: UInt64) -> Int64 {
+        _tls_decrypt(self.handle, &buffer, offset, count)
+    }
+
+    // Whether a read would answer without more ciphertext: plaintext is
+    // waiting, the peer sent close_notify, or the session failed.
+    internal fn pending(self: Self) -> Bool {
+        linea_tls_pending(self.handle) == 1
+    }
+
+    // Take plaintext to send and answer how many bytes, or a negated code.
+    internal fn write(self: Self, bytes: Slice[UInt8]) -> Int64 {
+        _tls_encrypt(self.handle, bytes)
+    }
+
+    // Queue the close_notify alert.
+    internal fn close_notify(self: Self) {
+        linea_tls_close_notify(self.handle)
+    }
+
+    // Write the protocol the handshake agreed on to the front of `buffer` and
+    // answer its length, 0 for none.
+    internal fn alpn[A: Allocator](self: Self, inout buffer: Buffer[A]) -> Int64 {
+        _tls_alpn(self.handle, &buffer)
+    }
+
+    // Free the session.
+    internal fn close(sink self: Self) {
+        let TlsSession { handle } = self
+        linea_tls_free(handle)
+    }
+}
+
+impl Release for TlsSession {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+
+test "a client and a server session carry a handshake between them" {
+    let server = _tls_server_config(embed("../tls/testdata/server.pem").as_bytes(), embed("../tls/testdata/server_key.pem").as_bytes(), "".as_bytes(), 0, "".as_bytes()).unwrap()
+    let client = _tls_client_config(embed("../tls/testdata/ca.pem").as_bytes(), 0, "".as_bytes(), "".as_bytes(), "".as_bytes()).unwrap()
+    defer let near = client.open_session("localhost".as_bytes()).unwrap()
+    defer let far = server.open_session("".as_bytes()).unwrap()
+    client.close()
+    server.close()
+    defer var flight = system().acquire(32768).unwrap()
+    var rounds = 0
+    while rounds < 8 {
+        rounds += 1
+        let sent = near.transmit(&flight)
+        if sent > 0 {
+            testing.assert(far.receive(flight.as_slice().subspan(start: 0, count: UInt64(sent)).unwrap()) == sent, "the server refused the client's flight")?
+        }
+        let answered = far.transmit(&flight)
+        if answered > 0 {
+            testing.assert(near.receive(flight.as_slice().subspan(start: 0, count: UInt64(answered)).unwrap()) == answered, "the client refused the server's flight")?
+        }
+    }
+    let settled = !tls_holds(near.state(), tls_handshaking) && !tls_holds(far.state(), tls_handshaking)
+    testing.assert(settled, "the handshake did not finish")?
+    // Neither end offered a protocol, and nothing has been sent yet.
+    testing.assert_eq(far.alpn(&flight), Int64(0), "a protocol was agreed though none was offered")?
+    testing.assert(!far.pending(), "plaintext was waiting before any was sent")?
+    testing.assert_eq(far.decrypted(&flight, offset: 0, count: 16), tls_empty, "plaintext was read before any was sent")?
+    testing.assert_eq(near.write("hi".as_bytes()), Int64(2), "the client did not take its plaintext")?
+    near.close_notify()
+    let sent = near.transmit(&flight)
+    testing.assert(far.receive(flight.as_slice().subspan(start: 0, count: UInt64(sent)).unwrap()) == sent, "the server refused the client's records")?
+    testing.assert(far.pending(), "the plaintext sent was not waiting")?
+    testing.assert_eq(far.decrypted(&flight, offset: 0, count: 16), Int64(2), "the server did not read the plaintext")?
+    testing.assert_eq(far.decrypted(&flight, offset: 0, count: 16), Int64(0), "the client's close_notify did not end the stream")?
+}

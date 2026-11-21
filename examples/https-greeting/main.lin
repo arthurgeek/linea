@@ -1,0 +1,146 @@
+// Greet visitors over HTTPS. GET /hello/{name} answers `Hello, NAME.` over
+// TLS, with the certificate and private key the command line names, and
+// every request is logged to standard error. `localhost.pem` and
+// `localhost_key.pem` beside this file are a certificate for `localhost`
+// issued by `test_ca.pem`, a root no system trusts, so a client is told to
+// trust it: `curl --cacert test_ca.pem https://localhost:PORT/hello/ada`.
+import std.cli
+import std.env
+import std.fs
+import std.http
+import std.io
+import std.log
+import std.net
+import std.session
+import std.task
+import std.testing
+import std.tls
+
+// Answer a greeting for the name in the path.
+fn hello(name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "Hello, {name.value}.\n")
+}
+
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route(r"GET /hello/{name}", hello)
+}
+
+// Each serving task builds its own router, releasing the one it could not
+// finish.
+fn routed() -> Result[http.Router[()], http.RouteError] {
+    var router: http.Router[()] = http.Router.new()
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
+// A client that trusts the test root connects over TLS, sends `request`
+// and reads the whole answer. `tls.Stream.connect` checks that
+// `test_ca.pem`, the only root the client trusts, issued the server's
+// certificate and that it names `localhost`, before it answers the stream.
+fn fetch(address: net.Address, request: Str) -> String {
+    let client = tls.ClientConfig.open(roots: embed("test_ca.pem")).unwrap()
+    let opened = tls.Stream.connect(client, net.connect(address).unwrap(), server_name: "localhost")
+    client.close()
+    var stream = opened.unwrap()
+    let _sent = io.write_all(&stream, request.as_bytes()).unwrap()
+    let bytes = io.read_all(&stream, max_bytes: 4096).unwrap()
+    stream.close().unwrap()
+    let text = Str.from_bytes(bytes.as_slice()).unwrap().to_owned().unwrap()
+    bytes.release()
+    text
+}
+
+// The server answers one request over TLS while a task of its own fetches
+// it. `tls: .Some(borrow config)` lends the configuration to serving, which
+// wraps every connection it accepts in a TLS stream.
+test "a greeting is served over TLS" {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let config = tls.ServerConfig.open(embed("localhost.pem"), embed("localhost_key.pem")).unwrap()
+    let client = task.start(
+        sink [bound] |sink me: session.Chan[session.Send[String, session.End]]| {
+            me.send(fetch(bound, "GET /hello/ada HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")).close()
+        },
+    ).unwrap()
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    let served = http.serve(listener, routed, limits: limits, shutdown: .Manual, tls: .Some(borrow config))
+    config.close()
+    let (answer, done) = client.recv()
+    done.close()
+    defer answer.release()
+    testing.assert(served.is_ok(), "serving over TLS failed")?
+    testing.assert(answer.view().ends_with("\r\n\r\nHello, ada.\n"), "the greeting did not arrive over TLS")?
+}
+
+fn main() -> UInt8 {
+    let options = parse_options(env.args()) else |status| {
+        return status
+    }
+    let logger = log.to_stderr(minimum: .Info)
+    // `open_files` reads the PEM certificate chain and private key. A file
+    // that cannot be read, or PEM text that is not a certificate and its
+    // key, is reported here, before anything listens.
+    let config = tls.ServerConfig.open_files(fs.Path.from_str(options.certificate.view()).unwrap(), fs.Path.from_str(options.key.view()).unwrap()) else |error| {
+        io.eprintln("https-greeting: the certificate cannot be used: {error}")
+        options.release()
+        return 1
+    }
+    let limits = http.Limits { connections = copy(options.requests), ..http.Limits.default() }
+    let serving = [sink logger = copy(logger)] || {
+        routed().map([sink logger = copy(logger)] |sink router: http.Router[()]| http.logged(copy(logger), router))
+    }
+    // Serving borrows the configuration, so it is closed once serving ends.
+    let served = http.listen_and_serve(net.loopback(options.port), serving, limits: limits, tls: .Some(borrow config))
+    config.close()
+    options.release()
+    let _ = served else |error| {
+        logger.error("serving stopped", log.field("error", error))
+        return 1
+    }
+    0
+}
+
+// The port, how many requests to serve before stopping, and the paths of
+// the PEM certificate chain and its private key.
+@derive(Release)
+struct Options {
+    port: UInt16,
+    requests: Option[UInt64],
+    certificate: String,
+    key: String,
+}
+
+fn parse_options(args: env.Args) -> Result[Options, UInt8] {
+    defer var cmd = cli.Command.new("https-greeting", "Greetings over HTTPS")
+    &cmd.option("port", "--port", "port to listen on", required: true)
+    &cmd.option("requests", "--requests", "number of requests to serve")
+    &cmd.option("certificate", "--certificate", "PEM certificate chain", required: true)
+    &cmd.option("key", "--key", "PEM private key", required: true)
+    var cursor = cli.ArgCursor.new(args)
+    defer let matches = cmd.parse(&cursor) else |error| {
+        io.eprintln("error: {error}")
+        return .Err(64)
+    }
+    let port: UInt16 = matches.get("port") else |error| {
+        io.eprintln("error: {error}")
+        return .Err(64)
+    }
+    let requests: Option[UInt64] = matches.get_optional("requests") else |error| {
+        io.eprintln("error: {error}")
+        return .Err(64)
+    }
+    let certificate = matches.required_option("certificate") else |error| {
+        io.eprintln("error: {error}")
+        return .Err(64)
+    }
+    let key = matches.required_option("key") else |error| {
+        io.eprintln("error: {error}")
+        return .Err(64)
+    }
+    .Ok(.{ port, requests, certificate = certificate.to_owned().unwrap(), key = key.to_owned().unwrap() })
+}

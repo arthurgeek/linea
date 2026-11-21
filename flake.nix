@@ -53,6 +53,14 @@
             pkgs.sqlite
           ];
 
+          # The runtime's TLS calls rustls through rustls-ffi, linked
+          # statically: `build.zig` compiles `runtime/tls.c` against its header
+          # and appends its archive to the runtime archives. The package is
+          # pinned with nixpkgs in `flake.lock`, and nixpkgs pins its source
+          # tag and its vendored crates by hash; the binary cache serves the
+          # same build on macOS and on Linux, so no machine compiles Rust.
+          LINEA_RUSTLS = "${pkgs.rustls-ffi}";
+
           shellHook = ''
             # Find the checkout the shell was entered from. `nix develop <path>`
             # run from outside any checkout finds none, and then there is no

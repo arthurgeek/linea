@@ -1,0 +1,271 @@
+import std.fs
+import std.mem
+import std.testing
+
+// Verify says how a client checks the certificate a server presents.
+// `System` checks it against the operating system's trusted roots, or,
+// when the configuration names `roots`, against those roots alone, as for a
+// private certificate authority. `Insecure_AcceptAnyCertificate`
+// accepts every certificate, so an attacker between the two ends can read
+// and change everything: it is for a test against a server whose
+// certificate nothing can verify, never for a real connection.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum Verify {
+    System,
+    Insecure_AcceptAnyCertificate,
+}
+
+// ClientAuth says whether a server asks clients for a certificate:
+// `Unrequested` asks for none, `Optional` verifies a certificate a client
+// offers and accepts a client that offers none, and `Required` refuses a
+// client without one. A client certificate is verified against the server
+// configuration's `client_roots`.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum ClientAuth {
+    Unrequested,
+    Optional,
+    Required,
+}
+
+// The largest PEM file `ClientConfig.open_files` and `ServerConfig.open_files`
+// read, in bytes: a certificate bundle of several hundred roots fits.
+pub let max_pem_bytes: UInt64 = 1048576
+
+// A ClientConfig holds what a client needs for its TLS connections: how it
+// verifies servers, the certificate it presents for mutual TLS, the ALPN
+// protocols it offers, and the cache of sessions it may resume. Every
+// connection opened with one configuration shares its cache, which keeps the
+// tickets of up to 256 sessions and forgets the oldest past that. It owns
+// what the runtime built, so it is linear: `close` frees it, and a stream
+// opened with it keeps what it needs, so the configuration may be closed
+// first.
+@linear
+pub struct ClientConfig {
+    built: mem.TlsConfig,
+}
+
+impl ClientConfig {
+    // Build a client configuration. `roots`, when given, holds the PEM
+    // certificates of the only roots the client trusts, in place of the
+    // system's: a private certificate authority, for one. An empty `roots`
+    // trusts the operating system's roots, which verify through the
+    // Security framework on macOS and the distribution's bundle on Linux.
+    // `certificate_chain` and `private_key`,
+    // both PEM, are the certificate this client presents to a server that
+    // asks for one; give both or neither. `alpn` lists the protocols the
+    // client offers, most preferred first, separated by commas, such as
+    // `"h2,http/1.1"`.
+    pub fn open(verify: Verify = .System, roots: Str = "", certificate_chain: Str = "", private_key: Str = "", alpn: Str = "") -> Result[ClientConfig, Refusal] {
+        let code: UInt8 = match verify {
+            System => 0,
+            Insecure_AcceptAnyCertificate => 1,
+        }
+        match mem._tls_client_config(roots.as_bytes(), code, certificate_chain.as_bytes(), private_key.as_bytes(), alpn.as_bytes()) {
+            Ok(built) => .Ok(.{ built }),
+            Err(answer) => .Err(refusal(.Open, answer)),
+        }
+    }
+
+    test "a client configuration is built from the system's roots or from roots of its own" {
+        let system = ClientConfig.open().unwrap()
+        system.close()
+        let private = ClientConfig.open(roots: test_ca, alpn: "h2,http/1.1").unwrap()
+        private.close()
+    }
+
+    test "a client configuration refuses a certificate without its key" {
+        let refused = match ClientConfig.open(roots: test_ca, certificate_chain: client_chain) {
+            Ok(config) => {
+                config.close()
+                false
+            },
+            Err(error) => error.reason == .InvalidInput,
+        }
+        testing.assert(refused, "a client certificate without a key was accepted")?
+    }
+
+    // Build a client configuration as `open` does from PEM files, each at
+    // most `max_pem_bytes`: the roots to trust in place of the system's and,
+    // for mutual TLS, the
+    // certificate chain and its private key.
+    pub fn open_files(verify: Verify = .System, roots: Option[fs.Path] = .None, certificate_chain: Option[fs.Path] = .None, private_key: Option[fs.Path] = .None, alpn: Str = "") -> Result[ClientConfig, ConfigFileError] {
+        defer let trusted = read_optional(roots)?
+        defer let chain = read_optional(certificate_chain)?
+        defer let key = read_optional(private_key)?
+        match ClientConfig.open(verify, trusted.view(), chain.view(), key.view(), alpn) {
+            Ok(config) => .Ok(config),
+            Err(refused) => .Err(.Tls(refused)),
+        }
+    }
+
+    test "a client configuration is read from PEM files" {
+        let trusted = scratch_pem(test_ca)
+        let opened = ClientConfig.open_files(roots: .Some(fs.Path.from_str(trusted.view()).unwrap()))
+        remove_pem(trusted)
+        opened.unwrap().close()
+        let missing = match ClientConfig.open_files(roots: .Some(fs.Path.from_str("/no/such/linea/ca.pem").unwrap())) {
+            Ok(config) => {
+                config.close()
+                false
+            },
+            Err(Read(_)) => true,
+            Err(Tls(_)) => false,
+        }
+        testing.assert(missing, "a missing roots file was not reported as unread")?
+    }
+
+    // Free the configuration. Streams opened with it are unaffected.
+    pub fn close(sink self: Self) {
+        let ClientConfig { built } = self
+        built.close()
+    }
+
+    test "a client configuration closes while a stream it opened lives" {
+        let config = ClientConfig.open(verify: .Insecure_AcceptAnyCertificate).unwrap()
+        let session = config.built.open_session("localhost".as_bytes()).unwrap()
+        config.close()
+        session.close()
+    }
+}
+
+impl Release for ClientConfig {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+
+// A ServerConfig holds what a server needs for its TLS connections: the
+// certificate chain it presents and its private key, whether and how it
+// verifies client certificates, and the ALPN protocols it accepts. A server
+// keeps the sessions of up to 256 clients it may resume. It is linear: `close`
+// frees it once nothing opens streams with it any more.
+@linear
+pub struct ServerConfig {
+    built: mem.TlsConfig,
+}
+
+impl ServerConfig {
+    // Build a server configuration presenting `certificate_chain`, the PEM
+    // certificates from the server's own to the last before a root, with
+    // `private_key`, its PEM private key. `client_auth` says whether to ask
+    // clients for a certificate, verified against the PEM roots
+    // `client_roots`. `alpn` lists the protocols the server accepts, most
+    // preferred first, separated by commas.
+    pub fn open(certificate_chain: Str, private_key: Str, client_auth: ClientAuth = .Unrequested, client_roots: Str = "", alpn: Str = "") -> Result[ServerConfig, Refusal] {
+        let code: UInt8 = match client_auth {
+            Unrequested => 0,
+            Optional => 1,
+            Required => 2,
+        }
+        match mem._tls_server_config(certificate_chain.as_bytes(), private_key.as_bytes(), client_roots.as_bytes(), code, alpn.as_bytes()) {
+            Ok(built) => .Ok(.{ built }),
+            Err(answer) => .Err(refusal(.Open, answer)),
+        }
+    }
+
+    test "a server configuration is built from a certificate and its key" {
+        let config = ServerConfig.open(server_chain, server_key, alpn: "http/1.1").unwrap()
+        config.close()
+        let refused = match ServerConfig.open(server_chain, "not a key") {
+            Ok(config) => {
+                config.close()
+                false
+            },
+            Err(error) => error.reason == .InvalidInput,
+        }
+        testing.assert(refused, "a server configuration without a usable key was built")?
+    }
+
+    test "a server requiring client certificates needs roots to verify them" {
+        let refused = match ServerConfig.open(server_chain, server_key, client_auth: .Required) {
+            Ok(config) => {
+                config.close()
+                false
+            },
+            Err(error) => error.reason == .InvalidInput,
+        }
+        testing.assert(refused, "a server requiring client certificates was built without roots")?
+    }
+
+    // Build a server configuration as `open` does from PEM files, each at
+    // most `max_pem_bytes`.
+    pub fn open_files(certificate_chain: fs.Path, private_key: fs.Path, client_auth: ClientAuth = .Unrequested, client_roots: Option[fs.Path] = .None, alpn: Str = "") -> Result[ServerConfig, ConfigFileError] {
+        defer let chain = read_pem(certificate_chain)?
+        defer let key = read_pem(private_key)?
+        defer let roots = read_optional(client_roots)?
+        match ServerConfig.open(chain.view(), key.view(), client_auth, roots.view(), alpn) {
+            Ok(config) => .Ok(config),
+            Err(refused) => .Err(.Tls(refused)),
+        }
+    }
+
+    test "a server configuration is read from PEM files" {
+        let chain = scratch_pem(server_chain)
+        let key = scratch_pem(server_key)
+        let opened = ServerConfig.open_files(fs.Path.from_str(chain.view()).unwrap(), fs.Path.from_str(key.view()).unwrap())
+        remove_pem(chain)
+        remove_pem(key)
+        opened.unwrap().close()
+    }
+
+    // Free the configuration. Streams opened with it are unaffected.
+    pub fn close(sink self: Self) {
+        let ServerConfig { built } = self
+        built.close()
+    }
+
+    test "a server configuration closes while a stream it opened lives" {
+        let config = server_config()
+        let session = config.built.open_session("".as_bytes()).unwrap()
+        config.close()
+        session.close()
+    }
+}
+
+impl Release for ServerConfig {
+    fn release(sink self: Self) {
+        self.close()
+    }
+}
+
+// A ConfigFileError says why a configuration could not be read from files:
+// a file could not be read as text, or TLS refused what it held.
+@(copyable, derive(Debug, Release))
+pub enum ConfigFileError {
+    Read(fs.ReadTextError),
+    Tls(Refusal),
+}
+
+impl Display for ConfigFileError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Read(error) => error.fmt(&w),
+            Tls(refused) => refused.fmt(&w),
+        }
+    }
+}
+
+test "a configuration file error displays its cause" {
+    var writer = testing.Recorder.of(160).unwrap()
+    let failed: ConfigFileError = .Tls(refusal(.Open, -2))
+    let wrote = failed.fmt(&writer).is_ok()
+    let equal = writer.holds("TLS Open failed: the PEM text or the server name cannot be used (rustls code 2)")
+    writer.release()
+    testing.assert(wrote && equal, "a configuration file error displayed the wrong words")?
+}
+
+// Read the PEM text at `path`.
+fn read_pem(path: fs.Path) -> Result[String[mem.SystemAllocator], ConfigFileError] {
+    match fs.read_text(path, max_pem_bytes) {
+        Ok(text) => .Ok(text),
+        Err(error) => .Err(.Read(error)),
+    }
+}
+
+// Read the PEM text at `path`, or none.
+fn read_optional(path: Option[fs.Path]) -> Result[String[mem.SystemAllocator], ConfigFileError] {
+    match read path {
+        Some(named) => read_pem(named),
+        None => .Ok(String.new()),
+    }
+}

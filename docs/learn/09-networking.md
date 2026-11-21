@@ -2470,6 +2470,287 @@ stays ignored even under `.OnSignals`. A program may also register either
 signal in its own wait set: one delivery wakes both that registration and the
 server's registration.
 
+## Serving over HTTPS
+
+`std.tls` encrypts a connection with TLS, through rustls, the TLS library
+written in Rust that curl also links. A server holds a certificate and its
+private key; a client checks that the certificate names the host it meant
+to reach and that a root it trusts issued it. `http.serve` and
+`listen_and_serve` serve HTTPS when they are handed a server configuration.
+
+### A server and a client over TLS in one program
+
+The program below serves one request over TLS while a task of its own
+fetches it, the way [Both ends in one program](#both-ends-in-one-program)
+did for plain TCP:
+
+```linea
+import std.http
+import std.io
+import std.net
+import std.session
+import std.task
+import std.tls
+
+use session.Chan
+use session.End
+use session.Send
+
+// A certificate for `localhost`, its private key, and the root that issued
+// it. A real server reads its own from files; these are pasted in so the
+// program runs anywhere.
+let certificate: Str =
+    \\-----BEGIN CERTIFICATE-----
+    \\MIIBuDCCAV6gAwIBAgIJAMVQ5RDbfb9KMAoGCCqGSM49BAMCMBgxFjAUBgNVBAMM
+    \\DUxpbmVhIFRlc3QgQ0EwIBcNMjYwMTAxMDAwMDAwWhgPMjEyNTEyMzEyMzU5NTla
+    \\MBQxEjAQBgNVBAMMCWxvY2FsaG9zdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA
+    \\BOyx5sbcw+iUIs0UqLFbnpr3vgse/wrS2UoTlUFKA5ZbD3Vdu8UXLmvlPpZKrRDT
+    \\5IqWePA+hM0X7WTSKnxB62ejgZIwgY8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/
+    \\AAABMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/
+    \\BAQDAgeAMB0GA1UdDgQWBBS2m5l8kcWT9Da37xG0QIB7t2fG2TAfBgNVHSMEGDAW
+    \\gBRLW1Af/7FrpsGiqajDBfwqxer3kjAKBggqhkjOPQQDAgNIADBFAiEAjqD3xaN8
+    \\oO5ByC4U1QaklyYvCm3goPCbmUw5wG4BvfUCIDoVC8ealPJVorXb1QPQT2DbJGHV
+    \\Z/jbpJn7fLH7oa8U
+    \\-----END CERTIFICATE-----
+
+let private_key: Str =
+    \\-----BEGIN PRIVATE KEY-----
+    \\MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggEEoZtZ9TXxAOrXi
+    \\t/0JeoHsjNCeNuvwnxonOKD6tCWhRANCAATssebG3MPolCLNFKixW56a974LHv8K
+    \\0tlKE5VBSgOWWw91XbvFFy5r5T6WSq0Q0+SKlnjwPoTNF+1k0ip8Qetn
+    \\-----END PRIVATE KEY-----
+
+let test_root: Str =
+    \\-----BEGIN CERTIFICATE-----
+    \\MIIBljCCAT2gAwIBAgIUSsW4seiSOjcP87a6c80h5oIQZcIwCgYIKoZIzj0EAwIw
+    \\GDEWMBQGA1UEAwwNTGluZWEgVGVzdCBDQTAgFw0yNjAxMDEwMDAwMDBaGA8yMTI1
+    \\MTIzMTIzNTk1OVowGDEWMBQGA1UEAwwNTGluZWEgVGVzdCBDQTBZMBMGByqGSM49
+    \\AgEGCCqGSM49AwEHA0IABGX08dXM0oDGkm2iJBmKV6Z6rRQFLVyr+nGlD+SIirLZ
+    \\FqZSteBNDRmNcqlE7MqjWu7Sc+MON5BW1PHMJ/YtV3KjYzBhMB0GA1UdDgQWBBRL
+    \\W1Af/7FrpsGiqajDBfwqxer3kjAfBgNVHSMEGDAWgBRLW1Af/7FrpsGiqajDBfwq
+    \\xer3kjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQD
+    \\AgNHADBEAiBu8ZmGCoWd3LhEC8dEhZDU+12d8N/vaHelmxOXWHdZQAIgUSy+MKux
+    \\NSBuwOQ5B7jtGQuVfweQHDoZ6GttBacU8oo=
+    \\-----END CERTIFICATE-----
+
+fn hello(name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "Hello, {name.value}.\n")
+}
+
+fn routed() -> Result[http.Router[()], http.RouteError] {
+    var router: http.Router[()] = http.Router.new()
+    match &router.route(r"GET /hello/{name}", hello) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
+// Connect over TLS, ask for one greeting, and answer the body.
+fn fetch(address: net.Address) -> String {
+    // The client trusts `test_root` alone, in place of the system's roots.
+    let client = tls.ClientConfig.open(roots: test_root).unwrap()
+    // `connect` checks the certificate the server presents before it answers.
+    let opened = tls.Stream.connect(client, net.connect(address).unwrap(), server_name: "localhost")
+    client.close()
+    var stream = opened.unwrap()
+    let _sent = io.write_all(&stream, "GET /hello/ada HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".as_bytes()).unwrap()
+    let answer = io.read_text(&stream, max_bytes: 4096).unwrap()
+    // `close` sends close_notify, so the server knows nothing was cut short.
+    stream.close().unwrap()
+    answer
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let bound = listener.local_address().unwrap()
+    let config = tls.ServerConfig.open(certificate, private_key).unwrap()
+    let client = task.start(
+        sink [bound] |sink me: Chan[Send[String, End]]| {
+            me.send(fetch(bound)).close()
+        },
+    ).unwrap()
+    // One connection, then serving returns.
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    let served = http.serve(listener, routed, limits: limits, shutdown: .Manual, tls: .Some(borrow config))
+    config.close()
+    let (answer, done) = client.recv()
+    done.close()
+    // The answer is the response's head, a blank line, and the body.
+    match answer.split_once("\r\n\r\n") {
+        Some((head, body)) => io.print("{head.lines().count()} head lines, then: {body}").unwrap(),
+        None => io.print("no body\n").unwrap(),
+    }
+    answer.release()
+    match served {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+```
+
+```
+3 head lines, then: Hello, ada.
+```
+
+`tls.ServerConfig.open(certificate, private_key)` builds the server's
+configuration from PEM text: the certificate chain first, then its key.
+`tls: .Some(borrow config)` lends it to serving, which wraps every
+connection it accepts in a TLS stream and runs the handshake on the task that
+answers the connection, so one slow client never holds up the others.
+Serving only borrows the configuration, so `config.close()` frees it once
+serving returns. A configuration is linear, like a connection: a path that
+forgets to close it is refused.
+
+On the client side, `tls.ClientConfig.open(roots: test_root)` trusts
+the PEM roots it names and nothing else, as a program talking to servers of
+its own certificate authority does; `tls.ClientConfig.open()` with no roots
+trusts the operating system's, as a browser does.
+`tls.Stream.connect(client, connection, server_name: "localhost")` runs the
+handshake over the connection it takes and answers a `tls.Stream` only once
+the server's certificate checked out. A stream reads and writes like any
+byte stream, so `io.write_all` and `io.read_text` work on it unchanged, and
+`close` sends TLS's close_notify before closing the connection, so the peer
+can tell a whole answer from one cut short. In Rust, the same program would
+build a `rustls::ServerConfig` and wrap a `TcpStream` in a
+`rustls::StreamOwned`.
+
+### When a certificate is refused
+
+`connect` answers `.Err` when the certificate does not check out, with an
+`OpenFailure` that hands the connection back to be closed and a
+`tls.TlsError` saying why. Asking for `server_name: "example.test"` in the
+program above fails with a `Refusal` whose `reason` is `WrongName`, a
+certificate that has expired fails with `Expired`, and one no trusted root
+issued with `UnknownIssuer`. `verify: .Insecure_AcceptAnyCertificate`
+accepts any certificate; it is for a test against a server nothing can
+verify, never for a real connection, which the name says.
+
+A server that wants each client to present a certificate of its own, mutual
+TLS, says so with `client_auth: .Required` and the roots it trusts for
+clients, `client_roots:`; a client presents its own with
+`certificate_chain:` and `private_key:`. Both ends can offer ALPN protocols
+with `alpn: "h2,http/1.1"`, most preferred first, and
+`stream.alpn_protocol()` answers the one they agreed. A client configuration
+remembers the sessions of the servers it connected to, so a second
+connection to the same server resumes and skips most of the handshake's
+work; `stream.resumed()` says whether it did.
+
+### A handshake that never finishes
+
+A handshake waits for the other end, so a server that accepts the TCP
+connection and never answers would hold the client forever.
+`tls.Stream.connect` takes the same `deadline:` as `net.connect`, and a
+handshake still running when it passes fails as timed out:
+
+```linea
+import std.io
+import std.net
+import std.time
+import std.tls
+
+use tls.OpenFailure
+
+fn main() -> UInt8 {
+    // The listener's queue completes the TCP connection, but nothing reads
+    // the client's hello, so the server never answers it.
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let connection = net.connect(listener.local_address().unwrap()).unwrap()
+    let client = tls.ClientConfig.open().unwrap()
+    let opened = tls.Stream.connect(client, connection, server_name: "localhost", deadline: time.Deadline.after(time.Duration.from_milliseconds(100)))
+    client.close()
+    let status: UInt8 = match opened {
+        Ok(stream) => {
+            let _closed = stream.close()
+            io.println("the handshake finished").unwrap()
+            1
+        },
+        Err(OpenFailure { transport, error }) => {
+            let _closed = transport.close()
+            // A transport failure carries the `io.IoError` that ended it.
+            let timed_out = match read error {
+                Transport(reason) => reason.category == .TimedOut,
+                _ => false,
+            }
+            if timed_out {
+                io.println("the handshake timed out").unwrap()
+                0
+            } else {
+                io.println("{error}").unwrap()
+                1
+            }
+        },
+    }
+    listener.close().unwrap()
+    status
+}
+```
+
+```text
+the handshake timed out
+```
+
+One deadline made before `net.connect` and passed to both bounds the
+connection and its handshake together. `accept` takes `deadline:` too, and
+`http.serve` bounds each handshake by the request's read deadline, so a
+client that starts a handshake and stops answering is closed when its first
+request would have been.
+
+### Reading the certificate from files
+
+A real server reads its certificate and key from files, which
+`tls.ServerConfig.open_files` does:
+
+<!-- guide: check the server runs until it is stopped -->
+```linea
+import std.fs
+import std.http
+import std.io
+import std.net
+import std.tls
+
+fn hello(name: http.Path[Str], request: http.Request) -> Result[http.Response, http.Error] {
+    http.text(request, "Hello, {name.value}.\n")
+}
+
+fn routed() -> Result[http.Router[()], http.RouteError] {
+    var router: http.Router[()] = http.Router.new()
+    match &router.route(r"GET /hello/{name}", hello) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    // `open_files` reads a PEM certificate chain and its PEM private key.
+    let chain = fs.Path.from_str("localhost.pem").unwrap()
+    let key = fs.Path.from_str("localhost_key.pem").unwrap()
+    let config = tls.ServerConfig.open_files(chain, key) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    // Serving borrows the configuration, so it is closed once serving ends.
+    let served = http.listen_and_serve(net.loopback(8443), routed, tls: .Some(borrow config))
+    config.close()
+    let _ = served else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    0
+}
+```
+
+A file that cannot be read, or text that is not a certificate and its key,
+fails `open_files` before anything listens. `curl --cacert test_ca.pem
+https://localhost:8443/hello/ada` asks it a question; the
+[`https-greeting` example](../../examples/https-greeting/main.lin) is this
+server with its certificate files beside it.
+
 ## Running a handler as a CGI program
 
 `listen_and_serve` makes your program the server. CGI turns that around: a web

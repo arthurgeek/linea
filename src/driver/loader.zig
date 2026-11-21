@@ -685,7 +685,15 @@ fn loadInputs(
         gpa.free(modules);
     }
     const foreign = try l.foreignOf(declared, modules);
+    errdefer {
+        strings.free(gpa, foreign.native);
+        strings.free(gpa, foreign.link);
+    }
     const routes = try l.routes.toOwnedSlice(gpa);
+    errdefer {
+        for (routes) |route| gpa.free(route);
+        gpa.free(routes);
+    }
     const embeds = try l.takeEmbeds();
     return .{
         .modules = modules,

@@ -1,0 +1,157 @@
+import std.io
+import std.mem
+import std.testing
+
+// A Reason says why TLS refused a configuration or a connection.
+// `Expired`, `UnknownIssuer`, `WrongName` and `BadCertificate` mean this end
+// refused the peer's certificate: it is outside its validity period, no
+// trusted root issued it, it names another host, or it is otherwise invalid.
+// `PeerRefused` means the peer refused this end's certificate, or the lack
+// of one, and `NoCertificate` that a server requiring a client certificate
+// was offered none. `NoProtocol` means the two ends share no ALPN protocol.
+// `Truncated` means the transport ended without the peer's close_notify, so
+// what arrived may be cut short. `InvalidInput` means a configuration's PEM
+// text or a server name could not be used, or a configuration's connections
+// named more distinct servers than it keeps. `Protocol` is every other
+// failure of the TLS protocol itself.
+@(copyable, derive(Equatable, Debug, Display, Release))
+pub enum Reason {
+    Expired,
+    UnknownIssuer,
+    WrongName,
+    BadCertificate,
+    PeerRefused,
+    NoCertificate,
+    NoProtocol,
+    Truncated,
+    InvalidInput,
+    Protocol,
+}
+
+// A Refusal is what TLS refused, why, and rustls's result code, which the
+// rustls documentation lists (7000 and up), or a code of Linea's runtime
+// below 7000.
+@(copyable, derive(Equatable, Debug, Release))
+pub struct Refusal {
+    operation: io.IoOperation,
+    reason: Reason,
+    code: UInt64,
+}
+
+// Classify the negated code the runtime answered for `operation`.
+fn refusal(operation: io.IoOperation, answer: Int64) -> Refusal {
+    let reason: Reason = match mem._tls_reason(answer) {
+        1 => .Expired,
+        2 => .UnknownIssuer,
+        3 => .WrongName,
+        4 => .BadCertificate,
+        5 => .PeerRefused,
+        6 => .NoCertificate,
+        7 => .NoProtocol,
+        8 => .Truncated,
+        9 => .InvalidInput,
+        _ => .Protocol,
+    }
+    .{ operation, reason, code = UInt64(-answer) }
+}
+
+test "a refusal keeps the runtime's code and classifies it" {
+    // 7128 is rustls's code for a certificate that names another host.
+    let refused = refusal(.Connect, -7128)
+    testing.assert_eq(refused, Refusal { operation = .Connect, reason = .WrongName, code = 7128 }, "a wrong-name code was classified otherwise")?
+    testing.assert_eq(refusal(.Read, -7010).reason, Reason.Truncated, "rustls's unexpected end was not a truncation")?
+    testing.assert_eq(refusal(.Open, -2).reason, Reason.InvalidInput, "the runtime's invalid-input code was not invalid input")?
+}
+
+impl Display for Refusal {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let words: Str = match read self.reason {
+            Expired => "the peer's certificate is outside its validity period",
+            UnknownIssuer => "no trusted root issued the peer's certificate",
+            WrongName => "the peer's certificate names another host",
+            BadCertificate => "the peer's certificate is invalid",
+            PeerRefused => "the peer refused this end's certificate",
+            NoCertificate => "the client offered no certificate and the server requires one",
+            NoProtocol => "the two ends share no ALPN protocol",
+            Truncated => "the transport ended without the peer's close_notify",
+            InvalidInput => "the PEM text or the server name cannot be used",
+            Protocol => "the peer broke the TLS protocol",
+        }
+        "TLS {self.operation} failed: {words} (rustls code {self.code})".fmt(&w)
+    }
+}
+
+test "a refusal displays its operation, its reason and its code" {
+    let refused = refusal(.Connect, -7126)
+    var writer = testing.Recorder.of(128).unwrap()
+    let wrote = refused.fmt(&writer).is_ok()
+    let equal = writer.holds("TLS Connect failed: no trusted root issued the peer's certificate (rustls code 7126)")
+    writer.release()
+    testing.assert(wrote && equal, "a refusal displayed the wrong words")?
+}
+
+// A TlsError is how a TLS stream failed: TLS refused, the transport under it
+// failed, or the stream's buffer could not be allocated.
+@(copyable, derive(Equatable, Debug, Release))
+pub enum TlsError {
+    Tls(Refusal),
+    Transport(io.IoError),
+    Memory(mem.Oom),
+}
+
+impl Display for TlsError {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        match read self {
+            Tls(refused) => refused.fmt(&w),
+            Transport(error) => error.fmt(&w),
+            Memory(error) => error.fmt(&w),
+        }
+    }
+}
+
+test "a TLS error displays what failed" {
+    var writer = testing.Recorder.of(128).unwrap()
+    let failed: TlsError = .Transport(io.IoError { operation = .Read, category = .ConnectionReset, code = .None, progress = 0 })
+    let wrote = failed.fmt(&writer).is_ok()
+    let equal = writer.holds("Read failed (ConnectionReset) after 0 bytes")
+    writer.release()
+    testing.assert(wrote && equal, "a transport failure displayed the wrong words")?
+}
+
+impl TlsError {
+    // The I/O error this failure is reported as, by category, so code
+    // written for any byte stream handles a TLS stream's failures. A refused
+    // certificate is `PermissionDenied`, a transport cut short is
+    // `ConnectionReset`, bytes that are not TLS or a configuration that
+    // cannot be used are `InvalidInput`, no shared protocol is
+    // `Unsupported` and refused memory is `ResourceExhausted`. A transport's own failure is itself. The rustls
+    // code is not an errno, so `code` is `None`.
+    pub fn io_error(self: Self) -> io.IoError {
+        match read self {
+            Transport(error) => copy(error),
+            Memory(_) => .{ operation = .Open, category = .ResourceExhausted, code = .None, progress = 0 },
+            Tls(refused) => {
+                let category: io.IoCategory = match read refused.reason {
+                    Truncated => .ConnectionReset,
+                    InvalidInput => .InvalidInput,
+                    Protocol => .InvalidInput,
+                    NoProtocol => .Unsupported,
+                    _ => .PermissionDenied,
+                }
+                .{ operation = refused.operation, category, code = .None, progress = 0 }
+            },
+        }
+    }
+
+    test "a TLS error becomes an I/O error by category" {
+        let refused: TlsError = .Tls(refusal(.Connect, -7126))
+        let error = refused.io_error()
+        testing.assert_eq(error.category, io.IoCategory.PermissionDenied, "a refused certificate was not a permission failure")?
+        testing.assert_eq(error.operation, io.IoOperation.Connect, "the refused operation was lost")?
+        let cut: TlsError = .Tls(refusal(.Read, -7010))
+        testing.assert_eq(cut.io_error().category, io.IoCategory.ConnectionReset, "a truncated stream was not a reset")?
+        let reset = io.IoError { operation = .Read, category = .ConnectionReset, code = .Some(54), progress = 0 }
+        let carried: TlsError = .Transport(copy(reset))
+        testing.assert_eq(carried.io_error(), reset, "a transport failure was not itself")?
+    }
+}

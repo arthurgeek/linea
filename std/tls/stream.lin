@@ -1,0 +1,1013 @@
+import std.io
+import std.mem
+import std.net
+import std.task
+import std.testing
+import std.time
+
+use io.ByteWriter
+use io.Reader
+use net.Accepted
+use net.Acceptor
+use net.Connection
+
+// A Transport carries a TLS stream's ciphertext: a byte stream that reads
+// and writes and reports failures as I/O errors, such as a
+// `net.Connection`. A stream bound by both `io.Reader` and `io.ByteWriter`
+// could name neither's `Error`, since both traits declare one, so a TLS
+// stream runs over this one trait instead.
+pub trait Transport {
+    // Read up to `count` bytes into `buffer` from `offset` and answer how
+    // many, 0 at the end of the stream. A read still waiting when `deadline`
+    // passes fails as `TimedOut`; `time.never` adds no bound.
+    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64, deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries()
+
+    // Write a prefix of `bytes` and answer its length, failing as
+    // `TimedOut` when `deadline` passes first.
+    fn send(inout self: Self, bytes: mem.Slice[UInt8], deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries()
+}
+
+// A connection bounds each read and write by `deadline` as well as by its
+// own timeouts and deadlines, whichever comes first, and keeps those for the
+// operations after.
+impl Transport for Connection {
+    fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64, deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        self.read_before(&buffer, offset, count, deadline)
+    }
+
+    fn send(inout self: Self, bytes: mem.Slice[UInt8], deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        match self.write_bytes(bytes, deadline) {
+            Ok(count) => .Ok(count),
+            Err(failure) => .Err(failure.into()),
+        }
+    }
+}
+
+// The bytes of ciphertext a stream moves at once: one TLS record of 16 KiB
+// of plaintext and the 2 KiB a record may add to it.
+let flight_bytes: UInt64 = 18432
+
+// The longest protocol name ALPN allows, in bytes.
+let max_protocol_bytes: UInt64 = 255
+
+// rustls's result code for a stream that ended without close_notify.
+let truncated_code: Int64 = -7010
+
+// rustls's code for a peer that sent what TLS does not allow, negated.
+let protocol_code: Int64 = -7108
+
+// Which of a stream's buffers `lend` takes: the flight of ciphertext going
+// out, the ciphertext coming in, or the agreed protocol's name.
+let lent_flight: UInt8 = 0
+
+// rustls's code for an operation that needs a finished handshake, negated.
+let handshake_unfinished_code: Int64 = -7104
+
+let lent_incoming: UInt8 = 1
+
+let lent_protocol: UInt8 = 2
+
+// A Stream is a TLS connection over `S`, a transport it owns. Its handshake
+// runs when it is opened, with `connect` as a client or `accept` as a
+// server; reading answers the peer's plaintext and writing sends it
+// encrypted. A handshake still running when the deadline it was given
+// passes fails as `TimedOut`. It is linear, since closing it sends the close_notify that tells
+// the peer the stream ended whole: `close` sends it and closes the
+// transport.
+@(opaque, linear)
+struct Stream[S: Transport, A: Allocator = mem.SystemAllocator] {
+    session: mem.TlsSession,
+    transport: S,
+    allocator: A,
+    flight: Vec[UInt8, A],
+    incoming: Vec[UInt8, A],
+    // The ciphertext received and not yet taken by the session: `held`
+    // bytes of `incoming` from `held_start`.
+    held_start: UInt64,
+    held: UInt64,
+    protocol: Vec[UInt8, A],
+    protocol_length: UInt64,
+    operation: io.IoOperation,
+    handshaken: Bool,
+    // The moment the handshake must finish by; `time.never` once it has.
+    deadline: time.Deadline,
+}
+
+// An OpenFailure hands back the transport a stream could not be opened
+// over, with the reason, so the caller can close it.
+pub struct OpenFailure[S] {
+    transport: S,
+    error: TlsError,
+}
+
+impl[S: Transport] Stream[S, mem.SystemAllocator] {
+    // Open a client stream over `transport` to the server `server_name`
+    // names, a DNS name or an IP address the server's certificate must
+    // state, and run the handshake, which fails as `TimedOut` once
+    // `deadline` passes. The stream's buffers come from the system
+    // allocator.
+    pub fn connect(config: ClientConfig, sink transport: S, server_name: Str, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        Stream.connect_in(mem.system(), config, transport, server_name, deadline)
+    }
+
+    test "a client and a server exchange bytes over a pipe" {
+        let (served, said) = exchanged(server_config(), client_config(), "localhost", "ping")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "ping", "the server did not read the client's bytes")?
+        testing.assert_eq(said.view(), "pong", "the client did not read the server's answer")?
+    }
+
+    // Open a server stream over `transport` and run the handshake, which
+    // fails as `TimedOut` once `deadline` passes. The stream's buffers come
+    // from the system allocator.
+    pub fn accept(config: ServerConfig, sink transport: S, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        Stream.accept_in(mem.system(), config, transport, deadline)
+    }
+
+    // Open a server stream whose handshake runs at its first read or
+    // write, as `accept_later_in` does, with its buffers from the system
+    // allocator.
+    pub fn accept_later(config: ServerConfig, sink transport: S) -> Result[Self, OpenFailure[S]] where carries(transport), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        Stream.accept_later_in(mem.system(), config, transport)
+    }
+
+    test "a stream accepted later runs no handshake until it is used" {
+        let server = server_config()
+        let opened = Stream.accept_later(server, Unread { reads = 0 })
+        server.close()
+        let stream = opened.unwrap()
+        let waiting = !stream.handshaken
+        let (_transport, _sent) = stream.finish()
+        testing.assert(waiting, "a stream accepted later shook hands before it was used")?
+    }
+
+    test "a server stream reads what a client wrote before closing" {
+        let (served, said) = exchanged(server_config(), client_config(), "127.0.0.1", "a longer message")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "a longer message", "the server lost the client's bytes")?
+    }
+}
+
+impl[S: Transport, A: Allocator] Stream[S, A] {
+    // Open a client stream as `connect` does, with its buffers from
+    // `allocator`.
+    pub fn connect_in(allocator: A, config: ClientConfig, sink transport: S, server_name: Str, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        let session = config.built.open_session(server_name.as_bytes()) else |answer| {
+            return .Err(.{ transport, error = .Tls(refusal(.Connect, answer)) })
+        }
+        Stream.opened(allocator, session, transport, .Connect, deadline, eager: true)
+    }
+
+    test "a client refuses a server whose certificate names another host" {
+        let reason = refused_reason(server_config(), client_config(), "example.test")
+        testing.assert_eq(reason, .Some(Reason.WrongName), "a certificate for another host was accepted")?
+    }
+
+    test "a client refuses an expired certificate" {
+        let server = ServerConfig.open(expired_chain, expired_key).unwrap()
+        let reason = refused_reason(server, client_config(), "localhost")
+        testing.assert_eq(reason, .Some(Reason.Expired), "an expired certificate was accepted")?
+    }
+
+    test "a client refuses a certificate no trusted root issued" {
+        let server = ServerConfig.open(stranger_chain, stranger_key).unwrap()
+        let reason = refused_reason(server, client_config(), "localhost")
+        testing.assert_eq(reason, .Some(Reason.UnknownIssuer), "a certificate from an unknown root was accepted")?
+    }
+
+    test "the system's roots alone do not trust the test root" {
+        let reason = refused_reason(server_config(), ClientConfig.open().unwrap(), "localhost")
+        testing.assert(match read reason { Some(UnknownIssuer) => true, Some(BadCertificate) => true, _ => false }, "the system's roots trusted the test root")?
+    }
+
+    test "a client trusts a server whose root it names among its roots" {
+        let server = ServerConfig.open(stranger_chain, stranger_key).unwrap()
+        let client = ClientConfig.open(roots: other_ca).unwrap()
+        let (served, said) = exchanged(server, client, "localhost", "trusted")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "trusted", "a server under an extra root was refused")?
+    }
+
+    test "a client given roots trusts those roots alone" {
+        // The test root issued the server's certificate; the client names
+        // only the other root, so the system's roots and the test root are
+        // both out of reach.
+        let reason = refused_reason(server_config(), ClientConfig.open(roots: other_ca).unwrap(), "localhost")
+        testing.assert_eq(reason, .Some(Reason.UnknownIssuer), "a client given roots trusted a root it did not name")?
+    }
+
+    test "a client accepting any certificate connects to an unknown server" {
+        let server = ServerConfig.open(stranger_chain, stranger_key).unwrap()
+        let client = ClientConfig.open(verify: .Insecure_AcceptAnyCertificate).unwrap()
+        let (served, said) = exchanged(server, client, "localhost", "hi")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "hi", "an unverified connection lost the client's bytes")?
+    }
+
+    test "a refused name is refused before any byte is sent" {
+        let client = client_config()
+        let opened = Stream.connect_in(mem.system(), client, Unread { reads = 0 }, "not a name")
+        client.close()
+        let reason: Option[Reason] = match opened {
+            Ok(stream) => {
+                let _closed = stream.close()
+                .None
+            },
+            Err(OpenFailure { transport: _, error: Tls(refused) }) => .Some(refused.reason),
+            Err(_) => .None,
+        }
+        testing.assert_eq(reason, .Some(Reason.InvalidInput), "a server name with a space was used")?
+    }
+
+    test "a connect whose deadline has passed times out before shaking hands" {
+        let client = client_config()
+        let opened = Stream.connect_in(mem.system(), client, Unread { reads = 0 }, "localhost", deadline: time.Deadline.after(time.Duration.from_nanoseconds(0)))
+        client.close()
+        testing.assert(timed_out(opened), "a handshake past its deadline did not time out")?
+    }
+
+    test "a handshake the server never answers ends at its deadline" {
+        // The listener's backlog completes the TCP connection, and nothing
+        // ever answers the client's hello.
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let connection = net.connect(listener.local_address().unwrap()).unwrap()
+        let client = client_config()
+        let opened = Stream.connect(client, connection, "localhost", deadline: time.Deadline.after(time.Duration.from_milliseconds(50)))
+        client.close()
+        let ended = timed_out(opened)
+        listener.close().unwrap()
+        testing.assert(ended, "a handshake nobody answered outlived its deadline")?
+    }
+
+    test "an accept whose deadline has passed times out before shaking hands" {
+        let server = server_config()
+        let opened = Stream.accept_in(mem.system(), server, Unread { reads = 0 }, deadline: time.Deadline.after(time.Duration.from_nanoseconds(0)))
+        server.close()
+        testing.assert(timed_out(opened), "an accept past its deadline did not time out")?
+    }
+
+    test "a stream accepted later shakes hands by the deadline it is given" {
+        let server = server_config()
+        let opened = Stream.accept_later(server, Unread { reads = 0 })
+        server.close()
+        var stream = opened.unwrap()
+        &stream.set_handshake_deadline(time.Deadline.after(time.Duration.from_nanoseconds(0)))
+        defer var buffer = mem.system().acquire(8).unwrap()
+        let answered = &stream.read_plain(&buffer, offset: 0, count: 8)
+        let (_transport, _sent) = stream.finish()
+        let expired = match answered {
+            Err(Transport(error)) => error.category == .TimedOut,
+            _ => false,
+        }
+        testing.assert(expired, "a handshake run later ignored its deadline")?
+    }
+
+    // Open a server stream as `accept` does, with its buffers from
+    // `allocator`.
+    pub fn accept_in(allocator: A, config: ServerConfig, sink transport: S, deadline: time.Deadline = time.never) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        let session = config.built.open_session("".as_bytes()) else |answer| {
+            return .Err(.{ transport, error = .Tls(refusal(.Accept, answer)) })
+        }
+        Stream.opened(allocator, session, transport, .Accept, deadline, eager: true)
+    }
+
+    // Open a server stream over `transport` whose handshake runs at its first
+    // read or write, with its buffers from `allocator`, so a program can
+    // accept on one task and leave the handshake, which waits for the
+    // client, to the task that serves the connection. A handshake that fails
+    // fails that read or write; `set_handshake_deadline` bounds it.
+    pub fn accept_later_in(allocator: A, config: ServerConfig, sink transport: S) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        let session = config.built.open_session("".as_bytes()) else |answer| {
+            return .Err(.{ transport, error = .Tls(refusal(.Accept, answer)) })
+        }
+        Stream.opened(allocator, session, transport, .Accept, time.never, eager: false)
+    }
+
+    test "a stream accepted later shakes hands at its first read" {
+        let (served, said) = over_pipe(
+            sink [] |sink end: PipeEnd| -> String {
+                let server = server_config()
+                let opened = Stream.accept_later_in(mem.system(), server, end)
+                server.close()
+                var stream = opened.unwrap()
+                let heard = read_all_plain(&stream).unwrap()
+                stream.close().unwrap()
+                heard
+            },
+            sink [] |sink end: PipeEnd| -> String {
+                let client = client_config()
+                let opened = Stream.connect(client, end, "localhost")
+                client.close()
+                var stream = opened.unwrap()
+                write_all_plain(&stream, "later".as_bytes()).unwrap()
+                stream.close().unwrap()
+                "".to_owned().unwrap()
+            },
+        )
+        defer served.release()
+        said.release()
+        testing.assert_eq(served.view(), "later", "a stream accepted later lost the client's bytes")?
+    }
+
+    test "a server requiring a client certificate accepts a client presenting one" {
+        let server = ServerConfig.open(server_chain, server_key, client_auth: .Required, client_roots: test_ca).unwrap()
+        let client = ClientConfig.open(roots: test_ca, certificate_chain: client_chain, private_key: client_key).unwrap()
+        let (served, said) = exchanged(server, client, "localhost", "mutual")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "mutual", "a client with a certificate was not served")?
+    }
+
+    test "a server requiring a client certificate refuses a client without one" {
+        let server = ServerConfig.open(server_chain, server_key, client_auth: .Required, client_roots: test_ca).unwrap()
+        let (server_reason, _client_failed) = refused_both(server, client_config())
+        testing.assert_eq(server_reason, .Some(Reason.NoCertificate), "a client without a certificate was served")?
+    }
+
+    test "a server requiring a client certificate refuses one no trusted root issued" {
+        let server = ServerConfig.open(server_chain, server_key, client_auth: .Required, client_roots: test_ca).unwrap()
+        let client = ClientConfig.open(roots: test_ca, certificate_chain: outsider_chain, private_key: outsider_key).unwrap()
+        let (server_reason, _client_failed) = refused_both(server, client)
+        testing.assert_eq(server_reason, .Some(Reason.UnknownIssuer), "a client certificate from an unknown root was accepted")?
+    }
+
+    test "an optional client certificate lets a client without one connect" {
+        let server = ServerConfig.open(server_chain, server_key, client_auth: .Optional, client_roots: test_ca).unwrap()
+        let (served, said) = exchanged(server, client_config(), "localhost", "anonymous")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "anonymous", "a client without a certificate was refused")?
+    }
+
+    // Wrap a session over `transport` and run its handshake.
+    fn opened(allocator: A, sink session: mem.TlsSession, sink transport: S, operation: io.IoOperation, deadline: time.Deadline, eager: Bool) -> Result[Self, OpenFailure[S]] where carries(allocator, transport), carries(.Ok: allocator), carries(.Ok.transport: transport), carries(.Err.transport: transport) {
+        let flight = allocator.acquire(flight_bytes) else |_| {
+            session.close()
+            return .Err(.{ transport, error = .Memory(.Exhausted) })
+        }
+        let incoming = allocator.acquire(flight_bytes) else |_| {
+            flight.release()
+            session.close()
+            return .Err(.{ transport, error = .Memory(.Exhausted) })
+        }
+        let protocol = allocator.acquire(max_protocol_bytes) else |_| {
+            flight.release()
+            incoming.release()
+            session.close()
+            return .Err(.{ transport, error = .Memory(.Exhausted) })
+        }
+        var stream: Self = .{ session, transport, allocator = copy(allocator), flight = mem.vector_from_buffer(flight, flight_bytes), incoming = mem.vector_from_buffer(incoming, flight_bytes), held_start = 0, held = 0, protocol = mem.vector_from_buffer(protocol, max_protocol_bytes), protocol_length = 0, operation, handshaken = false, deadline = copy(deadline) }
+        if !eager {
+            return .Ok(stream)
+        }
+        match &stream.shake_hands() {
+            Ok(_) => {},
+            Err(error) => {
+                let Stream { session: ended, transport: carried, allocator: _, flight: used, incoming: received, held_start: _, held: _, protocol: named, protocol_length: _, operation: _, handshaken: _, deadline: _ } = stream
+                ended.close()
+                used.release()
+                received.release()
+                named.release()
+                return .Err(.{ transport = carried, error })
+            },
+        }
+        .Ok(stream)
+    }
+
+    // Run the handshake unless it has run, and keep the protocol it agreed.
+    // A deadline already passed fails before any byte is sent.
+    fn shake_hands(inout self: Self) -> Result[(), TlsError] {
+        if self.handshaken {
+            return .Ok(())
+        }
+        let operation = self.operation
+        if self.deadline.expired() {
+            return .Err(.Transport(.{ operation, category = .TimedOut, code = .None, progress = 0 }))
+        }
+        &self.handshake(operation)?
+        self.handshaken = true
+        self.deadline = time.never
+        var named = &self.lend(lent_protocol)
+        let agreed = self.session.alpn(&named)
+        &self.restore(lent_protocol, named)
+        self.protocol_length = UInt64(agreed)
+        .Ok(())
+    }
+
+    // The ALPN protocol the handshake agreed on, or none when either end
+    // offered none or the server picked none.
+    pub fn alpn_protocol(self: Self) -> Option[Str] where borrows(self) {
+        if self.protocol_length == 0 {
+            return .None
+        }
+        match Str.from_bytes(self.protocol.as_slice().subspan(start: 0, count: self.protocol_length).unwrap()) {
+            Ok(name) => .Some(name),
+            Err(_) => .None,
+        }
+    }
+
+    test "the client and the server agree on the protocol both prefer" {
+        let server = ServerConfig.open(server_chain, server_key, alpn: "http/1.1,h2").unwrap()
+        let client = ClientConfig.open(roots: test_ca, alpn: "h2,http/1.1").unwrap()
+        let (served, said) = protocols(server, client)
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "http/1.1", "the server did not pick its own preference")?
+        testing.assert_eq(said.view(), "http/1.1", "the client saw another protocol")?
+    }
+
+    test "no protocol is agreed when the client offers none" {
+        let server = ServerConfig.open(server_chain, server_key, alpn: "h2").unwrap()
+        let (served, said) = protocols(server, client_config())
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "", "a protocol was agreed though the client offered none")?
+        testing.assert_eq(said.view(), "", "the client saw a protocol it never offered")?
+    }
+
+    test "a server refuses a client that shares none of its protocols" {
+        let server = ServerConfig.open(server_chain, server_key, alpn: "h2").unwrap()
+        let client = ClientConfig.open(roots: test_ca, alpn: "spdy/3").unwrap()
+        let (server_reason, _client_failed) = refused_both(server, client)
+        testing.assert_eq(server_reason, .Some(Reason.NoProtocol), "a client sharing no protocol was served")?
+    }
+
+    // Bound a handshake that has not yet run, as one accepted later runs at
+    // its first read or write, by `deadline`: it fails as `TimedOut` once
+    // the deadline passes. A stream that has shaken hands is unchanged.
+    pub fn set_handshake_deadline(inout self: Self, deadline: time.Deadline) {
+        if !self.handshaken {
+            self.deadline = copy(deadline)
+        }
+    }
+
+    // Whether the handshake resumed a session this client's configuration
+    // kept from an earlier connection to the same server, rather than
+    // running in full.
+    pub fn resumed(self: Self) -> Bool {
+        mem.tls_holds(self.session.state(), mem.tls_resumed)
+    }
+
+    test "a second connection with one configuration resumes the first session" {
+        let (first, second) = resumed_twice()
+        testing.assert(!first, "a first connection claimed to resume")?
+        testing.assert(second, "a second connection with the same configuration did not resume")?
+    }
+
+    // Take the buffer `which` names out of its vector to hand to the session
+    // or the transport, leaving an empty vector until `restore` puts it
+    // back.
+    fn lend(inout self: Self, which: UInt8) -> mem.Buffer[A] {
+        let empty: Vec[UInt8, A] = Vec.new_in(self.allocator)
+        let bytes = if which == lent_protocol {
+            mem.exchange(&self.protocol, empty)
+        } else if which == lent_incoming {
+            mem.exchange(&self.incoming, empty)
+        } else {
+            mem.exchange(&self.flight, empty)
+        }
+        mem.vector_into_buffer(bytes).unwrap()
+    }
+
+    // Put back a buffer `lend` took.
+    fn restore(inout self: Self, which: UInt8, sink buffer: mem.Buffer[A]) where retains(self: buffer) {
+        let empty = if which == lent_protocol {
+            mem.exchange(&self.protocol, mem.vector_from_buffer(buffer, max_protocol_bytes))
+        } else if which == lent_incoming {
+            mem.exchange(&self.incoming, mem.vector_from_buffer(buffer, flight_bytes))
+        } else {
+            mem.exchange(&self.flight, mem.vector_from_buffer(buffer, flight_bytes))
+        }
+        empty.release()
+    }
+
+    // Send the ciphertext the session holds until it holds none.
+    fn transmit(inout self: Self) -> Result[(), TlsError] {
+        var flight = &self.lend(lent_flight)
+        let sent = transmit_through(self.session, &self.transport, &flight, self.deadline)
+        &self.restore(lent_flight, flight)
+        sent
+    }
+
+    // Hand the session ciphertext: what it left of the last flight, or else
+    // a new flight read from the transport. Answers false at the
+    // transport's end. The session may take part of a flight, when its
+    // plaintext buffer fills, and the rest waits for the next take. A flight
+    // the session refuses ends with the session's alert sent, when the
+    // transport still takes it, and the refusal.
+    fn take_flight(inout self: Self, operation: io.IoOperation) -> Result[Bool, TlsError] {
+        var incoming = &self.lend(lent_incoming)
+        if self.held == 0 {
+            let received = &self.transport.receive(&incoming, offset: 0, count: flight_bytes, deadline: self.deadline)
+            let count = match received {
+                Ok(count) => count,
+                Err(error) => {
+                    &self.restore(lent_incoming, incoming)
+                    return .Err(.Transport(error))
+                },
+            }
+            if count == 0 {
+                &self.restore(lent_incoming, incoming)
+                return .Ok(false)
+            }
+            self.held_start = 0
+            self.held = count
+        }
+        let taken = self.session.receive(incoming.as_slice().subspan(start: self.held_start, count: self.held).unwrap())
+        &self.restore(lent_incoming, incoming)
+        if taken < 0 {
+            self.held = 0
+            let _alerted = &self.transmit()
+            return .Err(.Tls(refusal(operation, taken)))
+        }
+        // A session holding no plaintext takes at least one record, so a
+        // take of nothing would never end: it is a session that refuses
+        // what it was sent.
+        if taken == 0 {
+            self.held = 0
+            return .Err(.Tls(refusal(operation, protocol_code)))
+        }
+        self.held_start += UInt64(taken)
+        self.held -= UInt64(taken)
+        .Ok(true)
+    }
+
+    // Send and receive flights until the handshake is done.
+    fn handshake(inout self: Self, operation: io.IoOperation) -> Result[(), TlsError] {
+        loop {
+            &self.transmit()?
+            if !mem.tls_holds(self.session.state(), mem.tls_handshaking) {
+                return .Ok(())
+            }
+            if !&self.take_flight(operation)? {
+                return .Err(.Tls(refusal(operation, truncated_code)))
+            }
+        }
+    }
+
+    // Read up to `count` bytes of the peer's plaintext into `buffer` from
+    // `offset` and answer how many, 0 once the peer ended the stream with
+    // close_notify. A transport that ends without close_notify fails with
+    // `Reason.Truncated`, since what arrived may be cut short.
+    pub fn read_plain[B: Allocator](inout self: Self, inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64) -> Result[UInt64, TlsError] {
+        if count == 0 {
+            return .Ok(0)
+        }
+        &self.shake_hands()?
+        loop {
+            let answer = self.session.decrypted(&buffer, offset, count)
+            if answer >= 0 {
+                return .Ok(UInt64(answer))
+            }
+            if answer != mem.tls_empty {
+                return .Err(.Tls(refusal(.Read, answer)))
+            }
+            &self.transmit()?
+            if !&self.take_flight(.Read)? {
+                return .Err(.Tls(refusal(.Read, truncated_code)))
+            }
+        }
+    }
+
+    test "bytes after the peer's close_notify are ignored" {
+        let (served, said) = over_pipe(
+            sink [] |sink end: PipeEnd| -> String {
+                let server = server_config()
+                let opened = Stream.accept(server, end)
+                server.close()
+                var stream = opened.unwrap()
+                // Waiting lets the client's record, its close_notify and what
+                // follows arrive together, in one flight.
+                time.sleep(time.Duration.from_milliseconds(200))
+                let heard = read_all_plain(&stream).unwrap()
+                stream.close().unwrap()
+                heard
+            },
+            sink [] |sink end: PipeEnd| -> String {
+                let client = client_config()
+                let opened = Stream.connect(client, end, "localhost")
+                client.close()
+                var stream = opened.unwrap()
+                write_all_plain(&stream, "last words".as_bytes()).unwrap()
+                let (transport, _sent) = stream.finish()
+                var after = transport
+                // Six thousand bytes of what looks like application data
+                // follow the close_notify.
+                defer let junk = Vec.filled(count: 6000, value: UInt8(23)).unwrap()
+                let _junk_sent = &after.send(junk.as_slice(), deadline: time.never).unwrap()
+                after.close().unwrap()
+                "".to_owned().unwrap()
+            },
+        )
+        defer served.release()
+        said.release()
+        testing.assert_eq(served.view(), "last words", "the bytes before close_notify were lost")?
+    }
+
+    test "a stream cut short without close_notify is truncated" {
+        testing.assert_eq(truncated_read(), .Some(Reason.Truncated), "a stream cut short read as a whole one")?
+    }
+
+    // Encrypt a prefix of `bytes`, send it, and answer its length.
+    pub fn write_plain(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, TlsError] {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        &self.shake_hands()?
+        let accepted = self.session.write(bytes)
+        if accepted < 0 {
+            return .Err(.Tls(refusal(.Write, accepted)))
+        }
+        &self.transmit()?
+        .Ok(UInt64(accepted))
+    }
+
+    test "a write larger than one record arrives whole" {
+        // Forty thousand bytes span three TLS records.
+        defer let long = Vec.filled(count: 40000, value: UInt8(120)).unwrap()
+        let text = Str.from_bytes(long.as_slice()).unwrap()
+        let (served, said) = exchanged(server_config(), client_config(), "localhost", text)
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.length(), UInt64(40000), "a long write lost bytes")?
+    }
+
+    // Send close_notify, telling the peer this end writes nothing more,
+    // while reads stay open for what the peer still sends.
+    pub fn notify_close(inout self: Self) -> Result[(), TlsError] {
+        self.session.close_notify()
+        &self.transmit()
+    }
+
+    test "a stream that notified its close still reads the peer's answer" {
+        let (served, said) = exchanged(server_config(), client_config(), "localhost", "half")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(said.view(), "pong", "the client stopped reading after its close_notify")?
+    }
+
+    // Free the session without sending close_notify and hand back the
+    // transport, still open, as an end that fails would leave it. The peer
+    // reads the stream as cut short.
+    pub fn abandon(sink self: Self) -> S where carries(self), carries(self.transport) {
+        let Stream { session, transport, allocator: _, flight, incoming, held_start: _, held: _, protocol, protocol_length: _, operation: _, handshaken: _, deadline: _ } = self
+        session.close()
+        flight.release()
+        incoming.release()
+        protocol.release()
+        transport
+    }
+
+    test "an abandoned stream is truncated at its peer" {
+        testing.assert_eq(truncated_read(), .Some(Reason.Truncated), "an abandoned stream read as a whole one")?
+    }
+
+    // Send close_notify and hand back the transport, still open, with how
+    // sending ended.
+    pub fn finish(sink self: Self) -> (S, Result[(), TlsError]) where carries(self), carries(self.transport) {
+        var ending = self
+        ending.session.close_notify()
+        let sent = &ending.transmit()
+        let Stream { session, transport, allocator: _, flight, incoming, held_start: _, held: _, protocol, protocol_length: _, operation: _, handshaken: _, deadline: _ } = ending
+        session.close()
+        flight.release()
+        incoming.release()
+        protocol.release()
+        (transport, sent)
+    }
+
+    test "a finished stream hands back its transport after close_notify" {
+        let (served, said) = over_pipe(
+            sink [] |sink end: PipeEnd| -> String {
+                let server = server_config()
+                let opened = Stream.accept(server, end)
+                server.close()
+                var stream = opened.unwrap()
+                let heard = read_all_plain(&stream).unwrap()
+                stream.close().unwrap()
+                heard
+            },
+            sink [] |sink end: PipeEnd| -> String {
+                let client = client_config()
+                let opened = Stream.connect(client, end, "localhost")
+                client.close()
+                var stream = opened.unwrap()
+                write_all_plain(&stream, "done".as_bytes()).unwrap()
+                let (transport, sent) = stream.finish()
+                transport.close().unwrap()
+                let finished = if sent.is_ok() {
+                    "finished"
+                } else {
+                    "failed"
+                }
+                finished.to_owned().unwrap()
+            },
+        )
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "done", "the server read past the client's close_notify")?
+        testing.assert_eq(said.view(), "finished", "sending close_notify failed")?
+    }
+}
+
+// Send the ciphertext `session` holds over `transport` through `flight`
+// until the session holds none.
+fn transmit_through[S: Transport, A: Allocator](session: mem.TlsSession, inout transport: S, inout flight: mem.Buffer[A], deadline: time.Deadline) -> Result[(), TlsError] {
+    loop {
+        let pending = session.transmit(&flight)
+        if pending <= 0 {
+            return .Ok(())
+        }
+        var sent: UInt64 = 0
+        while sent < UInt64(pending) {
+            let rest = flight.as_slice().subspan(start: sent, count: UInt64(pending) - sent).unwrap()
+            let count = &transport.send(rest, deadline) else |error| {
+                return .Err(.Transport(error))
+            }
+            if count == 0 {
+                return .Err(.Transport(.{ operation = .Write, category = .NoProgress, code = .None, progress = sent }))
+            }
+            sent += count
+        }
+    }
+}
+
+impl[S: Transport, A: Allocator] Stream[S, A] {
+    // Observe the transport, such as to read a connection's peer address.
+    pub fn inspect_transport[T, F: fn(transport: S) -> T where borrows(transport)](self: Self, inspect: F) -> T where borrows(self), carries(inspect) {
+        inspect(self.transport)
+    }
+
+    test "a stream lends its transport to be observed" {
+        let server = server_config()
+        let opened = Stream.accept_later(server, Unread { reads = 7 })
+        server.close()
+        let stream = opened.unwrap()
+        let reads = stream.inspect_transport(|transport: Unread| transport.reads)
+        let (_transport, _sent) = stream.finish()
+        testing.assert_eq(reads, UInt64(7), "the transport was not lent to be observed")?
+    }
+
+    // Configure the transport, such as a connection's timeouts, while the
+    // stream keeps it.
+    pub fn update_transport[F: fn(inout transport: S)](inout self: Self, update: F) {
+        update(&self.transport)
+    }
+
+    test "a stream lends its transport to be configured" {
+        let client = ClientConfig.open(verify: .Insecure_AcceptAnyCertificate).unwrap()
+        let server = server_config()
+        let opened = Stream.accept_later_in(mem.system(), server, Unread { reads = 0 })
+        server.close()
+        client.close()
+        var stream = opened.unwrap()
+        &stream.update_transport(|inout transport: Unread| transport.reads += 1)
+        let reads = stream.inspect_transport(|transport: Unread| transport.reads)
+        let (_transport, _sent) = stream.finish()
+        testing.assert_eq(reads, UInt64(1), "the transport was not lent to be configured")?
+    }
+}
+
+// A stream is readable at once while it holds plaintext, the peer's
+// close_notify or a failure; otherwise it waits for its transport.
+impl[S: Transport + io.Pollable, A: Allocator] io.Pollable for Stream[S, A] {
+    fn readiness(self: Self, interest: io.Interest) -> io.Readiness[Self] where borrows(self) {
+        let held = match interest {
+            Readable => self.held > 0 || self.handshaken && self.session.pending(),
+            Writable => false,
+        }
+        if held {
+            return .Now
+        }
+        self.transport.readiness(interest).within(self)
+    }
+}
+
+// A StreamWriter borrows a TLS stream over a connection for output, as
+// `net.ConnectionWriter` borrows a connection: it cannot close the stream,
+// and writes encrypted through the stream's session while the stream is
+// kept elsewhere, such as in a buffered reader. Each write takes a buffer of
+// `flight_bytes` from the system allocator for its ciphertext.
+@(opaque, copyable, derive(Release))
+struct StreamWriter[A: Allocator] {
+    owner: borrow Stream[Connection, A],
+}
+
+impl[A: Allocator] Stream[Connection, A] {
+    // Lend output access while the stream keeps its connection.
+    pub fn writer(self: Self) -> StreamWriter[A] where borrows(self) {
+        .{ owner = borrow self }
+    }
+
+    test "a stream's writer sends encrypted bytes over the connection" {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let bound = listener.local_address().unwrap()
+        let client = task.start(
+            sink [bound] |sink me: Chan[Send[String, End]]| {
+                let config = client_config()
+                let opened = Stream.connect(config, net.connect(bound).unwrap(), "localhost")
+                config.close()
+                var stream = opened.unwrap()
+                let heard = read_all_plain(&stream).unwrap()
+                stream.close().unwrap()
+                me.send(heard).close()
+            },
+        ).unwrap()
+        var accepting = listener
+        let Accepted { connection, address: _ } = &accepting.accept().unwrap()
+        accepting.close().unwrap()
+        let server = server_config()
+        let opened = Stream.accept(server, connection)
+        server.close()
+        let stream = opened.unwrap()
+        var writer = stream.writer()
+        let _sent = io.write_all(&writer, "through the writer".as_bytes()).unwrap()
+        stream.close().unwrap()
+        let (heard, done) = client.recv()
+        done.close()
+        defer heard.release()
+        testing.assert_eq(heard.view(), "through the writer", "the writer's bytes did not arrive")?
+    }
+
+    test "a stream's writer refuses to write before the handshake" {
+        let listener = net.listen(net.loopback(0)).unwrap()
+        let client = net.connect(listener.local_address().unwrap()).unwrap()
+        var accepting = listener
+        let Accepted { connection, address: _ } = &accepting.accept().unwrap()
+        accepting.close().unwrap()
+        let server = server_config()
+        let opened = Stream.accept_later(server, connection)
+        server.close()
+        let stream = opened.unwrap()
+        var writer = stream.writer()
+        let refused = match &writer.write_some("too early".as_bytes()) {
+            Ok(_) => false,
+            Err(_) => true,
+        }
+        stream.abandon().close().unwrap()
+        client.close().unwrap()
+        testing.assert(refused, "a writer sent bytes before the handshake verified the peer")?
+    }
+
+    // Encrypt a prefix of `bytes` and send its ciphertext through the
+    // connection's writer.
+    fn send_through(self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        if bytes.length() == 0 {
+            return .Ok(0)
+        }
+        // A writer cannot run the handshake, which reads, so it writes only
+        // once the stream has run it: nothing goes out before the peer, and
+        // a client certificate a server requires, is verified.
+        if !self.handshaken {
+            let error: TlsError = .Tls(refusal(.Write, handshake_unfinished_code))
+            return .Err(.{ kind = .Underlying, reason = .Some(error.io_error()), written = 0 })
+        }
+        let accepted = self.session.write(bytes)
+        if accepted < 0 {
+            let error: TlsError = .Tls(refusal(.Write, accepted))
+            return .Err(.{ kind = .Underlying, reason = .Some(error.io_error()), written = 0 })
+        }
+        defer var flight = mem.system().acquire(flight_bytes) else |_| {
+            let error: TlsError = .Memory(.Exhausted)
+            return .Err(.{ kind = .Underlying, reason = .Some(error.io_error()), written = 0 })
+        }
+        var output = self.transport.writer()
+        loop {
+            let pending = self.session.transmit(&flight)
+            if pending <= 0 {
+                break
+            }
+            match io.write_all(&output, flight.as_slice().subspan(start: 0, count: UInt64(pending)).unwrap()) {
+                Ok(_) => {},
+                Err(failure) => {
+                    let error: io.IoError = failure.into()
+                    return .Err(.{ kind = .Underlying, reason = .Some(error), written = 0 })
+                },
+            }
+        }
+        .Ok(UInt64(accepted))
+    }
+}
+
+impl[A: Allocator] io.ByteWriter for StreamWriter[A] {
+    type Error = io.IoError
+
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        self.owner.send_through(bytes)
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        .Ok(0)
+    }
+}
+
+impl[S: Transport + io.Close, A: Allocator] Stream[S, A] where S.CloseError: Into[io.IoError] {
+    // Send close_notify and close the transport. The first failure is
+    // reported, and the transport is closed either way.
+    pub fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        let (transport, sent) = self.finish()
+        let closed = transport.close()
+        match sent {
+            Err(error) => {
+                let _closed = closed
+                .Err(error.io_error())
+            },
+            Ok(_) => match closed {
+                Ok(_) => .Ok(()),
+                Err(error) => .Err(error.into()),
+            },
+        }
+    }
+
+    test "closing a stream sends close_notify to the peer" {
+        let (served, said) = exchanged(server_config(), client_config(), "localhost", "")
+        defer served.release()
+        defer said.release()
+        testing.assert_eq(served.view(), "", "the server read bytes the client never sent")?
+        testing.assert_eq(said.view(), "pong", "the client did not read the server's answer before its close")?
+    }
+}
+
+impl[S: Transport + io.Close, A: Allocator] io.Close for Stream[S, A] where S.CloseError: Into[io.IoError] {
+    type CloseError = io.IoError
+
+    fn close(sink self: Self) -> Result[(), io.IoError] where carries() {
+        Stream.close(self)
+    }
+}
+
+impl[S: Transport + io.Close, A: Allocator] Release for Stream[S, A] where S.CloseError: Into[io.IoError] {
+    fn release(sink self: Self) {
+        let _closed = self.close()
+    }
+}
+
+// A stream reads and writes as any byte stream does, so a buffered reader,
+// `io.write_all` or an HTTP exchange runs over it. A TLS failure is reported
+// as the I/O error `From[TlsError]` gives.
+impl[S: Transport, A: Allocator] io.Reader for Stream[S, A] {
+    type Error = io.IoError
+
+    fn read_some[B: Allocator](inout self: Self, inout buffer: mem.Buffer[B], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        match &self.read_plain(&buffer, offset, count) {
+            Ok(count) => .Ok(count),
+            Err(error) => .Err(error.io_error()),
+        }
+    }
+}
+
+impl[S: Transport, A: Allocator] io.ByteWriter for Stream[S, A] {
+    type Error = io.IoError
+
+    // A write is sent before it answers, so nothing waits.
+    fn pending_bytes(_self: Self) -> UInt64 {
+        0
+    }
+
+    fn write_some(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        match &self.write_plain(bytes) {
+            Ok(count) => .Ok(count),
+            Err(error) => .Err(.{ kind = .Underlying, reason = .Some(error.io_error()), written = 0 }),
+        }
+    }
+
+    fn flush(inout _self: Self) -> Result[UInt64, io.WriteFailure[io.IoError]] where carries() {
+        .Ok(0)
+    }
+}
+
+// A transport whose input never arrives, for a stream refused before any
+// byte moves, counting how often it was configured.
+struct Unread {
+    reads: UInt64,
+}
+
+impl Transport for Unread {
+    fn receive[A: Allocator](inout _self: Self, inout _buffer: mem.Buffer[A], _offset: UInt64, _count: UInt64, _deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        .Ok(0)
+    }
+
+    fn send(inout _self: Self, bytes: mem.Slice[UInt8], _deadline: time.Deadline) -> Result[UInt64, io.IoError] where carries() {
+        .Ok(bytes.length())
+    }
+}
+
+impl io.Close for Unread {
+    type CloseError = io.IoError
+
+    fn close(sink _self: Self) -> Result[(), io.IoError] where carries() {
+        .Ok(())
+    }
+}
+
+impl Release for Unread {
+    fn release(sink _self: Self) {}
+}

@@ -1,0 +1,56 @@
+import std.fs
+import std.testing
+
+// The certificates and keys the module's tests use, made once with OpenSSL
+// as ECDSA P-256 keys. `ca.pem` is the test root, valid from 2026-01-01 to
+// 2125-12-31; its key was deleted, so nothing more can be signed with it.
+// `server.pem` names `localhost` and `127.0.0.1`, `client.pem` is a client
+// certificate, and `expired.pem` is a server certificate for `localhost`
+// valid only through the year 2000. `other_ca.pem` is a second root, which
+// issued `stranger.pem`, a server certificate for `localhost`, and
+// `outsider.pem`, a client certificate.
+let test_ca: Str = embed("testdata/ca.pem")
+
+let other_ca: Str = embed("testdata/other_ca.pem")
+
+let server_chain: Str = embed("testdata/server.pem")
+
+let server_key: Str = embed("testdata/server_key.pem")
+
+let client_chain: Str = embed("testdata/client.pem")
+
+let client_key: Str = embed("testdata/client_key.pem")
+
+let expired_chain: Str = embed("testdata/expired.pem")
+
+let expired_key: Str = embed("testdata/expired_key.pem")
+
+let stranger_chain: Str = embed("testdata/stranger.pem")
+
+let stranger_key: Str = embed("testdata/stranger_key.pem")
+
+let outsider_chain: Str = embed("testdata/outsider.pem")
+
+let outsider_key: Str = embed("testdata/outsider_key.pem")
+
+// Write `text` to a new scratch file and answer the file's path.
+fn scratch_pem(text: Str) -> String {
+    let owned = fs.scratch_path()
+    let _written = fs.write_file(fs.Path.from_str(owned.view()).unwrap(), text.as_bytes(), policy: .CreateNew).unwrap()
+    owned
+}
+
+// Remove a scratch file `scratch_pem` wrote.
+fn remove_pem(sink path: String) {
+    fs.remove_scratch(fs.Path.from_str(path.view()).unwrap())
+    path.release()
+}
+
+test "a scratch PEM file holds its text" {
+    let path = scratch_pem(test_ca)
+    let text = fs.read_text(fs.Path.from_str(path.view()).unwrap(), max_bytes: 8192).unwrap()
+    remove_pem(path)
+    let same = text.view() == test_ca
+    text.release()
+    testing.assert(same, "a scratch PEM file changed its text")?
+}

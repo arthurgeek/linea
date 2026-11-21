@@ -377,12 +377,14 @@ pub const RawAccesses = struct {
 
     /// The free functions of `mem` that `runtime_byte_callers` holds.
     const runtime_byte_functions = [_][]const u8{
-        "read_fd",            "write_slice_fd",     "read_fd_at",     "write_slice_fd_at",
-        "read_socket",        "write_slice_socket", "_random_bytes",  "_open_parent_fd",
-        "_open_at_fd",        "_mode_at_fd",        "_publish_at_fd", "_unlink_at_fd",
-        "_make_dir_at",       "_remove_dir_at",     "_symlink_at",    "_open_dir",
-        "_open_dir_at",       "_read_dir",          "_reopen_dir",    "parse_float64_bits",
-        "parse_float32_bits", "_spawn",             "read_pipe",      "write_slice_pipe",
+        "read_fd",            "write_slice_fd",     "read_fd_at",       "write_slice_fd_at",
+        "read_socket",        "write_slice_socket", "_random_bytes",    "_open_parent_fd",
+        "_open_at_fd",        "_mode_at_fd",        "_publish_at_fd",   "_unlink_at_fd",
+        "_make_dir_at",       "_remove_dir_at",     "_symlink_at",      "_open_dir",
+        "_open_dir_at",       "_read_dir",          "_reopen_dir",      "parse_float64_bits",
+        "parse_float32_bits", "_spawn",             "read_pipe",        "write_slice_pipe",
+        "_tls_client_config", "_tls_server_config", "_tls_client_open", "_tls_receive",
+        "_tls_transmit",      "_tls_decrypt",       "_tls_encrypt",     "_tls_alpn",
     };
 
     /// Identify private storage declarations before checking their generic signatures.
