@@ -309,6 +309,37 @@ const NativeTests = struct {
         }
         step.dependOn(&b.addRunArtifact(executable).step);
     }
+
+    /// Builds the test `name` from `sources` and the static `archive` with the
+    /// C toolchain, which knows where the system libraries the archive needs
+    /// are, and runs it as part of `step`, sanitized as `add` sanitizes.
+    fn addLinked(self: NativeTests, step: *std.Build.Step, name: []const u8, sources: []const Source, archive: std.Build.LazyPath) void {
+        const b = self.b;
+        const linux = self.target.result.os.tag == .linux;
+        const sanitizer = self.sanitize.flag();
+        const link = b.addSystemCommand(&.{"cc"});
+        if (sanitizer) |selected| link.addArgs(&.{ b.fmt("-fsanitize={s}", .{selected}), "-fsanitize=undefined", "-fno-sanitize-recover=all", "-g" });
+        for (sources) |input| {
+            const compile = b.addSystemCommand(&.{ "cc", "-c", "-g", "-O1" });
+            if (sanitizer) |selected| compile.addArgs(&.{ b.fmt("-fsanitize={s}", .{selected}), "-fsanitize=undefined", "-fno-sanitize-recover=all" });
+            compile.addPrefixedDirectoryArg("-I", b.path("runtime"));
+            compile.addArgs(input.flags);
+            compile.addFileArg(b.path(input.file));
+            compile.addArg("-o");
+            link.addFileArg(compile.addOutputFileArg(b.fmt("{s}.o", .{std.fs.path.stem(input.file)})));
+        }
+        link.addFileArg(archive);
+        link.addArgs(rustlsSystemLibraries(linux));
+        link.addArg("-o");
+        const binary = link.addOutputFileArg(name);
+        const run = std.Build.Step.Run.create(b, b.fmt("run {s}", .{name}));
+        run.addFileArg(binary);
+        if (sanitizer != null) run.setEnvironmentVariable(
+            if (self.sanitize == .thread) "TSAN_OPTIONS" else "ASAN_OPTIONS",
+            "allocator_may_return_null=1",
+        );
+        step.dependOn(&run.step);
+    }
 };
 
 fn runtimeObject(
@@ -326,6 +357,31 @@ fn runtimeObject(
     module.addSystemIncludePath(.{ .cwd_relative = b.graph.zig_lib_directory.path orelse "." });
     module.addCSourceFile(.{ .file = file, .flags = flags });
     return b.addObject(.{ .name = name, .root_module = module });
+}
+
+/// The pinned rustls-ffi the development shell names in `LINEA_RUSTLS`: its
+/// header directory and its static archive. `flake.lock` pins the package,
+/// and through it the source and the vendored crates by hash.
+const RustlsFfi = struct { include: []const u8, archive: std.Build.LazyPath };
+
+fn rustlsFfi(b: *std.Build) RustlsFfi {
+    const root = b.graph.environ_map.get("LINEA_RUSTLS") orelse
+        @panic("LINEA_RUSTLS is not set: build inside `nix develop`, whose shell names the pinned rustls-ffi");
+    return .{
+        .include = b.pathJoin(&.{ root, "include" }),
+        .archive = .{ .cwd_relative = b.pathJoin(&.{ root, "lib", "librustls.a" }) },
+    };
+}
+
+/// What a link of rustls-ffi's archive needs from the system after it: on
+/// macOS the frameworks the platform verifier calls and iconv, and on Linux
+/// the unwinder, the dynamic loader and the clock libraries Rust's standard
+/// library calls. The driver's link names the same libraries.
+fn rustlsSystemLibraries(linux: bool) []const []const u8 {
+    return if (linux)
+        &.{ "-lgcc_s", "-lutil", "-lrt", "-ldl", "-lm", "-lpthread" }
+    else
+        &.{ "-framework", "Security", "-framework", "CoreFoundation", "-liconv" };
 }
 
 /// The target with the CPU model of the build machine replaced by the baseline
@@ -1733,6 +1789,14 @@ pub fn build(b: *std.Build) void {
     checked_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
     if (sanitize == .none) checked_flags.append(b.allocator, "-DLINEA_CHECK_STORAGE=1") catch @panic("OOM");
 
+    // `runtime/tls.c` calls rustls through the header of the pinned
+    // rustls-ffi the development shell names, and the runtime archives carry
+    // that library's own archive, so a program links one runtime as before.
+    const rustls = rustlsFfi(b);
+    var tls_flags: std.ArrayList([]const u8) = .empty;
+    tls_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    tls_flags.appendSlice(b.allocator, &.{ "-isystem", rustls.include }) catch @panic("OOM");
+
     const native: NativeTests = .{ .b = b, .target = target, .optimize = optimize, .sanitize = sanitize };
 
     const native_math_step = b.step("test-native-math", "Check strict binary64 runtime operations against independent reference vectors");
@@ -1767,6 +1831,18 @@ pub fn build(b: *std.Build) void {
         .{ .file = "runtime/io.c", .flags = transport_flags.items },
         .{ .file = "runtime/io_fault_test.c", .flags = runtime_flags.items },
     });
+
+    const native_tls_step = b.step("test-native-tls", "Check TLS sessions through rustls: handshakes over memory, verification, ALPN, resumption and client certificates");
+    var tls_test_flags: std.ArrayList([]const u8) = .empty;
+    tls_test_flags.appendSlice(b.allocator, tls_flags.items) catch @panic("OOM");
+    tls_test_flags.append(b.allocator, b.fmt("-DLINEA_TLS_FIXTURES=\"{s}\"", .{b.pathFromRoot("std/tls/testdata")})) catch @panic("OOM");
+    native.addLinked(native_tls_step, "native-tls-tests", &.{
+        .{ .file = "runtime/tls.c", .flags = tls_flags.items },
+        .{ .file = "runtime/tls_config.c", .flags = tls_flags.items },
+        .{ .file = "runtime/io.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/linea_rt.c", .flags = runtime_flags.items },
+        .{ .file = "runtime/tls_test.c", .flags = tls_test_flags.items },
+    }, rustls.archive);
 
     const native_net_step = b.step("test-native-net", "Check native socket listen, accept, connect and address operations, and the simulated clock and network");
     var socket_flags: std.ArrayList([]const u8) = .empty;
@@ -2154,6 +2230,8 @@ pub fn build(b: *std.Build) void {
             .{ .name = "parallelism", .file = "runtime/parallelism.c", .flags = runtime_flags.items },
             .{ .name = "context", .file = "runtime/context.c", .flags = runtime_flags.items },
             .{ .name = "sim", .file = "runtime/sim.c", .flags = runtime_flags.items },
+            .{ .name = "tls", .file = "runtime/tls.c", .flags = tls_flags.items },
+            .{ .name = "tls_config", .file = "runtime/tls_config.c", .flags = tls_flags.items },
         }) |input| {
             const name = b.fmt("{s}_{s}", .{ input.name, platform.os });
             native_runtime_step.dependOn(&runtimeObject(b, platform_target, name, b.path(input.file), input.flags).step);
@@ -2198,6 +2276,7 @@ pub fn build(b: *std.Build) void {
             native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}", .{ test_name, platform.os }), file, runtime_flags.items).step);
             native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("{s}_{s}_sanitized", .{ test_name, platform.os }), file, sanitized_test_flags.items).step);
         }
+        native_runtime_step.dependOn(&runtimeObject(b, platform_target, b.fmt("tls_test_{s}", .{platform.os}), b.path("runtime/tls_test.c"), tls_test_flags.items).step);
     }
 
     // The runtime objects are compiled for the baseline CPU of the target
@@ -2258,9 +2337,12 @@ pub fn build(b: *std.Build) void {
     // Two archives share every object but the one holding the allocator:
     // `linea test` and the conformance runner link the checking one, and
     // `linea build` and `linea run` the other unless asked to check.
-    const runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+    //
+    // `q` with `L` appends each object and the members of rustls-ffi's
+    // archive, so a program that never calls `tls` links no member of it.
+    const runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "qcsDL" });
     const runtime_archive = runtime.addOutputFileArg(runtime_symbols.archive_name);
-    const checked_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "rcsD" });
+    const checked_runtime = b.addSystemCommand(&.{ b.graph.zig_exe, "ar", "qcsDL" });
     const checked_runtime_archive = checked_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
     var ordinary_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
     var checked_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
@@ -2281,6 +2363,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "parallelism", .file = b.path("runtime/parallelism.c"), .flags = runtime_flags.items },
         .{ .name = "context", .file = b.path("runtime/context.c"), .flags = runtime_flags.items },
         .{ .name = "sim", .file = b.path("runtime/sim.c"), .flags = runtime_flags.items },
+        .{ .name = "tls", .file = b.path("runtime/tls.c"), .flags = tls_flags.items },
+        .{ .name = "tls_config", .file = b.path("runtime/tls_config.c"), .flags = tls_flags.items },
         .{ .name = "linea_float", .file = float_c, .flags = float_flags.items },
         .{ .name = "math", .file = b.path("runtime/math.c"), .flags = math_flags.items },
     };
@@ -2294,6 +2378,8 @@ pub fn build(b: *std.Build) void {
             checked_nonfiber_objects.append(b.allocator, checked_object) catch @panic("OOM");
         }
     }
+    runtime.addFileArg(rustls.archive);
+    checked_runtime.addFileArg(rustls.archive);
     const runtime_installs = [_]*std.Build.Step{
         &b.addInstallLibFile(runtime_archive, runtime_symbols.archive_name).step,
         &b.addInstallLibFile(checked_runtime_archive, runtime_symbols.checked_archive_name).step,
@@ -3364,6 +3450,7 @@ pub fn build(b: *std.Build) void {
                 step.dependOn(native_io_step);
                 step.dependOn(native_net_step);
                 step.dependOn(native_process_step);
+                step.dependOn(native_tls_step);
                 step.dependOn(native_clock_step);
                 step.dependOn(native_math_step);
                 step.dependOn(native_runtime_step);
