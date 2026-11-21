@@ -39,9 +39,9 @@ fn routed() -> Result[http.Router[()], http.RouteError] {
 }
 
 // A client that trusts the test root connects over TLS, sends `request`
-// and reads the whole answer. `tls.Stream.connect` checks the
-// server's certificate against the system's roots and `test_ca.pem`, and
-// that it names `localhost`, before it answers the stream.
+// and reads the whole answer. `tls.Stream.connect` checks that
+// `test_ca.pem`, the only root the client trusts, issued the server's
+// certificate and that it names `localhost`, before it answers the stream.
 fn fetch(address: net.Address, request: Str) -> String {
     let client = tls.ClientConfig.open(roots: embed("test_ca.pem")).unwrap()
     let opened = tls.Stream.connect(client, net.connect(address).unwrap(), server_name: "localhost")
