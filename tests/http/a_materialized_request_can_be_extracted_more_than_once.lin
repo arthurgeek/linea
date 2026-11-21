@@ -2,26 +2,31 @@
 // can use that same view repeatedly without lending the stream again.
 import std.http
 import std.io
-import std.mem
-
-use mem.Lender
 
 @derive(http.Params, Release)
 struct Name {
     name: Str,
 }
 
-fn main() -> UInt8 {
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/?name=Grace", body: "name=Ada", content_type: "application/x-www-form-urlencoded").unwrap()
-    defer var incoming = http.RequestBody.from_request(sent.request())
-    let ready = &incoming.materialize(sent.request()).unwrap()
-    let query = ready.extract[http.Query[Name]]().unwrap()
-    let first = ready.extract[http.Form[Name]]().unwrap()
-    let second = ready.extract[http.Form[Name]]().unwrap()
-    io.println("{query.name}: {first.name}, {second.name}").unwrap()
+fn names[P: Allocator](inout _: (), request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+    let ready = &incoming.materialize(request)?
+    let query = ready.extract[http.Query[Name]]()?
+    let first = ready.extract[http.Form[Name]]()?
+    let second = ready.extract[http.Form[Name]]()?
+    let answer = http.text(request, "{query.name}: {first.name}, {second.name}")
     query.release()
     first.release()
     second.release()
+    answer
+}
+
+fn main() -> UInt8 {
+    defer var router = http.Router.new()
+    &router.route_raw("POST /", names).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/?name=Grace", body: "name=Ada", content_type: "application/x-www-form-urlencoded").unwrap()
+    var nothing = {}
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    io.println(response.text().unwrap()).unwrap()
     0
 }

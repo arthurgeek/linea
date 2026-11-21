@@ -2,12 +2,10 @@
 // it in the request arena. The body is twice the size of that arena.
 import std.http
 import std.io
-import std.mem
 
 use io.Reader
-use mem.Lender
 
-fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+fn count[P: Allocator](inout _: (), request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
     var buffer = request.allocator().acquire(4096)?
     var total: UInt64 = 0
     loop {
@@ -17,17 +15,23 @@ fn count[P: Allocator](request: http.Request[P], inout incoming: http.RequestBod
         }
         total += got
     }
+    if incoming.remaining_bytes() != 0 {
+        return .Err(http.error(request, .InternalServerError, "the body was not read to its end"))
+    }
     http.text(request, "{total} bytes")
 }
 
 fn main() -> UInt8 {
     defer let bytes = Vec.filled(count: 131072, value: UInt8(97)).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/count", body: "").unwrap()
-    defer var incoming = http.RequestBody.from_slice(bytes.as_slice(), arena.handle())
-    let response = count(sent.request(), &incoming).unwrap()
-    io.println(response.text().unwrap()).unwrap()
-    if incoming.remaining_bytes() == 0 {
+    defer var router = http.Router.new()
+    &router.route_raw("POST /count", count).unwrap()
+    defer let exchange = http.TestExchange.open(limits: http.Limits { request_arena_bytes = 65536, ..http.Limits.default() })
+    defer var sent = exchange.request("POST", "/count", body: Str.from_bytes(bytes.as_slice()).unwrap()).unwrap()
+    var nothing = {}
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    let answer = response.text().unwrap()
+    io.println(answer).unwrap()
+    if answer == "131072 bytes" {
         0
     } else {
         1

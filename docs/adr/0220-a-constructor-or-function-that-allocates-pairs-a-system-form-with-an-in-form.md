@@ -4,7 +4,10 @@ Status: Accepted — 2026-10-12. Supersedes the clause of
 [0191](0191-the-caller-chooses-every-allocator.md) that every allocating
 standard-library API takes its allocator from its caller. The server's
 parent-allocator clause is superseded by
-[0225](0225-a-library-signature-states-its-allocator.md).
+[0225](0225-a-library-signature-states-its-allocator.md). Its
+`http.new_request` example is superseded by
+[0297](0297-a-handler-test-sends-a-request-built-in-the-arena-serve-would-give-it.md),
+which removes that function.
 
 ## Context
 

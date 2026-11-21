@@ -9,15 +9,11 @@ import std.env
 import std.http
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.testing
 
-// `use` brings a trait's operations into scope, so a test can call
-// `&router.serve_http(&app, request, &incoming)` on a router directly. `Writer` is in
-// the prelude, so `write_days` calls `&body.write_str(text)` without a `use`.
-use http.Handler
-use mem.Lender
+// `Writer` is in the prelude, so `write_days` calls `&body.write_str(text)`
+// without a `use`.
 
 // `weekday` numbers the days from Sunday, and this array names them in that
 // order. `_` in `[Str; _]` takes the length from the literal, here 7.
@@ -120,25 +116,22 @@ test "a year out of range is refused before streaming" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let late = http.new_request(arena.handle(), "GET", "/calendar/12000", body: "").unwrap()
-    defer var incoming_1 = http.RequestBody.from_request(late.request())
-    let refused = match &router.serve_http(&app, late.request(), &incoming_1) {
+    defer let exchange = http.TestExchange.open()
+    defer var late = exchange.request("GET", "/calendar/12000").unwrap()
+    let refused = match &late.send_to(&router, &app) {
         Ok(_) => return testing.assert(false, "a year past 9999 was accepted"),
         Err(error) => error,
     }
     testing.assert_eq(refused.status(), http.Status.BadRequest, "the status changed")?
     testing.assert_eq(refused.message(), Option.Some("12000 is not a year from 1 to 9999"), "the message changed")?
-    let named = http.new_request(arena.handle(), "GET", "/calendar/next", body: "").unwrap()
-    defer var incoming_2 = http.RequestBody.from_request(named.request())
-    let unread = match &router.serve_http(&app, named.request(), &incoming_2) {
+    defer var named = exchange.request("GET", "/calendar/next").unwrap()
+    let unread = match &named.send_to(&router, &app) {
         Ok(_) => return testing.assert(false, "a year that is not a number was accepted"),
         Err(error) => error,
     }
     testing.assert_eq(unread.message(), Option.Some(r#"cannot read path value "year" from "next": invalid decimal syntax at byte 0"#), "the refusal of a word changed")?
-    let valid = http.new_request(arena.handle(), "GET", "/calendar/2026", body: "").unwrap()
-    defer var incoming_3 = http.RequestBody.from_request(valid.request())
-    let answered = &router.serve_http(&app, valid.request(), &incoming_3).unwrap()
+    defer var valid = exchange.request("GET", "/calendar/2026").unwrap()
+    let answered = &valid.send_to(&router, &app).unwrap()
     testing.assert_eq(answered.header("Content-Type"), Option.Some("text/csv; charset=utf-8"), "a valid year was not answered with CSV")?
 }
 
@@ -148,10 +141,9 @@ test "a year streams one line per day" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/calendar/2024", body: "").unwrap()
-    defer var incoming_4 = http.RequestBody.from_request(sent.request())
-    let csv = &router.serve_http(&app, sent.request(), &incoming_4).unwrap().recorded_body().unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/calendar/2024").unwrap()
+    let csv = &sent.send_to(&router, &app).unwrap().recorded_body().unwrap()
     let calendar_text = Str.from_bytes(csv.as_slice()).unwrap()
     // `filter` keeps the newline bytes, and `count` says how many there are.
     let lines = calendar_text.as_bytes().filter(|byte| *byte == 10).count()

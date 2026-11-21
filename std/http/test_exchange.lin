@@ -1,0 +1,262 @@
+import std.fmt
+import std.mem
+import std.testing
+
+// A `TestExchange` holds the arena one exchange is served from, opened as
+// `serve` opens one for each of its tasks: an arena of
+// `limits.request_arena_bytes` over the system allocator, or over the
+// allocator `open_in` takes. An arena larger than 64 KiB takes a 64 KiB first
+// chunk when it opens and more only as a request needs it; a smaller one, or
+// one over another arena's handle, takes its whole size at once. Unlike
+// `serve`, it accepts an arena smaller than the limits need, so a test can
+// reach an allocation failure. A test builds requests in it with `request`
+// and sends them to the handler under test. The requests, and the
+// responses a handler builds for them, live in the arena, so they are read
+// before the exchange is released, and a test releases it with `defer`.
+@opaque
+struct TestExchange[P: Allocator = mem.SystemAllocator] {
+    arena: mem.Arena[P],
+    limits: Limits,
+}
+
+impl TestExchange[mem.SystemAllocator] {
+    // `open` opens an exchange over the system allocator, as `serve` does,
+    // held to `limits`.
+    pub fn open(limits: Limits = standard_limits) -> TestExchange[mem.SystemAllocator] {
+        TestExchange.open_in(mem.system(), limits)
+    }
+
+    test "an exchange's arena holds what its limits allow" {
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
+        // The default arena takes 64 KiB when it opens and grows past it.
+        let grows = match sent.request().allocator().acquire(1048576) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+        defer let small = TestExchange.open(limits: Limits { request_arena_bytes = 4096, ..Limits.default() })
+        defer var tight = small.request("GET", "/").unwrap()
+        let past = match tight.request().allocator().acquire(4096) {
+            Ok(_) => false,
+            Err(_) => true,
+        }
+        testing.assert(grows, "the default arena did not grow past its first chunk")?
+        testing.assert(past, "a 4096-byte arena handed out 4096 bytes past its request")?
+        .Ok(())
+    }
+}
+
+impl[P: Allocator] TestExchange[P] {
+    // `open_in` opens an exchange whose arena takes its memory from
+    // `allocator`, as `serve_in` opens one over its `parent`, held to
+    // `limits`. When `allocator` refuses the arena's first chunk, every
+    // request built in the exchange is refused with 500, where `serve`
+    // answers 503 before reading one.
+    pub fn open_in(allocator: P, limits: Limits = standard_limits) -> TestExchange[P] where carries(allocator) {
+        .{ arena = mem.Arena.open(allocator, limits.request_arena_bytes), limits = copy(limits) }
+    }
+
+    test "an exchange opened in an allocator takes its arena from it" {
+        defer let log = testing.TestAllocator.open(mem.system()).unwrap()
+        let exchange = TestExchange.open_in(log.handle())
+        let taken = log.acquired()
+        exchange.release()
+        testing.assert_eq(taken, UInt64(1), "the arena did not take its first chunk from the allocator")?
+        testing.assert_eq(log.outstanding(), UInt64(0), "releasing the exchange kept memory")?
+        .Ok(())
+    }
+
+    // `request` builds the request a client sends as `method` and `target`
+    // with `body`, stored in this exchange's arena and held to its limits as a
+    // request read from a connection is. A body is sent with its
+    // `Content-Length`, and one longer than `max_body_bytes` is refused with
+    // 413, as `serve` refuses it before any handler runs. `content_type` adds a
+    // `Content-Type` header; other headers, `Host` among them, are added with
+    // `add_header`. The handler reads the body through its `RequestBody`, as it
+    // reads a served one, so `Request.body` is empty until the handler
+    // materializes it. A method that is not a token or a target that is not
+    // visible ASCII is refused with 400, as a request line holding them is,
+    // and an arena that cannot hold the request answers 500.
+    pub fn request(self: Self, method: Str, target: Str, body: Str = "", content_type: Str = "") -> Result[TestRequest[P], RequestError] where borrows(.Ok: self), carries(.Ok: body) {
+        let memory = self.arena.handle()
+        if !is_token(method) || !is_target(target) {
+            return .Err(.Status(.BadRequest))
+        }
+        if body.length() > self.limits.max_body_bytes {
+            return .Err(.Status(.ContentTooLarge))
+        }
+        var head = String.new_in(memory)
+        let method_token = stored_or_refused(&head, method)?
+        let target_span = stored_or_refused(&head, target)?
+        let header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
+        let line = RequestLine { method = method_of(method), method_token, target = target_span, is_http_11 = true }
+        var message = assembled(memory, head, line, header_fields, empty_payload(memory), self.limits)?
+        if body.length() > 0 {
+            let length = fmt.render_owned_in(memory, "{body.length()}") else |_| {
+                return .Err(.Status(.InternalServerError))
+            }
+            &message.added_header("Content-Length", length.view(), self.limits)?
+        }
+        if content_type.length() > 0 {
+            &message.added_header("Content-Type", content_type, self.limits)?
+        }
+        .Ok(.{ message, body = RequestBody.from_held(body.as_bytes(), memory, self.limits), limits = copy(self.limits) })
+    }
+
+    test "a request is built as a client sends it" {
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("POST", "/echo?x=1", body: "hello", content_type: "text/plain").unwrap()
+        let request = sent.request()
+        testing.assert_eq(request.method(), Method.Post, "the method changed")?
+        testing.assert_eq(request.path(), "/echo", "the path changed")?
+        testing.assert_eq(request.query(), Option.Some("x=1"), "the query changed")?
+        testing.assert_eq(request.header("Content-Type"), Option.Some("text/plain"), "the content type changed")?
+        testing.assert_eq(request.header("Content-Length"), Option.Some("5"), "the body's length was not sent")?
+        testing.assert_eq(request.body().length(), UInt64(0), "the body was held in the request")?
+        defer var bare = exchange.request("GET", "/").unwrap()
+        testing.assert_eq(bare.request().header("Content-Length"), .None, "a request without a body sent a length")?
+        let spaced = match exchange.request("GET", "/a b") {
+            Ok(refused) => {
+                refused.release()
+                Option.None
+            },
+            Err(error) => Option.Some(error),
+        }
+        let unnamed = match exchange.request("", "/") {
+            Ok(refused) => {
+                refused.release()
+                Option.None
+            },
+            Err(error) => Option.Some(error),
+        }
+        testing.assert_eq(spaced, Option.Some(RequestError.Status(.BadRequest)), "a target holding a space was accepted")?
+        testing.assert_eq(unnamed, Option.Some(RequestError.Status(.BadRequest)), "an empty method was accepted")?
+        defer let small = TestExchange.open(limits: Limits { max_body_bytes = 4, ..Limits.default() })
+        let long = match small.request("POST", "/echo", body: "hello") {
+            Ok(refused) => {
+                refused.release()
+                Option.None
+            },
+            Err(error) => Option.Some(error),
+        }
+        testing.assert_eq(long, Option.Some(RequestError.Status(.ContentTooLarge)), "a body past max_body_bytes was sent")?
+        .Ok(())
+    }
+}
+
+impl[P: Allocator] Release for TestExchange[P] {
+    fn release(sink self: Self) {
+        let TestExchange { arena, limits: _ } = self
+        arena.release()
+    }
+}
+
+// A `TestRequest` is a request a client sent, built by `TestExchange.request`:
+// the request a handler reads and the body it reads from, both in the
+// exchange's arena. It is released with `defer` like the body `serve`
+// releases once the response has been written.
+@(opaque, linear)
+struct TestRequest[P: Allocator = mem.SystemAllocator] {
+    message: Message[P],
+    body: RequestBody[P],
+    limits: Limits,
+}
+
+impl[P: Allocator] TestRequest[P] {
+    // `add_header` adds the header `name: value` after the headers the request
+    // has, as a client sends one, held to its exchange's limits. A name that is
+    // not a token, or a value holding a control byte, is refused with 400, as a
+    // header line holding them is. The headers it already has count toward
+    // `max_headers`, and a `Content-Length` disagreeing with the one sent with
+    // the body, or a second `Host`, is refused with 400.
+    pub fn add_header(inout self: Self, name: Str, value: Str) -> Result[(), RequestError] where carries() {
+        &self.message.added_header(name, value, self.limits)
+    }
+
+    test "a test request carries the headers added to it" {
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("POST", "/orders", body: r"{}").unwrap()
+        &sent.add_header("Content-Type", " application/json ").unwrap()
+        let spaced = &sent.add_header("Bad Name", "x")
+        let broken = &sent.add_header("X-Note", "a\r\nb")
+        let request = sent.request()
+        testing.assert_eq(request.header("content-type"), Option.Some("application/json"), "the header was not added")?
+        testing.assert_eq(request.path(), "/orders", "adding a header disturbed the path")?
+        testing.assert_eq(spaced, .Err(.Status(.BadRequest)), "a name holding a space was accepted")?
+        testing.assert_eq(broken, .Err(.Status(.BadRequest)), "a value holding a line break was accepted")?
+        .Ok(())
+    }
+
+    // The headers added one call at a time are held to what a request's header
+    // lines are held to together, under the exchange's limits.
+    test "headers added one at a time are checked together" {
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("POST", "/orders", body: "abc").unwrap()
+        let agreeing = &sent.add_header("Content-Length", "3")
+        let disagreeing = &sent.add_header("Content-Length", "4")
+        testing.assert_eq(agreeing, .Ok(()), "a second length that agrees was refused")?
+        testing.assert_eq(disagreeing, .Err(.Status(.BadRequest)), "a second length that disagrees was accepted")?
+        defer var with_host = exchange.request("GET", "/").unwrap()
+        &with_host.add_header("Host", "example.test").unwrap()
+        let second_host = &with_host.add_header("Host", "other.test")
+        testing.assert_eq(second_host, .Err(.Status(.BadRequest)), "a second Host header was accepted")?
+        defer let few = TestExchange.open(limits: Limits { max_headers = 2, ..Limits.default() })
+        defer var many = few.request("GET", "/").unwrap()
+        &many.add_header("X-Note", "a").unwrap()
+        &many.add_header("X-Note", "b").unwrap()
+        testing.assert_eq(&many.add_header("X-Note", "c"), .Err(.Status(.RequestHeaderFieldsTooLarge)), "a header past max_headers was accepted")?
+        .Ok(())
+    }
+
+    // `request` returns the view of this request a handler reads, as `serve`
+    // hands it one.
+    pub fn request(self: Self) -> Request[P] where borrows(self) {
+        self.message.request()
+    }
+
+    test "a test request is read through its request" {
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/a?b=c").unwrap()
+        &sent.add_header("Host", "example.test").unwrap()
+        let request = sent.request()
+        testing.assert_eq(request.path(), "/a", "the path changed")?
+        testing.assert_eq(request.query_params().unwrap().get("b"), .Ok(.Some("c")), "the query was not decoded")?
+        testing.assert_eq(request.header("host"), Option.Some("example.test"), "the header changed")?
+        testing.assert_eq(request.path_value("a"), .None, "a request no router matched had a path value")?
+        .Ok(())
+    }
+
+    // `send_to` sends this request to `handler` with `state`, as `serve` does:
+    // the handler reads the request and its body, and answers with a response
+    // or an error. The response lives in the exchange's arena and may view the
+    // request, its body and `handler`, so it is read while all three live. A
+    // request is sent once, as a client's is: a second send finds the body
+    // the first one read.
+    pub fn send_to[S, H: Handler[S, P]](inout self: Self, inout handler: H, inout state: S) -> Result[Response[P], Error[P]] where borrows(self, handler) {
+        &handler.serve_http(&state, self.message.request(), &self.body)
+    }
+
+    test "a request sends its body to the handler" {
+        defer var router: Router[()] = Router.new()
+        &router.route_raw("POST /echo", echoed).unwrap()
+        var nothing = ()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("POST", "/echo", body: "hello").unwrap()
+        let response = &sent.send_to(&router, &nothing).unwrap()
+        testing.assert_ok_eq(response.text(), "hello", "the handler read another body")?
+        .Ok(())
+    }
+}
+
+impl[P: Allocator] Release for TestRequest[P] {
+    fn release(sink self: Self) {
+        let TestRequest { message: _, body, limits: _ } = self
+        body.release()
+    }
+}
+
+// Answer with the body the request was sent with, as text.
+fn echoed[P: Allocator](inout _: (), request: Request[P], inout body: RequestBody[P]) -> Result[Response[P], Error[P]] where carries(request), borrows(body), retains(body: body) {
+    let received = &body.text(request)?
+    text(request, received)
+}

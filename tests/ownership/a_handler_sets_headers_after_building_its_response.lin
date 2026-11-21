@@ -3,11 +3,8 @@
 // arena, and nothing has to be released.
 import std.http
 import std.io
-import std.mem
 
-use mem.Lender
-
-fn cached[P: Allocator](request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
+fn cached[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     var response = http.text(request, "hello")?
     &response.set_header("Cache-Control", "no-store")?
     &response.add_header("Vary", "Accept")?
@@ -15,17 +12,20 @@ fn cached[P: Allocator](request: http.Request[P], inout _incoming: http.RequestB
 }
 
 fn main() -> UInt8 {
-    let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = http.new_request(arena.handle(), "GET", "/", body: "").unwrap()
-    var incoming_1 = http.RequestBody.from_request(sent.request())
-    let answered = match cached(sent.request(), &incoming_1) {
+    var router = http.Router.new()
+    &router.route_raw("GET /", cached).unwrap()
+    let exchange = http.TestExchange.open()
+    var sent = exchange.request("GET", "/").unwrap()
+    var nothing = {}
+    let answered = match &sent.send_to(&router, &nothing) {
         Ok(response) => {
             let _printed = io.println("{response.status().code()} {response.header("Vary").unwrap_or("")}")
             0
         },
         Err(_) => 1,
     }
-    incoming_1.release()
-    arena.release()
+    sent.release()
+    exchange.release()
+    router.release()
     answered
 }

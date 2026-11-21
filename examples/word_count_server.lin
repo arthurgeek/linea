@@ -1,0 +1,161 @@
+// A service that counts the lines, words and bytes of the text posted to it,
+// as `wc` does. POST /count answers the counts as JSON. A body is held to the
+// service's limits, so an upload larger than 64 KiB is refused with 413
+// before the handler runs. The service listens on 127.0.0.1 at the port its
+// first argument names:
+//
+//     printf 'one two\nthree\n' | curl --data-binary @- http://127.0.0.1:8080/count
+//
+// answers `{"lines":2,"words":3,"bytes":14}`.
+import std.env
+import std.http
+import std.io
+import std.json
+import std.net
+import std.testing
+
+// The limits the service answers with. The tests send their requests under
+// the same limits, so a body the server would refuse is refused there too.
+fn service_limits() -> http.Limits {
+    http.Limits { max_body_bytes = 65536, ..http.Limits.default() }
+}
+
+// The counts of one text. `@derive(json.Encode)` writes the encoder, so
+// `http.json` answers with an object holding the three fields.
+@(copyable, derive(json.Encode, Equatable, Debug))
+struct Counts {
+    lines: UInt64,
+    words: UInt64,
+    bytes: UInt64,
+}
+
+// Count `text` as `wc` does: a line ends at each line feed, and a word is a
+// run of bytes that are not a space, a tab or a line break.
+fn counted(text: Str) -> Counts {
+    var lines: UInt64 = 0
+    var words: UInt64 = 0
+    var in_word = false
+    for byte in text.as_bytes() {
+        // `byte` views an element of the text; `*byte` reads its value.
+        let code = *byte
+        let blank = code == 32 || code == 9 || code == 10 || code == 13
+        if code == 10 {
+            lines += 1
+        }
+        if blank {
+            in_word = false
+        } else if !in_word {
+            in_word = true
+            words += 1
+        }
+    }
+    .{ lines, words, bytes = text.length() }
+}
+
+test "words are runs between blanks" {
+    testing.assert_eq(counted("one two\nthree\n"), Counts { lines = 2, words = 3, bytes = 14 }, "the counts changed")?
+    testing.assert_eq(counted("  spaced\tout  "), Counts { lines = 0, words = 2, bytes = 14 }, "blanks were counted as words")?
+    testing.assert_eq(counted(""), Counts { lines = 0, words = 0, bytes = 0 }, "an empty text had counts")?
+}
+
+// Read the posted text and answer its counts. `body.text` reads the whole
+// body into the request's arena, and `?` answers 400 for one that is not
+// UTF-8. The server has already refused a body past the limit.
+fn count(inout _: (), request: http.Request, inout body: http.RequestBody) -> Result[http.Response, http.Error] where carries(request), borrows(body), retains(body: body) {
+    let text = &body.text(request)?
+    http.json(request, counted(text))
+}
+
+fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
+    &router.route_raw("POST /count", count)
+}
+
+// Each test opens an `http.TestExchange`, the arena the server answers one
+// request from, under the service's limits, and builds the request in it as
+// a client sends it. `send_to` hands it to the router as the server does, and
+// the response is read before the exchange is released.
+test "a posted text is counted" {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let exchange = http.TestExchange.open(limits: service_limits())
+    defer var sent = exchange.request("POST", "/count", body: "one two\nthree\n", content_type: "text/plain").unwrap()
+    var nothing = ()
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the counts were not JSON")?
+    testing.assert_ok_eq(response.text(), r#"{"lines":2,"words":3,"bytes":14}"#, "the counts changed")?
+}
+
+// A body one byte past `max_body_bytes` is refused with 413 before any
+// handler runs, as the server refuses it.
+test "a text past the body limit is refused" {
+    let limits = service_limits()
+    defer var long = String.new()
+    for _ in 0..limits.max_body_bytes {
+        &long.append("a").unwrap()
+    }
+    &long.append("b").unwrap()
+    defer let exchange = http.TestExchange.open(limits: limits)
+    let refused = match exchange.request("POST", "/count", body: long.view()) {
+        Ok(sent) => {
+            sent.release()
+            return testing.assert(false, "a text past the limit was sent")
+        },
+        Err(error) => error,
+    }
+    testing.assert_eq(refused, http.RequestError.Status(.ContentTooLarge), "the refusal changed")?
+}
+
+// The router answers a path registered under another method with 405 and an
+// `Allow` header naming the methods it takes.
+test "counting needs a post" {
+    defer var router: http.Router[()] = http.Router.new()
+    routes(&router).unwrap()
+    defer let exchange = http.TestExchange.open(limits: service_limits())
+    defer var sent = exchange.request("GET", "/count").unwrap()
+    var nothing = ()
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    testing.assert_eq(response.status(), http.Status.MethodNotAllowed, "the status changed")?
+    testing.assert_eq(response.header("Allow"), Option.Some("POST"), "the allowed method changed")?
+}
+
+fn main() -> UInt8 {
+    match port_argument() {
+        Some(port) => serve(port),
+        None => {
+            io.eprintln("usage: word_count_server PORT")
+            64
+        },
+    }
+}
+
+// Read the first command-line argument as a port number. `?` returns `None`
+// when there is no argument, and `parse` fails on text that is not a port.
+fn port_argument() -> Option[UInt16] {
+    let text = env.args().at(1)?
+    match text.parse[UInt16]() {
+        Ok(port) => .Some(port),
+        Err(_) => .None,
+    }
+}
+
+// A serving task's router, or the reason a route was refused. The router it
+// could not finish is released before the reason is returned.
+fn serving_router() -> Result[http.Router[()], http.RouteError] {
+    var router: http.Router[()] = http.Router.new()
+    match routes(&router) {
+        Ok(_) => .Ok(router),
+        Err(error) => {
+            router.release()
+            .Err(error)
+        },
+    }
+}
+
+fn serve(port: UInt16) -> UInt8 {
+    io.eprintln("listening on http://127.0.0.1:{port}")
+    let _ = http.listen_and_serve(net.loopback(port), serving_router, limits: service_limits()) else |error| {
+        io.eprintln("{error}")
+        return 1
+    }
+    0
+}

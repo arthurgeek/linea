@@ -5,9 +5,6 @@ import std.io
 import std.json
 import std.mem
 
-use http.Handler
-use mem.Lender
-
 @derive(http.Params)
 struct Day {
     year: UInt32,
@@ -55,20 +52,17 @@ fn post[P: Allocator](inout _: (), request: http.Request[P], inout incoming: htt
 }
 
 fn answer(inout router: http.Router[(), mem.SystemAllocator], method: Str, target: Str, author: Str, body: Str) {
-    let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), method, target, body).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request(method, target, body).unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     if author.length() > 0 {
         &sent.add_header("X-Author", author).unwrap()
     }
     var nothing = {}
-    var incoming_1 = http.RequestBody.from_request(sent.request())
-    match &router.serve_http(&nothing, sent.request(), &incoming_1) {
+    match &sent.send_to(&router, &nothing) {
         Ok(response) => io.println(response.text().unwrap()).unwrap(),
         Err(error) => io.println("{error}").unwrap(),
     }
-    incoming_1.release()
-    arena.release()
 }
 
 fn main() -> UInt8 {

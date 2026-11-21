@@ -105,6 +105,7 @@ Sockets, connections, and what a server owes each one.
 HTTP routing, request bodies, and responses, from two routes to a full JSON service.
 
 - [hello_http.lin](hello_http.lin): an HTTP service with two routes; routing and JSON bodies.
+- [word_count_server.lin](word_count_server.lin): counts the lines, words and bytes of posted text, as `wc` does; a raw handler reading its body under the service's limits, tested through `http.TestExchange` with the same limits.
 - [party_rsvp.lin](party_rsvp.lin): collects party replies from a web form; a handler run as a CGI program with `http.serve_cgi`.
 - [site-icon](site-icon/main.lin): serves a page and the icon a browser shows on its tab, as a CGI program; files embedded with `embed` and `embed_bytes`, and bytes answered with `http.bytes`.
 - [countdown-server](countdown-server/main.lin): streams a countdown one line a second; path values, streamed responses, and timer waits on a shared fiber loop.

@@ -2,22 +2,31 @@
 // replaying the prefix or consuming the cache on subsequent calls.
 import std.http
 import std.io
-import std.mem
 
 use io.Reader
-use mem.Lender
+
+fn rest[P: Allocator](inout _: (), request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+    var buffer = request.allocator().acquire(2)?
+    let prefix_count = &incoming.read_some(&buffer, offset: 0, count: 2)?
+    if prefix_count != 2 {
+        return .Err(http.error(request, .InternalServerError, "the prefix was {prefix_count} bytes"))
+    }
+    let prefix = Str.from_bytes(buffer.as_slice())?
+    let first_length = &incoming.materialize(request)?.body().length()
+    let second = &incoming.materialize(request)?.text()?
+    http.text(request, "{prefix} / {first_length} / {second}")
+}
 
 fn main() -> UInt8 {
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/", body: "").unwrap()
-    defer var incoming = http.RequestBody.from_slice("hello".as_bytes(), arena.handle())
-    defer var buffer = mem.system().acquire(2).unwrap()
-    let prefix_count = &incoming.read_some(&buffer, offset: 0, count: 2).unwrap()
-    let prefix = Str.from_bytes(buffer.as_slice()).unwrap()
-    let first_length = &incoming.materialize(sent.request()).unwrap().body().length()
-    let second = &incoming.materialize(sent.request()).unwrap().text().unwrap()
-    io.println("{prefix} / {first_length} / {second}").unwrap()
-    if prefix_count == 2 && prefix == "he" && first_length == 3 && second == "llo" {
+    defer var router = http.Router.new()
+    &router.route_raw("POST /", rest).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/", body: "hello").unwrap()
+    var nothing = {}
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    let answer = response.text().unwrap()
+    io.println(answer).unwrap()
+    if answer == "he / 3 / llo" {
         0
     } else {
         1

@@ -1,4 +1,3 @@
-import std.mem
 import std.testing
 
 // `Stated` holds the application's state and the handler that answers with
@@ -26,15 +25,13 @@ test "with_state lends its state to every request" {
     var router: Router[Visits] = Router.new()
     &router.route_raw("GET /visit", visit).unwrap()
     defer var server = with_state(Visits { count = 0 }, router)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer let exchange = TestExchange.open()
     // `serve` lends a `Stated` nothing, `()`, as this test does.
     var nothing = ()
-    let first = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-    defer var request_body1 = RequestBody.from_request(first.request())
-    let _first = &server.serve_http(&nothing, first.request(), &request_body1).unwrap()
-    let second = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-    defer var request_body2 = RequestBody.from_request(second.request())
-    let answered = &server.serve_http(&nothing, second.request(), &request_body2).unwrap()
+    defer var first = exchange.request("GET", "/visit").unwrap()
+    let _first = &first.send_to(&server, &nothing).unwrap()
+    defer var second = exchange.request("GET", "/visit").unwrap()
+    let answered = &second.send_to(&server, &nothing).unwrap()
     testing.assert_ok_eq(answered.text(), "visit 2", "the state was not kept between requests")?
     .Ok(())
 }
@@ -51,11 +48,10 @@ impl[S, H] Stated[S, H] {
         &router.route_raw("GET /visit", visit).unwrap()
         defer var server = with_state(Visits { count = 0 }, router)
         let before = server.state().count
-        defer let arena = mem.Arena.open(mem.system(), size: 65536)
+        defer let exchange = TestExchange.open()
         var nothing = ()
-        let sent = new_request(arena.handle(), "GET", "/visit", body: "").unwrap()
-        defer var request_body3 = RequestBody.from_request(sent.request())
-        let _answered = &server.serve_http(&nothing, sent.request(), &request_body3).unwrap()
+        defer var sent = exchange.request("GET", "/visit").unwrap()
+        let _answered = &sent.send_to(&server, &nothing).unwrap()
         testing.assert_eq(before, UInt64(0), "a new state changed")?
         testing.assert_eq(server.state().count, UInt64(1), "the state did not show the visit")?
         .Ok(())
@@ -74,11 +70,10 @@ impl[S, H: Release] Stated[S, H] {
     test "into_state returns the state and releases the handler" {
         let router: Router[Visits] = Router.new()
         var server = with_state(Visits { count = 3 }, router)
-        defer let arena = mem.Arena.open(mem.system(), size: 65536)
+        defer let exchange = TestExchange.open()
         var nothing = ()
-        let sent = new_request(arena.handle(), "GET", "/nowhere", body: "").unwrap()
-        defer var request_body4 = RequestBody.from_request(sent.request())
-        let _missing = &server.serve_http(&nothing, sent.request(), &request_body4)
+        defer var sent = exchange.request("GET", "/nowhere").unwrap()
+        let _missing = &sent.send_to(&server, &nothing)
         let visits = server.into_state()
         testing.assert_eq(visits.count, UInt64(3), "the state changed")?
         visits.release()

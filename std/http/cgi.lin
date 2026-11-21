@@ -564,7 +564,7 @@ fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Hand
     var body: BodyWriter[P] = .{ output = unanswered, answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .Cgi }
     var nothing = ()
     let started = time.Instant.now()
-    defer var incoming: RequestBody[P] = RequestBody.from_request(request, limits: limits)
+    defer var incoming: RequestBody[P] = RequestBody.from_held(request.body(), request.allocator(), limits)
     let answered: Answered = match &handler.serve_http(&nothing, request, &incoming) {
         Ok(response) => {
             let status = response.status()

@@ -19,11 +19,6 @@ import std.task
 import std.testing
 import std.uuid
 
-// `use` brings a trait's operations into scope, so a test can call
-// `&router.serve_http(&ctx, request, &incoming)` on a router directly.
-use http.Handler
-use mem.Lender
-
 // `Options` holds what the command line asked for: the port to listen on,
 // and how many requests to answer before stopping, or `.None` to serve until
 // killed.
@@ -221,12 +216,11 @@ fn routes(inout router: http.Router[Ctx]) -> Result[(), http.RouteError] {
 test "echo answers the caller with their text" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
+    defer let exchange = http.TestExchange.open()
+    defer var sent = sent_by(exchange, "Bearer ada", r#"{"text":"hello"}"#)
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&ctx, sent.request(), &incoming_1).unwrap()
+    let response = &sent.send_to(&router, &ctx).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("application/json"), "the content type changed")?
     testing.assert_ok_eq(response.text(), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
     testing.assert_eq(ctx.app.call(|inout app: App| app.echoed), 1, "the echo was not counted")?
@@ -237,18 +231,15 @@ test "echo answers the caller with their text" {
 test "echo reads the caller from a bearer header" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let folded = sent_by(arena.handle(), "bearer  alan ", r#"{"text":"hi"}"#)
-    let basic = sent_by(arena.handle(), "Basic YWRhOg==", r#"{"text":"hi"}"#)
-    let unnamed = sent_by(arena.handle(), "Bearer ", r#"{"text":"hi"}"#)
+    defer let exchange = http.TestExchange.open()
+    defer var folded = sent_by(exchange, "bearer  alan ", r#"{"text":"hi"}"#)
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer var incoming_2 = http.RequestBody.from_request(folded.request())
-    let answered = &router.serve_http(&ctx, folded.request(), &incoming_2).unwrap()
+    let answered = &folded.send_to(&router, &ctx).unwrap()
     testing.assert_ok_eq(answered.text(), r#"{"to":"alan","echo":"hi"}"#, "a folded scheme was not read")?
-    for sent in [basic, unnamed] {
-        defer var incoming_3 = http.RequestBody.from_request(sent.request())
-        let refused = match &router.serve_http(&ctx, sent.request(), &incoming_3) {
+    for authorization in ["Basic YWRhOg==", "Bearer "] {
+        defer var sent = sent_by(exchange, authorization, r#"{"text":"hi"}"#)
+        let refused = match &sent.send_to(&router, &ctx) {
             Ok(_) => return testing.assert(false, "a request naming no caller was answered"),
             Err(error) => error,
         }
@@ -260,12 +251,11 @@ test "echo reads the caller from a bearer header" {
 test "echo refuses a body that is not json" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = sent_by(arena.handle(), "Bearer ada", "hello")
+    defer let exchange = http.TestExchange.open()
+    defer var sent = sent_by(exchange, "Bearer ada", "hello")
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer var incoming_4 = http.RequestBody.from_request(sent.request())
-    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_4) {
+    let refused = match &sent.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a body that is not JSON was accepted"),
         Err(error) => error,
     }
@@ -279,20 +269,18 @@ test "echo refuses a body that is not json" {
 test "echo names the field a message gets wrong" {
     defer var router: http.Router[Ctx] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let untold = sent_by(arena.handle(), "Bearer ada", r"{}")
+    defer let exchange = http.TestExchange.open()
+    defer var untold = sent_by(exchange, "Bearer ada", r"{}")
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer var incoming_5 = http.RequestBody.from_request(untold.request())
-    let missing = match &router.serve_http(&ctx, untold.request(), &incoming_5) {
+    let missing = match &untold.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a message without text was accepted"),
         Err(error) => error,
     }
     testing.assert_eq(missing.status(), http.Status.UnprocessableContent, "the status changed")?
     testing.assert_eq(missing.message(), Option.Some(r#"missing field at $["text"]"#), "the missing field changed")?
-    let counted = sent_by(arena.handle(), "Bearer ada", r#"{"text":3}"#)
-    defer var incoming_6 = http.RequestBody.from_request(counted.request())
-    let wrong = match &router.serve_http(&ctx, counted.request(), &incoming_6) {
+    defer var counted = sent_by(exchange, "Bearer ada", r#"{"text":3}"#)
+    let wrong = match &counted.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a number was accepted as text"),
         Err(error) => error,
     }
@@ -310,12 +298,11 @@ test "echo answers 500 when the arena cannot hold the message" {
     &body.append(r#"{"text":""#).unwrap()
     &body.append(Str.from_bytes(letters.as_slice()).unwrap()).unwrap()
     &body.append(r#""}"#).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = sent_by(arena.handle(), "Bearer ada", body.view())
+    defer let exchange = http.TestExchange.open(limits: http.Limits { request_arena_bytes = 8192, ..http.Limits.default() })
+    defer var sent = sent_by(exchange, "Bearer ada", body.view())
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer var incoming_7 = http.RequestBody.from_request(sent.request())
-    let refused = match &router.serve_http(&ctx, sent.request(), &incoming_7) {
+    let refused = match &sent.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a message the arena could not hold was answered"),
         Err(error) => error,
     }
@@ -344,10 +331,9 @@ test "echo answers the largest messages the default limits allow" {
     &values.append("0]}").unwrap()
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer let arena = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
-    let long = sent_by(arena.handle(), "Bearer ada", text.view())
-    defer var incoming_8 = http.RequestBody.from_request(long.request())
-    let answered = match &router.serve_http(&ctx, long.request(), &incoming_8) {
+    defer let exchange = http.TestExchange.open()
+    defer var long = sent_by(exchange, "Bearer ada", text.view())
+    let answered = match &long.send_to(&router, &ctx) {
         Ok(response) => response,
         Err(error) => {
             return testing.assert_eq(error.status(), http.Status.Ok, "the longest message was refused")
@@ -355,10 +341,9 @@ test "echo answers the largest messages the default limits allow" {
     }
     testing.assert_eq(answered.text().unwrap().length(), limits.max_body_bytes + 11, "the echo of the longest message changed")?
     // Each request is served from an arena of its own.
-    defer let second = mem.Arena.open(mem.system(), size: limits.request_arena_bytes)
-    let padded = sent_by(second.handle(), "Bearer ada", values.view())
-    defer var incoming_9 = http.RequestBody.from_request(padded.request())
-    let refused = match &router.serve_http(&ctx, padded.request(), &incoming_9) {
+    defer let second = http.TestExchange.open()
+    defer var padded = sent_by(second, "Bearer ada", values.view())
+    let refused = match &padded.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a document with an unknown field was accepted"),
         Err(error) => error,
     }
@@ -374,15 +359,13 @@ test "each response carries its request id" {
     defer var identified = http.with_request_ids(router)
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var traced = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var traced = exchange.request("GET", "/health").unwrap()
     &traced.add_header("X-Request-Id", "checkout-7").unwrap()
-    defer var incoming_10 = http.RequestBody.from_request(traced.request())
-    let traced_answer = &identified.serve_http(&ctx, traced.request(), &incoming_10).unwrap()
+    let traced_answer = &traced.send_to(&identified, &ctx).unwrap()
     testing.assert_eq(traced_answer.header("X-Request-Id"), Option.Some("checkout-7"), "the client's id was not kept")?
-    let fresh = http.new_request(arena.handle(), "GET", "/health", body: "").unwrap()
-    defer var incoming_11 = http.RequestBody.from_request(fresh.request())
-    let fresh_answer = &identified.serve_http(&ctx, fresh.request(), &incoming_11).unwrap()
+    defer var fresh = exchange.request("GET", "/health").unwrap()
+    let fresh_answer = &fresh.send_to(&identified, &ctx).unwrap()
     let made = uuid.Uuid.parse(fresh_answer.header("X-Request-Id").unwrap())
     testing.assert(made.is_ok(), "a request with no id was not given a UUID")?
 }
@@ -394,10 +377,9 @@ test "greet escapes the name as a json string" {
     routes(&router).unwrap()
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/greet/say%22hi%22", body: "").unwrap()
-    defer var incoming_12 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&ctx, sent.request(), &incoming_12).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/greet/say%22hi%22").unwrap()
+    let response = &sent.send_to(&router, &ctx).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"hello":"say\"hi\""}"#, "the greeting changed")?
 }
 
@@ -408,14 +390,12 @@ test "signup reads a form by field name" {
     routes(&router).unwrap()
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     var ctx = quiet(shared.client())
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
-    defer var incoming_13 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&ctx, sent.request(), &incoming_13).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/signup", body: "name=Ada+L%C3%B3pez&age=30", content_type: "application/x-www-form-urlencoded").unwrap()
+    let response = &sent.send_to(&router, &ctx).unwrap()
     testing.assert_ok_eq(response.text(), r#"{"signed_up":"Ada López","age":30}"#, "the signup changed")?
-    let json_sent = http.new_request(arena.handle(), "POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
-    defer var incoming_14 = http.RequestBody.from_request(json_sent.request())
-    let refused = match &router.serve_http(&ctx, json_sent.request(), &incoming_14) {
+    defer var json_sent = exchange.request("POST", "/signup", body: r#"{"name":"Ada"}"#, content_type: "application/json").unwrap()
+    let refused = match &json_sent.send_to(&router, &ctx) {
         Ok(_) => return testing.assert(false, "a JSON body was read as a form"),
         Err(error) => error,
     }
@@ -430,14 +410,12 @@ test "stats counts the messages echoed" {
     defer let shared = task.own(App { echoed = 0 }).unwrap()
     defer var server = http.with_state(quiet(shared.client()), http.with_request_ids(router))
     var nothing = ()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let message = sent_by(arena.handle(), "Bearer ada", r#"{"text":"hello"}"#)
-    defer var incoming_15 = http.RequestBody.from_request(message.request())
-    let echoed = &server.serve_http(&nothing, message.request(), &incoming_15).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var message = sent_by(exchange, "Bearer ada", r#"{"text":"hello"}"#)
+    let echoed = &message.send_to(&server, &nothing).unwrap()
     testing.assert_ok_eq(echoed.text(), r#"{"to":"ada","echo":"hello"}"#, "the echo changed")?
-    let asked = http.new_request(arena.handle(), "GET", "/stats", body: "").unwrap()
-    defer var incoming_16 = http.RequestBody.from_request(asked.request())
-    let stats = &server.serve_http(&nothing, asked.request(), &incoming_16).unwrap()
+    defer var asked = exchange.request("GET", "/stats").unwrap()
+    let stats = &asked.send_to(&server, &nothing).unwrap()
     testing.assert_ok_eq(stats.text(), r#"{"echoed":1}"#, "the stats changed")?
     testing.assert_eq(server.state().app.call(|inout app: App| app.echoed), 1, "the state did not keep the count")?
 }
@@ -531,8 +509,9 @@ fn parse_options(args: env.Args) -> Result[Options, UInt8] {
     .Ok(.{ port, requests })
 }
 
-// Each test builds a request in an arena, as the server does, and hands it to
-// a handler. The arena is released after the response has been read.
+// Each test builds its requests in an `http.TestExchange`, the arena the
+// server answers one request from, and sends them to the router with
+// `send_to`. The exchange is released after the responses have been read.
 // The tests keep the `App` in an owning task, as the server does, and hand the
 // handlers a context whose logger writes only errors, so the lines they log
 // while answering stay out of the test report.
@@ -540,11 +519,10 @@ fn quiet(app: task.Client[App]) -> Ctx where carries(app) {
     .{ app = copy(app), logger = log.to_stderr(minimum: .Error) }
 }
 
-// `sent_by` builds a POST /echo request in `memory` carrying `body` as JSON,
-// with `authorization` as its `Authorization` header.
-fn sent_by(memory: mem.Handle, authorization: Str, body: Str) -> http.Message where carries(memory) {
-    var sent = http.new_request(memory, "POST", "/echo", body).unwrap()
-    &sent.add_header("Content-Type", "application/json").unwrap()
+// `sent_by` builds a POST /echo request in `exchange` carrying `body` as
+// JSON, with `authorization` as its `Authorization` header.
+fn sent_by(exchange: http.TestExchange, authorization: Str, body: Str) -> http.TestRequest where borrows(exchange), carries(body) {
+    var sent = exchange.request("POST", "/echo", body, content_type: "application/json").unwrap()
     &sent.add_header("Authorization", authorization).unwrap()
     sent
 }

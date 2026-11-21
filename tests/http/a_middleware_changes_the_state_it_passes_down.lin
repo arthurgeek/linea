@@ -5,9 +5,6 @@ import std.http
 import std.io
 import std.mem
 
-use http.Handler
-use mem.Lender
-
 @derive(Release)
 struct App {
     requests: UInt64,
@@ -40,17 +37,15 @@ fn main() -> UInt8 {
     var router: http.Router[App, mem.SystemAllocator] = http.Router.new()
     &router.route_raw("GET /number", number).unwrap()
     var server = http.with_state(App { requests = 0 }, Counted.around(router))
-    let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer let exchange = http.TestExchange.open()
     var nothing = {}
     for _ in UInt64(0)..2 {
-        let sent = http.new_request(arena.handle(), "GET", "/number", body: "").unwrap()
-        defer var incoming_1 = http.RequestBody.from_request(sent.request())
-        match &server.serve_http(&nothing, sent.request(), &incoming_1) {
+        defer var sent = exchange.request("GET", "/number").unwrap()
+        match &sent.send_to(&server, &nothing) {
             Ok(response) => io.println(response.text().unwrap()).unwrap(),
             Err(_) => io.println("refused").unwrap(),
         }
     }
-    arena.release()
     let requests = server.state().requests
     server.release()
     if requests == 2 {
