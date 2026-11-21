@@ -1,7 +1,9 @@
 # 300. TLS runs over rustls, linked into the runtime, and drives any transport from Linea
 
 Status: Accepted — 2026-11-20. Extends
-[0154](0154-sockets-and-http-follow-go.md).
+[0154](0154-sockets-and-http-follow-go.md), and
+[0299](0299-a-deadline-is-an-absolute-moment-passed-explicitly.md), whose
+deadline bounds a handshake.
 
 ## Context
 
@@ -156,13 +158,17 @@ client resumes only with the server configuration that issued its ticket.
 ```linea
 pub trait Transport {
     fn receive[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A],
-        offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError]
-    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[UInt64, io.IoError]
+        offset: UInt64, count: UInt64, deadline: time.Deadline)
+        -> Result[UInt64, io.IoError]
+    fn send(inout self: Self, bytes: mem.Slice[UInt8], deadline: time.Deadline)
+        -> Result[UInt64, io.IoError]
 }
 
 Stream[S: Transport, A: Allocator = mem.SystemAllocator]
-Stream.connect(config, transport, server_name: Str) -> Result[Stream[S], OpenFailure[S]]
-Stream.accept(config, transport) -> Result[Stream[S], OpenFailure[S]]
+Stream.connect(config, transport, server_name: Str, deadline: time.Deadline = time.never)
+    -> Result[Stream[S], OpenFailure[S]]
+Stream.accept(config, transport, deadline: time.Deadline = time.never)
+    -> Result[Stream[S], OpenFailure[S]]
 ```
 
 A stream runs over a `Transport`, which `net.Connection` implements, and
@@ -178,6 +184,22 @@ stream whose handshake runs at its first read or write (§6). `_in` forms take t
 of the stream's two buffers, kept as byte vectors so a stream is `Owned` and
 moves between tasks: one flight of ciphertext (18 KiB, a full record and what
 TLS adds to it) and the agreed ALPN protocol's name (255 bytes).
+
+A handshake is bounded by a `time.Deadline` ([ADR 0299](0299-a-deadline-is-an-absolute-moment-passed-explicitly.md)),
+the one budget a program passes through a whole piece of work: `connect`
+and `accept` take `deadline:`, `time.never` by default, and a stream opened
+with `accept_later_in` takes one through `set_handshake_deadline` before its
+first read. A deadline already passed fails as `TimedOut` before any byte is
+sent; a peer that stops answering fails the read or write waiting on it as
+`TimedOut` once the deadline passes. The deadline reaches the transport as an
+argument of each `receive` and `send`, not as a setting on it: a connection
+bounds that one operation by the earlier of the argument and its own
+timeouts and deadlines and keeps those for what follows, so a handshake
+bounds its writes without changing the read deadline a server gave the
+connection, and generic code bounds any transport without knowing it holds
+one. Once the handshake ends the stream passes `time.never`, and its reads
+and writes are bounded by the transport's own settings, which
+`update_transport` changes.
 
 A stream is linear and owns its transport. `close` sends close_notify, so the
 peer can tell a whole stream from one cut short, and closes the transport;
@@ -226,9 +248,10 @@ parameter, because a default of a type that must be settled is refused
 With a configuration, the task that accepts a connection opens a server
 stream over it with `Stream.accept_later_in`, which creates the session and
 runs no handshake: the handshake runs at the stream's first read, on the
-serving task that answers the connection, under the connection's read
-timeout and deadline, so a slow or hostile client holds one serving task and
-never the acceptor. A handshake that fails fails that read, and the
+serving task that answers the connection, bounded by the request's read
+deadline, which `ServerLink.set_read_deadline` also gives the stream's
+handshake so its writes end by it too, so a slow or hostile client holds one
+serving task until then and never the acceptor. A handshake that fails fails that read, and the
 connection is closed as a request that could not be read. Inside serving a
 connection is a `ServerLink`, the plain connection or the TLS stream over
 it, so
