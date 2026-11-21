@@ -3071,9 +3071,10 @@ fn status_of(url: Str) -> Result[UInt16, http.ClientError] {
 }
 
 fn main() -> UInt8 {
-    match status_of("https://example.test/") {
+    // Port 1 on this machine has no server, so the connection is refused.
+    match status_of("http://127.0.0.1:1/") {
         Ok(code) => io.println("answered {code}").unwrap(),
-        Err(error) => io.println("no answer: {error}").unwrap(),
+        Err(error) => io.println("no answer, timed out: {error.is_timeout()}").unwrap(),
     }
     0
 }
@@ -3102,12 +3103,11 @@ reading the little that remains of its body so the connection can be reused:
 ```
 
 ```
-no answer: https needs a TLS stream, which this client does not have
+no answer, timed out: false
 ```
 
-The program asks an `https` URL, and `http.Client` speaks plain HTTP only for
-now: it refuses `https` before it connects, with the error above, rather than
-send anything in the clear.
+No server listens there, so the connection is refused: a failure to get an
+answer, which `is_timeout()` tells apart from a server that is too slow.
 
 Because only the client ends a response, it knows how many are still open.
 `ClientLimits.max_outstanding` bounds them (16 by default), and a request
@@ -3126,12 +3126,148 @@ copies any `io.Reader`, framed by its length when you give one and in chunks
 when you do not. A streamed body cannot be read twice, so `send_from` never
 follows a redirect.
 
+### Calling an `https` service
+
+An `https` URL is reached over TLS, as [Serving over HTTPS](#serving-over-https)
+described: the client runs the handshake on each new connection and checks
+that the server's certificate names the URL's host. `http.Client.new()`
+checks it against the operating system's roots, as a browser does, so
+`client.get("https://api.github.com/")` works with no setup. A service whose
+certificate a private authority issued needs that authority's root:
+`http.Client.with_tls(config)` hands the client a `tls.ClientConfig` of your
+own, which the client owns and closes when it is released.
+
+Every request also takes `deadline:`, one `time.Deadline` for the whole of
+it: connecting, the handshake, each redirect and the body. The per-read
+timeouts of `ClientLimits` still bound each wait; the deadline bounds what
+they add up to. The program below serves over TLS with a certificate for
+`localhost` and asks it with a client that trusts the root that issued it,
+within two seconds:
+
+```linea
+import std.http
+import std.io
+import std.net
+import std.session
+import std.task
+import std.time
+import std.tls
+
+use session.Chan
+use session.End
+use session.Send
+
+// A certificate for `localhost`, its private key, and the root that issued
+// it. A real server reads its own from files; these are pasted in so the
+// program runs anywhere.
+let certificate: Str =
+    \\-----BEGIN CERTIFICATE-----
+    \\MIIBuDCCAV6gAwIBAgIJAMVQ5RDbfb9KMAoGCCqGSM49BAMCMBgxFjAUBgNVBAMM
+    \\DUxpbmVhIFRlc3QgQ0EwIBcNMjYwMTAxMDAwMDAwWhgPMjEyNTEyMzEyMzU5NTla
+    \\MBQxEjAQBgNVBAMMCWxvY2FsaG9zdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA
+    \\BOyx5sbcw+iUIs0UqLFbnpr3vgse/wrS2UoTlUFKA5ZbD3Vdu8UXLmvlPpZKrRDT
+    \\5IqWePA+hM0X7WTSKnxB62ejgZIwgY8wGgYDVR0RBBMwEYIJbG9jYWxob3N0hwR/
+    \\AAABMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/
+    \\BAQDAgeAMB0GA1UdDgQWBBS2m5l8kcWT9Da37xG0QIB7t2fG2TAfBgNVHSMEGDAW
+    \\gBRLW1Af/7FrpsGiqajDBfwqxer3kjAKBggqhkjOPQQDAgNIADBFAiEAjqD3xaN8
+    \\oO5ByC4U1QaklyYvCm3goPCbmUw5wG4BvfUCIDoVC8ealPJVorXb1QPQT2DbJGHV
+    \\Z/jbpJn7fLH7oa8U
+    \\-----END CERTIFICATE-----
+
+let private_key: Str =
+    \\-----BEGIN PRIVATE KEY-----
+    \\MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQggEEoZtZ9TXxAOrXi
+    \\t/0JeoHsjNCeNuvwnxonOKD6tCWhRANCAATssebG3MPolCLNFKixW56a974LHv8K
+    \\0tlKE5VBSgOWWw91XbvFFy5r5T6WSq0Q0+SKlnjwPoTNF+1k0ip8Qetn
+    \\-----END PRIVATE KEY-----
+
+let test_root: Str =
+    \\-----BEGIN CERTIFICATE-----
+    \\MIIBljCCAT2gAwIBAgIUSsW4seiSOjcP87a6c80h5oIQZcIwCgYIKoZIzj0EAwIw
+    \\GDEWMBQGA1UEAwwNTGluZWEgVGVzdCBDQTAgFw0yNjAxMDEwMDAwMDBaGA8yMTI1
+    \\MTIzMTIzNTk1OVowGDEWMBQGA1UEAwwNTGluZWEgVGVzdCBDQTBZMBMGByqGSM49
+    \\AgEGCCqGSM49AwEHA0IABGX08dXM0oDGkm2iJBmKV6Z6rRQFLVyr+nGlD+SIirLZ
+    \\FqZSteBNDRmNcqlE7MqjWu7Sc+MON5BW1PHMJ/YtV3KjYzBhMB0GA1UdDgQWBBRL
+    \\W1Af/7FrpsGiqajDBfwqxer3kjAfBgNVHSMEGDAWgBRLW1Af/7FrpsGiqajDBfwq
+    \\xer3kjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQD
+    \\AgNHADBEAiBu8ZmGCoWd3LhEC8dEhZDU+12d8N/vaHelmxOXWHdZQAIgUSy+MKux
+    \\NSBuwOQ5B7jtGQuVfweQHDoZ6GttBacU8oo=
+    \\-----END CERTIFICATE-----
+
+fn hello[P: Allocator](inout _: (), request: http.Request[P], inout _body: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_body), retains(_body: _body) {
+    http.text(request, "hello over TLS")
+}
+
+fn routes() -> http.Router[()] {
+    var router = http.Router.new()
+    &router.route_raw("GET /hello", hello).unwrap()
+    router
+}
+
+// Ask the server at `port` over HTTPS and answer the body. The client trusts
+// `test_root` alone, and the request has two seconds in all.
+fn ask(port: UInt16) -> Result[String, http.ClientError] {
+    var client = http.Client.with_tls(tls.ClientConfig.open(roots: test_root).unwrap())
+    defer client.release()
+    let response = &client.get("https://localhost:{port}/hello", deadline: time.Deadline.after(time.Duration.from_seconds(2)))?
+    &client.read_text(response, max_bytes: 1024)
+}
+
+fn main() -> UInt8 {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let config = tls.ServerConfig.open(certificate, private_key).unwrap()
+    let asking = task.start(
+        sink [port] |sink me: Chan[Send[Result[String, http.ClientError], End]]| {
+            me.send(ask(port)).close()
+        },
+    ).unwrap()
+    let limits = http.Limits { connections = .Some(1), ..http.Limits.default() }
+    let served = http.serve(listener, routes, limits: limits, policy: .Sequential, tls: .Some(borrow config))
+    config.close()
+    let (asked, done) = asking.recv()
+    done.close()
+    let served_whole = match served {
+        Ok(_) => true,
+        Err(error) => {
+            io.eprintln("serving failed: {error}")
+            false
+        },
+    }
+    match asked {
+        Ok(body) => {
+            io.println(body.view()).unwrap()
+            body.release()
+            if served_whole {
+                0
+            } else {
+                1
+            }
+        },
+        Err(error) => {
+            io.eprintln("asking failed: {error}")
+            1
+        },
+    }
+}
+```
+
+```
+hello over TLS
+```
+
+A certificate that does not check out fails the request with
+`http.ClientError.Tls`, holding the `tls.TlsError` that says why, before a
+byte of the request is sent. The pool keeps `https` connections apart from
+`http` ones to the same host, and a redirect from one scheme to the other is
+a redirect to another server, so it drops the credentials the request
+carried.
+
 The [GitHub issues](../../examples/github-issues/main.lin) example is a
-client for a real API: a token from the environment, pages followed through the `Link`
-header, the rate limit read from the response's headers, and tests that run
-against a local server answering recorded responses. GitHub's API is served
-over `https`, so until the client has a TLS stream the program reaches it only
-through a server you point `--api` at. The [link
+client for a real API: a token from the environment, pages followed through
+the `Link` header, the rate limit read from the response's headers, and tests
+that run against a local server answering recorded responses, over HTTP and
+over HTTPS. The [link
 checker](../../examples/link-checker/main.lin) checks many links at once, one
 client per task, through `task.lazy_map`.
 
@@ -3191,7 +3327,8 @@ client per task, through `task.lazy_map`.
 - `http.Client` sends requests and pools their connections by server;
   `send` follows redirects, and a response, which holds its connection, is
   settled only by its client: `read_text`, `read_bytes`, `finish` or
-  `discard`. `https` waits for a TLS stream.
+  `discard`. `https` URLs go over TLS, checked against the system's roots or
+  the configuration `with_tls` gives, and `deadline:` bounds a whole request.
 
 Handlers are ordinary functions, so they are tested by calling them:
 [Testing](10-testing.md#testing-a-server) shows how. The [JSON echo

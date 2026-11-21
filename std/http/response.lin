@@ -526,7 +526,7 @@ enum Framing {
 // request's arena. A write takes the output out, leaving `Taken` in its place,
 // and puts it back through `put_output`.
 enum Output[P: Allocator] {
-    Borrowed(io.BufferedWriter[ServerLinkWriter, mem.Handle[P]]),
+    Borrowed(io.BufferedWriter[LinkWriter, mem.Handle[P]]),
     Standard(io.BufferedWriter[io.Descriptor, mem.Handle[P]]),
     Recorded(Vec[UInt8, mem.Handle[P]]),
     Taken,
@@ -621,7 +621,7 @@ impl[P: Allocator] BodyWriter[P] {
     }
 
     // Buffer a response without taking ownership of the input connection.
-    fn open_borrowed(sink bytes: mem.Buffer[mem.Handle[P]], sink writer: ServerLinkWriter, request: Request[P], keep_alive: Bool) -> BodyWriter[P] where carries(bytes, writer, request) {
+    fn open_borrowed(sink bytes: mem.Buffer[mem.Handle[P]], sink writer: LinkWriter, request: Request[P], keep_alive: Bool) -> BodyWriter[P] where carries(bytes, writer, request) {
         let output = io.BufferedWriter.with_buffer(bytes, writer)
         let framing: Framing = if keep_alive {
             .KeepAlive(0)
@@ -664,7 +664,7 @@ impl[P: Allocator] BodyWriter[P] {
     }
 }
 
-fn borrowed_of[P: Allocator](sink output: Output[P]) -> io.BufferedWriter[ServerLinkWriter, mem.Handle[P]] where carries(output) {
+fn borrowed_of[P: Allocator](sink output: Output[P]) -> io.BufferedWriter[LinkWriter, mem.Handle[P]] where carries(output) {
     match output {
         Borrowed(writer) => writer,
         Standard(_) => panic("a CGI body is not borrowed"),
@@ -741,7 +741,7 @@ test "a failed write is reported by every later write" {
     let client = net.connect(listener.local_address().unwrap()).unwrap()
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
     // A connection shut down for writing refuses every write to it.
-    var server = ServerLink.plain(connection)
+    var server = Link.plain(connection)
     &server.shutdown_write().unwrap()
     defer let exchange = TestExchange.open()
     defer var sent = exchange.request("GET", "/").unwrap()
@@ -881,7 +881,7 @@ test "a streamed body may exceed the arena" {
     let client = net.connect(listener.local_address().unwrap()).unwrap()
     var accepting = listener
     let Accepted { connection: accepted, address: _ } = &accepting.accept().unwrap()
-    let connection = ServerLink.plain(accepted)
+    let connection = Link.plain(accepted)
     // The message and the 4 KiB buffer fill most of this 8 KiB arena.
     defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 8192, ..Limits.default() })
     defer var sent = exchange.request("GET", "/").unwrap()
@@ -1174,7 +1174,7 @@ fn exchanged(method: Method, answer: Reply) -> String {
     // The backlog queues the connection before accept is called.
     let client = net.connect(listener.local_address().unwrap()).unwrap()
     let Accepted { connection: accepted, address: _ } = &listener.accept().unwrap()
-    let connection = ServerLink.plain(accepted)
+    let connection = Link.plain(accepted)
     defer let exchange = TestExchange.open()
     let token = if method == Method.Head {
         "HEAD"

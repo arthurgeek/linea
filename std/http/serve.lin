@@ -1470,7 +1470,7 @@ fn served_at_limits(sink limits: Limits, header_lines: UInt64, line_length: UInt
 // parser, body reader and response path the dispatcher uses. Forcing close
 // lets the fixture collect the complete response without running a dispatcher.
 fn answer_one[H: Handler[(), P] + Observer, P: Allocator](sink connection: net.Connection, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits, exhaust_after_head: Bool = false) {
-    var configured = ServerLink.plain(connection)
+    var configured = Link.plain(connection)
     &configured.set_timeouts(limits.read_timeout_ms, limits.write_timeout_ms)
     &configured.set_read_deadline(net.bound_after(limits.read_timeout_ms))
     let reader = io.BufferedReader.open(capacity: request_buffer_bytes, reader: configured) else |failure| {
@@ -1617,7 +1617,7 @@ fn noted_text[A: Allocator](note: String[A], noted: Noted) -> Option[Str] where 
 // is discarded into `refusal`, the buffer `serve` holds for this, so the client
 // reads the 503 the event reports unless writing it failed, which the event
 // then reports instead.
-fn refuse_for_want_of_arena[H: Handler[(), P] + Observer, P: Allocator](sink connection: ServerLink, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) {
+fn refuse_for_want_of_arena[H: Handler[(), P] + Observer, P: Allocator](sink connection: Link, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits) {
     var refused = connection
     // The answer's headers are empty, so the refused arena's handle allocates
     // nothing for them.
@@ -1633,7 +1633,7 @@ fn refuse_for_want_of_arena[H: Handler[(), P] + Observer, P: Allocator](sink con
 }
 
 // Answer a request that was not read with `status` alone.
-fn refuse[A: Allocator](inout connection: ServerLink, status: Status, allocator: A) -> Result[(), io.IoError] {
+fn refuse[A: Allocator](inout connection: Link, status: Status, allocator: A) -> Result[(), io.IoError] {
     let headers = ResponseHeaders.new_in(allocator)
     let wrote = write_head(&connection, status, headers, .Http)
     headers.release()
@@ -1644,7 +1644,7 @@ fn refuse[A: Allocator](inout connection: ServerLink, status: Status, allocator:
 // Stop writing to `connection` and discard what the client still sends into
 // `discarded`, so closing it does not reset the connection before the client
 // reads the answer.
-fn linger[A: Allocator](inout connection: ServerLink, inout discarded: mem.Buffer[A], read_timeout_ms: UInt64) {
+fn linger[A: Allocator](inout connection: Link, inout discarded: mem.Buffer[A], read_timeout_ms: UInt64) {
     if !&connection.shutdown_write().is_ok() {
         return
     }
@@ -1683,13 +1683,13 @@ test "a linger read waits no longer than the read timeout" {
 // Close `connection` and ignore a failure: the descriptor is released either
 // way, and the response has already been delivered or lost, so a server has
 // nothing to do about it.
-fn close_connection(sink connection: ServerLink) {
+fn close_connection(sink connection: Link) {
     let _closed = connection.close()
 }
 
 // Reset `connection`, so the client reads an error rather than the end of a
 // response, and ignore a failure: the descriptor is released either way.
-fn reset_connection(sink connection: ServerLink) {
+fn reset_connection(sink connection: Link) {
     let _reset = connection.reset()
 }
 
@@ -2005,7 +2005,7 @@ fn answer_reading[H: Handler[(), P] + Observer, P: Allocator](sink reading: Read
 
 // Settle the parsed message, response and body before returning the connection.
 fn answer_message[H: Handler[(), P] + Observer, P: Allocator](sink reader: Reading, inout handler: H, memory: mem.Handle[P], inout refusal: mem.Buffer[P], limits: Limits, closing: Bool, stopping: Option[task.Client[Bool]], sink message: Message[P], length: UInt64) -> ExchangeRead where carries() {
-    let deadline = reader.inspect_reader(|link: ServerLink| link.read_deadline())
+    let deadline = reader.inspect_reader(|link: Link| link.read_deadline())
     let request = Request[P] { deadline, ..message.request() }
     var incoming: RequestBody[P] = RequestBody.from_reader(reader, length, limits, memory)
     var note = String.new_in(memory)
@@ -2102,7 +2102,7 @@ fn settle_borrowed[P: Allocator](sink body: BodyWriter[P], sink written: Result[
     }
 }
 
-fn refuse_writer[A: Allocator](inout writer: ServerLinkWriter, status: Status, allocator: A) -> Result[(), io.IoError] where carries() {
+fn refuse_writer[A: Allocator](inout writer: LinkWriter, status: Status, allocator: A) -> Result[(), io.IoError] where carries() {
     let headers: ResponseHeaders[A] = ResponseHeaders.new_in(allocator)
     let written = write_head(&writer, status, headers, .Http)
     headers.release()
@@ -2138,7 +2138,7 @@ fn form_health_router() -> Router[()] {
 fn refuse_reading[H: Observer, P: Allocator](sink reader: Reading, inout handler: H, memory: mem.Handle[P], inout scratch: mem.Buffer[P], limits: Limits, sink reason: RequestError) -> ExchangeRead where carries() {
     let status = reason.status()
     let refused: Result[(), io.IoError] = {
-        var writer = reader.inspect_reader(|connection: ServerLink| -> ServerLinkWriter where borrows(connection) connection.writer())
+        var writer = reader.inspect_reader(|connection: Link| -> LinkWriter where borrows(connection) connection.writer())
         match read status {
             Some(answer) => refuse_writer(&writer, answer, memory),
             None => .Ok(()),
