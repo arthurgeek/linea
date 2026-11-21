@@ -2657,6 +2657,7 @@ pub fn build(b: *std.Build) void {
             .{ .source = "io.lin", .completion = .rearm },
             .{ .source = "io.lin", .completion = .timer_tie },
             .{ .source = "io_timeout.lin" },
+            .{ .source = "io_buffer_reuse.lin" },
             .{ .source = "io_failure.lin" },
             .{ .source = "io_rearm_failure.lin", .completion = .rearm_failure },
             .{ .source = "join.lin" },

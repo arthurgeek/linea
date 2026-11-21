@@ -44,7 +44,8 @@ fn main() -> UInt8 {
         if ack != 1 || replacement.as_slice()[0] != 73 {
             panic("a retired read changed replacement storage")
         }
-        &stream.set_timeouts(read_ms: 1000, write_ms: 0)
+        // The first deadline has passed, so the next read gets one of its own.
+        &stream.set_deadline(time.Deadline.after(time.Duration.from_milliseconds(1000)))
         let received = &stream.read_some(&replacement, offset: 0, count: 1).unwrap()
         if received != 1 || replacement.as_slice()[0] != 120 {
             panic("the retired read consumed the next operation's byte")
