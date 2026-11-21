@@ -93,24 +93,7 @@ pub trait Acceptor: io.Close {
 impl Acceptor for Listener {
     // Wait for the next connection, with no bound on how long.
     fn accept(inout self: Self) -> Result[Accepted, NetError] {
-        accept_by(&self, deadline_ns: 0)
-    }
-}
-
-// Accept the next connection by the monotonic moment `deadline_ns`, 0 for
-// none, and read its peer's address.
-fn accept_by(inout listener: Listener, deadline_ns: UInt64) -> Result[Accepted, NetError] {
-    let answer = linea_net_accept(listener.fd, deadline_ns)
-    if answer < 0 {
-        return .Err(failure(.Accept, answer))
-    }
-    let connection = adopt(Int32(answer))
-    match connection.peer_address() {
-        Ok(address) => .Ok(Accepted { connection = connection, address = address }),
-        Err(reason) => {
-            let _closed = connection.close()
-            return .Err(reason)
-        },
+        &self.accept_by(time.never)
     }
 }
 
@@ -216,16 +199,24 @@ impl Listener {
         .Ok(())
     }
 
-    // Wait for the next connection for at most `ms` milliseconds. Once they
-    // have passed, the accept fails as timed out and a connection that
-    // arrives later waits for the next accept. A connection ready as the time
-    // runs out is accepted. Zero sets no bound, as `accept` has none.
-    pub fn accept_within(inout self: Self, ms: UInt64) -> Result[Accepted, NetError] {
-        var deadline: UInt64 = 0
-        if ms != 0 {
-            deadline = deadline_after(time.Instant.now().monotonic_nanoseconds(), ms)
+    // Wait for the next connection until `deadline`, and read its peer's
+    // address. Once the deadline has passed, the accept fails as timed out and a
+    // connection that arrives later waits for the next accept. A connection
+    // ready as the deadline passes is accepted. `time.never` sets no bound, as
+    // `accept` has none.
+    pub fn accept_by(inout self: Self, deadline: time.Deadline) -> Result[Accepted, NetError] {
+        let answer = linea_net_accept(self.fd, deadline.monotonic_nanoseconds())
+        if answer < 0 {
+            return .Err(failure(.Accept, answer))
         }
-        accept_by(&self, deadline)
+        let connection = adopt(Int32(answer))
+        match connection.peer_address() {
+            Ok(address) => .Ok(Accepted { connection = connection, address = address }),
+            Err(reason) => {
+                let _closed = connection.close()
+                return .Err(reason)
+            },
+        }
     }
 
     test "an accept whose connection is ready at its deadline takes it" {
@@ -240,8 +231,8 @@ impl Listener {
                 var listener = listen(loopback(80)).unwrap()
                 let client = connect(loopback(80)).unwrap()
                 let connected = time.Instant.now()
-                let early = timed_out(&listener.accept_within(ms: 9))
-                let on_time = !timed_out(&listener.accept_within(ms: 1))
+                let early = timed_out(&listener.accept_by(time.Deadline.after(time.Duration.from_milliseconds(9))))
+                let on_time = !timed_out(&listener.accept_by(time.Deadline.after(time.Duration.from_milliseconds(1))))
                 let waited = connected.elapsed()
                 client.close().unwrap()
                 listener.close().unwrap()
@@ -254,13 +245,27 @@ impl Listener {
         testing.assert_eq(waited, time.Duration.from_milliseconds(10), "the accepts waited other than the ACK's 10 ms")?
     }
 
-    test "an accept with no bound waits as accept does" {
+    test "an accept whose deadline is never waits as accept does" {
         var listener = listen(loopback(0)).unwrap()
         let client = connect(listener.local_address().unwrap()).unwrap()
-        let accepted = !timed_out(&listener.accept_within(ms: 0))
+        let accepted = !timed_out(&listener.accept_by(time.never))
         client.close().unwrap()
         listener.close().unwrap()
-        testing.assert(accepted, "an accept with no bound did not take the waiting connection")?
+        testing.assert(accepted, "an accept whose deadline is never did not take the waiting connection")?
+    }
+
+    test "an accept whose deadline has passed times out with no client" {
+        var sim = io.Simulation.open(seed: 1).unwrap()
+        let expired = &sim.run(
+            |inout _world| {
+                var listener = listen(loopback(80)).unwrap()
+                let expired = timed_out(&listener.accept_by(time.Deadline.after(time.Duration.from_nanoseconds(0))))
+                listener.close().unwrap()
+                expired
+            },
+        )
+        sim.close()
+        testing.assert(expired, "an accept past its deadline did not time out")?
     }
 }
 

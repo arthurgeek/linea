@@ -19,7 +19,7 @@ fn main() -> UInt8 {
     let body = sink [sink listening, inout passed] |sink me: Chan[End]| {
         var listener = listening
         let first = task.current_carrier().unwrap()
-        let Accepted { connection, address: _ } = &listener.accept_within(500).unwrap()
+        let Accepted { connection, address: _ } = &listener.accept_by(time.Deadline.after(time.Duration.from_milliseconds(500))).unwrap()
         if first == task.current_carrier().unwrap() {
             panic("the completed accept did not migrate its continuation")
         }

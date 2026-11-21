@@ -98,7 +98,8 @@ Sockets, connections, and what a server owes each one.
 
 - [tcp_echo.lin](tcp_echo.lin): echoes text over TCP; a server, a client, `io.read_text`, and `defer let` for connections.
 - [visitor_counter.lin](visitor_counter.lin): numbers visitors across connections; state shared by a server.
-- [bounded_echo.lin](bounded_echo.lin): an echo server a slow client cannot hold up; timeouts, deadlines, and size caps.
+- [bounded_echo.lin](bounded_echo.lin): an echo server a slow client cannot hold up; one deadline shared by every read and write, and size caps.
+- [wait_for_service.lin](wait_for_service.lin): waits until a service accepts connections; retries with `time.Backoff` under one `time.Deadline`, tested on a simulated clock.
 
 ## Web services
 

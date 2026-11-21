@@ -11,6 +11,9 @@ proposed — 2026-11-13, and implemented by
 sentence on the share a taken or closed registration answers, are
 superseded by
 [0281](0281-the-signal-router-chains-to-a-snapshot-of-the-hosts-action-as-the-system-would-call-it.md).
+The clause of §10 that bounds a connect and an accept with relative
+milliseconds (`within_ms`, `accept_within(ms)`, zero for none) is superseded by
+[0299](0299-a-deadline-is-an-absolute-moment-passed-explicitly.md).
 It builds on
 [0261](0261-an-owning-task-holds-nothing-that-waits.md). Phases 1 to 7 of §13
 state what is built when. Phase 1 is built: nonblocking sockets with
