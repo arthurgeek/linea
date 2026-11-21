@@ -396,6 +396,7 @@ The library tests itself.
   ok    http.a cgi head request is answered_with the head alone
   ok    http.a cgi request answers each limits status one past the bound
   ok    http.a client reset before accept never stops serving and the next is served
+  ok    http.a client that fails the handshake is closed and serving goes on
   ok    http.a close token in a second connection header closes after the response
   ok    http.a cookie error displays its reason
   ok    http.a cookie is cleared with an empty expired value
@@ -488,6 +489,7 @@ The library tests itself.
   ok    http.a pattern has one capture for each named segment
   ok    http.a pattern splits into its method and path
   ok    http.a percent error displays its reason
+  ok    http.a plain link carries bytes both ways and closes
   ok    http.a policy of no threads is refused and closes the listener
   ok    http.a port that is taken is a listen failure
   ok    http.a prefixed cookie is cleared with secure
@@ -683,6 +685,7 @@ The library tests itself.
   ok    http.serving in the system allocator answers a request
   ok    http.serving reports an accept failure when closing the listener fails too
   ok    http.serving that cannot begin announces nothing
+  ok    http.serving with a TLS configuration answers over TLS
   ok    http.set_header replaces every value of a name
   ok    http.setting a header replaces every value
   ok    http.status returns the status the error answers with
@@ -1177,9 +1180,12 @@ The library tests itself.
   ok    mem.a carried field keeps a lend until its holders last use
   ok    mem.a carried type that can carry nothing is owned
   ok    mem.a chunked arena hands out exactly its size less the cursor
+  ok    mem.a client and a server session carry a handshake between them
+  ok    mem.a client session starts handshaking
   ok    mem.a closure calls what it captured
   ok    mem.a closure keeps its captures in an arena
   ok    mem.a closure opened in the system allocator calls what it captured
+  ok    mem.a configuration from text that is not PEM is refused
   ok    mem.a directory stream lists what a directory holds
   ok    mem.a directory stream opens a directory inside the one it reads
   ok    mem.a directory's lasting identity is the same through two streams
@@ -1215,6 +1221,7 @@ The library tests itself.
   ok    mem.a shared test allocator over an arena is released with a dropped buffer
   ok    mem.a slice debugs as its elements in brackets
   ok    mem.a slice observes only its initialized extent
+  ok    mem.a state holds the bits it was made of
   ok    mem.a system drain stopped early is returned by finish with its storage
   ok    mem.a tag records its code when it is released
   ok    mem.a terminated copy ends with one zero byte
@@ -1373,7 +1380,7 @@ The library tests itself.
   ok    net.a net error displays its reason
   ok    net.a read deadline leaves writes unbounded
   ok    net.a read whose bytes arrive at its deadline reads them
-  ok    net.a read_by is the nearer of the read bound and the deadline
+  ok    net.a read_by is the nearest of the read bound, the deadline and the caller's
   ok    net.a reset connection is reset at its peer
   ok    net.a reset or exhausted accept is retried
   ok    net.a scripted listener fails as scripted then accepts and reports its close failure
@@ -1773,6 +1780,56 @@ The library tests itself.
   ok    time.the monotonic clock never moves back
   ok    time.the runtime is given never as no deadline
   ok    time.unix_seconds counts from the epoch
+  ok    tls.a TLS error becomes an I/O error by category
+  ok    tls.a TLS error displays what failed
+  ok    tls.a client accepting any certificate connects to an unknown server
+  ok    tls.a client and a server exchange bytes over a pipe
+  ok    tls.a client configuration closes while a stream it opened lives
+  ok    tls.a client configuration is built from the system's roots or from roots of its own
+  ok    tls.a client configuration is read from PEM files
+  ok    tls.a client configuration refuses a certificate without its key
+  ok    tls.a client given roots trusts those roots alone
+  ok    tls.a client refuses a certificate no trusted root issued
+  ok    tls.a client refuses a server whose certificate names another host
+  ok    tls.a client refuses an expired certificate
+  ok    tls.a client trusts a server whose root it names among its roots
+  ok    tls.a configuration file error displays its cause
+  ok    tls.a connect whose deadline has passed times out before shaking hands
+  ok    tls.a finished stream hands back its transport after close_notify
+  ok    tls.a handshake the server never answers ends at its deadline
+  ok    tls.a refusal displays its operation, its reason and its code
+  ok    tls.a refusal keeps the runtime's code and classifies it
+  ok    tls.a refused name is refused before any byte is sent
+  ok    tls.a scratch PEM file holds its text
+  ok    tls.a second connection with one configuration resumes the first session
+  ok    tls.a server configuration closes while a stream it opened lives
+  ok    tls.a server configuration is built from a certificate and its key
+  ok    tls.a server configuration is read from PEM files
+  ok    tls.a server refuses a client that shares none of its protocols
+  ok    tls.a server requiring a client certificate accepts a client presenting one
+  ok    tls.a server requiring a client certificate refuses a client without one
+  ok    tls.a server requiring a client certificate refuses one no trusted root issued
+  ok    tls.a server requiring client certificates needs roots to verify them
+  ok    tls.a server stream reads what a client wrote before closing
+  ok    tls.a stream accepted later runs no handshake until it is used
+  ok    tls.a stream accepted later shakes hands at its first read
+  ok    tls.a stream accepted later shakes hands by the deadline it is given
+  ok    tls.a stream cut short without close_notify is truncated
+  ok    tls.a stream lends its transport to be configured
+  ok    tls.a stream lends its transport to be observed
+  ok    tls.a stream that notified its close still reads the peer's answer
+  ok    tls.a stream's writer refuses to write before the handshake
+  ok    tls.a stream's writer sends encrypted bytes over the connection
+  ok    tls.a write larger than one record arrives whole
+  ok    tls.an abandoned stream is truncated at its peer
+  ok    tls.an accept whose deadline has passed times out before shaking hands
+  ok    tls.an optional client certificate lets a client without one connect
+  ok    tls.bytes after the peer's close_notify are ignored
+  ok    tls.closing a stream sends close_notify to the peer
+  ok    tls.no protocol is agreed when the client offers none
+  ok    tls.taking from the front of a queue keeps the rest in order
+  ok    tls.the client and the server agree on the protocol both prefer
+  ok    tls.the system's roots alone do not trust the test root
   ok    tuple.a five tuple prints its components in parentheses
   ok    tuple.a four tuple prints its components in parentheses
   ok    tuple.a pair derives its traits from its components
@@ -1807,4 +1864,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1804 passed, 0 failed
+  1861 passed, 0 failed
