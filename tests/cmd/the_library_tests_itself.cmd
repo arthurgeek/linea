@@ -1193,6 +1193,7 @@ The library tests itself.
   ok    mem.a parent refusing a chunk refuses the reservation that needed it
   ok    mem.a read walk lends each viewed element
   ok    mem.a refused allocation releases the callback
+  ok    mem.a refused allocation reports what it was for and answers status 1
   ok    mem.a refused overflowing reservation keeps the cursor
   ok    mem.a release log holds its codes in release order
   ok    mem.a reservation larger than the first chunk is handed out whole
@@ -1277,6 +1278,7 @@ The library tests itself.
   ok    mem.releasing a closure returns its bytes
   ok    mem.releasing a drain stopped early releases only what remains
   ok    mem.releasing a slice leaves its storage owned
+  ok    mem.report answers status 1
   ok    mem.rewinding gives back every chunk but the first
   ok    mem.settling a refused push releases the value and keeps the reason
   ok    mem.slice iteration collects observations and transformed values
@@ -1616,6 +1618,9 @@ The library tests itself.
   ok    testing.a recorder traps when a write exceeds its storage
   ok    testing.a refused failure is a refusal and an assertion is not
   ok    testing.a success matches its value and an error never does
+  ok    testing.allocated fails a refused allocation as a refusal carrying the message
+  ok    testing.allocated hands back what a granted allocation built
+  ok    testing.allocated reports each refusal of a walked body
   ok    testing.an assertion checks its condition and preserves the message
   ok    testing.an equality answers and carries what it was given
   ok    testing.an error is accepted and a success is reported
@@ -1788,4 +1793,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1785 passed, 0 failed
+  1790 passed, 0 failed
