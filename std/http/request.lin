@@ -3,6 +3,7 @@ import std.io
 import std.mem
 import std.testing
 import std.text as strings
+import std.time
 
 use mem.Lender
 
@@ -308,6 +309,7 @@ impl[P: Allocator] Message[P] {
             matched = "",
             path_values = .None,
             request_id = .None,
+            deadline = time.never,
         }
     }
 
@@ -548,6 +550,8 @@ struct Request[P: Allocator = mem.SystemAllocator] {
     // middleware sets it, so a client's header reaches it only when the
     // middleware kept it as well formed.
     request_id: Option[Str],
+    // `deadline` is when the server stops reading the request, head and body.
+    deadline: time.Deadline,
 }
 
 impl[P: Allocator] Request[P] {
@@ -570,6 +574,22 @@ impl[P: Allocator] Request[P] {
         testing.assert(fits, "the arena refused one byte")?
         testing.assert(past, "the arena handed out more than it holds")?
         .Ok(())
+    }
+
+    // `deadline` returns when the server stops reading this request, head and
+    // body: its read timeout after the request began to arrive, or `time.never`
+    // for a request no server reads, such as one a test builds. A handler that
+    // waits on something else for the request, such as another service, passes
+    // it on, or the earlier of it and a deadline of its own, so the whole
+    // exchange shares one budget.
+    pub fn deadline(self: Self) -> time.Deadline {
+        copy(self.deadline)
+    }
+
+    test "a request no server reads has no deadline" {
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
+        testing.assert_eq(sent.request().deadline(), time.never, "a test request had a deadline")?
     }
 
     // `method` returns the request's method, or `Other` for a token `Method`

@@ -16,13 +16,13 @@ fn main() -> UInt8 {
     let address = listener.local_address().unwrap()
     // Linux admits one connection beyond the backlog before reporting a full
     // accept queue. Keep both queued so the next handshake must wait.
-    let occupied_first = net.connect(address, within_ms: 1000).unwrap()
-    let occupied_second = net.connect(address, within_ms: 1000).unwrap()
+    let occupied_first = net.connect(address, deadline: time.Deadline.after(time.Duration.from_milliseconds(1000))).unwrap()
+    let occupied_second = net.connect(address, deadline: time.Deadline.after(time.Duration.from_milliseconds(1000))).unwrap()
     let execution = io.Loop.open(carriers: 2).unwrap()
     var passed = false
     let body = sink [address, inout passed] |sink me: Chan[End]| {
         let first = task.current_carrier().unwrap()
-        var stream = net.connect(address, within_ms: 10000).unwrap()
+        var stream = net.connect(address, deadline: time.Deadline.after(time.Duration.from_milliseconds(10000))).unwrap()
         if first == task.current_carrier().unwrap() {
             panic("the completed connect did not migrate its continuation")
         }
