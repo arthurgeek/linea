@@ -1792,4 +1792,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1785 passed, 0 failed
+  1789 passed, 0 failed
