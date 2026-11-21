@@ -1,0 +1,44 @@
+// `carries(.Some.Ok: got)` ties the success inside `Some` to the arena, so
+// the buffer it holds cannot be taken out after the arena is released.
+import std.mem
+
+use mem.Lender
+
+@(copyable)
+struct Note {
+    said: Str,
+}
+
+fn granted(sink got: Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], mem.Oom]) -> Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], Note] where carries(.Ok: got) {
+    match got {
+        Ok(v) => .Ok(v),
+        Err(_) => .Err(.{ said = "refused" }),
+    }
+}
+
+fn used(sink b: mem.Buffer[mem.Handle[mem.SystemAllocator]]) -> UInt8 {
+    let n = b.load_byte(0)
+    b.release()
+    n
+}
+
+fn wrapped(sink got: Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], mem.Oom]) -> Option[Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], Note]] where carries(.Some.Ok: got) {
+    .Some(granted(got))
+}
+
+fn run() -> Result[UInt8, Note] {
+    let arena = mem.Arena.open(mem.system(), 64)
+    let kept = wrapped(arena.handle().acquire(16))
+    arena.release()
+    match kept {
+        Some(r) => .Ok(used(r?)),
+        None => .Ok(3),
+    }
+}
+
+fn main() -> UInt8 {
+    match run() {
+        Ok(n) => n,
+        Err(_) => 9,
+    }
+}

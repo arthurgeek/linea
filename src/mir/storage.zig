@@ -73,6 +73,12 @@ const Dep = struct {
     len: u32,
     role: Role = .held,
     cause: InstId = .none,
+    /// The variant whose payload holds the dependency, when the carrier's
+    /// bytes `[hoff, hoff + hlen)` are an enum and a call's clause tied it
+    /// to that one variant (`carries(.Ok: x)`). A read of another variant's
+    /// payload of that enum does not use it. `none` where it is held in
+    /// those bytes whatever variant they hold.
+    variant: Inst.Variant = .none,
 
     /// What a dependency is to its carrier. A pointer value observes the
     /// place it points at, which is not something the bytes at that place
@@ -104,11 +110,22 @@ const Dep = struct {
         if (a.len != b.len) return a.len > b.len;
         if (a.hlen != b.hlen) return a.hlen > b.hlen;
         if (a.role != b.role) return @intFromEnum(a.role) > @intFromEnum(b.role);
+        if (a.variant != b.variant) return @intFromEnum(a.variant) > @intFromEnum(b.variant);
         return @intFromEnum(a.cause) > @intFromEnum(b.cause);
     }
 
     fn heldOverlaps(self: Dep, a: Access) bool {
+        if (self.inOtherVariant(a)) return false;
         return self.isWhole() or a.meets(self.hoff, self.hlen);
+    }
+
+    /// Whether the dependency is held in one variant's payload of the enum
+    /// whose other variant's payload the access reads. The two payloads
+    /// share their bytes, and only one of them is there.
+    fn inOtherVariant(self: Dep, a: Access) bool {
+        const p = a.payload;
+        return self.variant != .none and p.variant != .none and
+            p.at == self.hoff and p.len == self.hlen and p.variant != self.variant;
     }
 
     fn heldWithin(self: Dep, off: u32, len: u32) bool {
@@ -122,6 +139,15 @@ const Dep = struct {
 
 /// A byte range: an offset and a length.
 const Range = struct { off: u32, len: u32 };
+
+/// The variant whose payload an address lies in, and the bytes of the enum
+/// holding it, `[at, at + len)` of the root; `none` where the address lies
+/// in no payload a `field_addr` named, or where its bytes are not exact.
+const Payload = struct {
+    variant: Inst.Variant = .none,
+    at: u32 = 0,
+    len: u32 = 0,
+};
 
 /// The bytes an address covers: a range, or, for an address computed steps
 /// reached, one part of every element at every level of the arrays they
@@ -137,6 +163,7 @@ const Access = struct {
     steps: [verify_mod.max_computed_steps]Step = [_]Step{.{}} ** verify_mod.max_computed_steps,
     depth: u8 = 0,
     inner: u32 = 0,
+    payload: Payload = .{},
 
     fn whole(len: u32) Access {
         return .{ .off = 0, .len = len };
@@ -353,6 +380,7 @@ const Base = struct {
     /// read through it carries what those bytes hold and not the pointer's
     /// own observation of them.
     through: bool = false,
+    payload: Payload = .{},
 
     fn computed(self: Base) bool {
         return self.depth != 0;
@@ -796,8 +824,22 @@ pub const Phase = struct {
                 .heap => b.through = true,
                 .static, .none => {},
             }
+            if (mir.tagOf(id) == .field_addr) b.payload = self.payloadOf(id, b);
             self.base[i] = b;
         }
+    }
+
+    /// The payload a field address `b` lies in: the variant it names, in the
+    /// enum its base addresses, or the payload its base lies in, which a
+    /// constant step further into the value is still inside. Where either
+    /// address is not an exact place of the same root there is none.
+    fn payloadOf(self: *const Phase, id: InstId, b: Base) Payload {
+        const f = self.mir.fieldAddrOf(id);
+        const under = self.base[f.base.index()];
+        if (b.root == no_entity or b.through or b.computed()) return .{};
+        if (under.root != b.root or under.carrier != b.carrier or under.computed()) return .{};
+        if (f.variant == .none) return under.payload;
+        return .{ .variant = f.variant, .at = under.off, .len = self.layoutSize(self.mir.typeOf(f.base)) };
     }
 
     // -- Dependency sets. --
@@ -891,6 +933,9 @@ pub const Phase = struct {
         /// across the boundary of what is read, or every dependency when
         /// `structure` is false, covers the whole range.
         at: struct { off: u32, len: u32, structure: bool },
+        /// In one variant's payload of the enum at `[at, at + len)` of a
+        /// call result: what a clause naming that variant carries.
+        payload: struct { at: u32, len: u32, variant: Inst.Variant },
     };
 
     /// What a projection does with the dependencies that are a pointer's own
@@ -923,10 +968,19 @@ pub const Phase = struct {
     /// `d` as a projection places it: null when it is held outside `window`,
     /// else where the placement holds it afterwards. Dependencies and marks
     /// project by this one rule.
+    ///
+    /// A dependency held in one variant's payload keeps its variant only
+    /// where the enum holding it is copied whole out of a root's own bytes,
+    /// which places it exactly: a read of a part of the enum -- the payload
+    /// itself, once its variant is known -- takes it out of the enum, and
+    /// what it lands in holds it whatever that is. A pointer's dependencies
+    /// are placed relative to its referent, and a read through one is not
+    /// placed by the offset it reads at, so neither keeps a variant.
     fn placed(d: Dep, window: Access, to: Placement, views: Views) ?Dep {
         if (views == .skip and d.role == .view) return null;
         if (!d.heldOverlaps(window)) return null;
         var out = d;
+        out.variant = .none;
         if (views == .hold) out.role = .held;
         switch (to) {
             .whole => {
@@ -947,10 +1001,16 @@ pub const Phase = struct {
                 if (r) |part| {
                     out.hoff = t.off + part.off;
                     out.hlen = part.len;
+                    if (part.len == d.hlen and views != .skip) out.variant = d.variant;
                 } else {
                     out.hoff = t.off;
                     out.hlen = t.len;
                 }
+            },
+            .payload => |p| {
+                out.hoff = p.at;
+                out.hlen = p.len;
+                out.variant = p.variant;
             },
         }
         return out;
@@ -985,6 +1045,7 @@ pub const Phase = struct {
             .whole => if (all_whole) return s,
             .pointee => if (!window.isStrided() and window.off == 0 and all_whole) return s,
             .at => |t| if (unchanged and t.structure and !window.isStrided() and window.off == 0 and t.off == 0 and t.len == window.len and self.partsWithin(s, window.len)) return s,
+            .payload => {},
         }
         self.prefix.clearRetainingCapacity();
         var at = s;
@@ -1244,6 +1305,7 @@ pub const Phase = struct {
             .whole => if (all_whole) return s,
             .pointee => if (!window.isStrided() and window.off == 0 and all_whole) return s,
             .at => |t| if (unchanged and t.structure and !window.isStrided() and window.off == 0 and t.off == 0 and t.len == window.len and self.markPartsWithin(s, window.len)) return s,
+            .payload => {},
         }
         self.prefix.clearRetainingCapacity();
         try self.markPlaced(s, window, to, views);
@@ -1651,7 +1713,7 @@ pub const Phase = struct {
 
     /// The bytes an address of `ty` covers.
     fn accessOf(self: *const Phase, b: Base, ty: TypeId) Access {
-        if (!b.computed() or b.steps[0].elem == 0) return .{ .off = b.off, .len = self.layoutSize(ty) };
+        if (!b.computed() or b.steps[0].elem == 0) return .{ .off = b.off, .len = self.layoutSize(ty), .payload = if (b.computed()) .{} else b.payload };
         return .{ .off = b.off, .len = self.layoutSize(ty), .steps = b.steps, .depth = b.depth, .inner = b.inner };
     }
 
@@ -2008,7 +2070,7 @@ pub const Phase = struct {
             else
                 viewsRead(b);
             var carried: SetId = if (b.carrier != no_entity) try self.project(self.deps[b.carrier], window, to, views) else empty_set;
-            const carried_marks: MarkId = if (b.carrier != no_entity) try self.projectMarks(self.stale[b.carrier], window, to, views) else empty_set;
+            var carried_marks: MarkId = if (b.carrier != no_entity) try self.projectMarks(self.stale[b.carrier], window, to, views) else empty_set;
             if (contract.kind == .borrows or contract.borrows_source) {
                 if (b.root != no_entity) {
                     const r = a.first();
@@ -2023,6 +2085,11 @@ pub const Phase = struct {
             switch (contract.kind) {
                 .borrows, .carries => {
                     if (!targetCarriesWhole(contract.target)) continue;
+                    if (self.payloadOfResult(contract.target, s.result)) |into| {
+                        const all = Access.whole(held_whole - 1);
+                        carried = try self.project(carried, all, into, .keep);
+                        carried_marks = try self.projectMarks(carried_marks, all, into, .keep);
+                    }
                     result_deps = try self.unionOf(result_deps, carried);
                     result_marks = try self.markUnion(result_marks, carried_marks);
                 },
@@ -2048,6 +2115,28 @@ pub const Phase = struct {
         if (mir.tagOf(id) == .call or mir.tagOf(id) == .call_indirect) {
             try self.define(id, result_deps, result_marks);
         }
+    }
+
+    /// Where a clause whose target names a variant's payload holds what it
+    /// carries: in the innermost variant the target names, at the bytes of
+    /// the enum holding it -- for `.Some.Ok`, the `Ok` payload of the result
+    /// inside `Some`, which a binder of `Some` takes out whole. None for a
+    /// target naming no variant, or a result held in a register or of no
+    /// bytes, which no payload address reads.
+    fn payloadOfResult(self: *const Phase, target: []const types_mod.ResultSelector, result: TypeId) ?Placement {
+        if (target.len == 0) return null;
+        if (self.module.representationOf(result).storage != .bytes) return null;
+        const types = &self.module.types;
+        var enum_ty = types.erased(result);
+        var at: u32 = 0;
+        for (target[0 .. target.len - 1]) |selector| {
+            const k: u32 = @intFromEnum(selector.payload.variant);
+            at += types.variantFieldOffset(enum_ty, k, selector.payload.index);
+            enum_ty = types.erased(types.variantFieldType(enum_ty, k, selector.payload.index));
+        }
+        const len = self.layoutSize(enum_ty);
+        if (len == 0) return null;
+        return .{ .payload = .{ .at = at, .len = len, .variant = .at(@intFromEnum(target[target.len - 1].payload.variant)) } };
     }
 
     /// Whether a result target lets the clause reach the whole result. A
@@ -2713,6 +2802,12 @@ const CallableContract = types_mod.CallableContract;
 
 const borrows_first: []const CallableContract = &.{.{ .kind = .borrows, .source = .{ .root = .{ .parameter = 0 } } }};
 const carries_first: []const CallableContract = &.{.{ .kind = .carries, .source = .{ .root = .{ .parameter = 0 } } }};
+/// `borrows(.Left: x)`, for a result of `Either`.
+const borrows_first_left: []const CallableContract = &.{.{
+    .kind = .borrows,
+    .source = .{ .root = .{ .parameter = 0 } },
+    .target = &.{.{ .payload = .{ .variant = @enumFromInt(0), .index = 0 } }},
+}};
 const retains_borrow: []const CallableContract = &.{.{
     .kind = .retains,
     .source = .{ .root = .{ .parameter = 1 } },
@@ -2776,6 +2871,21 @@ fn returnsBorrowOfBig(gpa: std.mem.Allocator) !Mir {
     return b.finish(entry, .from(0));
 }
 
+/// A callee reading one `Big` and returning an `Either` through the
+/// caller's storage.
+fn returnsEither(gpa: std.mem.Allocator) !Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = Harness.either;
+    b.param_count = 1;
+    _ = try b.addLocal(Harness.big, .managed_address);
+    const answer = try b.addLocal(Harness.either, .value);
+    const entry = try b.addBlock();
+    const at = try addrOfEither(&b, entry, answer);
+    _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = at } });
+    return b.finish(entry, .from(0));
+}
+
 /// A callee taking one word by value.
 fn takesWord(gpa: std.mem.Allocator) !Mir {
     var b = Builder.init(gpa);
@@ -2794,10 +2904,11 @@ const Shapes = struct {
     /// 2 lends it for writing, 3 takes it by sink, 4 takes a word, 5 lends
     /// it for reading with `carries`, 6 returns a borrow of the `Big` it reads
     /// with `borrows`, 7 keeps a borrow of its second `Big` in its first with
-    /// `retains`, 8 returns a borrow of the `Big` it reads with `carries`, and
-    /// 9 reads one `Big` and takes another by sink.
+    /// `retains`, 8 returns a borrow of the `Big` it reads with `carries`, 9
+    /// reads one `Big` and takes another by sink, and 10 returns an `Either`
+    /// whose `Left` payload borrows the `Big` it reads.
     fn callees(gpa: std.mem.Allocator, subject: Mir) ![]Mir {
-        const functions = try gpa.alloc(Mir, 10);
+        const functions = try gpa.alloc(Mir, 11);
         functions[0] = subject;
         functions[1] = try takesBig(gpa, .read);
         functions[2] = try takesBig(gpa, .inout);
@@ -2808,6 +2919,7 @@ const Shapes = struct {
         functions[7] = try takesTwoBig(gpa);
         functions[8] = try returnsBorrowOfBig(gpa);
         functions[9] = try readsAndTakesBig(gpa);
+        functions[10] = try returnsEither(gpa);
         return functions;
     }
 
@@ -2822,6 +2934,7 @@ const Shapes = struct {
         .{ .conventions = &.{ .inout, .read }, .contracts = retains_borrow },
         .{ .conventions = &.{.read}, .contracts = carries_first },
         .{ .conventions = &.{ .read, .sink } },
+        .{ .conventions = &.{.read}, .contracts = borrows_first_left },
     };
 
     const reads: FunctionId = .at(1);
@@ -2833,6 +2946,7 @@ const Shapes = struct {
     const retains: FunctionId = .at(7);
     const carries_borrow: FunctionId = .at(8);
     const reads_and_takes: FunctionId = .at(9);
+    const borrows_left: FunctionId = .at(10);
 };
 
 fn ret(b: *Builder, block: BlockId, value: InstId) !void {
@@ -2845,6 +2959,10 @@ fn constant(b: *Builder, block: BlockId, value: i128) !InstId {
 
 fn addrOf(b: *Builder, block: BlockId, slot: LocalId) !InstId {
     return b.addInst(block, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .local = slot } });
+}
+
+fn addrOfEither(b: *Builder, block: BlockId, slot: LocalId) !InstId {
+    return b.addInst(block, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.either, .span = Span.empty, .data = .{ .local = slot } });
 }
 
 fn expectRefused(functions: []Mir, needle: []const u8) !void {
@@ -3138,6 +3256,66 @@ fn carriedThroughBorrow(gpa: std.mem.Allocator) ![]Mir {
 
 test "a result carried from the bytes a borrow points at does not observe the place they came from" {
     try expectAccepted(try carriedThroughBorrow(testing.allocator));
+}
+
+/// Gets an `Either` whose `Left` payload borrows `x`, writes `x`, and copies
+/// out the payload of `variant` -- or, for `.none`, the payload's bytes read
+/// without naming a variant.
+fn payloadAfterChange(gpa: std.mem.Allocator, variant: Inst.Variant) ![]Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    const x = try b.addLocal(Harness.big, .value);
+    const out = try b.addLocal(Harness.big, .value);
+    const entry = try b.addBlock();
+    const a = try addrOf(&b, entry, x);
+    const got = try b.addCall(entry, .managed_address, Harness.either, Span.empty, Shapes.borrows_left, &.{a});
+    try writeFirstWord(&b, entry, a);
+    const at = try constant(&b, entry, 8);
+    const part: Inst.Part = if (variant == .none) .none else .at(0);
+    const payload = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = got, .offset = at, .part = part, .variant = variant } } });
+    _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = try addrOf(&b, entry, out), .rhs = payload } } });
+    try ret(&b, entry, try constant(&b, entry, 0));
+    return Shapes.callees(gpa, try b.finish(entry, .from(0)));
+}
+
+test "a payload a clause ties to its source is refused after the source changes" {
+    try expectRefused(try payloadAfterChange(testing.allocator, .at(0)), "wrote the storage it observes");
+}
+
+test "another variant's payload does not hold what a clause ties to one variant" {
+    try expectAccepted(try payloadAfterChange(testing.allocator, .at(1)));
+}
+
+test "bytes of a payload read without naming its variant hold what any variant holds" {
+    try expectRefused(try payloadAfterChange(testing.allocator, .none), "wrote the storage it observes");
+}
+
+/// Gets an `Either` whose `Left` payload borrows `x`, moves it whole into a
+/// slot, writes `x`, and copies out the slot's payload of `variant`.
+fn payloadMovedThenChanged(gpa: std.mem.Allocator, variant: Inst.Variant) ![]Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.return_type = .u64;
+    const x = try b.addLocal(Harness.big, .value);
+    const held = try b.addLocal(Harness.either, .value);
+    const out = try b.addLocal(Harness.big, .value);
+    const entry = try b.addBlock();
+    const a = try addrOf(&b, entry, x);
+    const got = try b.addCall(entry, .managed_address, Harness.either, Span.empty, Shapes.borrows_left, &.{a});
+    const h = try addrOfEither(&b, entry, held);
+    _ = try b.addInst(entry, .{ .tag = .move_value, .ty = Harness.either, .span = Span.empty, .data = .{ .binary = .{ .lhs = h, .rhs = got } } });
+    try writeFirstWord(&b, entry, a);
+    const at = try constant(&b, entry, 8);
+    const payload = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = Harness.big, .span = Span.empty, .data = .{ .field = .{ .base = h, .offset = at, .part = .at(0), .variant = variant } } });
+    _ = try b.addInst(entry, .{ .tag = .copy_value, .ty = Harness.big, .span = Span.empty, .data = .{ .binary = .{ .lhs = try addrOf(&b, entry, out), .rhs = payload } } });
+    try ret(&b, entry, try constant(&b, entry, 0));
+    return Shapes.callees(gpa, try b.finish(entry, .from(0)));
+}
+
+test "a payload's variant is still known once the enum holding it moves whole" {
+    try expectRefused(try payloadMovedThenChanged(testing.allocator, .at(0)), "wrote the storage it observes");
+    try expectAccepted(try payloadMovedThenChanged(testing.allocator, .at(1)));
 }
 
 /// Gets a borrow of `x` from a `borrows` callee, copies the bytes it points

@@ -1,0 +1,32 @@
+// `carries(.Ok: got)` ties only the success to the arena, so `?` may return
+// the failure after the deferred release of the arena has run.
+import std.mem
+
+use mem.Lender
+
+@(copyable)
+struct Note {
+    said: Str,
+}
+
+impl Display for Note {
+    fn fmt[W: Writer](self: Note, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, self.said)
+    }
+}
+
+fn granted(sink got: Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], mem.Oom]) -> Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], Note] where carries(.Ok: got) {
+    match got {
+        Ok(v) => .Ok(v),
+        Err(_) => .Err(.{ said = "refused" }),
+    }
+}
+
+fn main() -> Result[UInt8, Note] {
+    defer let arena = mem.Arena.open(mem.system(), 64)
+    var b = granted(arena.handle().acquire(16))?
+    &b.store_byte(0, 7)
+    let n = b.load_byte(0)
+    b.release()
+    .Ok(n)
+}

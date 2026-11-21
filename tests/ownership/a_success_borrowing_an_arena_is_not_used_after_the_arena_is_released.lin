@@ -1,0 +1,34 @@
+// `carries(.Ok: got)` ties the success to the arena, so the buffer it holds
+// cannot be taken out after the arena is released.
+import std.mem
+
+use mem.Lender
+
+@(copyable)
+struct Note {
+    said: Str,
+}
+
+impl Display for Note {
+    fn fmt[W: Writer](self: Note, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Writer.write_str(&w, self.said)
+    }
+}
+
+fn granted(sink got: Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], mem.Oom]) -> Result[mem.Buffer[mem.Handle[mem.SystemAllocator]], Note] where carries(.Ok: got) {
+    match got {
+        Ok(v) => .Ok(v),
+        Err(_) => .Err(.{ said = "refused" }),
+    }
+}
+
+fn main() -> Result[UInt8, Note] {
+    let arena = mem.Arena.open(mem.system(), 64)
+    let got = granted(arena.handle().acquire(16))
+    arena.release()
+    var b = got?
+    &b.store_byte(0, 7)
+    let n = b.load_byte(0)
+    b.release()
+    .Ok(n)
+}

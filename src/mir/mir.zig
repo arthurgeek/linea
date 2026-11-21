@@ -159,9 +159,10 @@ pub const Inst = struct {
         /// A checked heap address pointing at a concrete typed element.
         storage_addr,
         /// The address of a field within a value held in memory: the value's
-        /// address, an offset into it, and which part of the value's type the
-        /// address selects (`Part`). Read as a binary operation over the
-        /// first two, `lhs` and `rhs`, through `binaryOf`.
+        /// address, an offset into it, which part of the value's type the
+        /// address selects (`Part`), and, for a variant's payload, which
+        /// variant (`Variant`). Read as a binary operation over the first
+        /// two, `lhs` and `rhs`, through `binaryOf`.
         ///
         /// The part is what tells two fields apart where the offset cannot:
         /// zero-sized fields share their offset with what follows them, and
@@ -322,7 +323,27 @@ pub const Inst = struct {
         }
     };
 
-    pub const FieldAddr = struct { base: InstId, offset: InstId, part: Part = .none };
+    /// Which variant's payload a `field_addr` selects, by the variant's
+    /// ordinal in its enum; `none` where the address selects no payload.
+    /// A variant's payload shares its bytes with every other variant's, so
+    /// the offset cannot say which one an address reads: what a call's
+    /// clause ties to the `Ok` payload of its result is not in the `Err`
+    /// payload, and only this tells a read of one from a read of the other.
+    pub const Variant = enum(u32) {
+        none = std.math.maxInt(u32),
+        _,
+
+        pub fn at(i: u32) Variant {
+            std.debug.assert(i != std.math.maxInt(u32));
+            return @enumFromInt(i);
+        }
+
+        pub fn index(self: Variant) u32 {
+            return @intFromEnum(self);
+        }
+    };
+
+    pub const FieldAddr = struct { base: InstId, offset: InstId, part: Part = .none, variant: Variant = .none };
 
     /// Named rather than anonymous so a consumer can spell the type it is
     /// handed and pass it on.

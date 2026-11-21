@@ -1136,6 +1136,7 @@ const Function = struct {
                 const p = mir.binaryOf(id);
                 if (!try self.operandInRange(id, p.lhs)) return false;
                 if (!try self.operandInRange(id, p.rhs)) return false;
+                if (mir.tagOf(id) == .field_addr and !try self.variantPayload(id)) return false;
 
                 // Arithmetic and comparison take operands with matching
                 // recorded result representations. A mismatched pair is
@@ -1564,6 +1565,31 @@ const Function = struct {
             return false;
         }
         return true;
+    }
+
+    /// A field address naming a variant names one its base's enum declares,
+    /// a position in that variant's payload, and the offset the position
+    /// sits at. The storage phase reads the variant to tell a read of one
+    /// payload from a read of another, which share their bytes, so a wrong
+    /// variant would hide a use of storage that changed. The address is
+    /// of the payload's own type, as a field address names its field's.
+    fn variantPayload(self: *Function, id: InstId) std.mem.Allocator.Error!bool {
+        const mir = self.mir;
+        const f = mir.fieldAddrOf(id);
+        if (f.variant == .none) return true;
+        const types = &self.module.types;
+        const of = types.erased(mir.typeOf(f.base));
+        const k = f.variant.index();
+        const named = self.covers(mir.typeOf(f.base)) and self.covers(mir.typeOf(id)) and
+            types.get(of) == .enum_ and
+            k < types.variantCount(of) and f.part != .none and
+            @intFromEnum(f.part) < types.variantFieldCount(of, k) and
+            mir.tagOf(f.offset) == .constant and
+            mir.constantOf(f.offset) == types.variantFieldOffset(of, k, @intFromEnum(f.part)) and
+            types.erased(mir.typeOf(id)) == types.erased(types.variantFieldType(of, k, @intFromEnum(f.part)));
+        if (named) return true;
+        try self.report(mir.spanOf(id), "%{d} names a variant payload the enum at its base does not hold there", .{id.index()});
+        return false;
     }
 
     fn operandInRange(self: *Function, id: InstId, operand: InstId) std.mem.Allocator.Error!bool {
@@ -2739,6 +2765,8 @@ pub const Harness = struct {
         .{ .name = "plain", .ty = plain },
         .{ .name = "left", .ty = token },
         .{ .name = "right", .ty = token },
+        .{ .name = "0", .ty = big },
+        .{ .name = "0", .ty = big },
     };
 
     const all_variants = [_]types_mod.Variant{
@@ -2749,6 +2777,8 @@ pub const Harness = struct {
         .{ .name = "Array", .first_field = 14, .field_count = 2 },
         .{ .name = "Scalar", .first_field = 16, .field_count = 1 },
         .{ .name = "Empty" },
+        .{ .name = "Left", .first_field = 23, .field_count = 1 },
+        .{ .name = "Right", .first_field = 24, .field_count = 1 },
     };
 
     pub const big: TypeId = @enumFromInt(TypeId.builtins.len);
@@ -2786,6 +2816,9 @@ pub const Harness = struct {
     pub const tokens: TypeId = @enumFromInt(TypeId.builtins.len + 21);
     /// Two `Token`s as an array: zero-sized elements at one offset.
     pub const token_array: TypeId = @enumFromInt(TypeId.builtins.len + 22);
+    /// `Left(Big)` or `Right(Big)`: two payloads sharing their bytes, which
+    /// only the variant an address names tells apart.
+    pub const either: TypeId = @enumFromInt(TypeId.builtins.len + 23);
 
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
@@ -2811,7 +2844,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 23;
+            const fixed_type_count = TypeId.builtins.len + 24;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2838,6 +2871,7 @@ pub const Harness = struct {
             pool[@intFromEnum(tokens)] = .{ .struct_ = .{ .name = "Tokens", .first_field = 21, .field_count = 2, .ownership_policy = .linear } };
             pool[@intFromEnum(token_array)] = .{ .array = .{ .name = "[Token; 2]", .element = token, .count = 2 } };
             pool[@intFromEnum(callback_enum)] = .{ .enum_ = .{ .name = "Callbacks", .first_variant = 2, .variant_count = 5 } };
+            pool[@intFromEnum(either)] = .{ .enum_ = .{ .name = "Either", .first_variant = 7, .variant_count = 2 } };
             const callable_params = [_]types_mod.CallableParam{
                 .{ .spelling = "value", .convention = .read, .ty = .u8, .default = .absent },
                 .{ .spelling = "value", .convention = .read, .ty = .u16, .default = .absent },
@@ -5063,6 +5097,34 @@ test "an indirect store agrees with its value type" {
     const got = try h.run();
     try testing.expect(!got.ok);
     try expectSaid(got.said, "stores a value of a different type through an address");
+}
+
+test "a field address names a variant its base's enum declares, where its payload sits, as its type" {
+    const gpa = testing.allocator;
+
+    const cases = [_]struct { variant: u32, offset: i128, ty: TypeId = Harness.big }{
+        .{ .variant = 2, .offset = 8 },
+        .{ .variant = 1, .offset = 0 },
+        .{ .variant = 1, .offset = 8, .ty = .i64 },
+    };
+    for (cases) |case| {
+        var b = Builder.init(gpa);
+        defer b.deinit();
+        b.return_type = .u8;
+        const slot = try b.addLocal(Harness.either, .value);
+        const entry = try b.addBlock();
+        const base = try b.addInst(entry, .{ .tag = .addr_of, .result_role = .managed_address, .ty = Harness.either, .span = Span.empty, .data = .{ .local = slot } });
+        const off = try b.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = case.offset } });
+        _ = try b.addInst(entry, .{ .tag = .field_addr, .result_role = .managed_address, .ty = case.ty, .span = Span.empty, .data = .{ .field = .{ .base = base, .offset = off, .part = .at(0), .variant = .at(case.variant) } } });
+        const value = try b.addInst(entry, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 0 } });
+        _ = try b.setTerminator(entry, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = value } });
+
+        var h = try Harness.init(gpa, try oneFunction(gpa, try b.finish(entry, .from(0))));
+        defer h.deinit();
+        const got = try h.run();
+        try testing.expect(!got.ok);
+        try expectSaid(got.said, "names a variant payload the enum at its base does not hold there");
+    }
 }
 
 test "an indirect return is a managed address" {
