@@ -1502,21 +1502,103 @@ fn lazy_test_refusing(refused: UInt64) -> (UInt64, Bool) {
     (sum, settled)
 }
 
-// The map the slow-head tests walk: the items 1 to 10 two at once, the
-// first taking six tenths of a second and the others a twentieth each.
-fn lazy_test_slow_items[A: Allocator](allocator: A) -> LazyMap[Range[UInt64], UInt64, fn(sink n: UInt64) -> UInt64, A] where carries(allocator) {
-    lazy_map_in(allocator, Policy.Threads(2), UInt64(1)..=10, lazy_test_slow_item)
+// The tests of how promptly a map refills a worker make items wait for each
+// other instead of sleeping and hoping the others ran first. Each item is an
+// errand: one end of a session with a relay task, which tells the item its
+// number once the items it waits for have run, and then hears from the item
+// that it ran. An owning task counts the errands that ran. A function a map
+// moves to its workers must be `Owned`, so it cannot hold a client of that
+// count; an errand's relay holds the client, and the errand only its end.
+
+// Wait until the count `client` reaches is at least `count`, looking every
+// millisecond for at most a minute, and answer whether it was. The minute
+// stands in for forever: an item that waits for work its map never starts
+// fails its test instead of hanging it.
+fn count_reached(client: Client[UInt64], count: UInt64) -> Bool {
+    let started = time.Instant.now()
+    loop {
+        if client.call(|inout ran: UInt64| ran) >= count {
+            return true
+        }
+        if started.elapsed().nanoseconds() >= 60000000000 {
+            return false
+        }
+        time.sleep(time.Duration.from_milliseconds(1))
+    }
 }
 
-// Sleep six tenths of a second for item 1 and a twentieth for any other.
-fn lazy_test_slow_item(sink n: UInt64) -> UInt64 {
-    let pause = if n == 1 {
-        UInt64(600)
-    } else {
-        UInt64(50)
+// Hand `run` one errand for each entry of `waits`, in order, and answer what
+// it answers once every relay has finished. The relay of errand `i` waits
+// until `waits[i]` errands have run, then sends its number, `i + 1`, or 0
+// when the minute ran out first, and counts the errand once it replies.
+fn with_errands[R: Owned, F: sink fn(sink errands: mem.Vec[Chan[Recv[UInt64, Send[(), End]]], mem.SystemAllocator]) -> R](waits: mem.Slice[UInt64], sink run: F) -> R {
+    let counter = own(UInt64(0)).unwrap()
+    let answer = relayed(counter.client(), waits, mem.Vec.new(), run)
+    let _ran = counter.close()
+    answer
+}
+
+// Start the relay of the errand after the ones in `errands`, then the rest,
+// and run `run` on them all; join each relay once `run` has answered. Each
+// call keeps its own relay's handle, so the handles need no vector of a type
+// the relay's body cannot be named in.
+fn relayed[R: Owned, F: sink fn(sink errands: mem.Vec[Chan[Recv[UInt64, Send[(), End]]], mem.SystemAllocator]) -> R](client: Client[UInt64], waits: mem.Slice[UInt64], sink errands: mem.Vec[Chan[Recv[UInt64, Send[(), End]]], mem.SystemAllocator], sink run: F) -> R {
+    let index = errands.length()
+    if index == waits.length() {
+        return run(errands)
     }
-    time.sleep(time.Duration.from_milliseconds(pause))
-    n
+    let waits_for = waits[index]
+    let relay = prepare(
+        sink [sink client = copy(client), sink waits_for, sink index] |sink me: Chan[Send[Chan[Recv[UInt64, Send[(), End]]], End]]| {
+            // The errand's task sends its own end over this relay's session
+            // to the caller, so the relay keeps the other end.
+            let errand = prepare(
+                sink [sink me] |sink end: Chan[Recv[UInt64, Send[(), End]]]| {
+                    me.send(end).close()
+                },
+            ).unwrap().start()
+            let number = if count_reached(client, waits_for) {
+                index + 1
+            } else {
+                0
+            }
+            let (_, done) = errand.send(number).recv()
+            done.close()
+            client.call(|inout ran: UInt64| ran += 1)
+        },
+    ).unwrap().start()
+    let (errand, joined) = relay.recv()
+    var more = errands
+    &more.push(errand).unwrap()
+    let answer = relayed[R, F](client, waits, more, run)
+    joined.close()
+    answer
+}
+
+// Run an errand: wait for its relay's number, tell the relay the errand ran,
+// and answer the number.
+fn run_errand(sink errand: Chan[Recv[UInt64, Send[(), End]]]) -> UInt64 {
+    let (number, reply) = errand.recv()
+    reply.send(()).close()
+    number
+}
+
+test "an errand answers its number once the errands it waits for have run" {
+    let numbers = with_errands(
+        [UInt64(0), 1].as_slice(),
+        sink [] |sink errands| {
+            var answered: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
+            var pending = errands.drain()
+            for errand in &pending {
+                &answered.push(run_errand(errand)).unwrap()
+            }
+            pending.finish().unwrap()
+            answered
+        },
+    )
+    let in_order = numbers.as_slice() == [UInt64(1), 2].as_slice()
+    numbers.release()
+    testing.assert(in_order, "an errand answered before the errand it waits for ran")?
 }
 
 // Walk a lazy map of `count` items on `max` workers, and answer how many
@@ -1600,38 +1682,59 @@ test "a map visits each worker entry a fixed number of times per chunk" {
 }
 
 test "a slow item fills the window and the places wrap" {
-    // Stop after the first result and count what had been pulled: while
-    // item 1 is mapped, the other worker maps items 2, 3 and 4, and the
-    // window stops pulling with four items waiting; item 5 is pulled once
-    // item 1 is yielded.
-    var stopped = lazy_test_slow_items(mem.system())
-    let first = &stopped.next()
-    &stopped.stop()
-    var after = UInt64(0)
-    for _ in &stopped {
-        after += 1
-    }
-    var resumed = match stopped.finish() {
-        Ok(source) => source,
-        Err(still) => {
-            still.release()
-            return testing.assert(false, "a walked stopped map still held results")
+    // Item 1 finishes only once items 2, 3 and 4 have run, so the other
+    // worker maps them while item 1 waits, and the window stops pulling with
+    // four items waiting; item 5 is pulled once item 1 is yielded. A window
+    // that pulled fewer would leave item 1 waiting until its minute ran out.
+    let waits = [UInt64(3), 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let (first, after, left) = with_errands(
+        waits.as_slice(),
+        sink [] |sink errands| {
+            var stopped = lazy_map(Policy.Threads(2), errands.drain(), run_errand)
+            let first = &stopped.next()
+            &stopped.stop()
+            var after = UInt64(0)
+            for _ in &stopped {
+                after += 1
+            }
+            // The errands the map never pulled run here, so their relays
+            // finish.
+            var rest = match stopped.finish() {
+                Ok(source) => source,
+                Err(_) => panic("a walked stopped map still held results"),
+            }
+            var left = UInt64(0)
+            for errand in &rest {
+                let _number = run_errand(errand)
+                left += 1
+            }
+            rest.finish().unwrap()
+            (first, after, left)
         },
-    }
-    let next_item = &resumed.next()
+    )
     // A full walk reuses the places the first four items had for items five
     // to ten.
-    defer var walked = lazy_test_slow_items(mem.system())
-    var expected = UInt64(1)
-    var in_order = true
-    for n in &walked {
-        in_order = in_order && n == expected
-        expected += 1
-    }
-    testing.assert_eq(first, Option.Some(UInt64(1)), "the slow first item was not yielded first")?
+    let (in_order, walked_count) = with_errands(
+        waits.as_slice(),
+        sink [] |sink errands| {
+            var walked = lazy_map(Policy.Threads(2), errands.drain(), run_errand)
+            var expected = UInt64(1)
+            var in_order = true
+            for n in &walked {
+                in_order = in_order && n == expected
+                expected += 1
+            }
+            match walked.finish() {
+                Ok(drained) => drained.finish().unwrap(),
+                Err(_) => panic("a walked map still held results"),
+            }
+            (in_order, expected - 1)
+        },
+    )
+    testing.assert_eq(first, Option.Some(UInt64(1)), "the slow first item gave up waiting for the three after it")?
     testing.assert_eq(after, UInt64(4), "the window did not fill to twice its bound behind a slow item")?
-    testing.assert_eq(next_item, Option.Some(UInt64(6)), "the map pulled past its window")?
-    testing.assert(in_order && expected == 11, "results came back out of order once the places wrapped")?
+    testing.assert_eq(left, UInt64(5), "the map pulled past its window")?
+    testing.assert(in_order && walked_count == 10, "results came back out of order once the places wrapped")?
 }
 
 test "a lazy_map released early settles every job it started" {
@@ -1862,39 +1965,6 @@ test "all runs sequentially and on threads" {
     testing.assert_eq(par_len, 3, "threaded all length wrong")?
 }
 
-// Sleep a little under half a second and answer when the sleep ended.
-fn slow_job() -> time.Instant {
-    time.sleep(time.Duration.from_milliseconds(400))
-    time.Instant.now()
-}
-
-// Sleep a twentieth of a second and answer when the sleep ended.
-fn fast_job() -> time.Instant {
-    time.sleep(time.Duration.from_milliseconds(50))
-    time.Instant.now()
-}
-
-test "all starts the next job as soon as one finishes" {
-    var jobs: mem.Vec[fn() -> time.Instant, mem.SystemAllocator] = mem.Vec.new()
-    &jobs.push(slow_job).unwrap()
-    for _ in 0..4 {
-        &jobs.push(fast_job).unwrap()
-    }
-    let finished: mem.Vec[time.Instant, mem.SystemAllocator] = all(Policy.Threads(2), jobs)
-    var pending = finished.drain()
-    let slow = &pending.next().unwrap()
-    // Two jobs run at once. While the slow one runs, the other task's place
-    // goes to each fast job in turn, so all four finish before it.
-    var before = UInt64(0)
-    for at in &pending {
-        if at < slow {
-            before += 1
-        }
-    }
-    pending.finish().unwrap()
-    testing.assert_eq(before, 4, "a fast job waited for the slow one")?
-}
-
 // Run every job as `all` does, taking the results, the window's places and
 // the workers' bytes from `allocator`. Jobs a refused worker would have run
 // run on the caller; a result the vector cannot take stops the program.
@@ -2016,29 +2086,18 @@ test "map keeps every result of a fallible function" {
 }
 
 test "map starts the next item as soon as one finishes" {
-    var pauses: mem.Vec[UInt64, mem.SystemAllocator] = mem.Vec.new()
-    &pauses.push(400).unwrap()
-    for _ in 0..4 {
-        &pauses.push(50).unwrap()
-    }
-    let finished = map(
-        Policy.Threads(2),
-        pauses,
-        |sink milliseconds| -> time.Instant {
-            time.sleep(time.Duration.from_milliseconds(milliseconds))
-            time.Instant.now()
-        },
+    // The first item finishes only once the four after it have run. Two
+    // workers map the items, so while the first waits, the other worker
+    // takes each of the four in turn. A worker that waited for the first
+    // item before taking the next would leave it waiting until its minute
+    // ran out.
+    let numbers = with_errands(
+        [UInt64(4), 0, 0, 0, 0].as_slice(),
+        sink [] |sink errands| map(Policy.Threads(2), errands, run_errand),
     )
-    var pending = finished.drain()
-    let slow = &pending.next().unwrap()
-    var before = UInt64(0)
-    for at in &pending {
-        if at < slow {
-            before += 1
-        }
-    }
-    pending.finish().unwrap()
-    testing.assert_eq(before, 4, "a fast item waited for the slow one")?
+    let prompt = numbers.as_slice() == [UInt64(1), 2, 3, 4, 5].as_slice()
+    numbers.release()
+    testing.assert(prompt, "a fast item waited for the slow one")?
 }
 
 // Map every item as `map` does, taking the results, the window's places and
