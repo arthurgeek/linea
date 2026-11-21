@@ -14,6 +14,23 @@ extern fn linea_net_read(fd: Int32, at: UInt64, len: UInt64, deadline_ns: UInt64
 
 extern fn linea_net_write(fd: Int32, at: UInt64, len: UInt64, deadline_ns: UInt64) -> Int64
 
+// The runtime looks up a host name's first IPv4 address and answers it packed
+// with port 0, or a negated errno.
+extern fn linea_net_resolve(at: UInt64, len: UInt64) -> Int64
+
+// Look up the host name `name` and answer the runtime's packed address or
+// negated errno.
+internal fn resolve_name(name: Slice[UInt8]) -> Int64 {
+    linea_net_resolve(address.raw(slice_address(name)), name.length())
+}
+
+test "a dotted name resolves to itself and an empty one to nothing" {
+    // 127.0.0.1 packs as 0x7f000001 above a zero port.
+    testing.assert_eq(resolve_name("127.0.0.1".as_bytes()), Int64(2130706433) * 65536, "a dotted address did not resolve to itself")?
+    testing.assert(resolve_name("".as_bytes()) < 0, "an empty name resolved")?
+    .Ok(())
+}
+
 extern fn linea_read_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64
 
 extern fn linea_write_at(fd: Int32, at: UInt64, len: UInt64, offset: UInt64) -> Int64

@@ -1,0 +1,8 @@
+error: missing required argument 'repo'
+usage: github-issues <repo> [options]
+
+List a GitHub repository's open issues
+
+options:
+  --api <value>       the API's address (default https://api.github.com)
+  --pages <value>     the most pages of 100 issues to fetch (default 10)

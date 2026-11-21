@@ -1,0 +1,101 @@
+import std.io
+import std.mem
+import std.net
+import std.testing
+import std.time
+
+// A `Link` is the byte stream a client speaks HTTP/1.1 over: a TCP
+// connection to the origin. Every operation the client performs on a stream
+// is in this file, so a second kind of stream, such as TLS over the
+// connection for `https`, is added here as a variant and nothing else in the
+// client changes.
+@linear
+struct Link {
+    connection: net.Connection,
+}
+
+// Open a link to `origin`: resolve its host, connect within the client's
+// connect timeout, and bound each later read and write by its read and write
+// timeouts. An `https` origin is refused with `HttpsUnsupported`.
+fn open_link(origin: Origin, limits: ClientLimits) -> Result[Link, ClientError] {
+    if origin.is_https() {
+        return .Err(.HttpsUnsupported)
+    }
+    let address = match net.resolve(origin.host(), origin.port()) {
+        Ok(address) => address,
+        Err(Io(error)) => return .Err(.Resolve(error)),
+        Err(_) => return .Err(.Resolve(io.IoError.from_os(.Resolve, 0))),
+    }
+    var connection = match net.connect(address, deadline: net.bound_after(limits.connect_timeout_ms)) {
+        Ok(connection) => connection,
+        Err(Io(error)) => return .Err(.Connect(error)),
+        Err(_) => return .Err(.Connect(io.IoError.from_os(.Connect, 0))),
+    }
+    &connection.set_timeouts(read_ms: limits.read_timeout_ms, write_ms: limits.write_timeout_ms)
+    .Ok(.{ connection })
+}
+
+test "an https origin is refused until a TLS stream is available" {
+    let opened = open_link(Origin.parse("https://example.test").unwrap(), ClientLimits.default())
+    let refused = match opened {
+        Ok(link) => {
+            link.release()
+            false
+        },
+        Err(error) => error == ClientError.HttpsUnsupported,
+    }
+    testing.assert(refused, "an https origin was opened over plain TCP")
+}
+
+test "a link reaches a listening origin" {
+    let listener = net.listen(net.loopback(0)).unwrap()
+    let port = listener.local_address().unwrap().port
+    let origin = Origin { is_https = false, host = "127.0.0.1", port }
+    let opened = open_link(origin, ClientLimits.default())
+    let reached = match opened {
+        Ok(link) => {
+            link.release()
+            true
+        },
+        Err(_) => false,
+    }
+    listener.release()
+    testing.assert(reached, "a link did not reach its origin")
+}
+
+impl Link {
+    // End every read and write of the exchange once `deadline` passes;
+    // `time.never` leaves them bounded only by the read and write timeouts.
+    fn bound_exchange(inout self: Self, deadline: time.Deadline) {
+        &self.connection.set_deadline(deadline)
+    }
+
+    // Write every byte of `bytes`, or fail as the stream did.
+    fn send(inout self: Self, bytes: mem.Slice[UInt8]) -> Result[(), io.IoError] {
+        match io.write_all(&self.connection, bytes) {
+            Ok(_) => .Ok(()),
+            Err(failure) => .Err(failure.into()),
+        }
+    }
+
+    // Close the stream, reporting a failed close.
+    fn close(sink self: Self) -> Result[(), io.IoError] {
+        let Link { connection } = self
+        connection.close()
+    }
+}
+
+impl io.Reader for Link {
+    type Error = io.IoError
+
+    fn read_some[A: Allocator](inout self: Self, inout buffer: mem.Buffer[A], offset: UInt64, count: UInt64) -> Result[UInt64, io.IoError] where carries() {
+        &self.connection.read_some(&buffer, offset, count)
+    }
+}
+
+impl Release for Link {
+    fn release(sink self: Self) {
+        let Link { connection } = self
+        connection.release()
+    }
+}

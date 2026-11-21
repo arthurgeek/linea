@@ -25,6 +25,13 @@ long linea_net_shutdown_write(int fd);
  * orderly end of input. The descriptor is closed even when lingering cannot
  * be configured, and that failure is the one reported. */
 long linea_net_reset(int fd);
+/* The first IPv4 address the system's resolver gives for the `len` bytes of
+ * a host name at `at`, packed with port 0, or a negated errno: -ENOENT when
+ * the name has no IPv4 address, -ENAMETOOLONG past 253 bytes, -EINVAL for a
+ * name holding a NUL, and -EIO when the resolver failed for another reason.
+ * The lookup blocks the calling thread. Inside a simulation only a dotted
+ * IPv4 literal resolves, so a simulated run never consults the network. */
+long linea_net_resolve(unsigned long at, unsigned long len);
 /* Close a socket, or a simulated descriptor (`sim.h`). */
 long linea_net_close(int fd);
 

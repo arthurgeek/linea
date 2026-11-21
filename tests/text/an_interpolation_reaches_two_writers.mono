@@ -36,6 +36,7 @@ pub enum IoOperation {
     Listen,
     Accept,
     Connect,
+    Resolve,
     Configure,
     Spawn,
     Wait,

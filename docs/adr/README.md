@@ -194,7 +194,7 @@ true of a different implementation.
 | [0141](0141-json-documents-own-bounded-trees-and-number-tokens.md) | JSON documents own bounded trees and validated number tokens | Accepted; same-allocator `from_value` sentence superseded by 0286; extended by 0292 |
 | [0286](0286-a-document-decodes-into-any-allocator.md) | A JSON document decodes into an allocator of its own | Accepted; supersedes the same-allocator `from_value` sentence of 0141 |
 | [0292](0292-json-lines-are-read-lazily-one-bounded-line-at-a-time.md) | JSON Lines are read lazily, one bounded line at a time, and a failed line is an item | Accepted; extends 0141 |
-| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180, 0185 and 0300; subtree clause superseded by 0222; arena-memory clause superseded by 0263; test clause superseded by 0297 |
+| [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180, 0185, 0300 and 0301; subtree clause superseded by 0222; arena-memory clause superseded by 0263; test clause superseded by 0297 |
 | [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214; `Message.add_header` sentence superseded by 0297 |
@@ -203,6 +203,7 @@ true of a different implementation.
 | [0283](0283-an-arena-disposes-without-rechecking-where-a-buffer-lies.md) | An arena disposes of a buffer without rechecking where it lies | Accepted; supersedes the disposal clause of 0263 |
 | [0297](0297-a-handler-test-sends-a-request-built-in-the-arena-serve-would-give-it.md) | A handler test sends a request built in the arena `serve` would give it | Accepted; supersedes the test clause of 0154, the `new_request` example of 0220 and the `Message.add_header` sentence of 0185 |
 | [0232](0232-a-cookie-value-is-percent-encoded-text.md) | A cookie value is percent-encoded text: `set_cookie` takes any text and `Request.cookie` decodes it, reading a value that does not decode as absent | Accepted |
+| [0301](0301-an-http-client-settles-each-response-through-the-client-that-sent-it.md) | An HTTP client settles each response through the client that sent it | Accepted; extends 0154 |
 | [0294](0294-a-directory-walk-is-a-lazy-linear-iterator.md) | A directory walk is a lazy, linear iterator with bounded open directories | Accepted |
 | [0300](0300-tls-runs-over-rustls-linked-into-the-runtime.md) | TLS runs over rustls, linked into the runtime, and drives any transport from Linea | Accepted; extends 0154 and 0299 |
 | [0142](0142-construction-derives-expand-to-ordinary-source.md) | Construction derives expand to ordinary source | Accepted; partially supersedes 0081 and 0113; extends 0047 and 0087; attached-derive predicate clause superseded by 0165 |
