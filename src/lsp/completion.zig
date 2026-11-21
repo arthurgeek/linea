@@ -2288,6 +2288,14 @@ fn offeredAt(gpa: std.mem.Allocator, text: []const u8, offset: usize) ![]const [
     return out;
 }
 
+/// Fails unless the program checks without errors, so a test meant to offer
+/// completions in a valid program cannot drift into an invalid one.
+fn expectChecks(gpa: std.mem.Allocator, text: []const u8) !void {
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+}
+
 fn releaseAll(gpa: std.mem.Allocator, labels: []const []const u8) void {
     for (labels) |l| gpa.free(l);
     gpa.free(labels);
@@ -2666,7 +2674,7 @@ test "a conversion is offered only where something converts from the value" {
         \\struct Wrapped { n: UInt8 }
         \\
         \\impl From[Plain] for Wrapped {
-        \\    fn from(source: Plain) -> Wrapped {
+        \\    fn from(sink source: Plain) -> Wrapped {
         \\        .{ n = source.n }
         \\    }
         \\}
@@ -2681,6 +2689,7 @@ test "a conversion is offered only where something converts from the value" {
         \\}
         \\
     ;
+    try expectChecks(gpa, text);
     const plain = std.mem.lastIndexOf(u8, text, "plain.").? + "plain.".len;
     const converts = try offeredAt(gpa, text, plain);
     defer releaseAll(gpa, converts);
@@ -2699,8 +2708,9 @@ test "a conversion is offered where a generic or a bound one converts from the v
         \\struct Wrap[T] { item: T }
         \\
         \\impl[T] From[Box[T]] for Wrap[T] {
-        \\    fn from(source: Box[T]) -> Wrap[T] {
-        \\        .{ item = source.item }
+        \\    fn from(sink source: Box[T]) -> Wrap[T] {
+        \\        let Box { item } = source
+        \\        .{ item = item }
         \\    }
         \\}
         \\
@@ -2712,7 +2722,7 @@ test "a conversion is offered where a generic or a bound one converts from the v
         \\}
         \\
         \\impl From[UInt8] for Count {
-        \\    fn from(source: UInt8) -> Count {
+        \\    fn from(sink source: UInt8) -> Count {
         \\        .{ n = source }
         \\    }
         \\}
@@ -2724,6 +2734,7 @@ test "a conversion is offered where a generic or a bound one converts from the v
         \\}
         \\
     ;
+    try expectChecks(gpa, text);
     const boxed = std.mem.lastIndexOf(u8, text, "b.").? + "b.".len;
     const from_box = try offeredAt(gpa, text, boxed);
     defer releaseAll(gpa, from_box);
@@ -2750,8 +2761,9 @@ test "a conversion is offered only where the bounds of the one that converts hol
         \\struct Wrap[T] { item: T }
         \\
         \\impl[T: Tag] From[Box[T]] for Wrap[T] {
-        \\    fn from(source: Box[T]) -> Wrap[T] {
-        \\        .{ item = source.item }
+        \\    fn from(sink source: Box[T]) -> Wrap[T] {
+        \\        let Box { item } = source
+        \\        .{ item = item }
         \\    }
         \\}
         \\

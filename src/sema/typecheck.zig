@@ -29978,8 +29978,10 @@ const Checker = struct {
         no_trait,
         /// Nothing implements it for this head at this index.
         unimplemented,
-        /// A row the compiler provides, or one whose projection was refused
-        /// where its body was read: there is no path to splice either way.
+        /// A row the compiler provides, one whose projection was refused
+        /// where its body was read, or none where a row for the head was
+        /// refused for its key: there is no path to splice, and nothing
+        /// left to report.
         unusable,
     };
 
@@ -29992,7 +29994,13 @@ const Checker = struct {
         const trait = self.index_decl orelse return .no_trait;
 
         const args = [_]TypeId{index};
-        const choice = try self.builder.implementationChoiceWithin(self.generic, trait, &args, head) orelse return .unimplemented;
+        const choice = try self.builder.implementationChoiceWithin(self.generic, trait, &args, head) orelse {
+            // An implementation for this head refused for its key was
+            // reported where it is written; that it answers nothing here is
+            // its consequence, not another mistake.
+            if (self.impl_index.refusedUnder(self.implementations, trait.index(), self.builder.headOf(head))) return .unusable;
+            return .unimplemented;
+        };
         if (choice.supplier == .bound) {
             const elem = self.index_elem orelse return .unusable;
             const settled = try self.builder.settledAt(trait.index(), &args, head, elem, "Elem");

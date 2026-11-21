@@ -3786,6 +3786,21 @@ pub const ImplIndex = struct {
         return self.chained.walk(key(trait, head));
     }
 
+    /// Whether an implementation of `trait` under `head` was refused for its
+    /// key. Such a row answers no lookup, and the refusal is already
+    /// reported, so a lookup of a type with this head that finds nothing may
+    /// be failing only because of it.
+    ///
+    /// **Bound:** the rows of `trait` filed under `head`.
+    pub fn refusedUnder(self: *const ImplIndex, impls: []const Implementation, trait: u32, head: Head) bool {
+        var run = self.membersOf(trait, head);
+        while (run.next()) |row_index| {
+            const row = impls[row_index];
+            if (row.trait == trait and row.head.same(head) and !row.valid_key) return true;
+        }
+        return false;
+    }
+
     /// Structural candidates only: callers decide complete-key matching,
     /// predicates, and whether ordinary headers reserve a default's receiver.
     ///

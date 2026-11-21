@@ -1607,7 +1607,7 @@ fn appendDependencyPaths(
     std.mem.sort(dependencies.Entry, entries, {}, dependencies.Entry.lessByName);
     for (entries) |entry| {
         const named = entry.path orelse continue;
-        const dir = try joinedDir(a, manifest_dir, named);
+        const dir = try dependencyDir(a, io, manifest_dir, named);
         const library_text = (try manifestTextOf(a, io, dir)) orelse continue;
         // The manifest under every spelling a manifest uses, whatever it
         // holds, so a load from these files finds and reports it as a load
@@ -2106,6 +2106,46 @@ pub fn joinedDir(gpa: std.mem.Allocator, base: []const u8, path: []const u8) std
     return std.fs.path.resolvePosix(gpa, &.{ base, path });
 }
 
+/// The directory a dependency's `path` names from `base`, the directory
+/// holding the manifest that writes it. Spelled as `joinedDir` spells it,
+/// except where `io` reads the disk and the file system reads a `..` in it
+/// otherwise: a `..` after a symbolic link leaves the directory the link
+/// names, which the spelling cannot know, and there the directory is the file
+/// system's canonical path. A path the file system cannot resolve keeps its
+/// spelling, and whatever refuses it names the spelling.
+///
+/// **Bound:** two canonicalisations for a path holding `..`, and none
+/// otherwise.
+fn dependencyDir(gpa: std.mem.Allocator, io: ?std.Io, base: []const u8, path: []const u8) std.mem.Allocator.Error![]u8 {
+    const spelled = try joinedDir(gpa, base, path);
+    const disk = io orelse return spelled;
+    var steps = std.mem.splitScalar(u8, path, '/');
+    while (steps.next()) |step| {
+        if (std.mem.eql(u8, step, "..")) break;
+    } else return spelled;
+    var written_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const written = if (path.len > 0 and path[0] == '/')
+        path
+    else
+        std.fmt.bufPrint(&written_buffer, "{s}/{s}", .{ if (base.len == 0) "." else base, path }) catch return spelled;
+    var real_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const real = real_buffer[0 .. std.Io.Dir.cwd().realPathFile(disk, written, &real_buffer) catch return spelled];
+    var spelled_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    if (std.Io.Dir.cwd().realPathFile(disk, if (spelled.len == 0) "." else spelled, &spelled_buffer)) |n| {
+        if (std.mem.eql(u8, spelled_buffer[0..n], real)) return spelled;
+    } else |_| {}
+    gpa.free(spelled);
+    return gpa.dupe(u8, real);
+}
+
+/// Whether the directory at `dir` goes through a symbolic link that leads back
+/// to itself, so the file system names no directory there at all.
+fn linkLoops(io: std.Io, dir: []const u8) bool {
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    _ = std.Io.Dir.cwd().realPathFile(io, dir, &buffer) catch |err| return err == error.SymLinkLoop;
+    return false;
+}
+
 /// What identifies the file or directory at `path`: its canonical absolute
 /// path, so two spellings of one file -- through a symlink, through `..`, or
 /// in another case where the file system ignores case -- are one identity. A
@@ -2171,7 +2211,7 @@ pub fn mayHold(arena: std.mem.Allocator, io: std.Io, dir: []const u8, file: []co
         const written = try dependencies.read(arena, text) orelse continue;
         for (written.entries) |entry| {
             const path = entry.path orelse continue;
-            const named = try joinedDir(arena, at, path);
+            const named = try dependencyDir(arena, io, at, path);
             if ((try seen.getOrPut(arena, try identityOf(arena, io, named))).found_existing) continue;
             try pending.append(arena, named);
         }
@@ -2203,6 +2243,73 @@ test "a program may hold a file under its directory or its libraries', by identi
     try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "broken" }), file) == null);
     try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "broken" }), try std.fs.path.join(a, &.{ root, "broken/inside/x.lin" })) != null);
     try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "gone" }), file) == null);
+}
+
+test "a program's libraries follow a `..` after a symlink as the file system does, and a cycle of links ends" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for ([_][]const u8{ "store/lib", "store/other", "other", "app", "looped", "ring_a", "ring_b" }) |d| try tmp.dir.createDirPath(testing.io, d);
+    try tmp.dir.symLink(testing.io, "store/lib", "link", .{ .is_directory = true });
+    try tmp.dir.symLink(testing.io, "loop", "loop", .{ .is_directory = true });
+    try tmp.dir.symLink(testing.io, "ring_a", "ring_a_link", .{ .is_directory = true });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "store/other/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"other\" }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "other/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"other\" }" });
+    // `link/..` is `store`, the directory holding what `link` names, and
+    // not the directory holding `link`.
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/linea.json", .data = "{ \"dependencies\": { \"other\": { \"path\": \"../link/../other\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "looped/linea.json", .data = "{ \"dependencies\": { \"x\": { \"path\": \"../loop\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "ring_a/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"ring_a\", \"dependencies\": { \"ring_b\": { \"path\": \"../ring_b\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "ring_b/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"ring_b\", \"dependencies\": { \"ring_a\": { \"path\": \"../ring_a_link\" } } }" });
+    const root = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const app = try std.fs.path.join(a, &.{ root, "app" });
+
+    try testing.expect(try mayHold(a, testing.io, app, try std.fs.path.join(a, &.{ root, "store/other/other.lin" })) != null);
+    try testing.expect(try mayHold(a, testing.io, app, try std.fs.path.join(a, &.{ root, "other/other.lin" })) == null);
+    try testing.expectEqualStrings(
+        try identityOf(a, testing.io, try std.fs.path.join(a, &.{ root, "store/other" })),
+        try identityOf(a, testing.io, try std.fs.path.join(a, &.{ root, "link/../other" })),
+    );
+    // A link that names itself has no identity of its own, and the walk ends.
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "looped" }), try std.fs.path.join(a, &.{ root, "other/other.lin" })) == null);
+    try testing.expect(try mayHold(a, testing.io, try std.fs.path.join(a, &.{ root, "ring_a" }), try std.fs.path.join(a, &.{ root, "other/other.lin" })) == null);
+}
+
+test "a dependency path follows a `..` after a symlink as the file system does, and a link naming itself is refused" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for ([_][]const u8{ "store/lib", "store/shelf", "app", "looped" }) |d| try tmp.dir.createDirPath(testing.io, d);
+    try tmp.dir.symLink(testing.io, "store/lib", "link", .{ .is_directory = true });
+    try tmp.dir.symLink(testing.io, "loop", "loop", .{ .is_directory = true });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "store/shelf/linea.json", .data = "{ \"kind\": \"library\", \"name\": \"shelf\" }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "store/shelf/shelf.lin", .data = "pub fn count() -> UInt8 {\n    3\n}\n" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/linea.json", .data = "{ \"dependencies\": { \"shelf\": { \"path\": \"../link/../shelf\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "app/main.lin", .data = "import shelf\n\nfn main() -> UInt8 {\n    shelf.count()\n}\n" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "looped/linea.json", .data = "{ \"dependencies\": { \"shelf\": { \"path\": \"../loop\" } } }" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "looped/main.lin", .data = "import shelf\n\nfn main() -> UInt8 {\n    shelf.count()\n}\n" });
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        _ = try loadFromDisk(gpa, testing.io, &table, &sink, &interner, try std.fs.path.join(gpa, &.{ root, "app/main.lin" }), .program, false);
+        try testing.expect(!sink.hasErrors());
+    }
+    {
+        var table: FileTable = .empty;
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        _ = try loadFromDisk(gpa, testing.io, &table, &sink, &interner, try std.fs.path.join(gpa, &.{ root, "looped/main.lin" }), .program, false);
+        try testing.expectEqual(@as(usize, 1), sink.items().len);
+        try testing.expectEqual(Code.m_dependency, sink.items()[0].code.?);
+        try testing.expect(std.mem.indexOf(u8, sink.items()[0].message, "symbolic link") != null);
+    }
 }
 
 test "a dependency's C is built once from its own directory, and its libraries keep each manifest's order" {
@@ -3889,7 +3996,7 @@ const Loader = struct {
             try self.reportManifest(manifest_path, text, entry.key, "an import starts with this name, so it is an identifier", "`{s}` is not a name an import can start with", .{entry.name}, &.{});
             return true;
         }
-        const dir = try joinedDir(a, consumer_dir, entry.path.?);
+        const dir = try dependencyDir(a, self.diskReader(), consumer_dir, entry.path.?);
         const identity = try self.identityOf(dir);
 
         if (self.graph_dirs.get(identity)) |existing| {
@@ -3917,6 +4024,10 @@ const Loader = struct {
         }
 
         const library_text = (try self.manifestTextAt(dir)) orelse {
+            if (self.diskReader()) |io| if (linkLoops(io, dir)) {
+                try self.reportManifest(manifest_path, text, entry.path_at, "name the directory that holds the library's linea.json", "`{s}` is a symbolic link that leads back to itself", .{entry.path.?}, &.{});
+                return true;
+            };
             try self.reportManifest(manifest_path, text, entry.path_at, "name the directory that holds the library's linea.json", "`{s}` holds no {s}", .{ entry.path.?, manifest_name }, &.{});
             return true;
         };
