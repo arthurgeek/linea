@@ -426,6 +426,7 @@ The library tests itself.
   ok    http.a handler cannot set the status as a header
   ok    http.a handler error before headers answers its status
   ok    http.a handler error is answered_with its status and message
+  ok    http.a handler is given the request's read deadline
   ok    http.a handler is made as itself and a result as what it holds
   ok    http.a handler one task cannot make ends serving before anything is accepted
   ok    http.a handlers own id is replaced
@@ -523,6 +524,7 @@ The library tests itself.
   ok    http.a request keeps its method token as sent
   ok    http.a request larger than the arena is answered 500
   ok    http.a request names its method
+  ok    http.a request no server reads has no deadline
   ok    http.a request split into single bytes parses as one
   ok    http.a request that leaves no room for the response is answered 500
   ok    http.a request the handler never saw is logged without an id
@@ -1350,15 +1352,17 @@ The library tests itself.
   ok    net.a borrowed connection writer keeps the connection open
   ok    net.a client reports the listener as its peer
   ok    net.a client that holds its task holds up no other
+  ok    net.a connect whose deadline has passed times out
+  ok    net.a connect whose deadline is never waits for the handshake
   ok    net.a connect whose handshake ends at its deadline connects
-  ok    net.a connect with no bound waits for the handshake
   ok    net.a connection close reports success
   ok    net.a connection reaches its own listener
+  ok    net.a connection reports its read deadline
   ok    net.a connection reset before accept is reported as reset and the next is accepted
   ok    net.a connection to a closed port is refused
+  ok    net.a deadline ends a write the peer never reads
   ok    net.a deadline ends reads that each arrive in time
-  ok    net.a deadline of zero leaves reads unbounded
-  ok    net.a deadline too far ahead means no deadline
+  ok    net.a deadline of never leaves reads unbounded
   ok    net.a failed listener close ends serving with close
   ok    net.a fatal accept failure ends serving and closes the listener
   ok    net.a limit is reached at its count and none is never reached
@@ -1367,8 +1371,9 @@ The library tests itself.
   ok    net.a listener close reports success
   ok    net.a listener reports the port it was given
   ok    net.a net error displays its reason
+  ok    net.a read deadline leaves writes unbounded
   ok    net.a read whose bytes arrive at its deadline reads them
-  ok    net.a read_deadline is the nearer of the read bound and the session
+  ok    net.a read_by is the nearer of the read bound and the deadline
   ok    net.a reset connection is reset at its peer
   ok    net.a reset or exhausted accept is retried
   ok    net.a scripted listener fails as scripted then accepts and reports its close failure
@@ -1379,7 +1384,8 @@ The library tests itself.
   ok    net.a simulated connection kept past its simulation closes
   ok    net.a write times out when the peer reads nothing
   ok    net.an accept whose connection is ready at its deadline takes it
-  ok    net.an accept with no bound waits as accept does
+  ok    net.an accept whose deadline has passed times out with no client
+  ok    net.an accept whose deadline is never waits as accept does
   ok    net.an accept_attempt retries failures with a growing pause that a connection resets
   ok    net.an address debugs its parts
   ok    net.an address displays as dotted octets and a port
@@ -1387,6 +1393,7 @@ The library tests itself.
   ok    net.an address parses and prints the same
   ok    net.an address refuses what is not ipv4
   ok    net.an address survives the runtime packing
+  ok    net.an operation bound of zero or too far ahead is never
   ok    net.any names every interface
   ok    net.finish closes the listener and reports the accept failure before the close failure
   ok    net.listen queues the default backlog or the one given
@@ -1398,8 +1405,9 @@ The library tests itself.
   ok    net.serve_workers handles connections concurrently
   ok    net.serve_workers sequential policy
   ok    net.serving no connections returns at once and closes the listener
+  ok    net.set_timeouts keeps the deadline
   ok    net.tasks that cannot be made do not hold up the one that runs
-  ok    net.the accept_pause doubles to one second
+  ok    net.the accept_backoff doubles from 5 ms to one second
   ok    net.the handler reads from each connection and names its peer
   ok    net.transient accept failures are retried until a connection is served
   ok    net.zero workers closes the listener and returns
@@ -1738,10 +1746,19 @@ The library tests itself.
   ok    text.valid owned bytes keep nul and bom
   ok    text.validated byte transfer does not allocate
   ok    text.view reads the owned text
+  ok    time.a backoff doubles its pause up to the longest
+  ok    time.a backoff gives no pause that would end past the deadline
+  ok    time.a deadline after no time has already passed
+  ok    time.a deadline an hour away has about an hour left
+  ok    time.a deadline an hour away has not expired
+  ok    time.a deadline too far away never passes
+  ok    time.a deadline's time left counts down to zero
   ok    time.a duration displays in the largest unit below it
   ok    time.a duration is made from_milliseconds
   ok    time.a duration is made from_seconds
   ok    time.a duration returns its nanoseconds
+  ok    time.a new backoff starts at its first pause
+  ok    time.a reset backoff starts again at its first pause
   ok    time.a sleep lasts at least its duration
   ok    time.a timestamp displays as rfc 3339
   ok    time.a timestamp is made only inside the years rfc 3339 writes
@@ -1752,7 +1769,9 @@ The library tests itself.
   ok    time.from_nanoseconds makes a duration that long
   ok    time.nanoseconds returns the part of a second
   ok    time.now reads the present
+  ok    time.the earlier of two deadlines is the nearer one
   ok    time.the monotonic clock never moves back
+  ok    time.the runtime is given never as no deadline
   ok    time.unix_seconds counts from the epoch
   ok    tuple.a five tuple prints its components in parentheses
   ok    tuple.a four tuple prints its components in parentheses
@@ -1788,4 +1807,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1785 passed, 0 failed
+  1804 passed, 0 failed
