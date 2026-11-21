@@ -1939,7 +1939,16 @@ it checks:
   stale in every carrier holding it. A use on any path of a part of a carrier
   holding a stale dependency is a defect naming both instructions. A scalar
   payload read out of a stale result is not a use, and a read of a sibling part
-  is not a use of the stale one.
+  is not a use of the stale one. A clause naming a variant (`carries(.Ok: p)`)
+  holds its dependencies in that variant's payload of the result: a
+  `field_addr` names the variant whose payload it selects, so a read of the
+  `Err` payload, which shares the `Ok` payload's bytes, is not a use of them.
+  A target naming nested variants (`.Some.Ok`) places them at the innermost
+  enum's bytes under its variant. The variant stays on a dependency while the
+  enum holding it moves whole, and is dropped wherever a read takes a part of
+  it. Lowering ends a block nothing reaches in a trap rather than unwrapping an
+  answer there, so every payload address the verifier checks addresses an
+  enum.
 - **No read after a move.** A whole-root `sink` argument (convention from the
   callee's `CallableSignature`) or a whole-root `move_value` source moves an
   owned slot or a returned temporary out; a later read of it on any path is a

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_success_borrowing_an_arena_is_not_used_after_the_arena_is_released.lin:28:5
+   |
+28 |     arena.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+29 |     var b = got?
+   |             --- the observation is still used here

@@ -1291,7 +1291,7 @@ fn lowerFunction(
         const tail = ast.blockOf(body).tail;
         break :tail if (tail == ExprId.none) span else ast.exprSpan(tail);
     } else span;
-    if (b.return_type == .never) {
+    if (b.return_type == .never or l.unreached.contains(l.block)) {
         try l.finishNever(span);
     } else {
         try l.returnFrom(try l.testSuccess(body, result, exit_span), exit_span);
@@ -2502,20 +2502,14 @@ const Lowerer = struct {
         const view = self.types();
         const selected = self.typing.partSelection(part) orelse
             @panic("compiler defect: a pattern's part was not settled before emission");
-        const part_index: Inst.Part = switch (selected) {
-            .field => |f| .at(f.index),
-            .payload => |p| .at(p.index),
-            .base => .none,
-        };
-        const offset: u32 = switch (selected) {
-            .field => |f| view.fieldOffset(m.ty, f.index),
-            .payload => |p| view.variantFieldOffset(m.ty, p.variant, p.index),
+        switch (selected) {
+            .field => |f| return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, view.fieldOffset(m.ty, f.index), .at(f.index), span) },
+            .payload => |p| return .{ .ty = ty, .address = try self.payloadAddr(m.address, m.ty, p.variant, p.index, ty, span) },
             .base => {
                 if (m.address == .none) return .{ .ty = ty, .value = m.value };
                 return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, 0, .none, span) };
             },
-        };
-        return .{ .ty = ty, .address = try self.fieldAddr(m.address, ty, offset, part_index, span) };
+        }
     }
 
     /// Tests that `pattern` matches the value at `m`, its outer part first,
@@ -2664,6 +2658,13 @@ const Lowerer = struct {
         return self.emit(.field_addr, result_ty, span, .{ .field = .{ .base = base, .offset = off, .part = part } });
     }
 
+    /// The address of the value at position `j` of variant `k`'s payload in
+    /// the enum of type `of` at `base`, naming the variant it reads.
+    fn payloadAddr(self: *Lowerer, base: InstId, of: TypeId, k: u32, j: u32, result_ty: TypeId, span: Span) !InstId {
+        const off = try self.emit(.constant, .u64, span, .{ .constant = self.types().variantFieldOffset(of, k, j) });
+        return self.emit(.field_addr, result_ty, span, .{ .field = .{ .base = base, .offset = off, .part = .at(j), .variant = .at(k) } });
+    }
+
     fn isIndirect(self: *const Lowerer, local: LocalId) bool {
         return self.b.slotRoleOf(local) == .managed_address;
     }
@@ -2755,8 +2756,7 @@ const Lowerer = struct {
         // width is the whole value rather than this part of it.
         for (0..carried.count()) |j| {
             const field = self.types().variantFieldType(ty, @intCast(k), @intCast(j));
-            const offset = self.types().variantFieldOffset(ty, @intCast(k), @intCast(j));
-            const at = try self.fieldAddr(base, field, offset, .at(@intCast(j)), span);
+            const at = try self.payloadAddr(base, ty, k, @intCast(j), field, span);
             switch (carried) {
                 .values => |v| try self.writeThrough(at, field, v[j], span),
                 .written => |a| try self.writeInto(a[j], field, at, span),
@@ -2803,7 +2803,7 @@ const Lowerer = struct {
         ty: TypeId,
         span: Span,
     ) std.mem.Allocator.Error!InstId {
-        return self.fieldAddr(value, ty, self.types().variantFieldOffset(of, k, j), .at(j), span);
+        return self.payloadAddr(value, of, k, j, ty, span);
     }
 
     /// `p.x`, or `Colour.Red`.
@@ -3304,9 +3304,10 @@ const Lowerer = struct {
     /// itself. What a return *does* is one question, and three answers to it is
     /// three chances for the entry point to keep only two of them.
     ///
-    /// For every other function this is the terminator and nothing else.
+    /// For every other function this is the terminator and nothing else. A
+    /// block nothing jumps to ends in a trap: it has no answer to unwrap.
     fn returnFrom(self: *Lowerer, value: InstId, span: Span) std.mem.Allocator.Error!void {
-        if (self.b.return_type == .never) return self.finishNever(span);
+        if (self.b.return_type == .never or self.unreached.contains(self.block)) return self.finishNever(span);
 
         const carrier = self.unwraps;
         if (carrier == TypeId.poison) {
@@ -3590,7 +3591,13 @@ const Lowerer = struct {
         // itself: everything the function scheduled runs on the way out.
         try self.runScheduledAt(id);
 
-        try self.returnFrom(try self.testSuccess(id, result, span), span);
+        // A `return` nothing reaches builds no answer: the block it ends
+        // holds what follows another exit, and its value is no value.
+        if (self.unreached.contains(self.block)) {
+            try self.finishNever(span);
+        } else {
+            try self.returnFrom(try self.testSuccess(id, result, span), span);
+        }
 
         // Whatever follows in the source is unreachable, and lowering is
         // total, so it goes into a block nothing jumps to.
