@@ -20,6 +20,9 @@ clauses are superseded by the implemented phase 3 of
 [0265](0265-waits-go-through-the-runtimes-poller-and-a-loop-runs-tasks-as-fibers.md) §6:
 raw handlers receive an exclusive body reader beside the request metadata, and
 the server preserves framed persistent connections through a dispatcher.
+Its test clause, that `http.new_request` builds a request for a test, is
+superseded by
+[0297](0297-a-handler-test-sends-a-request-built-in-the-arena-serve-would-give-it.md).
 
 ## Context
 

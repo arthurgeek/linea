@@ -2,18 +2,23 @@
 // is refused until the last use of that observation.
 import std.http
 import std.io
-import std.mem
 
 use io.Reader
-use mem.Lender
+
+fn reread[P: Allocator](inout _: (), request: http.Request[P], inout incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(incoming), retains(incoming: incoming) {
+    let cached = &incoming.read_all(request)?
+    var buffer = request.allocator().acquire(8)?
+    let _received = &incoming.read_some(&buffer, offset: 0, count: 8)?
+    http.text(request, Str.from_bytes(cached)?)
+}
 
 fn main() -> UInt8 {
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "POST", "/", body: "").unwrap()
-    defer var incoming = http.RequestBody.from_slice("hello".as_bytes(), arena.handle())
-    let cached = &incoming.read_all(sent.request()).unwrap()
-    defer var buffer = mem.system().acquire(8).unwrap()
-    let _received = &incoming.read_some(&buffer, offset: 0, count: 8).unwrap()
-    io.println(Str.from_bytes(cached).unwrap()).unwrap()
+    defer var router = http.Router.new()
+    &router.route_raw("POST /", reread).unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("POST", "/", body: "hello").unwrap()
+    var nothing = {}
+    let response = &sent.send_to(&router, &nothing).unwrap()
+    io.println(response.text().unwrap()).unwrap()
     0
 }

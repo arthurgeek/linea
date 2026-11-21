@@ -1,9 +1,6 @@
 // A handler's state outlives each request, while the request's text lives
 // only until its response is written, so the state cannot keep a view of it.
 import std.http
-import std.mem
-
-use mem.Lender
 
 struct LastPath {
     path: Str,
@@ -18,16 +15,15 @@ impl[P: Allocator] http.Handler[(), P] for LastPath {
 
 fn main() -> UInt8 {
     var handler = LastPath { path = "" }
-    let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = http.new_request(arena.handle(), "GET", "/a", body: "").unwrap()
+    let exchange = http.TestExchange.open()
+    var sent = exchange.request("GET", "/a").unwrap()
     var nothing = {}
-    var incoming_1 = http.RequestBody.from_request(sent.request())
-    let status = match http.Handler.serve_http(&handler, &nothing, sent.request(), &incoming_1) {
+    let status = match &sent.send_to(&handler, &nothing) {
         Ok(response) => response.status().code(),
         Err(_) => 0,
     }
-    incoming_1.release()
-    arena.release()
+    sent.release()
+    exchange.release()
     if status == 200 {
         0
     } else {

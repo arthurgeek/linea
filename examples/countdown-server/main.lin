@@ -9,18 +9,14 @@ import std.env
 import std.http
 import std.io
 import std.log
-import std.mem
 import std.net
 import std.testing
 import std.time
 
-// `use` brings a trait's operations into scope: `Handler` lets a test call
-// `&router.serve_http(&app, request, &incoming)`, and `ByteWriter` lets `count_down`
+// `use` brings a trait's operations into scope: `ByteWriter` lets `count_down`
 // call `&body.flush()`. `Writer` is in the prelude, so `&body.write_str(text)`
 // needs no `use`.
-use http.Handler
 use io.ByteWriter
-use mem.Lender
 
 // A countdown runs for at most ten seconds.
 let longest_countdown: UInt64 = 10
@@ -64,10 +60,9 @@ test "a count out of range is refused before streaming" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let long = http.new_request(arena.handle(), "GET", "/countdown/11", body: "").unwrap()
-    defer var incoming_1 = http.RequestBody.from_request(long.request())
-    let refused = match &router.serve_http(&app, long.request(), &incoming_1) {
+    defer let exchange = http.TestExchange.open()
+    defer var long = exchange.request("GET", "/countdown/11").unwrap()
+    let refused = match &long.send_to(&router, &app) {
         Ok(_) => return testing.assert(false, "a count past 10 was accepted"),
         Err(error) => error,
     }
@@ -81,11 +76,10 @@ test "a countdown ends with liftoff" {
     defer var router: http.Router[App] = http.Router.new()
     routes(&router).unwrap()
     var app = quiet()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/countdown/1", body: "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/countdown/1").unwrap()
     let started = time.Instant.now()
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let body = &router.serve_http(&app, sent.request(), &incoming_2).unwrap().recorded_body().unwrap()
+    let body = &sent.send_to(&router, &app).unwrap().recorded_body().unwrap()
     let took = started.elapsed()
     testing.assert_eq(Str.from_bytes(body.as_slice()).unwrap(), "T-1\nliftoff\n", "the countdown changed")?
     testing.assert(took >= time.Duration.from_seconds(1), "the countdown did not pause for a second")?

@@ -208,15 +208,14 @@ struct CallCount {
 // `arena_bytes`. The description is the status code and the body, or the
 // refusal's message.
 fn served_headed[S](inout router: Router[S], inout state: S, target: Str, headers: mem.Slice[Str], arena_bytes: UInt64 = 65536) -> String[mem.SystemAllocator] {
-    let arena = mem.Arena.open(mem.system(), size: arena_bytes)
-    var sent = new_request(arena.handle(), "GET", target, body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = arena_bytes, ..Limits.default() })
+    defer var sent = exchange.request("GET", target).unwrap()
     var at: UInt64 = 0
     while at < headers.length() {
         &sent.add_header(headers[at], headers[at + 1]).unwrap()
         at += 2
     }
-    var request_body1 = RequestBody.from_request(sent.request())
-    let described = match &router.serve_http(&state, sent.request(), &request_body1) {
+    let described = match &sent.send_to(&router, &state) {
         Ok(response) => {
             let code = response.status().code()
             let body = response.text().unwrap()
@@ -228,8 +227,6 @@ fn served_headed[S](inout router: Router[S], inout state: S, target: Str, header
             fmt.render_owned("{code} {message}").unwrap()
         },
     }
-    request_body1.release()
-    arena.release()
     described
 }
 
@@ -683,17 +680,14 @@ fn show(id: Path[UInt64], pick: Query[Pick], order: Order, request: ProbeRequest
 test "the library extractors and a type that reads itself are arguments" {
     defer var router = Router.new()
     testing.assert_ok_eq(&router.route(r"POST /orders/{id}", show), (), "registering failed")?
-    let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = new_request(arena.handle(), "POST", "/orders/7?page=2", body: r#"{"quantity":3}"#).unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/orders/7?page=2", body: r#"{"quantity":3}"#).unwrap()
     &sent.add_header("Content-Type", "application/json").unwrap()
     var nothing = ()
-    var request_body2 = RequestBody.from_request(sent.request())
-    let described = match &router.serve_http(&nothing, sent.request(), &request_body2) {
+    let described = match &sent.send_to(&router, &nothing) {
         Ok(response) => response.text().unwrap() == "order 7 page 2 of 3",
         Err(_) => false,
     }
-    request_body2.release()
-    arena.release()
     testing.assert(described, "a path, a query and a body were not read into the arguments")?
     .Ok(())
 }
@@ -707,12 +701,11 @@ test "an endpoint receives the same body through a stated router" {
     var router = Router.new()
     &router.route("POST /echo", echo_stream).unwrap()
     defer var handler = with_state((), router)
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = new_request(arena.handle(), "POST", "/echo", body: "").unwrap()
-    defer var body = RequestBody.from_slice("streamed".as_bytes(), arena.handle())
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/echo", body: "streamed").unwrap()
     var state = ()
-    let response = &handler.serve_http(&state, sent.request(), &body).unwrap()
+    let response = &sent.send_to(&handler, &state).unwrap()
     testing.assert_ok_eq(response.text(), "streamed", "the endpoint did not receive the body")?
-    testing.assert_eq(body.remaining_bytes(), UInt64(0), "the endpoint read a separate body")?
+    testing.assert_eq(sent.body.remaining_bytes(), UInt64(0), "the endpoint read a separate body")?
     .Ok(())
 }

@@ -1,23 +1,23 @@
-// A response is built in its request's arena, so it is written before the
-// arena is released; reading it afterwards is refused.
+// A response is built in its request's arena and may view the request, so it
+// is read before the request and its exchange are released; reading it
+// afterwards is refused.
 import std.http
 import std.io
-import std.mem
 
-use mem.Lender
-
-fn greet[P: Allocator](request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
+fn greet[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let name = request.query().unwrap_or("stranger")
     http.text(request, "hello, {name}")
 }
 
 fn main() -> UInt8 {
-    let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = http.new_request(arena.handle(), "GET", "/greet?ada", body: "").unwrap()
-    defer let body_arena = mem.Arena.open(mem.system(), size: 4096)
-    defer var incoming_1 = http.RequestBody.from_slice("".as_bytes(), body_arena.handle())
-    let answered = greet(sent.request(), &incoming_1)
-    arena.release()
+    defer var router = http.Router.new()
+    &router.route_raw("GET /greet", greet).unwrap()
+    let exchange = http.TestExchange.open()
+    var sent = exchange.request("GET", "/greet?ada").unwrap()
+    var nothing = {}
+    let answered = &sent.send_to(&router, &nothing)
+    sent.release()
+    exchange.release()
     match answered {
         Ok(response) => {
             let _printed = io.println("{response.status().code()}")

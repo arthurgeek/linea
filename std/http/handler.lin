@@ -98,11 +98,10 @@ fn refused_router() -> Result[Router[()], Unopened] {
 
 test "a handler is made as itself and a result as what it holds" {
     defer var made = made_by(greeting_router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer let exchange = TestExchange.open()
     var nothing = ()
-    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    defer var request_body1 = RequestBody.from_request(sent.request())
-    let response = &made.serve_http(&nothing, sent.request(), &request_body1).unwrap()
+    defer var sent = exchange.request("GET", "/hello").unwrap()
+    let response = &sent.send_to(&made, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "hello", "the handler a factory returned was not the one made")?
     let refused = match made_by(refused_router) {
         Ok(router) => {
@@ -122,11 +121,10 @@ fn greeting[P: Allocator](inout _: (), request: Request[P], inout _body: Request
 test "a route returning a response is registered and answers" {
     defer var router: Router[()] = Router.new()
     &router.route_raw("GET /hello", greeting).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer let exchange = TestExchange.open()
     var nothing = ()
-    let sent = new_request(arena.handle(), "GET", "/hello", body: "").unwrap()
-    defer var request_body2 = RequestBody.from_request(sent.request())
-    let answered: Result[Response, Error] = &router.serve_http(&nothing, sent.request(), &request_body2)
+    defer var sent = exchange.request("GET", "/hello").unwrap()
+    let answered: Result[Response, Error] = &sent.send_to(&router, &nothing)
     let response = answered.unwrap()
     testing.assert_ok_eq(response.text(), "hello", "the answer changed")?
     .Ok(())

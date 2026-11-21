@@ -11,9 +11,6 @@ import std.mem
 import std.net
 import std.testing
 
-use http.Handler
-use mem.Lender
-
 // The count stops growing here, so a browser that sends a huge `visits` cookie
 // cannot overflow it.
 let visit_limit: UInt32 = 1000
@@ -53,11 +50,10 @@ fn routes(inout router: http.Router[()]) -> Result[(), http.RouteError] {
 test "a first visit sets the cookie" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/hello/ada").unwrap()
     var nothing = ()
-    defer var incoming_1 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_1).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_eq(response.header("Content-Type"), Option.Some("text/html; charset=utf-8"), "the content type changed")?
     testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=1; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie changed")?
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "the page changed")?
@@ -66,12 +62,11 @@ test "a first visit sets the cookie" {
 test "a returning visitor is counted" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/hello/ada").unwrap()
     &sent.add_header("Cookie", "theme=dark; visits=2").unwrap()
     var nothing = ()
-    defer var incoming_2 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_2).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 3.</p>", "the count did not advance")?
     testing.assert_eq(response.header("Set-Cookie"), Option.Some("visits=3; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly"), "the cookie did not advance")?
 }
@@ -79,35 +74,32 @@ test "a returning visitor is counted" {
 test "a cookie that is not a count starts over" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/hello/ada").unwrap()
     &sent.add_header("Cookie", "visits=lots").unwrap()
     var nothing = ()
-    defer var incoming_3 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_3).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1.</p>", "a bad cookie was counted")?
 }
 
 test "the count stops at its limit" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    var sent = http.new_request(arena.handle(), "GET", "/hello/ada", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/hello/ada").unwrap()
     &sent.add_header("Cookie", "visits=4294967295").unwrap()
     var nothing = ()
-    defer var incoming_4 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_4).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, ada!</h1><p>Visit 1000.</p>", "the count passed its limit")?
 }
 
 test "a name with markup is shown as text" {
     defer var router: http.Router[()] = http.Router.new()
     routes(&router).unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 65536)
-    let sent = http.new_request(arena.handle(), "GET", "/hello/%3Cscript%3Ealert(%22x%22)%3C%2Fscript%3E", "").unwrap()
+    defer let exchange = http.TestExchange.open()
+    defer var sent = exchange.request("GET", "/hello/%3Cscript%3Ealert(%22x%22)%3C%2Fscript%3E").unwrap()
     var nothing = ()
-    defer var incoming_5 = http.RequestBody.from_request(sent.request())
-    let response = &router.serve_http(&nothing, sent.request(), &incoming_5).unwrap()
+    let response = &sent.send_to(&router, &nothing).unwrap()
     testing.assert_ok_eq(response.text(), "<h1>Hello, &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;!</h1><p>Visit 1.</p>", "the name was not escaped")?
 }
 

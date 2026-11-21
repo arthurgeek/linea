@@ -1,7 +1,14 @@
 error[O-Borrow]: this operation invalidates a place that a later observation still needs
   --> tests/ownership/a_response_read_after_its_arena_is_released_is_refused.lin:20:5
    |
-20 |     arena.release()
-   |     ^^^^^ keep this place available until the last use of its observation
+20 |     exchange.release()
+   |     ^^^^^^^^ keep this place available until the last use of its observation
+21 |     match answered {
+   |           -------- the observation is still used here
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/ownership/a_response_read_after_its_arena_is_released_is_refused.lin:19:5
+   |
+19 |     sent.release()
+   |     ^^^^ keep this place available until the last use of its observation
 21 |     match answered {
    |           -------- the observation is still used here

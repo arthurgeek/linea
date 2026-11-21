@@ -60,8 +60,8 @@ pub fn text[P: Allocator, T: Display](request: Request[P], body: T) -> Result[Re
 }
 
 test "a text response holds its rendered body" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     let count = 3
     let response = text(sent.request(), "{count} items").unwrap()
     testing.assert_eq(response.status(), Status.Ok, "the status changed")?
@@ -72,8 +72,8 @@ test "a text response holds its rendered body" {
 
 // A body larger than the arena answers 500.
 test "a text response past the arena is refused" {
-    defer let arena = mem.Arena.open(mem.system(), size: 64)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 64, ..Limits.default() })
+    defer var sent = exchange.request("GET", "/").unwrap()
     defer let long = Vec.filled(512, UInt8(120)).unwrap()
     let refused = match text(sent.request(), Str.from_bytes(long.as_slice()).unwrap()) {
         Ok(_) => Option.None,
@@ -96,8 +96,8 @@ pub fn html[P: Allocator, T: Display](request: Request[P], body: T) -> Result[Re
 }
 
 test "an html response holds its rendered body and content type" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     let count = 3
     let response = html(sent.request(), "<p>{count} items</p>").unwrap()
     testing.assert_eq(response.status(), Status.Ok, "the status changed")?
@@ -107,8 +107,8 @@ test "an html response holds its rendered body and content type" {
 }
 
 test "an html response past the arena is refused" {
-    defer let arena = mem.Arena.open(mem.system(), size: 64)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 64, ..Limits.default() })
+    defer var sent = exchange.request("GET", "/").unwrap()
     defer let long = Vec.filled(512, UInt8(120)).unwrap()
     let refused = match html(sent.request(), Str.from_bytes(long.as_slice()).unwrap()) {
         Ok(_) => Option.None,
@@ -135,8 +135,8 @@ pub fn json[P: Allocator, T: json_format.Encode](request: Request[P], value: T) 
 }
 
 test "a json response holds its encoded value" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     let response = json(sent.request(), Greeting { hello = r#"say "hi""# }).unwrap()
     testing.assert_eq(response.status(), Status.Ok, "the status changed")?
     testing.assert_eq(response.header("content-type"), Option.Some("application/json"), "the content type changed")?
@@ -151,8 +151,8 @@ pub fn status[P: Allocator](request: Request[P], status: Status) -> Response[P] 
 }
 
 test "a status response has no body" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "DELETE", "/items/1", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("DELETE", "/items/1").unwrap()
     let response = status(sent.request(), .NoContent)
     testing.assert_eq(response.status(), Status.NoContent, "the status changed")?
     testing.assert_ok_eq(response.text(), "", "an empty response had a body")?
@@ -176,8 +176,8 @@ pub fn redirect[P: Allocator, L: Display](request: Request[P], status: Status, l
 }
 
 test "a redirect sets its status and location and refuses a control byte" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "POST", "/sign", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("POST", "/sign").unwrap()
     let prefix = "/cgi-bin/book"
     let response = redirect(sent.request(), .SeeOther, "{prefix}/").unwrap()
     testing.assert_eq(response.status(), Status.SeeOther, "the status changed")?
@@ -208,8 +208,8 @@ pub fn stream[P: Allocator, F: Produce[P] + Release + Discardable](request: Requ
 }
 
 test "a streamed response has no held body" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/count", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/count").unwrap()
     let response = stream(sent.request(), count_to_three).unwrap()
     testing.assert_eq(response.status(), Status.Ok, "the status changed")?
     testing.assert(response.body().is_none(), "a streamed body was held")?
@@ -227,8 +227,8 @@ test "a streamed body uses what its handler captured" {
 // A streamed body's closure is kept in the request's arena, so an arena too
 // full to hold it answers 500 before anything is sent.
 test "a stream the arena cannot hold is refused" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/count", body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 4096, ..Limits.default() })
+    defer var sent = exchange.request("GET", "/count").unwrap()
     // Fill the arena eight bytes at a time until it refuses.
     while Vec.filled_in(sent.request().allocator(), 1, UInt8(0)).is_ok() {}
     let last: UInt64 = 4
@@ -247,8 +247,8 @@ pub fn bytes[P: Allocator](request: Request[P], sink body: Vec[UInt8, mem.Handle
 }
 
 test "a bytes response holds its body as built" {
-    defer let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     var built = String.new_in(sent.request().allocator())
     &built.append("built once").unwrap()
     let response = bytes(sent.request(), built.into_bytes())
@@ -289,8 +289,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a response takes another status" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "POST", "/items", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("POST", "/items").unwrap()
         let response = text(sent.request(), "made").unwrap().with_status(.Created)
         testing.assert_eq(response.status(), Status.Created, "the status did not change")?
         testing.assert_ok_eq(response.text(), "made", "changing the status changed the body")?
@@ -305,8 +305,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "set_header replaces every value of a name" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         let set = &response.set_header("Cache-Control", "no-store")
         let seconds = 60
@@ -326,8 +326,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "add_header keeps the values a name already has" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         let first = &response.add_header("Vary", "Accept")
         let second = &response.add_header("vary", "Origin")
@@ -343,8 +343,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "remove_header drops every value of a name" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         &response.add_header("Vary", "Accept").unwrap()
         &response.add_header("vary", "Origin").unwrap()
@@ -362,8 +362,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "header reads the first value under ascii case folding" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         let response = json(sent.request(), Greeting { hello = "hi" }).unwrap()
         testing.assert_eq(response.header("CONTENT-TYPE"), Option.Some("application/json"), "a header name matched only in its own case")?
         testing.assert_eq(response.header("Cache-Control"), .None, "an absent header was found")?
@@ -376,8 +376,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a response reads its status" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         let held = text(sent.request(), "abc").unwrap().with_status(.Accepted)
         testing.assert_eq(held.status(), Status.Accepted, "the status changed")?
         .Ok(())
@@ -393,8 +393,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a response reads its held body and no streamed one" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         let held = text(sent.request(), "abc").unwrap()
         let streamed = stream(sent.request(), count_to_three).unwrap()
         testing.assert_ok_eq(held.text(), "abc", "the held body changed")?
@@ -417,8 +417,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a response body is text only when it is held utf8" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         testing.assert_ok_eq(text(sent.request(), "olá").unwrap().text(), "olá", "the held text changed")?
         testing.assert_ok_eq(text(sent.request(), "").unwrap().text(), "", "an empty body was not empty text")?
         let streamed = stream(sent.request(), count_to_three).unwrap()
@@ -478,8 +478,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a recorded_body is what a client would read" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        let sent = new_request(arena.handle(), "GET", "/count?to=2", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/count?to=2").unwrap()
         let streamed = stream(sent.request(), count_to_query).unwrap().recorded_body().unwrap()
         let last: UInt64 = 3
         let captured = stream(sent.request(), inout [sink last] |inout body| count_to(last, &body)).unwrap().recorded_body().unwrap()
@@ -743,8 +743,8 @@ test "a failed write is reported by every later write" {
     // A connection shut down for writing refuses every write to it.
     var server = connection
     &server.shutdown_write().unwrap()
-    defer let arena = mem.Arena.open(mem.system(), size: 16384)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var sent = exchange.request("GET", "/").unwrap()
     let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
     var body = BodyWriter.open_borrowed(reserved, server.writer(), sent.request(), keep_alive: false)
     // A chunk larger than the buffer is sent before the write returns.
@@ -882,14 +882,13 @@ test "a streamed body may exceed the arena" {
     var accepting = listener
     let Accepted { connection, address: _ } = &accepting.accept().unwrap()
     // The message and the 4 KiB buffer fill most of this 8 KiB arena.
-    let arena = mem.Arena.open(mem.system(), size: 8192)
-    let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 8192, ..Limits.default() })
+    defer var sent = exchange.request("GET", "/").unwrap()
     let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
     var body = BodyWriter.open_borrowed(reserved, connection.writer(), sent.request(), keep_alive: false)
     let streamed = write_response(&body, stream(sent.request(), a_thousand_lines).unwrap(), head_only: false).is_ok()
     body.finish_borrowed().unwrap()
     connection.close().unwrap()
-    arena.release()
     var reader = client
     let bytes = io.read_all(&reader, max_bytes: 65536).unwrap()
     let length = bytes.length()
@@ -1174,13 +1173,13 @@ fn exchanged(method: Method, answer: Reply) -> String {
     // The backlog queues the connection before accept is called.
     let client = net.connect(listener.local_address().unwrap()).unwrap()
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    let arena = mem.Arena.open(mem.system(), size: 65536)
+    defer let exchange = TestExchange.open()
     let token = if method == Method.Head {
         "HEAD"
     } else {
         "GET"
     }
-    let sent = new_request(arena.handle(), token, answer.target, body: "").unwrap()
+    defer var sent = exchange.request(token, answer.target, body: "").unwrap()
     let reserved = sent.request().allocator().acquire(response_buffer_bytes).unwrap()
     var body = BodyWriter.open_borrowed(reserved, connection.writer(), sent.request(), keep_alive: false)
     let head_only = method == Method.Head
@@ -1190,7 +1189,6 @@ fn exchanged(method: Method, answer: Reply) -> String {
     }
     body.finish_borrowed().unwrap()
     connection.close().unwrap()
-    arena.release()
     let received = read_to_end(client)
     listener.close().unwrap()
     received
@@ -1218,10 +1216,10 @@ fn read_or_reset(sink connection: net.Connection) -> String {
 }
 
 test "a known length frames a persistent response" {
-    defer let arena = mem.Arena.open(mem.system(), 8192)
-    let message = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+    defer let exchange = TestExchange.open()
+    defer var message = exchange.request("GET", "/").unwrap()
     let request = message.request()
-    var body: BodyWriter = .{ output = .Recorded(Vec.new_in(arena.handle())), answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .KeepAlive(0) }
+    var body: BodyWriter = .{ output = .Recorded(Vec.new_in(request.allocator())), answering = copy(request), failure = .None, in_body = false, body_bytes = 0, framing = .KeepAlive(0) }
     let written = write_response(&body, text(request, "message").unwrap(), false).is_ok()
     let BodyWriter { output, answering: _, failure: _, in_body: _, body_bytes: _, framing: _ } = body
     let framed = match read output {

@@ -1,5 +1,4 @@
 import std.fmt
-import std.mem
 import std.testing
 
 // Why parsing an HTTP origin or authority failed:
@@ -666,16 +665,16 @@ pub fn same_origin[P: Allocator](request: Request[P], trust: ProxyTrust = .None)
 }
 
 test "same_origin policy validates requests" {
-    defer let arena = mem.Arena.open(mem.system(), size: 8192)
+    defer let exchange = TestExchange.open()
     let expected = Origin.parse("http://example.test").unwrap()
 
     // Missing both headers passes under standard policy, fails under strict.
-    let bare = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var bare = exchange.request("POST", "/submit").unwrap()
     testing.assert(check_same_origin(bare.request(), expected, SameOriginPolicy.standard()), "bare request was refused under standard policy")?
     testing.assert(!check_same_origin(bare.request(), expected, SameOriginPolicy.strict()), "bare request was accepted under strict policy")?
 
     // Matching Origin alone passes under both standard and strict policy.
-    var matching_alone = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var matching_alone = exchange.request("POST", "/submit").unwrap()
     &matching_alone.add_header("Host", "example.test").unwrap()
     &matching_alone.add_header("Origin", "http://example.test").unwrap()
     testing.assert(check_same_origin(matching_alone.request(), expected, SameOriginPolicy.standard()), "matching origin refused under standard policy")?
@@ -683,60 +682,60 @@ test "same_origin policy validates requests" {
     testing.assert(same_origin(matching_alone.request()), "same_origin helper refused matching request")?
 
     // Sec-Fetch-Site same-origin alone passes under both.
-    var fetch_alone = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var fetch_alone = exchange.request("POST", "/submit").unwrap()
     &fetch_alone.add_header("Host", "example.test").unwrap()
     &fetch_alone.add_header("Sec-Fetch-Site", "same-origin").unwrap()
     testing.assert(check_same_origin(fetch_alone.request(), expected, SameOriginPolicy.standard()), "fetch same-origin refused under standard policy")?
     testing.assert(check_same_origin(fetch_alone.request(), expected, SameOriginPolicy.strict()), "fetch same-origin refused under strict policy")?
 
     // Default port and uppercase host match.
-    var matching_folded = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var matching_folded = exchange.request("POST", "/submit").unwrap()
     &matching_folded.add_header("Host", "EXAMPLE.TEST").unwrap()
     &matching_folded.add_header("Origin", "HTTP://example.test:80").unwrap()
     testing.assert(same_origin(matching_folded.request()), "folded origin refused")?
 
     // Mismatched scheme, port, or host fail.
-    var wrong_scheme = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var wrong_scheme = exchange.request("POST", "/submit").unwrap()
     &wrong_scheme.add_header("Host", "example.test").unwrap()
     &wrong_scheme.add_header("Origin", "https://example.test").unwrap()
     testing.assert(!same_origin(wrong_scheme.request()), "wrong scheme accepted")?
 
-    var wrong_port = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var wrong_port = exchange.request("POST", "/submit").unwrap()
     &wrong_port.add_header("Host", "example.test:8080").unwrap()
     &wrong_port.add_header("Origin", "http://example.test:8081").unwrap()
     testing.assert(!same_origin(wrong_port.request()), "wrong port accepted")?
 
-    var wrong_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var wrong_host = exchange.request("POST", "/submit").unwrap()
     &wrong_host.add_header("Host", "example.test").unwrap()
     &wrong_host.add_header("Origin", "http://evil.test").unwrap()
     testing.assert(!same_origin(wrong_host.request()), "wrong host accepted")?
 
     // Sec-Fetch-Site none passes.
-    var fetch_none = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var fetch_none = exchange.request("POST", "/submit").unwrap()
     &fetch_none.add_header("Host", "example.test").unwrap()
     &fetch_none.add_header("Sec-Fetch-Site", "none").unwrap()
     testing.assert(same_origin(fetch_none.request()), "Sec-Fetch-Site none refused")?
 
     // Sec-Fetch-Site cross-site and same-site fail under standard policy.
-    var cross_site = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var cross_site = exchange.request("POST", "/submit").unwrap()
     &cross_site.add_header("Host", "example.test").unwrap()
     &cross_site.add_header("Sec-Fetch-Site", "cross-site").unwrap()
     testing.assert(!same_origin(cross_site.request()), "cross-site accepted")?
 
-    var same_site = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var same_site = exchange.request("POST", "/submit").unwrap()
     &same_site.add_header("Host", "example.test").unwrap()
     &same_site.add_header("Sec-Fetch-Site", "same-site").unwrap()
     testing.assert(!same_origin(same_site.request()), "same-site accepted under standard policy")?
 
     // Conflicting: valid Origin but cross-site Sec-Fetch-Site fails.
-    var conflict = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var conflict = exchange.request("POST", "/submit").unwrap()
     &conflict.add_header("Host", "example.test").unwrap()
     &conflict.add_header("Origin", "http://example.test").unwrap()
     &conflict.add_header("Sec-Fetch-Site", "cross-site").unwrap()
     testing.assert(!check_same_origin(conflict.request(), expected, SameOriginPolicy.standard()), "conflicting cross-site accepted")?
 
     // Forwarded HTTPS requires explicit proxy trust to match an https origin.
-    var forwarded_https = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var forwarded_https = exchange.request("POST", "/submit").unwrap()
     &forwarded_https.add_header("Host", "example.test").unwrap()
     &forwarded_https.add_header("Origin", "https://example.test").unwrap()
     &forwarded_https.add_header("X-Forwarded-Proto", "https").unwrap()
@@ -745,7 +744,7 @@ test "same_origin policy validates requests" {
     testing.assert(same_origin(forwarded_https.request(), trust: .All), "explicitly trusted .All was refused")?
 
     // Missing Host header is always refused by same_origin helper.
-    let missing_host = new_request(arena.handle(), "POST", "/submit", body: "").unwrap()
+    defer var missing_host = exchange.request("POST", "/submit").unwrap()
     testing.assert(!same_origin(missing_host.request()), "missing host header was accepted by same_origin")?
     .Ok(())
 }

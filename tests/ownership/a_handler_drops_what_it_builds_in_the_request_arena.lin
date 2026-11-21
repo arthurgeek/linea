@@ -4,10 +4,8 @@ import std.http
 import std.io
 import std.mem
 
-use mem.Lender
-
 // Answer the words of the query, `+` between them, in reverse order.
-fn reverse[P: Allocator](request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
+fn reverse[P: Allocator](inout _: (), request: http.Request[P], inout _incoming: http.RequestBody[P]) -> Result[http.Response[P], http.Error[P]] where carries(request), borrows(_incoming), retains(_incoming: _incoming) {
     let query = request.query().unwrap_or("")
     // `words` lives in the arena and is dropped when the handler returns.
     var words: Vec[Str, mem.Handle[P]] = Vec.new_in(request.allocator())
@@ -25,10 +23,12 @@ fn reverse[P: Allocator](request: http.Request[P], inout _incoming: http.Request
 }
 
 fn main() -> UInt8 {
-    let arena = mem.Arena.open(mem.system(), size: 4096)
-    let sent = http.new_request(arena.handle(), "GET", "/reverse?one+two+three", body: "").unwrap()
-    var incoming_1 = http.RequestBody.from_request(sent.request())
-    let answered = match reverse(sent.request(), &incoming_1) {
+    var router = http.Router.new()
+    &router.route_raw("GET /reverse", reverse).unwrap()
+    let exchange = http.TestExchange.open()
+    var sent = exchange.request("GET", "/reverse?one+two+three").unwrap()
+    var nothing = {}
+    let answered = match &sent.send_to(&router, &nothing) {
         Ok(response) => {
             let body = response.text().unwrap()
             let _printed = io.println("{response.status().code()} {body}")
@@ -36,7 +36,8 @@ fn main() -> UInt8 {
         },
         Err(_) => 1,
     }
-    incoming_1.release()
-    arena.release()
+    sent.release()
+    exchange.release()
+    router.release()
     answered
 }

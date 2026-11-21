@@ -197,8 +197,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "cookies walk the pairs of a cookie header in order" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "session=abc123; theme=dark; empty=").unwrap()
         defer let pairs = walked(sent.request())
         testing.assert_eq(pairs.view(), "[session=abc123][theme=dark][empty=]", "the pairs changed")?
@@ -206,8 +206,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "a malformed pair is skipped and the others survive" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "novalue; =nameless; bad name=1; ok=1; a,b=2; last=2").unwrap()
         defer let pairs = walked(sent.request())
         testing.assert_eq(pairs.view(), "[ok=1][last=2]", "a malformed pair was yielded or hid its neighbours")?
@@ -215,8 +215,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "a request without a cookie header has no cookies" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Accept", "*/*").unwrap()
         defer let pairs = walked(sent.request())
         testing.assert_eq(pairs.view(), "", "a request without cookies had some")?
@@ -257,8 +257,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "cookie finds a cookie by name" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "session=abc123; theme=dark; empty=").unwrap()
         testing.assert(cookie_reads(sent.request(), "theme", .Some("dark")), "a cookie was not found")?
         testing.assert(cookie_reads(sent.request(), "empty", .Some("")), "an empty value was absent")?
@@ -267,8 +267,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "cookie decodes the percent encoded value" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "name=Zo%C3%AB%20%3Cb%3E; plus=a+b; quoted=\"Ada%20L\"").unwrap()
         testing.assert(cookie_reads(sent.request(), "name", .Some("Zoë <b>")), "an escape was not decoded")?
         testing.assert(cookie_reads(sent.request(), "plus", .Some("a+b")), "a plus was read as a space")?
@@ -280,8 +280,8 @@ impl[P: Allocator] Request[P] {
     // not set by `set_cookie`, so it reads as no cookie and the walk still shows
     // it as sent.
     test "a cookie that does not decode reads as none" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "share=100%; latin=caf%E9; ok=1").unwrap()
         testing.assert(cookie_reads(sent.request(), "share", .None), "a malformed escape was read")?
         testing.assert(cookie_reads(sent.request(), "latin", .None), "a value that is not UTF-8 was read")?
@@ -292,8 +292,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "whitespace around pairs is tolerated and names match exactly" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("cookie", "  a=1 ;b = 2;\tC=3;;  ; d=4  ").unwrap()
         defer let pairs = walked(sent.request())
         testing.assert_eq(pairs.view(), "[a=1][b=2][C=3][d=4]", "whitespace or an empty pair disturbed the walk")?
@@ -303,8 +303,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "a value may hold equals signs and quotes around it are dropped" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "token=YWJj==; quoted=\"hello world\"; lone=\"; kept=\"x").unwrap()
         testing.assert(cookie_reads(sent.request(), "token", .Some("YWJj==")), "the equals signs of a value were lost")?
         testing.assert(cookie_reads(sent.request(), "quoted", .Some("hello world")), "the quotes were kept")?
@@ -314,8 +314,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "non ascii values without escapes read as sent" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "name=José; note=日本語").unwrap()
         testing.assert(cookie_reads(sent.request(), "name", .Some("José")), "a non-ASCII value changed")?
         testing.assert(cookie_reads(sent.request(), "note", .Some("日本語")), "a non-ASCII value changed")?
@@ -323,8 +323,8 @@ impl[P: Allocator] Request[P] {
     }
 
     test "the first cookie of a repeated name wins across headers" {
-        defer let arena = mem.Arena.open(mem.system(), size: 4096)
-        var sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         &sent.add_header("Cookie", "id=first; theme=dark").unwrap()
         &sent.add_header("Accept", "*/*").unwrap()
         &sent.add_header("Cookie", "id=second; lang=pt").unwrap()
@@ -566,8 +566,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a cookie is set with the attributes given" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         &response.set_cookie("theme", "dark").unwrap()
         &response.set_cookie("session", "abc123", path: "/", domain: "example.com", max_age: .Some(3600), secure: true, http_only: true, same_site: .Some(.Lax)).unwrap()
@@ -580,8 +580,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a name that is not a token is refused" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         for name in ["", "two words", "a=b", "a;b", "a\r\nSet-Cookie: x=y", "café", "a,b", "a\"b"] {
             testing.assert_eq(&response.set_cookie(name, "v"), .Err(CookieError.NotAToken), "a bad name was accepted")?
@@ -592,8 +592,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "any text is written percent encoded" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         &response.set_cookie("name", "Ada Lovelace").unwrap()
         &response.set_cookie("who", "Zoë <b>").unwrap()
@@ -606,13 +606,13 @@ impl[P: Allocator] Response[P] {
 
     test "a cookie value reads back as it was set" {
         for value in ["Ada Lovelace", "Zoë <b>", "a;b=c", "100% \"sure\"", "", "日本語", "a+b", "%41"] {
-            defer let arena = mem.Arena.open(mem.system(), size: 8192)
-            let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            defer let exchange = TestExchange.open()
+            defer var sent = exchange.request("GET", "/").unwrap()
             var response = text(sent.request(), "ok").unwrap()
             &response.set_cookie("v", value, path: "/").unwrap()
             let header = response.header("Set-Cookie").unwrap()
             let (pair, _attributes) = header.split_once("; ").unwrap()
-            var returned = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            defer var returned = exchange.request("GET", "/").unwrap()
             &returned.add_header("Cookie", pair).unwrap()
             testing.assert(cookie_reads(returned.request(), "v", .Some(value)), "a value did not read back as it was set")?
         }
@@ -620,8 +620,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a path or domain that could end the cookie is refused" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         for path in ["x", "/a b", "/a;b", "/a\r\nb", "/é"] {
             testing.assert_eq(&response.set_cookie("n", "v", path: path), .Err(CookieError.InvalidPath), "a bad path was accepted")?
@@ -634,8 +634,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "cross site use requires secure" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         testing.assert_eq(&response.set_cookie("n", "v", same_site: .Some(.Unrestricted)), .Err(CookieError.InsecureSameSiteNone), "an insecure SameSite=None cookie was accepted")?
         testing.assert_ok_eq(&response.set_cookie("n", "v", same_site: .Some(.Lax)), (), "an insecure Lax cookie was refused")?
@@ -643,8 +643,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a prefixed cookie keeps the rules its prefix names" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         testing.assert_eq(&response.set_cookie("__Secure-id", "v"), .Err(CookieError.PrefixRules), "an insecure __Secure- cookie was accepted")?
         testing.assert_eq(&response.set_cookie("__secure-id", "v"), .Err(CookieError.PrefixRules), "a lowercase __secure- cookie escaped its rules")?
@@ -663,8 +663,8 @@ impl[P: Allocator] Response[P] {
     // Browsers ignore an `Expires` date before 1601, which would keep the cookie
     // for the session instead of until that date.
     test "an expiry before 1601 is refused" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         let last_second_of_1600 = time.Timestamp.from_unix(-11644473601, 0).unwrap()
         let first_second_of_1601 = time.Timestamp.from_unix(-11644473600, 0).unwrap()
@@ -684,8 +684,8 @@ impl[P: Allocator] Response[P] {
         let value = Str.from_bytes(long.as_slice()).unwrap()
         var refusals: UInt64 = 0
         for length in 1..1025 {
-            defer let arena = mem.Arena.open(mem.system(), size: 1024)
-            let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+            defer let exchange = TestExchange.open(limits: Limits { request_arena_bytes = 1024, ..Limits.default() })
+            defer var sent = exchange.request("GET", "/").unwrap()
             var response = text(sent.request(), "ok").unwrap()
             match &response.set_cookie("n", value.slice(0, length).unwrap()) {
                 Ok(_) => {},
@@ -711,8 +711,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a cookie is cleared with an empty expired value" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         &response.clear_cookie("session", path: "/").unwrap()
         &response.clear_cookie("theme", path: "/app", domain: "example.com").unwrap()
@@ -722,8 +722,8 @@ impl[P: Allocator] Response[P] {
     }
 
     test "a prefixed cookie is cleared with secure" {
-        defer let arena = mem.Arena.open(mem.system(), size: 8192)
-        let sent = new_request(arena.handle(), "GET", "/", body: "").unwrap()
+        defer let exchange = TestExchange.open()
+        defer var sent = exchange.request("GET", "/").unwrap()
         var response = text(sent.request(), "ok").unwrap()
         testing.assert_eq(&response.clear_cookie("__Host-session", path: "/"), .Err(CookieError.PrefixRules), "a clearing header a browser ignores was accepted")?
         &response.clear_cookie("__Host-session", path: "/", secure: true).unwrap()
