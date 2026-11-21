@@ -540,10 +540,20 @@ test "a sanitized runtime is linked with its sanitizer and the undefined-behavio
 }
 
 /// The system libraries the runtime archive references, which follow it:
-/// the math library and the threads a task runs on. macOS supplies both in
-/// libSystem, which the host C compiler already links.
+/// the math library and the threads a task runs on, and what the archive's
+/// rustls members call. macOS supplies the first two in libSystem, which the
+/// host C compiler already links; rustls's platform verifier calls the
+/// Security and CoreFoundation frameworks there, and Rust's standard library
+/// calls iconv. On Linux Rust's standard library calls the unwinder, the
+/// dynamic loader and the clock libraries. A program that never calls `tls`
+/// links no rustls member, so each such library is dropped again: on macOS by
+/// `-dead_strip_dylibs`, and on Linux by `--as-needed`.
 fn appendSystemLink(gpa: std.mem.Allocator, argv: *std.ArrayList([]const u8)) !void {
-    if (builtin.os.tag == .linux) try argv.appendSlice(gpa, &.{ "-lm", "-lpthread" });
+    switch (builtin.os.tag) {
+        .linux => try argv.appendSlice(gpa, &.{ "-lm", "-lpthread", "-Wl,--as-needed", "-lgcc_s", "-lutil", "-lrt", "-ldl", "-Wl,--no-as-needed" }),
+        .macos => try argv.appendSlice(gpa, &.{ "-Wl,-dead_strip_dylibs", "-framework", "Security", "-framework", "CoreFoundation", "-liconv" }),
+        else => {},
+    }
 }
 
 /// Holds an emitted module to MLIR's own verifier, without lowering it.

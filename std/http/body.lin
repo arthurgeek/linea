@@ -7,7 +7,7 @@ import std.testing
 // the bytes a CGI request was read with or a test request was sent with.
 enum BodySource {
     Held(mem.Slice[UInt8]),
-    Reading(io.BufferedReader[net.Connection, mem.SystemAllocator]),
+    Reading(io.BufferedReader[ServerLink, mem.SystemAllocator]),
     Taken,
 }
 
@@ -45,7 +45,7 @@ impl[P: Allocator] RequestBody[P] {
     }
 
     // Move the buffered connection into a body bounded by its canonical length.
-    fn from_reader(sink reader: io.BufferedReader[net.Connection, mem.SystemAllocator], length: UInt64, limits: Limits, memory: mem.Handle[P]) -> Self where carries(.source: reader), carries(.memory: memory) {
+    fn from_reader(sink reader: io.BufferedReader[ServerLink, mem.SystemAllocator], length: UInt64, limits: Limits, memory: mem.Handle[P]) -> Self where carries(.source: reader), carries(.memory: memory) {
         let failure: Option[RequestError] = if length > limits.max_body_bytes {
             .Some(.Status(.ContentTooLarge))
         } else {
@@ -66,10 +66,10 @@ impl[P: Allocator] RequestBody[P] {
 
     // Keep the connection's output available while response values read the
     // body's cached input. This view cannot close or move the connection.
-    fn writer(self: Self) -> net.ConnectionWriter where borrows(self) {
+    fn writer(self: Self) -> ServerLinkWriter where borrows(self) {
         match read self.source {
             Reading(reader) => reader.inspect_reader(
-                |connection: net.Connection| -> net.ConnectionWriter where borrows(connection) {
+                |connection: ServerLink| -> ServerLinkWriter where borrows(connection) {
                     connection.writer()
                 },
             ),
@@ -80,7 +80,7 @@ impl[P: Allocator] RequestBody[P] {
 
     // Return the connection with all next-request read-ahead intact. Callers
     // take it only after the response and the unread body have been settled.
-    fn into_reader(sink self: Self) -> Option[io.BufferedReader[net.Connection, mem.SystemAllocator]] where carries(self.source) {
+    fn into_reader(sink self: Self) -> Option[io.BufferedReader[ServerLink, mem.SystemAllocator]] where carries(self.source) {
         let RequestBody { source, memory: _, cursor: _, remaining: _, failure: _, limits: _, cache } = self
         cache.release()
         match source {
@@ -316,7 +316,7 @@ test "a socket body preserves the next requests read ahead" {
     defer var client = net.connect(listener.local_address().unwrap()).unwrap()
     let _written = io.write_all(&client, "head\nbodytail\n".as_bytes()).unwrap()
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    var reader = io.BufferedReader.open(capacity: 32, reader: connection).unwrap()
+    var reader = io.BufferedReader.open(capacity: 32, reader: ServerLink.plain(connection)).unwrap()
     let head = &reader.read_line_borrowed(max_bytes: 8).unwrap().unwrap() == "head"
     var body = RequestBody.from_reader(reader, length: 4, limits: Limits.default(), memory: arena.handle())
     defer var bytes = mem.system().acquire(8).unwrap()
@@ -339,7 +339,7 @@ test "a truncated socket body reports a sticky bad request" {
     let _written = io.write_all(&client, "ab".as_bytes()).unwrap()
     &client.shutdown_write().unwrap()
     let Accepted { connection, address: _ } = &listener.accept().unwrap()
-    let reader = io.BufferedReader.open(capacity: 8, reader: connection).unwrap()
+    let reader = io.BufferedReader.open(capacity: 8, reader: ServerLink.plain(connection)).unwrap()
     defer var body = RequestBody.from_reader(reader, length: 4, limits: Limits.default(), memory: arena.handle())
     defer var bytes = mem.system().acquire(8).unwrap()
     let first = &body.read_some(&bytes, offset: 0, count: 8).unwrap()
