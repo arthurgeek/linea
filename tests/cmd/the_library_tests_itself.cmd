@@ -1668,8 +1668,8 @@ The library tests itself.
   ok    task.a value that is ready now is delivered at once
   ok    task.a value that is writable at once is delivered
   ok    task.all runs sequentially and on threads
-  ok    task.all starts the next job as soon as one finishes
   ok    task.all_in takes its results and tasks from its allocator
+  ok    task.an errand answers its number once the errands it waits for have run
   ok    task.an offering endpoint is delivered once its peer chooses
   ok    task.an owning task hands its state back when closed
   ok    task.calls from two tasks run one at a time

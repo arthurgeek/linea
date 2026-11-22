@@ -1,0 +1,31 @@
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+// A task's body may send its own end away. Here the errand's body hands its
+// end to `main` over the relay's session, and the relay sends the errand a
+// number and closes its handle before `main` has received anything. Closing
+// the handle joins the errand's body, but the end `main` holds still has the
+// number to receive, so the session lasts until `main` closes that end too.
+fn main() -> Result[UInt8, io.IoError] {
+    let relay = sink [] |sink me: Chan[Send[Chan[Recv[UInt64, End]], End]]| {
+        let errand = sink [sink me] |sink end: Chan[Recv[UInt64, End]]| {
+            me.send(end).close()
+        }
+        task.prepare(errand).unwrap().start().send(7).close()
+        io.println("the relay closed the errand's handle").unwrap()
+    }
+    let (end, joined) = task.start(relay).unwrap().recv()
+    // Joining the relay first means its close of the errand's handle has
+    // already returned when `main` receives the number.
+    joined.close()
+    let (number, done) = end.recv()
+    done.close()
+    io.println("main received {number} after the relay closed")?
+    .Ok(0)
+}

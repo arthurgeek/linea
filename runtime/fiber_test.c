@@ -268,6 +268,31 @@ static void simultaneous_writes_keep_both_waiters(void) {
     assert(close(sockets[0]) == 0 && close(sockets[1]) == 0);
 }
 
+/* A body may send its own end away instead of closing it. The creator here
+ * receives that end, sends a value to it and closes its handle before the
+ * value is received, so the session lasts until the end it holds is closed
+ * too, on a system thread and on a fiber alike. */
+static void sends_its_own_end(unsigned long endpoint, unsigned long at, unsigned long len) {
+    assert(at == 0 && len == 0);
+    linea_chan_send(endpoint, (unsigned long)&endpoint, sizeof endpoint);
+}
+
+static void an_end_sent_away_outlives_the_handle(unsigned long identity) {
+    const long prepared = linea_task_prepare_on(stack_bytes, identity);
+    assert(prepared > 0);
+    const unsigned long handle = linea_task_start((unsigned long)prepared, sends_its_own_end, release_body, 0, 0, 0);
+    unsigned long end = 0;
+    linea_chan_recv(handle, (unsigned long)&end, sizeof end);
+    assert(end == (handle | 1UL));
+    const unsigned long sent = 5;
+    linea_chan_send(handle, (unsigned long)&sent, sizeof sent);
+    linea_chan_close(handle);
+    unsigned long received = 0;
+    linea_chan_recv(end, (unsigned long)&received, sizeof received);
+    assert(received == sent);
+    linea_chan_close(end);
+}
+
 int main(void) {
     (void)alarm(30);
     assert(linea_loop_open(0) == -EINVAL);
@@ -283,7 +308,12 @@ int main(void) {
     assert(released == 18);
     simultaneous_writes_keep_both_waiters();
     assert(released == 21);
+    an_end_sent_away_outlives_the_handle(0);
+    const long loop = linea_loop_open(1);
+    assert(loop > 0);
+    an_end_sent_away_outlives_the_handle((unsigned long)loop);
+    assert(released == 23);
     (void)alarm(0);
-    puts("native fibers: same-carrier sessions, cross-carrier wakes, joins and cancelled preparations passed");
+    puts("native fibers: same-carrier sessions, cross-carrier wakes, joins, ends sent away and cancelled preparations passed");
     return 0;
 }
