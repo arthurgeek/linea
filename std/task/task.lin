@@ -1944,21 +1944,36 @@ test "a refused allocation moves work to the caller and keeps every result" {
     }
 }
 
+// Walk a lazy map in `order` over one errand for each entry of `waits` on two
+// workers, and answer the errands' numbers as the digits of one number, in
+// the order they were yielded.
+fn lazy_test_errand_digits(waits: mem.Slice[UInt64], order: Order) -> UInt64 {
+    with_errands(
+        waits,
+        sink [order] |sink errands| {
+            var mapped = lazy_map(Policy.Threads(2), errands.drain(), run_errand, order: order)
+            var digits = UInt64(0)
+            for n in &mapped {
+                digits = digits * 10 + n
+            }
+            match mapped.finish() {
+                Ok(drained) => drained.finish().unwrap(),
+                Err(_) => panic("a walked map still held results"),
+            }
+            digits
+        },
+    )
+}
+
 test "a lazy_map in completion order yields each result as its job finishes" {
-    // Item 1 takes six tenths of a second and every other item a twentieth,
-    // so while item 1 runs the other worker maps items 2 to 6, each yielded
-    // as it finishes, and item 1 is yielded last. In input order item 1 is
-    // yielded first.
-    defer var finishing = lazy_map(Policy.Threads(2), UInt64(1)..=6, lazy_test_slow_item, order: .Completion)
-    var completed = UInt64(0)
-    for n in &finishing {
-        completed = completed * 10 + n
-    }
-    defer var in_input = lazy_map(Policy.Threads(2), UInt64(1)..=6, lazy_test_slow_item)
-    var input = UInt64(0)
-    for n in &in_input {
-        input = input * 10 + n
-    }
+    // Item 1 finishes only once the five after it have run, so while item 1
+    // waits the other worker maps items 2 to 6, each yielded as it finishes,
+    // and item 1 is yielded last. A map that waited for item 1 before
+    // yielding the others would leave it waiting until its minute ran out.
+    let completed = lazy_test_errand_digits([UInt64(5), 0, 0, 0, 0, 0].as_slice(), Order.Completion)
+    // In input order item 1 is yielded first, though it finishes only once
+    // the three after it have run.
+    let input = lazy_test_errand_digits([UInt64(3), 0, 0, 0, 0, 0].as_slice(), Order.Input)
     testing.assert_eq(completed, UInt64(234561), "the slow job's result was not yielded after the faster ones")?
     testing.assert_eq(input, UInt64(123456), "input order changed")?
 }
