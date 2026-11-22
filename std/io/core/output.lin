@@ -87,9 +87,7 @@ pub fn line[T: Display, W: Writer](x: T, inout w: W) -> Result[(), W.Error] wher
 }
 
 test "a line is the value and the ending after it" {
-    var w = testing.Recorder.of(64) else |_| {
-        return testing.assert(false, "a recorder was refused")
-    }
+    var w = testing.allocated(testing.Recorder.of(64), "a recorder was refused")?
     let wrote = line("hello", &w).is_ok()
     let said = w.holds("hello\n")
     w.release()
@@ -97,9 +95,7 @@ test "a line is the value and the ending after it" {
     testing.assert(wrote, "writing a line into a recorder failed")?
     testing.assert(said, "a line is not the value and the ending after it")?
 
-    var w = testing.Recorder.of(64) else |_| {
-        return testing.assert(false, "a recorder was refused")
-    }
+    var w = testing.allocated(testing.Recorder.of(64), "a recorder was refused")?
     let wrote = line(1250, &w).is_ok()
     let said = w.holds("1250\n")
     w.release()

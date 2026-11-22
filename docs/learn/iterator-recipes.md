@@ -381,9 +381,8 @@ for delivery in deliveries {
     // `merge` adds the units to an existing entry, or inserts them for a
     // new product and warehouse. If allocation fails, the failure hands the
     // key and units back; `settled()` releases them and keeps only why.
-    if &stock.merge(key, units, |sink current, sink added| current + added).settled().is_err() {
-        io.eprintln("could not allocate warehouse stock")
-        return .Ok(1)
+    let _ = &stock.merge(key, units, |sink current, sink added| current + added).settled() else |refusal| {
+        return .Ok(refusal.report("the warehouse stock"))
     }
 }
 ```

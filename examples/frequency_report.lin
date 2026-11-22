@@ -151,13 +151,11 @@ fn main() -> Result[UInt8, io.IoError] {
         input.release()
         counted
     }
-    defer let counts = counted else |reason| {
-        io.eprintln("could not allocate frequencies: {reason:?}")
-        return .Ok(1)
+    defer let counts = counted else |refusal| {
+        return .Ok(refusal.report("the line frequencies"))
     }
-    defer let rows = ranked(counts) else |reason| {
-        io.eprintln("could not allocate the report: {reason:?}")
-        return .Ok(1)
+    defer let rows = ranked(counts) else |refusal| {
+        return .Ok(refusal.report("the ranked report"))
     }
     io.println("Frequencies ({rows.length()} distinct lines, most frequent first):")?
     for row in rows.as_slice() {

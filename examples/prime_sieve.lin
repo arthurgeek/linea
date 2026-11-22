@@ -55,9 +55,8 @@ test "a sieve counts the primes below its limit" {
 fn main() -> Result[UInt8, IoError] {
     let limits: [UInt64; _] = [30, 100, 1000]
     for limit in limits {
-        let n = primes_below(limit) else |_| {
-            io.eprintln("not enough memory to count primes below {limit}")
-            return .Ok(1)
+        let n = primes_below(limit) else |refusal| {
+            return .Ok(refusal.report("the sieve of the numbers below {limit}"))
         }
         println("{n} primes below {limit}")?
     }

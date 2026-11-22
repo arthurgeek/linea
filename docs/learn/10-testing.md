@@ -436,8 +436,10 @@ fn banner_in[A: Allocator](allocator: A, title: Str) -> Result[String[A], mem.Oo
     .Ok(line)
 }
 
+// `testing.allocated` answers the banner, or fails the test with the message
+// when the allocation is refused.
 test "a banner frames its title" {
-    defer let heading = banner_in(mem.system(), "Daily report").unwrap()
+    defer let heading = testing.allocated(banner_in(mem.system(), "Daily report"), "the banner was refused")?
     testing.assert_eq(heading.view(), "== Daily report ==", "the banner changed")?
 }
 
@@ -458,8 +460,8 @@ test "every allocation the banner asks for can fail" {
 }
 
 fn main() -> Result[UInt8, io.IoError] {
-    defer let heading = banner_in(mem.system(), "Daily report") else |_| {
-        return .Ok(1)
+    defer let heading = banner_in(mem.system(), "Daily report") else |refusal| {
+        return .Ok(refusal.report("the banner"))
     }
     io.println(heading.view())?
     .Ok(0)
@@ -472,6 +474,16 @@ ok    every allocation the banner asks for can fail
 
 2 passed, 0 failed
 ```
+
+The first test needs its banner, and `testing.allocated(result, message)`
+says so. It takes the `Result[T, mem.Oom]` an allocating call answers and
+answers `Result[T, testing.Failure]`: the value when the allocation was
+granted, or a failure carrying the message when it was refused, which `?`
+hands on so the test fails and names what it could not build. It accepts only
+`mem.Oom` as the error, so it never passes off another kind of failure, such
+as a file that would not open, as a refused allocation. Writing `.unwrap()`
+there instead would stop the whole test program at the first refusal, before
+the other tests run.
 
 `each_allocation_failure` takes three arguments:
 
@@ -495,9 +507,11 @@ needed no change to be tested this way: it takes its allocator as an argument
 ([Memory](07-memory.md)).
 
 A body that makes assertions of its own answers `Result[(), testing.Failure]`.
-It reports a refused allocation with `testing.refused(message)`, and passes
-`testing.Failure.is_refusal` as the third argument, so that a failed assertion
-still fails the test. Add this test to `banner.lin`:
+It hands each allocation on with `testing.allocated`, and passes
+`testing.Failure.is_refusal` as the third argument. The failure `allocated`
+makes for a refused allocation is a refusal, so the walk accepts it, while a
+failed assertion is not, so it still fails the test. Add this test to
+`banner.lin`:
 
 <!-- guide: unchecked the program is a partial listing or an edit of an earlier one -->
 ```linea
@@ -507,9 +521,7 @@ test "every banner that is built reads right" {
     let _attempts = testing.each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), testing.Failure] {
-            let heading = banner_in(allocator, "Daily report") else |_| {
-                return .Err(testing.refused("the banner was refused"))
-            }
+            let heading = testing.allocated(banner_in(allocator, "Daily report"), "the banner was refused")?
             let reads_right = heading.view() == "== Daily report =="
             heading.release()
             testing.assert(reads_right, "the banner changed")

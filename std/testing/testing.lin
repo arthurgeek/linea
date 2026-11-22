@@ -33,9 +33,7 @@ impl Display for Failure {
 test "a failure displays the caller's message" -> Result[(), Failure] {
     let failure = Failure { said = "the expected message", refusal = false }
     // This capacity leaves spare bytes beyond the complete failure message.
-    var writer = Recorder.of(256) else |_| {
-        return assert(false, "the display recorder was refused")
-    }
+    var writer = allocated(Recorder.of(256), "the display recorder was refused")?
     let wrote = failure.fmt(&writer).is_ok()
     let equal = writer.holds("the expected message")
     writer.release()
@@ -68,6 +66,53 @@ impl Failure {
         assert(refusal.said == "the arena was refused", "a refused failure lost its message")?
         .Ok(())
     }
+}
+
+// Return what a test's allocation built, or a Failure that reports its
+// refusal with `said`. A test hands the failure on with `?`, so a refused
+// allocation fails the test with the message, and a body walked by
+// `each_allocation_failure` that passes `Failure.is_refusal` has each of its
+// refusals accepted, while its assertions still fail the walk.
+pub fn allocated[T](sink got: Result[T, Oom], said: Str) -> Result[T, Failure] where carries(.Ok: got), carries(.Err: said) {
+    match got {
+        Ok(value) => .Ok(value),
+        Err(_) => .Err(refused(said)),
+    }
+}
+
+test "allocated hands back what a granted allocation built" -> Result[(), Failure] {
+    let buffer = allocated(mem.system().acquire(8), "eight bytes were refused")?
+    let length = buffer.length()
+    buffer.release()
+    assert_eq(length, 8, "allocated changed the buffer it handed back")?
+    .Ok(())
+}
+
+test "allocated fails a refused allocation as a refusal carrying the message" -> Result[(), Failure] {
+    let refusal: Result[UInt64, Oom] = .Err(Oom.Exhausted)
+    let failure = match allocated(refusal, "the score table was refused") {
+        Err(failure) => failure,
+        Ok(_) => return assert(false, "a refused allocation passed"),
+    }
+    assert(failure.is_refusal(), "a refused allocation failed as an assertion")?
+    assert(failure.said == "the score table was refused", "a refused allocation lost its message")?
+    .Ok(())
+}
+
+// A body walked by `each_allocation_failure` hands each refusal on with `?`,
+// and `Failure.is_refusal` accepts it, while its assertions still fail the walk.
+test "allocated reports each refusal of a walked body" -> Result[(), Failure] {
+    let checked = each_allocation_failure(
+        mem.system(),
+        |allocator| -> Result[(), Failure] {
+            defer let first = allocated(allocator.acquire(8), "the first buffer was refused")?
+            defer let second = allocated(allocator.acquire(16), "the second buffer was refused")?
+            assert_eq(first.length() + second.length(), 24, "the buffers lost their lengths")
+        },
+        Failure.is_refusal,
+    )
+    assert_eq(checked.unwrap_or(0), 2, "the walk did not refuse each of the two allocations")?
+    .Ok(())
 }
 
 // Return Ok when the condition holds, or Failure with the supplied message.
@@ -401,9 +446,7 @@ test "each_allocation_failure reports a refused run that fails for another reaso
     let checked = each_allocation_failure(
         mem.system(),
         |allocator| -> Result[(), Failure] {
-            defer let first = allocator.acquire(8) else |_| {
-                return .Err(refused("the first buffer was refused"))
-            }
+            defer let first = allocated(allocator.acquire(8), "the first buffer was refused")?
             defer let second = allocator.acquire(8) else |_| {
                 return assert(false, "the second buffer was refused")
             }
@@ -541,9 +584,7 @@ impl Recorder[mem.SystemAllocator] {
     }
 
     test "a recorder records into the system allocator" -> Result[(), Failure] {
-        var recorder = Recorder.of(16) else |_| {
-            return assert(false, "a recorder of sixteen bytes was refused")
-        }
+        var recorder = allocated(Recorder.of(16), "a recorder of sixteen bytes was refused")?
         let wrote = &recorder.write_str("tea").is_ok()
         let kept = recorder.holds("tea")
         recorder.release()
@@ -551,9 +592,7 @@ impl Recorder[mem.SystemAllocator] {
     }
 
     test "a new recorder holds nothing" -> Result[(), Failure] {
-        var recorder = Recorder.of(8) else |_| {
-            return assert(false, "a recorder of eight bytes was refused")
-        }
+        var recorder = allocated(Recorder.of(8), "a recorder of eight bytes was refused")?
         let empty = recorder.length() == 0 && recorder.holds("")
         recorder.release()
         assert(empty, "a new recorder held something")
@@ -587,9 +626,7 @@ impl[A: Allocator] Recorder[A] {
     }
 
     test "length counts the bytes written" -> Result[(), Failure] {
-        var recorder = Recorder.of(8) else |_| {
-            return assert(false, "a recorder of eight bytes was refused")
-        }
+        var recorder = allocated(Recorder.of(8), "a recorder of eight bytes was refused")?
         let wrote = &recorder.write_str("olá").is_ok()
         let counted = recorder.length()
         recorder.release()
@@ -608,9 +645,7 @@ impl[A: Allocator] Recorder[A] {
     }
 
     test "byte reads a written byte and nothing past the end" -> Result[(), Failure] {
-        var recorder = Recorder.of(8) else |_| {
-            return assert(false, "a recorder of eight bytes was refused")
-        }
+        var recorder = allocated(Recorder.of(8), "a recorder of eight bytes was refused")?
         let wrote = &recorder.write_str("hi").is_ok()
         let second = recorder.byte(1)
         let past = recorder.byte(2)
@@ -643,9 +678,7 @@ impl[A: Allocator] Recorder[A] {
     // at a particular index.
     test "a recorder keeps what was rendered into it" -> Result[(), Failure] {
         // Sixty-four bytes leave spare capacity beyond the five-byte word.
-        var w = Recorder.of(64) else |_| {
-            return assert(false, "a recorder of sixty-four bytes was refused")
-        }
+        var w = allocated(Recorder.of(64), "a recorder of sixty-four bytes was refused")?
         let wrote = "hello".fmt(&w).is_ok()
 
         let kept = w.holds("hello")
@@ -691,9 +724,7 @@ impl[A: Allocator] Writer for Recorder[A] {
 
 test trap "a recorder traps when a write exceeds its storage" -> Result[(), Failure] {
     // One byte cannot hold the two-byte write below; its second store traps.
-    var writer = Recorder.of(1) else |_| {
-        return assert(false, "the recorder was refused")
-    }
+    var writer = allocated(Recorder.of(1), "the recorder was refused")?
     match &writer.write_str("ab") {
         Ok(_) => {},
         Err(_) => {},
