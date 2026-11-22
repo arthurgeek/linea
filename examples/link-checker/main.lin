@@ -5,7 +5,8 @@
 //     link-checker links.txt --jobs 16
 //
 // The links are fetched in parallel through `task.lazy_map`, at most `--jobs`
-// at a time (8 by default), and reported in the order the file lists them.
+// at a time (8 by default), and each is reported as soon as its check
+// finishes, so a slow link does not hold back the ones after it.
 // Each check runs on a task of its own with an `http.Client` of its own, and
 // asks for the link without following a redirect, so a moved page is
 // reported with where it moved to. A blank line or one starting with `#` is
@@ -107,13 +108,14 @@ test "a list skips blank lines and comments" {
 }
 
 // Check every link in `urls`, at most `jobs` at once, and call `report` with
-// each result in the order the links were listed. Answers how many links
-// were broken or unreachable.
+// each result as its check finishes. Answers how many links were broken or
+// unreachable.
 fn check_all[F: inout fn(checked: Checked)](sink urls: mem.Vec[String, mem.SystemAllocator], jobs: UInt64, inout report: F) -> UInt64 {
-    // `lazy_map` starts a check only when one of its `jobs` tasks is free,
-    // and hands the results back in the order of the list, however they
-    // finish.
-    defer var checks = task.lazy_map(.Threads(jobs), urls.drain(), check)
+    // `lazy_map` starts a check only when one of its `jobs` tasks is free.
+    // `order: .Completion` hands each result back as soon as its check
+    // finishes, the fastest first, rather than in the order of the list;
+    // each result names its own URL, so the report needs no position.
+    defer var checks = task.lazy_map(.Threads(jobs), urls.drain(), check, order: .Completion)
     var failed: UInt64 = 0
     for checked in &checks {
         if match read checked.outcome { Broken(_) => true, Unreachable(_) => true, _ => false } {
@@ -125,7 +127,7 @@ fn check_all[F: inout fn(checked: Checked)](sink urls: mem.Vec[String, mem.Syste
     failed
 }
 
-test "links are reported in order as fine moved or broken" {
+test "every link is reported once as fine moved or broken" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let port = listener.local_address().unwrap().port
     let checking = task.prepare(
@@ -149,10 +151,21 @@ test "links are reported in order as fine moved or broken" {
     let (lines, done) = checking.recv()
     done.close()
     defer let shown = lines
-    let port_text = fmt.render_owned(port).unwrap()
-    defer let expected = fmt.render_owned("ok      200 http://127.0.0.1:{port_text.view()}/guide\nmoved   301 http://127.0.0.1:{port_text.view()}/old-guide -> http://127.0.0.1:{port_text.view()}/guide\nbroken  404 http://127.0.0.1:{port_text.view()}/gone\n1 failed").unwrap()
-    port_text.release()
-    testing.assert_eq(shown.view(), expected.view(), "the links were reported differently")
+    // The checks run two at once and are reported as each finishes, so the
+    // test asks that every link is reported once, in any order.
+    defer let fine = fmt.render_owned("ok      200 http://127.0.0.1:{port}/guide").unwrap()
+    defer let moved = fmt.render_owned("moved   301 http://127.0.0.1:{port}/old-guide -> http://127.0.0.1:{port}/guide").unwrap()
+    defer let broken = fmt.render_owned("broken  404 http://127.0.0.1:{port}/gone").unwrap()
+    var reported: UInt64 = 0
+    var expected: UInt64 = 0
+    for line in shown.view().lines() {
+        reported += 1
+        if line == fine.view() || line == moved.view() || line == broken.view() {
+            expected += 1
+        }
+    }
+    testing.assert_eq((reported, expected), (UInt64(4), UInt64(3)), "the links were reported differently")?
+    testing.assert(shown.view().ends_with("\n1 failed"), "the count of failed links was wrong")
 }
 
 // A site whose guide moved: `/guide` answers, `/old-guide` redirects to it,
@@ -201,10 +214,12 @@ fn main() -> UInt8 {
     }
     let urls = listed(text.view())
     text.release()
+    let at_once = jobs.unwrap_or(8)
+    io.println("checking {urls.length()} links, {at_once} at a time, each reported as its check finishes").unwrap()
     var report = |checked: Checked| {
         io.println("{checked}").unwrap()
     }
-    let failed = check_all(urls, jobs.unwrap_or(8), &report)
+    let failed = check_all(urls, at_once, &report)
     if failed > 0 {
         return 1
     }

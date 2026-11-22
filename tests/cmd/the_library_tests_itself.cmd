@@ -1641,6 +1641,8 @@ The library tests itself.
   ok    task.a handle is delivered once its body has returned
   ok    task.a key is refused by another set and after its slot is reused
   ok    task.a lazy_map hands linear results to their owner
+  ok    task.a lazy_map in completion order runs no more jobs at once than its bound
+  ok    task.a lazy_map in completion order yields each result as its job finishes
   ok    task.a lazy_map keeps every result of a fallible function
   ok    task.a lazy_map released early settles every job it started
   ok    task.a lazy_map releases results that own storage
@@ -1651,8 +1653,10 @@ The library tests itself.
   ok    task.a minted key names what it was minted for
   ok    task.a prepared body runs once its task starts
   ok    task.a refused allocation hands the body back
+  ok    task.a refused allocation leaves a lazy_map in completion order settled
   ok    task.a refused allocation moves work to the caller and keeps every result
   ok    task.a registered endpoint is delivered once its peer sends
+  ok    task.a sequential lazy_map in completion order yields in input order
   ok    task.a sequential lazy_map starts no task and yields the same results
   ok    task.a set with nothing registered answers none without waiting
   ok    task.a signal is registered in a wait set and withdrawn
@@ -1939,4 +1943,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1936 passed, 0 failed
+  1940 passed, 0 failed

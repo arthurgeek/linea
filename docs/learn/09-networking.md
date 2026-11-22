@@ -3269,7 +3269,8 @@ the `Link` header, the rate limit read from the response's headers, and tests
 that run against a local server answering recorded responses, over HTTP and
 over HTTPS. The [link
 checker](../../examples/link-checker/main.lin) checks many links at once, one
-client per task, through `task.lazy_map`.
+client per task, through `task.lazy_map`, and reports each link as its check
+finishes with `order: .Completion`.
 
 ## What you have seen
 

@@ -1555,7 +1555,7 @@ without a back-and-forth conversation, and return owned results.
 Linea provides four combinators for independent work:
 - `task.all(policy, jobs)` runs a collection of homogeneous jobs (like `Promise.all` in JavaScript or `futures::future::join_all` in Rust) and returns a `Vec[T]` in job order.
 - `task.map(policy, items, f)` applies `f` to every element of a `Vec[T]`, a bounded number at a time, and returns the results in the items' order.
-- `task.lazy_map(policy, items, f)` does the same for any sequence, but hands the results back one at a time, as you ask for them (see [Results one at a time](#results-one-at-a-time-tasklazy_map)).
+- `task.lazy_map(policy, items, f)` does the same for any sequence, but hands the results back one at a time, as you ask for them, in the items' order or, with `order: .Completion`, as each finishes (see [Results one at a time](#results-one-at-a-time-tasklazy_map)).
 - `task.join(policy, f1, f2)` (and `join3`, `join4`) gathers distinct computations of different types into a tuple `(T1, T2)` (like `tokio::join!` in Rust).
 
 Each takes a `policy: task.Policy`:
@@ -1728,6 +1728,147 @@ and the source; `defer var` calls it on every path, the `break` above
 included. Results that have no `Release` are taken by their owner instead:
 `stop()` stops pulling, a walk after it yields only what was already started,
 and `finish()` then hands back the source with the items it never pulled.
+
+### Results as they finish: `order: .Completion`
+
+By default a lazy map hands results back in the items' order, so a result
+that is ready early waits for the slower items before it. When the order of
+the items does not matter, as for a list of downloads or checks reported as
+they come in, pass `order: .Completion`: each result is handed back as soon
+as its job finishes, the fastest first, much as a Rust stream run through
+`buffer_unordered` does. The window is the same: at most `max` jobs run, and
+an item is pulled only when a job may start for it. The result does not say
+which item it came from, so a job whose caller needs that returns it, as
+`fetch` returns its page below.
+
+This program fetches four pages, two at a time, where each page takes as many
+milliseconds as its name ends with, and prints each page as it comes back:
+
+`fastest_first.lin`:
+
+```linea
+import std.io
+import std.mem
+import std.task
+import std.time
+
+// Pretend to fetch `page` by sleeping the milliseconds its name ends with,
+// and answer the page, so its caller knows which one finished.
+fn fetch(sink page: String) -> String {
+    let took_ms = if page.view() == "slow-300" {
+        UInt64(300)
+    } else if page.view() == "medium-400" {
+        400
+    } else {
+        100
+    }
+    time.sleep(time.Duration.from_milliseconds(took_ms))
+    page
+}
+
+// A page that came back, and the milliseconds since the first fetch started.
+@derive(Release)
+struct Arrival {
+    page: String,
+    after_ms: UInt64,
+}
+
+// Fetch `pages` two at a time and collect each one as it comes back.
+fn fetch_fastest_first(sink pages: mem.Vec[String, mem.SystemAllocator]) -> mem.Vec[Arrival, mem.SystemAllocator] {
+    let started = time.Instant.now()
+    var arrived: mem.Vec[Arrival, mem.SystemAllocator] = mem.Vec.new()
+    // Each page comes back as soon as its fetch finishes.
+    defer var fetched = task.lazy_map(.Threads(2), pages.drain(), fetch, order: .Completion)
+    for page in &fetched {
+        &arrived.push(Arrival { page, after_ms = started.elapsed().nanoseconds() / 1000000 }).unwrap()
+    }
+    arrived
+}
+
+// The pages to fetch, in the order they are listed.
+fn listed() -> mem.Vec[String, mem.SystemAllocator] {
+    var pages: mem.Vec[String, mem.SystemAllocator] = mem.Vec.new()
+    for page in ["slow-300", "quick-100", "medium-400", "short-100"] {
+        &pages.push(page.to_owned().unwrap()).unwrap()
+    }
+    pages
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer var arrived = fetch_fastest_first(listed())
+    for arrival in arrived.as_slice() {
+        io.println(arrival.page.view())?
+    }
+    .Ok(0)
+}
+```
+
+```sh
+linea run fastest_first.lin
+```
+
+```
+quick-100
+slow-300
+short-100
+medium-400
+```
+
+`main` really waits, so the program takes about half a second. Two pages are
+fetched at once, and each job that finishes takes the next page in the list.
+`slow-300` and `quick-100` start together; `quick-100` is back at 100 ms and
+its job takes `medium-400`, which is back at 500 ms. `slow-300` is back at
+300 ms and its job takes `short-100`, back at 400 ms, before `medium-400`.
+With the default `order: .Input` the same walk prints `slow-300`,
+`quick-100`, `medium-400` and `short-100`, each once the pages before it are
+back. Under `.Sequential` or `.Threads(1)` every job runs on the caller, one
+after another, so both orders are the items' order. Settling is the same in
+either order: `release()`, `stop()` and `finish()` wait for every job already
+started, so no result is lost.
+
+A test can pin that order without waiting. It runs the same
+`fetch_fastest_first` in a
+[simulation](09-networking.md#testing-a-timeout-without-waiting), whose clock
+is virtual, so the sleeps take no real time and every page comes back at the
+same millisecond on every run, so the test checks the order and the
+millisecond each page came back at. Add `import std.testing` after the other
+imports:
+
+<!-- guide: edit after 3 import std.task -->
+```linea
+import std.testing
+```
+
+and the test at the end of the file:
+
+<!-- guide: edit end -->
+```linea
+test "pages come back fastest first" {
+    var sim = io.Simulation.open(seed: 1).unwrap()
+    defer let report = &sim.run(
+        |inout _world| -> String {
+            defer var arrived = fetch_fastest_first(listed())
+            var report = String.new()
+            for arrival in arrived.as_slice() {
+                "{arrival.page.view()} at {arrival.after_ms} ms\n".fmt(&report).unwrap()
+            }
+            report
+        },
+    )
+    sim.close()
+    testing.assert_eq(report.view(), "quick-100 at 100 ms\nslow-300 at 300 ms\nshort-100 at 400 ms\nmedium-400 at 500 ms\n", "the pages did not come back as their fetches finished")?
+}
+```
+
+```sh
+linea test fastest_first.lin
+```
+
+```
+ok    pages come back fastest first
+
+1 passed, 0 failed
+```
 
 ### Naming the allocator: the `_in` forms
 
