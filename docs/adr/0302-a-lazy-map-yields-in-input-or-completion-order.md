@@ -1,4 +1,4 @@
-# 303. A lazy map yields in input order or, when asked, in completion order
+# 302. A lazy map yields in input order or, when asked, in completion order
 
 Status: Accepted — 2026-11-21. Extends
 [0276](0276-independent-jobs-run-through-one-bounded-window.md) §1 and §2 with

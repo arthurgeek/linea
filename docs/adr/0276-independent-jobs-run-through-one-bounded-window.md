@@ -10,7 +10,7 @@ Extended by
 queued sends remove the handoff's wait for the receiver and under which
 `finish` tells every worker to stop before it joins the first.
 Extended by
-[0303](0303-a-lazy-map-yields-in-input-or-completion-order.md), which adds
+[0302](0302-a-lazy-map-yields-in-input-or-completion-order.md), which adds
 completion order to `task.lazy_map`.
 
 ## Context
