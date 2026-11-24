@@ -5,14 +5,14 @@ compared is this program's.
   $ linea dump-expanded "$LINEA_ROOT"/tests/cmd/fixtures/dump_expanded_prints_generated_files > out
   $ awk '/^\/\/ === /{own = index($0, "dump_expanded_prints_generated_files/") == 1 + length("// === ")} own' out
   // === dump_expanded_prints_generated_files/linea-derive-0.lin ===
-  // origin: derive 2, trait token 10
+  // origin: derive 1, trait token 7
   import protocol as _linea_trait_0
   
   impl _linea_trait_0.First for Item {
   }
   
   // === dump_expanded_prints_generated_files/linea-derive-1.lin ===
-  // origin: derive 2, trait token 14
+  // origin: derive 1, trait token 11
   import protocol as _linea_trait_1
   
   impl _linea_trait_1.Second for Item {

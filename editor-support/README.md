@@ -95,9 +95,9 @@ Closed declaration attributes (`@opaque`, `@linear`, `@copyable`, `@carrier`,
 ordinary visibility. Grouped `@(items)` and repeated attributes retain their
 written order; comments may separate them. The editor grammar preserves these groups for indentation
 and highlights derive trait paths as types. The compiler validates duplicate
-items, conflicting policies, and derive requirements. Independently constrained
-standalone derives retain their own declaration grammar. Bare policy prefixes
-are no longer declaration syntax.
+items, conflicting policies, and derive requirements. A derive item may end
+with `for Type[Args]` or a `where` clause; there is no standalone derive
+declaration. Bare policy prefixes are no longer declaration syntax.
 
 ## What the tree-sitter grammar is for
 

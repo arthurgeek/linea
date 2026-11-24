@@ -1,0 +1,10 @@
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+ --> tests/traits/attached_derives/a_refused_standalone_derive_reports_a_name_it_misspells/main.lin:3:1
+  |
+3 | derive[T] Debug for Cell[T] where T: Nope
+  | ^^^^^^ write `@derive(Debug where T: Nope)` above the declaration of `Cell`
+error[N-Undefined]: unknown trait `Nope`
+ --> tests/traits/attached_derives/a_refused_standalone_derive_reports_a_name_it_misspells/main.lin:3:38
+  |
+3 | derive[T] Debug for Cell[T] where T: Nope
+  |                                      ^^^^ no trait with this name is declared

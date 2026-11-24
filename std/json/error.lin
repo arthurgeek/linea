@@ -19,6 +19,7 @@ let hard_object_members: UInt64 = 4096
 // ParseErrorKind names what stopped a parse: malformed input, a limit, or
 // refused storage.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum ParseErrorKind {
     Syntax,
     TrailingData,
@@ -38,6 +39,7 @@ pub enum ParseErrorKind {
 // A ParseError says what stopped a parse and where. The offset counts bytes
 // from the beginning of the supplied input; EOF is its length.
 @copyable
+@derive(Equatable, Debug, Release)
 pub struct ParseError {
     kind: ParseErrorKind,
     offset: UInt64,
@@ -46,6 +48,7 @@ pub struct ParseError {
 // NumberError says why text is not a JSON number: invalid syntax at a byte
 // offset, a token past the length limit, or refused storage.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum NumberError {
     Syntax(UInt64),
     TokenLimit,
@@ -55,6 +58,7 @@ pub enum NumberError {
 // NumberAccessError says why a number cannot be read as a machine value: the
 // value is not a number, not an integer, or out of the type's range.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum NumberAccessError {
     WrongKind,
     NotInteger,
@@ -63,12 +67,14 @@ pub enum NumberAccessError {
 
 // KindError says a value is not the kind an accessor asked for.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum KindError {
     WrongKind,
 }
 
 // MutationReason says why a document refused a change.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum MutationReason {
     WrongKind,
     DepthLimit,
@@ -77,14 +83,11 @@ pub enum MutationReason {
 }
 
 // A MutationFailure returns the value a document refused, with the reason.
+@derive(Release)
 pub struct MutationFailure[A: Allocator = mem.SystemAllocator] {
     reason: MutationReason,
     value: Value[A],
 }
-
-derive (Equatable, Debug, Release) for ParseErrorKind
-
-derive (Equatable, Debug, Release) for ParseError
 
 // A parse error reads as the problem and the byte offset where the parser
 // found it, such as "invalid syntax at byte 7", for a message or a log field.
@@ -141,14 +144,6 @@ test "a parse error displays its problem and the byte it stopped at" {
     testing.assert_eq(limit.view(), "nesting too deep at byte 129", "the limit error changed")?
 }
 
-derive (Equatable, Debug, Release) for NumberError
-
-derive (Equatable, Debug, Release) for NumberAccessError
-
-derive (Equatable, Debug, Release) for KindError
-
-derive (Equatable, Debug, Release) for MutationReason
-
 // A mutation reason reads as the problem, such as "nesting too deep", for a
 // message or a log field.
 impl Display for MutationReason {
@@ -171,8 +166,6 @@ test "a mutation reason displays its problem" {
     writer.release()
     testing.assert(wrote && equal, "a mutation reason lost its problem")?
 }
-
-derive[A: Allocator] Release for MutationFailure[A]
 
 // Settling a refused mutation releases the value it was offered and keeps
 // why the document refused it.

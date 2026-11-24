@@ -10,11 +10,10 @@ impl Release for Leaf {
 }
 
 @linear
+@derive(Release)
 struct Holder {
     leaf: Leaf,
 }
-
-derive Release for Holder
 
 fn main() -> UInt8 {
     let _value: Holder = .{ leaf = .Value }

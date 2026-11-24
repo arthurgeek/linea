@@ -175,7 +175,7 @@ pub fn materializeDerives(
     for (0..expanded.generatedSourceCount()) |raw| {
         const generated = expanded.generatedSource(@intCast(raw));
         if (generated.module == .none or program.get(generated.module).library) continue;
-        selected[generated.origin.derive.index()] = true;
+        selected[generated.origin.target.index()] = true;
         generated_count += 1;
     }
     if (generated_count == 0) return null;
@@ -191,24 +191,43 @@ pub fn materializeDerives(
     @memset(omitted_traits, false);
 
     var has_attached = false;
-    for (selected, 0..) |chosen, raw| {
-        if (!chosen) continue;
-        const declaration = DeclId.at(@intCast(raw));
-        if (program.ast.declTag(declaration) == .derive_impl) {
-            removed[raw] = true;
-            const range = program.ast.declTokens(declaration);
-            @memset(omitted_tokens[range.start.index()..range.end.index()], true);
-        } else {
-            has_attached = true;
-        }
+    for (selected) |chosen| {
+        if (chosen) has_attached = true;
     }
     for (0..expanded.generatedImplementationCount()) |raw| {
         const implementation = expanded.generatedImplementation(.at(@intCast(raw)));
-        if (!selected[implementation.derive.index()]) continue;
+        if (!selected[implementation.target.index()]) continue;
         const index = implementation.derive_trait.index();
         omitted_traits[index] = true;
         const range = program.ast.derive_traits[index].tokens;
         @memset(omitted_tokens[range.start.index()..range.end.index()], true);
+    }
+    // An item every trait of which is materialized is dropped whole, its
+    // clause with it.
+    var item_start: usize = 0;
+    while (item_start < program.ast.derive_traits.len) {
+        const keyword = program.ast.derive_traits[item_start].clause.keyword;
+        var item_end = item_start + 1;
+        while (item_end < program.ast.derive_traits.len and keyword != .none and program.ast.derive_traits[item_end].clause.keyword == keyword) item_end += 1;
+        defer item_start = item_end;
+        if (keyword == .none) continue;
+        for (omitted_traits[item_start..item_end]) |omitted| {
+            if (!omitted) break;
+        } else {
+            var end = keyword.index() + 1;
+            var depth: u32 = 0;
+            while (end < program.ast.tokenCount()) : (end += 1) {
+                switch (program.ast.tokenTag(.at(@intCast(end)))) {
+                    .l_bracket, .l_paren => depth += 1,
+                    .r_bracket, .r_paren => {
+                        if (depth == 0) break;
+                        depth -= 1;
+                    },
+                    else => {},
+                }
+            }
+            @memset(omitted_tokens[keyword.index()..end], true);
+        }
     }
     try removeUnusedMaterializedAliases(gpa, program, resolution, omitted_tokens, removed);
     var indexes: ?fmt.Indexes = if (has_attached) try fmt.Indexes.build(gpa, &program.ast) else null;
@@ -1048,19 +1067,9 @@ fn renameHeadParameters(
     for (0..ast.declCount()) |i| {
         const d = DeclId.at(@intCast(i));
         const tag = ast.declTag(d);
-        if (tag != .impl_ and tag != .derive_impl) continue;
+        if (tag != .impl_) continue;
         const params = ast.declTypeParams(d);
         if (params.len == 0) continue;
-
-        if (tag == .derive_impl) {
-            // A derive has no singular trait field. Its group entries and
-            // target arguments are the complete head this rename preserves.
-            // Reading both accessors keeps the rewrite on the source form
-            // rather than treating it as an ordinary implementation.
-            const traits = ast.deriveTraits(d);
-            const target_args = ast.typeArgs(ast.declHead(d).args);
-            if (traits.len == 0 or target_args.len != params.len) continue;
-        }
 
         var respellable = true;
         for (params) |p| {
@@ -1068,7 +1077,7 @@ fn renameHeadParameters(
                 respellable = false;
                 break;
             }
-            if (tag == .impl_ and taken.contains(@intFromEnum(ast.tokenName(p.name)))) {
+            if (taken.contains(@intFromEnum(ast.tokenName(p.name)))) {
                 respellable = false;
                 break;
             }
@@ -1094,10 +1103,6 @@ fn renameHeadParameters(
             var which: ?u32 = null;
             for (params, 0..) |p, k| {
                 if (ast.tokenName(p.name) != name) continue;
-                if (tag == .derive_impl and tok != p.name) {
-                    const binding = res.writtenAt(tok);
-                    if (binding == BindingId.none or res.declaringToken(binding) != p.name) continue;
-                }
                 which = @intCast(k);
                 break;
             }
@@ -2479,23 +2484,10 @@ fn reorderFields(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]
     for (0..ast.declCount()) |i| {
         const d = DeclId.at(@intCast(i));
         if (ast.declTag(d) != .struct_) continue;
-        if (ast.deriveTraits(d).len != 0) continue;
+        if (ast.deriveTraitRange(d).len() != 0) continue;
 
         const fields = ast.declFields(d);
         if (fields.len < 2) continue;
-
-        const name = ast.declName(d);
-        var structurally_observed = false;
-        for (0..ast.declCount()) |j| {
-            const derive = DeclId.at(@intCast(j));
-            if (ast.declTag(derive) != .derive_impl) continue;
-            const head = ast.declHead(derive);
-            if (head.name == .none or name == .none) continue;
-            if (!std.mem.eql(u8, ast.tokenText(head.name), ast.tokenText(name))) continue;
-            structurally_observed = true;
-            break;
-        }
-        if (structurally_observed) continue;
 
         var out: std.ArrayList(u8) = .empty;
         errdefer out.deinit(gpa);
@@ -2580,8 +2572,8 @@ test "materialized derives are ordinary source files" {
         \\template impl Mark {
         \\    fn value(_self: Self) -> UInt8 { 7 }
         \\}
+        \\@derive(Mark)
         \\struct Target {}
-        \\derive Mark for Target
         \\fn main() -> UInt8 {
         \\    let target: Target = .{}
         \\    Mark.value(target)
@@ -2604,7 +2596,7 @@ test "materialized derives are ordinary source files" {
     var materialized = (try materializeDerives(gpa, &program, &expanded, &resolution, &typing)).?;
     defer materialized.deinit(gpa);
     try testing.expectEqual(@as(usize, 2), materialized.files.len);
-    try testing.expect(std.mem.indexOf(u8, materialized.files[0].text, "derive Mark for Target") == null);
+    try testing.expect(std.mem.indexOf(u8, materialized.files[0].text, "derive(Mark") == null);
     try testing.expect(std.mem.indexOf(u8, materialized.files[1].text, "impl Mark") != null);
     try testing.expect(std.mem.indexOf(u8, materialized.files[1].text, "for Target") != null);
 
@@ -3184,8 +3176,8 @@ test "renaming leaves a template impl as written and renames the rest" {
         \\        generated
         \\    }
         \\}
+        \\@derive(Structural)
         \\struct Mark { value: UInt8 }
-        \\derive Structural for Mark
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{ value = 1 }
         \\    Structural.value(mark)
@@ -3887,6 +3879,7 @@ test "canonical call index keeps generated postfix calls out of source rewrites"
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const got = try applyTo(arena.allocator(), .postfix_written_out,
+        \\@derive(Structural)
         \\struct Mark {}
         \\trait Literal { fn value(self: Self) -> UInt8 }
         \\impl Literal for UInt8 {
@@ -3899,7 +3892,6 @@ test "canonical call index keeps generated postfix calls out of source rewrites"
         \\        n.value()
         \\    }
         \\}
-        \\derive Structural for Mark
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{}
         \\    Structural.result(mark)
@@ -4085,6 +4077,7 @@ test "a derived postfix call is written out from expanded semantics" {
     const gpa = arena.allocator();
 
     const got = (try applyTo(gpa, .postfix_written_out,
+        \\@derive(Structural)
         \\struct Mark {}
         \\
         \\trait Structural {
@@ -4094,8 +4087,6 @@ test "a derived postfix call is written out from expanded semantics" {
         \\template impl Structural {
         \\    fn value(_self: Self) -> UInt8 { 7 }
         \\}
-        \\
-        \\derive Structural for Mark
         \\
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{}
@@ -4170,8 +4161,8 @@ test "fields observed through structural reflection retain declaration order" {
 
     try testing.expectEqual(@as(?[]const u8, null), try applyTo(arena.allocator(), .reordered_fields,
         \\trait Structural { fn value(self: Self) -> UInt8 }
+        \\@derive(Structural)
         \\struct Pair { left: UInt8, right: UInt8 }
-        \\derive Structural for Pair
         \\fn main() -> UInt8 { 0 }
     ));
 }
@@ -4229,45 +4220,6 @@ test "renaming respells an implementation's parameters everywhere they are writt
     try testing.expect(std.mem.indexOf(u8, out, "struct Holder[T] {") != null);
 }
 
-test "renaming respells a derive head and preserves its grouped traits" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const gpa = arena.allocator();
-
-    const out = (try applyTo(gpa, .renamed_head_parameters,
-        \\trait First {}
-        \\template impl First {}
-        \\trait Second {}
-        \\template impl Second {}
-        \\struct Pair[A, B] { first: A, second: B }
-        \\derive[T, U] (
-        \\    First,
-        \\    Second,
-        \\) for Pair[T, U]
-        \\fn main() -> UInt8 { 0 }
-    )).?;
-
-    try testing.expect(std.mem.indexOf(u8, out, "derive[Zz0, Zz1]") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "for Pair[Zz0, Zz1]") != null);
-    try testing.expect(std.mem.indexOf(u8, out, "    First,\n    Second,") != null);
-}
-
-test "renaming a derive parameter leaves a same-spelled trait entry alone" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const gpa = arena.allocator();
-
-    const out = (try applyTo(gpa, .renamed_head_parameters,
-        \\trait T {}
-        \\template impl T {}
-        \\struct Box[A] { value: A }
-        \\derive[T] T for Box[T]
-        \\fn main() -> UInt8 { 0 }
-    )).?;
-
-    try testing.expect(std.mem.indexOf(u8, out, "derive[Zz0] T for Box[Zz0]") != null);
-}
-
 test "reversing moves a grouped derive whole and preserves entry order" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -4278,20 +4230,16 @@ test "reversing moves a grouped derive whole and preserves entry order" {
         \\template impl First {}
         \\trait Second {}
         \\template impl Second {}
+        \\@derive(First, Second)
         \\struct Pair { first: UInt8, second: UInt8 }
-        \\derive (
-        \\    First,
-        \\    Second,
-        \\) for Pair
         \\fn main() -> UInt8 { 0 }
     )).?;
 
     var ast = try parseText(gpa, out);
     for (0..ast.declCount()) |i| {
         const d = DeclId.at(@intCast(i));
-        if (ast.declTag(d) != .derive_impl) continue;
-        const traits = ast.deriveTraits(d);
-        try testing.expect(ast.deriveIsGrouped(d));
+        const traits = ast.attachedDeriveTraits(d);
+        if (traits.len == 0) continue;
         try testing.expectEqual(@as(usize, 2), traits.len);
         try testing.expectEqualStrings("First", ast.tokenText(traits[0].ref.name));
         try testing.expectEqualStrings("Second", ast.tokenText(traits[1].ref.name));
@@ -4415,6 +4363,7 @@ test "source renaming keeps a parameter spelled as one a template member names" 
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const changed = (try applyTo(arena.allocator(), .renamed_bindings,
+        \\@derive(Label)
         \\struct Item {}
         \\trait Label { fn label(self: Self) -> UInt8 }
         \\fn seven(number: UInt8) -> UInt8 { number }
@@ -4424,7 +4373,6 @@ test "source renaming keeps a parameter spelled as one a template member names" 
         \\        held(7)
         \\    }
         \\}
-        \\derive Label for Item
         \\fn main() -> UInt8 {
         \\    let item: Item = .{}
         \\    Label.label(item)

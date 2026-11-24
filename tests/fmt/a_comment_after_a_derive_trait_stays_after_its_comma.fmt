@@ -1,0 +1,32 @@
+// A comment written after the comma that separates two traits of a derive,
+// or two predicates of its `where`, stays after that comma, and the item
+// continues on the next line.
+@derive(Equatable, // compared field by field
+    Debug where T: Equatable + Debug)
+struct Key[T] {
+    value: T,
+}
+
+@derive(Equatable where T: Equatable, // the field's own bound
+    U: Equatable)
+struct Pair[T, U] {
+    left: T,
+    right: U,
+}
+
+@derive(Equatable // one application
+    for Mark[UInt8])
+struct Mark[T] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let key: Key[UInt8] = .{ value = 1 }
+    let pair: Pair[UInt8, Bool] = .{ left = 2, right = true }
+    let mark: Mark[UInt8] = .{ value = 3 }
+    if key == key && pair == pair && mark == mark {
+        0
+    } else {
+        1
+    }
+}

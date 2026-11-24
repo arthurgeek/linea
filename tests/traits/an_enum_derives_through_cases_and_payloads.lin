@@ -22,13 +22,12 @@ template impl Rank {
     }
 }
 
+@derive(Rank)
 enum Shape {
     Empty,
     One(UInt8),
     Pair(UInt8, UInt8),
 }
-
-derive Rank for Shape
 
 fn main() -> UInt8 {
     let same = Rank.rank(Shape.Pair(1, 2), Shape.Pair(3, 4))

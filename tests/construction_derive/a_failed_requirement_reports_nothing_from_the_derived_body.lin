@@ -22,11 +22,10 @@ template impl Apply where reflect.target: struct, reflect.components: Zero {
     }
 }
 
+@derive(Apply)
 struct Pair {
     left: Bool,
 }
-
-derive Apply for Pair
 
 fn main() -> UInt8 {
     let pair = Pair { left = true }

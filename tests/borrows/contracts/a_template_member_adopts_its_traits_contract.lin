@@ -12,11 +12,10 @@ template impl Prefixed {
     }
 }
 
+@derive(Prefixed)
 struct Point {
     x: Int64,
 }
-
-derive Prefixed for Point
 
 fn main() -> UInt8 {
     let _printed = io.println(Point { x = 1 }.prefixed("point"))

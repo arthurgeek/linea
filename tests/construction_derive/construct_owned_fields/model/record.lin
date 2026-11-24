@@ -47,15 +47,12 @@ impl[A: Allocator] helpers.FromField[A] for Second[A] {
 }
 
 @opaque
+@derive(Release, protocol.FromFields[A])
 struct Settings[A: Allocator] {
     first: First[A],
     second: Second[A],
     enabled: Bool,
 }
-
-derive[Backing: Allocator] Release for Settings[Backing]
-
-derive[Memory: Allocator] protocol.FromFields[Memory] for Settings[Memory]
 
 impl[A: Allocator] Settings[A] {
     pub fn valid(self: Self) -> Bool {

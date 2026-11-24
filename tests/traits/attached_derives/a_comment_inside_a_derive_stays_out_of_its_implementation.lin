@@ -1,0 +1,38 @@
+// A comment may sit anywhere inside `@derive(...)`, after a trait or inside
+// its clause, and requests nothing: each item below derives what its traits
+// and clause say.
+@derive(
+    Equatable, // compared field by field
+)
+struct Key[T] {
+    value: T,
+}
+
+@derive(Equatable // the environment follows
+    where T: Equatable)
+struct Cell[T] {
+    value: T,
+}
+
+@derive(Equatable // one application
+    for Mark[UInt8])
+struct Mark[T] {
+    value: T,
+}
+
+@derive(Equatable where T: Equatable) // the bound the field needs
+struct Slot[T] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let key: Key[UInt8] = .{ value = 1 }
+    let cell: Cell[UInt8] = .{ value = 2 }
+    let mark: Mark[UInt8] = .{ value = 3 }
+    let slot: Slot[UInt8] = .{ value = 4 }
+    if key == key && cell == cell && mark == mark && slot == slot {
+        0
+    } else {
+        1
+    }
+}

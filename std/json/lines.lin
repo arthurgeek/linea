@@ -15,26 +15,20 @@ let lines_read_ahead_bytes: UInt64 = 4096
 // the target accepts, as `decode` would report it for that line alone: a line
 // longer than `max_input_bytes` is `input too long`, and one that is not UTF-8
 // is `invalid UTF-8`. Reading continues at the next line.
+@derive(Release, Debug)
 pub enum LineProblem[E, A: Allocator = mem.SystemAllocator] {
     Input(io.LineError[E]),
     Document(DecodeError[A]),
 }
 
-derive[E: Release, A: Allocator] Release for LineProblem[E, A]
-
-derive[E: Debug, A: Allocator] Debug for LineProblem[E, A]
-
 // A LinesError says which line of a JSON Lines stream failed, counted from
 // one with blank lines included, and why. It displays as the line and the
 // problem, such as `line 3: missing field at $["units"]`.
+@derive(Release, Debug)
 pub struct LinesError[E, A: Allocator = mem.SystemAllocator] {
     line: UInt64,
     problem: LineProblem[E, A],
 }
-
-derive[E: Release, A: Allocator] Release for LinesError[E, A]
-
-derive[E: Debug, A: Allocator] Debug for LinesError[E, A]
 
 impl[E: Display, A: Allocator] Display for LinesError[E, A] {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {

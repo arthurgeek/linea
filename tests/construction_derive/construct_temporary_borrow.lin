@@ -16,9 +16,8 @@ template impl Build where reflect.target: struct {
     }
 }
 
+@derive(Build)
 struct View { value: borrow UInt64 }
-
-derive Build for View
 
 fn main() -> UInt8 {
     let view: View = Build.build()

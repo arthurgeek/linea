@@ -35,11 +35,10 @@ template impl Fresh where reflect.target: struct, reflect.components: Fresh {
     }
 }
 
+@derive(Fresh for M[fn(x: UInt8 = 1) -> UInt8])
 struct M[T] {
     value: T,
 }
-
-derive Fresh for M[fn(x: UInt8 = 1) -> UInt8]
 
 fn main() -> UInt8 {
     let held: M[fn(x: UInt8 = 1) -> UInt8] = Fresh.fresh()

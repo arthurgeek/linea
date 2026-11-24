@@ -1,5 +1,5 @@
 error[T-Derive]: declare `template impl` in the trait's module, or write the implementation by hand
- --> tests/traits/a_missing_structural_template_is_a_derive_error.lin:7:8
+ --> tests/traits/a_missing_structural_template_is_a_derive_error.lin:3:9
   |
-7 | derive Structural for Stamp
-  |        ^^^^^^^^^^ this trait has no structural template
+3 | @derive(Structural)
+  |         ^^^^^^^^^^ this trait has no structural template

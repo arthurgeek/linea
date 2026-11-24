@@ -4,7 +4,7 @@ error[T-Reflection]: leave the recipe descriptor unannotated
 20 |                 |(component, other)| {
    |                 ^^^^^^^^^^^^^^^^^^^^^^ a component descriptor is not a callable parameter
 error[T-Bound]: `Rebuild` requires `Self` to implement it, and `Shape` does not
-  --> tests/construction_derive/construct_descriptor_pattern.lin:36:36
+  --> tests/construction_derive/construct_descriptor_pattern.lin:35:36
    |
-36 |     let _rebuilt = Rebuild.rebuild(original)
+35 |     let _rebuilt = Rebuild.rebuild(original)
    |                                    ^^^^^^^^ implement it for that type, or reach the operation on one that does

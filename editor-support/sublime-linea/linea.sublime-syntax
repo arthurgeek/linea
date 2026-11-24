@@ -63,11 +63,28 @@ contexts:
 
   attribute-derive-open:
     - include: comments
+    # `[A: Bound]` binds a parameter only the traits' arguments name.
+    - match: '\['
+      scope: punctuation.section.brackets.begin.linea
+      push: attribute-derive-binders
     - match: '\('
       scope: punctuation.section.group.begin.linea
       set: attribute-derive-traits
     - match: '(?=\S)'
       pop: true
+
+  attribute-derive-binders:
+    - include: comments
+    - match: '\]'
+      scope: punctuation.section.brackets.end.linea
+      pop: true
+    - match: ','
+      scope: punctuation.separator.linea
+    - match: ':'
+      scope: punctuation.separator.linea
+    - match: '\+'
+      scope: keyword.operator.linea
+    - include: types
 
   attribute-derive-traits:
     - include: comments
@@ -76,6 +93,13 @@ contexts:
       pop: true
     - match: ','
       scope: punctuation.separator.linea
+    # `for Type[Args]` or `where T: Bound` after the traits.
+    - match: '\b(for|where)\b'
+      scope: keyword.declaration.type.linea
+    - match: ':'
+      scope: punctuation.separator.linea
+    - match: '\+'
+      scope: keyword.operator.linea
     - match: '\b({{ident}})(\.)'
       captures:
         1: entity.name.namespace.linea

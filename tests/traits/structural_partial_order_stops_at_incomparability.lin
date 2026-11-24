@@ -18,12 +18,11 @@ impl Comparable for Partial {
     }
 }
 
+@derive(Equatable, Comparable)
 struct Pair {
     first: Partial,
     later: UInt8,
 }
-
-derive (Equatable, Comparable) for Pair
 
 fn main() -> UInt8 {
     let left: Pair = .{ first = .{ value = 1 }, later = 0 }

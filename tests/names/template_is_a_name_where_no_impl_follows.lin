@@ -12,12 +12,10 @@ template impl Label where reflect.target: struct {
     }
 }
 
-@derive(Equatable)
+@derive(Equatable, Label)
 struct Page {
     template: Str,
 }
-
-derive Label for Page
 
 // Count the placeholders `template` holds.
 fn holes(template: Str) -> UInt8 {

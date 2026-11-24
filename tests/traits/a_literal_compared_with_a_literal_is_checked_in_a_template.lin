@@ -18,11 +18,10 @@ template impl Tally {
     }
 }
 
+@derive(Tally)
 struct Point {
     x: UInt8,
 }
-
-derive Tally for Point
 
 fn main() -> UInt8 {
     let point: Point = .{ x = 1 }

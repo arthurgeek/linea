@@ -8,10 +8,9 @@ template impl[Parameter: Copyable] Echo[Parameter] {
     }
 }
 
-struct Product {}
-
 // The same argument list asks for the same implementation twice.
-derive (Echo[UInt8], Echo[UInt8]) for Product
+@derive(Echo[UInt8], Echo[UInt8])
+struct Product {}
 
 fn main() -> UInt8 {
     let product: Product = .{}

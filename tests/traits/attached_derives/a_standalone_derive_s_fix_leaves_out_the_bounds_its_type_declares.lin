@@ -1,0 +1,22 @@
+// The attribute a refused standalone request's help writes states only the
+// bounds the type's declaration does not already write: `Copyable` on `V`
+// and on `T` is the declaration's own, so the attribute's `where` leaves it
+// out, bound by bound.
+struct Pair[K, V: Copyable] {
+    key: K,
+    value: V,
+}
+
+struct Plain[T: Copyable] {
+    value: T,
+}
+
+derive[K: Equatable, V: Copyable + Equatable] Equatable for Pair[K, V] where K: Debug
+
+derive[T] Equatable for Plain[T] where T: Copyable + Equatable
+
+fn main() -> UInt8 {
+    let pair: Pair[UInt8, UInt8] = .{ key = 1, value = 2 }
+    let plain: Plain[UInt8] = .{ value = 3 }
+    if pair == pair && plain == plain { 0 } else { 1 }
+}

@@ -208,8 +208,14 @@ until it is green.
   included, that lets the file reach the name selected from it, or a
   directory of the root's that no import loaded); the `use`
   [T-UnknownOperation] names, with its import; `copy(value)` passed to a
-  call that both lends and takes a copyable value; and `copy(...)` around a
-  range place a `let` or `var` binds. `linea check
+  call that both lends and takes a copyable value; `copy(...)` around a
+  range place a `let` or `var` binds; and the `@derive(...)` [S-Derive] writes
+  above the declaration of the type a standalone `derive … for …` names,
+  where the file declares it, with that request's line removed (its traits
+  joined to the type's plain `@derive(...)` instead where it writes one, and
+  the line alone removed where the type derives them all already); and a
+  derive binder [T-Derive] refuses for repeating one of the type's
+  parameters, removed. `linea check
   --error-format=json` writes them under `fixes`, and the language server
   offers each as a quick fix. A help whose edit is fully determined but cannot
   be written says why in its text instead of carrying a fix: a `where` beside

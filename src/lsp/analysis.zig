@@ -600,11 +600,11 @@ test "grouped generated implementations rewrite every qualified bound independen
         \\import second
         \\import protocol as p
         \\import formatting as f
+        \\@derive(p.Render, f.Inspect where T: first.Mark + second.Tag)
         \\struct Box[T] { value: T }
         \\struct Value {}
         \\impl first.Mark for Value {}
         \\impl second.Tag for Value {}
-        \\derive[T: first.Mark + second.Tag] (p.Render, f.Inspect) for Box[T]
         \\fn main() -> UInt8 { let _box: Box[Value] = .{ value = .{} }; 0 }
         },
         .{ .path = "app/first/first.lin", .text = "pub trait Mark {}\n" },

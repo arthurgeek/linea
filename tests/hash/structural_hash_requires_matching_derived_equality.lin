@@ -1,5 +1,6 @@
 import std.hash
 
+@derive(hash.Hash)
 struct Key { identity: UInt8, ignored: UInt8 }
 
 impl Equatable for Key {
@@ -9,8 +10,6 @@ impl Equatable for Key {
 }
 
 impl Equivalent for Key {}
-
-derive hash.Hash for Key
 
 fn main() -> UInt8 {
     let key: Key = .{ identity = 1, ignored = 2 }

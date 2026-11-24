@@ -1,0 +1,8 @@
+error[T-Bound]: `release` comes from `Release`, and `Box[UInt8]` does not implement it
+  --> tests/traits/parameter_heads/a_written_requirement_that_grows_through_a_derive_is_refused.lin:23:5
+   |
+23 |     box.release()
+   |     ^^^^^^^^^^^ its implementation's bounds are not met by this type's arguments
+   |
+   = help: `Box[T]` implements `Release` when `Wrap[Box[Box[T]]]` implements `Release`, and `Wrap[Box[Box[UInt8]]]` does not
+   = help: `Wrap[T]` implements `Release` when `T` implements `Release`, and `Box[Box[UInt8]]` does not

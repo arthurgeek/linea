@@ -1,5 +1,5 @@
 error[S-Name]: expected a type name, `()` or a tuple; `(T)` groups a type
- --> tests/traits/a_grouped_type_is_not_a_derive_target.lin:8:22
+ --> tests/traits/a_grouped_type_is_not_a_derive_target.lin:8:20
   |
-8 | derive[A] Marker for (A)
-  |                      ^ a derive request names its target type
+8 | @derive(Marker for (UInt8))
+  |                    ^ `for` names one application of the type the attribute is written on

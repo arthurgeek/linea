@@ -16,13 +16,12 @@ import std.http
 import std.io
 
 // `Options` holds what the command line asked for.
+@derive(Release)
 struct Options {
     repo: String,
     api: String,
     pages: UInt64,
 }
-
-derive Release for Options
 
 fn main() -> UInt8 {
     let options = parse_options(env.args()) else |status| {

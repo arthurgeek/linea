@@ -2,11 +2,10 @@ trait Structural {}
 
 template impl Structural {}
 
+@derive(Structural)
 struct Mark {
     value: UInt8,
 }
-
-derive Structural for Mark
 
 fn accept[T: Structural](_value: T) -> UInt8 {
     7

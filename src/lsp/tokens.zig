@@ -500,12 +500,11 @@ test "structural derive source names carry semantic modifiers" {
     const data = try forFile(gpa, &checked, checked.fileNamed("main.lin").?, .@"utf-16");
     defer gpa.free(data);
 
-    const declaration = std.mem.indexOf(u8, text, "derive[T:").? + 7;
+    const declaration = std.mem.indexOf(u8, text, "struct Box[T]").? + 11;
     try testing.expectEqual(Modifier.declaration.bit(), modifiersAtOffset(text, data, declaration).?);
-    const target_argument = std.mem.indexOf(u8, text, ") for Box[T]").? + 10;
-    const trait_argument = std.mem.indexOf(u8, text, "    Marker[T]").? + 11;
+    const trait_argument = std.mem.indexOf(u8, text, ", Marker[T]").? + 9;
     const predicate_subject = std.mem.indexOf(u8, text, "T.Item: Lookup").?;
-    for ([_]usize{ target_argument, trait_argument, predicate_subject }) |offset| {
+    for ([_]usize{ trait_argument, predicate_subject }) |offset| {
         try testing.expectEqual(@as(u32, 0), modifiersAtOffset(text, data, offset).?);
     }
 

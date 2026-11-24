@@ -8,9 +8,8 @@ template impl[A] Measure[A] {
     }
 }
 
+@derive(Measure[,])
 struct Product {}
-
-derive Measure[,] for Product
 
 fn main() -> UInt8 {
     let _product: Product = .{}

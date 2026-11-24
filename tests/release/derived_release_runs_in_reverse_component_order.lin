@@ -32,13 +32,12 @@ impl Release for Three {
 }
 
 @linear
+@derive(Release)
 struct Product {
     one: One,
     two: Two,
     three: Three,
 }
-
-derive Release for Product
 
 fn main() -> UInt8 {
     let value: Product = .{ one = .Value, two = .Value, three = .Value }

@@ -18,11 +18,10 @@ template impl Fresh where reflect.target: struct {
     }
 }
 
+@derive(Fresh for M[[UInt8; 2]])
 struct M[T] {
     value: T,
 }
-
-derive Fresh for M[[UInt8; 2]]
 
 fn main() -> UInt8 {
     let held: M[[UInt8; 2]] = Fresh.fresh()

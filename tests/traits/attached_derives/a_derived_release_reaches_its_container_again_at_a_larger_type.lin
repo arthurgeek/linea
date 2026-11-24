@@ -1,0 +1,34 @@
+import std.mem
+
+// A vector of indexes releases each index, an index releases its table, and
+// the table releases its own vector of slots. Asking whether `Vec[Index[A], A]`
+// implements `Release` asks the same of `Vec[Slot[Str], A]`, a larger type
+// from the same implementation of `Vec`, through the derived implementations
+// between them. The derived implementations recurse only through the fields
+// of a finite value, so the vector implements `Release`.
+@derive(Release)
+enum Slot[K] {
+    Empty,
+    Full(K),
+}
+
+@derive(Release)
+struct Table[K, A: Allocator] {
+    slots: Vec[Slot[K], A],
+}
+
+@linear
+@derive(Release)
+struct Index[A: Allocator] {
+    entries: Table[Str, A],
+}
+
+fn drop_indexes[A: Allocator](sink indexes: Vec[Index[A], A]) {
+    indexes.release()
+}
+
+fn main() -> UInt8 {
+    let indexes: Vec[Index[mem.SystemAllocator]] = Vec.new()
+    drop_indexes(indexes)
+    0
+}

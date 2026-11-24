@@ -14,6 +14,7 @@ template impl Measure where reflect.components: Measure {
     }
 }
 
+@derive(Measure)
 type Count = UInt8
 
 impl Measure for UInt8 {
@@ -21,8 +22,6 @@ impl Measure for UInt8 {
         self
     }
 }
-
-derive Measure for Count
 
 fn main() -> UInt8 {
     let count: Count = Count(7)

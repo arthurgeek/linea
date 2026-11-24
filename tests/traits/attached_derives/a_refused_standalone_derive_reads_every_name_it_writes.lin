@@ -1,0 +1,28 @@
+// A refused standalone request still reads every name it writes: the bounds
+// on its parameters, its `where` predicates and its traits' arguments. An
+// import or a type only the request names is used.
+import std.fmt
+
+trait Count[phantom A] {}
+
+template impl[A] Count[A] {}
+
+struct Cell[T] {
+    value: T,
+}
+
+struct Mark[T] {
+    value: T,
+}
+
+struct Tally {}
+
+derive[T: fmt.Debug] Equatable for Cell[T] where T: Equatable
+
+derive[U] Count[Tally] for Mark[U]
+
+fn main() -> UInt8 {
+    let cell: Cell[UInt8] = .{ value = 1 }
+    let mark: Mark[UInt8] = .{ value = 2 }
+    if cell.value == 1 && mark.value == 2 { 0 } else { 1 }
+}

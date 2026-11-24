@@ -236,13 +236,8 @@ type HashWrapper = UInt64
 @derive(Equatable, Equivalent, Hash)
 type PositiveHash = UInt8 where it in 1..=255
 
+@derive(Equatable, Equivalent, Hash)
 struct GenericHash[T] { value: T }
-
-derive[T: Equatable] Equatable for GenericHash[T]
-
-derive[T: Equivalent] Equivalent for GenericHash[T]
-
-derive[T: Hash] Hash for GenericHash[T]
 
 test "structural hashing preserves field order and variant identity" {
     let first = HashPair { first = 1, second = 2 }
