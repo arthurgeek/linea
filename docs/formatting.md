@@ -78,6 +78,22 @@ foo(a, b)
 The comma is the marker, not the newline. A newline is invisible history; a
 comma is a character anyone can see.
 
+A `derive(...)` attribute item that ends with a `for` or `where` clause keeps
+its traits on one line, joined by `, `, with the clause after them:
+`@derive(Equatable, Debug where T: Copyable)`. A `where` clause ending in a
+comma breaks, one predicate per line:
+
+```linea
+@derive(Equatable where
+    T: Equatable + Copyable,
+)
+struct Cell[T] { value: T }
+```
+
+Binders written after `derive` are a parameter list like a declaration's,
+`@derive[A: Allocator](json.Decode[A])`, and follow the same trailing-comma
+rule.
+
 ### A broken chain breaks at every link
 
 A chain of selections you broke across lines -- at any `.` -- is written one

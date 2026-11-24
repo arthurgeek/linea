@@ -40,11 +40,8 @@ template impl Build where reflect.target: struct, reflect.components: Build {
 }
 
 @linear
+@derive(Release, Build)
 struct Triple { first: Token, second: Token, third: Token }
-
-derive Release for Triple
-
-derive Build for Triple
 
 fn main() -> UInt8 {
     let result: Result[Triple, Bool] = Build.build(false)

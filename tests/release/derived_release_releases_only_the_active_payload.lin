@@ -23,12 +23,11 @@ impl Release for Right {
 }
 
 @linear
+@derive(Release)
 enum Choice {
     A(Left),
     B(Right),
 }
-
-derive Release for Choice
 
 fn main() -> UInt8 {
     let value: Choice = .B(.Value)

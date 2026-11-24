@@ -1,3 +1,6 @@
+// A binder is a parameter of every implementation its attribute requests, so
+// each trait's arguments must name it: `Count[A]` does, and `Marker` cannot
+// say which `A` it is implemented at.
 trait Marker {}
 
 template impl Marker {}
@@ -12,9 +15,8 @@ template impl[A] Count[A] {
     }
 }
 
+@derive[A](Marker, Count[A])
 struct Holder[T] { value: T }
-
-derive[A, T] (Marker, Count[A]) for Holder[T]
 
 fn main() -> UInt8 {
     let value: Holder[UInt64] = .{ value = 1 }

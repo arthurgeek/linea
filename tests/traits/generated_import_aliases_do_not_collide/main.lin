@@ -5,13 +5,11 @@ fn _linea_trait_1() -> UInt8 {
     0
 }
 
+@derive(protocol.Label)
 struct Item {}
 
-derive protocol.Label for Item
-
+@derive(protocol.Label)
 struct Other {}
-
-derive protocol.Label for Other
 
 fn main() -> UInt8 {
     let item: Item = .{}

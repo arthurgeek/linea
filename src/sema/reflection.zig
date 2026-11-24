@@ -1171,19 +1171,26 @@ const Renderer = struct {
 /// No copy of an erasable local is in scope.
 const no_copy = std.math.maxInt(u32);
 
-/// The identifiers a derive and its target spell, which no name a rendering
+/// The identifiers a derive's target spells, which no name a rendering
 /// makes may be. Read once per derive rather than once per member rendered,
 /// since a derive of k entries on a target of k variants spells O(k) of them.
 pub const Spelled = std.StringHashMapUnmanaged(void);
 
-/// The identifiers `target` and `derive` spell. The caller owns the set.
-pub fn spelledBy(gpa: std.mem.Allocator, ast: *const Ast, target: DeclId, derive: DeclId) std.mem.Allocator.Error!Spelled {
+/// The identifiers `target` spells, its attributes included, since the
+/// clause of a derive item writes names too. The caller owns the set.
+pub fn spelledBy(gpa: std.mem.Allocator, ast: *const Ast, target: DeclId) std.mem.Allocator.Error!Spelled {
     var spelled: Spelled = .empty;
     errdefer spelled.deinit(gpa);
-    // An attached derive is its own target, and is read once.
-    const declarations = [_]DeclId{ target, derive };
-    for (declarations[0..if (derive == target) 1 else 2]) |declaration| {
-        const tokens = ast.declTokens(declaration);
+    var ranges: [2]token.TokenRange = undefined;
+    var count: usize = 0;
+    const groups = ast.declAttributeGroups(target);
+    if (groups.len != 0) {
+        ranges[count] = .{ .start = groups[0].tokens.start, .end = groups[groups.len - 1].tokens.end };
+        count += 1;
+    }
+    ranges[count] = ast.declTokens(target);
+    count += 1;
+    for (ranges[0..count]) |tokens| {
         for (tokens.start.index()..tokens.end.index()) |i| {
             const at = token.TokenId.at(@intCast(i));
             if (ast.tokenTag(at) == .identifier) try spelled.put(gpa, ast.tokenText(at), {});

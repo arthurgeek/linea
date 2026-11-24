@@ -263,14 +263,11 @@ fn decode_text_through_question_mark(text: Str) -> Result[FileSettings[mem.Syste
 }
 
 // FileSettings derives Decode for the file tests.
+@derive(Release, Decode[A])
 struct FileSettings[A: Allocator] {
     name: String[A],
     port: UInt16,
 }
-
-derive[A: Allocator] Release for FileSettings[A]
-
-derive[A: Allocator] Decode[A] for FileSettings[A]
 
 // Write `text` to a new scratch file and return its path owner.
 fn scratch_file_with(text: Str) -> String {

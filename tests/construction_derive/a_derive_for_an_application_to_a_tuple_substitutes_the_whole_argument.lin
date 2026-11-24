@@ -30,11 +30,10 @@ template impl Fresh where reflect.target: struct, reflect.components: Fresh {
     }
 }
 
+@derive(Fresh for M[(UInt8, Bool)])
 struct M[T] {
     value: T,
 }
-
-derive Fresh for M[(UInt8, Bool)]
 
 fn main() -> UInt8 {
     let pair: M[(UInt8, Bool)] = Fresh.fresh()

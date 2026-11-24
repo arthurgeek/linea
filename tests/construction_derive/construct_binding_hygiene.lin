@@ -43,9 +43,8 @@ template impl Make where reflect.target: struct, reflect.components: Make {
     }
 }
 
+@derive(Make)
 struct Pair { first: UInt64, second: UInt64 }
-
-derive Make for Pair
 
 fn main() -> UInt8 {
     let pair: Pair = Make.make(10)

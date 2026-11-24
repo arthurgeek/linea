@@ -15,14 +15,13 @@ import std.tls
 // and adds more over time, so `Issue` decodes the fields it reads and leaves
 // the rest, where a derived `json.Decode` would refuse a field it does not
 // declare.
+@derive(Release)
 pub struct Issue[A: Allocator] {
     number: UInt64,
     title: String[A],
     author: String[A],
     is_pull_request: Bool,
 }
-
-derive[A: Allocator] Release for Issue[A]
 
 impl[A: Allocator] json.Decode[A] for Issue[A] {
     fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
@@ -55,11 +54,10 @@ test "an issue decodes the fields it reads and leaves the rest" {
 }
 
 // The author of an issue, of which only the login is read.
+@derive(Release)
 struct Author[A: Allocator] {
     login: String[A],
 }
-
-derive[A: Allocator] Release for Author[A]
 
 impl[A: Allocator] json.Decode[A] for Author[A] {
     fn decode[B: Allocator](value: json.Value[B], allocator: A) -> Result[Self, json.DecodeError[A]] where carries(.Ok: allocator), carries(.Err: allocator) {
@@ -127,14 +125,13 @@ fn has_next_relation(parameters: Str) -> Bool {
 // GitHub listed them, how many pages that took, and the rate limit GitHub
 // reported with the last page: requests left in the current window and the
 // Unix time the window resets.
+@derive(Release)
 pub struct Report {
     issues: mem.Vec[Issue[mem.SystemAllocator], mem.SystemAllocator],
     pages: UInt64,
     remaining: Option[UInt64],
     resets_at: Option[UInt64],
 }
-
-derive Release for Report
 
 // Why fetching failed: the request did not get an answer, GitHub answered
 // with a status other than `200` (`401` for a bad token, `404` for a

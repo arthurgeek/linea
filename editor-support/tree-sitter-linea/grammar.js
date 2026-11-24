@@ -81,7 +81,6 @@ module.exports = grammar({
       $.struct_declaration,
       $.impl_block,
       $.template_impl_block,
-      $.derive_declaration,
       $.import_declaration,
       $.use_declaration,
       $.trait_declaration,
@@ -99,7 +98,7 @@ module.exports = grammar({
 
     policy_attribute: _ => choice('opaque', 'linear', 'copyable', 'carrier', 'unshareable', 'shareable'),
 
-    derive_attribute: $ => seq('derive', $.derive_traits),
+    derive_attribute: $ => seq('derive', optional(field('binders', $.type_parameters)), $.derive_traits),
 
     // `[T, E: Copyable + Weigh]`. A bound travels with the parameter it is
     // written on, so the list is the whole of what a declaration says about
@@ -386,13 +385,28 @@ module.exports = grammar({
       ),
     ),
 
-    derive_declaration: $ => seq(
-      'derive',
-      optional($.type_parameters),
-      choice($.derive_trait, $.derive_traits),
+    derive_trait: $ => seq(
+      field('trait', $.trait_reference),
+    ),
+
+    // The list can be empty. `@derive()` requests nothing, which the compiler
+    // reports as a derive rule rather than a syntax one. After its traits an
+    // item writes at most one clause, `for` or `where`, and a trailing comma
+    // only when no clause follows.
+    derive_traits: $ => seq(
+      '(',
+      optional(seq(
+        sep1($.derive_trait, ','),
+        optional(choice(',', $.derive_application, alias($.derive_where_clause, $.where_clause))),
+      )),
+      ')',
+    ),
+
+    // `for Mark[UInt8]` names the one application of the attributed type the
+    // implementation is for. The head is the type's name with its arguments,
+    // or a tuple, whose declaration the prelude supplies.
+    derive_application: $ => seq(
       'for',
-      // The target is a declared constructor or a tuple, whose declaration
-      // the prelude supplies.
       choice(
         seq(
           field('type', alias($.identifier, $.type_identifier)),
@@ -400,20 +414,12 @@ module.exports = grammar({
         ),
         field('type', $.tuple_type),
       ),
-      optional($.where_clause),
     ),
 
-    derive_trait: $ => seq(
-      field('trait', $.trait_reference),
-    ),
-
-    // The list can be empty. `@derive()` requests nothing, which the compiler
-    // reports as a derive rule rather than a syntax one.
-    derive_traits: $ => seq(
-      '(',
-      optional(seq(sep1($.derive_trait, ','), optional(','))),
-      ')',
-    ),
+    // `where T: Equatable + Copyable` states what each type argument needs
+    // for the derived implementation. It holds predicates alone: a source
+    // contract describes a function's parameters, and a derive has none.
+    derive_where_clause: $ => seq('where', commaSep1($.where_predicate)),
 
     import_declaration: $ => seq(
       ...modifiers($),

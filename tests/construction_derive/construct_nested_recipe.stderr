@@ -4,7 +4,7 @@ error[T-Reflection]: finish the enclosing component recipe or reflected loop bef
 16 |                 let value: component.Type = reflect.construct(
    |                                             ^^^^^^^^^^^^^^^^^^ construction cannot nest inside a component recipe or reflected loop
 error[T-Bound]: `Zero` requires `Self` to implement it, and `Pair` does not
-  --> tests/construction_derive/construct_nested_recipe.lin:39:22
+  --> tests/construction_derive/construct_nested_recipe.lin:38:22
    |
-39 |     let pair: Pair = Zero.zero()
+38 |     let pair: Pair = Zero.zero()
    |                      ^^^^^^^^^^^ implement it for that type, or reach the operation on one that does

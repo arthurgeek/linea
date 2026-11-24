@@ -10,9 +10,8 @@ template impl Ordinal {
     }
 }
 
+@derive(Ordinal)
 struct Item {}
-
-derive Ordinal for Item
 
 fn _holds(_item: Item) {}
 

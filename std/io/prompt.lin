@@ -5,15 +5,12 @@ import std.testing
 // flushing it, or reading the response. An output failure stops before any
 // input is read, and the caller keeps its buffered reader.
 @copyable
+@derive(Debug, Release)
 pub enum PromptError[I, O] {
     Write(WriteFailure[O]),
     Flush(WriteFailure[O]),
     Read(LineError[I]),
 }
-
-derive[I: Debug, O: Debug] Debug for PromptError[I, O]
-
-derive[I: Release, O: Release] Release for PromptError[I, O]
 
 impl[I, O] PromptError[I, O] {
     // Return whether this failure is a refused allocation, which an

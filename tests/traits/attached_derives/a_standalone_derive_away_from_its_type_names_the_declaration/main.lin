@@ -1,0 +1,26 @@
+// `Point` is declared in another file of this module, so the help names the
+// declaration the attribute belongs on and writes nothing itself. A request
+// whose parameter only a trait argument names has no attached spelling.
+trait Count[phantom A] {
+    fn count(self: Self) -> UInt8
+}
+
+template impl[A] Count[A] {
+    fn count(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+derive Equatable for Point
+
+derive[A] Count[A] for Point
+
+fn main() -> UInt8 {
+    let origin = Point { x = 1 }
+    let start = Point { x = 1 }
+    if origin == start {
+        0
+    } else {
+        1
+    }
+}

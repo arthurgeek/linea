@@ -19,6 +19,7 @@ template impl Total where reflect.components: Value {
     }
 }
 
+@derive(Total where T: Value + Copyable)
 struct Pair[T] {
     left: T,
     right: T,
@@ -27,8 +28,6 @@ struct Pair[T] {
 impl Value for UInt8 {}
 
 impl Value for Bool {}
-
-derive[T: Value + Copyable] Total for Pair[T]
 
 fn main() -> UInt8 {
     let numbers: Pair[UInt8] = .{ left = 2, right = 3 }

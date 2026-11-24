@@ -27,9 +27,8 @@ template impl Rebuild where reflect.components: Zero {
     }
 }
 
+@derive(Rebuild)
 type Shape = UInt64
-
-derive Rebuild for Shape
 
 fn main() -> UInt8 {
     let original = Shape(4)

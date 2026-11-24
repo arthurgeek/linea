@@ -8,11 +8,10 @@ template impl Label where reflect.target: struct {
     }
 }
 
+@derive(Label)
 enum Choice {
     First,
 }
-
-derive Label for Choice
 
 fn main() -> UInt8 {
     let _choice: Choice = .First

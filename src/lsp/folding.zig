@@ -53,7 +53,7 @@ fn foldsAsBody(tag: node.Decl.Tag) bool {
         // its own line, but that is a clause growing, not a body opening.
         // A traversal writes no braces of its own either: what it names is an
         // expression, folded wherever a block form inside one sits.
-        .constant, .derive_impl, .import_, .use_, .associated_type, .traversal_, .newtype, .alias => false,
+        .constant, .import_, .use_, .associated_type, .traversal_, .newtype, .alias => false,
         // A declaration the parser gave up on has no extent anyone wrote.
         .err => false,
     };
@@ -255,7 +255,7 @@ test "a fold that opens and closes on one line is not reported" {
     try testing.expectEqual(@as(usize, 0), found.len);
 }
 
-test "bodyless grouped derives do not fold" {
+test "a derived type folds from its attribute and nothing else does" {
     const gpa = testing.allocator;
     const text = @import("references.zig").structural_derive_source;
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
@@ -268,9 +268,12 @@ test "bodyless grouped derives do not fold" {
     const expected = [_]struct { start: u32, end: u32 }{
         .{ .start = 3, .end = 5 },
         .{ .start = 7, .end = 8 },
-        .{ .start = 25, .end = 27 },
-        .{ .start = 28, .end = 30 },
-        .{ .start = 36, .end = 39 },
+        .{ .start = 12, .end = 13 },
+        .{ .start = 14, .end = 15 },
+        .{ .start = 17, .end = 19 },
+        .{ .start = 20, .end = 22 },
+        .{ .start = 23, .end = 24 },
+        .{ .start = 26, .end = 29 },
     };
     try testing.expectEqual(expected.len, found.len);
     for (expected, found) |want, fold| {

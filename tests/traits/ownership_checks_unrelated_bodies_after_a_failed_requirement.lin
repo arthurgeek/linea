@@ -17,11 +17,10 @@ template impl Inspect where reflect.components: Measured {
     }
 }
 
+@derive(Inspect where T: Copyable)
 struct Box[T] {
     value: T,
 }
-
-derive[T] Inspect for Box[T]
 
 @linear
 enum Key {

@@ -672,11 +672,6 @@ fn writtenReferenceModuleFrom(
 
 fn declarationEndsTraitReferenceAt(ast: *const Ast, decl: DeclId, at: TokenId) bool {
     if (traitReferenceContains(ast.declTraitRef(decl), at)) return true;
-    if (ast.declTag(decl) == .derive_impl) {
-        for (ast.deriveTraits(decl)) |entry| {
-            if (traitReferenceContains(entry.ref, at)) return true;
-        }
-    }
     for (ast.declAttributeGroups(decl)) |group| {
         for (ast.attributeItems(group)) |item| {
             for (ast.derive_traits[item.derive_traits.start..item.derive_traits.end]) |entry| {

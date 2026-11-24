@@ -1,11 +1,14 @@
-// A derive request's target follows the rule an implementation head follows:
-// `(A,)` is refused where it is written, and the refusal is the only report.
+// The application `for` names follows the rule an implementation head
+// follows: `(UInt8,)` is refused where it is written, and the refusal is the
+// only report.
 trait Marker {}
 
 template impl Marker {}
 
-derive[A] Marker for (A,)
+@derive(Marker for (UInt8,))
+struct Box[T] { value: T }
 
 fn main() -> UInt8 {
-    0
+    let box: Box[UInt8] = .{ value = 0 }
+    box.value
 }

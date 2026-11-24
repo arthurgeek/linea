@@ -85,10 +85,10 @@ Qualified trait references
 
 trait Child: protocol.Parent {}
 template impl protocol.Marker {}
-derive protocol.Marker for Item
 impl protocol.Parent for Item {}
 fn accepts[T: protocol.Parent](read _value: T) {}
 fn open(read _item: Item) where Item: protocol.Parent {}
+@derive(protocol.Marker)
 struct Item {}
 
 ---
@@ -104,12 +104,6 @@ struct Item {}
     trait: (trait_reference
       module: (identifier)
       name: (type_identifier)))
-  (derive_declaration
-    (derive_trait
-      trait: (trait_reference
-        module: (identifier)
-        name: (type_identifier)))
-    type: (type_identifier))
   (impl_block
     trait: (trait_reference
       module: (identifier)
@@ -146,6 +140,13 @@ struct Item {}
             name: (type_identifier)))))
     body: (block))
   (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            trait: (trait_reference
+              module: (identifier)
+              name: (type_identifier))))))
     name: (type_identifier)
     (field_list)))
 

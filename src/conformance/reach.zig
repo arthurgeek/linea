@@ -35,6 +35,7 @@ pub const not_yet_generated = [_]NotYet{
             "complete forms, and no mutation removes or swaps a token.",
         .rules = &.{
             .s_test,
+            .s_derive,
             .s_escape,
             .s_encoding,
             .s_embed,

@@ -218,7 +218,7 @@ pub const Relocation = struct {
                         else => {},
                     }
                     switch (input.tag) {
-                        .function, .projection, .struct_, .enum_, .trait_, .impl_, .derive_impl => result.type_params = self.positioned(.type_params, input.type_params),
+                        .function, .projection, .struct_, .enum_, .trait_, .impl_ => result.type_params = self.positioned(.type_params, input.type_params),
                         else => {},
                     }
                     if (input.tag == .trait_ or input.tag == .associated_type) result.bounds = self.positioned(.bounds, input.bounds);
@@ -229,7 +229,6 @@ pub const Relocation = struct {
                     }
                     if (input.tag == .enum_) result.variants = self.positioned(.variants, input.variants);
                     if (input.tag == .struct_) result.fields = self.positioned(.fields, input.fields);
-                    if (input.tag == .derive_impl) result.derive_traits = self.positioned(.derive_traits, input.derive_traits);
                 }
                 if (T == node.CallableType) {
                     result.params = self.positioned(.params, input.params);

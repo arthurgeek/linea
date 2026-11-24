@@ -1,0 +1,10 @@
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_s_fix_leaves_out_the_bounds_its_type_declares.lin:14:1
+   |
+14 | derive[K: Equatable, V: Copyable + Equatable] Equatable for Pair[K, V] where K: Debug
+   | ^^^^^^ write `@derive(Equatable where K: Equatable, V: Equatable, K: Debug)` above `struct Pair`
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_s_fix_leaves_out_the_bounds_its_type_declares.lin:16:1
+   |
+16 | derive[T] Equatable for Plain[T] where T: Copyable + Equatable
+   | ^^^^^^ write `@derive(Equatable where T: Equatable)` above `struct Plain`

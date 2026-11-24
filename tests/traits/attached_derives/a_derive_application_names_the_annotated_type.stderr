@@ -1,0 +1,10 @@
+error[T-Derive]: `for` names an application of `Mark`, the type this attribute is written on
+  --> tests/traits/attached_derives/a_derive_application_names_the_annotated_type.lin:19:19
+   |
+19 | @derive(Score for Other[UInt8])
+   |                   ^^^^^ write the request on the declaration of the type it names
+error[T-Derive]: `for` names one application of `Mark`, by its types
+  --> tests/traits/attached_derives/a_derive_application_names_the_annotated_type.lin:20:24
+   |
+20 | @derive(Score for Mark[T])
+   |                        ^ drop `for` to request every application, or name the types of one

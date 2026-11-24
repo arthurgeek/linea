@@ -214,6 +214,7 @@ test "a refused head is a malformed or oversized response" {
 // allocator. A client writes `Host`, `Content-Length`, `Transfer-Encoding`
 // and `Connection` itself, so a request refuses them.
 @opaque
+@derive(Release)
 struct ClientRequest[A: Allocator = mem.SystemAllocator] {
     allocator: A,
     method: String[A],
@@ -222,8 +223,6 @@ struct ClientRequest[A: Allocator = mem.SystemAllocator] {
     header_fields: Vec[Field, A],
     body: Vec[UInt8, A],
 }
-
-derive[A: Allocator] Release for ClientRequest[A]
 
 impl ClientRequest[mem.SystemAllocator] {
     // A request with no headers and no body, from the system allocator. The
@@ -552,6 +551,7 @@ fn framed_as(mode: BodyMode, left: UInt64 = 0) -> Framed {
 // What a response's head said, read before its body: the status, the
 // headers as stored text and ranges, how the body is framed, and whether the
 // connection may carry another request once the body is read.
+@derive(Release)
 struct ResponseHead[A: Allocator] {
     status: Status,
     head: String[A],
@@ -559,8 +559,6 @@ struct ResponseHead[A: Allocator] {
     framed: Framed,
     reusable: Bool,
 }
-
-derive[A: Allocator] Release for ResponseHead[A]
 
 // A server may send interim `1xx` heads before the final one; a client skips
 // at most this many.
@@ -1012,6 +1010,7 @@ impl[A: Allocator] io.Reader for ClientResponse[A] {
 
 // A connection the pool keeps between requests: the origin it reaches, the
 // stream, and when it was put back.
+@derive(Release)
 struct Idle[A: Allocator] {
     host: String[A],
     port: UInt16,
@@ -1019,8 +1018,6 @@ struct Idle[A: Allocator] {
     link: Link,
     since: time.Instant,
 }
-
-derive[A: Allocator] Release for Idle[A]
 
 // A `Client` sends requests and reads their responses over connections it
 // keeps open between them. It owns a pool of idle connections keyed by

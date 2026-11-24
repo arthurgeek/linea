@@ -1145,7 +1145,6 @@ const Printer = struct {
             .use_ => try self.writeUse(d),
             .impl_ => try self.writeImpl(d),
             .template_impl => try self.writeTemplateImpl(d),
-            .derive_impl => try self.writeDeriveImpl(d),
             .trait_ => try self.writeTrait(d),
             .associated_type => try self.writeAssociatedType(d),
             .newtype => try self.writeNewtype(d),
@@ -1183,7 +1182,7 @@ const Printer = struct {
             for (items) |item| {
                 if (!self.keepsAttribute(item)) continue;
                 count += 1;
-                if (item.kind == .derive) {
+                if (item.kind == .derive and self.deriveClause(item).keyword == .none) {
                     const open = self.firstAt(item.name, .l_paren);
                     blocked = blocked or self.hasTrailingComma(self.bracketRange(open));
                 }
@@ -1219,6 +1218,13 @@ const Printer = struct {
         }
     }
 
+    /// The clause a derive item writes after its traits, which every trait
+    /// of the item carries.
+    fn deriveClause(self: *const Printer, item: node.AttributeItem) node.DeriveClause {
+        if (item.derive_traits.len() == 0) return .{};
+        return self.ast.derive_traits[item.derive_traits.start].clause;
+    }
+
     fn writeAttribute(self: *Printer, item: node.AttributeItem) Error!void {
         try self.flushCommentsBefore(item.name);
         if (self.alreadyCopied(item.name)) return;
@@ -1226,6 +1232,9 @@ const Printer = struct {
         if (item.kind != .derive) return;
         const count = self.retainedAttributeTraits(item);
         const open = self.firstAt(item.name, .l_paren);
+        const clause = self.deriveClause(item);
+        try self.writeTypeParamList(self.ast.typeParams(clause.binders));
+        if (clause.keyword != .none) return self.writeDeriveWithClause(item, clause, self.hasTrailingComma(self.bracketRange(open)));
         try self.flushCommentsBefore(open);
         const l = try self.openList(self.bracketRange(open), count, "(", ")", "", false);
         var emitted: usize = 0;
@@ -1245,6 +1254,58 @@ const Printer = struct {
             });
         }
         try self.closeList(l, count);
+    }
+
+    /// `derive(A, B for Head)` or `derive(A, B where P: X, Q: Y)`: the
+    /// traits on one line, then the clause that applies to all of them. A
+    /// `where` ending in a comma writes each predicate on a line of its own.
+    /// A comment after a separating comma is written after that comma, and
+    /// the line a line comment ends continues one level in.
+    fn writeDeriveWithClause(self: *Printer, item: node.AttributeItem, clause: node.DeriveClause, broken: bool) Error!void {
+        try self.write("(");
+        const base = self.indent;
+        self.indent = base + 1;
+        var emitted: usize = 0;
+        for (item.derive_traits.start..item.derive_traits.end) |index| {
+            const trait = self.ast.derive_traits[index];
+            const kept = self.keepsDeriveTrait(@intCast(index));
+            if (kept and emitted != 0) try self.write(",");
+            try self.flushCommentsBefore(trait.tokens.start);
+            if (!kept) continue;
+            if (emitted != 0) try self.write(" ");
+            try self.writeTraitRef(trait.ref);
+            emitted += 1;
+        }
+        try self.flushCommentsBefore(clause.keyword);
+        switch (clause.kind) {
+            .inferred, .refused => {},
+            .application => {
+                try self.write(" ");
+                try self.write("for ");
+                try self.writeWrittenType(clause.head);
+            },
+            .environment => {
+                try self.write(" ");
+                try self.write(if (broken) "where" else "where ");
+                const predicates = self.ast.where_predicates[clause.where_predicates.start..clause.where_predicates.end];
+                for (predicates, 0..) |predicate, i| {
+                    if (!broken and i != 0) try self.write(",");
+                    try self.flushCommentsBefore(predicate.subject.at);
+                    if (broken) {
+                        if (!self.at_line_start) try self.newline();
+                    } else if (i != 0) try self.write(" ");
+                    try self.writeWrittenType(predicate.subject);
+                    try self.writeBounds(self.ast.boundsIn(predicate.bounds));
+                    if (broken) try self.write(",");
+                }
+                if (broken and !self.at_line_start) {
+                    self.indent = base;
+                    try self.newline();
+                }
+            },
+        }
+        self.indent = base;
+        try self.write(")");
     }
 
     /// The elements and dots of a path, and nothing between them.
@@ -1482,38 +1543,6 @@ const Printer = struct {
             });
         }
         if (broken) self.indent -= 1;
-    }
-
-    fn writeDeriveImpl(self: *Printer, d: DeclId) Error!void {
-        try self.write("derive");
-        try self.writeTypeParams(d);
-        try self.write(" ");
-        const traits = self.ast.deriveTraits(d);
-        if (self.ast.deriveIsGrouped(d)) {
-            const open = self.ast.deriveGroupOpen(d);
-            const close = self.ast.deriveGroupClose(d);
-            const range: token.TokenRange = if (close == .none)
-                .{ .start = open, .end = self.ast.declTokens(d).end }
-            else
-                .{ .start = open, .end = TokenId.at(close.index() + 1) };
-            const l = try self.openList(range, traits.len, "(", ")", "", false);
-            for (traits, 0..) |trait, i| {
-                try self.flushCommentsBefore(trait.ref.name);
-                if (self.alreadyCopied(trait.ref.name)) continue;
-                try self.writeTraitRef(trait.ref);
-                try self.afterElement(l, i + 1 == traits.len, .{
-                    .start = trait.tokens.start,
-                    .end = self.elementEnd(trait.ref.name),
-                });
-            }
-            try self.closeList(l, traits.len);
-        } else if (traits.len > 0) {
-            try self.writeTraitRef(traits[0].ref);
-        }
-        try self.write(" for ");
-        try self.writeWrittenType(self.ast.declHead(d));
-        try self.writeWhereClause(d);
-        try self.newline();
     }
 
     /// `trait Name { … }`. Its signatures are members owned by it, so the walk
@@ -2020,7 +2049,12 @@ const Printer = struct {
 
     fn writeTypeParams(self: *Printer, d: DeclId) Error!void {
         if (!self.notes.type_params) return;
-        const declared = self.ast.declTypeParams(d);
+        try self.writeTypeParamList(self.ast.declTypeParams(d));
+    }
+
+    /// `[A, B: Bound]`, the list a declaration or a derive item's binders
+    /// write, and nothing where it is empty.
+    fn writeTypeParamList(self: *Printer, declared: []const node.TypeParam) Error!void {
         if (declared.len == 0) return;
 
         const l = try self.openList(self.bracketRange(self.typeParamsOpen(declared[0])), declared.len, "[", "]", "", false);
@@ -4070,42 +4104,47 @@ test "formatter writes structural reflection" {
     );
 }
 
-test "a derive request formats as a bodyless impl-space declaration" {
+test "a derive clause is written on one line after its traits" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     try check(
         arena.allocator(),
-        "derive   Debug   for   Mark;\n",
-        "derive Debug for Mark\n",
+        "@derive(  Debug  for  Mark[ UInt8 ] )\nstruct Mark[T] { value: T }\n",
+        "@derive(Debug for Mark[UInt8])\nstruct Mark[T] { value: T }\n",
+    );
+    try check(
+        arena.allocator(),
+        "@derive(Debug,\n    Equatable\n    where T:Debug+Equatable,\n)\nstruct Mark[T] { value: T }\n",
+        "@derive(Debug, Equatable where\n    T: Debug + Equatable,\n)\nstruct Mark[T] { value: T }\n",
     );
 }
 
-test "a derive request on a tuple target prints the tuple" {
+test "a derive application on a tuple prints the tuple" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     try check(
         arena.allocator(),
-        "derive[A, B]   Debug   for   (A,B);\n",
-        "derive[A, B] Debug for (A, B)\n",
+        "@derive(Debug for (UInt8,Bool))\nstruct Pair {}\n",
+        "@derive(Debug for (UInt8, Bool))\nstruct Pair {}\n",
     );
 }
 
-test "formatter preserves grouped derive and template component requirement" {
+test "formatter preserves a derive clause beside a template component requirement" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     try check(arena.allocator(),
         \\template impl Inspect where reflect.components:Inspect+Lookup[UInt64]{}
-        \\derive[T:Inspect](Inspect,)for Box[T] where T:Lookup[UInt64]
+        \\@derive(Inspect where T:Lookup[UInt64])
+        \\struct Box[T] { value: T }
         \\
     ,
         \\template impl Inspect where reflect.components: Inspect + Lookup[UInt64] {}
         \\
-        \\derive[T: Inspect] (
-        \\    Inspect,
-        \\) for Box[T] where T: Lookup[UInt64]
+        \\@derive(Inspect where T: Lookup[UInt64])
+        \\struct Box[T] { value: T }
         \\
     );
 }
@@ -4147,15 +4186,16 @@ test "formatter keeps grouped derive comments with their traits" {
     defer arena.deinit();
 
     try check(arena.allocator(),
-        \\derive(Inspect, // exact trait
+        \\@derive(Inspect, // exact trait
         \\Lookup, // lookup trait
-        \\)for Box
+        \\)struct Box {}
         \\
     ,
-        \\derive (
+        \\@derive(
         \\    Inspect, // exact trait
         \\    Lookup, // lookup trait
-        \\) for Box
+        \\)
+        \\struct Box {}
         \\
     );
 }

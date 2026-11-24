@@ -8,9 +8,8 @@ template impl Label where reflect.target: struct {
     }
 }
 
+@derive(Label)
 struct Product {}
-
-derive Label for Product
 
 fn main() -> UInt8 {
     let product: Product = .{}

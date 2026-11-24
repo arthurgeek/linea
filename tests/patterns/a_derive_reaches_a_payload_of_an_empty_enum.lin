@@ -1,17 +1,15 @@
 // Derived `Debug` and `Equatable` take every variant apart, the one whose
 // payload is an enum with no variants included.
 @copyable
+@derive(Debug, Equatable)
 enum Uninhabited {}
 
-derive (Debug, Equatable) for Uninhabited
-
 @copyable
+@derive(Debug, Equatable)
 enum Wrap {
     Never(Uninhabited),
     Plain(UInt8),
 }
-
-derive (Debug, Equatable) for Wrap
 
 fn main() -> UInt8 {
     let a: Wrap = .Plain(1)

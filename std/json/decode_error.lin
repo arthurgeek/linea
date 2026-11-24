@@ -4,6 +4,7 @@ import std.testing
 
 // DecodeReason says why a JSON value did not decode into a type.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum DecodeReason {
     WrongKind,
     MissingField,
@@ -14,27 +15,23 @@ pub enum DecodeReason {
     InvalidValue,
 }
 
-derive (Equatable, Debug, Release) for DecodeReason
-
 // A PathSegment is one step from a value into one nested in it: an object
 // field by name, or an array element by index.
+@derive(Release)
 pub enum PathSegment[A: Allocator = mem.SystemAllocator] {
     Field(String[A]),
     Index(UInt64),
 }
 
-derive[A: Allocator] Release for PathSegment[A]
-
 // A DecodeFailure says why a value did not decode and where. Decoding adds
 // each enclosing segment as it unwinds, so `path` runs from the failing value
 // outward; `segment` reads it root first.
 @opaque
+@derive(Release)
 struct DecodeFailure[A: Allocator] {
     cause: DecodeReason,
     path: Vec[PathSegment[A], A],
 }
-
-derive[A: Allocator] Release for DecodeFailure[A]
 
 // Release a vector of errors from generic code, which needs DecodeError's
 // Release to be usable there.

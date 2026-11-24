@@ -1,0 +1,5 @@
+error[T-Derive]: `T` is a parameter of `Box`, and a binder names one the type does not have
+  --> tests/traits/attached_derives/a_derive_binder_names_a_parameter_the_type_does_not_have.lin:14:9
+   |
+14 | @derive[T](Count[T])
+   |         ^ drop it: the type's own parameters are in scope in the attribute already

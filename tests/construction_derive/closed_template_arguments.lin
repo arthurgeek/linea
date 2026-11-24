@@ -8,9 +8,8 @@ template impl[Parameter: Copyable] Echo[Parameter] {
     }
 }
 
+@derive(Echo[UInt8], Echo[Bool])
 struct Product {}
-
-derive (Echo[UInt8], Echo[Bool]) for Product
 
 fn main() -> UInt8 {
     let product: Product = .{}

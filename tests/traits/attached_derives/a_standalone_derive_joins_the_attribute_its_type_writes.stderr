@@ -1,0 +1,24 @@
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_joins_the_attribute_its_type_writes.lin:16:1
+   |
+16 | derive (Debug, Equatable) for Cell
+   | ^^^^^^ write `Equatable` in `@derive(Debug)` above `struct Cell`
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_joins_the_attribute_its_type_writes.lin:18:1
+   |
+18 | derive Debug for Mark
+   | ^^^^^^ remove this request: `struct Mark` already derives what it names
+error[T-Derive]: this derive trait is repeated
+  --> tests/traits/attached_derives/a_standalone_derive_joins_the_attribute_its_type_writes.lin:16:9
+   |
+6  | @derive(Debug)
+   |         ----- this trait was already requested here
+16 | derive (Debug, Equatable) for Cell
+   |         ^^^^^ a type derives each trait once
+error[T-Derive]: this derive trait is repeated
+  --> tests/traits/attached_derives/a_standalone_derive_joins_the_attribute_its_type_writes.lin:18:8
+   |
+11 | @derive(Debug)
+   |         ----- this trait was already requested here
+18 | derive Debug for Mark
+   |        ^^^^^ a type derives each trait once

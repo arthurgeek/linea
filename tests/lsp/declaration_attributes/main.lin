@@ -24,9 +24,8 @@ enum Choice { Value(UInt8) }
 @derive(Score)
 type Count = UInt8
 
+@derive(Score where T: Copyable)
 struct Cell[T] { value: T }
-
-derive[T: Copyable] Score for Cell[T]
 
 fn main() -> UInt8 {
     let point = Point { value = 3 }

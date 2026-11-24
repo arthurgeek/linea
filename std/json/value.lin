@@ -7,6 +7,7 @@ use collections.InsertFailure
 
 // Kind names what a JSON value is.
 @copyable
+@derive(Equatable, Debug, Release)
 pub enum Kind {
     Null,
     Boolean,
@@ -15,8 +16,6 @@ pub enum Kind {
     Array,
     Object,
 }
-
-derive (Equatable, Debug, Release) for Kind
 
 // A Node holds a value's content: a scalar, owned text or a number token, or
 // the owned children of an array or an object.

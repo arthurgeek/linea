@@ -4,13 +4,11 @@ trait Ready {}
 
 template impl Ready where reflect.components: Required[Self] {}
 
+@derive(Ready)
 struct First {}
 
+@derive(Ready)
 struct Second {}
-
-derive Ready for First
-
-derive Ready for Second
 
 fn main() -> UInt8 {
     let _first: First = .{}
