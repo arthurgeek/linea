@@ -169,7 +169,6 @@ fn kindOf(tag: token.Tag) ?Kind {
         .keyword_panic,
         .keyword_embed,
         .keyword_embed_bytes,
-        .keyword_template,
         .keyword_derive,
         .keyword_reflect,
         .keyword_impl,

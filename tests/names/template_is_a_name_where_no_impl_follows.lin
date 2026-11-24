@@ -1,0 +1,49 @@
+// `template` begins a structural template only where `impl` follows it at the
+// start of a declaration. Everywhere else it is an ordinary name: a parameter,
+// a local, a field and a function may all be called `template`, and a derive
+// reads a field named `template` as it reads any other.
+trait Label {
+    fn label(_self: Self) -> UInt8
+}
+
+template impl Label where reflect.target: struct {
+    fn label(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+@derive(Equatable)
+struct Page {
+    template: Str,
+}
+
+derive Label for Page
+
+// Count the placeholders `template` holds.
+fn holes(template: Str) -> UInt8 {
+    var count: UInt8 = 0
+    var rest = copy(template)
+    loop {
+        let at = rest.find("{{") else {
+            break
+        }
+        count += 1
+        rest = rest.slice(at + 2, rest.length()).unwrap()
+    }
+    count
+}
+
+fn template() -> Str {
+    "{{name}} signed on {{day}}"
+}
+
+fn main() -> UInt8 {
+    let template = template()
+    let page = Page { template }
+    let same = page == Page { template = "{{name}} signed on {{day}}" }
+    if same && holes(page.template) == 2 && Label.label(page) == 7 {
+        0
+    } else {
+        1
+    }
+}

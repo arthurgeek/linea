@@ -1,0 +1,9 @@
+// A `template` left alone on its line is one mistake, and the alias on the
+// line below it is still declared.
+template
+alias Count = UInt8
+
+fn main() -> UInt8 {
+    let c: Count = 0
+    c
+}

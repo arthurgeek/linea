@@ -210,7 +210,12 @@ contexts:
     - match: '\b(impl)\b'
       scope: keyword.declaration.type.linea
       push: impl-header
-    - match: '\b(enum|struct|template|derive|trait|for|extern)\b'
+    - match: '\b(enum|struct|derive|trait|for|extern)\b'
+      scope: keyword.declaration.type.linea
+    # `template impl Trait …`, a structural template. Contextual for the
+    # reason `default` is: a parameter or a field named `template` stays a
+    # name.
+    - match: '\b(template)\b(?=\s+impl\b)'
       scope: keyword.declaration.type.linea
     # `default impl[T] Trait for T`, a fallback implementation. Contextual
     # for the reason `type` is: the `impl` after it is what makes it the

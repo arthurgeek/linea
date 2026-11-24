@@ -3,11 +3,11 @@ error[S-Field]: `match` is a keyword, and a keyword cannot be a name
   |
 4 |     match: UInt8,
   |     ^^^^^ choose another name
-error[S-Enum]: `template` is a keyword, and a keyword cannot be a name
+error[S-Enum]: `phantom` is a keyword, and a keyword cannot be a name
  --> tests/recovery/a_keyword_where_a_name_belongs_is_named.lin:9:5
   |
-9 |     template,
-  |     ^^^^^^^^ choose another name
+9 |     phantom,
+  |     ^^^^^^^ choose another name
 error[S-Name]: `match` is a keyword, and a keyword cannot be a name
   --> tests/recovery/a_keyword_where_a_name_belongs_is_named.lin:13:4
    |
@@ -23,11 +23,11 @@ error[S-Params]: `match` is a keyword, and a keyword cannot be a name
    |
 17 | fn take[for](count: UInt8, match: UInt8) -> UInt8 {
    |                            ^^^^^ choose another name
-error[S-Name]: `template` is a keyword, and a keyword cannot be a name
+error[S-Name]: `phantom` is a keyword, and a keyword cannot be a name
   --> tests/recovery/a_keyword_where_a_name_belongs_is_named.lin:22:9
    |
-22 |     let template = 3
-   |         ^^^^^^^^ choose another name
+22 |     let phantom = 3
+   |         ^^^^^^^ choose another name
 error[S-Params]: `match` is a keyword, and a keyword cannot be a name
   --> tests/recovery/a_keyword_where_a_name_belongs_is_named.lin:23:18
    |

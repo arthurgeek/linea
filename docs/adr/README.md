@@ -134,6 +134,7 @@ true of a different implementation.
 | [0247](0247-a-test-in-an-impl-is-a-member-of-nothing.md) | A test in an inherent `impl` is a member of nothing | Accepted; extended by 0269; namespace clause superseded by 0277 |
 | [0269](0269-a-test-in-a-trait-declaration-is-a-member-of-nothing.md) | A test in a trait declaration is a member of nothing | Accepted; extends 0247; namespace clause superseded by 0277 |
 | [0277](0277-a-test-is-named-by-a-string.md) | A test is named by a string | Accepted; supersedes the function-modifier premise of 0084 and the namespace clauses of 0247 and 0269 |
+| [0304](0304-template-is-a-contextual-word.md) | `template` is a contextual word | Accepted; builds on 0084 and 0179 |
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
 | [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229 and 0295; boolean grant superseded by 0228; direct runtime call clause superseded by 0255 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
