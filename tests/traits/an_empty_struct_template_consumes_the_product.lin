@@ -8,9 +8,8 @@ template impl Consume {
     }
 }
 
+@derive(Consume)
 struct Empty {}
-
-derive Consume for Empty
 
 fn main() -> UInt8 {
     let empty: Empty = .{}

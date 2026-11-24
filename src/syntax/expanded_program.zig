@@ -26,10 +26,10 @@ const Program = program_mod.Program;
 const Kind = program_mod.Kind;
 
 pub const Origin = struct {
-    derive: DeclId,
+    /// Names the struct, enum or newtype whose `derive(...)` item requested
+    /// the implementation, and which the implementation is for.
+    target: DeclId,
     derive_trait: TokenId = .none,
-    /// Names the struct, enum or newtype the derive implements the trait for.
-    target: DeclId = .none,
     template_member: DeclId = .none,
     template_expr: ExprId = .none,
     case_ordinal: ?CaseOrdinal = null,
@@ -82,15 +82,13 @@ pub const GeneratedImport = struct {
 };
 
 fn validSourceOrigin(ast: *const Ast, origin: Origin, derive_trait: node.DeriveTraitId) bool {
-    if (origin.derive.index() >= ast.declCount()) return false;
+    if (origin.target.index() >= ast.declCount()) return false;
     if (origin.derive_trait == .none) return derive_trait == .none;
     if (derive_trait == .none or derive_trait.index() >= ast.derive_traits.len or
         origin.derive_trait.index() >= ast.tokenCount())
     {
         return false;
     }
-    const range = ast.deriveRequestTraitRange(origin.derive);
-    if (derive_trait.index() < range.start or derive_trait.index() >= range.end) return false;
     return ast.deriveTrait(derive_trait).ref.name == origin.derive_trait;
 }
 
@@ -144,11 +142,13 @@ pub const ComponentRequirementRange = struct {
 
 pub const GeneratedImplementation = struct {
     generated_impl: DeclId,
-    derive: DeclId,
     derive_trait: node.DeriveTraitId,
     target: DeclId,
     template: DeclId,
     requirements: ComponentRequirementRange,
+    /// Expanded from a refused standalone request so that what it names
+    /// exists; its bodies are not checked, since the refusal is its report.
+    recovered: bool = false,
 };
 
 pub const ComponentRequirement = struct {
@@ -698,7 +698,7 @@ pub const ExpandedProgram = struct {
                 mapped_source += 1;
 
                 const is_active = switch (owned_ast.declTag(decl)) {
-                    .template_impl, .derive_impl => false,
+                    .template_impl => false,
                     else => true,
                 };
                 active.set(decl, is_active);
@@ -823,7 +823,7 @@ pub const ExpandedProgram = struct {
         }
         for (generated) |entry| {
             if (entry.module.index() >= module_count) return error.InvalidGeneratedModule;
-            if (entry.origin.derive.index() >= source_decl_count or
+            if (entry.origin.target.index() >= source_decl_count or
                 (entry.origin.derive_trait != .none and
                     entry.origin.derive_trait.index() >= source_token_count) or
                 (entry.origin.template_member != .none and
@@ -866,9 +866,8 @@ pub const ExpandedProgram = struct {
             if (implementation.generated_impl.index() < source.declCount() or
                 implementation.generated_impl.index() >= expanded.declCount() or
                 expanded.declTag(implementation.generated_impl) != .impl_ or
-                implementation.derive.index() >= source.declCount() or
-                source.deriveRequestTraitRange(implementation.derive).len() == 0 or
                 implementation.target.index() >= source.declCount() or
+                (!implementation.recovered and source.attachedDeriveTraitRange(implementation.target).len() == 0) or
                 (source.declTag(implementation.target) != .struct_ and
                     source.declTag(implementation.target) != .enum_ and
                     source.declTag(implementation.target) != .newtype) or
@@ -878,10 +877,13 @@ pub const ExpandedProgram = struct {
                 return error.InvalidGeneratedImplementation;
             }
 
-            const derive_range = source.deriveRequestTraitRange(implementation.derive);
+            // A recovered implementation's entry is its refused request's,
+            // which the target does not hold.
+            const derive_range = source.attachedDeriveTraitRange(implementation.target);
             if (implementation.derive_trait == .none or
-                implementation.derive_trait.index() < derive_range.start or
-                implementation.derive_trait.index() >= derive_range.end)
+                implementation.derive_trait.index() >= source.derive_traits.len or
+                (!implementation.recovered and (implementation.derive_trait.index() < derive_range.start or
+                    implementation.derive_trait.index() >= derive_range.end)))
             {
                 return error.InvalidGeneratedImplementation;
             }
@@ -1080,7 +1082,7 @@ pub const ExpandedProgram = struct {
     }
 
     fn primaryDecl(self: *const ExpandedProgram, decl: DeclId) DeclId {
-        return if (self.originOf(decl)) |origin| origin.derive else decl;
+        return if (self.originOf(decl)) |origin| origin.target else decl;
     }
 
     pub fn primaryFileOfDecl(self: *const ExpandedProgram, decl: DeclId) FileId {
@@ -1121,7 +1123,8 @@ pub const ExpandedProgram = struct {
             \\template impl Structural {
             \\    fn value(self: Self) -> UInt8 { 0 }
             \\}
-            \\derive Structural for Mark
+            \\@derive(Structural)
+            \\struct Mark {}
             \\
             },
         }};
@@ -1152,8 +1155,8 @@ pub const ExpandedProgram = struct {
 
         const let_start: u32 = @intCast(std.mem.indexOf(u8, text, "let x").?);
         const let_end: u32 = @intCast(std.mem.indexOfScalarPos(u8, text, let_start, ';').? + 1);
-        const whole: Origin = .{ .derive = .at(2), .template_member = .at(0), .template_expr = template_expr, .component_ordinal = @enumFromInt(1) };
-        const narrow: Origin = .{ .derive = .at(2), .template_member = .at(0), .template_expr = template_expr, .component_ordinal = @enumFromInt(2) };
+        const whole: Origin = .{ .target = .at(2), .template_member = .at(0), .template_expr = template_expr, .component_ordinal = @enumFromInt(1) };
+        const narrow: Origin = .{ .target = .at(2), .template_member = .at(0), .template_expr = template_expr, .component_ordinal = @enumFromInt(2) };
         const segments = [_]GeneratedOriginSegment{
             .{ .file = .from(1), .span = .{ .start = 0, .end = @intCast(text.len) }, .origin = whole },
             .{ .file = .from(1), .span = .{ .start = let_start, .end = let_end }, .origin = narrow },
@@ -1161,7 +1164,7 @@ pub const ExpandedProgram = struct {
         var generated_implementations: []GeneratedImplementation = &.{};
         var component_requirements: []ComponentRequirement = &.{};
         var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
-            .{ .module = .from(0), .origin = .{ .derive = .at(2), .template_member = .at(0) } },
+            .{ .module = .from(0), .origin = .{ .target = .at(2), .template_member = .at(0) } },
         }, &.{}, &segments, &.{});
         defer expanded.deinit(gpa);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
@@ -1183,11 +1186,11 @@ pub const ExpandedProgram = struct {
         const files = [_]parser.ParsedFile{.{
             .file = .from(0),
             .source = Source{ .path = "root.lin", .text =
+            \\@derive(Structural)
             \\struct Pair { first: UInt8, second: UInt8 }
             \\template impl Structural {
             \\    fn value(self: Self) -> UInt8 { 0 }
             \\}
-            \\derive Structural for Pair
             \\
             },
         }};
@@ -1202,8 +1205,10 @@ pub const ExpandedProgram = struct {
         for (0..source.ast.declCount()) |i| {
             const id = DeclId.at(@intCast(i));
             switch (source.ast.declTag(id)) {
-                .struct_ => pair_decl = id,
-                .derive_impl => derive_decl = id,
+                .struct_ => {
+                    pair_decl = id;
+                    derive_decl = id;
+                },
                 .function => template_member = id,
                 else => {},
             }
@@ -1236,8 +1241,8 @@ pub const ExpandedProgram = struct {
         // in the first half names `Pair.first` and one in the second half
         // names `Pair.second`.
         const half: u32 = @intCast(text.len / 2);
-        const first_origin: Origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member, .template_expr = template_expr, .component_ordinal = @enumFromInt(0) };
-        const second_origin: Origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member, .template_expr = template_expr, .component_ordinal = @enumFromInt(1) };
+        const first_origin: Origin = .{ .target = pair_decl, .template_member = template_member, .template_expr = template_expr, .component_ordinal = @enumFromInt(0) };
+        const second_origin: Origin = .{ .target = pair_decl, .template_member = template_member, .template_expr = template_expr, .component_ordinal = @enumFromInt(1) };
         const segments = [_]GeneratedOriginSegment{
             .{ .file = .from(1), .span = .{ .start = 0, .end = half }, .origin = first_origin },
             .{ .file = .from(1), .span = .{ .start = half, .end = @intCast(text.len) }, .origin = second_origin },
@@ -1245,7 +1250,7 @@ pub const ExpandedProgram = struct {
         var generated_implementations: []GeneratedImplementation = &.{};
         var component_requirements: []ComponentRequirement = &.{};
         var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
-            .{ .module = .from(0), .origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member } },
+            .{ .module = .from(0), .origin = .{ .target = pair_decl, .template_member = template_member } },
         }, &.{}, &segments, &.{});
         defer expanded.deinit(gpa);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
@@ -1566,20 +1571,20 @@ pub const ExpandedProgram = struct {
                     label.file = self.source.ast.fileOf(origin.derive_trait);
                     label.span = self.source.ast.tokenSpan(origin.derive_trait);
                     // Said already inside the entry this was generated
-                    // from, or inside the head a standalone request writes
-                    // after its entries, which the implementation copies too.
+                    // from, or inside the clause its item writes after its
+                    // traits, which the implementation copies too.
                     if (written.get(try saying(sink.arena, diagnostic))) |sites| {
                         var end = self.deriveEntryEnd(origin.derive_trait);
-                        if (self.source.ast.declTag(origin.derive) == .derive_impl) {
-                            end = @max(end, self.source.ast.writtenWholeSpan(self.source.ast.declHead(origin.derive)).end);
+                        if (self.source.ast.attributeGroupAt(origin.derive_trait)) |group| {
+                            end = @max(end, self.source.ast.tokenSpan(TokenId.at(group.tokens.end.index() - 1)).end);
                         }
                         for (sites.items) |site| {
                             if (site.file == label.file and site.at >= label.span.start and site.at < end) continue :each;
                         }
                     }
                 } else {
-                    label.file = self.source.ast.fileOfDecl(origin.derive);
-                    label.span = self.source.ast.declSpan(origin.derive);
+                    label.file = self.source.ast.fileOfDecl(origin.target);
+                    label.span = self.source.ast.declSpan(origin.target);
                 }
             }
             @memcpy(labels[diagnostic.labels.len..], extra.items);
@@ -1606,11 +1611,11 @@ pub const ExpandedProgram = struct {
         const files = [_]parser.ParsedFile{.{
             .file = .from(0),
             .source = Source{ .path = "root.lin", .text =
+            \\@derive(Structural)
             \\struct Pair { first: UInt8, second: UInt8 }
             \\template impl Structural {
             \\    fn value(self: Self) -> UInt8 { 0 }
             \\}
-            \\derive Structural for Pair
             \\
             },
         }};
@@ -1625,8 +1630,10 @@ pub const ExpandedProgram = struct {
         for (0..source.ast.declCount()) |i| {
             const id = DeclId.at(@intCast(i));
             switch (source.ast.declTag(id)) {
-                .struct_ => pair_decl = id,
-                .derive_impl => derive_decl = id,
+                .struct_ => {
+                    pair_decl = id;
+                    derive_decl = id;
+                },
                 .function => template_member = id,
                 else => {},
             }
@@ -1659,8 +1666,8 @@ pub const ExpandedProgram = struct {
         // `Pair.first`, the second for no component. A diagnostic with a
         // label in each captions that expression once, for `Pair.first`.
         const half: u32 = @intCast(text.len / 2);
-        const captioned: Origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member, .template_expr = template_expr, .component_ordinal = @enumFromInt(0) };
-        const plain: Origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member, .template_expr = template_expr };
+        const captioned: Origin = .{ .target = pair_decl, .template_member = template_member, .template_expr = template_expr, .component_ordinal = @enumFromInt(0) };
+        const plain: Origin = .{ .target = pair_decl, .template_member = template_member, .template_expr = template_expr };
         const segments = [_]GeneratedOriginSegment{
             .{ .file = .from(1), .span = .{ .start = 0, .end = half }, .origin = captioned },
             .{ .file = .from(1), .span = .{ .start = half, .end = @intCast(text.len) }, .origin = plain },
@@ -1668,7 +1675,7 @@ pub const ExpandedProgram = struct {
         var generated_implementations: []GeneratedImplementation = &.{};
         var component_requirements: []ComponentRequirement = &.{};
         var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
-            .{ .module = .from(0), .origin = .{ .derive = derive_decl, .target = pair_decl, .template_member = template_member } },
+            .{ .module = .from(0), .origin = .{ .target = pair_decl, .template_member = template_member } },
         }, &.{}, &segments, &.{});
         defer expanded.deinit(gpa);
         try testing.expectEqual(@as(u32, 0), sink.error_count);
@@ -1748,7 +1755,8 @@ test "expanded module roots" {
         \\template impl Structural {
         \\    fn value(self: Self) -> UInt8 { 0 }
         \\}
-        \\derive Structural for Mark
+        \\@derive(Structural)
+        \\struct Mark {}
         \\
         },
     }};
@@ -1780,12 +1788,12 @@ test "expanded module roots" {
     const derive_trait_token = source.ast.deriveTrait(derive_trait).ref.name;
     try testing.expect(validSourceOrigin(
         &source.ast,
-        .{ .derive = .at(4), .derive_trait = derive_trait_token },
+        .{ .target = .at(4), .derive_trait = derive_trait_token },
         derive_trait,
     ));
     try testing.expect(!validSourceOrigin(
         &source.ast,
-        .{ .derive = .at(4), .derive_trait = derive_trait_token },
+        .{ .target = .at(4), .derive_trait = derive_trait_token },
         .none,
     ));
 
@@ -1838,7 +1846,7 @@ test "expanded module roots" {
             .file = .from(2),
             .span = .{ .start = 0, .end = @intCast(generated_texts[0].len) },
             .origin = .{
-                .derive = .at(4),
+                .target = .at(4),
                 .template_member = .at(2),
                 .template_expr = template_expr,
                 .component_ordinal = @enumFromInt(1),
@@ -1848,7 +1856,7 @@ test "expanded module roots" {
             .file = .from(2),
             .span = .{ .start = segment_start, .end = segment_end },
             .origin = .{
-                .derive = .at(4),
+                .target = .at(4),
                 .template_member = .at(2),
                 .template_expr = template_expr,
                 .component_ordinal = @enumFromInt(2),
@@ -1858,7 +1866,7 @@ test "expanded module roots" {
             .file = .from(2),
             .span = .{ .start = literal_start, .end = literal_start + 1 },
             .origin = .{
-                .derive = .at(4),
+                .target = .at(4),
                 .template_member = .at(2),
                 .template_expr = template_expr,
                 .component_ordinal = @enumFromInt(3),
@@ -1896,10 +1904,10 @@ test "expanded module roots" {
     var generated_implementations: []GeneratedImplementation = &.{};
     var component_requirements: []ComponentRequirement = &.{};
     var expanded = try ExpandedProgram.init(gpa, &source, &expanded_ast, &expanded_interner, &generated_sources, &.{}, &generated_implementations, &component_requirements, &.{
-        .{ .module = .from(0), .origin = .{ .derive = .at(4), .template_member = .at(2) } },
-        .{ .module = .from(1), .origin = .{ .derive = .at(4) } },
-        .{ .module = .from(0), .origin = .{ .derive = .at(4), .template_member = .at(2) } },
-        .{ .module = .from(1), .origin = .{ .derive = .at(4) } },
+        .{ .module = .from(0), .origin = .{ .target = .at(4), .template_member = .at(2) } },
+        .{ .module = .from(1), .origin = .{ .target = .at(4) } },
+        .{ .module = .from(0), .origin = .{ .target = .at(4), .template_member = .at(2) } },
+        .{ .module = .from(1), .origin = .{ .target = .at(4) } },
     }, &.{}, &fine_segments, &.{});
     defer expanded.deinit(gpa);
     generated_sources.deinit(gpa);
@@ -1914,18 +1922,18 @@ test "expanded module roots" {
     try testing.expectEqual(ModuleId.from(1), expanded.moduleOf(.at(3)));
     try testing.expect(!expanded.isActive(.at(2)));
     try testing.expect(!expanded.isActive(.at(3)));
-    try testing.expect(!expanded.isActive(.at(4)));
+    try testing.expect(expanded.isActive(.at(4)));
     try testing.expectEqual(ModuleId.from(0), expanded.moduleOf(.at(5)));
     try testing.expectEqual(ModuleId.from(1), expanded.moduleOf(.at(6)));
     try testing.expectEqual(ModuleId.from(0), expanded.moduleOf(.at(7)));
     try testing.expectEqual(ModuleId.from(1), expanded.moduleOf(.at(8)));
     try testing.expectEqualSlices(DeclId, &.{ .at(0), .at(1), .at(5), .at(7) }, expanded.declsOf(.from(0)));
-    try testing.expectEqualSlices(DeclId, &.{ .at(6), .at(8) }, expanded.declsOf(.from(1)));
+    try testing.expectEqualSlices(DeclId, &.{ .at(4), .at(6), .at(8) }, expanded.declsOf(.from(1)));
     try testing.expect(expanded.isActive(.at(5)));
-    try testing.expectEqual(Origin{ .derive = .at(4), .template_member = .at(2) }, expanded.originOf(.at(5)).?);
-    try testing.expectEqual(Origin{ .derive = .at(4) }, expanded.originOf(.at(6)).?);
-    try testing.expectEqual(Origin{ .derive = .at(4), .template_member = .at(2) }, expanded.originOf(.at(7)).?);
-    try testing.expectEqual(Origin{ .derive = .at(4) }, expanded.originOf(.at(8)).?);
+    try testing.expectEqual(Origin{ .target = .at(4), .template_member = .at(2) }, expanded.originOf(.at(5)).?);
+    try testing.expectEqual(Origin{ .target = .at(4) }, expanded.originOf(.at(6)).?);
+    try testing.expectEqual(Origin{ .target = .at(4), .template_member = .at(2) }, expanded.originOf(.at(7)).?);
+    try testing.expectEqual(Origin{ .target = .at(4) }, expanded.originOf(.at(8)).?);
     try testing.expectEqual(@as(?Origin, null), expanded.originOf(.at(0)));
 
     var diagnostic_arena = std.heap.ArenaAllocator.init(gpa);
@@ -1955,7 +1963,7 @@ test "expanded module roots" {
     try testing.expectEqual(@as(usize, 9), expanded.decl_modules.len());
     try testing.expectEqual(@as(usize, 9), expanded.active.len());
     try testing.expectEqual(@as(usize, 2), expanded.module_decl_ranges.len());
-    try testing.expectEqual(@as(usize, 6), expanded.module_decls.len);
+    try testing.expectEqual(@as(usize, 7), expanded.module_decls.len);
     try testing.expectEqual(@as(usize, 9), expanded.origins.len());
     try testing.expectEqual(@as(usize, 0), expanded.template_members.len);
     try testing.expectEqual(source_name_count + 5, expanded.interner.count());
@@ -2012,31 +2020,31 @@ test "expanded module roots" {
 }
 
 test "expanded module roots reject invalid generated metadata" {
-    const valid = GeneratedDecl{ .module = .from(0), .origin = .{ .derive = .at(4) } };
+    const valid = GeneratedDecl{ .module = .from(0), .origin = .{ .target = .at(4) } };
     try testing.expectError(
         error.InvalidGeneratedDeclarationCount,
         ExpandedProgram.validateGenerated(5, 10, 7, 2, &.{valid}),
     );
     try testing.expectError(
         error.InvalidGeneratedModule,
-        ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{.{ .module = .from(2), .origin = .{ .derive = .at(4) } }}),
+        ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{.{ .module = .from(2), .origin = .{ .target = .at(4) } }}),
     );
     try testing.expectError(
         error.InvalidGeneratedOrigin,
-        ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{.{ .module = .from(0), .origin = .{ .derive = .at(5) } }}),
+        ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{.{ .module = .from(0), .origin = .{ .target = .at(5) } }}),
     );
     try testing.expectError(
         error.InvalidGeneratedOrigin,
         ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{.{
             .module = .from(0),
-            .origin = .{ .derive = .at(4), .template_member = .at(5) },
+            .origin = .{ .target = .at(4), .template_member = .at(5) },
         }}),
     );
     try testing.expectError(
         error.InvalidGeneratedOrigin,
         ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{.{
             .module = .from(0),
-            .origin = .{ .derive = .at(4), .derive_trait = .at(10) },
+            .origin = .{ .target = .at(4), .derive_trait = .at(10) },
         }}),
     );
     try ExpandedProgram.validateGenerated(5, 10, 6, 2, &.{valid});
@@ -2064,8 +2072,8 @@ test "expanded program rejects invalid component requirement rows" {
         \\trait Required {}
         \\trait Structural {}
         \\template impl Structural where reflect.components: Required {}
+        \\@derive(Structural)
         \\struct Pair { left: UInt8, right: UInt16 }
-        \\derive Structural for Pair
         \\
         },
     }});
@@ -2090,10 +2098,9 @@ test "expanded program rejects invalid component requirement rows" {
     var expanded_ast = try generated_parser.finish();
     defer expanded_ast.deinit(gpa);
 
-    const derive_trait = node.DeriveTraitId.at(source.ast.deriveTraitRange(.at(4)).start);
+    const derive_trait = node.DeriveTraitId.at(source.ast.deriveTraitRange(.at(3)).start);
     const valid = GeneratedImplementation{
-        .generated_impl = .at(5),
-        .derive = .at(4),
+        .generated_impl = .at(4),
         .derive_trait = derive_trait,
         .target = .at(3),
         .template = .at(2),
@@ -2106,7 +2113,7 @@ test "expanded program rejects invalid component requirement rows" {
     try ExpandedProgram.validateGeneratedImplementations(&source.ast, &expanded_ast, &.{valid}, &rows);
 
     var invalid = valid;
-    invalid.generated_impl = .at(4);
+    invalid.generated_impl = .at(3);
     try testing.expectError(
         error.InvalidGeneratedImplementation,
         ExpandedProgram.validateGeneratedImplementations(&source.ast, &expanded_ast, &.{invalid}, &rows),

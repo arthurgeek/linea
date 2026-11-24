@@ -3477,8 +3477,8 @@ test "ownership skips suppressed generated bodies but builds unrelated bodies" {
         \\{
         \\    fn inspect(_self: Self) -> UInt8 { 0 }
         \\}
+        \\@derive(Inspect where T: Copyable)
         \\struct Box[T] { value: T }
-        \\derive[T] Inspect for Box[T]
         \\fn _unrelated() -> UInt8 { 1 }
         \\fn main() -> UInt8 { 0 }
     };

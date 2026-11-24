@@ -79,7 +79,7 @@ fn kindOf(tag: node.Decl.Tag) ?Kind {
         // module to import. A projection is the same: it is a trait's member,
         // and a bracket reaches it through the trait. A traversal is reached by
         // a walk over the type and never by name.
-        .impl_, .template_impl, .derive_impl, .import_, .associated_type, .projection, .traversal_, .err => null,
+        .impl_, .template_impl, .import_, .associated_type, .projection, .traversal_, .err => null,
     };
 }
 

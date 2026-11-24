@@ -4306,10 +4306,11 @@ fn reflectionComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "        } }\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(Visit)\n" ++
             "struct Big {\n",
     );
     for (0..n) |i| try w.print("    f{d}: UInt8,\n", .{i});
-    try w.writeAll("}\n\nderive Visit for Big\n\nfn main() -> UInt8 {\n    let value: Big = .{ ");
+    try w.writeAll("}\n\nfn main() -> UInt8 {\n    let value: Big = .{ ");
     for (0..n) |i| {
         if (i > 0) try w.writeAll(", ");
         try w.print("f{d} = 1", .{i});
@@ -4350,18 +4351,17 @@ const constructionSweepPrelude =
 ;
 
 /// One flat construction recipe expands once per field, with one applied
-/// component requirement and a trait-only parameter on the generated impl.
+/// component requirement and a closed trait argument on the generated impl.
 fn constructionProductModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     std.debug.assert(n > 0);
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
     const w = &out.writer;
     try w.writeAll(constructionSweepPrelude);
-    try w.writeAll("struct Product {\n");
+    try w.writeAll("@derive(Construct[Bool])\nstruct Product {\n");
     for (0..n) |i| try w.print("    f{d}: UInt8,\n", .{i});
     try w.writeAll(
         "}\n" ++
-            "derive[A: Copyable] Construct[A] for Product\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let product: Product = Construct.construct(true)\n" ++
             "    product.f0\n" ++
@@ -4378,8 +4378,7 @@ fn constructionDerivesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
     try w.writeAll(constructionSweepPrelude);
     for (0..n) |i| {
-        try w.print("struct Product{d} {{ first: UInt8, second: UInt8 }}\n", .{i});
-        try w.print("derive[A: Copyable] Construct[A] for Product{d}\n", .{i});
+        try w.print("@derive(Construct[Bool])\nstruct Product{d} {{ first: UInt8, second: UInt8 }}\n", .{i});
     }
     try w.writeAll("fn main() -> UInt8 {\n");
     for (0..n) |i| try w.print("    let _product{d}: Product{d} = Construct.construct(true)\n", .{ i, i });
@@ -4408,12 +4407,12 @@ fn reflectedEnumCasesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "        } }\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(CaseOrdinal)\n" ++
             "enum Cases {\n",
     );
     for (0..n) |i| try w.print("    Case{d},\n", .{i});
     try w.writeAll(
         "}\n\n" ++
-            "derive CaseOrdinal for Cases\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _case: Cases = .Case0\n" ++
             "    0\n" ++
@@ -4440,13 +4439,14 @@ fn reflectedEnumPayloadsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "        } }\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(VisitPayloads)\n" ++
             "enum Payloads { Value(",
     );
     for (0..n) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.writeAll("UInt8");
     }
-    try w.writeAll(") }\n\nderive VisitPayloads for Payloads\n\nfn main() -> UInt8 {\n    let value = Payloads.Value(");
+    try w.writeAll(") }\n\nfn main() -> UInt8 {\n    let value = Payloads.Value(");
     for (0..n) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.writeAll("0");
@@ -4473,8 +4473,8 @@ fn reflectedOrdinalOperationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
         "        UInt64(0)\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(ObserveOrdinals)\n" ++
             "enum Observed { First, Second }\n\n" ++
-            "derive ObserveOrdinals for Observed\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let value: Observed = .First\n" ++
             "    let _answer = ObserveOrdinals.observe(value)\n" ++
@@ -4527,10 +4527,10 @@ fn deriveGroupEntriesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             .{ i, i },
         );
     }
-    try w.writeAll("struct GroupTarget { value: UInt8 }\n\nderive (\n");
+    try w.writeAll("@derive(\n");
     for (0..n) |i| try w.print("    Group{d},\n", .{i});
     try w.writeAll(
-        ") for GroupTarget\n\n" ++
+        ")\nstruct GroupTarget { value: UInt8 }\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _value: GroupTarget = .{ value = 0 }\n" ++
             "    0\n" ++
@@ -4563,11 +4563,11 @@ fn structuralSupertraitConstraintsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             .{dependent},
         );
     }
-    try w.writeAll("struct Item {}\n\nderive (\n");
+    try w.writeAll("@derive(\n");
     for (0..n) |i| try w.print("    Base{d},\n", .{i});
     for (0..dependent_count) |dependent| try w.print("    Law{d},\n", .{dependent});
     try w.writeAll(
-        ") for Item\n\n" ++
+        ")\nstruct Item {}\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _item: Item = .{}\n" ++
             "    0\n" ++
@@ -4589,12 +4589,12 @@ fn genericDerivePredicatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
         "trait Predicate {}\n\n" ++
             "trait PredicateTarget {}\n\n" ++
             "template impl PredicateTarget where reflect.components: Predicate {}\n\n" ++
-            "struct GenericTarget[T] { value: T }\n\n" ++
-            "derive[T] PredicateTarget for GenericTarget[T] where\n",
+            "@derive(PredicateTarget where\n",
     );
     for (0..n) |_| try w.writeAll("    T: Predicate,\n");
     try w.writeAll(
-        "\nfn _hold[T](_value: GenericTarget[T]) {}\n\n" ++
+        ")\nstruct GenericTarget[T] { value: T }\n\n" ++
+            "fn _hold[T](_value: GenericTarget[T]) {}\n\n" ++
             "fn main() -> UInt8 { 0 }\n",
     );
     return out.toOwnedSlice();
@@ -4616,8 +4616,8 @@ fn derivedCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "template impl Settle where reflect.components: Settle {}\n\n",
     );
     for (0..n) |i| {
+        try w.print("@derive(Settle where X: Settle, Ring{d}[X]: Settle, Ring{d}[X]: Settle)\n", .{ (i + 1) % n, (i + 2) % n });
         try w.print("struct Ring{d}[X] {{ x: X }}\n\n", .{i});
-        try w.print("derive[X: Settle] Settle for Ring{d}[X] where Ring{d}[X]: Settle, Ring{d}[X]: Settle\n\n", .{ i, (i + 1) % n, (i + 2) % n });
     }
     try w.writeAll(
         "fn settled[T: Settle](_value: T) {}\n\n" ++
@@ -4638,10 +4638,11 @@ fn componentRequirementComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "impl ComponentBound for UInt8 {}\n\n" ++
             "trait ComponentsTarget {}\n\n" ++
             "template impl ComponentsTarget where reflect.components: ComponentBound {}\n\n" ++
+            "@derive(ComponentsTarget)\n" ++
             "struct ManyComponents {\n",
     );
     for (0..n) |i| try w.print("    f{d}: UInt8,\n", .{i});
-    try w.writeAll("}\n\nderive ComponentsTarget for ManyComponents\n\nfn main() -> UInt8 {\n    let _value: ManyComponents = .{ ");
+    try w.writeAll("}\n\nfn main() -> UInt8 {\n    let _value: ManyComponents = .{ ");
     for (0..n) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.print("f{d} = 0", .{i});
@@ -4667,8 +4668,8 @@ fn componentRequirementsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     }
     try w.writeAll(
         " {}\n\n" ++
+            "@derive(RequirementsTarget)\n" ++
             "struct OneComponent { value: UInt8 }\n\n" ++
-            "derive RequirementsTarget for OneComponent\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _value: OneComponent = .{ value = 0 }\n" ++
             "    0\n" ++
@@ -4696,9 +4697,9 @@ fn componentRequirementRowsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
         if (i != 0) try w.writeAll(" + ");
         try w.print("RowBound{d}", .{i});
     }
-    try w.writeAll(" {}\n\nstruct RowComponents {\n");
+    try w.writeAll(" {}\n\n@derive(RowsTarget)\nstruct RowComponents {\n");
     for (0..components) |i| try w.print("    f{d}: UInt8,\n", .{i});
-    try w.writeAll("}\n\nderive RowsTarget for RowComponents\n\nfn main() -> UInt8 {\n    let _value: RowComponents = .{ ");
+    try w.writeAll("}\n\nfn main() -> UInt8 {\n    let _value: RowComponents = .{ ");
     for (0..components) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.print("f{d} = 0", .{i});
@@ -4736,8 +4737,8 @@ fn templateMemberParametersModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     try w.writeAll(
         ") -> UInt8 { 0 }\n" ++
             "}\n\n" ++
+            "@derive(Structural)\n" ++
             "struct Target {}\n\n" ++
-            "derive Structural for Target\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _value: Target = .{}\n" ++
             "    0\n" ++
@@ -10340,6 +10341,7 @@ test "session errors retain earlier logs and updates" {
 
     const result = try checkSession(
         scratch.allocator(),
+        scratch.child_allocator,
         keep.allocator(),
         testing.io,
         test_library.get(),
@@ -12056,9 +12058,16 @@ fn checkRenameApplies(
     var it = first.iterator();
     while (it.next()) |entry| {
         if (entry.value.* == resolve_mod.BindingId.none) continue;
-        if (try renameHolds(gpa, backing, io, failures, display_path, case, checked, entry.value.*)) {
-            asked = true;
-        }
+        // A rename's trial analysis and edits end with this one subject.
+        // Only the report, if it failed, belongs to the case.
+        var trial = std.heap.ArenaAllocator.init(backing);
+        defer trial.deinit();
+        var found: std.ArrayList(Failure) = .empty;
+        if (try renameHolds(trial.allocator(), backing, io, &found, display_path, case, checked, entry.value.*)) asked = true;
+        try failures.ensureUnusedCapacity(gpa, found.items.len);
+        const retained = try retainFailures(gpa, found.items);
+        defer gpa.free(retained);
+        failures.appendSliceAssumeCapacity(retained);
     }
     return asked;
 }
@@ -12217,6 +12226,17 @@ test "slow: rename validation preserves compiler diagnostics and manifest semant
             var rendered: std.Io.Writer.Allocating = .init(gpa);
             try render.renderAll(&rendered.writer, &expected.table, &expected.sink, .{ .color = .never });
             try testing.expectEqualStrings(rendered.written(), failures.items[0].actual);
+            if (fixture == 1) {
+                var samples: std.ArrayList(Failure) = .empty;
+                try testing.expect(try checkRenameApplies(gpa, testing.allocator, testing.io, &samples, case.display_path, case, &checked));
+                for (samples.items) |sample| {
+                    if (!std.mem.eql(u8, sample.expected, failures.items[0].expected)) continue;
+                    try testing.expectEqualStrings(case.display_path, sample.path);
+                    try testing.expectEqualStrings(failures.items[0].what, sample.what);
+                    try testing.expectEqualStrings(rendered.written(), sample.actual);
+                    break;
+                } else return error.TestExpectedEqual;
+            }
         } else try testing.expectEqual(@as(usize, 0), failures.items.len);
     }
 }
@@ -13643,9 +13663,28 @@ fn checkSettledRefs(
                     try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, a);
                 }
             }
-            for (ast.deriveTraits(d)) |entry| {
+            // A derive item's clause is read once, at its first trait.
+            var clause_keyword = TokenId.none;
+            for (ast.attachedDeriveTraits(d)) |entry| {
                 for (ast.typeArgs(entry.ref.args)) |argument| {
                     try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, argument);
+                }
+                if (entry.clause.item() == clause_keyword) continue;
+                clause_keyword = entry.clause.item();
+                switch (entry.clause.kind) {
+                    .inferred, .refused => {},
+                    .application => for (ast.typeArgs(entry.clause.head.args)) |argument| {
+                        try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, argument);
+                    },
+                    .environment => for (ast.where_predicates[entry.clause.where_predicates.start..entry.clause.where_predicates.end]) |predicate| {
+                        if (predicate.subject.kind == .selection) {
+                            try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, ast.selectionBase(predicate.subject));
+                        }
+                        for (ast.typeArgs(predicate.subject.args)) |a| {
+                            try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, a);
+                        }
+                        try heldBoundArguments(gpa, &work, ast, program, typing, in_library, d, ast.boundsIn(predicate.bounds));
+                    },
                 }
             }
             try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, ast.declReturnRef(d));
@@ -15206,6 +15245,49 @@ fn layOutCase(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, case: Case) !
     }
 }
 
+test "slow: an editor replay releases its analyses before the case ends" {
+    try slow_tests.skipUnlessRun();
+    var setup = std.heap.ArenaAllocator.init(testing.allocator);
+    defer setup.deinit();
+    const a = setup.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(testing.io, ".", a);
+    const case: Case = .{
+        .display_path = "app",
+        .stem = "app",
+        .entry = "app",
+        .files = &.{
+            .{ .path = "app/main.lin", .text = "fn main() -> UInt8 { answer() }\n" },
+            .{ .path = "app/answer.lin", .text = "fn answer() -> UInt8 { 7 }\n" },
+        },
+    };
+    const checked_library = test_library.get();
+    const capacity = reference: {
+        var checked = try lsp_analysis.of(a, testing.allocator, checked_library, case.files, case.entry);
+        defer checked.deinit();
+        try testing.expect(!checked.sink.hasErrors());
+        break :reference checked.arena.queryCapacity();
+    };
+    var table: FileTable = .empty;
+    var sink = Sink.init(a);
+    var interner: Interner = .empty;
+    const program = try checked_library.loadModuleFromMemory(a, &table, &sink, &interner, case.entry, null, case.files, .program, .borrow);
+    try table.buildMaps(a);
+
+    var result = std.heap.ArenaAllocator.init(testing.allocator);
+    defer result.deinit();
+    var failures: std.ArrayList(Failure) = .empty;
+    var region_allocations = testing.FailingAllocator.init(testing.allocator, .{});
+    try checkSurvives(result.allocator(), region_allocations.allocator(), testing.io, checked_library, &failures, root, case, 0, &program, &table, true);
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+    const retained = result.queryCapacity();
+    if (retained >= capacity) std.debug.print("case retains {d} bytes after replay; one analysis holds {d} bytes\n", .{ retained, capacity });
+    try testing.expect(retained < capacity);
+    try testing.expect(region_allocations.allocated_bytes > 0);
+    try testing.expectEqual(region_allocations.allocated_bytes, region_allocations.freed_bytes);
+}
+
 /// One request a script sent, so the transcript can be held to what was asked
 /// rather than to how many bytes came back.
 const Asked = struct {
@@ -15660,6 +15742,22 @@ fn shapeWanted(method: []const u8, result: std.json.Value) ?[]const u8 {
     return null;
 }
 
+/// Message buffers live for one replay. The server replaces document analyses
+/// during that replay, so their regions use the reclaiming backing directly.
+fn replaySession(
+    backing: std.mem.Allocator,
+    io: std.Io,
+    checked_library: *const loader.CheckedLibrary,
+    dir: []const u8,
+    requests: []const u8,
+    out: *std.Io.Writer,
+    logs: ?*std.Io.Writer,
+) !u8 {
+    var messages = std.heap.ArenaAllocator.init(backing);
+    defer messages.deinit();
+    return session.replay(messages.allocator(), backing, io, checked_library, dir, requests, out, logs);
+}
+
 /// A server driven over any program finishes, and answers.
 ///
 /// The guarantee the frontend already makes -- no input is refused, every
@@ -15705,6 +15803,7 @@ fn shapeWanted(method: []const u8, result: std.json.Value) ?[]const u8 {
 /// the script sent and one per file of the case, never one per message.
 fn checkSurvives(
     gpa: std.mem.Allocator,
+    backing: std.mem.Allocator,
     io: std.Io,
     checked_library: *const loader.CheckedLibrary,
     failures: *std.ArrayList(Failure),
@@ -15732,7 +15831,7 @@ fn checkSurvives(
     const status = replayed: {
         const replay_zone = tracy.beginZone(@src(), "replay");
         defer replay_zone.end();
-        break :replayed session.replay(gpa, io, checked_library, dir, script.text, &out.writer, null) catch |err| {
+        break :replayed replaySession(backing, io, checked_library, dir, script.text, &out.writer, null) catch |err| {
             try failures.append(gpa, .{
                 .path = case.display_path,
                 .what = "a server finishes a session over any program",
@@ -15758,7 +15857,7 @@ fn checkSurvives(
     // Read once into a scratch arena: the transcript's values are looked at
     // here and nothing below this call holds one, so what a case costs the run
     // is its failures and not its answers.
-    var reading = std.heap.ArenaAllocator.init(gpa);
+    var reading = std.heap.ArenaAllocator.init(backing);
     defer reading.deinit();
     const scratch_gpa = reading.allocator();
 
@@ -15998,6 +16097,7 @@ fn heldTwice(
 
 fn checkSessionWork(
     scratch: std.mem.Allocator,
+    backing: std.mem.Allocator,
     io: std.Io,
     checked_library: *const loader.CheckedLibrary,
     tests_dir_path: []const u8,
@@ -16021,10 +16121,10 @@ fn checkSessionWork(
     session_zone.setText(display);
 
     var out: std.Io.Writer.Allocating = .init(scratch);
-    _ = try session.replay(scratch, io, checked_library, full_dir, requests, &out.writer, &logs.writer);
+    _ = try replaySession(backing, io, checked_library, full_dir, requests, &out.writer, &logs.writer);
 
     var again: std.Io.Writer.Allocating = .init(scratch);
-    _ = try session.replay(scratch, io, checked_library, full_dir, requests, &again.writer, &logs.writer);
+    _ = try replaySession(backing, io, checked_library, full_dir, requests, &again.writer, &logs.writer);
     const stable = std.mem.eql(u8, out.written(), again.written());
     if (!stable) {
         try failures.append(scratch, .{
@@ -16083,6 +16183,7 @@ fn checkSessionWork(
 
 fn checkSession(
     scratch: std.mem.Allocator,
+    backing: std.mem.Allocator,
     keep: std.mem.Allocator,
     io: std.Io,
     checked_library: *const loader.CheckedLibrary,
@@ -16096,6 +16197,7 @@ fn checkSession(
     var result: SessionResult = .{};
     checkSessionWork(
         scratch,
+        backing,
         io,
         checked_library,
         tests_dir_path,
@@ -16135,6 +16237,7 @@ const SessionWalk = struct {
             _ = per_session.reset(.{ .retain_with_limit = 4 << 20 });
             results[at] = checkSession(
                 per_session.allocator(),
+                per_session.child_allocator,
                 keep.allocator(),
                 io,
                 checked_library,
@@ -16568,6 +16671,7 @@ fn emitOrRecord(
 test "canonical call index covers generated expressions" {
     const gpa = testing.allocator;
     var checked = try lsp_analysis.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
+        \\@derive(Structural)
         \\struct Mark {}
         \\trait Literal { fn value(self: Self) -> UInt8 }
         \\impl Literal for UInt8 {
@@ -16580,7 +16684,6 @@ test "canonical call index covers generated expressions" {
         \\        n.value()
         \\    }
         \\}
-        \\derive Structural for Mark
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{}
         \\    Structural.result(mark)
@@ -19617,6 +19720,7 @@ test "dump mono renders generated members from expanded syntax" {
     const gpa = arena.allocator();
 
     const text =
+        \\@derive(Structural)
         \\struct Mark {}
         \\
         \\trait Structural {
@@ -19626,8 +19730,6 @@ test "dump mono renders generated members from expanded syntax" {
         \\template impl Structural {
         \\    fn value(_self: Self) -> UInt8 { 7 }
         \\}
-        \\
-        \\derive Structural for Mark
         \\
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{}
@@ -23135,31 +23237,35 @@ fn checkCase(
         // is a program or library. This remains a second load and check, independent
         // of the compiler answers above; publication and rename only share that
         // independent answer with each other.
-        var lsp_checked = try lsp_analysis.of(gpa, gpa, env.library, try inputsOf(gpa, case), case.entry);
-        defer lsp_checked.deinit();
+        {
+            var editor = std.heap.ArenaAllocator.init(scratch_parent);
+            defer editor.deinit();
+            var lsp_checked = try lsp_analysis.of(editor.allocator(), scratch_parent, env.library, try inputsOf(gpa, case), case.entry);
+            defer lsp_checked.deinit();
 
-        tally(&w.properties, &w.passed_over, .published_diagnostics, carriable);
-        if (carriable) {
-            try checkPublished(gpa, &w.failures, display_path, &lsp_checked, &program, &table, &sink);
+            tally(&w.properties, &w.passed_over, .published_diagnostics, carriable);
+            if (carriable) {
+                try checkPublished(gpa, &w.failures, display_path, &lsp_checked, &program, &table, &sink);
+            }
+
+            // Property: a rename the server answers, applied to the case's own
+            // source, leaves a program that still compiles. Above the code
+            // generation, because a rename is a question about the source rather
+            // than about what it lowers to.
+            tally(
+                &w.properties,
+                &w.passed_over,
+                .renamed,
+                try checkRenameApplies(gpa, scratch_parent, io, &w.failures, display_path, case, &lsp_checked),
+            );
         }
-
-        // Property: a rename the server answers, applied to the case's own
-        // source, leaves a program that still compiles. Above the code
-        // generation, because a rename is a question about the source rather
-        // than about what it lowers to.
-        tally(
-            &w.properties,
-            &w.passed_over,
-            .renamed,
-            try checkRenameApplies(gpa, scratch_parent, io, &w.failures, display_path, case, &lsp_checked),
-        );
 
         // Property: a server driven through the protocol over this program
         // finishes and answers. Counted per file, because every file of the
         // case is opened as a document of its own.
         for (case.files) |_| tally(&w.properties, &w.passed_over, .survives, carriable);
         if (carriable) {
-            try checkSurvives(gpa, io, env.library, &w.failures, env.scratch_dir, case, ordinal, &program, &table, !rejected);
+            try checkSurvives(gpa, scratch_parent, io, env.library, &w.failures, env.scratch_dir, case, ordinal, &program, &table, !rejected);
         }
         lsp_zone.end();
     }
@@ -23791,8 +23897,8 @@ test "derive arguments receive every selected reference oracle visit" {
         \\template impl[A] Use[A] {
         \\    fn consume(_value: A) -> UInt8 { 0 }
         \\}
+        \\@derive(Use[Token.Item])
         \\struct Target {}
-        \\derive Use[Token.Item] for Target
         \\fn main() -> UInt8 { let _target: Target = .{}; 0 }
     }}, "main.lin");
     defer checked.deinit();

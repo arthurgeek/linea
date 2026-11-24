@@ -43,7 +43,7 @@ fn kindOf(tag: node.Decl.Tag) ?lsp.types.SymbolKind {
         // do -- so it is the one entry that names something other than what it
         // declares. `Object` is what the protocol has for a grouping that is
         // neither a type nor a namespace.
-        .impl_, .template_impl, .derive_impl => .Object,
+        .impl_, .template_impl => .Object,
         .trait_ => .Interface,
         // A name standing for a type, which is what the protocol's
         // `TypeParameter` is: what it stands for is settled elsewhere.
@@ -134,7 +134,7 @@ pub fn forFile(
     for (out, found.items, 0..) |*symbol, d, i| {
         // A tuple, unit or callable head has no name token: it is named as
         // written.
-        const headed = ast.declTag(d) == .impl_ or ast.declTag(d) == .derive_impl;
+        const headed = ast.declTag(d) == .impl_;
         // A test is named by its string, shown after `test` as it is written
         // so the outline tells it from a function of the same words.
         const name = if (headed)
@@ -350,38 +350,7 @@ test "a callable implementation symbol names its complete head" {
     try testing.expectEqual(@as(usize, 2), seen);
 }
 
-test "a derive symbol selects the name its head applies, as an implementation's does" {
-    const gpa = testing.allocator;
-    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
-        \\trait Marker {}
-        \\
-        \\template impl Marker {}
-        \\
-        \\struct Box[T] {
-        \\    value: T,
-        \\}
-        \\
-        \\derive[T] Marker for Box[T]
-        \\
-        \\fn main() -> UInt8 { 0 }
-        \\
-    }}, "main.lin");
-    defer checked.deinit();
-
-    const found = try forFile(gpa, &checked, checked.fileNamed("main.lin").?, .@"utf-16");
-    defer free(gpa, found);
-
-    for (found) |symbol| {
-        if (symbol.kind != .Object or !std.mem.eql(u8, symbol.name, "Box")) continue;
-        // The three columns `Box` occupies, not its argument list.
-        try testing.expectEqual(lsp.types.Position{ .line = 8, .character = 21 }, symbol.selectionRange.start);
-        try testing.expectEqual(lsp.types.Position{ .line = 8, .character = 24 }, symbol.selectionRange.end);
-        return;
-    }
-    return error.TestExpectedEqual;
-}
-
-test "grouped derives remain one source symbol" {
+test "a derived type is one source symbol" {
     const gpa = testing.allocator;
     const text = @import("references.zig").structural_derive_source;
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
@@ -391,18 +360,22 @@ test "grouped derives remain one source symbol" {
     const found = try forFile(gpa, &checked, checked.fileNamed("main.lin").?, .@"utf-16");
     defer free(gpa, found);
 
-    var box_groups: usize = 0;
-    var solo_groups: usize = 0;
-    var generated_groups: usize = 0;
+    // Each type is one symbol, and no implementation a derive generated is
+    // listed beside it.
+    var box: usize = 0;
+    var solo: usize = 0;
+    var generated: usize = 0;
     for (found) |symbol| {
-        if (symbol.kind != .Object) continue;
-        if (std.mem.eql(u8, symbol.name, "Box")) box_groups += 1;
-        if (std.mem.eql(u8, symbol.name, "Solo")) solo_groups += 1;
-        if (std.mem.eql(u8, symbol.name, "Generated")) generated_groups += 1;
+        if (std.mem.eql(u8, symbol.name, "Box") or std.mem.eql(u8, symbol.name, "Solo") or std.mem.eql(u8, symbol.name, "Generated")) {
+            try testing.expect(symbol.kind != .Object);
+        }
+        if (std.mem.eql(u8, symbol.name, "Box")) box += 1;
+        if (std.mem.eql(u8, symbol.name, "Solo")) solo += 1;
+        if (std.mem.eql(u8, symbol.name, "Generated")) generated += 1;
     }
-    try testing.expectEqual(@as(usize, 1), box_groups);
-    try testing.expectEqual(@as(usize, 1), solo_groups);
-    try testing.expectEqual(@as(usize, 1), generated_groups);
+    try testing.expectEqual(@as(usize, 1), box);
+    try testing.expectEqual(@as(usize, 1), solo);
+    try testing.expectEqual(@as(usize, 1), generated);
 }
 
 test "the outline is the file's declarations, not its module's" {

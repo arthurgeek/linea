@@ -1,9 +1,8 @@
+@derive(Equatable, Equivalent, Comparable, Ordered)
 enum Priority {
     Later(UInt8, UInt8),
     Earlier(UInt8, UInt8),
 }
-
-derive (Equatable, Equivalent, Comparable, Ordered) for Priority
 
 fn main() -> UInt8 {
     if !Comparable.less(Priority.Later(9, 9), Priority.Earlier(0, 0)) {

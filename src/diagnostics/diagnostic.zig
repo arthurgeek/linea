@@ -29,6 +29,7 @@ pub const Severity = enum {
 pub const Code = enum {
     // Grammar. §2.
     s_entry,
+    s_derive,
     s_test,
     /// An `export` written on an impl member.
     s_export,
@@ -412,6 +413,7 @@ pub const Code = enum {
     pub fn ruleName(self: Code) []const u8 {
         return switch (self) {
             .s_entry => "S-Entry",
+            .s_derive => "S-Derive",
             .s_test => "S-Test",
             .s_export => "S-Export",
             .s_extern => "S-Extern",
@@ -642,6 +644,12 @@ pub const FixKind = enum {
     copy_argument,
     /// `copy(...)` around a range place bound by a `let` or `var`.
     copy_run,
+    /// The `@derive(...)` attribute written on a type's declaration in
+    /// place of a standalone `derive … for …`.
+    attached_derive,
+    /// A derive binder [T-Derive] refuses for repeating one of the type's own
+    /// parameters, removed.
+    drop_derive_binder,
 
     /// The name a tool reads, as JSON writes it.
     pub fn text(self: FixKind) []const u8 {

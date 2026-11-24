@@ -14,6 +14,7 @@ struct Vec[T, A: Allocator = SystemAllocator] {
 
 // A PushFailure returns the value a vector could not take, with the allocation
 // reason.
+@derive(Release)
 pub struct PushFailure[T] {
     reason: Oom,
     value: T,
@@ -34,8 +35,6 @@ impl[T] Display for PushFailure[T] {
         self.reason.fmt(&w)
     }
 }
-
-derive[T: Release] Release for PushFailure[T]
 
 // Settling a refused push releases the value and keeps the allocation reason.
 impl[T: Release] release.Settle for PushFailure[T] {

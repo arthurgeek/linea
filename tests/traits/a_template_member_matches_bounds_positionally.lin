@@ -24,9 +24,8 @@ enum Right {
 
 impl Relation[Left] for Right {}
 
+@derive(Structural)
 struct Item {}
-
-derive Structural for Item
 
 fn main() -> UInt8 {
     let item: Item = .{}

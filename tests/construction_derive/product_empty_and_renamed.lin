@@ -21,13 +21,11 @@ template impl Zero where reflect.target: struct, reflect.components: Zero {
     }
 }
 
+@derive(Zero)
 struct Empty {}
 
+@derive(Zero where T: Zero)
 struct Record[T] { value: T }
-
-derive Zero for Empty
-
-derive[U: Zero] Zero for Record[U]
 
 fn main() -> UInt8 {
     let _empty: Empty = Zero.zero()

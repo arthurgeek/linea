@@ -1,12 +1,11 @@
 import std.json
 
+@derive(json.Encode)
 struct Settings {
     name: Str,
     retries: UInt8,
     enabled: Option[Bool],
 }
-
-derive json.Encode for Settings
 
 fn main() -> UInt8 {
     let settings: Settings = .{ name = "tea", retries = 3, enabled = .None }

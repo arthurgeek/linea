@@ -19,21 +19,8 @@ import std.testing
 
 // Tuple2 holds two positional components, _0 and _1.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple2[A, B] { _0: A, _1: B }
-
-derive[A: Equatable, B: Equatable] Equatable for Tuple2[A, B]
-
-derive[A: Equivalent, B: Equivalent] Equivalent for Tuple2[A, B]
-
-derive[A: Comparable, B: Comparable] Comparable for Tuple2[A, B]
-
-derive[A: Ordered, B: Ordered] Ordered for Tuple2[A, B]
-
-derive[A: hash.Hash, B: hash.Hash] hash.Hash for Tuple2[A, B]
-
-derive[A: Default, B: Default] Default for Tuple2[A, B]
-
-derive[A: Release, B: Release] Release for Tuple2[A, B]
 
 // Accept any Equivalent value, so a call proves its argument's type is one.
 fn tuple_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {
@@ -125,21 +112,8 @@ test "pair compares and hashes by every component" {
 
 // Tuple3 holds three positional components, _0 to _2.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple3[A, B, C] { _0: A, _1: B, _2: C }
-
-derive[A: Equatable, B: Equatable, C: Equatable] Equatable for Tuple3[A, B, C]
-
-derive[A: Equivalent, B: Equivalent, C: Equivalent] Equivalent for Tuple3[A, B, C]
-
-derive[A: Comparable, B: Comparable, C: Comparable] Comparable for Tuple3[A, B, C]
-
-derive[A: Ordered, B: Ordered, C: Ordered] Ordered for Tuple3[A, B, C]
-
-derive[A: hash.Hash, B: hash.Hash, C: hash.Hash] hash.Hash for Tuple3[A, B, C]
-
-derive[A: Default, B: Default, C: Default] Default for Tuple3[A, B, C]
-
-derive[A: Release, B: Release, C: Release] Release for Tuple3[A, B, C]
 
 // Display writes the components between parentheses, separated by commas.
 impl[A: Display, B: Display, C: Display] Display for Tuple3[A, B, C] {
@@ -207,21 +181,8 @@ test "three tuple compares and hashes by every component" {
 
 // Tuple4 holds four positional components, _0 to _3.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple4[A, B, C, D] { _0: A, _1: B, _2: C, _3: D }
-
-derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable] Equatable for Tuple4[A, B, C, D]
-
-derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent] Equivalent for Tuple4[A, B, C, D]
-
-derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable] Comparable for Tuple4[A, B, C, D]
-
-derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered] Ordered for Tuple4[A, B, C, D]
-
-derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash] hash.Hash for Tuple4[A, B, C, D]
-
-derive[A: Default, B: Default, C: Default, D: Default] Default for Tuple4[A, B, C, D]
-
-derive[A: Release, B: Release, C: Release, D: Release] Release for Tuple4[A, B, C, D]
 
 // Display writes the components between parentheses, separated by commas.
 impl[A: Display, B: Display, C: Display, D: Display] Display for Tuple4[A, B, C, D] {
@@ -300,21 +261,8 @@ test "four tuple compares and hashes by every component" {
 
 // Tuple5 holds five positional components, _0 to _4.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple5[A, B, C, D, E] { _0: A, _1: B, _2: C, _3: D, _4: E }
-
-derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable] Equatable for Tuple5[A, B, C, D, E]
-
-derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent] Equivalent for Tuple5[A, B, C, D, E]
-
-derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable] Comparable for Tuple5[A, B, C, D, E]
-
-derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered] Ordered for Tuple5[A, B, C, D, E]
-
-derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash] hash.Hash for Tuple5[A, B, C, D, E]
-
-derive[A: Default, B: Default, C: Default, D: Default, E: Default] Default for Tuple5[A, B, C, D, E]
-
-derive[A: Release, B: Release, C: Release, D: Release, E: Release] Release for Tuple5[A, B, C, D, E]
 
 // Display writes the components between parentheses, separated by commas.
 impl[A: Display, B: Display, C: Display, D: Display, E: Display] Display for Tuple5[A, B, C, D, E] {
@@ -404,21 +352,8 @@ test "five tuple compares and hashes by every component" {
 
 // Tuple6 holds six positional components, _0 to _5.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple6[A, B, C, D, E, F] { _0: A, _1: B, _2: C, _3: D, _4: E, _5: F }
-
-derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable, F: Equatable] Equatable for Tuple6[A, B, C, D, E, F]
-
-derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent, F: Equivalent] Equivalent for Tuple6[A, B, C, D, E, F]
-
-derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable, F: Comparable] Comparable for Tuple6[A, B, C, D, E, F]
-
-derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered, F: Ordered] Ordered for Tuple6[A, B, C, D, E, F]
-
-derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash, F: hash.Hash] hash.Hash for Tuple6[A, B, C, D, E, F]
-
-derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default] Default for Tuple6[A, B, C, D, E, F]
-
-derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release] Release for Tuple6[A, B, C, D, E, F]
 
 // Display writes the components between parentheses, separated by commas.
 impl[A: Display, B: Display, C: Display, D: Display, E: Display, F: Display] Display for Tuple6[A, B, C, D, E, F] {
@@ -519,21 +454,8 @@ test "six tuple compares and hashes by every component" {
 
 // Tuple7 holds seven positional components, _0 to _6.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple7[A, B, C, D, E, F, G] { _0: A, _1: B, _2: C, _3: D, _4: E, _5: F, _6: G }
-
-derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable, F: Equatable, G: Equatable] Equatable for Tuple7[A, B, C, D, E, F, G]
-
-derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent, F: Equivalent, G: Equivalent] Equivalent for Tuple7[A, B, C, D, E, F, G]
-
-derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable, F: Comparable, G: Comparable] Comparable for Tuple7[A, B, C, D, E, F, G]
-
-derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered, F: Ordered, G: Ordered] Ordered for Tuple7[A, B, C, D, E, F, G]
-
-derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash, F: hash.Hash, G: hash.Hash] hash.Hash for Tuple7[A, B, C, D, E, F, G]
-
-derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default, G: Default] Default for Tuple7[A, B, C, D, E, F, G]
-
-derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release, G: Release] Release for Tuple7[A, B, C, D, E, F, G]
 
 // Display writes the components between parentheses, separated by commas.
 impl[A: Display, B: Display, C: Display, D: Display, E: Display, F: Display, G: Display] Display for Tuple7[A, B, C, D, E, F, G] {
@@ -645,21 +567,8 @@ test "seven tuple compares and hashes by every component" {
 
 // Tuple8 holds eight positional components, _0 to _7.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, hash.Hash, Default, Release)
 pub struct Tuple8[A, B, C, D, E, F, G, H] { _0: A, _1: B, _2: C, _3: D, _4: E, _5: F, _6: G, _7: H }
-
-derive[A: Equatable, B: Equatable, C: Equatable, D: Equatable, E: Equatable, F: Equatable, G: Equatable, H: Equatable] Equatable for Tuple8[A, B, C, D, E, F, G, H]
-
-derive[A: Equivalent, B: Equivalent, C: Equivalent, D: Equivalent, E: Equivalent, F: Equivalent, G: Equivalent, H: Equivalent] Equivalent for Tuple8[A, B, C, D, E, F, G, H]
-
-derive[A: Comparable, B: Comparable, C: Comparable, D: Comparable, E: Comparable, F: Comparable, G: Comparable, H: Comparable] Comparable for Tuple8[A, B, C, D, E, F, G, H]
-
-derive[A: Ordered, B: Ordered, C: Ordered, D: Ordered, E: Ordered, F: Ordered, G: Ordered, H: Ordered] Ordered for Tuple8[A, B, C, D, E, F, G, H]
-
-derive[A: hash.Hash, B: hash.Hash, C: hash.Hash, D: hash.Hash, E: hash.Hash, F: hash.Hash, G: hash.Hash, H: hash.Hash] hash.Hash for Tuple8[A, B, C, D, E, F, G, H]
-
-derive[A: Default, B: Default, C: Default, D: Default, E: Default, F: Default, G: Default, H: Default] Default for Tuple8[A, B, C, D, E, F, G, H]
-
-derive[A: Release, B: Release, C: Release, D: Release, E: Release, F: Release, G: Release, H: Release] Release for Tuple8[A, B, C, D, E, F, G, H]
 
 test "an eight tuple compares by position" {
     let first = Tuple8[UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8] {

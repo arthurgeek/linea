@@ -218,17 +218,20 @@ nothing. So `struct Pool[A: Allocator] { allocator: A, items: Vec[UInt64, A] }`
 releases its vector and keeps nothing else to settle. Declare a field before
 the fields that depend on it, so it is released after them.
 
-Write a standalone request to state the implementation's environment
+Write `where` after the traits to state the implementation's environment
 yourself, such as a stronger bound than its fields need:
 
 ```linea
+@derive(Equatable where T: Equatable + Copyable)
 struct Cell[T] { value: T }
-
-derive[T: Equatable + Copyable] Equatable for Cell[T]
 ```
 
-A standalone request states its whole environment; the compiler adds no bound
-to it. Derivation never adds unrequested prerequisite implementations. Deriving
+A `where` clause states the whole environment, the type's own bounds and the
+predicates written; the compiler adds no bound from the fields. Write `for`
+after the traits to derive them for one application of a generic type,
+`@derive(Debug for Mark[UInt8])`, and one attribute per application for
+several. A derive is always an attribute on the type's declaration.
+Derivation never adds unrequested prerequisite implementations. Deriving
 Hash also uses the ordinary same-type Key default; borrowed queries can supply
 a distinct Key implementation as described below.
 

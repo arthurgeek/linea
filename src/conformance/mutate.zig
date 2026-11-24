@@ -1558,7 +1558,7 @@ fn droppedComponentImplementation(gpa: std.mem.Allocator, ast: *const Ast, text:
             },
             else => {},
         }
-        if (ast.deriveRequestTraitRange(d).len() != 0)
+        if (ast.attachedDeriveTraitRange(d).len() != 0)
             try targets.put(gpa, @intFromEnum(ast.tokenName(ast.declName(d))), {});
     }
 
@@ -1647,41 +1647,31 @@ fn droppedDeriveBound(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8)
         }
     }
 
-    // Only a standalone request states its own environment. An attached one
-    // requires each field type's implementation, so a bound its type declares
-    // is not what proves the requirement.
-    for (0..ast.declCount()) |i| {
-        const d = node.DeclId.at(@intCast(i));
-        if (ast.declTag(d) != .derive_impl or ast.deriveRequestTraitRange(d).len() == 0) continue;
-        for (ast.declTypeParams(d)) |param| {
-            const bounds = ast.boundsOf(param);
+    // Only a request with a `where` clause states its own environment. One
+    // with none requires each field type's implementation, so a bound its
+    // type declares is not what proves the requirement.
+    var keyword = token.TokenId.none;
+    for (ast.derive_traits) |entry| {
+        if (entry.clause.kind != .environment or entry.clause.keyword == keyword) continue;
+        keyword = entry.clause.keyword;
+        const predicates = ast.where_predicates[entry.clause.where_predicates.start..entry.clause.where_predicates.end];
+        for (predicates, 0..) |predicate, p| {
+            const bounds = ast.boundsIn(predicate.bounds);
             for (bounds, 0..) |bound, at| {
                 if (bound.kind != .named or bound.named.name == token.TokenId.none) continue;
                 if (!required.contains(@intFromEnum(ast.tokenName(bound.named.name)))) continue;
-                if (bounds.len > 1 and at + 1 == bounds.len) continue;
-
-                const from: u32 = if (bounds.len == 1)
-                    ast.tokenSpan(param.name).end
-                else
-                    ast.tokenSpan(bound.named.name).start;
-                const to: u32 = if (bounds.len > 1)
-                    ast.tokenSpan(bounds[at + 1].named.name).start
-                else blk: {
-                    var depth: u32 = 0;
-                    var tok = token.TokenId.at(param.name.index() + 1);
-                    while (tok.index() < ast.declTokens(d).end.index()) : (tok = token.TokenId.at(tok.index() + 1)) {
-                        switch (ast.tokenTag(tok)) {
-                            .l_bracket => depth += 1,
-                            .r_bracket => {
-                                if (depth == 0) break :blk ast.tokenSpan(tok).start;
-                                depth -= 1;
-                            },
-                            .comma => if (depth == 0) break :blk ast.tokenSpan(tok).start,
-                            else => {},
-                        }
-                    }
-                    return null;
-                };
+                // A bound with a successor is dropped with its `+`; a lone
+                // bound takes its predicate and the comma after it, which
+                // leaves a `where` with something to say.
+                if (bounds.len > 1) {
+                    if (at + 1 == bounds.len) continue;
+                    const from = ast.tokenSpan(bound.named.name).start;
+                    const to = ast.tokenSpan(bounds[at + 1].named.name).start;
+                    return @as(?[]const u8, try std.mem.concat(gpa, u8, &.{ text[0..from], text[to..] }));
+                }
+                if (p + 1 == predicates.len) continue;
+                const from = ast.tokenSpan(predicate.subject.at).start;
+                const to = ast.tokenSpan(predicates[p + 1].subject.at).start;
                 return @as(?[]const u8, try std.mem.concat(gpa, u8, &.{ text[0..from], text[to..] }));
             }
         }
@@ -2721,8 +2711,8 @@ test "a structural template is not an implementation to drop a member from" {
         \\template impl Structural {
         \\    fn value(_self: Self) -> UInt8 { 7 }
         \\}
+        \\@derive(Structural)
         \\struct Mark {}
-        \\derive Structural for Mark
         \\fn main() -> UInt8 { 0 }
     ));
 }
@@ -2738,8 +2728,8 @@ const template_member_bounds =
     \\}
     \\impl First for UInt8 {}
     \\impl Second for UInt8 {}
+    \\@derive(Structural)
     \\struct Item {}
-    \\derive Structural for Item
     \\fn main() -> UInt8 {
     \\    let item: Item = .{}
     \\    Structural.value(item, UInt8(0))
@@ -2775,9 +2765,9 @@ test "removing one concrete component implementation is a derive error" {
         \\trait Required {}
         \\trait Ready {}
         \\template impl Ready where reflect.components: Required {}
+        \\@derive(Ready)
         \\struct Box { value: UInt8 }
         \\impl Required for UInt8 {}
-        \\derive Ready for Box
         \\fn main() -> UInt8 { let _box: Box = .{ value = 0 }; 0 }
     )).?;
     try testing.expect(std.mem.indexOf(u8, out, "impl Required for UInt8") == null);
@@ -2794,9 +2784,9 @@ test "opening one closed component requirement argument is a template error" {
         \\trait Ready {}
         \\struct _Generic[T] { value: T }
         \\template impl Ready where reflect.components: Required[UInt8] {}
+        \\@derive(Ready)
         \\struct Box { value: UInt8 }
         \\impl Required[UInt8] for UInt8 {}
-        \\derive Ready for Box
         \\fn main() -> UInt8 { let _box: Box = .{ value = 0 }; 0 }
     )).?;
     try testing.expect(std.mem.indexOf(u8, out, "Required[_Generic]") != null);
@@ -2812,12 +2802,13 @@ test "removing one generic derive bound is a derive error" {
         \\trait Required {}
         \\trait Ready {}
         \\template impl Ready where reflect.components: Required {}
+        \\@derive(Ready where T: Required + Copyable)
         \\struct Box[T] { value: T }
         \\impl Required for UInt8 {}
-        \\derive[T: Required] Ready for Box[T]
         \\fn main() -> UInt8 { let _box: Box[UInt8] = .{ value = 0 }; 0 }
     )).?;
-    try testing.expect(std.mem.indexOf(u8, out, "T: Required") == null);
+    try testing.expect(std.mem.indexOf(u8, out, "T: Copyable") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "Required +") == null);
     try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .dropped_derive_bound));
 }
 

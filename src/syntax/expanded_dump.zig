@@ -23,7 +23,7 @@ pub fn dumpExpanded(
         }
         try writer.writeAll(source.path);
         try writer.writeAll(" ===\n");
-        try writer.print("// origin: derive {d}", .{source.origin.derive.index()});
+        try writer.print("// origin: derive {d}", .{source.origin.target.index()});
         if (source.origin.derive_trait != .none) {
             try writer.print(", trait token {d}", .{source.origin.derive_trait.index()});
         }

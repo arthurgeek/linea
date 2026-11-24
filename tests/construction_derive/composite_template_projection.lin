@@ -18,9 +18,8 @@ template impl[A: Source] Maker[A] where reflect.target: struct {
     }
 }
 
+@derive[T](Maker[Wrapper[T]])
 struct Record {}
-
-derive[T] Maker[Wrapper[T]] for Record
 
 fn accepts[T: Maker[Wrapper[UInt8]]](_value: T) -> UInt8 {
     0

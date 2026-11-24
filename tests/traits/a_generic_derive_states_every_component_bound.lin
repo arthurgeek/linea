@@ -16,6 +16,7 @@ template impl Measure where reflect.components: Measure {
     }
 }
 
+@derive(Measure where T: Measure + Copyable)
 struct Pair[T] {
     left: T,
     right: T,
@@ -26,8 +27,6 @@ impl Measure for UInt8 {
         self
     }
 }
-
-derive[T: Measure] Measure for Pair[T]
 
 fn main() -> UInt8 {
     let pair: Pair[UInt8] = .{ left = 2, right = 3 }

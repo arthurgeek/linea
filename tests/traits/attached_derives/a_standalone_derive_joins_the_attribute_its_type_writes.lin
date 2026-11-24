@@ -1,0 +1,24 @@
+// A type that already writes `@derive(...)` receives a refused standalone
+// request's traits in that attribute, so the fix adds `Equatable` to it
+// rather than writing a second attribute. A trait the attribute already
+// derives is a repeated request, reported on its own, and the fix leaves it
+// out: a request naming only such traits is removed.
+@derive(Debug)
+struct Cell {
+    value: UInt8,
+}
+
+@derive(Debug)
+struct Mark {
+    value: UInt8,
+}
+
+derive (Debug, Equatable) for Cell
+
+derive Debug for Mark
+
+fn main() -> UInt8 {
+    let cell = Cell { value = 1 }
+    let mark = Mark { value = 2 }
+    if cell == cell && mark.value == 2 { 0 } else { 1 }
+}

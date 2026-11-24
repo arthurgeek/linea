@@ -16,12 +16,11 @@ template impl ReverseDigits {
     }
 }
 
+@derive(ReverseDigits)
 struct Digits {
     tens: UInt8,
     ones: UInt8,
 }
-
-derive ReverseDigits for Digits
 
 fn main() -> UInt8 {
     let digits: Digits = .{ tens = 2, ones = 5 }

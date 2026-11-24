@@ -18,17 +18,15 @@ template impl Tally {
     }
 }
 
+@derive(Tally)
 struct Point {
     x: UInt8,
 }
 
+@derive(Tally)
 enum Shape {
     Dot,
 }
-
-derive Tally for Point
-
-derive Tally for Shape
 
 fn main() -> UInt8 {
     let point: Point = .{ x = 1 }

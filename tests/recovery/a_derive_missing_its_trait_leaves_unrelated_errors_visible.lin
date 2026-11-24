@@ -1,0 +1,12 @@
+trait Marker {}
+
+template impl Marker {}
+
+struct Mark {}
+
+derive for Mark
+
+fn main() -> UInt8 {
+    let _mark = Mark {}
+    missing()
+}

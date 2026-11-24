@@ -1,0 +1,22 @@
+// A binder after `derive` names a parameter only a trait argument uses. The
+// type's own parameters are already in scope in the attribute, so a binder
+// spelled as one of them would name two parameters with one name.
+trait Count[A] {
+    fn count(_self: Self, _context: A) -> UInt64
+}
+
+template impl[A] Count[A] {
+    fn count(_self: Self, _context: A) -> UInt64 {
+        0
+    }
+}
+
+@derive[T](Count[T])
+struct Box[T] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let boxed: Box[UInt8] = .{ value = 1 }
+    UInt8(Count.count(boxed, UInt8(2)))
+}

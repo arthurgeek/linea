@@ -1,0 +1,15 @@
+error[S-Name]: expected a trait name after `derive`
+ --> tests/recovery/a_derive_missing_its_trait_leaves_unrelated_errors_visible.lin:7:8
+  |
+7 | derive for Mark
+  |        ^^^ a derive request names each capability it generates
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+ --> tests/recovery/a_derive_missing_its_trait_leaves_unrelated_errors_visible.lin:7:1
+  |
+7 | derive for Mark
+  | ^^^^^^ write `@derive(...)` above `struct Mark`
+error[N-Undefined]: undefined name `missing`
+  --> tests/recovery/a_derive_missing_its_trait_leaves_unrelated_errors_visible.lin:11:5
+   |
+11 |     missing()
+   |     ^^^^^^^ no binding with this name is in scope

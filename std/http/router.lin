@@ -69,14 +69,13 @@ impl MethodTable {
 // the next segment, and in `exact` the handlers of the patterns whose path
 // ends here.
 @linear
+@derive(Release)
 struct Node[A: Allocator] {
     literals: collections.Map[String[A], UInt64, A],
     parameter: Option[UInt64],
     remainder: Option[UInt64],
     exact: MethodTable,
 }
-
-derive[A: Allocator] Release for Node[A]
 
 // Return a node with no children and no handlers.
 fn new_node[A: Allocator](allocator: A) -> Node[A] where carries(allocator) {

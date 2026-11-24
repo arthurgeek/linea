@@ -97,6 +97,7 @@ struct Slice[UInt8] {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Int32] {
     None,
     Some(Int32),
@@ -106,12 +107,14 @@ pub enum Option[Int32] {
 type Address[UInt8] = UInt64
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Str] {
     None,
     Some(std.text.Str),
 }
 
 @copyable
+@derive(Debug, Release)
 pub struct WriteFailure[IoError] {
     kind: std.io.core.WriteFailureKind,
     reason: std.option.Option[std.io.core.IoError],
@@ -119,36 +122,42 @@ pub struct WriteFailure[IoError] {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[IoError] {
     None,
     Some(std.io.core.IoError),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[(),Wide] {
     Ok(()),
     Err(Wide),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Slice[UInt8]] {
     None,
     Some(std.mem.Slice[UInt8]),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[UInt8] {
     None,
     Some(UInt8),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[UInt64,WriteFailure[IoError]] {
     Ok(UInt64),
     Err(std.io.core.WriteFailure[std.io.core.IoError]),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[(),IoError] {
     Ok(()),
     Err(std.io.core.IoError),

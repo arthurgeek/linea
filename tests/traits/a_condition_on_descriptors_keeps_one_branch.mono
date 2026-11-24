@@ -1,8 +1,10 @@
+@derive(Tally)
 struct Point {
     x: UInt8,
     y: UInt8,
 }
 
+@derive(Tally)
 enum Shape {
     Dot,
     Box(UInt8, UInt8, UInt8),
@@ -22,8 +24,8 @@ fn ;main() -> UInt8 {
 fn Point;;Tally.tally(value: Point, inout total: UInt8) {
     match read value {
         Point {
-            x: _linea_derive_6_0_0_0,
-            y: _linea_derive_6_0_1_0,
+            x: _linea_derive_4_0_0_0,
+            y: _linea_derive_4_0_1_0,
         } => {
             {
                 {
@@ -56,7 +58,7 @@ fn Shape;;Tally.tally(value: Shape, inout total: UInt8) {
                 }
             }
         },
-        Box(_linea_derive_7_1_0_0, _linea_derive_7_1_1_0, _linea_derive_7_1_2_0) => {
+        Box(_linea_derive_5_1_0_0, _linea_derive_5_1_1_0, _linea_derive_5_1_2_0) => {
             {
                 {
                     {

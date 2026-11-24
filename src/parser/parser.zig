@@ -13,6 +13,8 @@ const Interner = @import("../support/interner.zig").Interner;
 const StringId = @import("../support/interner.zig").StringId;
 const Code = @import("../diagnostics/diagnostic.zig").Code;
 const Label = @import("../diagnostics/diagnostic.zig").Label;
+const Edit = @import("../diagnostics/diagnostic.zig").Edit;
+const Fix = @import("../diagnostics/diagnostic.zig").Fix;
 const text_mod = @import("../support/text.zig");
 const lexer_mod = @import("../lexer/lexer.zig");
 const tokenize = lexer_mod.tokenize;
@@ -387,6 +389,9 @@ const Parser = struct {
     /// parser's own value, which an attempt copies and restores, so the list
     /// is one list.
     type_exprs: *TypeExprs,
+    /// The standalone derives this file wrote, whose helps are written once
+    /// its declarations are read.
+    refused_derives: std.ArrayList(RefusedDerive) = .empty,
     /// The entry point's declared return type, or `.none` for a bare program.
     /// How many levels are open above what is being read. Recursive descent
     /// uses one stack frame per level, and the stack is a resource the
@@ -770,6 +775,11 @@ const Parser = struct {
     /// the resolver's rather than the parser's: here a declaration is a
     /// declaration.
     fn parseProgram(self: *Parser) !void {
+        const first_decl = self.builder.declMark();
+        defer {
+            self.refused_derives.deinit(self.gpa);
+            self.refused_derives = .empty;
+        }
         while (!self.cursor.atEnd()) {
             var attributes = try self.parseAttributes();
             while (self.atBareAttributeWord()) {
@@ -856,22 +866,9 @@ const Parser = struct {
 
             if (self.cursor.at(.keyword_derive)) {
                 if (attributes.recognized) {
-                    try self.reportAt(
-                        .s_entry,
-                        attributes.first,
-                        "attributes attach only to a type declaration",
-                        "a standalone derive is an implementation request, not a nominal type declaration",
-                    );
+                    try self.reportAt(.s_entry, attributes.first, "attributes attach only to a type declaration", "place them before a struct, enum, or newtype");
                 }
-                if (is_test or visibility != .private or is_export) {
-                    try self.reportAt(
-                        .s_entry,
-                        at,
-                        "a derive request takes no modifier",
-                        "the generated implementation has the trait's visibility",
-                    );
-                }
-                const d = try self.parseDerive();
+                const d = try self.parseRefusedDerive(attributes.first != .none or is_test or visibility != .private or is_export);
                 self.builder.markAttributeGroups(d, attributes.groups);
                 continue;
             }
@@ -987,6 +984,7 @@ const Parser = struct {
                 _ = self.cursor.advance();
             }
         }
+        try self.reviseRefusedDerives(first_decl);
     }
 
     /// Whether the cursor sits on an attribute word written without its `@`.
@@ -1096,11 +1094,17 @@ const Parser = struct {
                     if (result.shareable == .none) result.shareable = item_at;
                 } else if (self.cursor.eat(.keyword_derive) != null) {
                     kind = .derive;
+                    const binders_open = if (self.cursor.at(.l_bracket)) self.cursor.current() else TokenId.none;
+                    const binders = try self.parseTypeParams(.refused);
                     if (!self.cursor.at(.l_paren)) {
                         try self.reportAt(.s_params, item_at, "derive attributes carry a parenthesized trait list", "write `derive(Trait)`");
                     } else {
-                        const parsed = try self.parseDeriveTraits();
+                        const parsed = try self.parseDeriveTraits(true);
                         traits = parsed.range;
+                        for (self.builder.derive_traits.items[traits.start..traits.end]) |*entry| {
+                            entry.clause.binders = binders;
+                            entry.clause.binders_open = binders_open;
+                        }
                         if (traits.len() != 0) {
                             if (result.derive_traits.len() == 0) result.derive_traits.start = traits.start;
                             result.derive_traits.end = traits.end;
@@ -1175,7 +1179,7 @@ const Parser = struct {
             self.cursor.at(.keyword_carrier) or
             self.cursor.at(.keyword_unshareable) or
             self.cursor.at(.keyword_shareable) or
-            (self.cursor.at(.keyword_derive) and self.cursor.peekAt(1) == .l_paren);
+            (self.cursor.at(.keyword_derive) and (self.cursor.peekAt(1) == .l_paren or self.cursor.peekAt(1) == .l_bracket));
     }
 
     /// An item inside `@(...)`. A `derive` that the group's `,` or `)`
@@ -1607,18 +1611,16 @@ const Parser = struct {
         try self.reportAt(.s_name, head.at, "expected a type name, `()` or a tuple; `(T)` groups a type", label);
     }
 
-    test "a grouped type is refused as an implementation or derive head" {
+    test "a grouped type is refused as an implementation head" {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const gpa = arena.allocator();
 
         try testing.expectEqualSlices(?Code, &.{.s_name}, try codesOf(gpa, "trait Show {}\nimpl Show for (UInt8) {}\nfn main() -> UInt8 { 0 }\n"));
         try testing.expectEqualSlices(?Code, &.{.s_name}, try codesOf(gpa, "impl (UInt8) {}\nfn main() -> UInt8 { 0 }\n"));
-        try testing.expectEqualSlices(?Code, &.{.s_name}, try codesOf(gpa, "derive[A] Debug for (A)\nfn main() -> UInt8 { 0 }\n"));
         // A grouped tuple is refused the same way, and a head that names
         // nothing is not also held to applying its parameters.
         try testing.expectEqualSlices(?Code, &.{.s_name}, try codesOf(gpa, "trait Show {}\nimpl[A, B] Show for ((A, B)) {}\nfn main() -> UInt8 { 0 }\n"));
-        try testing.expectEqualSlices(?Code, &.{.s_name}, try codesOf(gpa, "derive[A, B] Debug for ((A, B))\nfn main() -> UInt8 { 0 }\n"));
         // Unit and a tuple are heads of their own.
         try testing.expectEqualSlices(?Code, &.{}, try codesOf(gpa, "trait Show {}\nimpl Show for () {}\nimpl Show for (UInt8, Bool) {}\nfn main() -> UInt8 { 0 }\n"));
     }
@@ -1747,12 +1749,21 @@ const Parser = struct {
         close: TokenId = .none,
     };
 
-    fn parseDeriveTraits(self: *Parser) std.mem.Allocator.Error!ParsedDeriveTraits {
+    /// The traits of a derive, and the clause an attribute item writes after
+    /// them before its `)`. `clause` is false for the refused standalone
+    /// form, whose `for` and `where` follow the list.
+    fn parseDeriveTraits(self: *Parser, clause: bool) std.mem.Allocator.Error!ParsedDeriveTraits {
         const start = self.builder.deriveTraitMark();
         const open = self.cursor.eat(.l_paren) orelse TokenId.none;
 
         while (!self.cursor.atEnd() and (open == .none or !self.cursor.at(.r_paren))) {
             if (open != .none and self.atDeclaration()) break;
+            if (clause and open != .none and self.atDeriveClause()) {
+                // The clause follows the last trait directly; a comma there
+                // separates traits and promises another.
+                if (self.builder.deriveTraitMark() != start) try self.reportAt(.s_params, self.justPassed(), "expected a trait after `,`", "write the clause right after the last trait, with no comma before it");
+                break;
+            }
             const before = self.cursor.current();
             const ref = try self.parseTraitRef("expected a trait name after `derive`", "a derive request names each capability it generates");
             if (self.cursor.current() == before) break;
@@ -1762,6 +1773,7 @@ const Parser = struct {
             });
 
             if (open == .none) break;
+            if (clause and self.atDeriveClause()) break;
             // What follows an entry before its `,` or `)` is not part of the
             // list. It is reported once, unless it is a token the lexer
             // refused and reported already, and stepped over as any list's
@@ -1781,6 +1793,11 @@ const Parser = struct {
             if (self.cursor.eat(.comma) == null) break;
         }
 
+        if (clause and open != .none and self.atDeriveClause()) {
+            const written = try self.parseDeriveClause();
+            for (self.builder.derive_traits.items[start..]) |*entry| entry.clause = written;
+        }
+
         var close = TokenId.none;
         if (open != .none) {
             close = self.cursor.eat(.r_paren) orelse value: {
@@ -1795,34 +1812,54 @@ const Parser = struct {
         };
     }
 
-    fn parseDerive(self: *Parser) std.mem.Allocator.Error!node.DeclId {
+    fn atDeriveClause(self: *const Parser) bool {
+        return self.cursor.at(.keyword_for) or self.cursor.at(.keyword_where);
+    }
+
+    /// `for Type[Args]` or `where P: B, ...`, written after a derive item's
+    /// traits and before its `)`.
+    fn parseDeriveClause(self: *Parser) std.mem.Allocator.Error!node.DeriveClause {
+        if (self.cursor.eat(.keyword_where)) |keyword| {
+            return .{ .kind = .environment, .keyword = keyword, .where_predicates = try self.parseWherePredicates() };
+        }
+        const keyword = self.cursor.advance();
+        const target = self.cursor.current();
+        var head: node.TypeRef = .{ .at = target, .name = target };
+        if (self.cursor.at(.l_paren)) {
+            head = try self.parseUnitType();
+            try self.refuseAGroupedHead(head, "`for` names one application of the type the attribute is written on");
+        } else {
+            if (self.cursor.eat(.identifier) == null) {
+                try self.reportAt(.s_name, target, "expected a type name after `for`", "`for` names one application of the type the attribute is written on");
+                head = .{ .at = target, .name = .none };
+            } else if (self.cursor.at(.l_bracket)) head.args = try self.parseTypeArgs();
+        }
+        return .{ .kind = .application, .keyword = keyword, .head = head };
+    }
+
+    /// A standalone `derive … for …`, which the language does not have: a
+    /// derive is requested by `@derive(...)` on the type's declaration. It is
+    /// read whole so the report covers it and its help can write the
+    /// attribute that requests the same implementation, which is decided
+    /// once the file's declarations are all read ([S-Derive]).
+    fn parseRefusedDerive(self: *Parser, modified: bool) std.mem.Allocator.Error!node.DeclId {
         const start = self.cursor.advance();
+        const errors_before = self.sink.error_count;
         const type_params = try self.parseTypeParams(.refused);
-        const traits = try self.parseDeriveTraits();
-        const has_for = self.cursor.eat(.keyword_for) != null;
+        const traits = try self.parseDeriveTraits(false);
+        const for_at = self.cursor.eat(.keyword_for) orelse TokenId.none;
+        const has_for = for_at != .none;
         if (!has_for) {
             try self.reportAt(.s_entry, self.cursor.current(), "expected `for`", "a derive request names the type receiving the implementation");
         }
 
         const target = self.cursor.current();
-        const target_is_boundary = !has_for and self.atDeclaration();
-        var head: node.TypeRef = .{ .at = target, .name = target };
-        if (target_is_boundary) {
-            try self.reportAt(.s_name, target, "expected a type name after `for`", "a derive request names its target type");
-        } else if (self.cursor.at(.l_paren)) {
-            // A tuple target is read as an implementation head's is, and the
-            // request then derives for the tuple's declaration.
+        var head: node.TypeRef = .{ .at = target, .name = .none };
+        if (has_for and self.cursor.at(.l_paren)) {
             head = try self.parseUnitType();
-            try self.refuseAGroupedHead(head, "a derive request names its target type");
-        } else {
-            if (self.cursor.eat(.identifier) == null) {
-                try self.reportAt(.s_name, target, "expected a type name after `for`", "a derive request names its target type");
-            }
+        } else if (has_for and self.cursor.eat(.identifier) != null) {
+            head.name = target;
             if (self.cursor.at(.l_bracket)) head.args = try self.parseTypeArgs();
-        }
-        var head_valid = !target_is_boundary;
-        if (!target_is_boundary) {
-            head_valid = try self.refuseAHeadThatIsNotItsParameters(.t_derive, head, type_params, true);
         }
 
         var where_at = TokenId.none;
@@ -1833,23 +1870,64 @@ const Parser = struct {
                 where_predicates = try self.parseWherePredicates();
             }
         }
+        const last = self.justPassed();
 
         try self.endBodilessDecl("this derive request ends here");
+        const readable = self.sink.error_count == errors_before and head.name != .none and traits.range.len() != 0;
+        const report = self.sink.items().len;
+        try self.reportAt(.s_derive, start, "a derive is requested by `@derive(...)` on the declaration of the type it is for", "write `@derive(...)` above the type's declaration");
+        if (self.sink.items().len != report) try self.refused_derives.append(self.gpa, .{
+            .report = report,
+            .keyword = start,
+            .last = last,
+            .type_params = type_params,
+            .traits = traits,
+            .head = head,
+            .where_at = where_at,
+            .readable = readable,
+            .placeable = !modified,
+        });
+        // The refused request still requests what it names where that has
+        // an attached meaning: the traits for every application, or for the
+        // one its head writes. A program refused for the spelling is checked
+        // as though it were written in place, so a use of what it would
+        // derive reports nothing more. A request with a parameter only a
+        // trait argument names, or with an environment for one application,
+        // only has its names read.
+        var derive_traits = node.DeriveTraitRange.empty;
+        if (readable and head.kind == .named) {
+            const params = self.builder.typeParams(type_params);
+            const head_args = self.builder.typeArgs(head.args);
+            var kind: node.DeriveClause.Kind = .inferred;
+            if (params.len == 0 and head_args.len != 0) kind = if (where_at == .none) .application else .refused;
+            if (params.len != 0) {
+                for (params) |parameter| {
+                    var applied = false;
+                    for (head_args) |argument| {
+                        if (argument.kind == .named and argument.args.len() == 0 and argument.name != .none and
+                            std.mem.eql(u8, self.cursor.textOf(argument.name), self.cursor.textOf(parameter.name))) applied = true;
+                    }
+                    if (!applied) kind = .refused;
+                }
+                for (self.builder.derive_traits.items[traits.range.start..traits.range.end]) |entry| {
+                    if (entry.ref.args.len() != 0) kind = .refused;
+                }
+            }
+            const named_head: node.TypeRef = if (kind == .application) head else .{ .at = head.at, .name = head.name };
+            for (self.builder.derive_traits.items[traits.range.start..traits.range.end]) |*entry| {
+                entry.clause = .{ .kind = kind, .keyword = if (kind == .application) for_at else TokenId.none, .head = named_head };
+            }
+            derive_traits = traits.range;
+        }
         return self.builder.addDecl(.{
-            .tag = .derive_impl,
+            .tag = .err,
             .main_token = start,
             .token_range = self.rangeFrom(start),
-            .name = head.at,
-            .head_args = head.args,
-            .head_kind = head.kind,
+            .name = start,
+            .derive_traits = derive_traits,
+            // Kept so the resolver reads the names its bounds and
+            // predicates write.
             .type_params = type_params,
-            .derive_traits = traits.range,
-            .derive_syntax = .{
-                .group_open = traits.open,
-                .group_close = traits.close,
-                .head_valid = head_valid,
-            },
-            .where_at = where_at,
             .where_predicates = where_predicates,
             .params = .{ .start = 0, .end = 0 },
             .returns = .{ .name = .none },
@@ -1858,27 +1936,606 @@ const Parser = struct {
         });
     }
 
-    test "a derive request's target may be a tuple of its own parameters" {
-        var arena = std.heap.ArenaAllocator.init(testing.allocator);
-        defer arena.deinit();
+    /// A standalone derive [S-Derive] refused, kept until the file's
+    /// declarations are read so its help can name the type's declaration.
+    const RefusedDerive = struct {
+        report: usize,
+        keyword: TokenId,
+        /// The last token of the request, before any `;`.
+        last: TokenId,
+        type_params: node.TypeParamRange,
+        traits: ParsedDeriveTraits,
+        head: node.TypeRef,
+        where_at: TokenId,
+        /// Whether the request parsed without another error, so its parts
+        /// can be copied into an attribute.
+        readable: bool,
+        /// Whether its line holds the request alone, with no attribute or
+        /// modifier a removal would leave behind or take along.
+        placeable: bool,
+    };
 
-        const ground = try parseProgramText(arena.allocator(),
-            \\derive Debug for (UInt8, Bool)
-            \\fn main() -> UInt8 { 0 }
-        );
-        try testing.expectEqual(@as(u32, 0), ground.errors);
-        try testing.expect(std.mem.indexOf(u8, ground.dump, "decl derive_impl single \"(UInt8, Bool)\"") != null);
+    /// Writes the help, and where it can be placed the fix, of every
+    /// standalone derive the file wrote: the `@derive(...)` that requests the
+    /// same implementation, above the declaration of its type when this file
+    /// declares it.
+    ///
+    /// **Bound:** one pass over the file's declarations to index its types by
+    /// name, then each request's own tokens, and per trait and per bound it
+    /// writes, the attribute items and the header of the one type it names.
+    fn reviseRefusedDerives(self: *Parser, first_decl: u32) std.mem.Allocator.Error!void {
+        if (self.refused_derives.items.len == 0) return;
+        var types: std.StringHashMapUnmanaged(node.DeclId) = .empty;
+        defer types.deinit(self.gpa);
+        const tags = self.builder.decls.items(.tag);
+        const names = self.builder.decls.items(.name);
+        for (first_decl..self.builder.declMark()) |i| {
+            switch (tags[i]) {
+                .struct_, .enum_, .newtype => {},
+                else => continue,
+            }
+            if (names[i] == .none or self.cursor.tags[names[i].index()] != .identifier) continue;
+            const entry = try types.getOrPut(self.gpa, self.cursor.textOf(names[i]));
+            if (!entry.found_existing) entry.value_ptr.* = node.DeclId.at(@intCast(i));
+        }
+        for (self.refused_derives.items) |refused| try self.reviseRefusedDerive(refused, &types);
+    }
 
-        const generic = try parseProgramText(arena.allocator(),
-            \\derive[A, B] (Debug, Equatable) for (A, B) where A: Debug
-            \\fn main() -> UInt8 { 0 }
-        );
-        try testing.expectEqual(@as(u32, 0), generic.errors);
-        try testing.expect(std.mem.indexOf(u8, generic.dump, "decl derive_impl grouped \"(A, B)\"") != null);
+    fn reviseRefusedDerive(self: *Parser, refused: RefusedDerive, types: *const std.StringHashMapUnmanaged(node.DeclId)) std.mem.Allocator.Error!void {
+        const arena = self.sink.arena;
+        // A request whose head did not parse keeps the help it was reported
+        // with, which names no declaration.
+        if (refused.head.name == .none) return;
+        const head_text = self.sourceOf(refused.head.at, self.headEnd(refused.head));
+        const named = refused.head.kind == .named and refused.head.name != .none;
+        const type_name = if (named) self.cursor.textOf(refused.head.name) else head_text;
+        const target: ?node.DeclId = if (named) types.get(type_name) else null;
+        const declaration = if (target) |d| try std.fmt.allocPrint(arena, "`{s} {s}`", .{ declarationKeyword(self.builder.decls.items(.tag)[d.index()]), type_name }) else try std.fmt.allocPrint(arena, "the declaration of `{s}`", .{type_name});
 
-        // A component that is not one of the derive's own parameters is
-        // refused as a head argument naming none is.
-        try testing.expectEqualSlices(?Code, &.{.t_derive}, try codesOf(arena.allocator(), "derive[A] Debug for (A, UInt8)\nfn main() -> UInt8 { 0 }\n"));
+        var help: []const u8 = undefined;
+        var edits: ?[]const Edit = null;
+        if (!refused.readable) {
+            help = try std.fmt.allocPrint(arena, "write `@derive(...)` above {s}", .{declaration});
+        } else switch (try self.attachedSpelling(refused, target)) {
+            .written => |written| {
+                const merged = if (written.plain) if (target) |d| self.plainDeriveItem(d) else null else null;
+                if (merged) |item| {
+                    const at = if (item.name.index() > 0 and self.cursor.tags[item.name.index() - 1] == .at_sign) "@" else "";
+                    help = try std.fmt.allocPrint(arena, "write `{s}` in `{s}{s}` above {s}", .{ written.traits, at, self.sourceOf(item.tokens.start, self.itemEnd(item)), declaration });
+                    if (target != null and refused.placeable) edits = try self.mergedDeriveEdits(refused, item, written.traits);
+                } else {
+                    help = try std.fmt.allocPrint(arena, "write `{s}` above {s}", .{ written.text, declaration });
+                    if (target) |d| if (refused.placeable) {
+                        edits = try self.attachedDeriveEdits(refused, d, written.text);
+                    };
+                }
+            },
+            .already_derived => {
+                help = try std.fmt.allocPrint(arena, "remove this request: {s} already derives what it names", .{declaration});
+                if (refused.placeable) if (self.requestLine(refused)) |line| {
+                    const removal = try arena.alloc(Edit, 1);
+                    removal[0] = .{ .file = self.file, .span = line, .text = "" };
+                    edits = removal;
+                };
+            },
+            .binder_collides => |parameter| help = try std.fmt.allocPrint(arena, "write `@derive[...](...)` above {s}, with the binder `{s}` renamed: the type's own parameter is spelled `{s}`", .{ declaration, parameter, parameter }),
+            .application_environment => help = "an attribute names one application with `for` and writes no `where` beside it; write this implementation with `impl`",
+        }
+
+        var reported = self.sink.items()[refused.report];
+        const labels = try arena.dupe(Label, reported.labels);
+        labels[0].message = help;
+        reported.labels = labels;
+        if (edits) |written_edits| {
+            const fixes = try arena.alloc(Fix, 1);
+            fixes[0] = .{ .kind = .attached_derive, .note = null, .edits = written_edits };
+            reported.fixes = fixes;
+        }
+        try self.sink.revise(refused.report, reported);
+    }
+
+    /// The type's first `derive(...)` item with neither binders nor a clause,
+    /// which a request for every application with no environment of its own
+    /// joins rather than writing an item beside it.
+    fn plainDeriveItem(self: *const Parser, d: node.DeclId) ?node.AttributeItem {
+        const groups = self.builder.decl_attribute_groups.items[d.index()];
+        for (self.builder.attribute_groups.items[groups.start..groups.end]) |group| {
+            for (self.builder.attribute_items.items[group.items.start..group.items.end]) |item| {
+                if (item.kind != .derive or item.derive_traits.len() == 0) continue;
+                const clause = self.builder.derive_traits.items[item.derive_traits.start].clause;
+                if (clause.kind == .inferred and clause.binders_open == .none) return item;
+            }
+        }
+        return null;
+    }
+
+    /// The token after an attribute item's last one other than a comment.
+    fn itemEnd(self: *const Parser, item: node.AttributeItem) TokenId {
+        var end = item.tokens.end.index();
+        while (end > item.tokens.start.index() and self.cursor.tags[end - 1].isTrivia()) end -= 1;
+        return TokenId.at(end);
+    }
+
+    /// A derive entry's tokens without the comments after it.
+    fn entryTokens(self: *const Parser, entry: node.DeriveTrait) TokenRange {
+        var end = entry.tokens.end.index();
+        while (end > entry.tokens.start.index() and self.cursor.tags[end - 1].isTrivia()) end -= 1;
+        return .{ .start = entry.tokens.start, .end = TokenId.at(end) };
+    }
+
+    /// Whether an attribute of the type's declaration already requests the
+    /// trait `entry` names, as the request does: for every application, or
+    /// for the application whose compact spelling is `application`. A trait
+    /// with arguments is a request of its own for each argument list.
+    fn attributeDerives(self: *const Parser, d: node.DeclId, entry: node.DeriveTrait, application: ?[]const u8) std.mem.Allocator.Error!bool {
+        if (entry.ref.args.len() != 0) return false;
+        var name: std.ArrayList(u8) = .empty;
+        try self.appendCompact(&name, self.entryTokens(entry), &.{}, &.{});
+        const groups = self.builder.decl_attribute_groups.items[d.index()];
+        for (self.builder.attribute_groups.items[groups.start..groups.end]) |group| {
+            for (self.builder.attribute_items.items[group.items.start..group.items.end]) |item| {
+                if (item.kind != .derive) continue;
+                for (self.builder.derive_traits.items[item.derive_traits.start..item.derive_traits.end]) |theirs| {
+                    if (theirs.ref.args.len() != 0 or theirs.clause.kind == .refused) continue;
+                    var their_name: std.ArrayList(u8) = .empty;
+                    try self.appendCompact(&their_name, self.entryTokens(theirs), &.{}, &.{});
+                    if (!std.mem.eql(u8, name.items, their_name.items)) continue;
+                    const theirs_applied = theirs.clause.kind == .application;
+                    if (application) |head| {
+                        if (!theirs_applied or theirs.clause.head.kind != .named) continue;
+                        var their_head: std.ArrayList(u8) = .empty;
+                        try self.appendCompact(&their_head, .{ .start = theirs.clause.head.at, .end = self.headEnd(theirs.clause.head) }, &.{}, &.{});
+                        if (std.mem.eql(u8, head, their_head.items)) return true;
+                    } else if (!theirs_applied) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    fn declarationKeyword(tag: node.Decl.Tag) []const u8 {
+        return switch (tag) {
+            .struct_ => "struct",
+            .enum_ => "enum",
+            else => "type",
+        };
+    }
+
+    const AttachedSpelling = union(enum) {
+        written: struct {
+            /// The whole attribute.
+            text: []const u8,
+            /// Its traits alone, separated by `, `.
+            traits: []const u8,
+            /// Whether it writes neither binders nor a clause.
+            plain: bool,
+        },
+        /// Every trait it names is already requested the same way by an
+        /// attribute of the type.
+        already_derived,
+        /// A parameter only a trait argument names, spelled as one of the
+        /// type's own, which a binder cannot be.
+        binder_collides: []const u8,
+        /// A request for one application that also writes `where`.
+        application_environment,
+    };
+
+    /// The `@derive(...)` requesting what a standalone request did. A
+    /// request declaring no parameter and applying its head names one
+    /// application, `for`; one with parameters is the family, with its
+    /// parameters read as the type's own in the same positions and those
+    /// its head does not apply written as binders, and states its
+    /// environment with `where` unless every bound it writes is one the
+    /// type's declaration already writes.
+    fn attachedSpelling(self: *Parser, refused: RefusedDerive, target: ?node.DeclId) std.mem.Allocator.Error!AttachedSpelling {
+        const arena = self.sink.arena;
+        const entries = self.builder.derive_traits.items[refused.traits.range.start..refused.traits.range.end];
+        const params = self.builder.typeParams(refused.type_params);
+        const head_args = self.builder.typeArgs(refused.head.args);
+        const applied = params.len == 0 and (head_args.len != 0 or refused.head.kind != .named);
+        if (applied and refused.where_at != .none) return .application_environment;
+        // A trait an attribute of the type already requests the same way is
+        // left out, so the attribute written requests each trait once.
+        var application: ?[]const u8 = null;
+        if (applied) {
+            var head: std.ArrayList(u8) = .empty;
+            try self.appendCompact(&head, .{ .start = refused.head.at, .end = self.headEnd(refused.head) }, &.{}, &.{});
+            application = head.items;
+        }
+        const derived = try arena.alloc(bool, entries.len);
+        var kept: usize = 0;
+        for (entries, derived) |entry, *already| {
+            already.* = if (target) |d| try self.attributeDerives(d, entry, application) else false;
+            if (!already.*) kept += 1;
+        }
+        if (kept == 0) return .already_derived;
+
+        if (params.len == 0) {
+            var traits: std.ArrayList(u8) = .empty;
+            for (entries, derived) |entry, already| {
+                if (already) continue;
+                if (traits.items.len != 0) try traits.appendSlice(arena, ", ");
+                const tokens = self.entryTokens(entry);
+                try traits.appendSlice(arena, self.sourceOf(tokens.start, tokens.end));
+            }
+            var text: std.ArrayList(u8) = .empty;
+            try text.appendSlice(arena, "@derive(");
+            try text.appendSlice(arena, traits.items);
+            var plain = true;
+            if (applied) {
+                try text.appendSlice(arena, " for ");
+                try text.appendSlice(arena, self.sourceOf(refused.head.at, self.headEnd(refused.head)));
+                plain = false;
+            } else if (refused.where_at != .none) {
+                var predicates: std.ArrayList(u8) = .empty;
+                try self.appendUndeclaredPredicates(&predicates, refused, target, &.{}, &.{});
+                if (predicates.items.len != 0) {
+                    try text.appendSlice(arena, " where ");
+                    try text.appendSlice(arena, predicates.items);
+                    plain = false;
+                }
+            }
+            try text.append(arena, ')');
+            return .{ .written = .{ .text = text.items, .traits = traits.items, .plain = plain } };
+        }
+
+        // Each parameter the head applies is read as the type's parameter in
+        // that position: the declaration's own name where this file declares
+        // the type, and the request's otherwise. A parameter the head does
+        // not apply is one only the traits' arguments name, and becomes a
+        // binder under its own name.
+        const target_params: []const node.TypeParam = if (target) |d| self.builder.typeParams(self.builder.decls.items(.type_params)[d.index()]) else &.{};
+        const from = try arena.alloc([]const u8, params.len);
+        const to = try arena.alloc([]const u8, params.len);
+        const position = try arena.alloc(?usize, params.len);
+        for (params, from, to, position) |parameter, *f, *t, *p| {
+            f.* = self.cursor.textOf(parameter.name);
+            t.* = f.*;
+            p.* = null;
+            for (head_args, 0..) |argument, i| {
+                if (argument.kind == .named and argument.args.len() == 0 and argument.name != .none and
+                    std.mem.eql(u8, self.cursor.textOf(argument.name), f.*))
+                {
+                    p.* = i;
+                    if (i < target_params.len) t.* = self.cursor.textOf(target_params[i].name);
+                }
+            }
+        }
+        for (params, position, from) |_, p, name| {
+            if (p != null) continue;
+            for (to, position) |other, q| {
+                if (q != null and std.mem.eql(u8, other, name)) return .{ .binder_collides = name };
+            }
+        }
+
+        var binders: std.ArrayList(u8) = .empty;
+        var predicates: std.ArrayList(u8) = .empty;
+        for (params, position, to) |parameter, p, name| {
+            const bounds = self.boundTokens(parameter);
+            var rendered: std.ArrayList(u8) = .empty;
+            if (p == null) {
+                if (bounds) |range| try self.appendRenamed(&rendered, range.start, range.end, from, to);
+                if (binders.items.len != 0) try binders.appendSlice(arena, ", ");
+                try binders.appendSlice(arena, name);
+                if (bounds != null) {
+                    try binders.appendSlice(arena, ": ");
+                    try binders.appendSlice(arena, rendered.items);
+                }
+                continue;
+            }
+            const range = bounds orelse continue;
+            try self.appendUndeclaredBounds(&rendered, range, if (p.? < target_params.len) .{ .decl = target.?, .position = p.? } else null, from, to);
+            if (rendered.items.len == 0) continue;
+            if (predicates.items.len != 0) try predicates.appendSlice(arena, ", ");
+            try predicates.appendSlice(arena, name);
+            try predicates.appendSlice(arena, ": ");
+            try predicates.appendSlice(arena, rendered.items);
+        }
+        if (refused.where_at != .none) try self.appendUndeclaredPredicates(&predicates, refused, target, from, to);
+
+        var traits: std.ArrayList(u8) = .empty;
+        for (entries, derived) |entry, already| {
+            if (already) continue;
+            if (traits.items.len != 0) try traits.appendSlice(arena, ", ");
+            const tokens = self.entryTokens(entry);
+            try self.appendRenamed(&traits, tokens.start, tokens.end, from, to);
+        }
+        var text: std.ArrayList(u8) = .empty;
+        try text.appendSlice(arena, "@derive");
+        if (binders.items.len != 0) {
+            try text.append(arena, '[');
+            try text.appendSlice(arena, binders.items);
+            try text.append(arena, ']');
+        }
+        try text.append(arena, '(');
+        try text.appendSlice(arena, traits.items);
+        if (predicates.items.len != 0) {
+            try text.appendSlice(arena, " where ");
+            try text.appendSlice(arena, predicates.items);
+        }
+        try text.append(arena, ')');
+        return .{ .written = .{ .text = text.items, .traits = traits.items, .plain = binders.items.len == 0 and predicates.items.len == 0 } };
+    }
+
+    /// A parameter of a type's declaration, by its position.
+    const DeclaredParameter = struct { decl: node.DeclId, position: usize };
+
+    /// Appends the request's `where` predicates, renamed, each less the
+    /// bounds the type's declaration already writes on the parameter it
+    /// names alone; a predicate left with no bound is dropped. Separated
+    /// from what `out` already holds by `, `.
+    fn appendUndeclaredPredicates(self: *const Parser, out: *std.ArrayList(u8), refused: RefusedDerive, target: ?node.DeclId, from: []const []const u8, to: []const []const u8) std.mem.Allocator.Error!void {
+        const arena = self.sink.arena;
+        const target_params: []const node.TypeParam = if (target) |d| self.builder.typeParams(self.builder.decls.items(.type_params)[d.index()]) else &.{};
+        var predicates = self.topLevelSplit(.{ .start = TokenId.at(refused.where_at.index() + 1), .end = TokenId.at(refused.last.index() + 1) }, .comma);
+        while (predicates.next()) |predicate| {
+            const colon = self.topLevelFind(predicate, .colon) orelse {
+                if (out.items.len != 0) try out.appendSlice(arena, ", ");
+                try self.appendRenamed(out, predicate.start, predicate.end, from, to);
+                continue;
+            };
+            const subject: TokenRange = .{ .start = predicate.start, .end = colon };
+            var subject_text: std.ArrayList(u8) = .empty;
+            try self.appendRenamed(&subject_text, subject.start, subject.end, from, to);
+            var declared: ?DeclaredParameter = null;
+            for (target_params, 0..) |parameter, i| {
+                if (std.mem.eql(u8, self.cursor.textOf(parameter.name), subject_text.items)) declared = .{ .decl = target.?, .position = i };
+            }
+            var bounds: std.ArrayList(u8) = .empty;
+            try self.appendUndeclaredBounds(&bounds, .{ .start = TokenId.at(colon.index() + 1), .end = predicate.end }, declared, from, to);
+            if (bounds.items.len == 0) continue;
+            if (out.items.len != 0) try out.appendSlice(arena, ", ");
+            try out.appendSlice(arena, subject_text.items);
+            try out.appendSlice(arena, ": ");
+            try out.appendSlice(arena, bounds.items);
+        }
+    }
+
+    /// Appends each bound of `range`, renamed and joined by ` + `, that the
+    /// declaration does not already write on `declared`: after the
+    /// parameter's `:`, or in a `where` predicate naming it alone. Bounds
+    /// compare by their tokens, so spacing does not tell two apart.
+    fn appendUndeclaredBounds(self: *const Parser, out: *std.ArrayList(u8), range: TokenRange, declared: ?DeclaredParameter, from: []const []const u8, to: []const []const u8) std.mem.Allocator.Error!void {
+        const arena = self.sink.arena;
+        var bounds = self.topLevelSplit(range, .plus);
+        while (bounds.next()) |bound| {
+            var compact: std.ArrayList(u8) = .empty;
+            try self.appendCompact(&compact, bound, from, to);
+            if (compact.items.len == 0) continue;
+            if (declared) |parameter| {
+                if (try self.declarationWritesBound(parameter, compact.items)) continue;
+            }
+            if (out.items.len != 0) try out.appendSlice(arena, " + ");
+            try self.appendRenamed(out, bound.start, bound.end, from, to);
+        }
+    }
+
+    /// Whether the declaration writes `bound`, in its compact spelling, on
+    /// the parameter: after the parameter's `:`, or in a predicate of its
+    /// `where` whose subject is the parameter alone.
+    fn declarationWritesBound(self: *const Parser, parameter: DeclaredParameter, bound: []const u8) std.mem.Allocator.Error!bool {
+        const d = parameter.decl.index();
+        const own = self.builder.typeParams(self.builder.decls.items(.type_params)[d])[parameter.position];
+        const name = self.cursor.textOf(own.name);
+        if (self.boundTokens(own)) |range| {
+            if (try self.boundsInclude(range, bound)) return true;
+        }
+        const where_at = self.builder.decls.items(.where_at)[d];
+        if (where_at == .none) return false;
+        const decl_end = self.builder.decls.items(.token_range)[d].end;
+        var end = where_at.index() + 1;
+        var depth: i32 = 0;
+        while (end < decl_end.index()) : (end += 1) {
+            const tag = self.cursor.tags[end];
+            if (depth == 0 and (tag == .l_brace or tag == .semicolon)) break;
+            depth += tag.nesting();
+        }
+        var predicates = self.topLevelSplit(.{ .start = TokenId.at(where_at.index() + 1), .end = TokenId.at(@intCast(end)) }, .comma);
+        while (predicates.next()) |predicate| {
+            const colon = self.topLevelFind(predicate, .colon) orelse continue;
+            var subject: std.ArrayList(u8) = .empty;
+            try self.appendCompact(&subject, .{ .start = predicate.start, .end = colon }, &.{}, &.{});
+            if (!std.mem.eql(u8, subject.items, name)) continue;
+            if (try self.boundsInclude(.{ .start = TokenId.at(colon.index() + 1), .end = predicate.end }, bound)) return true;
+        }
+        return false;
+    }
+
+    fn boundsInclude(self: *const Parser, range: TokenRange, bound: []const u8) std.mem.Allocator.Error!bool {
+        var bounds = self.topLevelSplit(range, .plus);
+        while (bounds.next()) |written| {
+            var compact: std.ArrayList(u8) = .empty;
+            try self.appendCompact(&compact, written, &.{}, &.{});
+            if (std.mem.eql(u8, compact.items, bound)) return true;
+        }
+        return false;
+    }
+
+    /// Appends the texts of the tokens of `range`, renamed as
+    /// `appendRenamed` does, with no comment and nothing between them.
+    fn appendCompact(self: *const Parser, out: *std.ArrayList(u8), range: TokenRange, from: []const []const u8, to: []const []const u8) std.mem.Allocator.Error!void {
+        for (range.start.index()..range.end.index()) |i| {
+            if (self.cursor.tags[i].isTrivia()) continue;
+            try self.appendRenamed(out, TokenId.at(@intCast(i)), TokenId.at(@intCast(i + 1)), from, to);
+        }
+    }
+
+    /// The first `tag` outside brackets in `range`.
+    fn topLevelFind(self: *const Parser, range: TokenRange, tag: Tag) ?TokenId {
+        var depth: i32 = 0;
+        for (range.start.index()..range.end.index()) |i| {
+            if (depth == 0 and self.cursor.tags[i] == tag) return TokenId.at(@intCast(i));
+            depth += self.cursor.tags[i].nesting();
+        }
+        return null;
+    }
+
+    /// The parts of `range` between the `separator`s outside brackets, each
+    /// without the comments and the trailing empty part around it.
+    fn topLevelSplit(self: *const Parser, range: TokenRange, separator: Tag) TopLevelParts {
+        return .{ .tags = self.cursor.tags, .at = range.start.index(), .end = range.end.index(), .separator = separator };
+    }
+
+    const TopLevelParts = struct {
+        tags: []const Tag,
+        at: u32,
+        end: u32,
+        separator: Tag,
+
+        fn next(self: *TopLevelParts) ?TokenRange {
+            while (self.at < self.end) {
+                var start = self.at;
+                var depth: i32 = 0;
+                var stop = start;
+                while (stop < self.end) : (stop += 1) {
+                    if (depth == 0 and self.tags[stop] == self.separator) break;
+                    depth += self.tags[stop].nesting();
+                }
+                self.at = stop + 1;
+                var last = stop;
+                while (start < last and self.tags[start].isTrivia()) start += 1;
+                while (last > start and self.tags[last - 1].isTrivia()) last -= 1;
+                if (last > start) return .{ .start = TokenId.at(start), .end = TokenId.at(last) };
+            }
+            return null;
+        }
+    };
+
+    /// The tokens of a parameter's bounds, after its `:` and before a `,`,
+    /// `=` or `]` outside brackets, or null where it writes none.
+    fn boundTokens(self: *const Parser, parameter: node.TypeParam) ?TokenRange {
+        if (parameter.bounds.len() == 0) return null;
+        var at = parameter.name.index() + 1;
+        while (at < self.cursor.tags.len and self.cursor.tags[at].isTrivia()) at += 1;
+        if (at >= self.cursor.tags.len or self.cursor.tags[at] != .colon) return null;
+        const start = at + 1;
+        var depth: u32 = 0;
+        var end = start;
+        while (end < self.cursor.tags.len) : (end += 1) {
+            switch (self.cursor.tags[end]) {
+                .l_bracket, .l_paren => depth += 1,
+                .r_bracket, .r_paren => {
+                    if (depth == 0) break;
+                    depth -= 1;
+                },
+                .comma, .equal => if (depth == 0) break,
+                else => {},
+            }
+        }
+        return .{ .start = TokenId.at(@intCast(start)), .end = TokenId.at(@intCast(end)) };
+    }
+
+    /// The token after the last one a written head occupies.
+    fn headEnd(self: *const Parser, head: node.TypeRef) TokenId {
+        if (head.kind != .named) return TokenId.at(head.name.index() + 1);
+        const args = self.builder.typeArgs(head.args);
+        if (args.len == 0) return TokenId.at(head.name.index() + 1);
+        // The bracket closing the arguments follows the last one's tokens.
+        var at = head.name.index() + 1;
+        var depth: u32 = 0;
+        while (at < self.cursor.tags.len) : (at += 1) {
+            switch (self.cursor.tags[at]) {
+                .l_bracket => depth += 1,
+                .r_bracket => {
+                    depth -= 1;
+                    if (depth == 0) return TokenId.at(at + 1);
+                },
+                else => {},
+            }
+        }
+        return TokenId.at(@intCast(self.cursor.tags.len));
+    }
+
+    /// The source text from `start` up to the token `end`, exclusive.
+    fn sourceOf(self: *const Parser, start: TokenId, end: TokenId) []const u8 {
+        if (end.index() <= start.index()) return "";
+        return self.cursor.source[self.cursor.spans[start.index()].start..self.cursor.spans[end.index() - 1].end];
+    }
+
+    /// Appends the source of `[start, end)` with each identifier spelled as
+    /// one of `from` written as the matching name of `to`, except where it
+    /// is selected after a `.`.
+    fn appendRenamed(self: *const Parser, out: *std.ArrayList(u8), start: TokenId, end: TokenId, from: []const []const u8, to: []const []const u8) std.mem.Allocator.Error!void {
+        if (end.index() <= start.index()) return;
+        var position = self.cursor.spans[start.index()].start;
+        for (start.index()..end.index()) |i| {
+            const span = self.cursor.spans[i];
+            try out.appendSlice(self.sink.arena, self.cursor.source[position..span.start]);
+            const written = self.cursor.source[span.start..span.end];
+            var spelled = written;
+            if (self.cursor.tags[i] == .identifier and (i == 0 or self.cursor.tags[i - 1] != .dot)) {
+                for (from, to) |f, t| if (std.mem.eql(u8, f, written)) {
+                    spelled = t;
+                    break;
+                };
+            }
+            try out.appendSlice(self.sink.arena, spelled);
+            position = span.end;
+        }
+    }
+
+    /// The span of the standalone request's line, its newline included, or
+    /// null where the line holds other source too.
+    fn requestLine(self: *const Parser, refused: RefusedDerive) ?Span {
+        const source = self.cursor.source;
+        const removed_start = lineStart(source, self.cursor.spans[refused.keyword.index()].start);
+        if (!blank(source[removed_start..self.cursor.spans[refused.keyword.index()].start])) return null;
+        var removed_end = self.cursor.spans[refused.last.index()].end;
+        while (removed_end < source.len and (source[removed_end] == ' ' or source[removed_end] == '\t' or source[removed_end] == ';' or source[removed_end] == '\r')) removed_end += 1;
+        if (removed_end < source.len and source[removed_end] != '\n') return null;
+        if (removed_end < source.len) removed_end += 1;
+        return .{ .start = @intCast(removed_start), .end = @intCast(removed_end) };
+    }
+
+    /// The edits writing `attribute` on its own line above the declaration
+    /// `d` and removing the standalone request's line, or null where the
+    /// request shares a line with other source.
+    fn attachedDeriveEdits(self: *const Parser, refused: RefusedDerive, d: node.DeclId, attribute: []const u8) std.mem.Allocator.Error!?[]const Edit {
+        const source = self.cursor.source;
+        const removed = self.requestLine(refused) orelse return null;
+
+        const groups = self.builder.decl_attribute_groups.items[d.index()];
+        var first = self.builder.decls.items(.token_range)[d.index()].start;
+        if (groups.len() != 0) first = self.builder.attribute_groups.items[groups.start].at;
+        const inserted_at = lineStart(source, self.cursor.spans[first.index()].start);
+        const indentation = source[inserted_at..self.cursor.spans[first.index()].start];
+        if (!blank(indentation)) return null;
+        const line = try std.fmt.allocPrint(self.sink.arena, "{s}{s}\n", .{ indentation, attribute });
+
+        const file = self.file;
+        if (removed.end == inserted_at) {
+            const edits = try self.sink.arena.alloc(Edit, 1);
+            edits[0] = .{ .file = file, .span = removed, .text = line };
+            return edits;
+        }
+        const edits = try self.sink.arena.alloc(Edit, 2);
+        edits[0] = .{ .file = file, .span = .{ .start = @intCast(inserted_at), .end = @intCast(inserted_at) }, .text = line };
+        edits[1] = .{ .file = file, .span = removed, .text = "" };
+        return edits;
+    }
+
+    /// The edits writing `traits` after the last trait of the type's
+    /// `derive(...)` item and removing the standalone request's line, or
+    /// null where the request shares a line with other source.
+    fn mergedDeriveEdits(self: *const Parser, refused: RefusedDerive, item: node.AttributeItem, traits: []const u8) std.mem.Allocator.Error!?[]const Edit {
+        const removed = self.requestLine(refused) orelse return null;
+        const last = self.entryTokens(self.builder.derive_traits.items[item.derive_traits.end - 1]);
+        const after: u32 = @intCast(self.cursor.spans[last.end.index() - 1].end);
+        const edits = try self.sink.arena.alloc(Edit, 2);
+        edits[0] = .{ .file = self.file, .span = .{ .start = after, .end = after }, .text = try std.fmt.allocPrint(self.sink.arena, ", {s}", .{traits}) };
+        edits[1] = .{ .file = self.file, .span = removed, .text = "" };
+        return edits;
+    }
+
+    fn lineStart(source: []const u8, at: usize) usize {
+        var start = at;
+        while (start > 0 and source[start - 1] != '\n') start -= 1;
+        return start;
+    }
+
+    fn blank(text: []const u8) bool {
+        for (text) |c| if (c != ' ' and c != '\t') return false;
+        return true;
     }
 
     /// `trait Name { fn f(…) -> T }`.
@@ -3534,6 +4191,8 @@ const Parser = struct {
         while (!self.cursor.atEnd() and !self.cursor.at(.l_brace) and !self.cursor.at(.r_brace)) {
             try self.parseWherePredicate();
             if (self.cursor.eat(.comma) == null) break;
+            // A trailing comma before the `)` that closes a derive item.
+            if (self.cursor.at(.r_paren)) break;
             if (self.atDelegation() and self.cursor.peekAt(1) == .identifier) break;
             if (self.cursor.precededByNewline() and self.atDeclaration()) break;
         }
@@ -9742,8 +10401,8 @@ test "qualified trait references parse in every trait position" {
     const got = try parseProgramText(arena.allocator(),
         \\trait Child: protocol.Parent {}
         \\template impl protocol.Marker {}
+        \\@derive(protocol.Marker)
         \\struct Item {}
-        \\derive protocol.Marker for Item
         \\impl protocol.Parent for Item {}
         \\fn accepts[T: protocol.Parent](_value: T) where T: protocol.Parent {}
         \\fn main() -> UInt8 { 0 }
@@ -9779,22 +10438,86 @@ test "parser records structural reflection" {
     try testing.expect(std.mem.indexOf(u8, got.dump, "\"of\"") != null);
 }
 
-test "a derive request is a distinct impl-space declaration" {
+test "a standalone derive is refused with the attribute that requests it" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
+    const gpa = arena.allocator();
 
-    const got = try parseProgramText(arena.allocator(),
-        \\struct Mark {}
-        \\trait Debug {}
-        \\derive Debug for Mark
+    const text =
+        \\struct Mark[T] { value: T }
+        \\
+        \\derive[U: Debug + Copyable] Debug for Mark[U]
         \\fn main() -> UInt8 { 0 }
-    );
-    try testing.expectEqual(@as(u32, 0), got.errors);
-    try testing.expect(std.mem.indexOf(u8, got.dump, "decl derive_impl single \"Mark\"") != null);
-    try testing.expect(std.mem.indexOf(u8, got.dump, "trait Debug") != null);
+    ;
+    const source: Source = .{ .path = "t.lin", .text = text };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    const refused = sink.items()[0];
+    try testing.expectEqual(@as(?Code, .s_derive), refused.code);
+    try testing.expectEqualStrings("write `@derive(Debug where T: Debug + Copyable)` above `struct Mark`", refused.primaryLabel().?.message);
+    try testing.expectEqual(@as(usize, 1), refused.fixes.len);
+    try testing.expectEqual(@import("../diagnostics/diagnostic.zig").FixKind.attached_derive, refused.fixes[0].kind);
+    // The request is no declaration of its own, and no type carries it.
+    for (0..ast.declCount()) |i| try testing.expectEqual(@as(u32, 0), ast.attachedDeriveTraitRange(node.DeclId.at(@intCast(i))).len());
+
+    // Applied, the fix writes the attribute above the type and removes the
+    // request's line.
+    var fixed: std.ArrayList(u8) = .empty;
+    var at: usize = 0;
+    const edits = try gpa.dupe(Edit, refused.fixes[0].edits);
+    std.mem.sort(Edit, edits, {}, struct {
+        fn before(_: void, left: Edit, right: Edit) bool {
+            return left.span.start < right.span.start;
+        }
+    }.before);
+    for (edits) |edit| {
+        try fixed.appendSlice(gpa, text[at..edit.span.start]);
+        try fixed.appendSlice(gpa, edit.text);
+        at = edit.span.end;
+    }
+    try fixed.appendSlice(gpa, text[at..]);
+    try testing.expectEqualStrings(
+        \\@derive(Debug where T: Debug + Copyable)
+        \\struct Mark[T] { value: T }
+        \\
+        \\fn main() -> UInt8 { 0 }
+    , fixed.items);
 }
 
-test "grouped derive and template component requirement parse" {
+test "a standalone derive's help writes the attribute for each form it took" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const helps = try helpsOf(gpa,
+        \\struct Point { x: UInt8 }
+        \\struct Mark[T: Copyable] { value: T }
+        \\derive (Equatable, Debug) for Point
+        \\derive Score for Mark[UInt8]
+        \\derive[A: Copyable] Debug for Mark[A]
+        \\derive[A] Count[A] for Point
+        \\derive Equatable for Elsewhere
+        \\derive[A: Copyable + Equatable] Equatable for Mark[A] where A: Copyable + Hash
+        \\fn main() -> UInt8 { 0 }
+    );
+    try testing.expectEqual(@as(usize, 6), helps.len);
+    try testing.expectEqualStrings("write `@derive(Equatable, Debug)` above `struct Point`", helps[0]);
+    try testing.expectEqualStrings("write `@derive(Score for Mark[UInt8])` above `struct Mark`", helps[1]);
+    // A bound the type's declaration writes already is no environment.
+    try testing.expectEqualStrings("write `@derive(Debug)` above `struct Mark`", helps[2]);
+    // A parameter only the trait's argument names is a binder.
+    try testing.expectEqualStrings("write `@derive[A](Count[A])` above `struct Point`", helps[3]);
+    try testing.expectEqualStrings("write `@derive(Equatable)` above the declaration of `Elsewhere`", helps[4]);
+    // Each bound the declaration writes is left out on its own, wherever the
+    // request writes it.
+    try testing.expectEqualStrings("write `@derive(Equatable where T: Equatable, T: Hash)` above `struct Mark`", helps[5]);
+}
+
+test "a derive item's clause parses after its traits" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
@@ -9804,11 +10527,9 @@ test "grouped derive and template component requirement parse" {
         \\template impl Inspect
         \\where reflect.components: Inspect + Lookup[UInt64]
         \\{}
+        \\@derive(Inspect, Lookup[UInt64] where T: Inspect + Lookup[UInt64],)
+        \\@derive(Inspect for Box[UInt8])
         \\struct Box[T] { value: T }
-        \\derive[T: Inspect] (
-        \\    Inspect,
-        \\) for Box[T] where
-        \\    T: Lookup[UInt64],
         \\fn main() -> UInt8 { 0 }
     ;
     const source: Source = .{ .path = "t.lin", .text = text };
@@ -9819,32 +10540,20 @@ test "grouped derive and template component requirement parse" {
 
     try testing.expectEqual(@as(u32, 0), sink.error_count);
     try testing.expectEqual(@as(usize, 1), ast.template_requirements.len);
-    try testing.expectEqual(@as(usize, 1), ast.derive_traits.len);
-
-    var template = node.DeclId.none;
-    var derive = node.DeclId.none;
-    for (0..ast.declCount()) |i| {
-        const id = node.DeclId.at(@intCast(i));
-        switch (ast.declTag(id)) {
-            .template_impl => template = id,
-            .derive_impl => derive = id,
-            else => {},
-        }
-    }
-    try testing.expect(template != .none);
-    try testing.expect(derive != .none);
-    const requirement = ast.templateRequirements(template)[0];
+    try testing.expectEqual(@as(usize, 3), ast.derive_traits.len);
+    const requirement = ast.template_requirements[0];
     try testing.expectEqual(node.TemplateRequirement.Kind.components, requirement.kind);
-    try testing.expectEqualStrings("reflect", ast.tokenText(requirement.reflect));
-    try testing.expectEqualStrings("components", ast.tokenText(requirement.selector));
     try testing.expectEqual(@as(usize, 2), ast.boundsIn(requirement.bounds).len);
-    try testing.expect(ast.deriveIsGrouped(derive));
-    try testing.expect(ast.deriveGroupOpen(derive) != .none);
-    try testing.expect(ast.deriveGroupClose(derive) != .none);
-    try testing.expectEqualStrings("Inspect", ast.tokenText(ast.deriveTraits(derive)[0].ref.name));
-    try testing.expectEqual(@as(usize, 1), ast.declTypeParams(derive).len);
-    try testing.expectEqual(@as(u32, 1), ast.declHead(derive).args.len());
-    try testing.expectEqual(@as(usize, 1), ast.declWherePredicates(derive).len);
+
+    for (ast.derive_traits[0..2]) |entry| {
+        try testing.expectEqual(node.DeriveClause.Kind.environment, entry.clause.kind);
+        try testing.expectEqual(@as(u32, 1), entry.clause.where_predicates.len());
+    }
+    try testing.expectEqual(ast.derive_traits[0].clause.keyword, ast.derive_traits[1].clause.keyword);
+    const application = ast.derive_traits[2].clause;
+    try testing.expectEqual(node.DeriveClause.Kind.application, application.kind);
+    try testing.expectEqualStrings("Box", ast.tokenText(application.head.name));
+    try testing.expectEqual(@as(u32, 1), application.head.args.len());
 }
 
 test "structural supertrait requirement parses as derived evidence" {
@@ -9878,12 +10587,13 @@ test "malformed structural source recovers at the next declaration" {
     const got = try parseProgramText(arena.allocator(),
         \\trait Inspect {}
         \\template impl Inspect where reflect.components Inspect {}
-        \\derive (Inspect, for Missing
+        \\@derive(Inspect, for Missing
+        \\struct Box {}
         \\fn main() -> UInt8 { 0 }
     );
     try testing.expect(got.errors > 0);
     try testing.expect(std.mem.indexOf(u8, got.dump, "decl template_impl \"Inspect\"") != null);
-    try testing.expect(std.mem.indexOf(u8, got.dump, "decl derive_impl grouped \"Missing\"") != null);
+    try testing.expect(std.mem.indexOf(u8, got.dump, "decl struct_ \"Box\"") != null);
     try testing.expect(std.mem.indexOf(u8, got.dump, "decl function \"main\"") != null);
 }
 
@@ -9949,17 +10659,17 @@ test "an unclosed derive group stops before a contextual newtype declaration" {
     try testing.expect(std.mem.indexOf(u8, got.dump, "decl function \"main\"") != null);
 }
 
-test "a derive target named type precedes a contextual newtype declaration" {
+test "a derive application named type precedes a contextual newtype declaration" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     const got = try parseProgramText(arena.allocator(),
-        \\derive Inspect for type
+        \\@derive(Inspect for type)
+        \\struct Box {}
         \\type Alias = UInt8
         \\fn main() -> UInt8 { 0 }
     );
-    try testing.expectEqual(@as(u32, 0), got.errors);
-    try testing.expect(std.mem.indexOf(u8, got.dump, "decl derive_impl single \"type\"") != null);
+    try testing.expect(std.mem.indexOf(u8, got.dump, "decl struct_ \"Box\"") != null);
     try testing.expect(std.mem.indexOf(u8, got.dump, "decl newtype \"Alias\"") != null);
 }
 
@@ -9973,7 +10683,8 @@ test "source ids retain structural source tables through a module prefix" {
         .path = "source.lin",
         .text =
         \\template impl Inspect where reflect.components: Inspect {}
-        \\derive (Inspect,) for Box
+        \\@derive(Inspect,)
+        \\struct Box {}
         \\default impl[T: Inspect] Query for T { type Item = T }
         \\
         ,
@@ -10864,19 +11575,17 @@ test "a missing attribute comma preserves the remaining group and declaration" {
     );
     try testing.expectEqual(@as(u32, 1), got.errors);
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, got.dump, "decl copyable struct_"));
-    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, got.dump, "decl derive_impl"));
 }
 
-test "attribute recovery preserves a following standalone derive" {
+test "attribute recovery preserves a following standalone derive's refusal" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const got = try parseProgramText(arena.allocator(),
+    const codes = try codesOf(arena.allocator(),
         \\@(copyable
         \\derive Mark for Point
         \\struct Point { value: UInt8 }
     );
-    try testing.expect(got.errors > 0);
-    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, got.dump, "decl derive_impl"));
+    try testing.expect(std.mem.indexOfScalar(?Code, codes, .s_derive) != null);
 }
 
 test "attribute recovery reports each malformed prefix once" {

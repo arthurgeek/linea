@@ -42,14 +42,11 @@ template impl[A: Allocator] Decode[A] where
 }
 
 // DecodedProfile derives Decode, with an optional field.
+@derive(Release, Decode[A])
 struct DecodedProfile[A: Allocator] {
     name: String[A],
     enabled: Option[Bool],
 }
-
-derive[A: Allocator] Release for DecodedProfile[A]
-
-derive[A: Allocator] Decode[A] for DecodedProfile[A]
 
 test "derived records own text and apply optional field policy" {
     let input = r#"{"name":"tea"}"#.to_owned().unwrap()
@@ -343,9 +340,8 @@ impl[K: DecodeKey[A], V: Decode[A], A: Allocator] Decode[A] for Map[K, V, A] {
 }
 
 // FoldedDecodeKey decodes both "tea" and "TEA" to the same key.
+@derive(Equatable, Release)
 struct FoldedDecodeKey { code: UInt8 }
-
-derive (Equatable, Release) for FoldedDecodeKey
 
 impl Equivalent for FoldedDecodeKey {}
 
@@ -609,13 +605,12 @@ impl[A: Allocator] ObjectDecoder[A] {
 
 // DecodeSettings decodes by hand with an ObjectDecoder, giving `retries` a
 // default of 3 and refusing more than 10.
+@derive(Release)
 struct DecodeSettings[A: Allocator] {
     name: String[A],
     labels: Vec[String[A], A],
     retries: UInt8,
 }
-
-derive[A: Allocator] Release for DecodeSettings[A]
 
 impl[A: Allocator] Decode[A] for DecodeSettings[A] {
     fn decode[B: Allocator](value: Value[B], allocator: A) -> Result[Self, DecodeError[A]] {
@@ -668,6 +663,7 @@ test "typed records apply missing policy and settle early owners" {
 
 // JsonDecodedRecord allocates through a TestHandle, so a test can
 // refuse each allocation decoding makes.
+@derive(Decode[testing.TestHandle[mem.SystemAllocator]])
 struct JsonDecodedRecord {
     name: String[testing.TestHandle[mem.SystemAllocator]],
     labels: Vec[String[testing.TestHandle[mem.SystemAllocator]], testing.TestHandle[mem.SystemAllocator]],
@@ -681,8 +677,6 @@ impl Release for JsonDecodedRecord {
         labels.release()
     }
 }
-
-derive Decode[testing.TestHandle[mem.SystemAllocator]] for JsonDecodedRecord
 
 // This walk refuses each attempt by hand rather than through
 // `testing.each_allocation_failure`, which accepts a refused run that

@@ -649,10 +649,13 @@ reading the retained library prefix. Template and derive headers use the same
 source module scopes, and immutable template-member plans precede generation.
 An admitted template validates each nonambient free reference once against the
 trait's reach and retains its canonical declaration and trait-module member
-binding. Attached and standalone requests enter one expansion path. An admitted derive is
-rendered as an ordinary implementation in the target module. An attached
-request on a generic type also renders one trailing predicate per distinct
-field type naming a type parameter, bounded by the template's component
+binding. Every request is a `derive(...)` item on a type declaration, and each
+trait entry carries its item's clause, so expansion walks those declarations
+alone. An admitted derive is rendered as an ordinary implementation in the
+target module: over the type's parameters, or over none for a `for`
+application, with a `where` clause's predicates in place of inferred ones. A
+request with no clause on a generic type also renders one trailing predicate
+per distinct field type naming a type parameter, bounded by the template's component
 requirements at the entry's arguments, so selection reads the condition as it
 reads a written one;
 a foreign trait adds an ordinary import using `Program.importRoute` and a
@@ -2190,7 +2193,7 @@ record that consumers must read.
 | Seam | What crosses it | Recorded as |
 | --- | --- | --- |
 | Lexer → Parser | tokens, spans, reserved words | the `TokenList` itself |
-| Parser → Resolver | source tree shape, declaration kinds including template and standalone derive forms, ordered closed attribute groups and attached derive entries, normalized visibility and ownership policy, panic expressions, written trailing constraints | source `Ast` accessors — `declTokens`, `declName`, `declOwner`, `declAttributeGroups`, `attachedDeriveTraitRange`, `deriveRequestTraitRange`, `declTraitRef`, `boundsOf`, constraint subject and requirement accessors |
+| Parser → Resolver | source tree shape, declaration kinds including template forms, ordered closed attribute groups and attached derive entries with their clauses, normalized visibility and ownership policy, panic expressions, written trailing constraints | source `Ast` accessors — `declTokens`, `declName`, `declOwner`, `declAttributeGroups`, `attachedDeriveTraitRange`, `attachedDeriveTraits`, `declTraitRef`, `boundsOf`, constraint subject and requirement accessors |
 | Loader → Resolver | which source modules exist, which independently loaded root owns each, what each imports, canonical routes between loaded modules, the source interner and source tree, and the bytes each embed read | `Program.modules` including typed `Module.root`, `Program.importRoute`, `Program.ast`, `Interner`, `Program.embeds` (borrowed into `Resolution.embeds` for the checker, the constant folder and lowering) |
 | Resolver → Checker | immutable expanded syntax and active roots; generated declaration modules and import targets, declaration and rendered origins, template plans, generated-implementation descriptors and ordered component-requirement rows; which declaration each name reaches, each binding's kind, bound classification, references and open scopes for written constraints, the implementations the compiler provides, lambda source identity and parameter scopes | `ExpandedProgram` plus `Resolution` — `declsOf`, `moduleOf`, `importedBy`, declaration origins, generated span origins, `template_members`, `generatedImplementation`, `componentRequirements`, `targets`, `written`, `variant_ordinals`, `ambient_impls`, `closures`, scope tables; `boundNames` for the bounds |
 | Checker → Ownership | expanded roots; types including `Never`, universes, which expressions the checker refused, accepted source or generated bodies, generated bodies suppressed during semantic recovery, and each call's normalised target and arguments | `ExpandedProgram` plus `Typing` — binding/expression types, `refused`, `selected_places`, `folded_indices`, closure descriptors, `variant_uses`, `suppressed_generated_bodies` in shared module/root order, normalised calls and `call_index`; contract destinations remain keyed to the expanded AST transfer. Ownership decides consuming positions itself, from where each expression sits |

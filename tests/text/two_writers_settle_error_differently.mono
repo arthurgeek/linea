@@ -104,6 +104,7 @@ struct Location {
     column: UInt32,
 }
 
+@derive(Equatable, Equivalent, Debug, Release)
 pub struct Range[UInt64] {
     lo: UInt64,
     hi: UInt64,
@@ -130,6 +131,7 @@ struct Buffer[SystemAllocator] {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Int32] {
     None,
     Some(Int32),
@@ -149,6 +151,7 @@ struct Storage[UInt8,SystemAllocator] {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Buffer[SystemAllocator]] {
     None,
     Some(std.mem.Buffer[std.mem.SystemAllocator]),
@@ -158,18 +161,21 @@ pub enum Option[Buffer[SystemAllocator]] {
 type Address[UInt8] = UInt64
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[UInt64] {
     None,
     Some(UInt64),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Str] {
     None,
     Some(std.text.Str),
 }
 
 @copyable
+@derive(Debug, Release)
 pub struct WriteFailure[IoError] {
     kind: std.io.core.WriteFailureKind,
     reason: std.option.Option[std.io.core.IoError],
@@ -177,60 +183,70 @@ pub struct WriteFailure[IoError] {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[IoError] {
     None,
     Some(std.io.core.IoError),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[(),Closed] {
     Ok(()),
     Err(Closed),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[UInt8,IoError] {
     Ok(UInt8),
     Err(std.io.core.IoError),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[Slice[UInt8]] {
     None,
     Some(std.mem.Slice[UInt8]),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[UInt8] {
     None,
     Some(UInt8),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[(),Oom] {
     Ok(()),
     Err(std.mem.Oom),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[Buffer[SystemAllocator],Oom] {
     Ok(std.mem.Buffer[std.mem.SystemAllocator]),
     Err(std.mem.Oom),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[UInt64,WriteFailure[IoError]] {
     Ok(UInt64),
     Err(std.io.core.WriteFailure[std.io.core.IoError]),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[(),IoError] {
     Ok(()),
     Err(std.io.core.IoError),
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[borrow(UInt8)] {
     None,
     Some(borrow(UInt8)),
@@ -557,10 +573,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_3020_1_0_0) => {
+        Some(_linea_derive_2990_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_3020_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_2990_1_0_0)
                 }
             }
         },

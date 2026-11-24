@@ -20,7 +20,7 @@ pub struct LineEncodingError {
 // the failed line: resume, take or discard it before reading another, or the
 // next read is `RecoveryRequired`. `?` turns a refused allocation into
 // `LineError.Allocation`.
-@(copyable, derive(From[mem.Oom]))
+@(copyable, derive(From[mem.Oom], Debug, Release))
 pub enum LineError[E] {
     Input(InputFailure[E]),
     Allocation(mem.Oom),
@@ -31,10 +31,6 @@ pub enum LineError[E] {
     InvalidProgress,
     PositionOverflow,
 }
-
-derive[E: Debug] Debug for LineError[E]
-
-derive[E: Release] Release for LineError[E]
 
 impl[E] LineError[E] {
     // Return whether the line failed because an allocation was refused, which

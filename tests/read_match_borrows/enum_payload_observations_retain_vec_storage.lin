@@ -1,13 +1,11 @@
 import std.mem
 import std.io
 
+@derive(Release)
 struct Pair { key: UInt64, value: UInt64 }
 
+@derive(Release)
 enum Bucket { Empty, Full(UInt64, Pair), Number(UInt64) }
-
-derive Release for Pair
-
-derive Release for Bucket
 
 fn observed(slots: Vec[Bucket, mem.SystemAllocator]) -> borrow UInt64 where borrows(slots) {
     match read slots[0] {

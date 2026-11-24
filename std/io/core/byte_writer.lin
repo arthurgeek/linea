@@ -16,15 +16,12 @@ pub enum WriteFailureKind {
 // pending output by flush. A reason preserves the
 // writer's own error value. Delivery does not promise filesystem durability.
 @copyable
+@derive(Debug, Release)
 pub struct WriteFailure[E] {
     kind: WriteFailureKind,
     reason: Option[E],
     written: UInt64,
 }
-
-derive[E: Debug] Debug for WriteFailure[E]
-
-derive[E: Release] Release for WriteFailure[E]
 
 // A ByteWriter accepts bytes, possibly fewer than it is offered on each call,
 // and may hold some pending until `flush` hands them on.

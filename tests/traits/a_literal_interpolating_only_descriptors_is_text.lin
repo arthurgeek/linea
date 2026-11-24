@@ -26,19 +26,17 @@ template impl Outline {
     }
 }
 
+@derive(Outline)
 struct Point {
     x: UInt8,
     y: UInt8,
 }
 
+@derive(Outline)
 enum Shape {
     Dot,
     Box(UInt8, UInt8),
 }
-
-derive Outline for Point
-
-derive Outline for Shape
 
 fn main() -> UInt8 {
     let point: Point = .{ x = 1, y = 2 }

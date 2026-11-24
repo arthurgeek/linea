@@ -1,8 +1,7 @@
 import std.json
 
+@derive(json.Encode)
 type Count = UInt8
-
-derive json.Encode for Count
 
 fn main() -> UInt8 {
     let value = Count(1)
