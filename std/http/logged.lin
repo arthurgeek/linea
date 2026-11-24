@@ -20,14 +20,13 @@ import std.time
 // logged at `Warn`, and the address `listen_and_serve` bound is logged at
 // `Info` as `listening address=127.0.0.1:8080`. Every call reaches `handler` too, so middleware inside
 // this one sees each request and event.
+// Releasing a `Logged` releases the handler and the logger it holds.
 @opaque
+@derive(Release)
 struct Logged[H, S: log.Sink, A: Allocator] {
     handler: H,
     logger: log.Logger[S, A],
 }
-
-// Releasing a `Logged` releases the handler and the logger it holds.
-derive[H: Release, S: log.Sink + Release, A: Allocator] Release for Logged[H, S, A]
 
 // `Logged` takes the state its handler takes and passes it on.
 impl[P: Allocator, T, H: Handler[T, P], S: log.Sink, A: Allocator] Handler[T, P] for Logged[H, S, A] {

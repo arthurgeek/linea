@@ -1,0 +1,29 @@
+trait Source {
+    type Item
+}
+
+struct Provider {}
+
+impl Source for Provider {
+    type Item = UInt8
+}
+
+trait Label {
+    fn label(_self: Self) -> UInt8
+}
+
+template impl Label where reflect.target: struct {
+    fn label(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+@derive(Label where I.Item == Missing)
+struct Product[I: Source] {
+    value: I.Item,
+}
+
+fn main() -> UInt8 {
+    let _product: Product[Provider] = .{ value = 1 }
+    0
+}

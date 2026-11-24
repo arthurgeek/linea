@@ -13,12 +13,11 @@ template impl Ordinal {
     }
 }
 
+@derive(Ordinal)
 enum Choice {
     First,
     Second,
 }
-
-derive Ordinal for Choice
 
 fn main() -> UInt8 {
     var count: UInt8 = 0

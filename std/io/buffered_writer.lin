@@ -12,6 +12,7 @@ pub enum BufferError {
 
 // A BufferOpenFailure hands back the stream no buffer was made for, with the
 // reason.
+@derive(Release)
 pub struct BufferOpenFailure[R] {
     resource: R,
     reason: BufferError,
@@ -52,18 +53,15 @@ impl[W: ByteWriter, A: Allocator, E: Display] Display for FinishFailure[W, A, E]
     }
 }
 
-derive[R: Release] Release for BufferOpenFailure[R]
-
 // BufferOpenReason says why a buffered stream could not be opened, once the
 // stream it was given is closed. Closing can fail too, so `close` keeps that
 // failure beside the refusal.
 @copyable
+@derive(Debug)
 pub struct BufferOpenReason[C] {
     reason: BufferError,
     close: Option[C],
 }
-
-derive[C: Debug] Debug for BufferOpenReason[C]
 
 // A refused buffer reads as its refusal, followed by a failed close.
 impl[C: Display] Display for BufferOpenReason[C] {
@@ -129,12 +127,11 @@ test "a refused buffer displays a failed close" {
 // bytes are abandoned and the underlying stream is closed. `close` keeps a
 // failed close beside the write failure.
 @copyable
+@derive(Debug)
 pub struct FinishReason[E, C] {
     write: WriteFailure[E],
     close: Option[C],
 }
-
-derive[E: Debug, C: Debug] Debug for FinishReason[E, C]
 
 // A failed finish reads as its write failure, followed by a failed close.
 impl[E: Display, C: Display] Display for FinishReason[E, C] {
@@ -203,14 +200,13 @@ test "settling a failed finish keeps the write failure and a failed close" {
 
 // BufferedOutputProbe accepts at most `step` bytes per write into eight bytes of
 // storage, and fails with the reason 9 once it holds `stop` bytes.
+@derive(Release)
 struct BufferedOutputProbe {
     bytes: [UInt8; 8],
     length: UInt64,
     step: UInt64,
     stop: UInt64,
 }
-
-derive Release for BufferedOutputProbe
 
 // The probe's close fails with 5 once it has stopped accepting bytes, so a
 // test can see a close failure kept beside a write failure.

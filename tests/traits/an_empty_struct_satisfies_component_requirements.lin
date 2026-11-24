@@ -2,9 +2,8 @@ trait Ready {}
 
 template impl Ready where reflect.components: Ready {}
 
+@derive(Ready)
 struct Empty {}
-
-derive Ready for Empty
 
 fn accept[T: Ready](_value: T) -> UInt8 {
     7

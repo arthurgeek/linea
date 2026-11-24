@@ -20,15 +20,13 @@ template impl Inspect where reflect.components: Lookup {
     }
 }
 
+@derive(Inspect)
 struct Filled {
     value: UInt8,
 }
 
+@derive(Inspect)
 struct Empty {}
-
-derive Inspect for Filled
-
-derive Inspect for Empty
 
 fn main() -> UInt8 {
     0

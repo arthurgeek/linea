@@ -17,11 +17,10 @@ template impl Count {
     }
 }
 
+@derive(Count)
 struct Point {
     x: UInt8,
 }
-
-derive Count for Point
 
 fn main() -> UInt8 {
     let point: Point = .{ x = 1 }

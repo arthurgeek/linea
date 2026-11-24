@@ -8,13 +8,12 @@ struct Wrapper[T] {
     value: T,
 }
 
+@derive(Ready where Wrapper[T]: Required)
 struct Constructed[T] {
     value: Wrapper[T],
 }
 
 impl Required for Wrapper[UInt8] {}
-
-derive[T] Ready for Constructed[T] where Wrapper[T]: Required
 
 trait Source {
     type Item
@@ -26,13 +25,12 @@ impl Source for Provider {
     type Item = UInt8
 }
 
+@derive(Ready where I.Item: Required)
 struct Projected[I: Source] {
     value: I.Item,
 }
 
 impl Required for UInt8 {}
-
-derive[I: Source] Ready for Projected[I] where I.Item: Required
 
 fn accept[T: Ready](_value: T) -> UInt8 {
     1

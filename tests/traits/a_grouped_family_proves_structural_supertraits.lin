@@ -6,9 +6,8 @@ template impl Base {}
 
 template impl Law where reflect.supertraits: derived {}
 
+@derive(Base, Law)
 struct Item {}
-
-derive (Base, Law) for Item
 
 fn accepts[T: Law](_value: T) -> UInt8 {
     7

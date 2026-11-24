@@ -5098,7 +5098,6 @@ fn memberKind(ast: *const Ast, d: node.DeclId) MemberKind {
         .use_,
         .impl_,
         .template_impl,
-        .derive_impl,
         .trait_,
         .err,
         => .operation,
@@ -5158,7 +5157,7 @@ fn suppliesSomething(ast: *const Ast, d: node.DeclId) bool {
         // is reachable inside a trait's or an implementation's braces, so
         // nothing here ever asks this question of one, but the switch is
         // exhaustive regardless of what is reachable.
-        .constant, .traversal_, .enum_, .struct_, .newtype, .alias, .import_, .use_, .impl_, .template_impl, .derive_impl, .trait_, .err => false,
+        .constant, .traversal_, .enum_, .struct_, .newtype, .alias, .import_, .use_, .impl_, .template_impl, .trait_, .err => false,
     };
 }
 
@@ -10417,8 +10416,8 @@ const Checker = struct {
             \\trait Structural {}
             \\struct Open {}
             \\template impl Structural where reflect.components: Required[Open.Item] {}
+            \\@derive(Structural)
             \\struct Target {}
-            \\derive Structural for Target
             \\fn main() -> UInt8 { let _target: Target = .{}; 0 }
         );
         try testing.expectEqual(@as(usize, 1), sink.items().len);
@@ -33205,9 +33204,7 @@ const Checker = struct {
         requirement: node.TemplateRequirement,
         checked: []CheckedTemplateRequirement,
     ) std.mem.Allocator.Error!bool {
-        const diagnostics_start = self.sink.items().len;
-        const errors_before = self.sink.error_count;
-        const warnings_before = self.sink.warning_count;
+        const diagnostics = self.sink.checkpoint();
         const reported_start = self.refusalMark();
         const bound_sites_start = self.bound_sites.items.len;
         defer self.forgetRefusalsSince(reported_start);
@@ -33258,7 +33255,7 @@ const Checker = struct {
         }
 
         var first_error: ?Diagnostic = null;
-        for (self.sink.items()[diagnostics_start..]) |diagnostic| {
+        for (self.sink.items()[diagnostics.len..]) |diagnostic| {
             if (diagnostic.severity != .err) continue;
             first_error = diagnostic;
             break;
@@ -33271,9 +33268,7 @@ const Checker = struct {
         // All diagnostics since the checkpoint belong to this one requirement.
         // Keep their arena-backed text alive, but expose only the first as the
         // template-owned aggregate.
-        self.sink.list.shrinkRetainingCapacity(diagnostics_start);
-        self.sink.error_count = errors_before;
-        self.sink.warning_count = warnings_before;
+        self.sink.restore(diagnostics);
         if (first_error) |captured| {
             var diagnostic = captured;
             diagnostic.code = .t_template;
@@ -33319,11 +33314,14 @@ const Checker = struct {
     /// Types the arguments a derive entry writes, with `owner`'s type
     /// parameters in scope. Sets `current` and `generic`; the caller restores
     /// them.
-    fn typeDeriveArguments(self: *Checker, target: node.DeclId, owner: node.DeclId, trait: node.DeriveTraitId) std.mem.Allocator.Error!void {
+    fn typeDeriveArguments(self: *Checker, target: node.DeclId, trait: node.DeriveTraitId) std.mem.Allocator.Error!void {
+        // Arguments naming a binder are typed in the generated
+        // implementation, which declares it; the type declares no binder.
+        if (self.ast.deriveTrait(trait).clause.binders.len() != 0) return;
         self.current = self.program.moduleOf(target);
-        self.generic = owner;
+        self.generic = target;
         for (self.ast.typeArgs(self.ast.deriveTrait(trait).ref.args)) |argument| {
-            _ = try self.typeOfRefOf(self.current, owner, argument);
+            _ = try self.typeOfRefOf(self.current, target, argument);
         }
     }
 
@@ -33340,7 +33338,7 @@ const Checker = struct {
             self.generic = outer_generic;
         }
         for (self.res.unwrapped_sources) |unwrapped| {
-            try self.typeDeriveArguments(unwrapped.target, unwrapped.owner, unwrapped.trait);
+            try self.typeDeriveArguments(unwrapped.target, unwrapped.trait);
         }
     }
 
@@ -33546,7 +33544,7 @@ const Checker = struct {
             const wrapped = ast.declParams(unwrapped.site.member)[unwrapped.site.parameter].written;
             const source = resolve_mod.wrappedArgument(ast, descriptor.template, wrapped, written_arguments);
             self.current = self.program.moduleOf(descriptor.target);
-            self.generic = descriptor.derive;
+            self.generic = descriptor.target;
             // An argument's text runs to the next argument, or to the end
             // of the entry, so a callable's refused result is inside it.
             for (written_arguments, 0..) |argument, index| {
@@ -33558,7 +33556,7 @@ const Checker = struct {
                     else
                         ast.rangeSpan(entry.tokens).end,
                 };
-                if (try self.writtenTypeRefused(descriptor.derive, argument, span, reported)) continue :entries;
+                if (try self.writtenTypeRefused(descriptor.target, argument, span, reported)) continue :entries;
             }
             try self.reportUnwrapped(unwrapped.site, unwrapped.want, unwrapped.holders);
         }
@@ -33661,7 +33659,9 @@ const Checker = struct {
         for (0..self.program.generatedImplementationCount()) |implementation_index| {
             const implementation_id: GeneratedImplementationId = .at(@intCast(implementation_index));
             const descriptor = self.program.generatedImplementation(implementation_id);
-            if (self.invalid_templates.contains(descriptor.template)) {
+            // An implementation recovered from a refused standalone request
+            // answers lookups, and its refusal is its one report.
+            if (descriptor.recovered or self.invalid_templates.contains(descriptor.template)) {
                 try self.suppressGeneratedImplementation(descriptor.generated_impl);
                 continue;
             }
@@ -33669,18 +33669,15 @@ const Checker = struct {
             // The entry's written arguments are types of the source request, so
             // the lengths they write are typed here, as the generated
             // implementation's copy is typed on its own.
-            try self.typeDeriveArguments(
-                descriptor.target,
-                if (self.ast.declTag(descriptor.derive) == .derive_impl) descriptor.derive else descriptor.target,
-                descriptor.derive_trait,
-            );
-            // A standalone request's head is a written type of the source as
+            try self.typeDeriveArguments(descriptor.target, descriptor.derive_trait);
+            // The application `for` names is a written type of the source as
             // well, and a length or a default written in an argument it
             // applies is typed here for the same reason.
-            if (self.ast.declTag(descriptor.derive) == .derive_impl) {
-                self.current = self.program.moduleOf(descriptor.derive);
-                self.generic = descriptor.derive;
-                _ = try self.typeOfRefOf(self.current, descriptor.derive, self.ast.declHead(descriptor.derive));
+            const clause = self.ast.deriveTrait(descriptor.derive_trait).clause;
+            if (clause.kind == .application) {
+                self.current = self.program.moduleOf(descriptor.target);
+                self.generic = descriptor.target;
+                _ = try self.typeOfRefOf(self.current, descriptor.target, clause.head);
             }
 
             self.current = self.program.moduleOf(descriptor.generated_impl);
@@ -33762,7 +33759,7 @@ const Checker = struct {
         };
     }
 
-    /// Withdraws the `Release` requirement an attached `derive(Release)` places
+    /// Withdraws the `Release` requirement a `derive(Release)` with no clause places
     /// on each discardable component, for every derive before any derive's
     /// release or discard choice is made. The choice for one derive asks
     /// whether another type implements `Release`, and the answer depends on
@@ -33783,7 +33780,7 @@ const Checker = struct {
             const implementation_id: GeneratedImplementationId = .at(@intCast(implementation_index));
             const descriptor = self.program.generatedImplementation(implementation_id);
             if (self.invalid_templates.contains(descriptor.template)) continue;
-            if (self.ast.declTag(descriptor.derive) == .derive_impl) continue;
+            if (self.ast.deriveTrait(descriptor.derive_trait).clause.statesEnvironment()) continue;
             const row_index = self.row_of_impl[descriptor.generated_impl.index()];
             if (row_index == impl_of_none) continue;
             const implementation = self.implementations[row_index];
@@ -33876,10 +33873,10 @@ const Checker = struct {
     /// Decides whether a derived `Release` discards this component, and records
     /// the component when it does. A component is discarded when its type is
     /// discardable and not proven to implement `Release` under the derive's
-    /// own constraints: the type's written bounds for an attached request, or
-    /// the request's written environment for a standalone one. The decision is
-    /// made once here, so every instantiation settles the component the same
-    /// way. Every attached derive has already withdrawn the `Release`
+    /// own constraints: the type's written bounds for a request with no clause,
+    /// or the environment a `where` clause writes. The decision is made once
+    /// here, so every instantiation settles the component the same way. Every
+    /// request with no clause has already withdrawn the `Release`
     /// requirement on its discardable components, so the answer reads final
     /// requirements.
     fn settlesByDiscard(
@@ -33894,9 +33891,12 @@ const Checker = struct {
         const release = self.builder.closure_release orelse return false;
         if (self.implementations[row_index].trait != release.trait.index()) return false;
         if ((traitAt(self.ast, self.res, bound.named.name) orelse return false) != release.trait) return false;
-        const attached = self.ast.declTag(descriptor.derive) != .derive_impl;
-        const scope = if (attached) descriptor.target else descriptor.generated_impl;
-        const subject = if (attached) raw else held;
+        // A request with no clause decides under the type's own bounds, and
+        // one stating its environment under the environment it writes, which
+        // the generated header holds.
+        const inferred = !self.ast.deriveTrait(descriptor.derive_trait).clause.statesEnvironment();
+        const scope = if (inferred) descriptor.target else descriptor.generated_impl;
+        const subject = if (inferred) raw else held;
         const outer = self.generic;
         defer self.generic = outer;
         self.generic = scope;
@@ -39170,15 +39170,11 @@ const Checker = struct {
         if (lambda.params.len != wanted_params.len) return;
         for (lambda.params, wanted_params) |param, wanted| {
             if (!param.written.wasWritten() or !try self.hasOpenParameter(wanted.ty, settling)) continue;
-            const diagnostics_start = self.sink.items().len;
-            const errors_before = self.sink.error_count;
-            const warnings_before = self.sink.warning_count;
+            const diagnostics = self.sink.checkpoint();
             const refusals = self.refusalMark();
             const written = try self.typeOfRef(param.written);
-            const reported = self.sink.items().len != diagnostics_start;
-            self.sink.list.shrinkRetainingCapacity(diagnostics_start);
-            self.sink.error_count = errors_before;
-            self.sink.warning_count = warnings_before;
+            const reported = self.sink.items().len != diagnostics.len;
+            self.sink.restore(diagnostics);
             self.forgetRefusalsSince(refusals);
             if (written == .poison or reported) continue;
             for (settling) |s| {
@@ -41815,8 +41811,8 @@ test "template member matches generic bounds positionally" {
         \\impl First for Left {}
         \\enum Right { Value }
         \\impl Relation[Left] for Right {}
+        \\@derive(Structural)
         \\struct Item {}
-        \\derive Structural for Item
         \\fn main() -> UInt8 {
         \\    let item: Item = .{}
         \\    let left: Left = .Value
@@ -41944,8 +41940,8 @@ test "component requirement suppression records generated bodies in traversal or
         \\    fn first(_self: Self) -> UInt8 { 0 }
         \\    fn second(_self: Self) -> UInt8 { 0 }
         \\}
+        \\@derive(Inspect where T: Copyable)
         \\struct Box[T] { value: T }
-        \\derive[T] Inspect for Box[T]
         \\fn main() -> UInt8 { 0 }
     };
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
@@ -41985,9 +41981,9 @@ test "structural supertrait provenance distinguishes derives from handwritten ro
         \\trait Law: Base {}
         \\template impl Base {}
         \\template impl Law where reflect.supertraits: derived {}
+        \\@derive(Law)
         \\struct Item {}
         \\impl Base for Item {}
-        \\derive Law for Item
         \\fn main() -> UInt8 { let _item: Item = .{}; 0 }
     , &rejected);
     var derive_errors: usize = 0;
@@ -42002,8 +41998,8 @@ test "structural supertrait provenance distinguishes derives from handwritten ro
         \\trait Law: Base {}
         \\template impl Base {}
         \\template impl Law where reflect.supertraits: derived {}
+        \\@derive(Base, Law)
         \\struct Item {}
-        \\derive (Base, Law) for Item
         \\fn main() -> UInt8 { let _item: Item = .{}; 0 }
     , &accepted);
     try testing.expectEqual(@as(u32, 0), errors);
@@ -42022,10 +42018,10 @@ test "template requirement argument bounds are reported once" {
         \\template impl Inspect
         \\where reflect.components: Required[Constrained[Bool]]
         \\{}
+        \\@derive(Inspect)
         \\struct Pair { left: UInt8, right: UInt8 }
+        \\@derive(Inspect)
         \\struct Single { value: UInt8 }
-        \\derive Inspect for Pair
-        \\derive Inspect for Single
         \\fn main() -> UInt8 { 0 }
     , &sink);
     try testing.expectEqual(@as(u32, 1), errors);
@@ -42040,7 +42036,7 @@ test "template requirement argument bounds are reported once" {
     try testing.expectEqual(@as(usize, 0), bound_errors);
 }
 
-test "generated origin attributes standalone errors to the selected derive trait" {
+test "generated origin attributes errors to the selected derive trait" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -42053,8 +42049,8 @@ test "generated origin attributes standalone errors to the selected derive trait
         \\template impl Structural {
         \\    fn value(_self: Self) -> UInt8 { true }
         \\}
+        \\@derive(Marker, Structural)
         \\struct Mark {}
-        \\derive (Marker, Structural) for Mark
         \\fn main() -> UInt8 { 0 }
     ;
     const source: Source = .{ .path = "t.lin", .text = text };
@@ -42072,10 +42068,10 @@ test "generated origin attributes standalone errors to the selected derive trait
     var derive = DeclId.none;
     for (0..ast.declCount()) |i| {
         const decl = DeclId.at(@intCast(i));
-        if (ast.declTag(decl) == .derive_impl) derive = decl;
+        if (ast.attachedDeriveTraitRange(decl).len() != 0) derive = decl;
     }
     try testing.expect(derive != .none);
-    const trait_token = ast.deriveTraits(derive)[1].ref.name;
+    const trait_token = ast.attachedDeriveTraits(derive)[1].ref.name;
     const trait_span = ast.tokenSpan(trait_token);
     try testing.expectEqualStrings("Structural", text[trait_span.start..trait_span.end]);
     for (0..3) |collapse_count| {
@@ -42111,8 +42107,8 @@ test "generated reflection diagnostics retain template origin" {
         \\        } }
         \\    }
         \\}
+        \\@derive(Sum)
         \\struct Parts { good: UInt8, bad: Bool }
-        \\derive Sum for Parts
         \\fn main() -> UInt8 { 0 }
     ;
     const source: Source = .{ .path = "t.lin", .text = text };
@@ -42130,7 +42126,7 @@ test "generated reflection diagnostics retain template origin" {
     var component_call = ExprId.none;
     for (0..ast.declCount()) |i| {
         const declaration = DeclId.at(@intCast(i));
-        if (ast.declTag(declaration) == .derive_impl) derive = declaration;
+        if (ast.attachedDeriveTraitRange(declaration).len() != 0) derive = declaration;
     }
     for (0..ast.exprCount()) |i| {
         const expression = ExprId.at(@intCast(i));
@@ -42141,7 +42137,7 @@ test "generated reflection diagnostics retain template origin" {
         }
     }
     try testing.expect(derive != .none and component_call != .none);
-    const derive_span = ast.tokenSpan(ast.deriveTraits(derive)[0].ref.name);
+    const derive_span = ast.tokenSpan(ast.attachedDeriveTraits(derive)[0].ref.name);
     const component_span = ast.exprSpan(component_call);
 
     var found_primary = false;
@@ -42189,8 +42185,8 @@ test "generated reflection diagnostics retain repeated body origins" {
         \\        } }
         \\    }
         \\}
+        \\@derive(Check)
         \\struct Pair { left: UInt8, right: UInt8 }
-        \\derive Check for Pair
         \\fn main() -> UInt8 { 0 }
     ;
     const source: Source = .{ .path = "t.lin", .text = text };
@@ -45557,8 +45553,8 @@ test "borrow generated contracts retain distinct parameter identities" {
         \\    }
         \\}
         \\@copyable
+        \\@derive(Structural)
         \\enum Empty {}
-        \\derive Structural for Empty
         \\fn main() -> UInt8 { 0 }
     , &sink);
     if (sink.error_count > 0) for (sink.items()) |diagnostic| std.debug.print("{s}: {s}\n", .{ @tagName(diagnostic.code.?), diagnostic.message });

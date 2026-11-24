@@ -4306,10 +4306,11 @@ fn reflectionComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "        } }\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(Visit)\n" ++
             "struct Big {\n",
     );
     for (0..n) |i| try w.print("    f{d}: UInt8,\n", .{i});
-    try w.writeAll("}\n\nderive Visit for Big\n\nfn main() -> UInt8 {\n    let value: Big = .{ ");
+    try w.writeAll("}\n\nfn main() -> UInt8 {\n    let value: Big = .{ ");
     for (0..n) |i| {
         if (i > 0) try w.writeAll(", ");
         try w.print("f{d} = 1", .{i});
@@ -4350,18 +4351,17 @@ const constructionSweepPrelude =
 ;
 
 /// One flat construction recipe expands once per field, with one applied
-/// component requirement and a trait-only parameter on the generated impl.
+/// component requirement and a closed trait argument on the generated impl.
 fn constructionProductModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     std.debug.assert(n > 0);
     var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
     const w = &out.writer;
     try w.writeAll(constructionSweepPrelude);
-    try w.writeAll("struct Product {\n");
+    try w.writeAll("@derive(Construct[Bool])\nstruct Product {\n");
     for (0..n) |i| try w.print("    f{d}: UInt8,\n", .{i});
     try w.writeAll(
         "}\n" ++
-            "derive[A: Copyable] Construct[A] for Product\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let product: Product = Construct.construct(true)\n" ++
             "    product.f0\n" ++
@@ -4378,8 +4378,7 @@ fn constructionDerivesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     const w = &out.writer;
     try w.writeAll(constructionSweepPrelude);
     for (0..n) |i| {
-        try w.print("struct Product{d} {{ first: UInt8, second: UInt8 }}\n", .{i});
-        try w.print("derive[A: Copyable] Construct[A] for Product{d}\n", .{i});
+        try w.print("@derive(Construct[Bool])\nstruct Product{d} {{ first: UInt8, second: UInt8 }}\n", .{i});
     }
     try w.writeAll("fn main() -> UInt8 {\n");
     for (0..n) |i| try w.print("    let _product{d}: Product{d} = Construct.construct(true)\n", .{ i, i });
@@ -4408,12 +4407,12 @@ fn reflectedEnumCasesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "        } }\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(CaseOrdinal)\n" ++
             "enum Cases {\n",
     );
     for (0..n) |i| try w.print("    Case{d},\n", .{i});
     try w.writeAll(
         "}\n\n" ++
-            "derive CaseOrdinal for Cases\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _case: Cases = .Case0\n" ++
             "    0\n" ++
@@ -4440,13 +4439,14 @@ fn reflectedEnumPayloadsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "        } }\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(VisitPayloads)\n" ++
             "enum Payloads { Value(",
     );
     for (0..n) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.writeAll("UInt8");
     }
-    try w.writeAll(") }\n\nderive VisitPayloads for Payloads\n\nfn main() -> UInt8 {\n    let value = Payloads.Value(");
+    try w.writeAll(") }\n\nfn main() -> UInt8 {\n    let value = Payloads.Value(");
     for (0..n) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.writeAll("0");
@@ -4473,8 +4473,8 @@ fn reflectedOrdinalOperationsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
         "        UInt64(0)\n" ++
             "    }\n" ++
             "}\n\n" ++
+            "@derive(ObserveOrdinals)\n" ++
             "enum Observed { First, Second }\n\n" ++
-            "derive ObserveOrdinals for Observed\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let value: Observed = .First\n" ++
             "    let _answer = ObserveOrdinals.observe(value)\n" ++
@@ -4527,10 +4527,10 @@ fn deriveGroupEntriesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             .{ i, i },
         );
     }
-    try w.writeAll("struct GroupTarget { value: UInt8 }\n\nderive (\n");
+    try w.writeAll("@derive(\n");
     for (0..n) |i| try w.print("    Group{d},\n", .{i});
     try w.writeAll(
-        ") for GroupTarget\n\n" ++
+        ")\nstruct GroupTarget { value: UInt8 }\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _value: GroupTarget = .{ value = 0 }\n" ++
             "    0\n" ++
@@ -4563,11 +4563,11 @@ fn structuralSupertraitConstraintsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             .{dependent},
         );
     }
-    try w.writeAll("struct Item {}\n\nderive (\n");
+    try w.writeAll("@derive(\n");
     for (0..n) |i| try w.print("    Base{d},\n", .{i});
     for (0..dependent_count) |dependent| try w.print("    Law{d},\n", .{dependent});
     try w.writeAll(
-        ") for Item\n\n" ++
+        ")\nstruct Item {}\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _item: Item = .{}\n" ++
             "    0\n" ++
@@ -4589,12 +4589,12 @@ fn genericDerivePredicatesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
         "trait Predicate {}\n\n" ++
             "trait PredicateTarget {}\n\n" ++
             "template impl PredicateTarget where reflect.components: Predicate {}\n\n" ++
-            "struct GenericTarget[T] { value: T }\n\n" ++
-            "derive[T] PredicateTarget for GenericTarget[T] where\n",
+            "@derive(PredicateTarget where\n",
     );
     for (0..n) |_| try w.writeAll("    T: Predicate,\n");
     try w.writeAll(
-        "\nfn _hold[T](_value: GenericTarget[T]) {}\n\n" ++
+        ")\nstruct GenericTarget[T] { value: T }\n\n" ++
+            "fn _hold[T](_value: GenericTarget[T]) {}\n\n" ++
             "fn main() -> UInt8 { 0 }\n",
     );
     return out.toOwnedSlice();
@@ -4616,8 +4616,8 @@ fn derivedCycleModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "template impl Settle where reflect.components: Settle {}\n\n",
     );
     for (0..n) |i| {
+        try w.print("@derive(Settle where X: Settle, Ring{d}[X]: Settle, Ring{d}[X]: Settle)\n", .{ (i + 1) % n, (i + 2) % n });
         try w.print("struct Ring{d}[X] {{ x: X }}\n\n", .{i});
-        try w.print("derive[X: Settle] Settle for Ring{d}[X] where Ring{d}[X]: Settle, Ring{d}[X]: Settle\n\n", .{ i, (i + 1) % n, (i + 2) % n });
     }
     try w.writeAll(
         "fn settled[T: Settle](_value: T) {}\n\n" ++
@@ -4638,10 +4638,11 @@ fn componentRequirementComponentsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
             "impl ComponentBound for UInt8 {}\n\n" ++
             "trait ComponentsTarget {}\n\n" ++
             "template impl ComponentsTarget where reflect.components: ComponentBound {}\n\n" ++
+            "@derive(ComponentsTarget)\n" ++
             "struct ManyComponents {\n",
     );
     for (0..n) |i| try w.print("    f{d}: UInt8,\n", .{i});
-    try w.writeAll("}\n\nderive ComponentsTarget for ManyComponents\n\nfn main() -> UInt8 {\n    let _value: ManyComponents = .{ ");
+    try w.writeAll("}\n\nfn main() -> UInt8 {\n    let _value: ManyComponents = .{ ");
     for (0..n) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.print("f{d} = 0", .{i});
@@ -4667,8 +4668,8 @@ fn componentRequirementsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     }
     try w.writeAll(
         " {}\n\n" ++
+            "@derive(RequirementsTarget)\n" ++
             "struct OneComponent { value: UInt8 }\n\n" ++
-            "derive RequirementsTarget for OneComponent\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _value: OneComponent = .{ value = 0 }\n" ++
             "    0\n" ++
@@ -4696,9 +4697,9 @@ fn componentRequirementRowsModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
         if (i != 0) try w.writeAll(" + ");
         try w.print("RowBound{d}", .{i});
     }
-    try w.writeAll(" {}\n\nstruct RowComponents {\n");
+    try w.writeAll(" {}\n\n@derive(RowsTarget)\nstruct RowComponents {\n");
     for (0..components) |i| try w.print("    f{d}: UInt8,\n", .{i});
-    try w.writeAll("}\n\nderive RowsTarget for RowComponents\n\nfn main() -> UInt8 {\n    let _value: RowComponents = .{ ");
+    try w.writeAll("}\n\nfn main() -> UInt8 {\n    let _value: RowComponents = .{ ");
     for (0..components) |i| {
         if (i != 0) try w.writeAll(", ");
         try w.print("f{d} = 0", .{i});
@@ -4736,8 +4737,8 @@ fn templateMemberParametersModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     try w.writeAll(
         ") -> UInt8 { 0 }\n" ++
             "}\n\n" ++
+            "@derive(Structural)\n" ++
             "struct Target {}\n\n" ++
-            "derive Structural for Target\n\n" ++
             "fn main() -> UInt8 {\n" ++
             "    let _value: Target = .{}\n" ++
             "    0\n" ++
@@ -13667,9 +13668,28 @@ fn checkSettledRefs(
                     try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, a);
                 }
             }
-            for (ast.deriveTraits(d)) |entry| {
+            // A derive item's clause is read once, at its first trait.
+            var clause_keyword = TokenId.none;
+            for (ast.attachedDeriveTraits(d)) |entry| {
                 for (ast.typeArgs(entry.ref.args)) |argument| {
                     try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, argument);
+                }
+                if (entry.clause.item() == clause_keyword) continue;
+                clause_keyword = entry.clause.item();
+                switch (entry.clause.kind) {
+                    .inferred, .refused => {},
+                    .application => for (ast.typeArgs(entry.clause.head.args)) |argument| {
+                        try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, argument);
+                    },
+                    .environment => for (ast.where_predicates[entry.clause.where_predicates.start..entry.clause.where_predicates.end]) |predicate| {
+                        if (predicate.subject.kind == .selection) {
+                            try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, ast.selectionBase(predicate.subject));
+                        }
+                        for (ast.typeArgs(predicate.subject.args)) |a| {
+                            try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, a);
+                        }
+                        try heldBoundArguments(gpa, &work, ast, program, typing, in_library, d, ast.boundsIn(predicate.bounds));
+                    },
                 }
             }
             try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, ast.declReturnRef(d));
@@ -16678,6 +16698,7 @@ fn emitOrRecord(
 test "canonical call index covers generated expressions" {
     const gpa = testing.allocator;
     var checked = try lsp_analysis.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
+        \\@derive(Structural)
         \\struct Mark {}
         \\trait Literal { fn value(self: Self) -> UInt8 }
         \\impl Literal for UInt8 {
@@ -16690,7 +16711,6 @@ test "canonical call index covers generated expressions" {
         \\        n.value()
         \\    }
         \\}
-        \\derive Structural for Mark
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{}
         \\    Structural.result(mark)
@@ -19727,6 +19747,7 @@ test "dump mono renders generated members from expanded syntax" {
     const gpa = arena.allocator();
 
     const text =
+        \\@derive(Structural)
         \\struct Mark {}
         \\
         \\trait Structural {
@@ -19736,8 +19757,6 @@ test "dump mono renders generated members from expanded syntax" {
         \\template impl Structural {
         \\    fn value(_self: Self) -> UInt8 { 7 }
         \\}
-        \\
-        \\derive Structural for Mark
         \\
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{}
@@ -23880,8 +23899,8 @@ test "derive arguments receive every selected reference oracle visit" {
         \\template impl[A] Use[A] {
         \\    fn consume(_value: A) -> UInt8 { 0 }
         \\}
+        \\@derive(Use[Token.Item])
         \\struct Target {}
-        \\derive Use[Token.Item] for Target
         \\fn main() -> UInt8 { let _target: Target = .{}; 0 }
     }}, "main.lin");
     defer checked.deinit();

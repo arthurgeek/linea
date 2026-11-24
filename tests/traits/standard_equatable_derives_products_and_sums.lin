@@ -1,40 +1,33 @@
+@derive(Equatable, Equivalent)
 struct Empty {}
 
+@derive(Equatable, Equivalent)
 struct Pair {
     left: UInt8,
     right: Bool,
 }
 
+@derive(Equatable, Equivalent)
 type Meters = UInt8
 
+@derive(Equatable, Equivalent)
 enum Flag {
     Off,
     On,
 }
 
+@derive(Equatable, Equivalent)
 enum Choice {
     None,
     One(UInt8),
     Pair(UInt8, Bool),
 }
 
+@derive(Equatable where T: Equatable)
+@derive(Equivalent where T: Equivalent)
 struct Wrapper[T] {
     value: T,
 }
-
-derive (Equatable, Equivalent) for Empty
-
-derive (Equatable, Equivalent) for Pair
-
-derive (Equatable, Equivalent) for Meters
-
-derive (Equatable, Equivalent) for Flag
-
-derive (Equatable, Equivalent) for Choice
-
-derive[T: Equatable] Equatable for Wrapper[T]
-
-derive[T: Equivalent] Equivalent for Wrapper[T]
 
 fn main() -> UInt8 {
     let empty: Empty = .{}

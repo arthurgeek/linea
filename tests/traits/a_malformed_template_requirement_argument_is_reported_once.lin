@@ -31,18 +31,16 @@ template impl Inspect where reflect.components: Required[Generic] + Other[Constr
     }
 }
 
+@derive(Inspect)
 struct Pair {
     left: UInt8,
     right: UInt8,
 }
 
+@derive(Inspect)
 struct Single {
     value: UInt8,
 }
-
-derive Inspect for Pair
-
-derive Inspect for Single
 
 fn main() -> UInt8 {
     0

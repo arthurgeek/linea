@@ -102,8 +102,13 @@ Attached generic and independently constrained derives
 
 @derive(Debug)
 struct Cell[T: Debug] { value: T }
+@derive(Debug where T: Debug)
 struct OpenCell[T] { value: T }
-derive[T: Debug] Debug for OpenCell[T]
+@(copyable, derive(Equatable, Debug where
+    A: Equatable + Copyable,
+    B: Debug,
+))
+struct Pair[A, B] { left: A, right: B }
 
 ---
 
@@ -127,6 +132,18 @@ derive[T: Debug] Debug for OpenCell[T]
         (identifier)
         (type_identifier))))
   (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier)))
+          (where_clause
+            (where_predicate
+              (type_identifier)
+              (bound
+                (trait_reference
+                  (type_identifier))))))))
     (type_identifier)
     (type_parameters
       (type_parameter
@@ -135,19 +152,45 @@ derive[T: Debug] Debug for OpenCell[T]
       (field
         (identifier)
         (type_identifier))))
-  (derive_declaration
+  (struct_declaration
+    (attribute
+      (attribute_group
+        (policy_attribute)
+        (derive_attribute
+          (derive_traits
+            (derive_trait
+              (trait_reference
+                (type_identifier)))
+            (derive_trait
+              (trait_reference
+                (type_identifier)))
+            (where_clause
+              (where_predicate
+                (type_identifier)
+                (bound
+                  (trait_reference
+                    (type_identifier)))
+                (bound
+                  (trait_reference
+                    (type_identifier))))
+              (where_predicate
+                (type_identifier)
+                (bound
+                  (trait_reference
+                    (type_identifier)))))))))
+    (type_identifier)
     (type_parameters
       (type_parameter
-        (type_identifier)
-        (bound
-          (trait_reference
-            (type_identifier)))))
-    (derive_trait
-      (trait_reference
+        (type_identifier))
+      (type_parameter
         (type_identifier)))
-    (type_identifier)
-    (type_arguments
-      (type_identifier))))
+    (field_list
+      (field
+        (identifier)
+        (type_identifier))
+      (field
+        (identifier)
+        (type_identifier)))))
 
 ==================
 An empty derive request
@@ -168,3 +211,125 @@ struct Point { value: UInt8 }
       (field
         (identifier)
         (type_identifier)))))
+
+==================
+A derive's for clause names one application of the type
+==================
+
+@derive(Score for Mark[UInt8])
+struct Mark[T] { value: T }
+@derive(Debug for (UInt8, Str))
+struct Pair { left: UInt8 }
+
+---
+
+(source_file
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier)))
+          (derive_application
+            (type_identifier)
+            (type_arguments
+              (type_identifier))))))
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (field_list
+      (field
+        (identifier)
+        (type_identifier))))
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier)))
+          (derive_application
+            (tuple_type
+              (type_identifier)
+              (type_identifier))))))
+    (type_identifier)
+    (field_list
+      (field
+        (identifier)
+        (type_identifier)))))
+
+==================
+A derive's binders name a parameter only its traits use
+==================
+
+@derive[A: Allocator](Build[A] where T: Field[A])
+struct Holder[T] { value: T }
+
+---
+
+(source_file
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (type_parameters
+          (type_parameter
+            (type_identifier)
+            (bound
+              (trait_reference
+                (type_identifier)))))
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier)
+              (type_arguments
+                (type_identifier))))
+          (where_clause
+            (where_predicate
+              (type_identifier)
+              (bound
+                (trait_reference
+                  (type_identifier)
+                  (type_arguments
+                    (type_identifier)))))))))
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (field_list
+      (field
+        (identifier)
+        (type_identifier)))))
+
+==================
+A trailing comma after the traits takes no clause
+:error
+==================
+
+@derive(Debug, where T: Debug)
+struct Cell[T] { value: T }
+
+==================
+A derive item writes one clause, not both
+:error
+==================
+
+@derive(Score for Mark[UInt8] where UInt8: Copyable)
+struct Mark[T] { value: T }
+
+==================
+A derive is not a declaration of its own
+:error
+==================
+
+struct Point { value: UInt8 }
+derive Equatable for Point
+
+==================
+A generic standalone derive is not a declaration either
+:error
+==================
+
+struct Cell[T] { value: T }
+derive[T: Debug] (Debug, Equatable) for Cell[T] where T: Debug

@@ -24,19 +24,17 @@ template impl Fingerprint where reflect.components: Fingerprint {
     }
 }
 
+@derive(Fingerprint)
 struct Point {
     x: UInt64,
     y: UInt64,
 }
 
-derive Fingerprint for Point
-
+@derive(Fingerprint)
 enum Shape {
     Empty,
     Pair(UInt64, Point),
 }
-
-derive Fingerprint for Shape
 
 fn main() -> UInt8 {
     let point: Point = .{ x = 2, y = 3 }

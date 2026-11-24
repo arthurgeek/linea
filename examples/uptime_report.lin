@@ -24,14 +24,13 @@ struct Check[A: Allocator = mem.SystemAllocator] {
 }
 
 // Tally is what the report knows about one service so far.
+@derive(Release)
 struct Tally {
     service: String,
     checks: UInt64,
     failed: UInt64,
     slowest_ms: UInt64,
 }
-
-derive Release for Tally
 
 // `json.Encode` writes a `Summary` as one JSON object, its fields in the order
 // they are declared.

@@ -31,9 +31,11 @@ template impl[A: Allocator] Build[A] where
     }
 }
 
+// `[A: Allocator]` binds the allocator the trait's argument names, which the
+// holder does not hold: the derive builds each field with whichever
+// allocator the caller passes.
+@derive[A: Allocator](Build[A] where T: Field[A])
 struct Holder[T] { first: T, second: T }
-
-derive[A: Allocator, T: Field[A]] Build[A] for Holder[T]
 
 fn main() -> UInt8 {
     let holder: Holder[UInt64] = Build.build(mem.system())

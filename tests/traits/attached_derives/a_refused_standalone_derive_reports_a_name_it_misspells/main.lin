@@ -1,0 +1,8 @@
+// A refused standalone request still reads the bounds its `where` writes, so
+// a trait name nothing declares is reported beside the refusal.
+derive[T] Debug for Cell[T] where T: Nope
+
+fn main() -> UInt8 {
+    let cell: Cell[UInt8] = .{ value = 1 }
+    cell.value - 1
+}

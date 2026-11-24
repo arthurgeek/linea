@@ -193,7 +193,7 @@ pub fn reachOfDecl(tag: Decl.Tag) Reach {
         // and not a scope.
         .impl_ => .generated,
 
-        .template_impl, .derive_impl => .generated,
+        .template_impl => .generated,
 
         // The generator writes one module, so there is nothing to import and
         // no second directory for a path to name. Closing this means teaching

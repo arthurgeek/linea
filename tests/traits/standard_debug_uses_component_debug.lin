@@ -19,12 +19,11 @@ impl Debug for Word {
 }
 
 @copyable
+@derive(Display, Debug)
 struct Point {
     x: UInt8,
     word: Word,
 }
-
-derive (Display, Debug) for Point
 
 fn main() -> Result[UInt8, IoError] {
     let point: Point = .{ x = 1, word = .{} }

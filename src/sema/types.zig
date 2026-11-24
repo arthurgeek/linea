@@ -4073,7 +4073,12 @@ pub const ImplIndex = struct {
         /// frame closes with the answer its cycles assumed of it, and dead
         /// when it closes with the other answer or at the outermost frame.
         scopes: std.ArrayList(Scope) = .empty,
-        prerequisite_sizes: std.AutoHashMapUnmanaged(ImplementationId, u128) = .empty,
+        /// Holds, for each implementation with requirements being asked on
+        /// this chain, the size of the key its innermost frame asks and the
+        /// number of derived frames from the outermost to that one.
+        prerequisite_sizes: std.AutoHashMapUnmanaged(ImplementationId, Measure) = .empty,
+        /// How many of `frames` are derived implementations.
+        derived_frames: u32 = 0,
         measure_seen: std.AutoHashMapUnmanaged(TypeId, void) = .empty,
         measure_sizes: std.AutoHashMapUnmanaged(TypeId, u32) = .empty,
         recursive_refusals: usize = 0,
@@ -4121,18 +4126,38 @@ pub const ImplIndex = struct {
             return total;
         }
 
+        const Measure = struct {
+            size: u128,
+            derived_frames: u32,
+        };
+
         /// Whether a row asked again inside its own requirements, for a key
         /// of `size`, is refused because the key grew past the one that row
         /// is already being asked for. A key no larger is asked: a row whose
         /// requirements reach it again for an equal or smaller key, such as a
         /// `Vec[Command[A], A]` whose element's derived `Release` asks about
-        /// `Vec[Str, A]`, is answered like any other. That still ends: along
-        /// one chain the keys never grow and never repeat (a repeat is a
-        /// cycle, which `active` catches), and only finitely many keys are
-        /// built from the program's types without growing.
-        fn outgrows(self: *const Decided, at: u32, size: u128) bool {
+        /// `Vec[Str, A]`, is answered like any other.
+        ///
+        /// A derived row is always held to its enclosing frame's key. A
+        /// written row is held to it only when no derived frame was opened
+        /// since: a derived frame between them restarts the written row's
+        /// measure. So a `Vec[Index[A], A]` whose element's derived `Release`
+        /// reaches `Vec[Slot[Str], A]` through a derived table is asked, while
+        /// a written row requiring itself at a larger key directly is refused.
+        ///
+        /// **Bound:** every chain is finite. Along an infinite chain the keys
+        /// of each derived row never grow after its first frame, and there
+        /// are finitely many rows, so past a finite prefix every derived key
+        /// is no larger than some `s`. Between two derived frames only
+        /// written rows are asked, each held to its own earlier key, so that
+        /// stretch grows at most once per row from a key no larger than `s`
+        /// and its keys too stay under one size. Finitely many keys of
+        /// bounded size are built from the program's types, so the chain
+        /// repeats a key, which is a cycle that `active` catches.
+        fn outgrows(self: *const Decided, at: u32, derived: bool, size: u128) bool {
             const previous = self.prerequisite_sizes.get(@enumFromInt(at)) orelse return false;
-            return size > previous;
+            if (!derived and self.derived_frames > previous.derived_frames) return false;
+            return size > previous.size;
         }
 
         fn rootSize(self: *Decided, pool: anytype, root: TypeId) !u32 {
@@ -5500,11 +5525,11 @@ pub const ImplIndex = struct {
             const previous_size = decided.prerequisite_sizes.get(@enumFromInt(at));
             if (im.predicates.len > 0) {
                 const size = try decided.keySize(pool, held, args);
-                if (decided.outgrows(at, size)) {
+                if (decided.outgrows(at, im.derived, size)) {
                     decided.recursive_refusals += 1;
                     break :blk false;
                 }
-                try decided.prerequisite_sizes.put(decided.gpa, @enumFromInt(at), size);
+                try decided.prerequisite_sizes.put(decided.gpa, @enumFromInt(at), .{ .size = size, .derived_frames = decided.derived_frames });
             }
             defer if (im.predicates.len > 0) {
                 if (previous_size) |previous|
@@ -14470,7 +14495,7 @@ pub const Typing = struct {
                 decided.granted_answers.get(key_);
             if (recorded) |answer| {
                 if (answer.arguments != null and decided.prerequisite_sizes.contains(@enumFromInt(at))) {
-                    if (decided.outgrows(at, try decided.keySize(self, held, args))) {
+                    if (decided.outgrows(at, impls[at].derived, try decided.keySize(self, held, args))) {
                         decided.recursive_refusals += 1;
                         return .{ .header_matches = answer.header_matches };
                     }
@@ -14508,6 +14533,10 @@ pub const Typing = struct {
             defer _ = decided.active.remove(key_);
             try decided.frames.append(self.gpa, .{ .key = key_, .derived = impls[at].derived, .scope = try decided.openScope(depth) });
             defer _ = decided.frames.pop();
+            if (impls[at].derived) decided.derived_frames += 1;
+            defer if (impls[at].derived) {
+                decided.derived_frames -= 1;
+            };
             const before = decided.recursive_refusals;
             const independent = decided.prerequisite_sizes.count() == 0;
             const assumed_before = decided.assumed.items.len;

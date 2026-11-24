@@ -1,8 +1,7 @@
 import protocol
 
+@derive(protocol.First, protocol.Second)
 struct Item {}
-
-derive (protocol.First, protocol.Second) for Item
 
 fn main() -> UInt8 {
     let _item: Item = .{}

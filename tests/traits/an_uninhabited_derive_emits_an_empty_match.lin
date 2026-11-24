@@ -8,9 +8,8 @@ template impl Consume {
     }
 }
 
+@derive(Consume)
 enum Empty {}
-
-derive Consume for Empty
 
 fn _holds(_empty: Empty) {}
 

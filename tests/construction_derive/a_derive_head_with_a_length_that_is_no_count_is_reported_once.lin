@@ -10,11 +10,10 @@ template impl Tr where reflect.target: struct {
     }
 }
 
+@derive(Tr for M[[UInt8; true]])
 struct M[T] {
     value: T,
 }
-
-derive Tr for M[[UInt8; true]]
 
 fn main() -> UInt8 {
     let held: M[UInt8] = .{ value = 0 }

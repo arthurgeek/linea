@@ -97,10 +97,13 @@ import       ::= "import" path ("as" name)?
 path         ::= name ("." name)*
 
 declaration  ::= visibility? "export"? (external | trait | reexport | constant | alias)
-               | attribute* visibility? "export"? (function | typedecl) | test | impl | template_impl | derive_impl
+               | attribute* visibility? "export"? (function | typedecl) | test | impl | template_impl
 visibility   ::= "pub" | "internal"
 attribute    ::= "@" attribute_item | "@" "(" attribute_item ("," attribute_item)* ","? ")"
-attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "unshareable" | "shareable" | "derive" "(" trait_ref ("," trait_ref)* ","? ")"
+attribute_item ::= "opaque" | "linear" | "copyable" | "carrier" | "unshareable" | "shareable" | "derive" generics? "(" derive_item ")"
+derive_item  ::= trait_ref ("," trait_ref)* ","? | clause_item
+clause_item  ::= trait_ref derive_clause | trait_ref "," clause_item
+derive_clause ::= "for" target_head | where_clause
 constant     ::= "let" name (":" type_name)? "=" expression unwrap?
 function     ::= "fn" name generics? "(" parameters? ")" ("->" result)? function_where? block
 test         ::= "test" "trap"? string ("->" result)? function_where? block
@@ -141,9 +144,6 @@ template_requirements ::= "where" template_requirement ("," template_requirement
 template_requirement  ::= "reflect" "." "components" ":" type_bound ("+" type_bound)*
                         | "reflect" "." "supertraits" ":" "derived"
                         | "reflect" "." "target" ":" ("struct" | "enum" | "type")
-derive_impl           ::= "derive" generics? derive_traits "for" target_head where_clause?
-derive_traits         ::= derive_trait | "(" derive_trait ("," derive_trait)* ","? ")"
-derive_trait          ::= trait_ref
 target_head           ::= name type_arguments? | tuple_type
 
 generics     ::= "[" generic ("," generic)* ","? "]"
@@ -261,7 +261,7 @@ type_arguments ::= "[" type_name ("," type_name)* ","? "]"
 The grammar omits statement terminators. A line break separates statements
 ([S-Separator]); `;` separates statements on the same line, and ends a
 declaration written without a block -- a signature, an alias, a newtype, an
-associated type, a `derive` or a delegation -- as a line break does. Inside an
+associated type or a delegation -- as a line break does. Inside an
 array type, that token separates the element type from the length and ends
 nothing. It appears nowhere else. An `import` uses the same terminators as a
 statement, although it is a declaration.
@@ -1456,7 +1456,7 @@ function type bounds a type parameter as the function type written out would:
 `F: units.Step` names one another module publishes. A bound naming an alias of
 any other type is [N-TypeAlias], and so is an alias naming a trait.
 
-An `impl` or `derive` head is the one place an alias is refused
+An `impl` head is the one place an alias is refused
 ([N-TypeAlias]): an implementation is written against the type's own
 declaration, which is what coherence and `opaque` are decided by. The report
 offers the type the alias names. The refused implementation adds nothing to any
@@ -3057,7 +3057,7 @@ missing parameter is [T-Impl]. A parameter head grants no type-side module
 owner, so the implementation belongs in the trait's module ([M-Impl]); an
 inherent parameter-headed implementation is invalid.
 
-An implementation's or a derive's type parameters are in scope over its whole
+An implementation's type parameters are in scope over its whole
 head and body, so a head spelled as one of them names that parameter. A
 parameter takes no type arguments, and a head applying one to some, as in
 `impl[Pair] Show for Pair[Pair]`, is [T-Bound].
@@ -3121,7 +3121,7 @@ type given two implementations and is refused. A family and a type it could be
 settled to overlap, so `impl[T] Weigh for Crate[T]` beside
 `impl Weigh for Crate[UInt8]` is refused in either order, naming `Crate[UInt8]`
 as the type both answer for. Where both are written in one file the report stands at the
-later of the two; a derive is written where its request is. An
+later of the two; a derive is written where its attribute is. An
 implementation whose head is refused for its form is compared with no other
 ([ADR 0272](adr/0272-two-applications-of-one-type-may-each-implement-a-trait.md)).
 An explicitly marked default
@@ -3372,30 +3372,76 @@ either. What it means is under the callable source clauses
 ([ADR 0216](adr/0216-a-carrier-type-supplies-its-signatures-default-contract.md)).
 Bare `opaque`, `linear`, and `copyable` declaration prefixes are not accepted.
 
-**[T-Derive]** A derive request is either a standalone bodyless declaration or
-one `derive(...)` item attached to a nominal type. It is not an implementation
-by itself. A standalone request may declare type parameters with inline bounds
-and trailing `where` predicates, and may name one trait or a parenthesised group
-of traits. An attached request uses the following type's parameter list and
-written constraints, and adds the field requirements described below. Each
-trait entry independently names a trait, its ordinary type arguments and its
-structural template. A request is for one implementation. An attached request, and a
-standalone one whose head applies the target to its own parameters, request the
-implementation for every application of the type; a standalone request that
-declares no parameter and applies the target to types, `derive Score for
-Mark[UInt8]`, requests it for that application. Each implementation of a trait
-taking no arguments is requested once across attached and standalone requests
-([T-Derive]); aliases and qualified spellings of the trait do not evade that
-rule, and neither does another spelling of the application: two standalone
-heads request one application where they are written as one type, so after
-`derive Score for Mark[UInt8]` each of `derive Score for Mark[ UInt8 ]`,
-`derive Score for Mark[(UInt8)]` and `derive Score for Mark[Byte]`, with `Byte`
-an alias of `UInt8`, is the request repeated. `derive Score for Mark[UInt8]`
-beside `derive Score for Mark[UInt16]` is two requests. A trait with arguments may be requested once per argument
-list. The implementations different requests generate are held to the rules of
-ordinary implementations: two that are one implementation are [N-Duplicate],
-and two that could answer for one type overlap ([T-Impl]), as a request for
-every application does with a request, or a written implementation, for one.
+**[S-Derive]** A derive is requested only by a `derive(...)` attribute item on
+the declaration of the type it is for
+([ADR 0303](adr/0303-a-derive-is-requested-only-by-an-attribute-on-its-type.md)).
+A standalone `derive Trait for Type` declaration is refused, whatever it
+writes. Its help writes the attribute requesting the same implementation: the
+traits alone where the request's head applies the type to its own parameters
+and its bounds are the ones the type declares, with `where` and the bounds
+and predicates it wrote, its parameters spelled as the type names them,
+where it states more, and with `for` and the head where it declares no
+parameter and applies the type to types; a parameter its head does not apply,
+which only a trait argument names, becomes a binder. `derive[U: Equatable +
+Copyable] Equatable for Cell[U]` beside `struct Cell[T]` is answered with
+`@derive(Equatable where T: Equatable + Copyable)`, written above `struct
+Cell`, and `derive[A] Count[A] for Plain` with `@derive[A](Count[A])`. A bound
+the type's declaration already writes on a parameter, after its `:` or in its
+`where`, is left out of the clause bound by bound, so beside `struct
+Cell[T: Copyable]` the same request is answered with `@derive(Equatable where
+T: Equatable)`. A trait an attribute of the type already requests the same way
+is left out too, and is reported as repeated; a request naming only such
+traits is answered by removing it, and one whose attribute would write neither
+binders nor a clause adds its traits to the type's item that writes neither.
+Where the file declares the type, the help writes the attribute there and
+removes the request; where it does not, the help names the declaration. A
+request for a primitive or for unit is answered that a derive targets a
+concrete declaration, and one for a name nothing declares names no
+declaration, beside the [N-Undefined] for the name. A request
+naming an application with a `where`, and one whose binder would be spelled
+as one of the type's own parameters, have no attribute the help can write,
+and it says what to write instead. A refused request still requests what it
+spells where it can: the program is checked as though the attribute were
+written on the type of its own module, without its environment, so a use of
+what it would derive, and an import only it names, report nothing more. Every
+name it writes is read, in its bounds, its predicates and its traits'
+arguments, so a name it misspells is reported beside the refusal.
+
+**[T-Derive]** A derive request is one `derive(...)` item attached to a nominal
+type ([S-Derive]). It is not an implementation by itself. An item may write
+binders in `[...]` after `derive`: parameters of every implementation it
+requests that the type does not declare, which only its traits' arguments
+name, so `@derive[A](Count[A])` on `struct Plain` requests `Count[A]` for
+every `A`. A binder spelled as one of the type's own parameters is refused
+here, since those are in scope in the attribute already, and stands for that
+parameter; its help removes it, with the `[...]` where it is the only one. Every trait of the item must name each binder in its arguments, as
+an implementation's parameters are recovered from its key ([T-Impl]). An item
+names one or more traits and may end with one clause, which applies to every
+trait it names:
+with none, the request is for every application of the type, conditional on
+its field types as described below; with `where`, it is for every application
+under the environment the clause states, the type's written constraints and
+the predicates written, with nothing inferred from the fields; with `for`, it
+is for the one application the clause names. The type's own parameters are in
+scope in the clause. `for` names the annotated type applied to as many types
+as it declares, none of them one of its own parameters, and its trait entries'
+arguments name none of them either; another head, a head of another arity, and
+one naming a parameter are refused here, at the head. Each trait entry
+independently names a trait, its ordinary type arguments and its structural
+template. A request is for one implementation, and `@derive(Score for
+Mark[UInt8])` beside `@derive(Score for Mark[UInt16])` is two requests. Each
+implementation of a trait taking no arguments is requested once ([T-Derive]);
+aliases and qualified spellings of the trait do not evade that rule, and
+neither does another spelling of the application: two `for` heads request one
+application where they are written as one type, so after `@derive(Score for
+Mark[UInt8])` each of `@derive(Score for Mark[ UInt8 ])`, `@derive(Score for
+Mark[(UInt8)])` and `@derive(Score for Mark[Byte])`, with `Byte` an alias of
+`UInt8`, is the request repeated. A trait with arguments may be requested once
+per argument list. The implementations different requests generate are held to
+the rules of ordinary implementations: two that are one implementation are
+[N-Duplicate], and two that could answer for one type overlap ([T-Impl]), as a
+request for every application does with a request, or a written
+implementation, for one.
 
 `@derive(From[S])` on an enum requests the implementation `From[S]` for it that
 wraps the source in the one variant whose only field has type `S`
@@ -3436,17 +3482,14 @@ implementation is the same as a
 handwritten one, so `?` finds it through the function's error type's `From`
 ([T-TryAnswer]) and `source.into()` through the `Into` bridge.
 
-The derive request and its struct, enum or newtype target belong to the same
-module. The trait and its template may belong to another loaded module. A
-generic derive head fills the target's arity with distinct derive parameters in
-relative declaration order; the derive and target parameter names need not
-match. Additional derive parameters may be determined by trait arguments. Every
-parameter must be recoverable from each entry's complete trait-and-target key,
-independently. Bounds alone and associated projections do not determine a
-parameter. Inline bounds and trailing predicates form the ordinary normalized
-written constraint environment. A missing template, ineligible target,
-malformed head or unsupported trait application is refused here for the
-affected trait entry only.
+The trait and its template may belong to another loaded module than the type
+the request is attached to. A request's implementation is generic over the
+type's own parameters, or over none for an application, and over the item's
+binders after them; the template's parameters are determined by the entry's
+trait arguments. Inline bounds and
+predicates form the ordinary normalized written constraint environment. A
+missing template, ineligible target or unsupported trait application is
+refused here for the affected trait entry only.
 
 For each admitted trait entry the template produces an independent ordinary
 trait implementation in the target's module and copies each template function
@@ -3459,24 +3502,19 @@ header exactly as to one written by hand, so a generated and a handwritten
 implementation with overlapping keys conflict in the ordinary tier. Defaults
 remain the lower selection tier.
 
-Target substitution maps each target parameter to the derive parameter written
-at that target position. Template substitution independently maps each template
-parameter to the corresponding trait argument. For example, in
-`derive[A, T] Build[A] for Record[T]`, Record's first parameter maps to `T`, not
-`A`. Neither mapping uses the entire implementation binder list as target
-arguments. A grouped entry may fail recoverability while a sibling succeeds: a
-trait-only `A` in `(Release, Build[A]) for Record[T]` is undetermined for
-`Release`. Expansion neither drops `A` nor edits the written constraints to
-admit that entry.
+For an application, target substitution maps each of the type's parameters to
+the argument `for` writes in its position. Template substitution independently
+maps each template parameter to the corresponding trait argument.
 
 Before checking generated bodies, the compiler applies those substitutions to
 target component types and template requirements. Every component requirement
 must then be discharged by the ordinary implementation relation under the
 derive's normalized written constraints.
 
-A standalone request states its whole environment: no bound is inferred for it
-from fields, requirements or generated calls. An attached request on a generic
-type instead makes its implementation conditional on its fields. For each struct
+A request with a `where` clause states its whole environment, and one with
+`for` names every type: no bound is inferred for either from fields,
+requirements or generated calls. A request with no clause on a generic type
+instead makes its implementation conditional on its fields. For each struct
 field or variant payload whose written type names one of the type's parameters,
 the generated header gains one trailing predicate: that type, bounded by every
 trait the template's component requirements name, at the entry's arguments.
@@ -3486,7 +3524,7 @@ implements `Equatable` for `Labelled[T]` where `T: Equatable`; a field
 `Tag`'s implementation does not. Equal field types contribute one predicate. A
 field naming no parameter, such as `label: Str`, and a phantom parameter, which
 no field names, contribute none; such fields are checked once, at the derive, as
-a standalone request's are. The type's own written bounds still apply at every
+every field of a request with a clause is. The type's own written bounds still apply at every
 use, and a template with no component requirement adds nothing. The predicates
 are ordinary implementation predicates: coherence, selection and diagnostics
 read them as they read written ones, and a use whose field type lacks the trait
@@ -3499,8 +3537,8 @@ that never applies, so the derive is [T-Derive] at that field.
 
 A derived `Release` settles each component, the last component first. Each
 component is decided once, at the derive, under the derive's own constraints:
-the type's written bounds for an attached request, the request's written
-environment for a standalone one. A component whose type implements `Release`
+the type's written bounds for a request with no clause, and the environment a
+`where` clause states for one with it. A component whose type implements `Release`
 there is released. One whose type is discardable there and not proven to
 implement `Release` is discarded: it adds no requirement to the implementation
 and is settled by `release.discard`, which runs nothing. Any other component is
@@ -3511,8 +3549,10 @@ for a closed type is [T-Derive] at that field. So
 the allocator is discarded and the vector is released. A discarded component
 whose type has an effectful `Release` at some instantiation is still discarded,
 because the choice does not depend on the instantiation; bound the parameter by
-`Release`, or write a standalone request, to release it instead. A discardable
-component adds no `Release` requirement to an attached request whichever way it
+`Release`, or state the environment with `where`, to release it instead;
+`where T: Copyable` instead discards a component of type `T` whose field
+types would otherwise require `T: Release`. A discardable
+component adds no `Release` requirement to a request with no clause whichever way it
 is settled, so whether a component's type implements `Release` is answered
 against every derive's final requirements, and the order of declarations never
 changes the choice.
@@ -4952,8 +4992,8 @@ The rule has four parts, each a refusal at the declaration:
   declaration's parameter list that puts the defaulted parameter last (state
   first, allocator last, as `Router[S = (), P: Allocator = SystemAllocator]`
   does) lets the other parameters be written and the allocator omitted.
-- Only a struct, an enum, an alias or a function declares one. A trait's, an
-  implementation's and a derive's arguments are settled by the head they key
+- Only a struct, an enum, an alias or a function declares one. A trait's and an
+  implementation's arguments are settled by the head they key
   on, so a default there would fill nothing. A function's type parameter that no
   argument, expected type or callback determines takes its default (an
   unsuffixed literal alone does not determine it), and a parameter typed by it
@@ -4963,10 +5003,10 @@ The rule has four parts, each a refusal at the declaration:
 - A default meets its parameter's bounds, checked where a type omits it
   ([T-Bound]).
 
-A trait implementation's head and a derive's head name every parameter of their
-type: the head key is the constructor applied to its own parameters, and an
-omitted argument is no parameter. `impl[T] Trait for Vec[T]` is [T-Bound], and a
-derive head that omits one is refused as an unsupported derive ([T-Derive]). A
+A trait implementation's head and a derive's `for` head name every parameter of
+their type: the head key is the constructor applied to its own parameters, and
+an omitted argument is no parameter. `impl[T] Trait for Vec[T]` is [T-Bound], and
+a `for` head that omits one is refused at the head ([T-Derive]). A
 bare name omits every argument, so it is refused the same way where every
 parameter has a default: with `struct Crate[T = UInt8]`, `impl Weighed for Crate`
 is [T-Bound], and `impl Weighed for Crate[UInt8]` is the implementation for a

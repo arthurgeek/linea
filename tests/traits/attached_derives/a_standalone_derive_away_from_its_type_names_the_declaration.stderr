@@ -1,0 +1,10 @@
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_away_from_its_type_names_the_declaration/main.lin:14:1
+   |
+14 | derive Equatable for Point
+   | ^^^^^^ write `@derive(Equatable)` above the declaration of `Point`
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_away_from_its_type_names_the_declaration/main.lin:16:1
+   |
+16 | derive[A] Count[A] for Point
+   | ^^^^^^ write `@derive[A](Count[A])` above the declaration of `Point`

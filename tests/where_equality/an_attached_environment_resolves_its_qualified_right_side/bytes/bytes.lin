@@ -1,0 +1,1 @@
+pub alias Byte = UInt8

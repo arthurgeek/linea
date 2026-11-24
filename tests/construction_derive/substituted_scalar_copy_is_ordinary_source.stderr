@@ -1,5 +1,5 @@
 error[O-ScalarCopy]: `UInt8` already produces a scalar snapshot when read
-  --> tests/construction_derive/substituted_scalar_copy_is_ordinary_source.lin:13:8
+  --> tests/construction_derive/substituted_scalar_copy_is_ordinary_source.lin:11:9
    |
-13 | derive Echo[UInt8] for Product
-   |        ^^^^ remove `copy` and read the value directly
+11 | @derive(Echo[UInt8])
+   |         ^^^^ remove `copy` and read the value directly

@@ -10,13 +10,11 @@ template impl Score {
     }
 }
 
+@derive(Score for Mark[UInt8])
+@derive(Score for Mark[UInt8])
 struct Mark[T] {
     value: T,
 }
-
-derive Score for Mark[UInt8]
-
-derive Score for Mark[UInt8]
 
 fn main() -> UInt8 {
     let byte: Mark[UInt8] = .{ value = 3 }

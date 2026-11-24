@@ -1,0 +1,25 @@
+// `Box[T]` releases only when `Wrap[Box[Box[T]]]` does, and the derived
+// `Release` of that wrapper asks the same of `Box[Box[T]]`. Each step asks
+// about a larger box than the one before, so no finite chain of requirements
+// proves it, and `Box[UInt8]` does not implement `Release`.
+@derive(Release)
+struct Wrap[T] {
+    value: T,
+}
+
+struct Box[T] {
+    value: T,
+}
+
+impl[T: Release] Release for Box[T] where Wrap[Box[Box[T]]]: Release {
+    fn release(sink self: Self) {
+        let Box { value } = self
+        value.release()
+    }
+}
+
+fn main() -> UInt8 {
+    let box: Box[UInt8] = .{ value = 0 }
+    box.release()
+    0
+}

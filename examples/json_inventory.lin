@@ -15,7 +15,19 @@ import std.json
 import std.mem
 import std.testing
 
+// `?` wraps each of these errors in its `InventoryError` variant through the
+// matching derived `From` implementation. The one written below keeps nothing
+// of a refused allocation.
 @copyable
+@derive(
+    Debug,
+    Release,
+    From[json.ParseFileError],
+    From[json.ParseError],
+    From[json.NumberAccessError],
+    From[json.MutationReason],
+    From[io.IoError],
+)
 enum InventoryError {
     Usage,
     File(json.ParseFileError),
@@ -28,19 +40,6 @@ enum InventoryError {
     Mutation(json.MutationReason),
     Output(io.IoError),
 }
-
-// `?` wraps each of these errors in its `InventoryError` variant through the
-// matching derived `From` implementation. The one written below keeps nothing
-// of a refused allocation.
-derive (
-    Debug,
-    Release,
-    From[json.ParseFileError],
-    From[json.ParseError],
-    From[json.NumberAccessError],
-    From[json.MutationReason],
-    From[io.IoError],
-) for InventoryError
 
 // A refused allocation becomes `Allocation`. `mem.Oom` has the one case
 // `Exhausted`, so the variant keeps nothing of it.

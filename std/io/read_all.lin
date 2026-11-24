@@ -9,6 +9,7 @@ use release.Settle
 // stream offset, refused storage, input past the byte limit, or a reader that
 // claimed more bytes than it was asked for.
 @copyable
+@derive(Debug, Release)
 pub enum ReadAllError[E] {
     Input(InputFailure[E]),
     Allocation(mem.Oom),
@@ -21,14 +22,11 @@ pub enum ReadAllError[E] {
 // byte, including the single byte used to establish that the limit was
 // exceeded.
 @linear
+@derive(Release)
 pub struct ReadAllFailure[A: Allocator, E] {
     partial: Option[Vec[UInt8, A]],
     reason: ReadAllError[E],
 }
-
-derive[E: Debug] Debug for ReadAllError[E]
-
-derive[E: Release] Release for ReadAllError[E]
 
 impl[E] ReadAllError[E] {
     // Return whether this failure is a refused allocation, which an
@@ -37,8 +35,6 @@ impl[E] ReadAllError[E] {
         match read self { Allocation(_) => true, _ => false }
     }
 }
-
-derive[A: Allocator, E: Release] Release for ReadAllFailure[A, E]
 
 impl[E: Display] Display for ReadAllError[E] {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
@@ -423,14 +419,11 @@ test "whole input rejects unreported destination overflow" {
 // `read_text` and `read_text_in` release the bytes of either failure, so the error owns nothing
 // beyond what the reader's own error owns.
 @copyable
+@derive(Debug, Release)
 pub enum ReadTextError[E] {
     Read(ReadAllError[E]),
     Encoding(text.Utf8Error),
 }
-
-derive[E: Debug] Debug for ReadTextError[E]
-
-derive[E: Release] Release for ReadTextError[E]
 
 impl[E] From[ReadAllError[E]] for ReadTextError[E] {
     fn from(sink source: ReadAllError[E]) -> ReadTextError[E] {

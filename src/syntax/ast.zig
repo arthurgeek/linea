@@ -645,6 +645,11 @@ pub const Ast = struct {
     }
 
     /// The types a declaration is generic over.
+    /// The type parameters a range of the table holds.
+    pub fn typeParams(self: *const Ast, r: node.TypeParamRange) []const node.TypeParam {
+        return self.type_params[r.start..r.end];
+    }
+
     pub fn declTypeParams(self: *const Ast, id: DeclId) []const node.TypeParam {
         const r = self.decls.items(.type_params)[id.index()];
         return self.type_params[r.start..r.end];
@@ -698,8 +703,15 @@ pub const Ast = struct {
         return self.decls.items(.where_at)[id.index()];
     }
 
-    pub fn deriveTraits(self: *const Ast, id: DeclId) []const node.DeriveTrait {
-        const r = self.deriveTraitRange(id);
+    /// The traits a refused standalone `derive … for …` names, each with the
+    /// head it wrote in its clause, or empty for every other declaration.
+    pub fn refusedDeriveTraitRange(self: *const Ast, id: DeclId) node.DeriveTraitRange {
+        return if (self.declTag(id) == .err) self.deriveTraitRange(id) else .empty;
+    }
+
+    /// The traits a type's `derive(...)` attribute items name, in order.
+    pub fn attachedDeriveTraits(self: *const Ast, id: DeclId) []const node.DeriveTrait {
+        const r = self.attachedDeriveTraitRange(id);
         return self.derive_traits[r.start..r.end];
     }
 
@@ -716,10 +728,6 @@ pub const Ast = struct {
             self.deriveTraitRange(id)
         else
             .empty;
-    }
-
-    pub fn deriveRequestTraitRange(self: *const Ast, id: DeclId) node.DeriveTraitRange {
-        return if (self.declTag(id) == .derive_impl) self.deriveTraitRange(id) else self.attachedDeriveTraitRange(id);
     }
 
     pub fn declAttributeGroupRange(self: *const Ast, id: DeclId) node.AttributeGroupRange {
@@ -755,22 +763,6 @@ pub const Ast = struct {
             }
         }
         return null;
-    }
-
-    pub fn deriveIsGrouped(self: *const Ast, id: DeclId) bool {
-        return self.decls.items(.derive_syntax)[id.index()].group_open != .none;
-    }
-
-    pub fn deriveHeadIsValid(self: *const Ast, id: DeclId) bool {
-        return self.decls.items(.derive_syntax)[id.index()].head_valid;
-    }
-
-    pub fn deriveGroupOpen(self: *const Ast, id: DeclId) TokenId {
-        return self.decls.items(.derive_syntax)[id.index()].group_open;
-    }
-
-    pub fn deriveGroupClose(self: *const Ast, id: DeclId) TokenId {
-        return self.decls.items(.derive_syntax)[id.index()].group_close;
     }
 
     pub fn templateRequirements(self: *const Ast, id: DeclId) []const node.TemplateRequirement {
@@ -1054,7 +1046,7 @@ pub const Ast = struct {
     /// declaration itself underlines. An implementation and a derive request
     /// declare no name; what stands for one is the whole written head.
     pub fn declNameSpan(self: *const Ast, id: DeclId) Span {
-        if (self.declTag(id) == .impl_ or self.declTag(id) == .derive_impl) return self.writtenSpan(self.declHead(id));
+        if (self.declTag(id) == .impl_) return self.writtenSpan(self.declHead(id));
         return self.tokenSpan(self.declName(id));
     }
 

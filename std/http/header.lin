@@ -57,12 +57,11 @@ test "a refused header answers 500" {
 }
 
 // A `PendingHeader` waits to be sent, and the list owns its name and value.
+@derive(Release)
 struct PendingHeader[A: Allocator] {
     name: String[A],
     value: String[A],
 }
-
-derive[A: Allocator] Release for PendingHeader[A]
 
 // `ResponseHeaders` holds a response's headers in the order they were added. A
 // name is a token and a value holds no control byte other than a tab, so no
@@ -72,12 +71,11 @@ derive[A: Allocator] Release for PendingHeader[A]
 // `Status` is refused too: a CGI program's answer names its status in that
 // header, which the response's own status writes, and a second one would let
 // the web server send a status other than the one the response holds.
+@derive(Release)
 struct ResponseHeaders[A: Allocator] {
     allocator: A,
     fields: Vec[PendingHeader[A], A],
 }
-
-derive[A: Allocator] Release for ResponseHeaders[A]
 
 fn release_header_lists[A: Allocator](sink lists: Vec[ResponseHeaders[A], A]) {
     lists.release()

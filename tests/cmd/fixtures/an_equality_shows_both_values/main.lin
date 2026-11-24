@@ -12,15 +12,13 @@
 import std.testing
 
 @linear
+@derive(Equatable, Debug)
 struct Ticket {
     number: UInt8,
 }
 
-derive (Equatable, Debug) for Ticket
-
+@derive(Equatable, Debug)
 enum Delivery { Pending, Sent(Str) }
-
-derive (Equatable, Debug) for Delivery
 
 fn main() -> UInt8 {
     0

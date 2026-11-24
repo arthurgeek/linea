@@ -28,12 +28,11 @@ template impl Repeat where reflect.target: struct, reflect.components: Zero {
     }
 }
 
+@derive(Repeat)
 struct Pair[W: Zero] {
     left: W,
     right: UInt64,
 }
-
-derive[W: Zero] Repeat for Pair[W]
 
 fn main() -> UInt8 {
     let pair: Pair[UInt64] = Repeat.repeat(true)

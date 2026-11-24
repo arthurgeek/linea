@@ -4,14 +4,12 @@ use io.IoError
 use io.println
 
 @copyable
+@derive(Display, Debug)
 struct Empty {}
 
 @copyable
+@derive(Display, Debug)
 enum Uninhabited {}
-
-derive (Display, Debug) for Empty
-
-derive (Display, Debug) for Uninhabited
 
 fn _render_uninhabited(value: Uninhabited) {
     let _display = "{value}"
