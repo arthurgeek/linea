@@ -973,7 +973,7 @@ pub trait Sequence {
         let log = mem.ReleaseLog.open(3)
         let tags = TagSource { log = borrow log, next_code = 1, limit = 4 }
         tags.for_each(Release.release)
-        let ordered = log.holds([UInt64(1), 2, 3].as_slice())
+        let ordered = log.holds([1, 2, 3])
         log.release()
         testing.assert(ordered, "for_each skipped, duplicated, or reordered a linear item")?
     }
@@ -1647,7 +1647,7 @@ test "releasing a map releases its iterator once" {
     let item = &mapped.next()
     let done = &mapped.next().is_none()
     mapped.release()
-    let released = log.holds([UInt64(11)].as_slice())
+    let released = log.holds([11])
     log.release()
     testing.assert_eq(item, Option.Some(UInt8(19)), "map changed its item")?
     testing.assert(done, "map yielded past its iterator")?
@@ -1806,7 +1806,7 @@ test "releasing a filter_map releases its iterator once" {
     let item = &selected.next()
     let done = &selected.next().is_none()
     selected.release()
-    let released = log.holds([UInt64(22)].as_slice())
+    let released = log.holds([22])
     log.release()
     testing.assert_eq(item, Option.Some(UInt8(19)), "filter_map changed its item")?
     testing.assert(done, "filter_map yielded past its iterator")?
@@ -1920,7 +1920,7 @@ test "releasing a filter releases its iterator once" {
     let item = &selected.next()
     let done = &selected.next().is_none()
     selected.release()
-    let released = log.holds([UInt64(33)].as_slice())
+    let released = log.holds([33])
     log.release()
     testing.assert_eq(item, Option.Some(UInt8(19)), "filter changed its item")?
     testing.assert(done, "filter yielded past its iterator")?
@@ -2041,7 +2041,7 @@ test "releasing an enumerate releases its iterator once" {
     var numbered = (LoggedCursor { tag = log.tag(44), visited = false }).enumerate()
     let item = &numbered.next()
     numbered.release()
-    let released = log.holds([UInt64(44)].as_slice())
+    let released = log.holds([44])
     log.release()
     testing.assert_eq(item, Option.Some((UInt64(0), UInt8(19))), "enumerate changed its item")?
     testing.assert(released, "releasing an enumerate did not release its iterator exactly once")?
@@ -2095,7 +2095,7 @@ test "releasing a zip releases both iterators once" {
     var zipped = (LoggedCursor { tag = log.tag(55), visited = false }).zip(LoggedCursor { tag = log.tag(66), visited = false })
     let item = &zipped.next()
     zipped.release()
-    let released = log.holds([UInt64(66), 55].as_slice())
+    let released = log.holds([66, 55])
     log.release()
     testing.assert_eq(item, Option.Some((UInt8(19), UInt8(19))), "zip changed its pair")?
     testing.assert(released, "releasing a zip did not release both iterators exactly once, the second first")?
@@ -2139,7 +2139,7 @@ test "releasing a take releases its iterator once" {
     var taken = (LoggedCursor { tag = log.tag(77), visited = false }).take(1)
     let item = &taken.next()
     taken.release()
-    let released = log.holds([UInt64(77)].as_slice())
+    let released = log.holds([77])
     log.release()
     testing.assert_eq(item, Option.Some(UInt8(19)), "take changed its item")?
     testing.assert(released, "releasing a take did not release its iterator exactly once")?
@@ -2190,7 +2190,7 @@ test "releasing a skip releases its iterator once" {
     var skipped = (LoggedCursor { tag = log.tag(88), visited = false }).skip(0)
     let item = &skipped.next()
     skipped.release()
-    let released = log.holds([UInt64(88)].as_slice())
+    let released = log.holds([88])
     log.release()
     testing.assert_eq(item, Option.Some(UInt8(19)), "skip changed its item")?
     testing.assert(released, "releasing a skip did not release its iterator exactly once")?
@@ -2315,7 +2315,7 @@ test "releasing a copied releases its iterator once" {
     let log = mem.ReleaseLog.open(1)
     let copies = Copied[LoggedCursor] { iterator = LoggedCursor { tag = log.tag(37), visited = false } }
     copies.release()
-    let released = log.holds([UInt64(37)].as_slice())
+    let released = log.holds([37])
     log.release()
     testing.assert(released, "releasing a copied did not release its iterator exactly once")?
 }
@@ -2371,7 +2371,7 @@ test "releasing a rev releases its iterator once" {
     let log = mem.ReleaseLog.open(1)
     let reversed = Rev[LoggedCursor] { iterator = LoggedCursor { tag = log.tag(31), visited = false } }
     reversed.release()
-    let released = log.holds([UInt64(31)].as_slice())
+    let released = log.holds([31])
     log.release()
     testing.assert(released, "releasing a rev did not release its iterator exactly once")?
 }
@@ -2580,7 +2580,7 @@ test "releasing a scan releases its iterator once" {
         },
     )
     scanned.release()
-    let released = log.holds([UInt64(23)].as_slice())
+    let released = log.holds([23])
     log.release()
     testing.assert(released, "releasing a scan did not release its iterator exactly once")?
 }

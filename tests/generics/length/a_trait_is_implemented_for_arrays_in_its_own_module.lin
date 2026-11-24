@@ -1,0 +1,15 @@
+// The module declaring a trait may implement it for arrays of every length,
+// through a length parameter in the implementation's head.
+trait Count {
+    fn count(self: Self) -> UInt64
+}
+
+impl[T, let n: UInt64] Count for [T; n] {
+    fn count(self: Self) -> UInt64 {
+        self.length()
+    }
+}
+
+fn main() -> UInt8 {
+    UInt8([true, false, true].count() * 10 + ["one"].count())
+}

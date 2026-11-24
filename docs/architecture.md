@@ -97,8 +97,15 @@ array literal checker receives the resulting concrete array TypeId and checks
 every element and row. `arrayTypeWithElement` remains the single validator for
 explicit constant lengths; an inference marker outside a supported local
 literal is diagnosed at its token. No wildcard or runtime array representation
-crosses the typing boundary. Ownership, instantiation, MIR, backend layout and
-hover consume the ordinary concrete type. Shape inference adds O(d) work for d
+crosses the typing boundary. A length parameter crosses as a `TypeId`: an
+array is `{ element, length }` in the type pool, where `length` is an interned
+`.length` entry or a `.parameter` marked as a length, so substitution,
+inference, instance keys, symbols and relocation carry lengths in the channels
+that carry types, and `Typing.arrayCount` is the one answer to an array's
+count (null for a parameter). Instances hold only `.length` entries, so
+ownership of a generic body treats a symbolic count as possibly nonzero and as
+more than one element, and instantiation, MIR, backend layout and hover
+consume the ordinary concrete type. Shape inference adds O(d) work for d
 nested array dimensions, with no table sized by the program or repeated walk
 of sibling elements.
 
@@ -210,6 +217,9 @@ reading's deferred reports, and passes the written types to `checkCallOf`,
 where they seed `inferCall` for the function's own parameters. The call record
 carries `written_type_arguments`; `calleeName` and `postfixSelection` give later
 passes and the language server the name in front of the brackets.
+When a bare lowercase name fills a type parameter, typing records its token in
+`value_names_in_type_slots`. Completion can offer a qualified type there even
+when a local shadows its module name in value expressions.
 
 ## The pipeline
 
@@ -561,6 +571,11 @@ capability or a trait (`boundNames`). Qualified lookup, re-exports and tool-faci
 member lists use the same stored visibility and the same predicate to check
 access from the requesting module or root.
 
+A declaration's type and length parameters have a lexical scope shared by its
+header expressions and its body. A member's generic scope sits below its
+implementation's or trait's scope. The callable's value parameters and block
+locals nest inside it, so editor queries see the same names resolution uses.
+
 A re-export binds the original declaration, so following a chain of re-exports
 costs no more than following one alias, and visibility is checked at each `use`.
 Unused bindings are reported by the resolver ([N-Unused], [M-Unused]) with two
@@ -603,8 +618,13 @@ name that reached no type, such as a header's own parameter. An alias is the
 type it names: its parameters stand for the arguments written at the use, so
 `Swap[UInt8, Bool]` with `alias Swap[A, B] = Pair[B, A]` is `Pair[Bool, UInt8]`,
 and an alias reached again inside its own text is read as spelled instead of
-expanded. Array lengths and callable defaults compare by the value they fold to,
-and a pair that does not fold compares as spelled. The one place the answer is
+expanded. A length parameter in an alias's array count reads the length
+supplied at the use. The comparison and its hash both fill omitted arguments from the declaration's
+defaults. Resolution prepares counts reachable through omitted type defaults,
+including their own omissions, before a key is hashed. It shares the completed
+walk of each alias body and default and guards cycles in active walks. Concrete array lengths and
+callable defaults compare by the value they fold to, and a pair that does
+not fold compares as spelled. The one place the answer is
 undecided is a name that has not been resolved yet, which the resolver reads
 while it builds scopes: such a name compares as spelled. A bound is paired
 with the earlier bounds on its parameter through a table keyed by the trait and
@@ -754,12 +774,11 @@ row also states which declarations may name its symbol: any module granted
 `seedProvidedImplementations` registers compiler-provided primitive and array
 implementations in the same relation as written implementations. Coherence
 checks and bound lookup therefore use one path for both kinds of implementation.
-An array row for `Equatable`, `Equivalent`, `Comparable`, `Ordered`, `Hash` or
-`Debug` is viewed: it applies where the implementation for the array's
-`mem.Slice` view does, and `implementationChoice` records its selection as that
-implementation, keeping the array as the receiver and naming the view the
-implementation runs for. Discovery and lowering read that one choice; lowering
-passes each whole-`Self` argument as the array's view.
+The provided array rows are the three `Index` rows. `Equatable`, `Equivalent`,
+`Comparable`, `Ordered`, `Hash` and `Debug` for arrays are written in the
+library over `[T; n]`, in each trait's own module, and are selected like any
+written implementation; the `Index` rows keep a witness array type and skip
+the header's length, since they have no declaration to own parameters.
 
 ### Type checker — `src/sema/typecheck.zig`
 
@@ -939,7 +958,9 @@ built in an arena per construct and freed with it. A layout is rejected when its
 ([L-Size]), and an array length is stored in 32 bits ([T-ArraySize]).
 
 `Checker.checkPolyRec` examines constructor-growing normalized calls before
-instance discovery. A conservative declaration graph shares dispatch identities
+instance discovery. A length argument needs no measure: a length in a type is
+a constant or a length parameter passed on, never a computation, so the
+lengths a program reaches are the ones its source writes. A conservative declaration graph shares dispatch identities
 with the weighted walk. Known nominal receiver heads share a candidate node
 selected by the canonical implementation index; unknown heads retain every
 supplier. Defaults remain candidates without predicate solving. Removing sinks

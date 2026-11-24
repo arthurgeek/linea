@@ -1,0 +1,7 @@
+error[T-Impl]: these two both answer `Label` for `Pack[3]`
+  --> tests/generics/length/a_length_parameter_overlaps_a_constant.lin:17:6
+   |
+11 | impl[let n: UInt64] Label for Pack[n] {
+   |                     ----- the other implementation
+17 | impl Label for Pack[3] {
+   |      ^^^^^ no instantiation may answer to two implementations of one trait

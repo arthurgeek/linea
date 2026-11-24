@@ -1,0 +1,5 @@
+error[T-Bound]: `count` declares `n` as a length, and `UInt8` is a type
+ --> tests/generics/length/a_type_where_a_length_is_declared.lin:8:17
+  |
+8 |     UInt8(count[UInt8]([true]))
+  |                 ^^^^^ this is a type

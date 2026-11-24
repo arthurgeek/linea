@@ -1,0 +1,5 @@
+error[T-PolyRec]: this call instantiates `deepen` with more than it was given
+ --> tests/generics/length/a_recurring_call_passes_its_length.lin:6:5
+  |
+6 |     deepen[[T; n], 1](wider)
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^ type-argument height must remain bounded across recursive calls

@@ -395,12 +395,12 @@ pub const ImplTypeSide = union(enum) {
     /// A primitive. No module declares one, so the library, which is what
     /// the language ships, owns its type side.
     primitive,
-    /// Unit, a callable type, a parameter or an observation constructor: no
-    /// module owns its type side, so only the trait's module may implement
-    /// for it.
+    /// Unit, an array, a callable type, a parameter or an observation
+    /// constructor: no module owns its type side, so only the trait's module
+    /// may implement for it.
     unowned,
-    /// A type no `impl` head can name: a closure, whose type is its own, or
-    /// an array. No module may write an implementation for it.
+    /// A type no `impl` head can name: a closure, whose type is its own. No
+    /// module may write an implementation for it.
     unnameable,
 };
 
@@ -1062,18 +1062,22 @@ pub const Resolution = struct {
             \\
         );
         const ast = &result.ast;
-        var readings: [3]?Resolution.BracketReading = .{ null, null, null };
+        const expected = [_]struct { text: []const u8, reading: std.meta.Tag(Resolution.BracketReading) }{
+            .{ .text = "pick[UInt8]", .reading = .type_arguments },
+            .{ .text = "box.items[0]", .reading = .index },
+            .{ .text = "box.first[UInt8]", .reading = .member },
+            .{ .text = "steps[i]", .reading = .index },
+        };
         var found: usize = 0;
         for (0..ast.exprCount()) |i| {
             const id = ExprId.at(@intCast(i));
             if (ast.exprTag(id) != .index or ast.bracketTypes(id) == null) continue;
-            if (found < readings.len) readings[found] = result.res.bracketReading(id);
+            try testing.expect(found < expected.len);
+            try testing.expectEqualStrings(expected[found].text, ast.exprText(id));
+            try testing.expectEqual(expected[found].reading, std.meta.activeTag(result.res.bracketReading(id).?));
             found += 1;
         }
-        try testing.expectEqual(@as(usize, 3), found);
-        try testing.expectEqual(Resolution.BracketReading.type_arguments, std.meta.activeTag(readings[0].?));
-        try testing.expectEqual(Resolution.BracketReading.member, std.meta.activeTag(readings[1].?));
-        try testing.expectEqual(Resolution.BracketReading.index, std.meta.activeTag(readings[2].?));
+        try testing.expectEqual(expected.len, found);
     }
 
     /// The free function a postfix call's name reaches, where it reaches one.
@@ -1882,7 +1886,7 @@ pub const Resolution = struct {
     }
 
     pub fn typeParameterOwner(self: *const Resolution, b: BindingId) DeclId {
-        std.debug.assert(self.kinds[b.index()] == .type_parameter);
+        std.debug.assert(self.kinds[b.index()] == .type_parameter or self.kinds[b.index()] == .length_parameter);
         return self.decls[b.index()];
     }
 
@@ -2634,6 +2638,10 @@ pub const Kind = enum {
     /// A type parameter declared by a structural derive. It names source for
     /// tooling but is neither a value nor a declaration semantic passes select.
     type_parameter,
+    /// A length parameter, `let n: UInt64`. Written in a length position it
+    /// stands for an array's count, and in a value position it is a `UInt64`
+    /// holding the instance's length.
+    length_parameter,
     /// An `alias`: another name for the type written after its `=`. A type
     /// name wherever a type is written, and nothing else -- it declares no
     /// representation, so there is no declaration of its own to construct,
@@ -2645,7 +2653,7 @@ pub const Kind = enum {
 /// namespace, a function, or a type standing for another.
 pub fn kindIsAValue(kind: Kind) bool {
     return switch (kind) {
-        .local, .parameter, .capture, .binder, .constant => true,
+        .local, .parameter, .capture, .binder, .constant, .length_parameter => true,
         .function, .declared_type, .builtin_type, .associated_type, .type_parameter, .type_alias, .trait, .module => false,
     };
 }
@@ -2656,7 +2664,7 @@ pub fn kindIsAValue(kind: Kind) bool {
 /// `lexicalName` while the scope is still being built.
 pub fn kindShadowsAnImport(kind: Kind) bool {
     return switch (kind) {
-        .local, .parameter, .capture, .binder, .type_parameter => true,
+        .local, .parameter, .capture, .binder, .type_parameter, .length_parameter => true,
         .function, .constant, .declared_type, .builtin_type, .associated_type, .type_alias, .trait, .module => false,
     };
 }
@@ -2831,6 +2839,7 @@ fn reachOf(kind: Kind, d: DeclId, s: StmtId) constfold.Reach {
         .binder,
         .associated_type,
         .type_parameter,
+        .length_parameter,
         .type_alias,
         => .nothing,
     };
@@ -3286,7 +3295,7 @@ const ParameterReading = struct { written: node.TypeRef, reading: Reading };
 
 fn parameterReading(ast: *const Ast, read: Reading, x: node.TypeRef) ?ParameterReading {
     if (read.family == DeclId.none) return null;
-    if (x.kind != .named or x.args.len() != 0) return null;
+    if ((x.kind != .named and x.kind != .length_argument) or x.args.len() != 0) return null;
     if (x.name == TokenId.none or ast.tokenTag(x.name) != .identifier) return null;
     const name = ast.tokenName(x.name);
     for (ast.declTypeParams(read.family), 0..) |p, i| {
@@ -3454,7 +3463,9 @@ fn sameType(
             sameWrittenNames(ast, ctx, x.name, y.name) and
             try sameArgs(ast, ctx, x.args, ra, y.args, rb, left),
         // The element and how many of them, because both are the type.
-        .array => try sameArgs(ast, ctx, x.args, ra, y.args, rb, left) and try sameArrayLength(ctx, x, y),
+        .array => try sameArgs(ast, ctx, x.args, ra, y.args, rb, left) and try sameArrayLength(ast, ctx, x, ra, y, rb, left),
+        // A length argument is the value it is worth.
+        .length_argument => try ctx.sameValue(x.length, y.length),
         .callable => try sameWrittenCallable(ast, ctx, ast.callableType(x), ra, ast.callableType(y), rb, left),
         // The components in order, which is what makes two tuples one.
         .borrow, .grouped, .tuple => try sameArgs(ast, ctx, x.args, ra, y.args, rb, left),
@@ -3562,11 +3573,11 @@ fn reachedType(reached: Reached) ?u32 {
 }
 
 /// Two arrays' written lengths: both inferred, or both counts of the same value.
-fn sameArrayLength(ctx: anytype, x: node.TypeRef, y: node.TypeRef) @TypeOf(ctx).Error!bool {
+fn sameArrayLength(ast: *const Ast, ctx: anytype, x: node.TypeRef, ra: Reading, y: node.TypeRef, rb: Reading, left: *usize) @TypeOf(ctx).Error!bool {
     if (x.inferred_length != TokenId.none or y.inferred_length != TokenId.none) {
         return x.inferred_length != TokenId.none and y.inferred_length != TokenId.none;
     }
-    return ctx.sameValue(x.length, y.length);
+    return sameType(ast, ctx, node.lengthArgument(ast, x.at, x.length), ra, node.lengthArgument(ast, y.at, y.length), rb, left);
 }
 
 fn sameWrittenCallable(
@@ -3667,14 +3678,15 @@ fn hashType(
             hashWrittenName(ast, ctx, h, written.name);
             try hashArgs(ast, ctx, h, written.args, read, left);
         },
+        .length_argument => {
+            const key = try ctx.valueKey(written.length);
+            h.update(std.mem.asBytes(&key));
+        },
         .array => {
             try hashArgs(ast, ctx, h, written.args, read, left);
             const inferred = written.inferred_length != TokenId.none;
             h.update(std.mem.asBytes(&inferred));
-            if (!inferred) {
-                const key = try ctx.valueKey(written.length);
-                h.update(std.mem.asBytes(&key));
-            }
+            if (!inferred) try hashType(ast, ctx, h, node.lengthArgument(ast, written.at, written.length), read, left);
         },
         .callable => {
             const callable = ast.callableType(written);
@@ -4188,11 +4200,12 @@ fn resolveInternal(
     defer r.long_shapes.deinit(gpa);
     defer r.builtin_namespaces.deinit(gpa);
     defer r.folded.deinit(gpa);
-    defer r.settled_aliases.deinit(gpa);
+    defer r.settled_length_sources.deinit(gpa);
     defer r.aliases_settle.deinit(gpa);
     defer r.type_expression_reports.deinit(gpa);
     defer r.used_type_params.deinit(gpa);
     defer r.type_param_slots.deinit(gpa);
+    defer r.generic_scopes.deinit(gpa);
     defer r.type_parameter_bindings.deinit(gpa);
     defer r.impl_of_head.deinit(gpa);
     defer r.inherent_heads.deinit(gpa);
@@ -4605,7 +4618,7 @@ fn resolveInternal(
             if (ast.declTag(d) == .impl_ and ast.declTrait(d) != TokenId.none) {
                 for (ast.typeArgs(ast.declTraitArgs(d))) |a| try r.useRef(a);
                 const head = ast.declHead(d);
-                if (ast.declHasParameterHead(d) or head.kind == .callable) try r.useRef(head);
+                if (ast.declHasParameterHead(d) or head.kind == .callable or head.kind == .array) try r.useRef(head);
             }
 
             // A trait's parameters are in scope in the signatures it declares,
@@ -5042,7 +5055,6 @@ fn resolveInternal(
                 .array => .array,
             },
             .args = i.supplied,
-            .viewed = i.viewed,
         });
     }
     const provided_rows = try provided.toOwnedSlice(gpa);
@@ -5409,7 +5421,7 @@ pub fn namesANamespace(kind: Kind) bool {
         .declared_type, .builtin_type, .trait, .type_parameter, .type_alias => true,
         // A type a trait declares holds nothing of its own: what it stands
         // for is settled by an implementation, and a dot is written on that.
-        .local, .parameter, .capture, .binder, .constant, .function, .module, .associated_type => false,
+        .local, .parameter, .capture, .binder, .constant, .length_parameter, .function, .module, .associated_type => false,
     };
 }
 
@@ -5427,7 +5439,7 @@ pub fn namesANamespace(kind: Kind) bool {
 pub fn carriesNoValue(kind: Kind) bool {
     return switch (kind) {
         .module, .trait => true,
-        .declared_type, .builtin_type, .type_alias, .local, .parameter, .capture, .binder, .constant, .function, .associated_type, .type_parameter => false,
+        .declared_type, .builtin_type, .type_alias, .local, .parameter, .capture, .binder, .constant, .function, .associated_type, .type_parameter, .length_parameter => false,
     };
 }
 
@@ -5449,7 +5461,7 @@ pub fn carriesNoValue(kind: Kind) bool {
 pub fn standsWhereAValueBelongs(kind: Kind) bool {
     return switch (kind) {
         .associated_type, .type_parameter, .type_alias => false,
-        .local, .parameter, .capture, .binder, .constant => true,
+        .local, .parameter, .capture, .binder, .constant, .length_parameter => true,
         .function, .declared_type, .builtin_type, .trait, .module => true,
     };
 }
@@ -6084,9 +6096,6 @@ const Implementation = struct {
     /// for a row no source wrote, and no written reference to read for one it
     /// did.
     supplied: []const ProvidedArg = &.{},
-    /// Is true when a row the compiler provides for arrays answers through the
-    /// array's `Slice` view.
-    viewed: bool = false,
 };
 
 /// Which traits the compiler implements for the primitives, in the order
@@ -6168,22 +6177,6 @@ const ambient_array_traits = [_]struct { name: []const u8, args: []const Provide
     } }} },
 };
 
-/// Lists the traits every array implements through its `Slice` view, each by
-/// the module declaring it and its name.
-///
-/// Each takes its receiver only as whole `read` parameters, so the view reads
-/// exactly the elements the array holds: an array answers where its view's
-/// implementation applies, and its operations are the view's. `Release` is
-/// not among them, because releasing a view settles none of its elements.
-const viewed_array_traits = [_]struct { module: []const u8, name: []const u8 }{
-    .{ .module = "cmp", .name = "Equatable" },
-    .{ .module = "cmp", .name = "Equivalent" },
-    .{ .module = "cmp", .name = "Comparable" },
-    .{ .module = "cmp", .name = "Ordered" },
-    .{ .module = "hash", .name = "Hash" },
-    .{ .module = "fmt", .name = "Debug" },
-};
-
 /// What a row the compiler provides supplies for one of its trait's
 /// parameters.
 ///
@@ -6245,8 +6238,6 @@ pub const AmbientImpl = struct {
     /// `Index[FromEnd]` are two implementations of one trait for one head, so
     /// the arguments are part of which row this is.
     args: []const ProvidedArg = &.{},
-    /// Is true when an array row answers through the array's `Slice` view.
-    viewed: bool = false,
 
     /// The two things the compiler implements for, which are the two a source
     /// cannot: a primitive, which no module declares, and the array
@@ -6467,6 +6458,9 @@ const Resolver = struct {
     /// declaration and interned name. Built once per source or generated row,
     /// so each annotation lookup is constant rather than a scan of its list.
     type_param_slots: std.AutoHashMapUnmanaged(u64, u32) = .empty,
+    /// A generic declaration's lexical scope beneath its enclosing scope.
+    /// Type expressions in a header and the body share these binding runs.
+    generic_scopes: std.AutoHashMapUnmanaged(struct { ScopeId, DeclId }, ScopeId) = .empty,
     /// Which declaration `used_type_params` counts for.
     marks_for: DeclId = DeclId.none,
     /// The trait whose signatures are being read, whose parameters are in scope
@@ -6565,11 +6559,9 @@ const Resolver = struct {
     /// length worked out per comparison would cost the square of what a module
     /// implements times the square of how far its constants chain.
     folded: constfold.Memo = .empty,
-    /// The aliases whose written text has been walked and holds only settled
-    /// lengths, so an alias used again is not walked again. One per run, so the
-    /// walk reads each alias's text once however many uses and implementations
-    /// reach it, and its size is the aliases the program declares.
-    settled_aliases: std.AutoHashMapUnmanaged(DeclId, void) = .empty,
+    /// Alias bodies and parameter defaults whose reachable lengths have been
+    /// folded for coherence. Each entry belongs to one source row.
+    settled_length_sources: std.AutoHashMapUnmanaged(LengthSource, void) = .empty,
     /// The aliases `writtenSettled` has found to name a type whose every name
     /// settled, and those it is in the middle of walking.
     aliases_settle: std.AutoHashMapUnmanaged(DeclId, AliasWalk) = .empty,
@@ -6950,6 +6942,25 @@ const Resolver = struct {
         try self.scopes.append(self.gpa, .{ .parent = self.scope, .from = 0, .to = 0 });
         self.scope = .at(@intCast(self.scopes.items.len - 1));
         return self.scope;
+    }
+
+    /// Enters the same outer-to-inner chain whose reverse lookup resolves a
+    /// generic name. Each owner declares its binding run once per parent, so
+    /// a header with many array types and an impl with many members share it.
+    fn enterGenericScopes(self: *Resolver) !void {
+        const owners = [_]DeclId{ self.trait_scope, self.impl_scope, self.generic };
+        for (owners, 0..) |owner, i| {
+            if (owner == .none or std.mem.indexOfScalar(DeclId, owners[0..i], owner) != null) continue;
+            const params = self.ast.declTypeParams(owner);
+            if (params.len == 0) continue;
+            const entry = try self.generic_scopes.getOrPut(self.gpa, .{ self.scope, owner });
+            if (entry.found_existing) {
+                self.scope = entry.value_ptr.*;
+            } else {
+                entry.value_ptr.* = try self.openScope();
+                for (params) |parameter| try self.declaredHere(self.type_parameter_bindings.get(parameter.name).?);
+            }
+        }
     }
 
     /// Ends a scope, leaving the walk in the scope above.
@@ -8339,8 +8350,9 @@ const Resolver = struct {
         // row, so its members are still read as members of that type, and is
         // compared with no other implementation: which types such a head
         // would answer for is a question the refusal leaves unasked.
+        var array_arguments: [2]node.TypeRef = undefined;
         if (!is_derive and trait_decl != DeclId.none and !self.ast.declHasParameterHead(d) and
-            !node.headAppliesItsParameters(WrittenNames{ .ast = self.ast }, self.ast.typeArgs(written_head.args), self.ast.declTypeParams(d), true))
+            !node.headAppliesItsParameters(WrittenNames{ .ast = self.ast }, node.appliedHeadArguments(self.ast, written_head, &array_arguments), self.ast.declTypeParams(d), true))
         {
             try self.refused_impls.put(self.gpa, d, {});
         }
@@ -8369,6 +8381,14 @@ const Resolver = struct {
                 return;
             }
             return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .borrow_, .decl = d });
+        }
+        if (written_head.kind == .array) {
+            if (trait_decl == .none or !self.mayImplement(.unowned, trait_decl)) {
+                try self.refused_impls.put(self.gpa, d, {});
+                try self.sink.addErrorFmt(.m_impl, self.ast.fileOf(tok), self.ast.writtenSpan(written_head), "write the implementation where the trait is declared", "an array has no declaring module", .{});
+                return;
+            }
+            return self.impls.append(self.gpa, .{ .trait = trait_decl, .args = self.ast.declTraitArgs(d), .head = .array, .decl = d });
         }
         if (written_head.kind == .callable) {
             if (!self.mayImplement(.unowned, trait_decl)) {
@@ -8753,17 +8773,6 @@ const Resolver = struct {
                 .supplied = t.args,
             });
         }
-
-        for (viewed_array_traits) |t| {
-            const trait = self.libraryTrait(t.module, t.name) orelse continue;
-            try self.impls.append(self.gpa, .{
-                .trait = trait,
-                .args = .empty,
-                .head = .array,
-                .decl = DeclId.none,
-                .viewed = true,
-            });
-        }
     }
 
     /// The trait the prelude publishes under a name, or `null` where the name
@@ -9144,7 +9153,11 @@ const Resolver = struct {
         const a_family = self.ast.declTypeParams(a.decl).len != 0;
         const b_family = self.ast.declTypeParams(b.decl).len != 0;
         if (a_family != b_family) return false;
-        const read: Reading = if (a_family) self.reading(a.decl, b) else .{};
+        var array: [2]node.TypeRef = undefined;
+        const read: Reading = if (a_family) .{
+            .family = a.decl,
+            .applied = node.appliedHeadArguments(self.ast, self.ast.declHead(b.decl), &array),
+        } else .{};
         if (!(sameWrittenType(self.ast, ctx, self.ast.declHead(a.decl), read, self.ast.declHead(b.decl), .{}) catch unreachable)) return false;
         return sameWrittenArgs(self.ast, ctx, a.args, read, b.args, .{}) catch unreachable;
     }
@@ -9186,6 +9199,11 @@ const Resolver = struct {
         }
 
         pub fn sameValue(self: Coherence, a: ExprId, b: ExprId) Error!bool {
+            // A length parameter is a variable of the key, which only another
+            // length parameter's name in the same place matches.
+            const a_parameter = self.res.namesLengthParameter(a);
+            const b_parameter = self.res.namesLengthParameter(b);
+            if (a_parameter or b_parameter) return a_parameter and b_parameter and self.res.targetOf(a) == self.res.targetOf(b);
             const x = (self.res.folded.worthOf(a) orelse
                 std.debug.panic("compiler defect: an unsettled constant reached a coherence key", .{})).checked() orelse
                 std.debug.panic("compiler defect: an unsettled constant reached a coherence key", .{});
@@ -9268,14 +9286,6 @@ const Resolver = struct {
             .default_ => h.update("default"),
         }
         return h.final();
-    }
-
-    /// A family's parameters read at what `at`'s head applies.
-    fn reading(self: *const Resolver, family: DeclId, at: Implementation) Reading {
-        return .{
-            .family = family,
-            .applied = self.ast.typeArgs(self.ast.declHead(at.decl).args),
-        };
     }
 
     /// The type a written name reached, through an alias to the name that heads
@@ -9428,41 +9438,33 @@ const Resolver = struct {
     /// reach, counts something, folding each into the memo a comparison of
     /// written types reads. The preparation every such comparison makes first.
     fn writtenLengthsSettled(self: *Resolver, runs: []const []const node.TypeRef) !bool {
-        var walking: std.AutoHashMapUnmanaged(DeclId, void) = .empty;
+        var walking: std.AutoHashMapUnmanaged(LengthSource, void) = .empty;
         defer walking.deinit(self.gpa);
-        var finished: std.ArrayList(DeclId) = .empty;
+        var finished: std.ArrayList(LengthSource) = .empty;
         defer finished.deinit(self.gpa);
         var settled = true;
         for (runs) |run| {
             if (!try self.lengthsWithin(run, &walking, &finished)) settled = false;
         }
-        // An alias finished inside a walk that failed was read under an
-        // answer the failure may have decided, so none of them is kept.
+        // A source completed inside a failed walk may have depended on it.
         if (!settled) {
-            for (finished.items) |alias| _ = self.settled_aliases.remove(alias);
+            for (finished.items) |source| _ = self.settled_length_sources.remove(source);
         }
         return settled;
     }
 
     /// The same question of a run of written types and everything under them.
     ///
-    /// It descends exactly where `sameWrittenType` does, because what it settles
-    /// is what that comparison reads: a form it walked past is a length the
-    /// comparison would find no value for, and that is the panic there. An
-    /// alias is read as the type it names, so its text is walked too, once for
-    /// the run: a type naming an alias twice stands for a tree of the alias's
-    /// expansion, but the lengths in it are the lengths in the alias's text.
-    /// `walking` holds the aliases being walked, so one that names itself is
-    /// not walked again, and `finished` the ones this walk settled. `walking`
-    /// is a set because a chain of aliases n deep holds n entries and each
-    /// step asks whether its alias is among them.
-    ///
-    /// Bounded by the text of the run and of each alias it reaches, once.
+    /// Applied arguments, omitted defaults and alias bodies can each contain
+    /// a length used by the written-type hash or equality check. The active
+    /// set breaks cycles, and the completed set shares reads of the same
+    /// source across uses and implementations. A walk costs the size of the
+    /// input and of each reachable alias body and default it visits.
     fn lengthsWithin(
         self: *Resolver,
         refs: []const node.TypeRef,
-        walking: *std.AutoHashMapUnmanaged(DeclId, void),
-        finished: *std.ArrayList(DeclId),
+        walking: *std.AutoHashMapUnmanaged(LengthSource, void),
+        finished: *std.ArrayList(LengthSource),
     ) !bool {
         // Every length is folded, whatever an earlier one came to: the
         // comparison that follows reads each of them, and one that counts
@@ -9479,7 +9481,18 @@ const Resolver = struct {
                 // so an implementation written with one is left unkeyed exactly
                 // as one whose length has no value at all is. The type is
                 // refused where it is written, which is what reports it.
-                .array => if ((try self.foldedLength(r)).number() == null) {
+                .array => if (!self.namesLengthParameter(r.length) and (try self.foldedLength(r)).number() == null) {
+                    settled = false;
+                },
+                // A length parameter is a variable of the key, as a type
+                // parameter is; any other length argument is a count.
+                .length_argument => if (!self.namesLengthParameter(r.length) and (try constfold.foldConstant(
+                    self.gpa,
+                    self.ast,
+                    self.nameSites(),
+                    &self.folded,
+                    r.length,
+                )).number() == null) {
                     settled = false;
                 },
                 .callable => {
@@ -9503,19 +9516,52 @@ const Resolver = struct {
             }
             if (!try self.lengthsWithin(self.ast.typeArgs(r.args), walking, finished)) settled = false;
             if ((r.kind == .named or r.kind == .selection) and r.name != TokenId.none) {
-                if (self.aliasReached(r.name)) |alias| {
-                    if (!self.settled_aliases.contains(alias) and !walking.contains(alias)) {
-                        try walking.put(self.gpa, alias, {});
-                        defer _ = walking.remove(alias);
-                        if (try self.lengthsWithin(&.{self.ast.declReturnRef(alias)}, walking, finished)) {
-                            try self.settled_aliases.put(self.gpa, alias, {});
-                            try finished.append(self.gpa, alias);
-                        } else settled = false;
-                    }
+                const head = (Coherence{ .res = self }).reaches(r.name);
+                const owner: DeclId = switch (head) {
+                    .alias => |alias| alias,
+                    .type_ => |identity| if (identity & Reached.primitive_identity == 0) .at(identity) else .none,
+                    .nothing => .none,
+                };
+                if (owner == .none) continue;
+                const params = self.ast.declTypeParams(owner);
+                const start = @min(r.args.len(), params.len);
+                for (params[start..], start..) |param, i| {
+                    if (!param.default.wasWritten()) continue;
+                    const row = self.ast.declTypeParamRange(owner).start + @as(u32, @intCast(i));
+                    if (!try self.lengthSourceSettled(.{ .default = row }, param.default, walking, finished)) settled = false;
                 }
+                if (head == .alias and !try self.lengthSourceSettled(.{ .alias = owner }, self.ast.declReturnRef(owner), walking, finished)) settled = false;
             }
         }
         return settled;
+    }
+
+    const LengthSource = union(enum) { alias: DeclId, default: u32 };
+
+    /// An omitted default and an alias body each contribute their written
+    /// type to the key. Walk each reachable source once, even in a diamond.
+    fn lengthSourceSettled(
+        self: *Resolver,
+        source: LengthSource,
+        ref: node.TypeRef,
+        walking: *std.AutoHashMapUnmanaged(LengthSource, void),
+        finished: *std.ArrayList(LengthSource),
+    ) std.mem.Allocator.Error!bool {
+        if (self.settled_length_sources.contains(source)) return true;
+        if (walking.contains(source)) return source == .alias;
+        try walking.put(self.gpa, source, {});
+        defer _ = walking.remove(source);
+        if (!try self.lengthsWithin(&.{ref}, walking, finished)) return false;
+        try self.settled_length_sources.put(self.gpa, source, {});
+        try finished.append(self.gpa, source);
+        return true;
+    }
+
+    /// Whether a written length is a length parameter's name alone.
+    fn namesLengthParameter(self: *const Resolver, length: ExprId) bool {
+        if (length == ExprId.none or self.ast.exprTag(length) != .name_ref) return false;
+        const target = self.targetOf(length);
+        return target != BindingId.none and self.kindOf(target) == .length_parameter;
     }
 
     /// What a fold reads about the names written in a constant expression, from
@@ -11082,7 +11128,7 @@ const Resolver = struct {
                     if (held.kind == .type_parameter and held.decl == target) return true;
                 }
             },
-            .array, .borrow, .grouped, .tuple => {},
+            .array, .borrow, .grouped, .tuple, .length_argument => {},
         }
         for (ast.typeArgs(ref.args)) |argument| {
             if (self.namesTargetParameter(target, argument)) return true;
@@ -12176,7 +12222,7 @@ const Resolver = struct {
                 }
             },
             .selection => links = try self.writtenLinks(ast.selectionBase(x)) orelse return null,
-            .callable, .array, .tuple, .borrow, .grouped => {},
+            .callable, .array, .tuple, .borrow, .grouped, .length_argument => {},
         }
         for (ast.typeArgs(x.args)) |argument| {
             links = @max(links, try self.writtenLinks(argument) orelse return null);
@@ -12311,6 +12357,7 @@ const Resolver = struct {
         // declaration is.
         for (params) |parameter| {
             if (parameter.default.wasWritten()) try self.useRef(parameter.default);
+            if (parameter.length_type.wasWritten()) try self.useRef(parameter.length_type);
         }
     }
 
@@ -12555,7 +12602,7 @@ const Resolver = struct {
                 .enum_ => for (source.declVariants(d)) |v| try checks.name(v.name, .variant, .{ .list = .{ .decl = d, .of = .variants } }),
                 else => {},
             }
-            for (source.declTypeParams(d)) |p| try checks.name(p.name, .type_parameter, .{ .list = .{ .decl = d, .of = .type_parameters } });
+            for (source.declTypeParams(d)) |p| try checks.name(p.name, if (p.kind == .length) .length_parameter else .type_parameter, .{ .list = .{ .decl = d, .of = .type_parameters } });
         }
         // A body's names may shadow what encloses them, so a respelling is
         // compared against nothing there.
@@ -12567,7 +12614,7 @@ const Resolver = struct {
             switch (b.kind) {
                 .local => {},
                 .binder => if (b.names_a_field) continue,
-                .capture, .parameter, .function, .constant, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => continue,
+                .capture, .parameter, .function, .constant, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .length_parameter, .type_alias => continue,
             }
             try checks.name(b.at, .binding, .none);
         }
@@ -12891,6 +12938,7 @@ const Resolver = struct {
 
     fn useRefIn(self: *Resolver, ref: node.TypeRef, context: TypeUseContext) std.mem.Allocator.Error!void {
         if (ref.stepped_to != .none) return self.useSteppedOverType(ref);
+        if (ref.kind == .length_argument) return self.useTypeExpression(ref.length);
         if (try self.reflectionComponentType(ref)) return;
         if (ref.kind == .callable) return self.useCallableTypeIn(self.ast.callableType(ref), context.ofArguments());
         if (ref.kind == .selection) {
@@ -13000,6 +13048,11 @@ const Resolver = struct {
         const previous = self.record_written_expr;
         self.record_written_expr = true;
         defer self.record_written_expr = previous;
+        const enclosing = self.scope;
+        defer self.scope = enclosing;
+        // The header is read from its module, before a body opens its locals.
+        // An annotation in a body already sits below the generic scopes.
+        if (enclosing != .none and self.scopes.items[enclosing.index()].parent == .none) try self.enterGenericScopes();
         const reported = self.sink.list.items.len;
         try self.expr(expression);
         const reports = try self.sink.arena.dupe(Diagnostic, self.sink.list.items[reported..]);
@@ -13170,7 +13223,7 @@ const Resolver = struct {
                     binding_entry.value_ptr.* = BindingId.at(@intCast(self.bindings.items.len));
                     try self.bindings.append(self.gpa, .{
                         .name = self.ast.tokenName(parameter.name),
-                        .kind = .type_parameter,
+                        .kind = if (parameter.kind == .length) .length_parameter else .type_parameter,
                         .stmt = .none,
                         .decl = d,
                         .param_index = @intCast(position),
@@ -13481,13 +13534,13 @@ const Resolver = struct {
             // member being read. Under a tuple head, `Self` is the prelude's
             // tuple declaration, which `implTarget` found by identity and
             // reported where the prelude publishes none; a grouped head was
-            // refused where it was written. Under a callable head, `Self` is
-            // the callable type. None of them leaves `Self` anything further
+            // refused where it was written. Under a callable or an array head,
+            // `Self` is that type. None of them leaves `Self` anything further
             // to report.
             const impl = if (self.ast.declTag(self.generic) == .impl_) self.generic else self.implEnclosing(self.generic);
             if (impl != DeclId.none) {
                 switch (self.ast.declHead(impl).kind) {
-                    .tuple, .grouped, .callable => return .settled,
+                    .tuple, .grouped, .callable, .array => return .settled,
                     else => {},
                 }
             }
@@ -14039,27 +14092,19 @@ const Resolver = struct {
         if (init_expr == ExprId.none) return;
         const mark = self.visible.items.len;
         defer self.popLocalsTo(mark);
-        const scope = try self.openScope();
-        defer self.closeScope(scope);
         self.generic = d;
         defer self.generic = DeclId.none;
         self.impl_scope = self.implEnclosing(d);
         defer self.impl_scope = DeclId.none;
+        const enclosing = self.scope;
+        defer self.scope = enclosing;
+        try self.enterGenericScopes();
+        _ = try self.openScope();
         try self.declareParameters(d);
         try self.expr(init_expr);
     }
 
     fn declareParameters(self: *Resolver, d: DeclId) !void {
-        // The namespace chain is searched nearest first; scope enumeration
-        // walks each recorded run backwards, so record the outer owners first.
-        const owners = [_]DeclId{ self.trait_scope, self.impl_scope, d };
-        for (owners, 0..) |owner, i| {
-            if (owner == .none) continue;
-            if (std.mem.indexOfScalar(DeclId, owners[0..i], owner) != null) continue;
-            for (self.ast.declTypeParams(owner)) |parameter| {
-                try self.declaredHere(self.type_parameter_bindings.get(parameter.name).?);
-            }
-        }
         // A second parameter of one spelling was refused where the list was
         // read; the first keeps the name, and the second is neither visible
         // nor reported unused.
@@ -14128,12 +14173,6 @@ const Resolver = struct {
         if (self.ast.declTag(d) != .function and self.ast.declTag(d) != .projection) return;
         self.popLocalsTo(module_scope);
 
-        // The parameters are a scope of their own, which the body's own scope
-        // sits below: a local of a parameter's name shadows it, exactly as one
-        // block's local shadows an outer block's.
-        const params = try self.openScope();
-        defer self.closeScope(params);
-
         // Its own type parameters answer for the whole body, as they do for
         // the signature: `T` in an annotation inside this function is this
         // function's `T`, and a body walked without them would find a
@@ -14149,6 +14188,12 @@ const Resolver = struct {
         // body names the trait's parameters as its signature does.
         self.trait_scope = if (self.ast.declIsProvided(d)) self.signatures.?.traitOf(self.ast, d) orelse DeclId.none else DeclId.none;
         defer self.trait_scope = DeclId.none;
+
+        const enclosing = self.scope;
+        defer self.scope = enclosing;
+        try self.enterGenericScopes();
+        // Value parameters shadow generic names; the body's locals shadow both.
+        _ = try self.openScope();
 
         self.body_labels.clearRetainingCapacity();
         try self.declareParameters(d);
@@ -16380,12 +16425,16 @@ const Resolver = struct {
         const selects_from_a_value = self.ast.exprTag(head) == .field and baseNamesAValue(self, self.ast, self.ast.unaryOperand(head));
         const held: Resolution.BracketReading = if (selects_from_a_value and !called)
             .index
-        else if (selects_from_a_value)
-            .{ .member = .{
-                .index_reports = try self.quietly(.index, b.rhs, types),
-                .type_reports = try self.quietly(.type_arguments, b.rhs, types),
-            } }
-        else if (target != BindingId.none and self.kindOf(target) == .function)
+        else if (selects_from_a_value) blk: {
+            const index_reports = try self.quietly(.index, b.rhs, types);
+            // One expression read as the index and as the one length argument
+            // resolves once, and reports the same either way.
+            const shared = types.len == 1 and types[0].kind == .length_argument and types[0].length == b.rhs;
+            break :blk .{ .member = .{
+                .index_reports = index_reports,
+                .type_reports = if (shared) index_reports else try self.quietly(.type_arguments, b.rhs, types),
+            } };
+        } else if (target != BindingId.none and self.kindOf(target) == .function)
             .type_arguments
         else if (self.trait_selections.contains(head))
             .type_arguments
@@ -17934,6 +17983,7 @@ test "a name reaches an initialiser only where one was written" {
             .parameter,
             .capture,
             .type_parameter,
+            .length_parameter,
             .function,
             .declared_type,
             .builtin_type,

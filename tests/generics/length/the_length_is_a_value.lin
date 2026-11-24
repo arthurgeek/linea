@@ -1,0 +1,14 @@
+// Inside the body a length parameter is a `UInt64` holding the instance's
+// length, the same value `length()` reports.
+import std.io
+
+fn describe[T, let n: UInt64](items: [T; n]) -> Result[(), io.IoError] {
+    io.println("{n} items, and length() agrees: {n == items.length()}")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    describe([true, false])?
+    describe(["a", "b", "c", "d"])?
+    describe([UInt8(1)])?
+    .Ok(0)
+}

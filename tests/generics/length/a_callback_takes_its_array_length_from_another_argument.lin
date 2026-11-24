@@ -1,0 +1,11 @@
+fn apply[let n: UInt64](step: fn(row: [UInt8; n]) -> UInt8, row: [UInt8; n]) -> UInt8 {
+    step(row)
+}
+
+fn last[let n: UInt64](row: [UInt8; n]) -> UInt8 {
+    row[^1]
+}
+
+fn main() -> UInt8 {
+    apply(last, [1, 2, 3]) + apply(|row| row[0], [4, 5])
+}

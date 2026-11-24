@@ -2355,7 +2355,7 @@ fn holdTemplateBindings(
 fn renamesBinding(kind: resolve_mod.Kind) bool {
     return switch (kind) {
         .local, .parameter, .capture, .binder => true,
-        .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => false,
+        .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => false,
     };
 }
 

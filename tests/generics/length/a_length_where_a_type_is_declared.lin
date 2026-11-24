@@ -1,0 +1,9 @@
+// [T-Bound]. `T` is a type, so a length cannot stand in its place.
+struct Ring[T, let n: UInt64] {
+    items: [T; n],
+}
+
+fn main() -> UInt8 {
+    let ring: Ring[4, UInt8] = .{ items = [1, 2, 3, 4] }
+    ring.items[0]
+}

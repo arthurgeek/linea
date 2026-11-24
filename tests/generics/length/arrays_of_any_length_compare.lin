@@ -1,0 +1,18 @@
+// An array of any length compares, hashes and prints wherever its element
+// does, so a generic body over `[T; n]` uses `==` and `:?` once for every
+// length.
+import std.io
+
+fn report[T: Equatable + Debug, let n: UInt64](before: [T; n], after: [T; n]) -> Result[(), io.IoError] {
+    if before == after {
+        io.println("{after:?} is unchanged")
+    } else {
+        io.println("{before:?} became {after:?}")
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    report([1, 2], [1, 2])?
+    report(["a", "b", "c"], ["a", "x", "c"])?
+    .Ok(0)
+}

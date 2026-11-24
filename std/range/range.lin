@@ -53,7 +53,7 @@ test "derived range release releases its endpoints in reverse field order" {
     let log = mem.ReleaseLog.open(2)
     let range = Range[mem.ReleaseTag] { lo = log.tag(40), hi = log.tag(50), inclusive = false }
     range.release()
-    let released = log.holds([UInt64(50), 40].as_slice())
+    let released = log.holds([50, 40])
     log.release()
     testing.assert(released, "derived release skipped, repeated or reordered an endpoint")?
     .Ok(())

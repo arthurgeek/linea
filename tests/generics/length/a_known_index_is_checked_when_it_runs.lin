@@ -1,0 +1,10 @@
+// A body is checked for every length, zero included, so an index the body
+// writes is checked when the program runs. Called with two elements, the
+// third does not exist and the program traps there.
+fn third[let n: UInt64](items: [UInt8; n]) -> UInt8 {
+    items[2]
+}
+
+fn main() -> UInt8 {
+    third([1, 2])
+}

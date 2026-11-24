@@ -6858,7 +6858,7 @@ test "checked unused library delegation resumes generic indexing and traversal" 
     }
     try testing.expect(delegated_impl != .none and delegated_traversal != .none);
     const saved_positions = prefix.checked.typing.traversal_positions.get(delegated_traversal).?;
-    try testing.expectEqual(@as(u32, 2), saved_positions.array.count);
+    try testing.expectEqual(@as(?u32, 2), prefix.checked.typing.arrayCount(saved_positions.array.length));
     var has_unused_expansion = false;
     for (prefix.checked.typing.expansions) |expansion| {
         if (expansion.member == delegated_impl and expansion.delegation != null) has_unused_expansion = true;
@@ -6905,13 +6905,13 @@ test "checked unused library delegation resumes generic indexing and traversal" 
         }
         const attached_positions = semantics.typing.traversal_positions.get(delegated_traversal).?;
         try testing.expectEqual(saved_positions.array.key, attached_positions.array.key);
-        try testing.expectEqual(saved_positions.array.count, attached_positions.array.count);
+        try testing.expectEqual(saved_positions.array.length, attached_positions.array.length);
         if (mode == 1) try testing.expectEqual(saved_positions.array.iterator, attached_positions.array.iterator);
         var used_traversals: usize = 0;
         for (semantics.typing.traversals) |traversal| {
             if (traversal.decl != delegated_traversal) continue;
             used_traversals += 1;
-            try testing.expectEqual(@as(u32, 2), traversal.positions.array.count);
+            try testing.expectEqual(@as(?u32, 2), semantics.typing.arrayCount(traversal.positions.array.length));
         }
         try testing.expectEqual(@as(usize, 2), used_traversals);
         var module = (try @import("../mir/lower.zig").lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program)) orelse return error.TestUnexpectedResult;
@@ -7666,7 +7666,7 @@ fn checkedWithLibrary(prefix: *LibraryPrefix, gpa: std.mem.Allocator, sink: *Sin
     return checkProgram(gpa, gpa, program, names, sink, .program);
 }
 
-test "implementationChoice runs an array's selection through its slice view" {
+test "an array's comparison selects the library's implementation for arrays" {
     var prefix = try LibraryPrefix.init(testing.allocator);
     defer prefix.deinit();
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
@@ -7690,19 +7690,15 @@ test "implementationChoice runs an array's selection through its slice view" {
             .array => |array| array,
             else => continue,
         };
-        // A row the compiler provides for `Index` answers for the array
-        // itself, with no view; a range place over an array selects one.
-        if (choice.declaredImplementation()) |supplier| if (typing.implementations[supplier.index()].ambient) continue;
-        if (array.element == .u8 and array.count == 2) compared = true;
-        // The call is typed with the array; the implementation runs for its
-        // view, an instance of the library's `Slice`.
+        const id = choice.declaredImplementation() orelse continue;
+        const implementation = typing.implementations[id.index()];
+        if (implementation.isAmbient()) continue;
+        if (array.element == .u8 and typing.arrayCount(array.length) == 2) compared = true;
+        // The row is the one `std.cmp` writes for `[T; n]`, and it runs for
+        // the array itself.
         try testing.expectEqual(row.key_ptr.receiver, choice.receiver);
-        try testing.expect(choice.view != .poison);
-        try testing.expectEqual(choice.view, choice.implementedFor());
-        try testing.expectEqual(typing.raw_accesses.slice, typing.instanceOf(choice.view).?.decl);
+        try testing.expectEqual(@import("../sema/types.zig").Head.array, implementation.head);
     }
-    // The program's own `[UInt8; 2]` is among the arrays answered through
-    // a view, not only the library's.
     try testing.expect(compared);
 }
 

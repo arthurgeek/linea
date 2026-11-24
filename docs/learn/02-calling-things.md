@@ -1107,6 +1107,211 @@ since it needs the place the caller changes. This is how
 function
 ([Networking](09-networking.md#running-a-handler-as-a-cgi-program)).
 
+## A length parameter: arrays of any size
+
+An array's length is part of its type, so `[UInt64; 3]` and `[UInt64; 5]` are
+two types. A function that should take either declares a **length parameter**,
+`let n: UInt64`, in its brackets and writes `n` where the length goes:
+
+```linea
+import std.io
+
+// `n` is a length parameter: `total` takes an array of any length, and `n` is
+// that length.
+fn total[let n: UInt64](prices: [UInt64; n]) -> UInt64 {
+    var sum: UInt64 = 0
+    for read price in prices {
+        sum += price
+    }
+    sum
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let lunch = total([12, 4, 3])
+    let dinner = total([30, 8, 6, 5, 2])
+    io.println("lunch {lunch}, dinner {dinner}")?
+    .Ok(0)
+}
+```
+
+```
+lunch 19, dinner 51
+```
+
+Each call settles `n` from the array it passes, the way `T` is settled from an
+argument: `n` is 3 for lunch and 5 for dinner. A length parameter is written
+with `let` and a lowercase name, because inside the function it is read as a
+value, and its type is always `UInt64`, the type of `length()` and of an index.
+
+### `n` is a value too
+
+Inside the body `n` is a `UInt64` holding the length of the array the call
+passed:
+
+```linea
+import std.io
+
+fn describe[let n: UInt64](names: [Str; n]) -> Result[(), io.IoError] {
+    io.println("{n} items, the first is {names[0]}")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    describe(["tea", "jam"])?
+    describe(["bread", "milk", "eggs", "salt"])?
+    .Ok(0)
+}
+```
+
+```
+2 items, the first is tea
+4 items, the first is bread
+```
+
+The body is checked once, for every length, zero included. So `names[0]` is
+checked when the program runs rather than when it compiles: a call with an
+empty array would stop the program with `index out of bounds`, as an index
+computed at run time does.
+
+### Naming a length
+
+When nothing passed to a call says what the length is, write it in the
+brackets after the function's name, by position beside any type arguments.
+`mem.filled` builds an array of `n` copies of one value, and the call says how
+many:
+
+```linea
+import std.io
+import std.mem
+
+fn main() -> Result[UInt8, io.IoError] {
+    // `[UInt8, 4]` names `T` as `UInt8` and `n` as 4.
+    let row = mem.filled[UInt8, 4](0)
+    // Or the annotation settles both.
+    let flags: [Bool; 3] = mem.filled(true)
+    io.println("{row:?} {flags:?}")?
+    .Ok(0)
+}
+```
+
+```
+[0, 0, 0, 0] [true, true, true]
+```
+
+A type where a length is declared is refused, and says which parameter wanted
+what:
+
+<!-- guide: edit 6 let row = mem.filled[UInt8, 4](0) -->
+```linea
+    let row = mem.filled[UInt8, UInt8](0)
+```
+
+```
+error[T-Bound]: `filled` declares `n` as a length, and `UInt8` is a type
+ --> main.lin:6:33
+  |
+6 |     let row = mem.filled[UInt8, UInt8](0)
+  |                                 ^^^^^ this is a type
+```
+
+This is Rust's `const N: usize`, written `let n: UInt64`, and its
+`filled::<u8, 4>(0)` is `mem.filled[UInt8, 4](0)`.
+
+### A struct with a length
+
+A struct can take a length parameter and size a field with it. Its written type
+names the length as an argument, `Ring[UInt8, 4]`, and an `impl` generic over
+the length answers for every one. This one is for rings of `UInt8` of any
+length:
+
+```linea
+import std.io
+
+// A ring buffer of `n` slots; `next` is where the next value goes.
+@derive(Debug)
+struct Ring[T, let n: UInt64] {
+    items: [T; n],
+    next: UInt64,
+}
+
+impl[let n: UInt64] Ring[UInt8, n] {
+    // Write over the oldest slot, and move on, wrapping after the last.
+    fn push(inout self: Self, value: UInt8) {
+        self.items[self.next] = value
+        self.next = (self.next + 1) % n
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var recent = Ring[UInt8, 3] { items = [0, 0, 0], next = 0 }
+    for reading in [5, 6, 7, 8] {
+        &recent.push(reading)
+    }
+    io.println("{recent:?}")?
+    .Ok(0)
+}
+```
+
+```
+Ring { items: [8, 6, 7], next: 1 }
+```
+
+`@derive(Debug)` works as it does for any struct, because an array of any
+length prints wherever its element type does.
+
+### What a length cannot be
+
+Two arrays that settle one `n` differently do not fit one call:
+
+```linea
+fn same_length[let n: UInt64](_a: [UInt8; n], _b: [UInt8; n]) -> UInt64 {
+    n
+}
+
+fn main() -> UInt8 {
+    UInt8(same_length([1, 2, 3], [4, 5]))
+}
+```
+
+```
+error[T-Mismatch]: `n` was already settled as `3`, and this settles it as `2`
+ --> main.lin:6:34
+  |
+6 |     UInt8(same_length([1, 2, 3], [4, 5]))
+  |                                  ^^^^^^ one length parameter, two lengths
+```
+
+A length in a type may be a constant expression such as `2 + 2`, or it may
+name a length parameter. A function cannot add one to that parameter to
+promise an array one longer than the one it got:
+
+```linea
+fn grown[let n: UInt64](sink xs: [UInt8; n]) -> [UInt8; n + 1] {
+    xs
+}
+
+fn main() -> UInt8 {
+    grown([1])[0]
+}
+```
+
+```
+error[T-ArraySize]: a length parameter cannot be computed with in a type
+ --> main.lin:1:57
+  |
+1 | fn grown[let n: UInt64](sink xs: [UInt8; n]) -> [UInt8; n + 1] {
+  |                                                         ^^^^^ `n + 1` is not a length
+  |
+  = help: a length in a type is a constant or a length parameter
+```
+
+A result that grows belongs in a `Vec`.
+
+Each length a program calls a function with makes its own copy of the
+function, so a function called with fifty lengths is compiled fifty times.
+Take `[T; n]` when the length belongs in a type: a result of the same length,
+a field, or a caller passing a literal. Take a `mem.Slice[T]` when it does not,
+and in particular when `Vec`s feed the function too.
+
 ## Functions as values
 
 `fn(coffee: Coffee) -> UInt64` is a type: a function that takes a `Coffee` and
@@ -2015,6 +2220,9 @@ the operations that walk a collection.
   `[N-Shadowed]` warns you when that hides an implementation.
 - `x.f()` never calls a field; `(x.f)()` calls the function a field holds.
 - `f[T](x)` and `x.op[T]()` name a type argument the call cannot work out.
+- `let n: UInt64` in a function's or a type's brackets is a length parameter:
+  `[T; n]` takes an array of any length, `n` reads that length as a value,
+  and `f[3](xs)` or `Ring[UInt8, 16]` names one.
 - `@derive(Equatable, Debug)` and the like write a trait's implementation from
   a type's fields; write the `impl` by hand when field by field is wrong.
 - A function is a value; labels in a function type are for reading and named

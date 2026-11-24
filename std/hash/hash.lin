@@ -258,3 +258,20 @@ test "structural hashing preserves field order and variant identity" {
     let different = GenericHash[UInt64] { value = 8 }
     testing.assert(generic.hash() != different.hash(), "generic components were lost")?
 }
+
+// An array hashes its length and then each element's hash in order, as a
+// `mem.Slice` over the same elements does, so equal arrays hash equally and
+// the order of the elements is kept.
+impl[T: Hash, let n: UInt64] Hash for [T; n] {
+    fn hash(self: Self) -> UInt64 {
+        self.as_slice().hash()
+    }
+}
+
+test "equal arrays hash equally" {
+    let first = [UInt16(4), 2]
+    let same = [UInt16(4), 2]
+    let reordered = [UInt16(2), 4]
+    testing.assert_eq(first.hash(), same.hash(), "equal arrays hashed differently")?
+    testing.assert(first.hash() != reordered.hash(), "element order was lost")?
+}

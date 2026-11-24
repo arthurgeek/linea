@@ -139,6 +139,26 @@ test "a name reaches the declaration the resolver gave it" {
     try testing.expectEqual(@as(u32, 5), found.range.start.line);
 }
 
+test "a length parameter in the editor reaches its binder from an array and a value" {
+    const gpa = testing.allocator;
+    const text =
+        \\fn count[let width: UInt64](_items: [Bool; width]) -> UInt64 {
+        \\    width
+        \\}
+        \\fn main() -> UInt8 { UInt8(count([true])) }
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const binder = at(text, std.mem.indexOf(u8, text, "width:").?);
+    for ([_][]const u8{ "width]", "width\n" }) |use| {
+        const offset = std.mem.indexOf(u8, text, use).?;
+        const found = (try forPosition(gpa, testing.io, &checked, checked.fileNamed("main.lin").?, at(text, offset + 1), .@"utf-16", "")).?;
+        defer gpa.free(found.uri);
+        try testing.expectEqual(binder, found.range.start);
+        try testing.expectEqualStrings("width", declared(&checked, found));
+    }
+}
+
 test "a cursor on what names nothing reaches nothing" {
     const gpa = testing.allocator;
 

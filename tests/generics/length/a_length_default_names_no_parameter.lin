@@ -1,0 +1,10 @@
+// [T-ArgumentDefault]. A default is read where its declaration is, so it
+// names no parameter of its own list.
+struct Grid[let width: UInt64, let height: UInt64 = width] {
+    cells: [[UInt8; width]; height],
+}
+
+fn main() -> UInt8 {
+    let grid: Grid[2] = .{ cells = [[0, 0], [0, 0]] }
+    grid.cells[0][0]
+}

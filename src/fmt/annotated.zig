@@ -222,7 +222,7 @@ pub fn dumpMono(
         // builds a value, and a type declaration does neither.
         const from = origin.decl;
         const extent = switch (origin.body) {
-            .declaration, .closure_release, .erased_entry, .erased_settle, .built_in, .viewed => ast.declTokens(from),
+            .declaration, .closure_release, .erased_entry, .erased_settle, .built_in => ast.declTokens(from),
             .closure => |closure| ast.exprTokens(typing.closureOf(closure).body),
             .constructor => |constructor| ast.exprTokens(constructor.expr),
         };
@@ -230,7 +230,7 @@ pub fn dumpMono(
         try notes.noteConstructors(gpa, ast, typing, &pool, origin, extent, tokens, &sites);
 
         switch (origin.body) {
-            .closure_release, .erased_entry, .erased_settle, .built_in, .viewed => {
+            .closure_release, .erased_entry, .erased_settle, .built_in => {
                 if (wrote_one) try w.writeAll("\n");
                 wrote_one = true;
                 try w.print("generated MIR function {s}\n", .{module.nameOf(id)});
@@ -514,7 +514,7 @@ fn noteInferredLengths(
         else => return,
     };
     if (ref.inferred_length != .none) {
-        const count = try std.fmt.allocPrint(gpa, "{d}", .{array.count});
+        const count = try std.fmt.allocPrint(gpa, "{d}", .{typing.concreteCount(array.length)});
         try owned.append(gpa, count);
         tokens[ref.inferred_length.index()] = count;
     }

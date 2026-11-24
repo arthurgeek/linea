@@ -3,3 +3,5 @@ error[T-Bound]: `[Token; 2]` does not implement `Equatable`
   |
 7 |     if first == second {
   |              ^^ an array compares through its elements, so their type must implement the trait
+  |
+  = help: `[T; n]` implements `Equatable` when `T` implements `Equatable`, and `Token` does not

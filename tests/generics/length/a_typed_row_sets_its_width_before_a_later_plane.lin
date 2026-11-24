@@ -1,0 +1,37 @@
+import std.mem
+
+fn rows[let width: UInt64, let height: UInt64, let depth: UInt64](_grid: [[[Option[UInt8]; width]; height]; depth]) -> UInt64 {
+    width
+}
+
+fn main() -> UInt8 {
+    let typed: [Option[UInt8]; 2] = [.None, .Some(3)]
+    let _matching = rows([[copy(typed)], [[.Some(4), .None]]])
+    let _conflict = rows([[copy(typed)], [[.Some(7)]]])
+    let _separate = two_planes([[typed]], [[.Some(7)]])
+    let two: [UInt8; 2] = [1, 2]
+    let _context = uses_row([blank()], two)
+    let _literal_context = two_matrices([blank()], [[1, 2]])
+    let _fixed = rows([[pair()], [[.Some(7)]]])
+    0
+}
+
+fn pair() -> [Option[UInt8]; 2] {
+    [.None, .None]
+}
+
+fn two_planes[let width: UInt64, let height: UInt64, let depth: UInt64](_grid: [[[Option[UInt8]; width]; height]; depth], _plane: [[Option[UInt8]; width]; height]) -> UInt64 {
+    width
+}
+
+fn uses_row[let n: UInt64, let m: UInt64](_matrix: [[UInt8; n]; m], _row: [UInt8; n]) -> UInt64 {
+    n
+}
+
+fn blank[let n: UInt64]() -> [UInt8; n] {
+    mem.filled(0)
+}
+
+fn two_matrices[let n: UInt64, let m: UInt64](_matrix: [[UInt8; n]; m], _other: [[UInt8; n]; m]) -> UInt64 {
+    n
+}

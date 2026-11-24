@@ -1,0 +1,2 @@
+[1, 2] is unchanged
+["a", "b", "c"] became ["a", "x", "c"]

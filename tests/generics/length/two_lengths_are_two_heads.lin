@@ -1,0 +1,21 @@
+// A type's own implementation may fix its length, and two constant lengths are
+// two types: each block's members belong to its instantiation alone.
+struct Pack[let n: UInt64] {
+    weights: [UInt8; n],
+}
+
+impl Pack[2] {
+    fn pair_total(self: Self) -> UInt8 {
+        self.weights[0] + self.weights[1]
+    }
+}
+
+impl Pack[3] {
+    fn triple_total(self: Self) -> UInt8 {
+        self.weights[0] + self.weights[1] + self.weights[2]
+    }
+}
+
+fn main() -> UInt8 {
+    Pack[2] { weights = [1, 2] }.pair_total() + Pack[3] { weights = [3, 4, 5] }.triple_total()
+}

@@ -1966,15 +1966,16 @@ fn lazy_test_errand_digits(waits: mem.Slice[UInt64], order: Order) -> UInt64 {
 }
 
 test "a lazy_map in completion order yields each result as its job finishes" {
-    // Item 1 finishes only once the five after it have run, so while item 1
-    // waits the other worker maps items 2 to 6, each yielded as it finishes,
-    // and item 1 is yielded last. A map that waited for item 1 before
-    // yielding the others would leave it waiting until its minute ran out.
+    // Items 2 through 5 precede both remaining results. Item 6's
+    // acknowledgement can release item 1 before item 6 is published.
     let completed = lazy_test_errand_digits([UInt64(5), 0, 0, 0, 0, 0].as_slice(), Order.Completion)
     // In input order item 1 is yielded first, though it finishes only once
     // the three after it have run.
     let input = lazy_test_errand_digits([UInt64(3), 0, 0, 0, 0, 0].as_slice(), Order.Input)
-    testing.assert_eq(completed, UInt64(234561), "the slow job's result was not yielded after the faster ones")?
+    testing.assert(
+        completed == UInt64(234561) || completed == UInt64(234516),
+        "completion order did not yield ready jobs before the blocked one",
+    )?
     testing.assert_eq(input, UInt64(123456), "input order changed")?
 }
 

@@ -135,7 +135,7 @@ impl         ::= "impl" generics? impl_head where_clause? "{" ("pub"? (function 
               | "impl" generics? trait_ref "for" impl_head where_clause? "{" ("pub"? (function | projection | constant) | settled)* "}"
               | "impl" generics? trait_ref "for" impl_head where_clause? "via" name
               | "default" "impl" generics trait_ref "for" name where_clause? "{" (function | settled)* "}"
-impl_head    ::= name type_arguments? | "()" | "borrow" type_name | tuple_type
+impl_head    ::= name type_arguments? | "()" | "borrow" type_name | tuple_type | array_type | callable_type
 template_impl         ::= "template" "impl" generics? trait_ref template_requirements? "{" function* "}"
 template_requirements ::= "where" template_requirement ("," template_requirement)* ","?
 template_requirement  ::= "reflect" "." "components" ":" type_bound ("+" type_bound)*
@@ -147,7 +147,9 @@ derive_trait          ::= trait_ref
 target_head           ::= name type_arguments? | tuple_type
 
 generics     ::= "[" generic ("," generic)* ","? "]"
-generic      ::= "phantom"? name (":" type_bound ("+" type_bound)*)? ("=" type_name)?
+generic      ::= type_generic | length_generic
+type_generic ::= "phantom"? name (":" type_bound ("+" type_bound)*)? ("=" type_name)?
+length_generic ::= "phantom"? "let" name ":" type_name ("=" expression)?
 trait_ref    ::= name ("." name)* type_arguments?
 type_bound   ::= trait_ref | callable_type
 where_clause ::= "where" predicate ("," predicate)* ","?
@@ -254,8 +256,15 @@ type_base    ::= name type_arguments? | "(" ")" | "(" type_name ")" | tuple_type
 tuple_type   ::= "(" type_name "," type_name ("," type_name)* ","? ")"
 array_type   ::= "[" type_name ";" (expression | "_") "]"
 callable_type ::= convention? "fn" "(" parameters? ")" ("->" result)? source_where?
-type_arguments ::= "[" type_name ("," type_name)* ","? "]"
+type_arguments ::= "[" type_argument ("," type_argument)* ","? "]"
+type_argument  ::= type_name | expression
 ```
+
+A generic argument starting with an integer literal or a name whose last
+dotted segment starts with a lowercase letter is a length expression. Other
+generic arguments are read as types. The case rule ([N-Case]) distinguishes
+a value's name from a type's name. An argument must have the kind its
+parameter declares ([T-Bound]).
 
 The grammar omits statement terminators. A line break separates statements
 ([S-Separator]); `;` separates statements on the same line, and ends a
@@ -1235,7 +1244,8 @@ of times.
 an associated type, a variant and a type parameter start with an ASCII capital
 letter: `struct Point`, `trait Sized`, `type Unit`, `alias Pricing`, `Light`,
 `[T]`. Every other name starts with a lowercase ASCII letter: a function, a
-projection, a traversal, a field, a parameter, a module constant or a constant
+projection, a traversal, a field, a parameter, a length parameter
+(`[let n: UInt64]`), a module constant or a constant
 an `impl` declares, the name an `import` binds, and every name a body binds (a
 local, a pattern's binder, a loop's binder, an `else` binder, a closure's
 parameter and a capture alias).
@@ -1342,9 +1352,7 @@ parameter, the member is selected when the enclosing function is instantiated,
 as a call through the trait's is. A settled reference written in the
 operation's signature (`Self.Unit`) is read once `Self` is settled. An
 operation the compiler provides, such as `Equatable.equals` at `UInt8`, is a
-value like one a program writes, and so is one an array answers through its
-slice view: the value views each array argument and calls the slice's
-operation, as a direct call does. A member of an implementation of a trait is
+value like one a program writes. A member of an implementation of a trait is
 reached only through its trait.
 
 A lambda and a function value meet at the function's type: an `if` whose arms
@@ -1385,9 +1393,11 @@ not a value; `Measure.of` selects a trait operation, which is.
 **[N-NotAType]** Only a type may have an `impl`. An invalid target is diagnosed
 at the header rather than at every member.
 
-A type argument named in brackets before a call must likewise be a type:
-`nothing[count]()`, where `count` is a local, is diagnosed at `count`, and so
-is a value that reads as no type, such as `3` in `"7".parse[3]()`. A named
+A type argument named in brackets before a call must likewise be a type, and
+so must a name written where a type is: `let x: n`, where `n` is a length
+parameter, is diagnosed at `n`. A bracket argument that reads as a length,
+such as `3` in `"7".parse[3]()` or a local `count` in `nothing[count]()`, is
+[T-Bound] where a type parameter is declared. A named
 literal's head must name a type. A local, function, trait or module written
 there is diagnosed once at the head; it is still a use of that declaration, so
 it is not also undefined or unused.
@@ -1623,8 +1633,12 @@ Naming them is optional. A call names every type parameter its function
 declares or none, and one naming a different number is [T-Bound]. The
 parameters of a generic implementation's head and a trait operation's `Self`
 are not among them: the receiver or the path the call is written through
-settles those. Each named argument must be a type ([N-NotAType]) and must
-satisfy its parameter's bounds ([T-Bound], reported at the type written). It
+settles those. Arguments match parameters by position. Each argument for a
+type parameter must be a type ([N-NotAType]) and must satisfy its
+parameter's bounds ([T-Bound], reported at the type written); each argument
+for a length parameter is a constant expression or a length parameter in
+scope ([T-LengthParameter]), and a type where a length is declared, or a
+length where a type is, is [T-Bound]. It
 settles its parameter before any argument is read, so an argument of a
 different type is [T-Mismatch]: `same[UInt8](true)` names `T` as `UInt8` and
 passes a `Bool`
@@ -2057,7 +2071,11 @@ type's or the trait's declaring module.
 A module may thus implement its own trait for a foreign type, or a foreign
 trait for its own type. It may not implement a foreign trait for a foreign
 type. A callable type has no declaring module either, so a trait is implemented
-for one only in the trait's own module.
+for one only in the trait's own module. Nor has an array: a trait is
+implemented for `[T; n]`, over every length through a length parameter
+([T-LengthParameter]), only in the trait's own module, which is how the
+library gives arrays `Equatable`, `Equivalent`, `Comparable`, `Ordered`,
+`Hash` and `Debug` wherever their elements have them.
 
 Primitives have no declaring module; the standard library owns their type side.
 It alone may declare an inherent implementation such as `impl UInt8 { … }`. The
@@ -3007,8 +3025,8 @@ dispatch and instantiation.
 Unit is a concrete head and can carry trait-only parameters:
 `impl[A] Build[A] for ()` determines `A` from Build's argument, while
 `impl[T] Trait for ()` leaves `T` undetermined and is [T-Impl]. A parameter
-absent from both receiver and trait arguments is refused. Arrays, callables and
-parenthesized type patterns cannot be written directly as implementation heads,
+absent from both receiver and trait arguments is refused. Parenthesized
+type patterns cannot be written directly as implementation heads,
 though a parameter-headed family can match their types when its constraints are
 satisfied.
 
@@ -3020,9 +3038,9 @@ marked defaults retain their own head rules.
 
 A type's own implementation writes each declared parameter exactly once in
 its head's arguments, at any depth: as a whole argument, an argument of a
-named type, a tuple's component, an array's element, an observation's
+named type, a tuple's component, an array's element or length, an observation's
 referent, or a callable type's parameter or result. Every other position holds
-a type naming no declared parameter, and an array's length names none.
+a type or length naming no declared parameter.
 `impl[P] Router[(), P]` is admitted, and its members belong to the
 instantiations whose first argument is `()`; so is
 `impl[T, N: Protocol, H] Chan[Send[T, N], H]`, whose members belong to every
@@ -4071,6 +4089,11 @@ accepting such a recursion is a decreasing measure the trait states and each
 implementation is checked against, not reasoning over the whole program or a
 limit on instantiation depth.
 
+A length argument cannot grow: a length is a constant the source writes or a
+length parameter passed on, since a length in a type is never computed
+([T-ArraySize]), so lengths need no measure of their own and `f[n]` calling
+`f[n]` is stationary.
+
 Generic type parts retain the structural non-growth rule: each argument on a
 recurring part must contain none of the declaration's parameters or be exactly
 one of them. A part is a struct's field, an enum's payload or a newtype's base.
@@ -4093,7 +4116,10 @@ Indexing may follow any expression that produces an indexable value.
 requires the base to name a binding.
 
 **[T-ArraySize]** An array's length is part of its type. An explicit length must
-be a non-negative numeric constant expression. A binding initialized with an
+be a non-negative numeric constant expression, or the name of a length
+parameter in scope ([T-LengthParameter]); an expression that computes with a
+length parameter, such as `n + 1`, is neither, and nor is a local initialised
+from one. A binding initialized with an
 array literal may instead write `[T; _]` to infer the count from that literal: a
 local `let` or `var`, a module constant or an `impl` constant. Grouping
 parentheses around the literal are allowed.
@@ -4122,7 +4148,7 @@ The element type supplies context to every literal element. For example,
 `let weekday_names: [Str; _] = ["Sunday", "Monday"]` has type `[Str; 2]`; a
 constant may also omit its annotation entirely ([T-Const]), so
 `let seasons = ["spring", "summer"]` has the same shape. The marker is syntax,
-not a variable, constant expression, unsized array or generic length parameter.
+not a variable, constant expression, unsized array or length parameter.
 It is rejected in signatures, fields, parameter defaults and nested generic
 arguments. An initializer that is missing or is not an array literal cannot
 supply an inferred count, even if its resulting type has a known count.
@@ -4154,7 +4180,10 @@ syntactic constant expressions can still lack values, as with cyclic constants
 **[T-ArrayLength]** An array literal has as many elements as its type says. The
 expected type supplies the required count, as it supplies a braced literal's
 type: for `let xs: [UInt8; 3] = [1, 2]`, both the two-element literal and
-`[1, 2, 3, 4]` are ill-formed.
+`[1, 2, 3, 4]` are ill-formed. A literal cannot initialise an array whose length
+is a length parameter, `let xs: [T; n] = [a, b]`, since a literal's count is
+fixed and `n` is any length; `mem.filled(value)` builds one of `n` copies of a
+copyable value.
 
 An array literal always has an array type. An expected type that is not an
 array supplies nothing to the literal: its type is its elements' type and their
@@ -4185,10 +4214,39 @@ constant expression ([§4.1](#41-constant-expressions)), so
 `let open_days: [Bool; weekday_names.length()]` sizes one table from another
 ([ADR 0172](adr/0172-an-array-reports-its-length.md)).
 
+**[T-LengthParameter]** A generic parameter list may declare a length
+parameter, `let n: UInt64`: a struct's, an enum's, an alias's, a function's or
+an implementation's, never a trait's. Its type is written and is `UInt64`,
+the type of `length()` and of an index. Its name is a value's, so it starts
+with a lowercase letter ([N-Case]). It may stand as the length of an array
+type, `[T; n]`, and as a length argument of a type that declares one,
+`Ring[T, n]`; in a value position it is a `UInt64` holding the instance's
+length, and it is not a constant expression ([§4.1](#41-constant-expressions)),
+for the reason a symbolic `T.max` is not.
+
+A length parameter is settled like a type parameter: by matching parameter
+types against the arguments' types, at any depth, and then the result type
+against the expected one, or by a length argument written in the call's
+brackets by position (`total[3](xs)`). An argument for a length parameter is a
+constant expression or a length parameter in scope, and it must fit the
+largest array length. Two positions settling one length differently are
+[T-Mismatch], reported at the second; a length nothing settles is [T-Infer].
+
+A trailing length parameter may supply a constant default ([T-ArgumentDefault]).
+A struct or enum can declare an unused length as `phantom let n: UInt64`
+under [T-Phantom].
+
+A generic body is checked once, for every length, zero included. An index
+into a `[T; n]` is checked when the program runs, even where its value is
+known, and an array literal cannot initialise one ([T-ArrayLength]). Each
+distinct length a program reaches makes its own instance of the declaration.
+
 **[T-Index]** An array index must be a whole number or a count from its end. A
 compile-time index must identify an existing element: `xs[9]` on a `[UInt8; 3]`
 is diagnosed at compile time when the index is known; otherwise a runtime check
-traps if the index is out of bounds. Brackets before a call holding what only a
+traps if the index is out of bounds. Over an array whose length is a length
+parameter, every index is checked when the program runs, since the body is
+checked once for every length. Brackets before a call holding what only a
 type list can be, such as `rack.steps[UInt8, Bool](1)` where `steps` is a field,
 index nothing: only a generic function's or method's call takes types.
 
@@ -4280,7 +4338,9 @@ A range place has no value form: binding the place, passing it, or reading it as
 a value to write elsewhere is rejected here.
 
 Bounds must be known where the place is formed, before any later generic
-substitution: `[T; ?]` is not a type. A bound is determined exactly when it is a
+substitution: `[T; ?]` is not a type. Over an array whose length is a length parameter, the place's type is still settled by its bounds, `xs[0..2]` is a
+`[T; 2]`, and whether the range fits is checked when the program runs: an
+instance whose length is too short traps as an index past the end does. A bound is determined exactly when it is a
 constant expression ([§4.1](#41-constant-expressions)), as an array length is:
 digits, module constants, block-local `let` bindings whose initialisers are
 constant expressions, `e.length()` on a constant array, and arithmetic over
@@ -4897,6 +4957,11 @@ of an inherent implementation; a member of a trait implementation stays
 names the call that left it to the default. The fallback is subject to
 [T-DefaultedAllocator].
 
+A length parameter may take a default the same way, a constant expression
+written after `=`: with `struct Ring[T, let n: UInt64 = 16]`, `Ring[UInt8]` is
+`Ring[UInt8, 16]`. Its default trails and names no parameter of its own list,
+as a type parameter's does.
+
 The rule has four parts, each a refusal at the declaration:
 
 - Defaults trail: a parameter without a default may not follow one that has one,
@@ -4976,7 +5041,9 @@ trait implementation settles cannot take an allocator parameter, so there the
 help offers `mem.SystemAllocator` alone.
 
 **[T-Phantom]** A type parameter absent from every struct field, enum variant,
-newtype base and trait signature must be declared `phantom`. It contributes to
+newtype base and trait signature must be declared `phantom`, and so must a
+struct's or enum's length parameter that no field's type mentions
+(`struct Units[phantom let n: UInt64] { value: UInt64 }`). It contributes to
 type identity without appearing in the stored representation. An unused-name spelling,
 including a leading underscore, does not express this role. Conversely, a
 parameter that does occur in those positions cannot be `phantom`. Phantom

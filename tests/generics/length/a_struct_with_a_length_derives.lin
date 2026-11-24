@@ -1,0 +1,15 @@
+// A derive on a struct with a length parameter applies wherever the field
+// types support the trait: here an array of `n` integers.
+import std.io
+
+@derive(Equatable, Debug)
+struct Readings[let n: UInt64] {
+    values: [Int64; n],
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let monday = Readings[3] { values = [18, 21, 19] }
+    let tuesday = Readings[3] { values = [18, 21, 19] }
+    io.println("{monday:?} equals {tuesday:?}: {monday == tuesday}")?
+    .Ok(0)
+}

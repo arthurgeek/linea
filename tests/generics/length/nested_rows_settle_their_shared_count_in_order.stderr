@@ -1,0 +1,22 @@
+error[T-Mismatch]: `n` was already settled as `1`, and this settles it as `2`
+ --> tests/generics/length/nested_rows_settle_their_shared_count_in_order.lin:6:36
+  |
+6 |     let _wider = rows([[.Some(7)], [.None, .Some(3)]])
+  |                                    ^^^^^^^^^^^^^^^^^ one length parameter, two lengths
+error[T-Mismatch]: `n` was already settled as `2`, and this settles it as `1`
+ --> tests/generics/length/nested_rows_settle_their_shared_count_in_order.lin:7:46
+  |
+7 |     let _narrower = rows([[.None, .Some(3)], [.Some(7)]])
+  |                                              ^^^^^^^^^^ one length parameter, two lengths
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/generics/length/nested_rows_settle_their_shared_count_in_order.lin:9:43
+  |
+9 |     let _typed_first = rows([copy(typed), [.Some(7)]])
+  |                                           ^^^^^^^^^^ this has 1, and the type says 2
+error[T-Mismatch]: expected `[Option[UInt8]; 1]`, found `[Option[UInt8]; 2]`
+  --> tests/generics/length/nested_rows_settle_their_shared_count_in_order.lin:10:41
+   |
+1  | fn rows[let n: UInt64, let m: UInt64](_grid: [[Option[UInt8]; n]; m]) -> UInt64 {
+   |                                       ----- expected because of this parameter
+10 |     let _typed_last = rows([[.Some(7)], typed])
+   |                                         ^^^^^ expected `[Option[UInt8]; 1]`, found `[Option[UInt8]; 2]`

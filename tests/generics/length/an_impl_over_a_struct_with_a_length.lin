@@ -1,0 +1,34 @@
+// An implementation may declare a length parameter and pass it to the type
+// it implements, as it passes a type parameter.
+import std.io
+
+struct Shelf[T, let n: UInt64] {
+    items: [T; n],
+}
+
+impl[T, let n: UInt64] Shelf[T, n] {
+    fn capacity(self: Self) -> UInt64 {
+        self.items.length()
+    }
+}
+
+trait Describe {
+    fn describe(self: Self) -> Str
+}
+
+impl[T, let n: UInt64] Describe for Shelf[T, n] {
+    fn describe(self: Self) -> Str {
+        if n == self.items.length() {
+            "a shelf"
+        } else {
+            "a broken shelf"
+        }
+    }
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let small = Shelf[UInt8, 2] { items = [1, 2] }
+    let large = Shelf[Bool, 5] { items = [true, true, false, true, false] }
+    io.println("{small.describe()} of {small.capacity()}, {large.describe()} of {large.capacity()}")?
+    .Ok(0)
+}

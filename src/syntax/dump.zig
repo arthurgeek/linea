@@ -369,6 +369,7 @@ fn dumpWrittenType(
             try w.writeAll("]");
         },
         .callable => try dumpCallableType(w, ast, ast.callableType(ref)),
+        .length_argument => try w.writeAll(ast.tokenText(ref.at)),
         .tuple => {
             try w.writeAll("(");
             for (ast.typeArgs(ref.args), 0..) |component, i| {

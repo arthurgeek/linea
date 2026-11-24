@@ -1,0 +1,5 @@
+error[T-LengthParameter]: a length parameter is a `UInt64`, and this is `UInt8`
+ --> tests/generics/length/a_length_parameter_is_a_UInt64.lin:3:17
+  |
+3 | fn count[let n: UInt8](_flags: [Bool; n]) -> UInt8 {
+  |                 ^^^^^ write `UInt64`, the type of `length()` and of an index

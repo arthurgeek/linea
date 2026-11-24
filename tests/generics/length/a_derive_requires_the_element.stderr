@@ -1,0 +1,8 @@
+error[T-Bound]: `Shelf[Box, 1]` does not implement `Equatable`
+  --> tests/generics/length/a_derive_requires_the_element.lin:15:10
+   |
+15 |     if a == b {
+   |          ^^ implement `Equatable` for `Box`
+   |
+   = help: `Shelf[T, n]` implements `Equatable` when `[T; n]` implements `Equatable`, and `[Box; 1]` does not
+   = help: `[T; n]` implements `Equatable` when `T` implements `Equatable`, and `Box` does not

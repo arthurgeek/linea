@@ -118,7 +118,7 @@ const Emitter = struct {
         return switch (typing.get(t)) {
             .unit, .never => true,
             .newtype => |n| self.isZeroWidth(n.base),
-            .array => |a| a.count == 0 or self.isZeroWidth(a.element),
+            .array => |a| self.typing.arrayCount(a.length) == 0 or self.isZeroWidth(a.element),
             .struct_ => {
                 for (0..typing.fieldCount(t)) |i| {
                     if (!self.isZeroWidth(typing.fieldType(t, @intCast(i)))) return false;
@@ -170,7 +170,7 @@ const Emitter = struct {
             // Neither reaches a layout: a parameter never reaches the backend,
             // and poison never reaches code generation. Either arriving here
             // is a defect upstream rather than a type to spell.
-            .parameter, .poison, .open_integer, .open_float, .open_type, .callable => .cannot,
+            .parameter, .poison, .open_integer, .open_float, .open_type, .callable, .length => .cannot,
         };
     }
 
@@ -185,7 +185,7 @@ const Emitter = struct {
                 const elem = try self.spell(a.element, &inner);
                 switch (elem) {
                     .text => |name| {
-                        try self.out.print("  {s} m{d}[{d}];\n", .{ name, index, a.count });
+                        try self.out.print("  {s} m{d}[{d}];\n", .{ name, index, self.typing.concreteCount(a.length) });
                         return .{ .text = name };
                     },
                     // An array of a type with no C spelling, and an array whose
@@ -259,9 +259,10 @@ const Emitter = struct {
                 // The element is written as the member's type, so an array of
                 // arrays would need a declarator this does not build.
                 .array => false,
-                else => self.partExpressible(a.element),
+                // A length parameter is a count C has no number to write for.
+                else => self.typing.arrayCount(a.length) != null and self.partExpressible(a.element),
             },
-            .unit, .never, .parameter, .poison, .open_integer, .open_float, .open_type, .callable, .closure => false,
+            .unit, .never, .parameter, .poison, .open_integer, .open_float, .open_type, .callable, .closure, .length => false,
         };
     }
 

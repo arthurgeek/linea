@@ -1,0 +1,2 @@
+trap
+linea: index out of bounds at tests/generics/length/a_known_index_is_checked_when_it_runs.lin:5:5

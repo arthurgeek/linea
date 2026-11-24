@@ -1,0 +1,71 @@
+// Report how much of each checklist is done before a trip: a five-item
+// pre-flight check and an eight-item packing list, both through one function.
+import std.io
+import std.testing
+
+// One line of a checklist: what to do, and whether it is done.
+@copyable
+struct Item {
+    task: Str,
+    done: Bool,
+}
+
+// How many of a checklist's items are done. The length parameter `n` stands
+// for however many items the caller's array holds, so this one function
+// counts a list of five and a list of eight.
+fn done_count[let n: UInt64](items: [Item; n]) -> UInt64 {
+    var done: UInt64 = 0
+    for read item in items {
+        if item.done {
+            done += 1
+        }
+    }
+    done
+}
+
+test "only finished items are counted" {
+    let items = [Item { task = "Lock the door", done = true }, Item { task = "Water the plants", done = false }]
+    testing.assert_eq(done_count(items), 1, "one of two items is done")?
+}
+
+test "an empty checklist has nothing done" {
+    let items: [Item; _] = []
+    testing.assert_eq(done_count(items), 0, "an empty list has nothing done")?
+}
+
+// Print a checklist's title, how much of it is done, and each item still to
+// do. `n`, read as a value, is the number of items on the list. Adding an item
+// while the program runs would change the array's type, so a list that grows
+// belongs in a `Vec` instead.
+fn report[let n: UInt64](title: Str, items: [Item; n]) -> Result[(), io.IoError] {
+    io.println("{title}: {done_count(items)} of {n} done")?
+    for read item in items {
+        if !item.done {
+            io.println("  still to do: {item.task}")?
+        }
+    }
+    .Ok(())
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let preflight = [
+        Item { task = "Check the passport", done = true },
+        Item { task = "Print the boarding pass", done = true },
+        Item { task = "Charge the phone", done = false },
+        Item { task = "Weigh the suitcase", done = true },
+        Item { task = "Book the taxi", done = true },
+    ]
+    let packing = [
+        Item { task = "Socks", done = true },
+        Item { task = "Shirts", done = true },
+        Item { task = "Raincoat", done = false },
+        Item { task = "Toothbrush", done = true },
+        Item { task = "Charger", done = false },
+        Item { task = "Book", done = true },
+        Item { task = "Sunglasses", done = true },
+        Item { task = "Adapter", done = false },
+    ]
+    report("Pre-flight", preflight)?
+    report("Packing", packing)?
+    .Ok(0)
+}

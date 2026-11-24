@@ -1,0 +1,5 @@
+error[N-Unused]: `n` is never used
+ --> tests/generics/length/an_unused_length_parameter_is_an_error.lin:3:16
+  |
+3 | fn zero[T, let n: UInt64](_item: T) -> UInt8 {
+  |                ^ name it in this declaration, or remove it

@@ -1,0 +1,16 @@
+// A length parameter is settled by the array a call passes, as a type
+// parameter is settled by its argument's type, so one function takes arrays
+// of three and of five.
+fn total[let n: UInt64](prices: [UInt64; n]) -> UInt64 {
+    var sum: UInt64 = 0
+    for read price in prices {
+        sum = sum + price
+    }
+    sum
+}
+
+fn main() -> UInt8 {
+    let lunch = total([12, 4, 3])
+    let dinner = total([30, 8, 6, 5, 2])
+    UInt8(dinner - lunch)
+}

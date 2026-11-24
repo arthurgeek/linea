@@ -2,8 +2,9 @@
 
 Status: Accepted — 2026-08-13. Extended by
 [0149](0149-local-array-literals-infer-written-lengths.md),
-[0198](0198-array-literal-bindings-infer-written-lengths.md) and
-[0172](0172-an-array-reports-its-length.md).
+[0198](0198-array-literal-bindings-infer-written-lengths.md),
+[0172](0172-an-array-reports-its-length.md) and [0307](0307-a-length-may-be-a-parameter.md), which answers the open
+question of a length an implementation binds.
 
 ## Context
 

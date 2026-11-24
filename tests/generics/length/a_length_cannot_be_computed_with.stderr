@@ -1,0 +1,12 @@
+error[T-ArraySize]: a length parameter cannot be computed with in a type
+ --> tests/generics/length/a_length_cannot_be_computed_with.lin:7:26
+  |
+7 |     let _longer: [UInt8; n + 1] = mem.filled(0)
+  |                          ^^^^^ `n + 1` is not a length
+  |
+  = help: a length in a type is a constant or a length parameter
+error[T-ArraySize]: an array's length is part of its type, so it is settled where the type is written
+ --> tests/generics/length/a_length_cannot_be_computed_with.lin:9:24
+  |
+9 |     let _part: [UInt8; half] = mem.filled(0)
+  |                        ^^^^ this is not a constant

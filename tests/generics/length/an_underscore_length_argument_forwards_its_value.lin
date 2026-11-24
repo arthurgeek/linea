@@ -1,0 +1,11 @@
+fn size[let _1width: UInt64](_row: [Bool; _1width]) -> UInt64 {
+    _1width
+}
+
+fn forward[let _n: UInt64](row: [Bool; _n]) -> UInt64 {
+    size[_n](row)
+}
+
+fn main() -> UInt8 {
+    UInt8(forward([true, false, true]))
+}
