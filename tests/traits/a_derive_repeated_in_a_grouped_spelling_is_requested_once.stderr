@@ -1,7 +1,7 @@
 error[T-Derive]: this derive trait is repeated
-  --> tests/traits/a_derive_repeated_in_a_grouped_spelling_is_requested_once.lin:19:8
+  --> tests/traits/a_derive_repeated_in_a_grouped_spelling_is_requested_once.lin:14:9
    |
-17 | derive Score for Mark[UInt8]
-   |        ----- this trait was already requested here
-19 | derive Score for Mark[(UInt8)]
-   |        ^^^^^ a type derives each trait once
+13 | @derive(Score for Mark[UInt8])
+   |         ----- this trait was already requested here
+14 | @derive(Score for Mark[(UInt8)])
+   |         ^^^^^ a type derives each trait once

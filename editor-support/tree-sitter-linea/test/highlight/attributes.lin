@@ -23,3 +23,12 @@ struct Cursor { at: UInt64 }
 @(opaque, shareable)
 //        ^ keyword.storage.modifier
 type Handle = UInt64
+@derive(Score for Mark[UInt8])
+//            ^ keyword.storage.type
+//                ^ type
+struct Mark[T] { value: T }
+@derive(Equatable where T: Equatable + Copyable)
+//                ^ keyword.control
+//                      ^ type
+//                         ^ type
+struct Cell[T] { value: T }

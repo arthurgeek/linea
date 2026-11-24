@@ -1534,16 +1534,11 @@ struct Skip[I] {
 
 // A FindReport holds the first matching item, if any, and how many items the
 // search inspected.
+@derive(Equatable, Debug, Release)
 pub struct FindReport[T] {
     found: Option[T],
     inspected: UInt64,
 }
-
-derive[T: Equatable] Equatable for FindReport[T]
-
-derive[T: Debug] Debug for FindReport[T]
-
-derive[T: Release] Release for FindReport[T]
 
 // Widen an item. A thousand exceeds UInt8, so the result requires the wider
 // output type.

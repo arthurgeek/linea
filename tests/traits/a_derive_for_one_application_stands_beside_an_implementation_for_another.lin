@@ -11,9 +11,8 @@ template impl Score {
     }
 }
 
+@derive(Score for Mark[UInt8])
 struct Mark[T] { value: T }
-
-derive Score for Mark[UInt8]
 
 impl Score for Mark[UInt16] {
     fn score(self: Self) -> UInt8 {

@@ -9,9 +9,8 @@ template impl Remainder {
     }
 }
 
+@derive(Remainder where T: Discardable)
 struct Mark[T] { value: T }
-
-derive[T: Discardable] Remainder for Mark[T]
 
 fn main() -> UInt8 {
     let mark: Mark[Float64] = .{ value = 5.5 }

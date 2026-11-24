@@ -1,9 +1,8 @@
 @linear
+@derive(Release)
 struct Ticket {
     number: UInt64,
 }
-
-derive Release for Ticket
 
 fn main() -> UInt8 {
     let ticket: Ticket = .{ number = 7 }

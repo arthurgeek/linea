@@ -1,3 +1,4 @@
+@derive(Equivalent)
 struct Token {
     value: UInt8,
 }
@@ -7,8 +8,6 @@ impl Equatable for Token {
         self.value == other.value
     }
 }
-
-derive Equivalent for Token
 
 fn main() -> UInt8 {
     0

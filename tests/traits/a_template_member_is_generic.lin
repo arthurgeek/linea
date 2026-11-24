@@ -46,11 +46,10 @@ impl Sink for SecondSink {
     }
 }
 
+@derive(Render)
 struct Box[T] {
     value: T,
 }
-
-derive[T] Render for Box[T]
 
 fn main() -> UInt8 {
     let box: Box[UInt8] = .{ value = 1 }

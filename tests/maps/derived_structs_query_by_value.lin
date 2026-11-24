@@ -2,19 +2,14 @@ import std.collections
 import std.hash
 import std.mem
 
+@derive(Equatable, Equivalent, hash.Hash, Release)
 struct Point { x: Int64, y: Int64 }
 
-derive (Equatable, Equivalent, hash.Hash, Release) for Point
-
+@derive(Equatable where T: Equatable)
+@derive(Equivalent where T: Equivalent)
+@derive(hash.Hash where T: hash.Hash)
+@derive(Release where T: Release)
 struct Cell[T] { row: T, column: T }
-
-derive[T: Equatable] Equatable for Cell[T]
-
-derive[T: Equivalent] Equivalent for Cell[T]
-
-derive[T: hash.Hash] hash.Hash for Cell[T]
-
-derive[T: Release] Release for Cell[T]
 
 fn main() -> UInt8 {
     var points: collections.Map[Point, UInt64, mem.SystemAllocator] = collections.Map.new()

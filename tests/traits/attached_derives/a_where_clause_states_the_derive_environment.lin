@@ -1,0 +1,34 @@
+// `where` gives a derive an environment of its own: the type's bounds and
+// the predicates written, with nothing inferred from the fields. `Cell`
+// compares only copyable values. `Tagged` releases its labels and discards
+// its tag, because `T: Copyable` proves the tag may be discarded, so a
+// `Tagged[Stamp]` releases though `Stamp` implements no `Release`.
+@copyable
+struct Stamp {
+    at: UInt64,
+}
+
+@derive(Equatable where T: Equatable + Copyable)
+struct Cell[T] {
+    value: T,
+}
+
+@(linear, derive(Release where T: Copyable))
+struct Tagged[T] {
+    tag: T,
+    labels: Vec[UInt64],
+}
+
+fn main() -> UInt8 {
+    let left = Cell[UInt8] { value = 4 }
+    let right = Cell[UInt8] { value = 4 }
+    var tagged = Tagged[Stamp] { tag = .{ at = 9 }, labels = Vec.new() }
+    Vec.push(&tagged.labels, 5).unwrap()
+    let count = tagged.labels.length()
+    tagged.release()
+    if left == right && count == 1 {
+        0
+    } else {
+        1
+    }
+}

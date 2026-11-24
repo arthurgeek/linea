@@ -2,11 +2,10 @@
 // into its result, because `T` might hold a view. Instantiated with a type that
 // holds no view, the result depends on nothing, so the text it was built from
 // may be released while the result is still used.
+@derive(Release)
 struct Label {
     text: String,
 }
-
-derive Release for Label
 
 trait FromText {
     fn from_text(input: Str) -> Self where carries()

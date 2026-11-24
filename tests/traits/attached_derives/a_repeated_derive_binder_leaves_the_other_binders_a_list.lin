@@ -1,0 +1,28 @@
+// A binder spelled as one of the type's own parameters is refused, and its
+// fix removes it with the comma beside it, so the binders left are still a
+// list: `@derive[T, A]` on `Box[T]` becomes `@derive[A]`.
+trait Count[A] {
+    fn count(_self: Self, _context: A) -> UInt64
+}
+
+template impl[A] Count[A] {
+    fn count(_self: Self, _context: A) -> UInt64 {
+        0
+    }
+}
+
+@derive[T, A](Count[A])
+struct Box[T] {
+    value: T,
+}
+
+@derive[A, T](Count[A])
+struct Crate[T] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let boxed: Box[UInt8] = .{ value = 1 }
+    let crated: Crate[UInt8] = .{ value = 2 }
+    UInt8(Count.count(boxed, UInt8(2)) + Count.count(crated, UInt8(3)))
+}

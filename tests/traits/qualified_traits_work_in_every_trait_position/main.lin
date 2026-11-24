@@ -4,11 +4,10 @@ import protocol
 
 trait Child: protocol.Parent {}
 
+@derive(protocol.Marker)
 struct Item {
     value: UInt8,
 }
-
-derive protocol.Marker for Item
 
 impl protocol.Parent for Item {
     fn value(self: Self) -> UInt8 {

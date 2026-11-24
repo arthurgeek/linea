@@ -8,17 +8,15 @@ struct Generic[T] {
 
 template impl Ready where reflect.components: Required[Generic] {}
 
+@derive(Ready)
 struct First {
     value: UInt8,
 }
 
+@derive(Ready)
 struct Second {
     value: UInt8,
 }
-
-derive Ready for First
-
-derive Ready for Second
 
 fn main() -> UInt8 {
     let _first: First = .{ value = 0 }

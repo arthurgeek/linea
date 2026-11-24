@@ -1,0 +1,51 @@
+// A derive is requested by `@derive(...)` on the declaration of the type it
+// is for. Each standalone request below is refused, and its help writes the
+// attribute that requests the same implementation: the traits alone for every
+// application, `where` for an environment of its own, `for` for one
+// application, and a binder for a parameter only a trait argument names.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+trait Count[phantom A] {}
+
+template impl[A] Count[A] {}
+
+struct Point {
+    x: UInt8,
+}
+
+struct Cell[T] {
+    value: T,
+}
+
+struct Mark[T] {
+    value: T,
+}
+
+derive (Equatable, Debug) for Point
+
+derive[U: Equatable + Copyable] Equatable for Cell[U]
+
+derive Score for Mark[UInt8]
+
+derive[C, U] Count[C] for Mark[U]
+
+fn main() -> UInt8 {
+    let left = Cell[UInt8] { value = 1 }
+    let right = Cell[UInt8] { value = 1 }
+    let mark: Mark[UInt8] = .{ value = 3 }
+    let origin = Point { x = 1 }
+    let start = Point { x = 1 }
+    if left == right && origin == start {
+        mark.score()
+    } else {
+        0
+    }
+}

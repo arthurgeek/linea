@@ -1,12 +1,10 @@
 import protocol
 
+@derive(protocol.Label)
 pub struct First {}
 
+@derive(protocol.Label)
 pub struct Second {}
-
-derive protocol.Label for First
-
-derive protocol.Label for Second
 
 fn main() -> UInt8 {
     0

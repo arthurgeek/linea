@@ -44,7 +44,9 @@ import std.uuid
 // The request it hands on is the original with the id added. Its head and
 // header table are rebuilt in buffers the middleware keeps and reuses, valid
 // until the next request. The buffers keep the size of the largest head seen.
+// Releasing a `RequestIds` releases the handler and its buffers.
 @opaque
+@derive(Release)
 struct RequestIds[H, A: Allocator = mem.SystemAllocator] {
     handler: H,
     // `pending` is where the id of the request the handler is answering or has
@@ -55,17 +57,13 @@ struct RequestIds[H, A: Allocator = mem.SystemAllocator] {
     buffers: Buffers[A],
 }
 
-// Releasing a `RequestIds` releases the handler and its buffers.
-derive[H: Release, A: Allocator] Release for RequestIds[H, A]
-
 // `Buffers` hold the rebuilt request: `head` is the original head followed by
 // the header's name and the id, and `fields` locates the headers in it.
+@derive(Release)
 struct Buffers[A: Allocator] {
     head: Vec[UInt8, A],
     fields: Vec[Field, A],
 }
-
-derive[A: Allocator] Release for Buffers[A]
 
 // The name of the header that carries the id.
 let request_id_header: Str = "X-Request-Id"

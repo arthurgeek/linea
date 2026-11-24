@@ -1,3 +1,4 @@
+@derive(Structural)
 struct Mark {}
 
 enum Bad { Broken }
@@ -16,8 +17,6 @@ template impl Structural {
         n
     }
 }
-
-derive Structural for Mark
 
 fn main() -> UInt8 {
     let mark: Mark = .{}

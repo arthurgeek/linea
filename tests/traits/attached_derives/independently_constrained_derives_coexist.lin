@@ -3,9 +3,8 @@ trait Tagged {}
 template impl Tagged {}
 
 @derive(Tagged)
+@derive(Equatable where T: Equatable)
 struct Cell[T] { value: T }
-
-derive[T: Equatable] Equatable for Cell[T]
 
 fn tagged[T: Tagged](_value: T) -> Bool {
     true

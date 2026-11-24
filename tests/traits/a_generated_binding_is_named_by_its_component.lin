@@ -32,12 +32,11 @@ impl Weigh for Token {
 }
 
 @linear
+@derive(Count)
 enum Slot {
     Empty,
     Held(Token),
 }
-
-derive Count for Slot
 
 fn main() -> UInt8 {
     let slot: Slot = .Empty

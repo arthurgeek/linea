@@ -16,6 +16,9 @@ template impl Measure where reflect.components: Measure {
     }
 }
 
+// A `where` clause states the derive's whole environment, so the
+// requirement each component places on `T` is not inferred beside it.
+@derive(Measure where T: Copyable)
 struct Pair[T] {
     left: T,
     right: T,
@@ -26,8 +29,6 @@ impl Measure for UInt8 {
         self
     }
 }
-
-derive[T] Measure for Pair[T]
 
 fn main() -> UInt8 {
     let pair: Pair[UInt8] = .{ left = 2, right = 3 }

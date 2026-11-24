@@ -10,15 +10,13 @@ template impl Score {
     }
 }
 
+@derive(Score for Mark[UInt8])
+@derive(Score for Mark[Byte])
 struct Mark[T] {
     value: T,
 }
 
 alias Byte = UInt8
-
-derive Score for Mark[UInt8]
-
-derive Score for Mark[Byte]
 
 fn main() -> UInt8 {
     let byte: Mark[UInt8] = .{ value = 3 }

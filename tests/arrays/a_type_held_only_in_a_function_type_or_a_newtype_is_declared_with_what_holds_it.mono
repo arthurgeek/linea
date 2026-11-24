@@ -37,6 +37,7 @@ struct Holder {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[fn(read:Cell:none)->UInt8] {
     None,
     Some(fn(read:Cell:none)->UInt8),

@@ -1,5 +1,5 @@
 error[S-Type]: expected a type
-  --> tests/construction_derive/malformed_argument_keeps_parser_diagnostic.lin:13:16
+  --> tests/construction_derive/malformed_argument_keeps_parser_diagnostic.lin:11:17
    |
-13 | derive Measure[,] for Product
-   |                ^ an argument is a type
+11 | @derive(Measure[,])
+   |                 ^ an argument is a type

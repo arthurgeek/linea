@@ -16,9 +16,8 @@ template impl BaseValue {
     }
 }
 
+@derive(BaseValue)
 type Meters = UInt8
-
-derive BaseValue for Meters
 
 fn main() -> UInt8 {
     BaseValue.value(Meters(9))

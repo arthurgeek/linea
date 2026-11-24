@@ -1,0 +1,29 @@
+// `for` requests one application of the type the attribute is written on, so
+// it names that type applied to types. Another type is no application of it,
+// and the type's own parameter names every application, which `@derive(Score)`
+// requests.
+trait Score {
+    fn score(self: Self) -> UInt8
+}
+
+template impl Score {
+    fn score(_self: Self) -> UInt8 {
+        1
+    }
+}
+
+struct Other[T] {
+    value: T,
+}
+
+@derive(Score for Other[UInt8])
+@derive(Score for Mark[T])
+struct Mark[T] {
+    value: T,
+}
+
+fn main() -> UInt8 {
+    let other: Other[UInt8] = .{ value = 3 }
+    let mark: Mark[UInt8] = .{ value = 3 }
+    other.value + mark.value
+}

@@ -16,9 +16,8 @@ template impl[A: Source] Maker[A] where reflect.target: struct {
     }
 }
 
+@derive[T](Maker[borrow T])
 struct Record {}
-
-derive[T] Maker[borrow T] for Record
 
 fn accepts[T: Maker[borrow UInt8]](_value: T) -> UInt8 {
     0

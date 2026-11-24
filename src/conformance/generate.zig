@@ -1174,8 +1174,22 @@ const Gen = struct {
             \\
             \\template impl _StructuralMarker {}
             \\
-            \\struct _StructuralTarget[
+            \\@derive(_Structural
         );
+        if (shape.group_entries == 2) try w.writeAll(", _StructuralMarker");
+        try w.writeAll(" where ");
+        // The derive states its environment: the first parameter's bounds,
+        // then the trailing predicates over every parameter.
+        try w.writeAll("A: _Need0 + _Argument[UInt8]");
+        if (shape.inline_bounds == 3) try w.writeAll(" + _Need1");
+        for (0..shape.trailing_predicates) |predicate| {
+            const parameter = predicate % shape.generic_parameters;
+            try w.print(", {c}: _Need{d}", .{
+                @as(u8, 'A') + @as(u8, @intCast(parameter)),
+                predicate + 2,
+            });
+        }
+        try w.writeAll(")\nstruct _StructuralTarget[");
         for (0..shape.generic_parameters) |i| {
             try w.print("{s}{s}{c}", .{
                 if (i == 0) "" else ", ",
@@ -1183,35 +1197,7 @@ const Gen = struct {
                 @as(u8, 'A') + @as(u8, @intCast(i)),
             });
         }
-        try w.writeAll("] { first: A, second: Bool }\n\n");
-
-        try w.writeAll("derive[");
-        for (0..shape.generic_parameters) |i| {
-            if (i != 0) try w.writeAll(", ");
-            try w.print("{c}", .{@as(u8, 'A') + @as(u8, @intCast(i))});
-            if (i == 0) {
-                try w.writeAll(": _Need0 + _Argument[UInt8]");
-                if (shape.inline_bounds == 3) try w.writeAll(" + _Need1");
-            }
-        }
-        try w.writeAll("] (\n    _Structural,\n");
-        if (shape.group_entries == 2) try w.writeAll("    _StructuralMarker,\n");
-        try w.writeAll(") for _StructuralTarget[");
-        for (0..shape.generic_parameters) |i| {
-            try w.print("{s}{c}", .{ if (i == 0) "" else ", ", @as(u8, 'A') + @as(u8, @intCast(i)) });
-        }
-        try w.writeAll("]");
-        if (shape.trailing_predicates != 0) {
-            try w.writeAll(" where ");
-            for (0..shape.trailing_predicates) |predicate| {
-                if (predicate != 0) try w.writeAll(", ");
-                const parameter = predicate % shape.generic_parameters;
-                try w.print("{c}: _Need{d}", .{
-                    @as(u8, 'A') + @as(u8, @intCast(parameter)),
-                    predicate + 2,
-                });
-            }
-        }
+        try w.writeAll("] { first: A, second: Bool }");
         try w.writeAll(
             \\
             \\
@@ -3271,8 +3257,8 @@ fn structuralReceipt(gpa: std.mem.Allocator, text: []const u8) !?StructuralRecei
     var template_count: u32 = 0;
     for (0..ast.declCount()) |i| {
         const d = DeclId.at(@intCast(i));
+        if (ast.attachedDeriveTraitRange(d).len() != 0) derive = d;
         switch (ast.declTag(d)) {
-            .derive_impl => derive = d,
             .template_impl => {
                 template_count += 1;
                 if (ast.templateRequirements(d).len != 0) function_template = d;
@@ -3288,13 +3274,17 @@ fn structuralReceipt(gpa: std.mem.Allocator, text: []const u8) !?StructuralRecei
     const template = function_template orelse return null;
     const member = template_member orelse return null;
     try testing.expectEqual(@as(u32, 2), template_count);
-    try testing.expect(ast.deriveIsGrouped(d));
     try testing.expect(std.mem.indexOf(u8, text, "reflect.case") != null);
     try testing.expect(std.mem.indexOf(u8, text, "reflect.components") != null);
     try testing.expect(std.mem.indexOf(u8, text, "component.of") != null);
 
-    var inline_bounds: u32 = 0;
-    for (ast.declTypeParams(d)) |param| inline_bounds += @intCast(ast.boundsOf(param).len);
+    // The derive's `where` clause bounds the first parameter first, then
+    // writes the trailing predicates.
+    const entries = ast.attachedDeriveTraits(d);
+    const clause = entries[0].clause;
+    try testing.expectEqual(node.DeriveClause.Kind.environment, clause.kind);
+    const predicates = ast.where_predicates[clause.where_predicates.start..clause.where_predicates.end];
+    const inline_bounds: u32 = @intCast(ast.boundsIn(predicates[0].bounds).len);
 
     const requirements = ast.templateRequirements(template);
     const bounds_per_predicate: u32 = @intCast(ast.boundsIn(requirements[0].bounds).len);
@@ -3309,10 +3299,10 @@ fn structuralReceipt(gpa: std.mem.Allocator, text: []const u8) !?StructuralRecei
     }
 
     return .{
-        .group_entries = @intCast(ast.deriveTraits(d).len),
+        .group_entries = @intCast(entries.len),
         .generic_parameters = @intCast(ast.declTypeParams(d).len),
         .inline_bounds = inline_bounds,
-        .trailing_predicates = @intCast(ast.declWherePredicates(d).len),
+        .trailing_predicates = @intCast(predicates.len - 1),
         .component_predicates = @intCast(requirements.len),
         .bounds_per_predicate = bounds_per_predicate,
         .member_parameters = @intCast(member_parameters.len),

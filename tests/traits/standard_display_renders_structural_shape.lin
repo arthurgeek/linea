@@ -13,25 +13,22 @@ impl Display for Word {
 }
 
 @copyable
+@derive(Display)
 struct Point {
     x: UInt8,
     y: Word,
 }
 
-derive Display for Point
-
 @copyable
+@derive(Display)
 type Meters = UInt8
 
-derive Display for Meters
-
 @copyable
+@derive(Display)
 enum Shape {
     Empty,
     Pair(UInt8, Word),
 }
-
-derive Display for Shape
 
 fn main() -> Result[UInt8, IoError] {
     let point: Point = .{ x = 1, y = .{} }

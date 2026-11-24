@@ -13,14 +13,13 @@ enum BodySource {
 
 // Materialized bytes and form fields keep the owners of every view handed to
 // an extractor. They are released only after the response using them ends.
+@derive(Release)
 struct BodyCache[P: Allocator] {
     payload: Vec[UInt8, mem.Handle[P]],
     form_text: Vec[UInt8, mem.Handle[P]],
     form_fields: Option[Vec[Field, mem.Handle[P]]],
     form_ready: Bool,
 }
-
-derive[P: Allocator] Release for BodyCache[P]
 
 // A RequestBody holds the stream's exclusive read position. Metadata stays a
 // copyable Request; a body is lent inout to the handler and lives until the
