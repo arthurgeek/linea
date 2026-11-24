@@ -1,0 +1,9 @@
+// Inside the function `B.Item` is `A.Item`, so the mismatch says `A.Item`; a
+// note names the clause, for a reader who wrote `B.Item`.
+fn _second_first[A: Iterator, B: Iterator](inout second: B) -> Option[UInt8] where B.Item == A.Item {
+    &second.next()
+}
+
+fn main() -> UInt8 {
+    0
+}

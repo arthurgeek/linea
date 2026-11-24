@@ -1,0 +1,7 @@
+error[T-Equal]: `S.Iter.Item` must be the same type as `Self.Iter.Item`, and here they are `UInt16` and `UInt8`
+  --> tests/where_equality/a_call_whose_sides_differ_is_refused.lin:45:37
+   |
+15 |     fn then[S: Source](sink self: Self, sink other: S) -> Chain[Self.Iter, S.Iter] where S.Iter.Item == Self.Iter.Item,  ...
+   |                                                                                          ----------------------------- required by this `where` clause
+45 |     let _joined = Span { stop = 3 }.then(Wide { stop = 3 })
+   |                                     ^^^^ both sides of the equality must settle to one type

@@ -1,0 +1,5 @@
+error[T-Equal]: `I.Iter.Item` cannot be the same type as `Option[I.Item]`, which holds it
+ --> tests/where_equality/a_late_reading_that_holds_itself_is_refused.lin:3:61
+  |
+3 | fn _count_all[I: Iterator + Sequence](_i: I) -> UInt8 where I.Iter.Item == Option[I.Item] {
+  |                                                             ^^^^^^^^^^^^^^^^^^^^^ no type contains itself, so no settling meets this; equate the projection with a type that does not hold it

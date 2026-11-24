@@ -117,6 +117,7 @@ const Scan = struct {
         }
         for (self.ast.declWherePredicates(decl)) |predicate| {
             if (try self.containsSelf(predicate.subject)) return false;
+            if (predicate.isEquality() and try self.containsSelf(predicate.equals)) return false;
             if (!try self.bounds(self.ast.boundsIn(predicate.bounds))) return false;
         }
         return true;

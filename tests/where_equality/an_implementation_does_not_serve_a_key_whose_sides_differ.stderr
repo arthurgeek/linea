@@ -1,0 +1,9 @@
+error[T-Equal]: `B.Item` must be the same type as `A.Item`, and here they are `UInt16` and `UInt8`
+  --> tests/where_equality/an_implementation_does_not_serve_a_key_whose_sides_differ.lin:27:15
+   |
+10 | impl[A: Iterator, B: Iterator] Iterator for Chain[A, B] where B.Item == A.Item {
+   |                                                               ---------------- required by this `where` clause
+27 |     for _x in joined {
+   |               ^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Iterator` implementation does not serve `Chain[Range[UInt8], Range[UInt16]]`

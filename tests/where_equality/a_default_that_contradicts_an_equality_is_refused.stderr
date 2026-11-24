@@ -1,0 +1,7 @@
+error[T-Equal]: `I.Item` must be the same type as `T`, and here they are `UInt8` and `UInt64`
+ --> tests/where_equality/a_default_that_contradicts_an_equality_is_refused.lin:9:17
+  |
+4 | struct Tally[I: Iterator, T = UInt64] where I.Item == T {
+  |                                             ----------- required by this `where` clause
+9 |     let _tally: Tally[Range[UInt8]] = .{ source = UInt8(0)..3 }
+  |                 ^^^^^ both sides of the equality must settle to one type

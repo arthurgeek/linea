@@ -1,0 +1,54 @@
+// A provided operation can require that its argument yields what its receiver
+// yields: `then` is read at the receiver's `Self`, and the equality holds at
+// that reading.
+struct Chain[A, B] {
+    first: A,
+    second: B,
+    first_done: Bool,
+}
+
+impl[A: Iterator, B: Iterator] Iterator for Chain[A, B] where B.Item == A.Item {
+    type Item = A.Item
+
+    fn next(inout self: Self) -> Option[A.Item] where carries(.Some: self) {
+        if !self.first_done {
+            match &self.first.next() {
+                Some(x) => return .Some(x),
+                None => self.first_done = true,
+            }
+        }
+        &self.second.next()
+    }
+}
+
+trait Source {
+    type Iter: Iterator
+
+    fn open(sink self: Self) -> Self.Iter
+
+    fn then[S: Source](sink self: Self, sink other: S) -> Chain[Self.Iter, S.Iter] where S.Iter.Item == Self.Iter.Item, carries(self, other) {
+        .{ first = self.open(), second = other.open(), first_done = false }
+    }
+}
+
+struct Span {
+    start: UInt8,
+    stop: UInt8,
+}
+
+impl Source for Span {
+    type Iter = Range[UInt8]
+
+    fn open(sink self: Span) -> Range[UInt8] {
+        self.start..self.stop
+    }
+}
+
+fn main() -> UInt8 {
+    let low = Span { start = 1, stop = 3 }
+    var total: UInt8 = 0
+    for x in low.then(Span { start = 5, stop = 7 }) {
+        total += x
+    }
+    total
+}

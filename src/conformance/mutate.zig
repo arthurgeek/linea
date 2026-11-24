@@ -64,6 +64,8 @@ pub const Mutation = enum {
     dropped_template_member_bound,
     /// Replaces one structural template member bound with another trait.
     replaced_template_member_bound,
+    /// Equates two bare parameters beside an equality of projected types.
+    equated_parameters,
     /// Rewrites the entry point's return type to one an exit status is not.
     wrong_entry_type,
     /// Repeats one statement that gives a linear value away, so the value is
@@ -106,6 +108,7 @@ pub const Mutation = enum {
             .dropped_template_member_bound,
             .replaced_template_member_bound,
             => "T-Template",
+            .equated_parameters => "T-Equal",
             .wrong_entry_type => "S-Entry",
             .repeated_disposal => "O-Move",
             .copied_disposal => "O-Copy",
@@ -171,6 +174,9 @@ pub const Mutation = enum {
             // 53.1% of 128 and 49.6% of 256 on both streams, set under both.
             .dropped_disposal => 48,
             .dropped_implementation => 35,
+            // Two item types are equated in 17 of 32, 31 of 64 and 98 of
+            // 200 generated programs, every one that declares its trait.
+            .equated_parameters => 45,
             .dropped_component_implementation => 90,
             .opened_component_requirement_argument => 40,
             .dropped_derive_bound => 90,
@@ -322,7 +328,7 @@ pub const Mutation = enum {
             // operator is written and nowhere else, so the one mistake is
             // reported once, where the checker stops on the poisoned sum;
             // the pattern below it binds nothing further to go wrong about.
-            .summed_newtype => &.{},
+            .equated_parameters, .summed_newtype => &.{},
         };
     }
 
@@ -339,6 +345,7 @@ pub const Mutation = enum {
             .dropped_derive_bound => "a generic derive no longer proving a component requirement is rejected",
             .dropped_template_member_bound => "a template member no longer carrying one signature bound is rejected",
             .replaced_template_member_bound => "a template member carrying a different bound from its signature is rejected",
+            .equated_parameters => "an equality between two plain type parameters is refused",
             .wrong_entry_type => "an entry point returning something other than `UInt8` is rejected",
             .repeated_disposal => "a linear value given away twice is rejected",
             .copied_disposal => "a copy of a linear value is rejected",
@@ -388,6 +395,7 @@ pub const Mutation = enum {
             .dropped_phantom => droppedPhantom(gpa, ast, text),
             .narrowed_range => narrowedRange(gpa, ast, res, types_of, text),
             .narrowed_refinement => narrowedRefinement(gpa, ast, res, text),
+            .equated_parameters => equatedParameters(gpa, ast, text),
             .summed_newtype => summedNewtype(gpa, ast, types_of, text),
         };
     }
@@ -1493,6 +1501,23 @@ fn droppedTemplateMemberBound(gpa: std.mem.Allocator, ast: *const Ast, text: []c
                 return null;
             };
             return @as(?[]const u8, try std.mem.concat(gpa, u8, &.{ text[0..from], text[to..] }));
+        }
+    }
+    return null;
+}
+
+fn equatedParameters(gpa: std.mem.Allocator, ast: *const Ast, text: []const u8) !?[]const u8 {
+    for (0..ast.declCount()) |i| {
+        const d = node.DeclId.at(@intCast(i));
+        if (ast.declTag(d) != .function) continue;
+        const params = ast.declTypeParams(d);
+        if (params.len < 2) continue;
+        for (ast.declWherePredicates(d)) |predicate| {
+            if (!predicate.isEquality()) continue;
+            const start = ast.writtenWholeSpan(predicate.subject).start;
+            return try std.mem.concat(gpa, u8, &.{
+                text[0..start], ast.tokenText(params[0].name), " == ", ast.tokenText(params[1].name), ", ", text[start..],
+            });
         }
     }
     return null;
@@ -2625,6 +2650,19 @@ fn parses(gpa: std.mem.Allocator, text: []const u8) !bool {
         if (ast.exprTag(node.ExprId.at(@intCast(i))) == .err) return false;
     }
     return true;
+}
+
+test "the equality mutation leaves the original item requirement in force" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const out = (try mutated(gpa, .equated_parameters,
+        \\trait Source { type Item }
+        \\fn _same[A: Source, B: Source](_a: A, _b: B) -> UInt8 where A.Item == B.Item { 0 }
+        \\fn main() -> UInt8 { 0 }
+    )).?;
+    try testing.expect(std.mem.indexOf(u8, out, "where A == B, A.Item == B.Item") != null);
+    try testing.expect(asClaimed(try verdictOf(gpa, out, .program), .equated_parameters));
 }
 
 test "an implementation with an operation deleted parses, and breaks the rule it names" {

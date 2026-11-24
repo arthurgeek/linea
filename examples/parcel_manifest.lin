@@ -56,18 +56,19 @@ fn shipping_weight(sink parcel: borrow UInt64) -> UInt64 {
     *parcel + packaging_grams
 }
 
-// Late parcels already include packaging. `iter.extend` appends them in
-// order; if memory runs out, the manifest keeps the parcels appended so far.
-fn append_late(inout manifest: Vec[UInt64], late: [UInt64; 2]) -> Result[(), Oom] {
-    var arrivals = late.as_slice().map(|sink parcel| *parcel)
-    iter.extend(&manifest, &arrivals).settled()
+// Late parcels already include packaging. Any scanner that yields weights in
+// grams can supply them. On refusal the manifest keeps the accepted prefix.
+fn append_late[I: Iterator](inout manifest: Vec[UInt64], inout arrivals: I) -> Result[(), Oom] where I.Item == UInt64 {
+    iter.extend_owned(&manifest, &arrivals).settled()
 }
 
 test "late parcels follow the existing manifest" {
     let arrivals = [UInt64(1200)]
     let { weights, inspected: _ } = build_manifest(arrivals.as_slice(), limit: 5000).unwrap()
     defer var manifest = weights
-    append_late(&manifest, [750, 1600]).unwrap()
+    let late = [UInt64(750), 1600]
+    var scanner = late.as_slice().copied()
+    append_late(&manifest, &scanner).unwrap()
     testing.assert_eq([manifest[0], manifest[1], manifest[2]], [UInt64(1300), 750, 1600], "extension replaced or reordered an existing parcel")?
 }
 
@@ -89,7 +90,10 @@ fn main() -> Result[UInt8, io.IoError] {
     // A pattern binds with `let`; `var manifest` takes the vector so the late
     // parcels can be appended to it.
     defer var manifest = weights
-    let _ = append_late(&manifest, [750, 1600]) else |refusal| {
+    let counter = [UInt64(750)]
+    let loading_dock = [UInt64(1600)]
+    var scanner = counter.as_slice().chain(loading_dock.as_slice()).copied()
+    let _ = append_late(&manifest, &scanner) else |refusal| {
         return .Ok(refusal.report("the late parcels"))
     }
     print_manifest(manifest, inspected)?

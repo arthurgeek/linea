@@ -1,0 +1,5 @@
+error[T-UnknownOperation]: `Wrap[Range[UInt16]]` has no operation `flag`
+  --> tests/where_equality/an_unrelated_missing_operation_ignores_an_iterator_equality.lin:26:12
+   |
+26 |     used + wrap.flag()
+   |            ^^^^^^^^^ `Mark` declares it, and `Wrap[Range[UInt16]]` does not implement `Mark`

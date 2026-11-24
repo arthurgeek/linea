@@ -1,0 +1,25 @@
+trait Measure[T] {
+    fn count_as(self: Self, _x: T) -> UInt8
+}
+
+struct Wrap[I] { value: I, stamp: UInt8 }
+
+impl[I: Iterator] Measure[UInt8] for Wrap[I] where I.Item == UInt8 {
+    fn count_as(self: Self, _x: UInt8) -> UInt8 {
+        self.stamp
+    }
+}
+
+impl[I: Iterator] Measure[UInt16] for Wrap[I] where I.Item == UInt16 {
+    fn count_as(self: Self, _x: UInt16) -> UInt8 {
+        self.stamp
+    }
+}
+
+fn _count[I: Iterator](wrap: Wrap[I]) -> UInt8 {
+    wrap.count_as(UInt16(1))
+}
+
+fn main() -> UInt8 {
+    0
+}

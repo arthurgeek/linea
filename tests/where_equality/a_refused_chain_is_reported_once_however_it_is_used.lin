@@ -1,0 +1,8 @@
+// The call to `chain` is the one mistake: counting what it built, or asking
+// it for an item, is not refused a second time.
+fn main() -> UInt8 {
+    let _counted = (UInt8(0)..3).chain(UInt16(5)..9).count()
+    var joined = (UInt8(0)..3).chain(UInt16(5)..9)
+    let _first = &joined.next()
+    0
+}

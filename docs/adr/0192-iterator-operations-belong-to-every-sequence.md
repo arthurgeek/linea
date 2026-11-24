@@ -8,6 +8,7 @@ Refines the disjointness sentence of
 clause of [0152](0152-an-integer-literals-type-is-settled-by-its-uses.md).
 The `_inout` forms and the `sink` callbacks of the walking operations are
 superseded by [0267](0267-an-inout-parameter-takes-a-temporary.md).
+[0306](0306-a-where-clause-may-equate-two-types.md) adds `chain` and `unzip`.
 
 ## Context
 

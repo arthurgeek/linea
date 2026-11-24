@@ -1,0 +1,15 @@
+trait Census[I: Iterator] {
+    fn tally(self: Self, sample: I) -> UInt8 where I.Item == UInt8
+}
+
+struct Poll[I] { items: I, count: UInt8 }
+
+impl[I: Iterator] Census[I] for Poll[I] where I.Item == UInt8 {
+    fn tally(self: Self, _sample: I) -> UInt8 {
+        self.count
+    }
+}
+
+fn main() -> UInt8 {
+    (Poll[Range[UInt8]] { items = UInt8(0)..1, count = 6 }).tally(UInt8(2)..3)
+}

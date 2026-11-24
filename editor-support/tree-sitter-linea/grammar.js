@@ -541,10 +541,14 @@ module.exports = grammar({
 
     contract_clause: $ => seq('where', commaSep1($.source_contract)),
 
+    // A bound predicate, `T: Copyable`, or an equality between two types,
+    // `B.Item == A.Item`.
     where_predicate: $ => seq(
       field('subject', $._type),
-      ':',
-      sep1($.bound, '+'),
+      choice(
+        seq(':', sep1($.bound, '+')),
+        seq('==', field('equals', $._type)),
+      ),
     ),
 
     // A re-export names a module and a declaration in it, so its path is not

@@ -5524,6 +5524,13 @@ pub const ImplIndex = struct {
                     try pool.substitute(predicate.subject, im.decl.index(), bindings);
                 if (!try self.meetsDemand(impls, pool, decided, im, bindings, subject, predicate.demand)) break :blk false;
             }
+            // An equality restricts the keys the implementation serves to those
+            // whose two sides settle to one type.
+            for (pool.contextual_constraints.equalities.ownSides(im.decl)) |side| {
+                const lhs = try self.equalitySide(impls, pool, decided, im, bindings, side.lhs);
+                const rhs = try self.equalitySide(impls, pool, decided, im, bindings, side.rhs);
+                if (lhs != rhs) break :blk false;
+            }
             // A viewed array row applies exactly where the view's own
             // implementation does, so the two cannot disagree.
             if (im.viewed) {
@@ -5535,6 +5542,21 @@ pub const ImplIndex = struct {
         if (matched) return .{ .header_matches = true, .arguments = bindings };
         decided.gpa.free(bindings);
         return .{ .header_matches = header_matches };
+    }
+
+    /// One side of an implementation's equality with the head's bindings
+    /// substituted, read in the lookup's scope.
+    fn equalitySide(
+        self: *const ImplIndex,
+        impls: []const Implementation,
+        pool: anytype,
+        decided: *Decided,
+        im: Implementation,
+        bindings: []const TypeId,
+        side: TypeId,
+    ) std.mem.Allocator.Error!TypeId {
+        const direct = try self.directlySubstituted(impls, pool, decided, side, im.decl.index(), bindings);
+        return pool.substituteWithin(decided.scope, direct orelse side, im.decl.index(), bindings);
     }
 
     fn meetsDemand(
@@ -5927,6 +5949,94 @@ pub const ContextualConstraint = struct {
     demand: Demand,
 };
 
+/// The `where` equalities each declaration is checked under, and the classes
+/// they form.
+///
+/// A declaration's classes are built from its enclosing implementation's or
+/// trait's equalities followed by its own, so a member's run already holds
+/// what it inherits and a lookup reads one run. Only declarations that write
+/// an equality, or sit inside one that does, have a run; a run is sized by the
+/// equalities written on the declaration and its enclosing block.
+pub const TypeEqualities = struct {
+    runs: std.AutoHashMapUnmanaged(DeclId, Run) = .empty,
+    /// Each projection that a class answers, with the type it reads as.
+    members: []const Member = &.{},
+    /// Each equality as the declaration writes it, both sides read without
+    /// the classes, which is what a use substitutes its settling into.
+    sides: []const Side = &.{},
+
+    pub const Run = struct {
+        members: Range = .{},
+        sides: Range = .{},
+    };
+
+    pub const Range = struct {
+        start: u32 = 0,
+        end: u32 = 0,
+    };
+
+    pub const Member = struct {
+        ty: TypeId,
+        representative: TypeId,
+        /// The predicate, by its index in the tree's predicate table, that
+        /// joined this member to its class.
+        predicate: u32,
+    };
+
+    pub const Side = struct {
+        lhs: TypeId,
+        rhs: TypeId,
+        predicate: u32,
+    };
+
+    /// What `ty` reads as inside `owner`, where a class there answers it.
+    pub fn memberWithin(self: *const TypeEqualities, owner: DeclId, ty: TypeId) ?Member {
+        for (self.membersWithin(owner)) |member| {
+            if (member.ty == ty) return member;
+        }
+        return null;
+    }
+
+    /// Every projection a class answers inside `owner`.
+    pub fn membersWithin(self: *const TypeEqualities, owner: DeclId) []const Member {
+        if (owner == .none or self.runs.count() == 0) return &.{};
+        const at = self.runs.get(owner) orelse return &.{};
+        return self.members[at.members.start..at.members.end];
+    }
+
+    /// The equalities `owner` writes itself, without what it inherits.
+    pub fn ownSides(self: *const TypeEqualities, owner: DeclId) []const Side {
+        if (owner == .none or self.runs.count() == 0) return &.{};
+        const at = self.runs.get(owner) orelse return &.{};
+        return self.sides[at.sides.start..at.sides.end];
+    }
+
+    pub fn holds(self: *const TypeEqualities, owner: DeclId) bool {
+        return owner != .none and self.runs.contains(owner);
+    }
+
+    pub fn deinit(self: *TypeEqualities, gpa: std.mem.Allocator) void {
+        self.runs.deinit(gpa);
+        gpa.free(self.members);
+        gpa.free(self.sides);
+        self.* = .{};
+    }
+};
+
+test "a member reads as its class's representative only inside the declaration that holds the class" {
+    const gpa = testing.allocator;
+    var equalities: TypeEqualities = .{};
+    defer equalities.deinit(gpa);
+    const members = try gpa.alloc(TypeEqualities.Member, 1);
+    members[0] = .{ .ty = @enumFromInt(40), .representative = @enumFromInt(41), .predicate = 0 };
+    equalities.members = members;
+    equalities.sides = try gpa.alloc(TypeEqualities.Side, 0);
+    try equalities.runs.put(gpa, DeclId.at(3), .{ .members = .{ .start = 0, .end = 1 } });
+    try testing.expectEqual(@as(TypeId, @enumFromInt(41)), equalities.memberWithin(DeclId.at(3), @enumFromInt(40)).?.representative);
+    try testing.expect(equalities.memberWithin(DeclId.at(4), @enumFromInt(40)) == null);
+    try testing.expect(equalities.memberWithin(DeclId.at(3), @enumFromInt(41)) == null);
+}
+
 /// Contextual promises, stored once with one enclosing-scope link per declaration.
 pub const ContextualConstraints = struct {
     capability_scopes: []const DeclId = &.{},
@@ -5934,9 +6044,12 @@ pub const ContextualConstraints = struct {
     starts: []const u32 = &.{},
     parents: []const DeclId = &.{},
     items: []const ContextualConstraint = &.{},
+    /// The `where` equalities, which select implementations and settle
+    /// projections in the scope that writes them as bounds do.
+    equalities: TypeEqualities = .{},
 
     fn lookupScope(self: *const ContextualConstraints, owner: DeclId) DeclId {
-        return if (self.run(owner).len != 0 or self.run(self.parentOf(owner)).len != 0) owner else .none;
+        return if (self.run(owner).len != 0 or self.run(self.parentOf(owner)).len != 0 or self.equalities.holds(owner)) owner else .none;
     }
 
     pub fn activeCapabilityScope(self: *const ContextualConstraints, owner: DeclId) DeclId {
@@ -6056,6 +6169,7 @@ pub const ContextualConstraints = struct {
         gpa.free(self.starts);
         gpa.free(self.parents);
         gpa.free(self.items);
+        self.equalities.deinit(gpa);
         self.* = .{};
     }
 };
@@ -10131,6 +10245,15 @@ pub const Typing = struct {
             return substitution.apply(self, ty);
         }
 
+        /// Rebuilds a constructed equality representative using the same
+        /// structural substitution as a call. The memo starts with the
+        /// declaration's projection-only classes and is shared by its holders.
+        pub fn normalizeEqualityRepresentative(self: *Builder, ty: TypeId, memo: *std.AutoHashMapUnmanaged(TypeId, TypeId)) std.mem.Allocator.Error!TypeId {
+            var substitution: TypeSubstitution = .{ .decl = no_owner, .args = &.{}, .memo = memo.* };
+            defer memo.* = substitution.memo;
+            return substitution.apply(self, ty);
+        }
+
         /// Leaves cannot grow the pool, so they need neither a stable copy
         /// of the replacement vector nor a structural traversal memo.
         fn substitutionLeaf(self: *const Builder, ty: TypeId, decl: u32, args: []const TypeId) ?TypeId {
@@ -10302,7 +10425,7 @@ pub const Typing = struct {
                 if (to != a.*) moved = true;
                 a.* = to;
             }
-            if (!moved) return s.ty;
+            if (!moved) return self.equatedWithin(substitution.within, s.ty);
             return (try self.settledAtWithin(substitution.within, s.trait, inner, held, s.member, s.named)).ty;
         }
 
@@ -13325,6 +13448,19 @@ pub const Typing = struct {
             sig: DeclId,
             impl_args: []const TypeId,
         ) std.mem.Allocator.Error!?TypeId {
+            return self.settledByWithin(.none, impl, sig, impl_args);
+        }
+
+        /// `settledBy`, read in `owner`'s scope: a projection the settled type
+        /// holds once the implementation's arguments are substituted reads as
+        /// `owner`'s `where` equalities make it, as `settledAtWithin` reads one.
+        pub fn settledByWithin(
+            self: *Builder,
+            owner: DeclId,
+            impl: Implementation,
+            sig: DeclId,
+            impl_args: []const TypeId,
+        ) std.mem.Allocator.Error!?TypeId {
             const member = self.supply.memberOf(impl.decl, sig) orelse return null;
             // Settling the member may select this same implementation again,
             // and recording that selection frees the argument slice the
@@ -13349,7 +13485,7 @@ pub const Typing = struct {
             const settled = self.decl_returns.get(member);
             if (settled == .poison) return null;
             if (impl.parameters == 0) return settled;
-            return try self.substitute(settled, impl.decl.index(), args);
+            return try self.substituteWithin(owner, settled, impl.decl.index(), args);
         }
 
         /// Settles a concrete trait key once, carrying the answer with the pool
@@ -13411,6 +13547,49 @@ pub const Typing = struct {
             const choice = try self.implementationChoice(trait, args, receiver) orelse return null;
             const selected = choice.declaredImplementation() orelse return null;
             return self.implementations[selected.index()];
+        }
+
+        /// An implementation of `trait` whose head matches `receiver` and
+        /// whose `where` equality the receiver's arguments settle to two
+        /// different types, so it does not serve the receiver.
+        pub const RefusedEquality = struct {
+            implementation: DeclId,
+            /// The predicate, by its index in the tree's predicate table.
+            predicate: u32,
+            lhs: TypeId,
+            rhs: TypeId,
+        };
+
+        /// The first implementation of `trait` that matches `receiver`'s
+        /// head and is refused by one of its equalities, or null.
+        ///
+        /// **Bound:** the candidates of one trait for the receiver's head and
+        /// for a parameter head, and the equalities each of them writes.
+        pub fn refusedEquality(self: *Builder, owner: DeclId, trait: DeclId, args: []const TypeId, receiver: TypeId) std.mem.Allocator.Error!?RefusedEquality {
+            if (trait == .none or receiver == .poison) return null;
+            const head = self.headOf(receiver);
+            if (head == .default_) return null;
+            var decided: ImplIndex.Decided = .{ .gpa = self.gpa, .scope = self.contextual_constraints.lookupScope(owner) };
+            defer decided.deinit();
+            var rows = self.impl_index.candidates(self.implementations, trait.index(), head, false);
+            while (rows.next()) |at| {
+                const im = self.implementations[at];
+                if (!im.valid_key or im.isAmbient() or im.args.len != args.len) continue;
+                if (!im.head.same(head) and !im.head.same(.parameter)) continue;
+                const sides = self.contextual_constraints.equalities.ownSides(im.decl);
+                if (sides.len == 0) continue;
+                if (!ImplIndex.receiverDomainAdmits(self, decided.scope, im, receiver)) continue;
+                const bindings = try self.gpa.alloc(TypeId, im.parameters);
+                defer self.gpa.free(bindings);
+                @memset(bindings, .poison);
+                if (!try self.impl_index.matchHeader(self.implementations, self, &decided, im, args, receiver, bindings)) continue;
+                for (sides) |side| {
+                    const lhs = try self.impl_index.equalitySide(self.implementations, self, &decided, im, bindings, side.lhs);
+                    const rhs = try self.impl_index.equalitySide(self.implementations, self, &decided, im, bindings, side.rhs);
+                    if (lhs != rhs) return .{ .implementation = im.decl, .predicate = side.predicate, .lhs = lhs, .rhs = rhs };
+                }
+            }
+            return null;
         }
 
         /// Finds the first trait requirement that keeps an implementation whose
@@ -13682,13 +13861,13 @@ pub const Typing = struct {
             if (self.awaitsTypes(held, args)) {
                 if (self.dualOfDual(held, member)) |protocol| return .{ .ty = protocol, .head_definition = true };
                 if (try self.stepOfDual(owner, trait, args, held, member, named)) |mirrored| return .{ .ty = mirrored, .head_definition = true };
-                if (try self.settledThroughParameterHead(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
-                if (try self.settledThroughParameterArguments(owner, trait, args, held, member)) |settled| return .{ .ty = settled, .head_definition = settled != .poison };
-                return .{ .ty = try self.addSettledStandin(trait, args, held, member, named) };
+                if (try self.settledThroughParameterHead(owner, trait, args, held, member)) |settled| return .{ .ty = self.equatedWithin(owner, settled), .head_definition = settled != .poison };
+                if (try self.settledThroughParameterArguments(owner, trait, args, held, member)) |settled| return .{ .ty = self.equatedWithin(owner, settled), .head_definition = settled != .poison };
+                return .{ .ty = self.equatedWithin(owner, try self.addSettledStandin(trait, args, held, member, named)) };
             }
             const choice = try self.implementationChoiceWithin(owner, DeclId.at(trait), args, held) orelse return .{ .ty = .poison };
             const implementation = choice.declaredImplementation() orelse
-                return .{ .ty = try self.addSettledStandin(trait, args, held, member, named) };
+                return .{ .ty = self.equatedWithin(owner, try self.addSettledStandin(trait, args, held, member, named)) };
             const row = self.implementations[implementation.index()];
             if (row.array_element_member == member and member != .none) {
                 return .{ .ty = self.get(held).array.element };
@@ -13728,6 +13907,13 @@ pub const Typing = struct {
             const step = (try self.settledAtWithin(owner, trait, args, inner.held, member, named)).ty;
             if (step == .poison) return null;
             return (try self.settledAtWithin(owner, trait, args, step, inner.member, inner.named)).ty;
+        }
+
+        /// What `ty` reads as inside `owner`: the representative of the class
+        /// a `where` equality there puts it in, or `ty` itself.
+        pub fn equatedWithin(self: *const Builder, owner: DeclId, ty: TypeId) TypeId {
+            const member = self.contextual_constraints.equalities.memberWithin(owner, ty) orelse return ty;
+            return member.representative;
         }
 
         /// What `member` settles to for a key still holding a type parameter,

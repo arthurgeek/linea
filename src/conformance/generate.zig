@@ -1298,6 +1298,22 @@ const Gen = struct {
         try w.writeAll("    _Measure.item(v)\n");
         try w.writeAll("}\n\n");
 
+        // A `where` equality makes the second argument's declared type the
+        // first's, so the body hands out `U.Item` as the `T.Item` it returns.
+        // The contract names the second argument as the result's source, lent
+        // under `read` and given up under `sink`; a taken first argument may
+        // be linear, so the body settles it by asking its item, which the
+        // bound lets it drop.
+        switch (shape.convention) {
+            .read => try w.writeAll("fn _sameItem[T: _Measure, U: _Measure](_first: T, second: U) -> T.Item where U.Item == T.Item, borrows(second) {\n"),
+            .sink => {
+                try w.writeAll("fn _sameItem[T: _Measure, U: _Measure](sink first: T, sink second: U) -> T.Item where U.Item == T.Item, T.Item: Discardable, carries(second) {\n");
+                try w.writeAll("    let _settled = _Measure.item(first)\n");
+            },
+        }
+        try w.writeAll("    _Measure.item(second)\n");
+        try w.writeAll("}\n\n");
+
         for (0..shape.ops) |j| {
             try w.print("fn _measured{d}[T: _Measure]({s}v: T) -> UInt8 {{\n", .{ j, conv });
             try w.print("    _Measure.of{d}(v)\n", .{j});
@@ -1422,6 +1438,35 @@ const Gen = struct {
                     if (shape.item_hits[i]) "true" else "false",
                     wrong,
                 }),
+            }
+            wrong += 1;
+
+            // The declared type once more, through the equality: the first
+            // argument is of the implementation two along, which settles the
+            // same item type, so the two arguments are sometimes two
+            // different structures whose items are one type.
+            const partner: u32 = if (i + 2 < shape.impls) @intCast(i + 2) else @intCast(i);
+            const first = try self.name("e");
+            const second = try self.name("e");
+            const same = try self.name("e");
+            for ([_]struct { []const u8, u32 }{ .{ first, partner }, .{ second, @intCast(i) } }) |built| {
+                try indent(w, at);
+                try w.print("let {s}: _M{d} = .{{", .{ built[0], built[1] });
+                for (0..shape.fields[built[1]]) |f| {
+                    try w.print("{s} f{d} = {d}", .{
+                        if (f == 0) "" else ",",
+                        f,
+                        shape.value(built[1], @intCast(f)),
+                    });
+                }
+                try w.writeAll(" };\n");
+            }
+            try indent(w, at);
+            try w.print("let {s}: {s} = _sameItem({s}, {s});\n", .{ same, shape.items[i].spelling(), first, second });
+            try indent(w, at);
+            switch (shape.items[i]) {
+                .u8_ => try w.print("if {s} != {d} {{ return {d}; }}\n", .{ same, shape.itemField(@intCast(i)), wrong }),
+                .bool_ => try w.print("if {s} != {s} {{ return {d}; }}\n", .{ same, if (shape.item_hits[i]) "true" else "false", wrong }),
             }
             wrong += 1;
         }
@@ -3573,10 +3618,16 @@ test "the trait a generated program declares is not one fixed program" {
     // substitutes into.
     var through_the_bound: std.EnumSet(ItemType) = .initEmpty();
 
+    var counts = [_]u32{0} ** 3;
+    const windows = [_]u32{ 32, 64, 200 };
     for (0..200) |seed| {
         const bytes = try choicesFromSeed(gpa, seed, 64);
         const text = try generate(gpa, bytes, .{});
         const block = traitBlockOf(text) orelse continue;
+
+        for (windows, &counts) |length, *count| {
+            if (seed < length) count.* += 1;
+        }
 
         var novel = true;
         for (blocks.items) |b| {
@@ -3593,6 +3644,10 @@ test "the trait a generated program declares is not one fixed program" {
         try testing.expect(std.mem.indexOf(u8, block, "type Item = UInt8") != null);
         try testing.expect(std.mem.indexOf(u8, block, "type Item = Bool") != null);
         try testing.expect(std.mem.indexOf(u8, block, "-> T.Item") != null);
+        try testing.expect(std.mem.indexOf(u8, block, "where U.Item == T.Item") != null);
+        if (std.mem.indexOf(u8, block, "struct _M2 ") != null) {
+            try testing.expect(std.mem.indexOf(u8, text, "_sameItem(") != null);
+        }
         // Read through a subtrait that inherits it, too.
         try testing.expect(std.mem.indexOf(u8, block, "fn _itemOf[T: _Ranked]") != null);
 
@@ -3604,6 +3659,9 @@ test "the trait a generated program declares is not one fixed program" {
         conventions.insert(if (std.mem.indexOf(u8, block, "sink x: Self") != null) .sink else .read);
         ops.insert(if (std.mem.indexOf(u8, block, "fn of1(") != null) .two else .one);
         impls.insert(if (std.mem.indexOf(u8, block, "struct _M2 ") != null) .three else .two);
+    }
+    for (windows, counts) |length, count| {
+        try testing.expect(count * 100 >= @import("mutate.zig").Mutation.equated_parameters.generatedFloor() * length);
     }
 
     // Every axis reached both ways, named one at a time so a drawing that

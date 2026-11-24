@@ -1,0 +1,5 @@
+error[T-Equal]: `J.Item` is `UInt8` here, so `Option[J.Item]` names it by a projection the equalities already settle
+ --> tests/where_equality/a_written_side_holding_a_settled_projection_is_refused.lin:3:72
+  |
+3 | fn _first_inner[I: Iterator, J: Iterator](_i: I, _j: J) -> UInt8 where I.Item == Option[J.Item], J.Item == UInt8 {
+  |                                                                        ^^^^^^^^^^^^^^^^ write `UInt8` where `J.Item` is written inside `Option[J.Item]`

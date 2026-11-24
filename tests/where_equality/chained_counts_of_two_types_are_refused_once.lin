@@ -1,0 +1,12 @@
+// `chain` requires both sequences to yield one type. The morning counts are
+// `UInt64` and the evening counts `UInt8`, so the call is refused, and walking
+// what it built is not refused a second time.
+fn main() -> UInt8 {
+    let morning = [UInt64(12), 9]
+    let evening = [UInt8(4), 7, 3]
+    var visitors: UInt64 = 0
+    for count in morning.as_slice().chain(evening.as_slice()) {
+        visitors += *count
+    }
+    UInt8(visitors)
+}

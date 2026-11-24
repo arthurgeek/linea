@@ -1,0 +1,9 @@
+// `J.Item` is `UInt8`, so `Option[J.Item]` names by a projection what the
+// equalities already settle; the equality says `Option[UInt8]` instead.
+fn _first_inner[I: Iterator, J: Iterator](_i: I, _j: J) -> UInt8 where I.Item == Option[J.Item], J.Item == UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,18 @@
+error[T-Equal]: `I.Item` must be the same type as `Int64`, and here they are `UInt32` and `Int64`
+  --> tests/where_equality/an_integer_literal_and_its_explicit_type_report_the_same_implementation_equality.lin:21:13
+   |
+7  | impl[I: Iterator] Measure[Int64] for Wrap[I] where I.Item == Int64 {
+   |                                                    --------------- required by this `where` clause
+21 |     let a = wrap.count_as(Int64(1))
+   |             ^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[Int64]` implementation does not serve `Wrap[Range[UInt32]]`
+error[T-Equal]: `I.Item` must be the same type as `Int64`, and here they are `UInt32` and `Int64`
+  --> tests/where_equality/an_integer_literal_and_its_explicit_type_report_the_same_implementation_equality.lin:22:9
+   |
+7  | impl[I: Iterator] Measure[Int64] for Wrap[I] where I.Item == Int64 {
+   |                                                    --------------- required by this `where` clause
+22 |     a + wrap.count_as(1)
+   |         ^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[Int64]` implementation does not serve `Wrap[Range[UInt32]]`

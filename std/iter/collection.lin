@@ -3,6 +3,7 @@ import std.release
 import std.testing
 
 use mem.Lender
+use mem.PushFailure
 use release.Settle
 
 // Append every item of `iterator` to `values`, in source order. On refusal, the
@@ -230,4 +231,160 @@ test "settling a failed collection keeps the allocation reason" {
         Err(reason) => reason == mem.Oom.Exhausted,
     }
     testing.assert(refused, "settling a failed collection lost its reason")?
+}
+
+// Push the halves of every pair `iterator` yields onto `lefts` and `rights`,
+// in source order. On refusal the error owns the pair whose half was refused
+// and the allocator's reason, and both vectors hold the halves of the pairs
+// before it: a right half refused takes its left half back off `lefts`.
+fn unzip_into[I: Iterator, A: Allocator, L, R](
+    inout lefts: Vec[L, A],
+    inout rights: Vec[R, A],
+    inout iterator: I,
+) -> Result[(), ((L, R), mem.Oom)] where
+    I.Item == (L, R),
+    retains(lefts: iterator),
+    retains(rights: iterator),
+    carries(.Err: iterator, lefts)
+{
+    while true {
+        match &iterator.next() {
+            None => break,
+            Some(pair) => {
+                let (left, right) = pair
+                match &lefts.push(left) {
+                    Ok(_) => {},
+                    Err(PushFailure { reason, value }) => return .Err(((value, right), reason)),
+                }
+                match &rights.push(right) {
+                    Ok(_) => {},
+                    Err(PushFailure { reason, value }) => {
+                        let taken_back = &lefts.pop().unwrap()
+                        return .Err(((taken_back, value), reason))
+                    },
+                }
+            },
+        }
+    }
+    .Ok(())
+}
+
+test "unzip splits pairs into two vectors in order" {
+    let Unzipped { lefts, rights, iterator: _ } = (UInt16(1)..4).zip(UInt8(10)..13).unzip().settled().unwrap()
+    let lengths = (lefts.length(), rights.length())
+    let ends = (lefts[0], lefts[2], rights[0], rights[2])
+    lefts.release()
+    rights.release()
+    testing.assert_eq(lengths, (UInt64(3), UInt64(3)), "unzip lost a half")?
+    testing.assert_eq(ends, (UInt16(1), UInt16(3), UInt8(10), UInt8(12)), "unzip changed a half or the order of the halves")?
+}
+
+test "unzip hands back the refused pair and the pairs before it" {
+    // Eight cursor bytes, then room for four UInt64 halves: the left vector
+    // takes the first two, the right vector is refused its second.
+    defer let arena = mem.Arena.open(mem.system(), size: 40)
+    let failed = (UInt64(1)..9).zip(UInt64(11)..19).unzip_in(arena.handle())
+    let report: Option[((UInt64, UInt64), (UInt64, UInt64), mem.Oom)] = match failed {
+        Ok(Unzipped { lefts, rights, iterator: _ }) => {
+            lefts.release()
+            rights.release()
+            .None
+        },
+        Err(UnzipFailure { unzipped: Unzipped { lefts, rights, iterator: _ }, refused, reason }) => {
+            let held = (lefts.length(), rights.length())
+            lefts.release()
+            rights.release()
+            .Some((held, refused, reason))
+        },
+    }
+    testing.assert(report.is_some(), "an arena too small for every half accepted them all")?
+    let (held, refused, reason) = report.unwrap()
+    testing.assert_eq(held._0, held._1, "the vectors hold different numbers of halves after a refusal")?
+    testing.assert_eq(refused, (held._0 + 1, held._0 + 11), "the failure holds a pair other than the refused one")?
+    testing.assert_eq(reason, mem.Oom.Exhausted, "the failure lost the allocator's reason")?
+}
+
+// An Unzipped holds the left halves and the right halves of a sequence of
+// pairs, in source order, and the iterator they came from, which may still
+// hold state the caller must settle. `L` and `R` are the halves' types.
+pub struct Unzipped[I: Iterator, A: Allocator, L, R] {
+    lefts: Vec[L, A],
+    rights: Vec[R, A],
+    iterator: I,
+}
+
+// An UnzipFailure holds what was unzipped before a vector refused a half, the
+// pair that half came from, and the allocator's reason. Both vectors hold the
+// halves of the pairs before the refused one.
+pub struct UnzipFailure[I: Iterator, A: Allocator, L, R] {
+    unzipped: Unzipped[I, A, L, R],
+    refused: (L, R),
+    reason: mem.Oom,
+}
+
+// Display renders the allocation refusal.
+impl[I: Iterator, A: Allocator, L, R] Display for UnzipFailure[I, A, L, R] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str("could not grow the vector: ")?
+        self.reason.fmt(&w)
+    }
+}
+
+// Releasing a failed unzip settles it, then releases the allocation reason.
+impl[I: Iterator + Release, A: Allocator, L: Release, R: Release] Release for UnzipFailure[I, A, L, R] {
+    fn release(sink self: Self) {
+        self.settle().release()
+    }
+}
+
+// Settling a failed unzip releases both vectors, the iterator and the refused
+// pair, and keeps the allocation reason.
+impl[I: Iterator + Release, A: Allocator, L: Release, R: Release] release.Settle for UnzipFailure[I, A, L, R] {
+    type Reason = mem.Oom
+
+    fn settle(sink self: Self) -> mem.Oom where carries(self) {
+        let UnzipFailure { unzipped: Unzipped { lefts, rights, iterator }, refused, reason } = self
+        let (left, right) = refused
+        right.release()
+        left.release()
+        iterator.release()
+        rights.release()
+        lefts.release()
+        reason
+    }
+}
+
+test "settling a failed unzip keeps the allocation reason" {
+    // The arena's cursor fills all eight bytes, so the first half is refused.
+    defer let arena = mem.Arena.open(mem.system(), size: 8)
+    let refused = match (UInt64(0)..3).zip(UInt64(5)..8).unzip_in(arena.handle()).settled() {
+        Ok(Unzipped { lefts, rights, iterator: _ }) => {
+            lefts.release()
+            rights.release()
+            false
+        },
+        Err(reason) => reason == mem.Oom.Exhausted,
+    }
+    testing.assert(refused, "settling a failed unzip lost its reason")?
+}
+
+test "a failed unzip displays its reason" {
+    // The arena's cursor fills all eight bytes, so the first half is refused.
+    defer let arena = mem.Arena.open(mem.system(), size: 8)
+    let explained = match (UInt64(0)..3).zip(UInt64(5)..8).unzip_in(arena.handle()) {
+        Ok(Unzipped { lefts, rights, iterator: _ }) => {
+            lefts.release()
+            rights.release()
+            false
+        },
+        Err(failure) => {
+            // The 64-byte recorder holds the growth refusal.
+            var writer = testing.Recorder.of(64).unwrap()
+            let said = failure.fmt(&writer).is_ok() && writer.holds("could not grow the vector: Exhausted")
+            writer.release()
+            failure.release()
+            said
+        },
+    }
+    testing.assert(explained, "a failed unzip did not say why")?
 }

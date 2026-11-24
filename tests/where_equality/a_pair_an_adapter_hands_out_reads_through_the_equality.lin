@@ -1,0 +1,28 @@
+// `zip` hands out `(A.Item, B.Item)`, and inside `agree` the equality makes
+// `B.Item` an `A.Item`, so the two halves of each pair compare with `!=`, and
+// the bounds on `A.Item` let the body drop either half.
+fn agree[A: Iterator, B: Iterator](sink first: A, sink second: B) -> Bool where
+    B.Item == A.Item,
+    A.Item: Equatable + Discardable,
+    A: Discardable,
+    B: Discardable
+{
+    for (a, b) in first.zip(second) {
+        if a != b {
+            return false
+        }
+    }
+    true
+}
+
+fn main() -> UInt8 {
+    let hall = [Int64(19), 20, 21]
+    let porch = [Int64(19), 20, 23]
+    let same = agree(hall.as_slice().map(|sink c| *c), hall.as_slice().map(|sink c| *c))
+    let different = agree(hall.as_slice().map(|sink c| *c), porch.as_slice().map(|sink c| *c))
+    if same && !different {
+        0
+    } else {
+        1
+    }
+}

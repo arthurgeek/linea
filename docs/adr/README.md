@@ -148,7 +148,8 @@ true of a different implementation.
 | [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171, 0227 and 0229 |
 | [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096; extended by 0228 |
 | [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
-| [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
+| [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted; extended by 0306 |
+| [0306](0306-a-where-clause-may-equate-two-types.md) | A `where` clause may equate two types | Accepted; extends 0107 and 0192 |
 | [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted; extended by 0229 |
 | [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171; extended by 0228 and 0280 |
 | [0280](0280-a-manifest-source-is-a-path-down-from-its-directory.md) | A manifest's source is a path down from its directory | Accepted; extends 0075 and 0229 |
@@ -355,7 +356,7 @@ ones most likely to be superseded as the compiler grows.
 | [0198](0198-array-literal-bindings-infer-written-lengths.md) | Array literal bindings infer written lengths | Accepted; extends 0061, 0083 and 0149 |
 | [0166](0166-an-array-compares-through-its-slice-view.md) | An array compares, hashes and prints through its slice view | Accepted; extends 0061 and 0137 |
 | [0172](0172-an-array-reports-its-length.md) | An array reports its length | Accepted; extends 0061, 0083 and 0137 |
-| [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203 and 0245; `_inout` forms superseded by 0267 |
+| [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203, 0245 and 0306; `_inout` forms superseded by 0267 |
 | [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050; extended by 0246 |
 | [0257](0257-the-driver-keeps-the-checked-standard-library-on-disk.md) | The driver keeps the checked standard library on disk | Accepted |
 | [0296](0296-a-command-answers-main-for-a-mistake-and-for-help.md) | A command answers `main` for a mistake and for help | Accepted |

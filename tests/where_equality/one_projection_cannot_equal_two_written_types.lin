@@ -1,0 +1,7 @@
+// The two equalities make `I.Item` both `UInt8` and `UInt16`, which no
+// iterator's items can be; the second one is refused.
+fn _narrow[I: Iterator](_source: I) where I.Item == UInt8, I.Item == UInt16 {}
+
+fn main() -> UInt8 {
+    0
+}

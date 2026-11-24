@@ -3,11 +3,11 @@ error[S-Type]: expected a type
   |
 1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
   |                                             ^ a `:` introduces a type
-error[S-Type]: expected `:`
+error[S-Type]: expected `:` or `==`
  --> tests/recovery/a_where_clause_missing_its_subject.lin:1:45
   |
 1 | fn f(w: UInt8) -> Result[UInt8, UInt8] where) carries(.Err: w) {
-  |                                             ^ a where predicate bounds its subject
+  |                                             ^ a where predicate bounds its subject or equates it with another type
 error[S-Brace]: expected `{`
  --> tests/recovery/a_where_clause_missing_its_subject.lin:1:45
   |

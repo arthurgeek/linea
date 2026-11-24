@@ -10340,6 +10340,7 @@ test "session errors retain earlier logs and updates" {
 
     const result = try checkSession(
         scratch.allocator(),
+        scratch.child_allocator,
         keep.allocator(),
         testing.io,
         test_library.get(),
@@ -12056,9 +12057,16 @@ fn checkRenameApplies(
     var it = first.iterator();
     while (it.next()) |entry| {
         if (entry.value.* == resolve_mod.BindingId.none) continue;
-        if (try renameHolds(gpa, backing, io, failures, display_path, case, checked, entry.value.*)) {
-            asked = true;
-        }
+        // A rename's trial analysis and edits end with this one subject.
+        // Only the report, if it failed, belongs to the case.
+        var trial = std.heap.ArenaAllocator.init(backing);
+        defer trial.deinit();
+        var found: std.ArrayList(Failure) = .empty;
+        if (try renameHolds(trial.allocator(), backing, io, &found, display_path, case, checked, entry.value.*)) asked = true;
+        try failures.ensureUnusedCapacity(gpa, found.items.len);
+        const retained = try retainFailures(gpa, found.items);
+        defer gpa.free(retained);
+        failures.appendSliceAssumeCapacity(retained);
     }
     return asked;
 }
@@ -12217,6 +12225,17 @@ test "slow: rename validation preserves compiler diagnostics and manifest semant
             var rendered: std.Io.Writer.Allocating = .init(gpa);
             try render.renderAll(&rendered.writer, &expected.table, &expected.sink, .{ .color = .never });
             try testing.expectEqualStrings(rendered.written(), failures.items[0].actual);
+            if (fixture == 1) {
+                var samples: std.ArrayList(Failure) = .empty;
+                try testing.expect(try checkRenameApplies(gpa, testing.allocator, testing.io, &samples, case.display_path, case, &checked));
+                for (samples.items) |sample| {
+                    if (!std.mem.eql(u8, sample.expected, failures.items[0].expected)) continue;
+                    try testing.expectEqualStrings(case.display_path, sample.path);
+                    try testing.expectEqualStrings(failures.items[0].what, sample.what);
+                    try testing.expectEqualStrings(rendered.written(), sample.actual);
+                    break;
+                } else return error.TestExpectedEqual;
+            }
         } else try testing.expectEqual(@as(usize, 0), failures.items.len);
     }
 }
@@ -13238,6 +13257,11 @@ fn settledRefsWritten(ast: *const Ast, program: *const Program, in_library: []co
                 }
             }
             if (ownSettledRef(ast, in_library, ast.declReturnRef(d))) n += 1;
+            // An equality's right-hand side is a written type no other type
+            // holds, as a signature's are.
+            for (ast.declWherePredicates(d)) |predicate| {
+                if (predicate.isEquality() and ownSettledRef(ast, in_library, predicate.equals)) n += 1;
+            }
         }
     }
 
@@ -13667,6 +13691,9 @@ fn checkSettledRefs(
                 for (ast.typeArgs(predicate.subject.args)) |a| {
                     try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, a);
                 }
+                // An equality's right-hand side is a written type like a
+                // signature's, and holds what it writes as one does.
+                if (predicate.isEquality()) try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, predicate.equals);
                 try heldBoundArguments(gpa, &work, ast, program, typing, in_library, d, ast.boundsIn(predicate.bounds));
             }
         }
@@ -14424,6 +14451,40 @@ fn namesTheBoundThatDeclaresIt(
     // reference reads as that definition -- which may itself be a key of
     // another trait awaiting an instantiation, `I.Item` for `I.Out`.
     if (readAsHeadDefinition(ast, typing, written.last)) return .through_a_bound;
+    const selected = reading.?;
+    var source_args: std.ArrayList(u8) = .empty;
+    defer source_args.deinit(gpa);
+    // Whether the source spells every argument, so there is a whole key to
+    // hold the recorded one to.
+    const spelled_all = spelled: {
+        if (selected.args.len != ast.declTypeParams(trait).len) break :spelled false;
+        for (selected.args, 0..) |arg, i| {
+            const name = try spellReadArg(gpa, ast, work.res, arg, selected.outer) orelse break :spelled false;
+            defer gpa.free(name);
+            if (i > 0) try source_args.appendSlice(gpa, ", ");
+            try source_args.appendSlice(gpa, name);
+        }
+        break :spelled true;
+    };
+
+    // The reference may name a different member of the same equality class.
+    for (typing.contextual_constraints.equalities.membersWithin(held_by)) |equated| {
+        if (equated.representative != resolved) continue;
+        const candidate = typing.standinOf(equated.ty) orelse continue;
+        if (candidate.trait != trait.index() or candidate.member != member or
+            !std.mem.eql(u8, typing.nameOf(candidate.held), from.items)) continue;
+        if (spelled_all) {
+            var arguments: std.ArrayList(u8) = .empty;
+            defer arguments.deinit(gpa);
+            for (typing.standinArgsOf(candidate), 0..) |arg, i| {
+                if (i > 0) try arguments.appendSlice(gpa, ", ");
+                try arguments.appendSlice(gpa, typing.nameOf(arg));
+            }
+            if (!std.mem.eql(u8, arguments.items, source_args.items)) continue;
+        }
+        return if (spelled_all) .through_a_bound else .no_bound_the_source_names;
+    }
+
     const key = typing.standinOf(resolved) orelse {
         try work.failures.append(gpa, .{
             .path = work.display_path,
@@ -14445,22 +14506,7 @@ fn namesTheBoundThatDeclaresIt(
     // read off. One trait may bound a parameter at several argument lists and
     // each settles the member its own way, so a key naming the right trait at
     // other arguments names another type.
-    const selected = reading.?;
     const recorded_args = typing.standinArgsOf(key);
-    var source_args: std.ArrayList(u8) = .empty;
-    defer source_args.deinit(gpa);
-    // Whether the source spells every argument, so there is a whole key to
-    // hold the recorded one to.
-    const spelled_all = spelled: {
-        if (selected.args.len != ast.declTypeParams(trait).len) break :spelled false;
-        for (selected.args, 0..) |arg, i| {
-            const name = try spellReadArg(gpa, ast, work.res, arg, selected.outer) orelse break :spelled false;
-            defer gpa.free(name);
-            if (i > 0) try source_args.appendSlice(gpa, ", ");
-            try source_args.appendSlice(gpa, name);
-        }
-        break :spelled true;
-    };
     var key_args: std.ArrayList(u8) = .empty;
     defer key_args.deinit(gpa);
     for (recorded_args, 0..) |arg, i| {
@@ -15206,6 +15252,49 @@ fn layOutCase(gpa: std.mem.Allocator, io: std.Io, dir: []const u8, case: Case) !
     }
 }
 
+test "slow: an editor replay releases its analyses before the case ends" {
+    try slow_tests.skipUnlessRun();
+    var setup = std.heap.ArenaAllocator.init(testing.allocator);
+    defer setup.deinit();
+    const a = setup.allocator();
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(testing.io, ".", a);
+    const case: Case = .{
+        .display_path = "app",
+        .stem = "app",
+        .entry = "app",
+        .files = &.{
+            .{ .path = "app/main.lin", .text = "fn main() -> UInt8 { answer() }\n" },
+            .{ .path = "app/answer.lin", .text = "fn answer() -> UInt8 { 7 }\n" },
+        },
+    };
+    const checked_library = test_library.get();
+    const capacity = reference: {
+        var checked = try lsp_analysis.of(a, testing.allocator, checked_library, case.files, case.entry);
+        defer checked.deinit();
+        try testing.expect(!checked.sink.hasErrors());
+        break :reference checked.arena.queryCapacity();
+    };
+    var table: FileTable = .empty;
+    var sink = Sink.init(a);
+    var interner: Interner = .empty;
+    const program = try checked_library.loadModuleFromMemory(a, &table, &sink, &interner, case.entry, null, case.files, .program, .borrow);
+    try table.buildMaps(a);
+
+    var result = std.heap.ArenaAllocator.init(testing.allocator);
+    defer result.deinit();
+    var failures: std.ArrayList(Failure) = .empty;
+    var region_allocations = testing.FailingAllocator.init(testing.allocator, .{});
+    try checkSurvives(result.allocator(), region_allocations.allocator(), testing.io, checked_library, &failures, root, case, 0, &program, &table, true);
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+    const retained = result.queryCapacity();
+    if (retained >= capacity) std.debug.print("case retains {d} bytes after replay; one analysis holds {d} bytes\n", .{ retained, capacity });
+    try testing.expect(retained < capacity);
+    try testing.expect(region_allocations.allocated_bytes > 0);
+    try testing.expectEqual(region_allocations.allocated_bytes, region_allocations.freed_bytes);
+}
+
 /// One request a script sent, so the transcript can be held to what was asked
 /// rather than to how many bytes came back.
 const Asked = struct {
@@ -15660,6 +15749,22 @@ fn shapeWanted(method: []const u8, result: std.json.Value) ?[]const u8 {
     return null;
 }
 
+/// Message buffers live for one replay. The server replaces document analyses
+/// during that replay, so their regions use the reclaiming backing directly.
+fn replaySession(
+    backing: std.mem.Allocator,
+    io: std.Io,
+    checked_library: *const loader.CheckedLibrary,
+    dir: []const u8,
+    requests: []const u8,
+    out: *std.Io.Writer,
+    logs: ?*std.Io.Writer,
+) !u8 {
+    var messages = std.heap.ArenaAllocator.init(backing);
+    defer messages.deinit();
+    return session.replay(messages.allocator(), backing, io, checked_library, dir, requests, out, logs);
+}
+
 /// A server driven over any program finishes, and answers.
 ///
 /// The guarantee the frontend already makes -- no input is refused, every
@@ -15705,6 +15810,7 @@ fn shapeWanted(method: []const u8, result: std.json.Value) ?[]const u8 {
 /// the script sent and one per file of the case, never one per message.
 fn checkSurvives(
     gpa: std.mem.Allocator,
+    backing: std.mem.Allocator,
     io: std.Io,
     checked_library: *const loader.CheckedLibrary,
     failures: *std.ArrayList(Failure),
@@ -15732,7 +15838,7 @@ fn checkSurvives(
     const status = replayed: {
         const replay_zone = tracy.beginZone(@src(), "replay");
         defer replay_zone.end();
-        break :replayed session.replay(gpa, io, checked_library, dir, script.text, &out.writer, null) catch |err| {
+        break :replayed replaySession(backing, io, checked_library, dir, script.text, &out.writer, null) catch |err| {
             try failures.append(gpa, .{
                 .path = case.display_path,
                 .what = "a server finishes a session over any program",
@@ -15758,7 +15864,7 @@ fn checkSurvives(
     // Read once into a scratch arena: the transcript's values are looked at
     // here and nothing below this call holds one, so what a case costs the run
     // is its failures and not its answers.
-    var reading = std.heap.ArenaAllocator.init(gpa);
+    var reading = std.heap.ArenaAllocator.init(backing);
     defer reading.deinit();
     const scratch_gpa = reading.allocator();
 
@@ -15998,6 +16104,7 @@ fn heldTwice(
 
 fn checkSessionWork(
     scratch: std.mem.Allocator,
+    backing: std.mem.Allocator,
     io: std.Io,
     checked_library: *const loader.CheckedLibrary,
     tests_dir_path: []const u8,
@@ -16021,10 +16128,10 @@ fn checkSessionWork(
     session_zone.setText(display);
 
     var out: std.Io.Writer.Allocating = .init(scratch);
-    _ = try session.replay(scratch, io, checked_library, full_dir, requests, &out.writer, &logs.writer);
+    _ = try replaySession(backing, io, checked_library, full_dir, requests, &out.writer, &logs.writer);
 
     var again: std.Io.Writer.Allocating = .init(scratch);
-    _ = try session.replay(scratch, io, checked_library, full_dir, requests, &again.writer, &logs.writer);
+    _ = try replaySession(backing, io, checked_library, full_dir, requests, &again.writer, &logs.writer);
     const stable = std.mem.eql(u8, out.written(), again.written());
     if (!stable) {
         try failures.append(scratch, .{
@@ -16083,6 +16190,7 @@ fn checkSessionWork(
 
 fn checkSession(
     scratch: std.mem.Allocator,
+    backing: std.mem.Allocator,
     keep: std.mem.Allocator,
     io: std.Io,
     checked_library: *const loader.CheckedLibrary,
@@ -16096,6 +16204,7 @@ fn checkSession(
     var result: SessionResult = .{};
     checkSessionWork(
         scratch,
+        backing,
         io,
         checked_library,
         tests_dir_path,
@@ -16135,6 +16244,7 @@ const SessionWalk = struct {
             _ = per_session.reset(.{ .retain_with_limit = 4 << 20 });
             results[at] = checkSession(
                 per_session.allocator(),
+                per_session.child_allocator,
                 keep.allocator(),
                 io,
                 checked_library,
@@ -23110,31 +23220,35 @@ fn checkCase(
         // is a program or library. This remains a second load and check, independent
         // of the compiler answers above; publication and rename only share that
         // independent answer with each other.
-        var lsp_checked = try lsp_analysis.of(gpa, gpa, env.library, try inputsOf(gpa, case), case.entry);
-        defer lsp_checked.deinit();
+        {
+            var editor = std.heap.ArenaAllocator.init(scratch_parent);
+            defer editor.deinit();
+            var lsp_checked = try lsp_analysis.of(editor.allocator(), scratch_parent, env.library, try inputsOf(gpa, case), case.entry);
+            defer lsp_checked.deinit();
 
-        tally(&w.properties, &w.passed_over, .published_diagnostics, carriable);
-        if (carriable) {
-            try checkPublished(gpa, &w.failures, display_path, &lsp_checked, &program, &table, &sink);
+            tally(&w.properties, &w.passed_over, .published_diagnostics, carriable);
+            if (carriable) {
+                try checkPublished(gpa, &w.failures, display_path, &lsp_checked, &program, &table, &sink);
+            }
+
+            // Property: a rename the server answers, applied to the case's own
+            // source, leaves a program that still compiles. Above the code
+            // generation, because a rename is a question about the source rather
+            // than about what it lowers to.
+            tally(
+                &w.properties,
+                &w.passed_over,
+                .renamed,
+                try checkRenameApplies(gpa, scratch_parent, io, &w.failures, display_path, case, &lsp_checked),
+            );
         }
-
-        // Property: a rename the server answers, applied to the case's own
-        // source, leaves a program that still compiles. Above the code
-        // generation, because a rename is a question about the source rather
-        // than about what it lowers to.
-        tally(
-            &w.properties,
-            &w.passed_over,
-            .renamed,
-            try checkRenameApplies(gpa, scratch_parent, io, &w.failures, display_path, case, &lsp_checked),
-        );
 
         // Property: a server driven through the protocol over this program
         // finishes and answers. Counted per file, because every file of the
         // case is opened as a document of its own.
         for (case.files) |_| tally(&w.properties, &w.passed_over, .survives, carriable);
         if (carriable) {
-            try checkSurvives(gpa, io, env.library, &w.failures, env.scratch_dir, case, ordinal, &program, &table, !rejected);
+            try checkSurvives(gpa, scratch_parent, io, env.library, &w.failures, env.scratch_dir, case, ordinal, &program, &table, !rejected);
         }
         lsp_zone.end();
     }

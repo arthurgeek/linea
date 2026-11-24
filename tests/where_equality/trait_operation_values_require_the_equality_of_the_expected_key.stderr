@@ -1,0 +1,27 @@
+error[T-Equal]: `I.Item` must be the same type as `UInt16`, and here they are `I.Item` and `UInt16`
+  --> tests/where_equality/trait_operation_values_require_the_equality_of_the_expected_key.lin:20:62
+   |
+13 | impl[I: Iterator] Measure[UInt16] for Wrap[I] where I.Item == UInt16 {
+   |                                                     ---------------- required by this `where` clause
+20 |     let _operation: fn(self: Wrap[I], _x: UInt16) -> UInt8 = Measure.count_as
+   |                                                              ^^^^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[UInt16]` implementation does not serve `Wrap[I]`
+error[T-Equal]: `I.Item` must be the same type as `UInt8`, and here they are `UInt32` and `UInt8`
+  --> tests/where_equality/trait_operation_values_require_the_equality_of_the_expected_key.lin:25:69
+   |
+7  | impl[I: Iterator] Measure[UInt8] for Wrap[I] where I.Item == UInt8 {
+   |                                                    --------------- required by this `where` clause
+25 |     let _small: fn(self: Wrap[Range[UInt32]], _x: UInt8) -> UInt8 = Measure.count_as
+   |                                                                     ^^^^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[UInt8]` implementation does not serve `Wrap[Range[UInt32]]`
+error[T-Equal]: `I.Item` must be the same type as `UInt16`, and here they are `UInt32` and `UInt16`
+  --> tests/where_equality/trait_operation_values_require_the_equality_of_the_expected_key.lin:26:69
+   |
+13 | impl[I: Iterator] Measure[UInt16] for Wrap[I] where I.Item == UInt16 {
+   |                                                     ---------------- required by this `where` clause
+26 |     let _wide: fn(self: Wrap[Range[UInt32]], _x: UInt16) -> UInt8 = Measure.count_as
+   |                                                                     ^^^^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[UInt16]` implementation does not serve `Wrap[Range[UInt32]]`

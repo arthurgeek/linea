@@ -1,0 +1,9 @@
+error[T-Mismatch]: expected `Option[UInt8]`, found `Option[A.Item]`
+ --> tests/where_equality/a_mismatch_names_the_equality_that_joined_two_types.lin:4:5
+  |
+3 | fn _second_first[A: Iterator, B: Iterator](inout second: B) -> Option[UInt8] where B.Item == A.Item {
+  |                                                                ------ expected because of this return type
+4 |     &second.next()
+  |     ^^^^^^^^^^^^^^ expected `Option[UInt8]`, found `Option[A.Item]`
+  |
+  = note: `B.Item` is `A.Item` here, by `where B.Item == A.Item`

@@ -1,0 +1,7 @@
+error[T-Equal]: `S.Iter.Item` must be the same type as `(L, R)`, and here they are `UInt8` and `(L, R)`
+  --> tests/where_equality/items_that_are_not_pairs_are_refused_by_the_equality.lin:13:17
+   |
+3  | fn last_second[L: Discardable, R: Discardable, S: Sequence](sink pairs: S) -> Option[R] where S.Iter.Item == (L, R), S.I ...
+   |                                                                                               --------------------- required by this `where` clause
+13 |     let _last = last_second(UInt8(1)..4)
+   |                 ^^^^^^^^^^^ both sides of the equality must settle to one type

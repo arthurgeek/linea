@@ -1,0 +1,11 @@
+// `T` defaults to `UInt64`, and the equality requires it to be what the
+// source yields. A `Tally` over a `UInt8` range that leaves `T` to its default
+// makes the two sides `UInt8` and `UInt64`, and is refused.
+struct Tally[I: Iterator, T = UInt64] where I.Item == T {
+    source: I,
+}
+
+fn main() -> UInt8 {
+    let _tally: Tally[Range[UInt8]] = .{ source = UInt8(0)..3 }
+    0
+}

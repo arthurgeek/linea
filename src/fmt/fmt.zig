@@ -1879,6 +1879,10 @@ const Printer = struct {
             } else {
                 const predicate = predicates[pi];
                 try self.writeWrittenType(predicate.subject);
+                if (predicate.isEquality()) {
+                    try self.write(" == ");
+                    try self.writeWrittenType(predicate.equals);
+                }
                 try self.writeBounds(self.ast.boundsIn(predicate.bounds));
                 pi += 1;
             }

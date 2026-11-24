@@ -1,0 +1,15 @@
+// `S.Iter.Item == (L, R)` requires pairs. A range yields single numbers, so
+// the call is refused at the equality rather than left with `L` unsettled.
+fn last_second[L: Discardable, R: Discardable, S: Sequence](sink pairs: S) -> Option[R] where S.Iter.Item == (L, R), S.Iter: Discardable {
+    var last: Option[R] = .None
+    for pair in pairs {
+        let (_first, second) = pair
+        last = .Some(second)
+    }
+    last
+}
+
+fn main() -> UInt8 {
+    let _last = last_second(UInt8(1)..4)
+    0
+}

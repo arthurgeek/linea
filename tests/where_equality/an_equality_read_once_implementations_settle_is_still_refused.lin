@@ -1,0 +1,14 @@
+// `I.Iter.Item` reads as `I.Item` only once the implementation making every
+// iterator a sequence has answered, and then the two equalities make `I.Item`
+// both `UInt8` and `UInt16`. The second is refused at its predicate.
+fn first_byte[I: Iterator + Sequence](inout i: I) -> UInt8 where I.Iter.Item == UInt8, I.Item == UInt16 {
+    match &i.next() {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    var r = UInt8(30)..40
+    first_byte(&r)
+}

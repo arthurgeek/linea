@@ -152,6 +152,7 @@ trait_ref    ::= name ("." name)* type_arguments?
 type_bound   ::= trait_ref | callable_type
 where_clause ::= "where" predicate ("," predicate)* ","?
 predicate    ::= type_name ":" type_bound ("+" type_bound)*
+               | type_name "==" type_name
 
 parameters   ::= parameter ("," parameter)* ","?
 parameter    ::= convention? name destructuring? ":" type_name ("=" expression)?
@@ -3241,6 +3242,11 @@ spellings resolving to different traits represent different requirements.
 Capability bounds are compared by the strongest requirement the complete list
 demands ([T-Bound]); Copyable includes Discardable.
 
+A member and its signature must also require the same type equalities after
+substituting the receiver and the supplied trait arguments. An equality
+already proved by the enclosing implementation holds for the member. The order
+of the clauses and which side is written first do not change this agreement.
+
 At most one ordinary implementation may answer a given trait declaration, trait
 argument list and receiver type: a program in which two could is refused where
 the second is declared, by one of two reports. Writing the same implementation
@@ -3693,7 +3699,8 @@ and implementations may carry the clause. Its subject may be a parameter,
 another open type expression or an associated projection such as `I.Item` or
 `Self.Error`. Its requirements are the existing bound grammar: named traits with
 arguments, an exact structural callable type, a capability, or a `+` list of
-them. The clause adds no type equality, negative, region or value predicate.
+them. A predicate may instead equate two types, [T-Equal]. The clause adds no
+negative, region or value predicate.
 
 An inline parameter bound is shorthand for a constraint whose subject is that
 parameter; both forms contribute to one per-declaration set of subject type
@@ -3716,6 +3723,47 @@ named by two bounds or reached through supertraits, and one supertrait
 required at two argument lists give [N-Ambiguous]. No qualification selects
 between them; a parameter bounded by one of the traits alone reads its
 declaration.
+
+**[T-Equal]** A predicate `A == B` in a `where` clause says the two types are
+one type. At least one side is an associated projection read through a bound in
+the declaration's set (`I.Item`, `Self.Iter.Item`). An equality between two type
+parameters, or between a type parameter and a type written without one, is
+refused: the declaration has a parameter too many, and writes the one type for
+both. So is a projection equated with a type that holds it
+(`I.Item == Option[I.Item]`), and an equality that would make one projection two
+different types that are not projections (`I.Item == UInt8, I.Item == UInt16`).
+Equalities are judged together: two that make a projection hold itself
+(`I.Item == Vec[J.Item], J.Item == I.Item`) are refused, and so is a type
+written on one side that holds a projection another equality settles
+(`I.Item == Option[J.Item], J.Item == UInt8`, where `Option[UInt8]` is the type
+to write). A trait's own `where` clause cannot equate types; the equality goes
+on the operation or implementation that needs it. `where A = B` is [S-Type],
+with the help to write `==`, and is one report.
+
+Inside the declaration, and inside the members of an implementation that
+writes it, the equalities form classes, and every member of a class reads
+as one representative: the member that is not a projection, where there is one,
+and otherwise the right-hand side of the first equality that formed the class.
+Under `where B.Item == A.Item` a `B.Item` is an `A.Item`, in the signature and
+in the body, and a bound written on either side is a bound on both. Which side
+is written first changes only which name a message prints.
+
+Wherever the declaration's parameters are settled -- a call, a type's
+instantiation, a provided operation read at its receiver's `Self`, an
+implementation chosen for a key -- both sides are read at that settling and
+must be one type; otherwise the use is refused, naming both settled types and
+citing the clause. A value such a use built is not refused again, for the same
+two types, where the body uses it. A type written with a parameter's default
+is filled before the check. At a call, after the receiver and the arguments
+have settled what they settle, a side still holding a parameter of the callee
+is matched against the other side's settled type, and settles the parameters
+it holds as an argument would, so a default fills only a parameter neither
+settles: `fn split[L, R, S: Sequence](sink s: S) where S.Iter.Item
+== (L, R)` settles `L` and `R` from the items. A settled side whose shape the
+other cannot take is refused at the equality. A parameter settled this way can
+settle another equality, regardless of their written order. An implementation's equality
+restricts the keys it serves, as its bounds do; it does not make two
+implementations disjoint, so two that differ only by an equality overlap.
 
 Instantiation substitutes a concrete type for each constraint subject, and
 [T-Bound] checks every requirement. When a generic declaration passes an open

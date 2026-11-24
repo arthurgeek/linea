@@ -1,0 +1,13 @@
+// At a call, the equality settles `T` from the items as an argument would, and
+// a default fills only a parameter nothing settles, so `T` is `UInt8` here.
+fn first_of[I: Iterator, T = UInt64](inout i: I) -> Option[T] where I.Item == T {
+    &i.next()
+}
+
+fn main() -> UInt8 {
+    var r = UInt8(4)..9
+    match first_of(&r) {
+        Some(v) => v,
+        None => 0,
+    }
+}

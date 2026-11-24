@@ -1,0 +1,15 @@
+trait Census {
+    fn read_count[I: Iterator](self: Self, items: I) -> UInt8 where I.Item == UInt8
+}
+
+struct Poll { count: UInt8 }
+
+impl Census for Poll {
+    fn read_count[I: Iterator](self: Self, _items: I) -> UInt8 {
+        self.count
+    }
+}
+
+fn main() -> UInt8 {
+    (Poll { count = 1 }).read_count(UInt8(0)..1)
+}

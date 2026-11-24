@@ -1,0 +1,8 @@
+// Which side of `K.Item == J.Item` is written first does not decide whether
+// the declaration is accepted: here `J.Item` is a projection read as another
+// projection, which a written side may hold.
+fn _wrap[I: Iterator, J: Iterator, K: Iterator](_i: I, _j: J, _k: K) where I.Item == Option[J.Item], J.Item == K.Item {}
+
+fn main() -> UInt8 {
+    0
+}

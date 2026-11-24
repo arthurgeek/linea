@@ -1,0 +1,24 @@
+// The refused `chain` call and the `Chain2` literal are two mistakes, each
+// with its own clause, so both are reported though they settle the same two
+// item types.
+struct Chain2[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[A: Iterator, B: Iterator] Iterator for Chain2[A, B] where B.Item == A.Item {
+    type Item = A.Item
+
+    fn next(inout self: Self) -> Option[A.Item] where carries(.Some: self) {
+        &self.second.next()
+    }
+}
+
+fn main() -> UInt8 {
+    let _joined = (UInt8(0)..3).chain(UInt16(5)..9)
+    var mine: Chain2[Range[UInt8], Range[UInt16]] = .{ first = UInt8(0)..3, second = UInt16(5)..9 }
+    match &mine.next() {
+        Some(v) => v,
+        None => 0,
+    }
+}

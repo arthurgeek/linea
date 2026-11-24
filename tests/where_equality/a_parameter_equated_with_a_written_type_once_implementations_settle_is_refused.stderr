@@ -1,0 +1,5 @@
+error[T-Equal]: `I.Iter` is `I`, so this `where` clause makes the type parameter `I` always `Range[UInt16]`
+ --> tests/where_equality/a_parameter_equated_with_a_written_type_once_implementations_settle_is_refused.lin:3:69
+  |
+3 | fn pick[I: Iterator + Sequence](inout i: I) -> Option[I.Item] where I.Iter == Range[UInt16], carries(.Some: i) {
+  |                                                                     ^^^^^^^^^^^^^^^ write `Range[UInt16]` where `I` is written, and drop the parameter

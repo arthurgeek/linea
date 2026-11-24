@@ -12306,6 +12306,7 @@ const Resolver = struct {
         try self.classifyBounds(self.ast.declBounds(d));
         for (self.ast.declWherePredicates(d)) |predicate| {
             try self.useRef(predicate.subject);
+            if (predicate.isEquality()) try self.useRef(predicate.equals);
         }
         // A default is a written type like any other, read where the
         // declaration is.

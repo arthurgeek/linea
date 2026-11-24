@@ -1,0 +1,30 @@
+// `Option[J.Item]` is a written side, and `J.Item` is equated with `K.Item`
+// in one function and `K.Item` with `J.Item` in the other: both read an
+// `I.Item` as an `Option[K.Item]` alike.
+fn first_inner[I: Iterator, J: Iterator, K: Iterator](inout i: I, _j: J, _k: K) -> Option[K.Item] where I.Item == Option[J.Item], J.Item == K.Item, carries(.Some: i) {
+    match &i.next() {
+        Some(inner) => inner,
+        None => .None,
+    }
+}
+
+fn first_inner_reversed[I: Iterator, J: Iterator, K: Iterator](inout i: I, _j: J, _k: K) -> Option[K.Item] where I.Item == Option[J.Item], K.Item == J.Item, carries(.Some: i) {
+    match &i.next() {
+        Some(inner) => inner,
+        None => .None,
+    }
+}
+
+fn main() -> UInt8 {
+    let logged = [Option.Some(UInt8(4)), Option.Some(UInt8(5))]
+    var readings = logged.as_slice().map(|sink reading| copy(*reading))
+    let first = match first_inner(&readings, UInt8(0)..3, UInt8(0)..3) {
+        Some(v) => v,
+        None => 0,
+    }
+    let second = match first_inner_reversed(&readings, UInt8(0)..3, UInt8(0)..3) {
+        Some(v) => v,
+        None => 0,
+    }
+    first + second
+}

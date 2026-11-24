@@ -1,0 +1,23 @@
+// `where B.Item = A.Item` is written with one `=`. It is one report, telling
+// the reader to write `==`, and the declaration after it is still read.
+struct Chain[A, B] {
+    first: A,
+    second: B,
+}
+
+impl[A: Iterator, B: Iterator] Iterator for Chain[A, B] where B.Item = A.Item {
+    type Item = A.Item
+
+    fn next(inout self: Self) -> Option[A.Item] where carries(.Some: self) {
+        &self.first.next()
+    }
+}
+
+fn main() -> UInt8 {
+    let joined: Chain[Range[UInt8], Range[UInt8]] = .{ first = UInt8(1)..3, second = UInt8(5)..7 }
+    var total: UInt8 = 0
+    for x in joined {
+        total += x
+    }
+    total
+}

@@ -81,6 +81,7 @@ const ScriptTransport = struct {
 /// handler's own answer and not a second reading of the script.
 pub fn replay(
     gpa: std.mem.Allocator,
+    region_backing: std.mem.Allocator,
     io: std.Io,
     /// The checked standard library the server resumes each module from.
     library: *const loader.CheckedLibrary,
@@ -98,7 +99,7 @@ pub fn replay(
     var script = ScriptTransport.init(script_text, &answers.writer);
     var handler: server.Handler = .{
         .gpa = gpa,
-        .region_backing = gpa,
+        .region_backing = region_backing,
         .library = library,
         .io = io,
         .transport = &script.transport,
@@ -145,7 +146,7 @@ test "a session captures replay errors" {
     var logs: std.Io.Writer.Allocating = .init(gpa);
     defer logs.deinit();
 
-    _ = try replay(gpa, std.testing.io, test_library.get(), dir, asked, &out.writer, &logs.writer);
+    _ = try replay(gpa, std.testing.allocator, std.testing.io, test_library.get(), dir, asked, &out.writer, &logs.writer);
 
     try std.testing.expectEqualStrings(
         "error: Failed to handle message: error.UnexpectedEndOfInput\n",
@@ -175,7 +176,7 @@ test "a session releases the workspace the client named" {
 
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
-    _ = try replay(gpa, std.testing.io, test_library.get(), dir, asked, &out.writer, null);
+    _ = try replay(gpa, std.testing.allocator, std.testing.io, test_library.get(), dir, asked, &out.writer, null);
 }
 
 test "a session ends where the client said to, and leaves with what it said" {
@@ -202,7 +203,7 @@ test "a session ends where the client said to, and leaves with what it said" {
 
     // `exit` with no `shutdown` before it ends a session the server was in the
     // middle of, which the protocol asks it to leave saying.
-    try std.testing.expectEqual(@as(u8, 1), try replay(gpa, std.testing.io, test_library.get(), dir, asked, &out.writer, null));
+    try std.testing.expectEqual(@as(u8, 1), try replay(gpa, std.testing.allocator, std.testing.io, test_library.get(), dir, asked, &out.writer, null));
 
     // And the request after it was never read.
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "\"id\":2") == null);
@@ -236,7 +237,7 @@ fn fuzzSession(_: void, smith: *std.testing.Smith) anyerror!void {
 
     var out: std.Io.Writer.Allocating = .init(gpa);
     var logs: std.Io.Writer.Allocating = .init(gpa);
-    _ = try replay(gpa, std.testing.io, test_library.get(), dir, buf[0..len], &out.writer, &logs.writer);
+    _ = try replay(gpa, std.testing.allocator, std.testing.io, test_library.get(), dir, buf[0..len], &out.writer, &logs.writer);
 }
 
 test "fuzz: a session of any messages ends" {

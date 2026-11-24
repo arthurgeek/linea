@@ -1,0 +1,9 @@
+// `I.Iter.Item` is `I.Item`, so this equality asks `I.Item` to hold itself,
+// which no settling meets.
+fn _count_all[I: Iterator + Sequence](_i: I) -> UInt8 where I.Iter.Item == Option[I.Item] {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

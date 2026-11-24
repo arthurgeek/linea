@@ -1,0 +1,7 @@
+// An equality between a type parameter and a type written without one makes
+// the parameter that type, so the declaration writes the type instead.
+fn _bytes[T](_value: T) where T == UInt8 {}
+
+fn main() -> UInt8 {
+    0
+}

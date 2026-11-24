@@ -795,6 +795,7 @@ fn typecheckInternal(
         c.loops.deinit(gpa);
     }
     defer c.bounds_reported.deinit(gpa);
+    defer c.equalities_reported.deinit(gpa);
     defer c.bounds_reported_order.deinit(gpa);
     defer c.written_arrays.deinit(gpa);
     defer c.lengths_waiting.deinit(gpa);
@@ -3435,39 +3436,36 @@ pub const Reach = struct {
         return if (found.items.len == 0) node.DeclId.none else found.items[0].trait;
     }
 
-    /// The trait in scope that declares `wanted` and has an implementation
-    /// for `held`'s shape whose bounds `held` does not meet, or `.none`.
-    ///
-    /// Only for a report: such an operation does not resolve, and saying the
-    /// type has no field of that name, or that its parts are sealed, would
-    /// send a reader after the wrong mistake. It runs only on that failure and
-    /// reads `traits`, the ones in scope declaring `wanted` that preparing the
-    /// lookup collected, so it walks no trait names of its own; of those it
-    /// reads implementations only for `held`'s head.
-    pub fn unmetImplementation(self: Reach, gpa: std.mem.Allocator, held: TypeId, wanted: StringId, traits: []const node.DeclId) !node.DeclId {
-        if (held == .poison) return node.DeclId.none;
+    const UnmetOperation = struct {
+        trait: DeclId,
+        signature: DeclId,
+        conditional_equality: bool,
+    };
+
+    /// An operation whose receiver matches an implementation header but does
+    /// not satisfy its requirements. The signature is independent of which
+    /// applied trait key the rest of the call will settle.
+    fn unmetImplementation(self: Reach, gpa: std.mem.Allocator, held: TypeId, wanted: StringId) !?UnmetOperation {
+        if (held == .poison) return null;
         const head = self.typing.headOf(held);
-        if (head == .parameter or head == .default_) return node.DeclId.none;
-        for (traits) |trait| {
-            var declares = false;
-            var declared = self.res.signatures.of(self.ast, trait);
-            while (declared.next()) |sig| {
-                if (self.ast.tokenName(self.ast.declName(sig)) != wanted) continue;
-                if (!postfixReaches(self.ast, sig)) continue;
-                declares = true;
-                break;
-            }
-            if (!declares) continue;
-            // A type the trait does apply to reaches the operation some other
-            // way, or is refused for a reason of its own.
+        if (head == .parameter or head == .default_) return null;
+        var declarations = self.res.traitMembersNamed(self.from, wanted);
+        while (declarations.next()) |operation| {
+            if (!postfixReaches(self.ast, operation.member)) continue;
+            const trait = operation.trait;
             if (try self.index.any(gpa, self.impls, self.typing, trait.index(), held, self.scope, .direct)) continue;
+            var matched = false;
             var rows = self.index.candidates(self.impls, trait.index(), head, false);
             while (rows.next()) |at| {
-                if (!self.impls[at].head.same(head)) continue;
-                if (try self.typing.receiverTraitArguments(@enumFromInt(at), held) != null) return trait;
+                const row = self.impls[at];
+                if (!row.head.same(head) or try self.typing.receiverTraitArguments(@enumFromInt(at), held) == null) continue;
+                matched = true;
+                if (self.typing.contextual_constraints.equalities.ownSides(row.decl).len > 0)
+                    return .{ .trait = trait, .signature = operation.member, .conditional_equality = true };
             }
+            if (matched) return .{ .trait = trait, .signature = operation.member, .conditional_equality = false };
         }
-        return node.DeclId.none;
+        return null;
     }
 
     /// Every operation `held` would answer to through a trait this module
@@ -6440,7 +6438,11 @@ const Checker = struct {
     /// The set answers "was this refused" in one lookup however many refusals
     /// the program holds; the list keeps the order refusals were noted in, so
     /// a scope that checks speculatively can forget the ones it noted.
-    bounds_reported: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
+    bounds_reported: std.AutoHashMapUnmanaged(TokenId, RefusalKind) = .empty,
+    /// The `where` equalities, by their index in the tree's predicate table,
+    /// already refused where they are written. `settleEqualities` reads them
+    /// twice, and the second reading can find a refusal the first could not.
+    equalities_reported: std.AutoHashMapUnmanaged(u32, void) = .empty,
     bounds_reported_order: std.ArrayList(TokenId) = .empty,
     /// Where each array type is first written, for a report about a type no
     /// declaration names.
@@ -7066,6 +7068,11 @@ const Checker = struct {
             contextual.deinit(self.gpa);
         }
 
+        // Equalities first: a bound written on a projection an equality
+        // joins to a class is a bound on the class's representative, so the
+        // subjects below are read through the classes.
+        try self.settleEqualities();
+
         // Resolve first because members are allocated before the impl that
         // encloses them, while their bodies inherit that impl's predicates.
         for (0..self.ast.declCount()) |i| {
@@ -7074,6 +7081,7 @@ const Checker = struct {
                 if (!predicate.subject.wasWritten()) continue;
                 if (self.unreadTemplateSubject(d, predicate.subject)) continue;
                 if (self.whereSubjectDependsOnOpen(d, predicate.subject)) continue;
+                if (predicate.isEquality() and self.whereSubjectDependsOnOpen(d, predicate.equals)) continue;
                 try self.sink.addError(
                     .t_where,
                     self.ast.fileOf(predicate.subject.at),
@@ -7110,11 +7118,7 @@ const Checker = struct {
             starts[i] = @intCast(contextual.items.len);
             promised.clearRetainingCapacity();
             promises.clearRetainingCapacity();
-            const enclosing = self.res.implEnclosing(d);
-            parents[i] = if (enclosing != .none and enclosing != d)
-                enclosing
-            else
-                self.traitDeclaring(d) orelse node.DeclId.none;
+            parents[i] = self.constraintParent(d);
 
             const range = self.constraints.rangeOfDeclaration(d);
             for (range.start..range.end) |at| {
@@ -7197,8 +7201,465 @@ const Checker = struct {
             .parents = parents,
             .capability_scopes = capability_scopes,
             .items = items,
+            .equalities = self.contextual_constraints.equalities,
         };
         self.builder.setContextualConstraints(self.contextual_constraints);
+    }
+
+    /// The declaration whose `where` clauses `d` is checked under besides its
+    /// own: the implementation or trait that encloses it, or none.
+    fn constraintParent(self: *const Checker, d: node.DeclId) node.DeclId {
+        const enclosing = self.res.implEnclosing(d);
+        if (enclosing != .none and enclosing != d) return enclosing;
+        return self.traitDeclaring(d) orelse node.DeclId.none;
+    }
+
+    /// One equality as `settleEqualities` reads it.
+    const WrittenEquality = struct {
+        lhs: TypeId,
+        rhs: TypeId,
+        predicate: u32,
+    };
+
+    /// Reads every `where` equality and builds the classes each declaration
+    /// is checked under, replacing the ones the builder held.
+    ///
+    /// Each side is read with no classes in force, so a side is the type its
+    /// spelling names. A declaration's classes join its enclosing block's
+    /// equalities and its own, in that order; the representative of a class
+    /// is its member that is not a projection, where it has one, and otherwise
+    /// the right-hand side of the first equality that formed it.
+    ///
+    /// Run twice: when constraints are resolved, and again once
+    /// implementations have settled what their traits declare, since
+    /// `I.Iter.Item` reads as `I.Item` only then. Each equality is refused at
+    /// most once where it is written, by whichever run first finds it
+    /// malformed; the second run finds what only the later reading shows.
+    ///
+    /// A trait's own `where` clause equates nothing: what an implementation
+    /// settles is checked where an operation needing it is written.
+    ///
+    /// **Bound:** two readings per equality predicate, and per declaration a
+    /// class build over the equalities written on it and on its enclosing
+    /// block, each a scan of that declaration's members.
+    fn settleEqualities(self: *Checker) std.mem.Allocator.Error!void {
+        const gpa = self.gpa;
+        var old = self.contextual_constraints.equalities;
+        self.contextual_constraints.equalities = .{};
+        self.builder.setContextualConstraints(self.contextual_constraints);
+        old.deinit(gpa);
+
+        // Each declaration's own well-formed equalities, as a run of `written`.
+        var written: std.ArrayList(WrittenEquality) = .empty;
+        defer written.deinit(gpa);
+        var own: std.AutoHashMapUnmanaged(node.DeclId, types_mod.TypeEqualities.Range) = .empty;
+        defer own.deinit(gpa);
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            const predicates = self.ast.declWherePredicates(d);
+            const start: u32 = @intCast(written.items.len);
+            var any = false;
+            for (predicates) |predicate| any = any or predicate.isEquality();
+            if (!any) continue;
+            self.self_at_call = if (self.ast.declIsSignature(d)) try self.signatureSelfType(d) else null;
+            defer self.self_at_call = null;
+            for (predicates, 0..) |predicate, k| {
+                if (!predicate.isEquality() or !predicate.subject.wasWritten()) continue;
+                const at = self.ast.declWherePredicateStart(d) + @as(u32, @intCast(k));
+                if (self.ast.declTag(d) == .trait_) {
+                    if (try self.firstRefusalOf(at)) try self.sink.addErrorFmt(
+                        .t_equal,
+                        self.ast.fileOf(predicate.subject.at),
+                        self.equalitySpan(predicate),
+                        "write the equality on the operation or implementation that needs it",
+                        "a trait's `where` clause cannot equate `{s}` with `{s}`",
+                        .{ try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject), try spellWrittenOwned(self.sink.arena, self.ast, predicate.equals) },
+                    );
+                    continue;
+                }
+                const lhs = try self.typeOfRefOf(self.program.moduleOf(d), d, predicate.subject);
+                const rhs = try self.typeOfRefOf(self.program.moduleOf(d), d, predicate.equals);
+                if (!try self.equalityIsWellFormed(d, at, predicate, lhs, rhs)) continue;
+                try written.append(gpa, .{ .lhs = lhs, .rhs = rhs, .predicate = at });
+            }
+            const end: u32 = @intCast(written.items.len);
+            if (end > start) try own.put(gpa, d, .{ .start = start, .end = end });
+        }
+        if (own.count() == 0) return;
+
+        // Classes, enclosing blocks first so a member reads its block's
+        // conflicts as already refused.
+        var conflicting: std.AutoHashMapUnmanaged(u32, void) = .empty;
+        defer conflicting.deinit(gpa);
+        var members: std.ArrayList(types_mod.TypeEqualities.Member) = .empty;
+        defer members.deinit(gpa);
+        var sides: std.ArrayList(types_mod.TypeEqualities.Side) = .empty;
+        defer sides.deinit(gpa);
+        var runs: std.AutoHashMapUnmanaged(node.DeclId, types_mod.TypeEqualities.Run) = .empty;
+        errdefer runs.deinit(gpa);
+        var classes: EqualityClasses = .{};
+        defer classes.deinit(gpa);
+        for ([_]bool{ true, false }) |blocks| for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            const parent = self.constraintParent(d);
+            if ((parent == .none) != blocks) continue;
+            const inherited: []const WrittenEquality = inherited: {
+                if (parent == .none) break :inherited &.{};
+                const r = own.get(parent) orelse break :inherited &.{};
+                break :inherited written.items[r.start..r.end];
+            };
+            const mine: []const WrittenEquality = if (own.get(d)) |r| written.items[r.start..r.end] else &.{};
+            if (mine.len == 0) {
+                const enclosing = runs.get(parent) orelse continue;
+                // All the member sees are its enclosing declaration's classes.
+                // Its uses discharge no equality a second time.
+                try runs.put(gpa, d, .{ .members = enclosing.members, .sides = .{ .start = 0, .end = 0 } });
+                continue;
+            }
+
+            classes.clear();
+            var clashes: std.ArrayList(struct { predicate: u32, conflict: EqualityClasses.Conflict }) = .empty;
+            defer clashes.deinit(gpa);
+            for ([_][]const WrittenEquality{ inherited, mine }, 0..) |list, which| for (list) |equality| {
+                if (conflicting.contains(equality.predicate)) continue;
+                const clash = try classes.join(gpa, &self.builder, equality.lhs, equality.rhs, equality.predicate) orelse continue;
+                if (which == 1) try clashes.append(gpa, .{ .predicate = equality.predicate, .conflict = clash });
+            };
+
+            // Fixed members with different spellings may already name the same
+            // type. Every projection-only class, including one written later,
+            // supplies the same substitution here and in the body.
+            var projections: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty;
+            defer projections.deinit(gpa);
+            try classes.projectionReplacements(gpa, &projections);
+            for (clashes.items) |clash| {
+                if (projections.count() != 0) {
+                    const held = try self.builder.normalizeEqualityRepresentative(clash.conflict.held, &projections);
+                    const joined = try self.builder.normalizeEqualityRepresentative(clash.conflict.joined, &projections);
+                    if (held == joined) continue;
+                }
+                try conflicting.put(gpa, clash.predicate, {});
+                if (try self.firstRefusalOf(clash.predicate)) try self.reportEqualityClash(clash.predicate, clash.conflict);
+            }
+
+            // A fixed representative holding a member of a class -- its own,
+            // through two equalities, or another, whose member reads as that
+            // class's representative -- is refused at the equality that
+            // joined the member, and the classes it would leave are dropped.
+            //
+            // Only a member read as a written type is held to this: a class
+            // of projections alone takes the right-hand side of its first
+            // equality as representative, and which side is written first
+            // must not decide whether a declaration is refused. The equality
+            // reported and dropped is the one that wrote the holding type,
+            // which is where the edit goes.
+            var refused_class = false;
+            for (classes.classes.items, 0..) |class, c| {
+                if (!class.fixed) continue;
+                const holder_predicate = for (classes.members.items) |member| {
+                    if (member.class == c and member.ty == class.representative) break member.predicate;
+                } else continue;
+                for (classes.members.items) |member| {
+                    const its = classes.classes.items[member.class];
+                    if (member.ty == its.representative or member.ty == class.representative) continue;
+                    if (!its.fixed and member.class != c) continue;
+                    if (!try self.builder.holdsType(class.representative, member.ty)) continue;
+                    refused_class = true;
+                    try conflicting.put(gpa, holder_predicate, {});
+                    if (try self.firstRefusalOf(holder_predicate)) try self.reportEqualityHolding(holder_predicate, class.representative, member.ty, its.representative);
+                    break;
+                }
+            }
+            if (refused_class) {
+                classes.clear();
+                for ([_][]const WrittenEquality{ inherited, mine }) |list| for (list) |equality| {
+                    if (conflicting.contains(equality.predicate)) continue;
+                    _ = try classes.join(gpa, &self.builder, equality.lhs, equality.rhs, equality.predicate);
+                };
+                projections.clearRetainingCapacity();
+                try classes.projectionReplacements(gpa, &projections);
+            }
+
+            if (projections.count() > 0) for (classes.classes.items) |*class| {
+                if (class.fixed) class.representative = try self.builder.normalizeEqualityRepresentative(class.representative, &projections);
+            };
+
+            const member_start: u32 = @intCast(members.items.len);
+            for (classes.members.items) |member| {
+                const representative = classes.classes.items[member.class].representative;
+                if (member.ty == representative or self.builder.standinOf(member.ty) == null) continue;
+                try members.append(gpa, .{ .ty = member.ty, .representative = representative, .predicate = member.predicate });
+            }
+            const side_start: u32 = @intCast(sides.items.len);
+            for (mine) |equality| {
+                if (conflicting.contains(equality.predicate)) continue;
+                try sides.append(gpa, .{ .lhs = equality.lhs, .rhs = equality.rhs, .predicate = equality.predicate });
+            }
+            try runs.put(gpa, d, .{
+                .members = .{ .start = member_start, .end = @intCast(members.items.len) },
+                .sides = .{ .start = side_start, .end = @intCast(sides.items.len) },
+            });
+        };
+
+        const owned_members = try members.toOwnedSlice(gpa);
+        errdefer gpa.free(owned_members);
+        const owned_sides = try sides.toOwnedSlice(gpa);
+        const equalities: types_mod.TypeEqualities = .{ .runs = runs, .members = owned_members, .sides = owned_sides };
+        self.contextual_constraints.equalities = equalities;
+        self.builder.setContextualConstraints(self.contextual_constraints);
+    }
+
+    /// The classes one declaration's equalities form, rebuilt per declaration.
+    const EqualityClasses = struct {
+        classes: std.ArrayList(Class) = .empty,
+        members: std.ArrayList(Joined) = .empty,
+
+        const Class = struct {
+            representative: TypeId,
+            /// Whether the representative is a type that is not a projection,
+            /// which no other such type may join.
+            fixed: bool,
+        };
+
+        const Joined = struct {
+            ty: TypeId,
+            class: u32,
+            predicate: u32,
+        };
+
+        /// The two types that cannot be one, when an equality would join a
+        /// class holding one type that is not a projection to another.
+        const Conflict = struct { held: TypeId, joined: TypeId };
+
+        fn clear(self: *EqualityClasses) void {
+            self.classes.clearRetainingCapacity();
+            self.members.clearRetainingCapacity();
+        }
+
+        fn deinit(self: *EqualityClasses, gpa: std.mem.Allocator) void {
+            self.classes.deinit(gpa);
+            self.members.deinit(gpa);
+        }
+
+        fn classOf(self: *const EqualityClasses, ty: TypeId) ?u32 {
+            for (self.members.items) |member| if (member.ty == ty) return member.class;
+            return null;
+        }
+
+        fn projectionReplacements(self: *const EqualityClasses, gpa: std.mem.Allocator, replacements: *std.AutoHashMapUnmanaged(TypeId, TypeId)) std.mem.Allocator.Error!void {
+            for (self.members.items) |member| {
+                const class = self.classes.items[member.class];
+                if (!class.fixed and member.ty != class.representative)
+                    try replacements.put(gpa, member.ty, class.representative);
+            }
+        }
+
+        /// Joins `lhs` and `rhs` into one class, or returns why they cannot be.
+        fn join(self: *EqualityClasses, gpa: std.mem.Allocator, builder: *const types_mod.Typing.Builder, lhs: TypeId, rhs: TypeId, predicate: u32) std.mem.Allocator.Error!?Conflict {
+            const left = self.classOf(lhs);
+            const right = self.classOf(rhs);
+            const left_fixed = builder.standinOf(lhs) == null;
+            const right_fixed = builder.standinOf(rhs) == null;
+            if (left == null and right == null) {
+                const class: u32 = @intCast(self.classes.items.len);
+                try self.classes.append(gpa, .{ .representative = if (left_fixed) lhs else rhs, .fixed = left_fixed or right_fixed });
+                try self.members.append(gpa, .{ .ty = lhs, .class = class, .predicate = predicate });
+                if (rhs != lhs) try self.members.append(gpa, .{ .ty = rhs, .class = class, .predicate = predicate });
+                return null;
+            }
+            if (left == null or right == null) {
+                const class = (left orelse right).?;
+                const joining = if (left == null) lhs else rhs;
+                const fixed = if (left == null) left_fixed else right_fixed;
+                const held = &self.classes.items[class];
+                if (fixed) {
+                    if (held.fixed and held.representative != joining) return .{ .held = held.representative, .joined = joining };
+                    held.* = .{ .representative = joining, .fixed = true };
+                }
+                try self.members.append(gpa, .{ .ty = joining, .class = class, .predicate = predicate });
+                return null;
+            }
+            const keep = @min(left.?, right.?);
+            const drop = @max(left.?, right.?);
+            if (keep == drop) return null;
+            const kept = self.classes.items[keep];
+            const dropped = self.classes.items[drop];
+            if (kept.fixed and dropped.fixed and kept.representative != dropped.representative)
+                return .{ .held = kept.representative, .joined = dropped.representative };
+            if (dropped.fixed) self.classes.items[keep] = dropped;
+            for (self.members.items) |*member| {
+                if (member.class == drop) member.class = keep;
+            }
+            return null;
+        }
+    };
+
+    /// The span a `where` equality is written over, both sides included.
+    fn equalitySpan(self: *const Checker, predicate: node.WherePredicate) Span {
+        return Span.merge(self.ast.writtenSpan(predicate.subject), self.ast.writtenSpan(predicate.equals));
+    }
+
+    fn predicateAt(self: *const Checker, at: u32) node.WherePredicate {
+        return self.ast.where_predicates[at];
+    }
+
+    /// Whether an equality may stand as written: one side is a projection,
+    /// and neither side holds the other. Reports a refusal the first time it is found.
+    fn equalityIsWellFormed(
+        self: *Checker,
+        d: node.DeclId,
+        at: u32,
+        predicate: node.WherePredicate,
+        lhs: TypeId,
+        rhs: TypeId,
+    ) std.mem.Allocator.Error!bool {
+        if (lhs == .poison or rhs == .poison) return false;
+        const left_projection = self.builder.standinOf(lhs) != null;
+        const right_projection = self.builder.standinOf(rhs) != null;
+        const file = self.ast.fileOf(predicate.subject.at);
+        const span = self.equalitySpan(predicate);
+        if (!left_projection and !right_projection) {
+            // Neither side open is the subject `[T-Where]` already refused.
+            if (!self.whereSubjectDependsOnOpen(d, predicate.subject) and !self.whereSubjectDependsOnOpen(d, predicate.equals)) return false;
+            if (!try self.firstRefusalOf(at)) return false;
+            const left_parameter = self.builder.get(lhs) == .parameter;
+            const right_parameter = self.builder.get(rhs) == .parameter;
+            const left = try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject);
+            const right = try spellWrittenOwned(self.sink.arena, self.ast, predicate.equals);
+            if ((left_parameter or right_parameter) and try self.reportSettledProjectionEquated(file, span, left, lhs, right, rhs)) return false;
+            if (left_parameter and right_parameter) {
+                try self.sink.addErrorFmt(
+                    .t_equal,
+                    file,
+                    span,
+                    "declare one type parameter and write it for both",
+                    "this `where` clause makes the type parameters `{s}` and `{s}` one type",
+                    .{ left, right },
+                );
+            } else if (left_parameter or right_parameter) {
+                const parameter = if (left_parameter) left else right;
+                const settled = if (left_parameter) right else left;
+                try self.sink.addErrorFmt(
+                    .t_equal,
+                    file,
+                    span,
+                    try std.fmt.allocPrint(self.sink.arena, "write `{s}` where `{s}` is written, and drop the parameter", .{ settled, parameter }),
+                    "this `where` clause makes the type parameter `{s}` always `{s}`",
+                    .{ parameter, settled },
+                );
+            } else {
+                try self.sink.addErrorFmt(
+                    .t_equal,
+                    file,
+                    span,
+                    "equate an associated type, such as `I.Item`, with the type it must be",
+                    "a `where` equality needs an associated type on one side, and neither `{s}` nor `{s}` is one",
+                    .{ left, right },
+                );
+            }
+            return false;
+        }
+        const holds_other = (left_projection and lhs != rhs and try self.builder.holdsType(rhs, lhs)) or
+            (right_projection and lhs != rhs and try self.builder.holdsType(lhs, rhs));
+        if (holds_other) {
+            if (!try self.firstRefusalOf(at)) return false;
+            const projection = try spellWrittenOwned(self.sink.arena, self.ast, if (left_projection and try self.builder.holdsType(rhs, lhs)) predicate.subject else predicate.equals);
+            const holder = try spellWrittenOwned(self.sink.arena, self.ast, if (left_projection and try self.builder.holdsType(rhs, lhs)) predicate.equals else predicate.subject);
+            try self.sink.addErrorFmt(
+                .t_equal,
+                file,
+                span,
+                "no type contains itself, so no settling meets this; equate the projection with a type that does not hold it",
+                "`{s}` cannot be the same type as `{s}`, which holds it",
+                .{ projection, holder },
+            );
+            return false;
+        }
+        return true;
+    }
+
+    /// `[T-Equal]` where a side written as a projection reads, once
+    /// implementations have settled, as a type parameter: `I.Iter` under
+    /// `I: Iterator` is `I`. The message says so, since the clause as written
+    /// names no parameter. False where both sides read as written.
+    fn reportSettledProjectionEquated(self: *Checker, file: FileId, span: Span, left: []const u8, lhs: TypeId, right: []const u8, rhs: TypeId) std.mem.Allocator.Error!bool {
+        const left_read = try self.typeName(lhs);
+        const right_read = try self.typeName(rhs);
+        const left_moved = !std.mem.eql(u8, left, left_read);
+        const right_moved = !std.mem.eql(u8, right, right_read);
+        if (!left_moved and !right_moved) return false;
+        const moved = if (left_moved) left else right;
+        const moved_read = if (left_moved) left_read else right_read;
+        const left_parameter = self.builder.get(lhs) == .parameter;
+        if (left_parameter and self.builder.get(rhs) == .parameter) {
+            try self.sink.addErrorFmt(
+                .t_equal,
+                file,
+                span,
+                "declare one type parameter and write it for both",
+                "`{s}` is `{s}`, so this `where` clause makes the type parameters `{s}` and `{s}` one type",
+                .{ moved, moved_read, left_read, right_read },
+            );
+            return true;
+        }
+        const parameter = if (left_parameter) left_read else right_read;
+        const settled = if (left_parameter) right_read else left_read;
+        try self.sink.addErrorFmt(
+            .t_equal,
+            file,
+            span,
+            try std.fmt.allocPrint(self.sink.arena, "write `{s}` where `{s}` is written, and drop the parameter", .{ settled, parameter }),
+            "`{s}` is `{s}`, so this `where` clause makes the type parameter `{s}` always `{s}`",
+            .{ moved, moved_read, parameter, settled },
+        );
+        return true;
+    }
+
+    /// Whether the equality at `at` is refused here for the first time, and
+    /// so is reported.
+    fn firstRefusalOf(self: *Checker, at: u32) std.mem.Allocator.Error!bool {
+        const entry = try self.equalities_reported.getOrPut(self.gpa, at);
+        return !entry.found_existing;
+    }
+
+    /// `[T-Equal]` at the equality that joined `member` to a class, where
+    /// `holder`, a type another equality makes a class's representative,
+    /// holds it. `member` reads as `reads_as` inside the declaration.
+    fn reportEqualityHolding(self: *Checker, at: u32, holder: TypeId, member: TypeId, reads_as: TypeId) std.mem.Allocator.Error!void {
+        const predicate = self.predicateAt(at);
+        const holds_itself = try self.builder.holdsType(holder, reads_as) or reads_as == holder;
+        if (holds_itself) {
+            try self.sink.addErrorFmt(
+                .t_equal,
+                self.ast.fileOf(predicate.subject.at),
+                self.equalitySpan(predicate),
+                "no type contains itself, so no settling meets these equalities; remove one of them",
+                "with this equality `{s}` must be `{s}`, which holds it",
+                .{ try self.typeName(member), try self.typeName(holder) },
+            );
+            return;
+        }
+        try self.sink.addErrorFmt(
+            .t_equal,
+            self.ast.fileOf(predicate.subject.at),
+            self.equalitySpan(predicate),
+            try std.fmt.allocPrint(self.sink.arena, "write `{s}` where `{s}` is written inside `{s}`", .{ try self.typeName(reads_as), try self.typeName(member), try self.typeName(holder) }),
+            "`{s}` is `{s}` here, so `{s}` names it by a projection the equalities already settle",
+            .{ try self.typeName(member), try self.typeName(reads_as), try self.typeName(holder) },
+        );
+    }
+
+    fn reportEqualityClash(self: *Checker, at: u32, clash: EqualityClasses.Conflict) std.mem.Allocator.Error!void {
+        const predicate = self.predicateAt(at);
+        const subject = try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject);
+        try self.sink.addErrorFmt(
+            .t_equal,
+            self.ast.fileOf(predicate.subject.at),
+            self.equalitySpan(predicate),
+            "one type cannot be both; remove one of the equalities",
+            "an earlier equality makes `{s}` the type `{s}`, and this one makes it `{s}`",
+            .{ subject, try self.typeName(clash.held), try self.typeName(clash.joined) },
+        );
     }
 
     /// Reads again each `where` subject that was left a stand-in because the
@@ -7212,6 +7673,7 @@ const Checker = struct {
     /// **Bound:** one reading per `where` subject whose first reading was a
     /// stand-in.
     fn resettleConstraintSubjects(self: *Checker) std.mem.Allocator.Error!void {
+        try self.settleEqualities();
         const items = @constCast(self.contextual_constraints.items);
         var changed = false;
         var promises: std.ArrayList(Checker.Promise) = .empty;
@@ -10086,7 +10548,7 @@ const Checker = struct {
         // hole [T-Impl] reports against the implementation itself: said once,
         // where the member is missing rather than at every type written in
         // terms of it.
-        const settled = try self.builder.settledBy(reading.impl, sig, reading.impl_args) orelse return .{};
+        const settled = try self.builder.settledByWithin(self.generic, reading.impl, sig, reading.impl_args) orelse return .{};
 
         return .{
             .ty = settled,
@@ -10485,14 +10947,17 @@ const Checker = struct {
         if (declaring != trait) return self.inheritedThroughSelf(owner, ref, run, trait, trait_args, declaring, held, at);
 
         const sig = try self.declaredTypeNamed(trait, run, at) orelse return .{};
+        // A `where` equality of the body making the call reads the key as its
+        // class's representative, as `settledAtWithin` does for every other
+        // reading of a projection there.
         return .{
-            .ty = try self.builder.addSettledStandin(
+            .ty = self.builder.equatedWithin(self.generic, try self.builder.addSettledStandin(
                 @intCast(trait.index()),
                 trait_args,
                 held,
                 sig,
                 self.ast.tokenText(at),
-            ),
+            )),
             .declared = sig,
             .named = at,
         };
@@ -12210,6 +12675,7 @@ const Checker = struct {
                 return true;
             }
         }
+        if (try self.equalitiesUnmet(d, args, enclosing, at, mode)) return true;
         if (d == self.raw_accesses.closure and args.len == 2 and self.builder.erasedSignature(args[0]) == null and
             self.builder.get(args[0]) != .parameter and args[0] != .poison)
         {
@@ -12360,18 +12826,76 @@ const Checker = struct {
         try testing.expect(diagnosticSays(&sink, .t_bound, "`eat` may dispose of an `Ingot`, so it requires the type to be Discardable; give the value to an operation that keeps it, or settle it before"));
     }
 
+    /// One side of `d`'s equality at a use's settling, read in the caller's
+    /// scope; poison where the use could not settle it.
+    fn equalitySideAt(self: *Checker, d: node.DeclId, side: TypeId, args: []const TypeId, enclosing: ?BoundSettlement) std.mem.Allocator.Error!TypeId {
+        var settled = try self.builder.substituteWithin(self.generic, side, d.index(), args);
+        if (enclosing) |outer| settled = try self.builder.substituteWithin(self.generic, settled, outer.decl.index(), outer.settled);
+        return settled;
+    }
+
+    /// Whether a use settles the two sides of one of `d`'s `where` equalities
+    /// to different types, reporting the first at `at` in `.report` mode.
+    fn equalitiesUnmet(
+        self: *Checker,
+        d: node.DeclId,
+        args: []const TypeId,
+        enclosing: ?BoundSettlement,
+        at: TokenId,
+        mode: BoundMode,
+    ) std.mem.Allocator.Error!bool {
+        for (self.contextual_constraints.equalities.ownSides(d)) |side| {
+            const lhs = try self.equalitySideAt(d, side.lhs, args, enclosing);
+            const rhs = try self.equalitySideAt(d, side.rhs, args, enclosing);
+            // A side the use could not settle was reported where it failed.
+            if (lhs == .poison or rhs == .poison) continue;
+            if (lhs == rhs) continue;
+            if (mode == .ask) return true;
+            try self.noteRefusal(at, .equality);
+            try self.reportEqualityUnmet(d, side.predicate, lhs, rhs, self.ast.fileOf(at), self.ast.tokenSpan(at));
+            return true;
+        }
+        return false;
+    }
+
+    /// `[T-Equal]` at a use: the two sides of the predicate at `predicate`
+    /// settle to `lhs` and `rhs`. The clause is cited where it is written.
+    fn reportEqualityUnmet(self: *Checker, d: node.DeclId, at: u32, lhs: TypeId, rhs: TypeId, file: FileId, span: Span) std.mem.Allocator.Error!void {
+        const predicate = self.predicateAt(at);
+        const reported = self.sink.items().len;
+        const label = self.equalityReason(d) orelse "both sides of the equality must settle to one type";
+        try self.sink.addErrorFmt(
+            .t_equal,
+            file,
+            span,
+            label,
+            "`{s}` must be the same type as `{s}`, and here they are `{s}` and `{s}`",
+            .{
+                try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject),
+                try spellWrittenOwned(self.sink.arena, self.ast, predicate.equals),
+                try self.typeName(lhs),
+                try self.typeName(rhs),
+            },
+        );
+        try self.citeWhereSpan(reported, self.ast.fileOf(predicate.subject.at), self.equalitySpan(predicate));
+    }
+
     /// Points the refusal reported since the sink held `reported` items at the
     /// `where` predicate whose subject is `subject`. The predicate sits on the
     /// callee, often in another module, and is what the call failed to meet.
     fn citeWhereClause(self: *Checker, reported: usize, subject: node.TypeRef) std.mem.Allocator.Error!void {
+        try self.citeWhereSpan(reported, self.ast.fileOf(subject.at), self.ast.writtenSpan(subject));
+    }
+
+    fn citeWhereSpan(self: *Checker, reported: usize, file: FileId, span: Span) std.mem.Allocator.Error!void {
         const items = self.sink.items();
         if (items.len <= reported) return;
         var last = items[items.len - 1];
         const labels = try self.sink.arena.alloc(Label, last.labels.len + 1);
         @memcpy(labels[0..last.labels.len], last.labels);
         labels[last.labels.len] = .{
-            .file = self.ast.fileOf(subject.at),
-            .span = self.ast.writtenSpan(subject),
+            .file = file,
+            .span = span,
             .message = "required by this `where` clause",
             .style = .secondary,
         };
@@ -12436,9 +12960,18 @@ const Checker = struct {
         return self.bounds_reported.contains(at);
     }
 
+    const RefusalKind = enum { bound, equality };
+
     fn noteRefused(self: *Checker, at: TokenId) std.mem.Allocator.Error!void {
+        try self.noteRefusal(at, .bound);
+    }
+
+    fn noteRefusal(self: *Checker, at: TokenId, kind: RefusalKind) std.mem.Allocator.Error!void {
         const entry = try self.bounds_reported.getOrPut(self.gpa, at);
-        if (!entry.found_existing) try self.bounds_reported_order.append(self.gpa, at);
+        if (entry.found_existing) return;
+        errdefer self.bounds_reported.removeByPtr(entry.key_ptr);
+        entry.value_ptr.* = kind;
+        try self.bounds_reported_order.append(self.gpa, at);
     }
 
     /// Records `demand`, whose trait arguments the caller may free once this
@@ -12914,6 +13447,37 @@ const Checker = struct {
             .reason = "`zip` draws an item from the first sequence before asking the second, and if the second sequence ends first it disposes of that first item, so the first sequence's items must be Discardable; zip in the other order, with the sequence whose items are Discardable first, or walk both sequences by hand",
         },
     };
+
+    /// Why one of `Sequence`'s operations equates two types, where `d` is one
+    /// whose `where` clause does.
+    fn equalityReason(self: *Checker, d: node.DeclId) ?[]const u8 {
+        if (self.ast.declTag(d) != .function) return null;
+        const owner = self.res.signatures.traitOf(self.ast, d) orelse return null;
+        if (owner != sequenceDecl(self.ast, self.res)) return null;
+        return equalityReasonOf(self.ast.tokenText(self.ast.declName(d)));
+    }
+
+    /// `Sequence`'s operations whose `where` clause equates two item types,
+    /// with the sentence saying what the operation does with them.
+    const sequence_equalities = [_]struct { operation: []const u8, reason: []const u8 }{
+        .{
+            .operation = "chain",
+            .reason = "`chain` hands out the second sequence's items as the first's, so both must yield one type; `map` one of them to the other's item first",
+        },
+    };
+
+    fn equalityReasonOf(operation: []const u8) ?[]const u8 {
+        for (sequence_equalities) |entry| {
+            if (std.mem.eql(u8, entry.operation, operation)) return entry.reason;
+        }
+        return null;
+    }
+
+    test "only an operation that equates two item types carries an equality reason" {
+        try testing.expect(equalityReasonOf("chain") != null);
+        try testing.expect(equalityReasonOf("zip") == null);
+        try testing.expect(equalityReasonOf("unzip") == null);
+    }
 
     fn disposalReasonOf(operation: []const u8) ?[]const u8 {
         for (sequence_disposals) |entry| {
@@ -13683,48 +14247,58 @@ const Checker = struct {
         self: *Checker,
         id: ExprId,
         rec: types_mod.CallImpl,
-    ) std.mem.Allocator.Error!void {
-        if (rec.args.len == 0) return;
-        if (rec.self_ty == .poison) return;
-        for (rec.args) |a| if (a == .poison) return;
-        if (self.builder.awaitsTypes(rec.self_ty, rec.args)) {
-            if (self.builder.get(rec.self_ty) != .parameter) return;
-            for (rec.args) |a| if (self.builder.get(a) == .open_type) return;
+        require_open_key: bool,
+    ) std.mem.Allocator.Error!?RefusalKind {
+        if (rec.args.len == 0) return null;
+        if (rec.self_ty == .poison) return null;
+        for (rec.args) |a| if (a == .poison) return null;
+        if (!require_open_key and self.builder.awaitsTypes(rec.self_ty, rec.args)) {
+            if (self.builder.get(rec.self_ty) != .parameter) return null;
+            for (rec.args) |a| if (self.builder.get(a) == .open_type) return null;
             // A bound on the trait written with the wrong number of arguments
             // was refused where it is written, and what it would have
             // carried is unknown: a call missing it is that mistake again.
             const declared = self.ast.declTypeParams(node.DeclId.at(rec.trait)).len;
             for (self.builder.boundsOn(rec.self_ty)) |bound| {
-                if (bound.trait.index() == rec.trait and bound.args.len != declared) return;
+                if (bound.trait.index() == rec.trait and bound.args.len != declared) return null;
             }
         }
 
         const trait = node.DeclId.at(rec.trait);
-        if (self.rendersItself(rec.self_ty, trait)) return;
+        if (self.rendersItself(rec.self_ty, trait)) return null;
         // The row rather than the declaration it names: what this asks is
         // whether an implementation exists, and one the compiler provides
         // exists without a source having declared it.
-        if (try self.builder.implementationChoiceWithin(self.generic, trait, rec.args, rec.self_ty) != null) return;
-        if (try self.fallBackOpenParts(rec.self_ty, rec.args)) {
-            const settled_args = try self.gpa.alloc(TypeId, rec.args.len);
-            defer self.gpa.free(settled_args);
-            for (rec.args, settled_args) |argument, *settled| settled.* = try self.builder.resolveOpen(argument, &self.open_types);
-            const settled_self = try self.builder.resolveOpen(rec.self_ty, &self.open_types);
-            if (try self.builder.implementationChoiceWithin(self.generic, trait, settled_args, settled_self) != null) return;
+        if (try self.builder.implementationChoiceWithin(self.generic, trait, rec.args, rec.self_ty) != null) return null;
+        var key = rec;
+        var settled_args: []TypeId = &.{};
+        defer self.gpa.free(settled_args);
+        if (try self.fallBackOpenParts(key.self_ty, key.args)) {
+            settled_args = try self.gpa.alloc(TypeId, key.args.len);
+            for (key.args, settled_args) |argument, *settled| settled.* = try self.builder.resolveOpen(argument, &self.open_types);
+            key.args = settled_args;
+            key.self_ty = try self.builder.resolveOpen(key.self_ty, &self.open_types);
+            if (try self.builder.implementationChoiceWithin(self.generic, trait, key.args, key.self_ty) != null) return null;
         }
 
+        const site = if (self.ast.exprTag(id) == .call and isPostfixCallee(self.ast, self.res, self.ast.call(id).callee))
+            self.ast.call(id).callee
+        else
+            id;
+        if (try self.reportRefusedEquality(site, key.self_ty, trait, key.args)) return .equality;
         try reportMissingImplementation(
             self.gpa,
             self.sink,
             self.ast,
             &self.builder,
             trait,
-            rec.args,
-            rec.self_ty,
+            key.args,
+            key.self_ty,
             self.ast.fileOfExpr(id),
             self.ast.exprSpan(id),
-            try self.unmetLabel(.{ .otherwise = "", .another_value = "settle them to ones that are" }, try self.editFor(trait, rec.args, rec.self_ty, false, 0)),
+            try self.unmetLabel(.{ .otherwise = "", .another_value = "settle them to ones that are" }, try self.editFor(trait, key.args, key.self_ty, false, 0)),
         );
+        return .bound;
     }
 
     fn inherentReceiver(self: *Checker, d: node.DeclId, held: TypeId) !TypeId {
@@ -15638,6 +16212,7 @@ const Checker = struct {
             .message = at_expr,
             .labels = labels,
             .notes = all_notes,
+            .remarks = if (try self.equalityRemark(want.ty, actual)) |remark| try self.sink.arena.dupe([]const u8, &.{remark}) else &.{},
         });
         if (allocators_note) |note| if (try self.allocatorFormEdits(id, note.form)) |edits| {
             try self.addFix(self.sink.items().len - 1, .allocator_form, allocators_at.?, edits);
@@ -15693,6 +16268,29 @@ const Checker = struct {
                 });
             },
         }
+    }
+
+    /// Where a mismatch in a body names the representative of a `where`
+    /// equality's class, which projection the reader may have written
+    /// instead, and the clause that made them one type.
+    fn equalityRemark(self: *Checker, wanted: TypeId, found: TypeId) std.mem.Allocator.Error!?[]const u8 {
+        const equalities = &self.contextual_constraints.equalities;
+        if (self.generic == .none) return null;
+        const run = equalities.runs.get(self.generic) orelse return null;
+        for (equalities.members[run.members.start..run.members.end]) |member| {
+            // A representative that is a written type, such as `UInt8`, is
+            // what the reader wrote too, and names no projection to explain.
+            if (self.builder.standinOf(member.representative) == null) continue;
+            if (!try self.builder.holdsType(wanted, member.representative) and !try self.builder.holdsType(found, member.representative)) continue;
+            const predicate = self.predicateAt(member.predicate);
+            return try std.fmt.allocPrint(self.sink.arena, "`{s}` is `{s}` here, by `where {s} == {s}`", .{
+                try self.typeName(member.ty),
+                try self.typeName(member.representative),
+                try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject),
+                try spellWrittenOwned(self.sink.arena, self.ast, predicate.equals),
+            });
+        }
+        return null;
     }
 
     /// What two different closures can be kept as. Closures called alike --
@@ -16982,7 +17580,7 @@ const Checker = struct {
         const release = self.builder.closure_release orelse return self.refuseDeferLet(id, receiver, null, .none);
         const wanted = self.ast.tokenName(self.ast.declName(release.member));
         switch (try self.postfixOperation(id, id, receiver, wanted, release.member, &.{}, null)) {
-            .settled => |settled| _ = try self.checkCallOf(id, settled.sig, settled.args, .postfix, null, &.{}),
+            .settled => |settled| _ = try self.checkCallOf(id, settled.sig, settled.args, .{ .postfix = settled.dispatch }, null, &.{}),
             .absent => |held| {
                 // A `Release` the value lacks only because a bound was refused
                 // at the call that made it was reported at that call.
@@ -19274,6 +19872,7 @@ const Checker = struct {
             // A `Sequence` implementation that fails only on demands a bound
             // refusal reported follows from that refusal.
             if (try self.refusalExplains(sequence, walked, at)) return .poison;
+            if (try self.reportRefusedEquality(at, walked, self.iterator_decl.?, &.{}) or try self.reportRefusedEquality(at, walked, sequence, &.{})) return .poison;
             const before = self.sink.items().len;
             const reported = try self.report(
                 .t_for,
@@ -19292,18 +19891,21 @@ const Checker = struct {
         // is read at the type it answered for. Read at the open key, the
         // implementation it selected is not the one it answered with.
         const settled = try self.builder.resolveOpen(walked, &self.open_types);
-        const iter = try self.builder.settledAt(
+        const iter = (try self.builder.settledAtWithin(
+            self.generic,
             @intCast(sequence.index()),
             &.{},
             settled,
             iter_sig,
             "Iter",
-        );
+        )).ty;
         if (iter == .poison) return .poison;
 
         if (!try self.abandonable(iter)) return self.reportAbandonedWalk(loop, walked, iter);
 
-        return try self.itemYieldedBy(iter) orelse return try self.report(
+        if (try self.itemYieldedBy(iter)) |item| return item;
+        if (try self.reportRefusedEquality(at, iter, self.iterator_decl.?, &.{})) return .poison;
+        return try self.report(
             .t_for,
             at,
             "walking {s} `{s}` builds {s} `{s}`, which implements no `Iterator`",
@@ -19555,6 +20157,26 @@ const Checker = struct {
         try self.sink.revise(at, reported);
     }
 
+    /// `[T-Equal]` at `at`, where the implementation of `trait` that
+    /// would serve `held` is refused by its `where` equality: the equality,
+    /// not a missing implementation, is what the reader edits. Whether it
+    /// reported.
+    fn reportRefusedEquality(self: *Checker, at: ExprId, held: TypeId, trait: node.DeclId, args: []const TypeId) std.mem.Allocator.Error!bool {
+        const refused = try self.builder.refusedEquality(self.generic, trait, args, held) orelse return false;
+        const before = self.sink.items().len;
+        try self.reportEqualityUnmet(refused.implementation, refused.predicate, refused.lhs, refused.rhs, self.ast.fileOfExpr(at), self.ast.exprSpan(at));
+        const items = self.sink.items();
+        if (items.len > before) {
+            var reported = items[before];
+            const implemented = try self.builder.spellInstance(self.ast.tokenText(self.ast.declName(trait)), args);
+            defer self.gpa.free(implemented);
+            const remark = try std.fmt.allocPrint(self.sink.arena, "so the `{s}` implementation does not serve `{s}`", .{ implemented, try self.typeName(held) });
+            reported.remarks = try self.sink.arena.dupe([]const u8, &.{remark});
+            try self.sink.revise(before, reported);
+        }
+        return true;
+    }
+
     /// Adds a note to the diagnostic the sink holds at `at`, a report this
     /// checker made.
     fn addNote(self: *Checker, at: usize, note: []const u8) std.mem.Allocator.Error!void {
@@ -19611,8 +20233,8 @@ const Checker = struct {
     fn associatedTypeOf(self: *Checker, trait: node.DeclId, member: node.DeclId, name: []const u8, held: TypeId) std.mem.Allocator.Error!?TypeId {
         const choice = try self.builder.implementationChoiceWithin(self.generic, trait, &.{}, held) orelse return null;
         if (choice.declaredImplementation()) |implementation|
-            return try self.builder.settledBy(self.implementations[implementation.index()], member, choice.impl_args);
-        return try self.builder.settledAt(@intCast(trait.index()), &.{}, held, member, name);
+            return try self.builder.settledByWithin(self.generic, self.implementations[implementation.index()], member, choice.impl_args);
+        return (try self.builder.settledAtWithin(self.generic, @intCast(trait.index()), &.{}, held, member, name)).ty;
     }
 
     /// A traversal's positions: an `Iterator` handing over integers.
@@ -23538,7 +24160,7 @@ const Checker = struct {
                 if (std.mem.eql(u8, name, "into_captures") and self.builder.get(receiver_type) == .closure)
                     return self.checkClosureRecovery(id, receiver, receiver_type, expected, invocation_marked);
                 switch (try self.postfixCall(id, c.callee, c.args, expected)) {
-                    .settled => |settled| return self.checkCallOf(id, settled.sig, settled.args, .postfix, expected, &.{}),
+                    .settled => |settled| return self.checkCallOf(id, settled.sig, settled.args, .{ .postfix = settled.dispatch }, expected, &.{}),
                     .absent => {},
                     .refused, .poisoned => {
                         for (c.args) |a| try self.checkRecoveredArgument(a);
@@ -23705,7 +24327,7 @@ const Checker = struct {
                         for (c.args) |a| try self.checkRecoveredArgument(a);
                         return .{ .checked = try self.record(id, .poison) };
                     };
-                    return .{ .checked = try self.checkCallOf(id, settled.sig, settled.args, .postfix, expected, written) };
+                    return .{ .checked = try self.checkCallOf(id, settled.sig, settled.args, .{ .postfix = settled.dispatch }, expected, written) };
                 },
                 .absent => {
                     // A name that is neither an operation nor a field of the
@@ -24559,7 +25181,7 @@ const Checker = struct {
     const Postfixed = union(enum) {
         /// The operation the form reaches, and the arguments with the receiver
         /// in front.
-        settled: struct { sig: node.DeclId, args: []const ExprId },
+        settled: struct { sig: node.DeclId, args: []const ExprId, dispatch: PostfixDispatch },
         /// No operation answers, which is not a mistake here: the caller
         /// reports the name as an operation the type does not have, which is
         /// what it is. Holds the receiver's type.
@@ -24633,12 +25255,25 @@ const Checker = struct {
             applicable.shrinkRetainingCapacity(kept);
         }
 
-        if (applicable.items.len == 0) return .{ .absent = held };
-        var name_reach: NameReach = .{};
-        for (applicable.items) |a| name_reach.note(a);
-        const sig = for (applicable.items) |a| {
-            if (name_reach.reaches(a)) break a.sig;
-        } else {
+        var dispatch: PostfixDispatch = .applicable;
+        const sig = choose: {
+            if (applicable.items.len == 0) {
+                // Applied keys of one trait share a signature. Let the
+                // ordinary call infer its key from the receiver, arguments
+                // and result before diagnosing the implementation equality.
+                if (only == .none and self.contextual_constraints.equalities.runs.count() != 0) {
+                    if (try self.reaching(&pool).unmetImplementation(self.gpa, held, wanted)) |unmet| {
+                        if (unmet.conditional_equality and self.ast.declTypeParams(unmet.trait).len > 0) {
+                            dispatch = .requires_key;
+                            break :choose unmet.signature;
+                        }
+                    }
+                }
+                return .{ .absent = held };
+            }
+            var name_reach: NameReach = .{};
+            for (applicable.items) |a| name_reach.note(a);
+            for (applicable.items) |a| if (name_reach.reaches(a)) break :choose a.sig;
             try self.reportAmbiguous(at, held, applicable.items, true);
             return .refused;
         };
@@ -24651,7 +25286,7 @@ const Checker = struct {
             .call = id,
             .args = args,
         });
-        return .{ .settled = .{ .sig = sig, .args = args } };
+        return .{ .settled = .{ .sig = sig, .args = args, .dispatch = dispatch } };
     }
 
     /// The type of `receiver` where `receiver.wanted` is written, checked
@@ -25509,13 +26144,17 @@ const Checker = struct {
     }
 
     /// How a call names the operation it runs.
+    /// A header behind unmet equalities supplies a signature for inference,
+    /// but cannot license this call until the complete key is proved.
+    const PostfixDispatch = enum { applicable, requires_key };
+
     const CallForm = union(enum) {
         /// A function's name or a path to it: `f(x)`, `Measure.of(x)`.
         named,
         /// `x.op()`. The receiver is an argument the tree does not spell: it
         /// was checked to learn which implementations were in play, and the
         /// matcher pins it to parameter zero.
-        postfix,
+        postfix: PostfixDispatch,
         /// `Limits.default()`: a trait's operation reached through the type
         /// written before the dot, which is the call's `Self`.
         through_type: TypeId,
@@ -25946,7 +26585,10 @@ const Checker = struct {
                 self.call_impls.items[at].self_ty = receiver;
                 self.self_at_call = receiver;
                 self.call_impls.items[at].args = trait_args;
-                try self.checkImplementationExists(id, self.call_impls.items[at]);
+                const require_open_key = postfix and form.postfix == .requires_key;
+                if (try self.checkImplementationExists(id, self.call_impls.items[at], require_open_key)) |refused| {
+                    if (refused == .equality or require_open_key) self.self_at_call = .poison;
+                }
             }
 
             // A `Self` that was reported takes the call with it. Every
@@ -25979,7 +26621,7 @@ const Checker = struct {
         };
         const supplied = settled.own;
         const errors_before_bounds = self.sink.error_count;
-        if (self.constraints.rangeOfDeclaration(d).len() > 0) {
+        if (self.constraints.rangeOfDeclaration(d).len() > 0 or self.contextual_constraints.equalities.ownSides(d).len > 0) {
             // The arguments a call settled are as much an instantiation as the
             // ones a written type spells, and a bound constrains both. A
             // trait's operation is written in the trait's parameters as an
@@ -26177,7 +26819,11 @@ const Checker = struct {
             trait_decl,
             trait_args,
         );
-        const result_type = if (argument_diverges)
+        // A result promised under a false type equality supplies no value
+        // of the promised type. Its arguments have still been checked.
+        const result_type = if (self.bounds_reported.get(named) == .equality)
+            TypeId.poison
+        else if (argument_diverges)
             TypeId.never
         else
             returns;
@@ -27280,18 +27926,20 @@ const Checker = struct {
             // this type asks for more than the type's arguments give it, is the
             // mistake here, whatever the type's parts are.
             const prepared = try self.builder.capabilityView();
-            const unmet = try self.reaching(&prepared).unmetImplementation(self.gpa, of, wanted, declaring.items);
-            if (unmet != node.DeclId.none) {
+            if (try self.reaching(&prepared).unmetImplementation(self.gpa, of, wanted)) |unmet| {
                 // Unless what it asks for is a demand a bound refusal reported
                 // unmet: then the missing implementation follows from that.
-                if (try self.refusalExplains(unmet, of, base)) return try self.record(id, .poison);
+                if (try self.refusalExplains(unmet.trait, of, base)) return try self.record(id, .poison);
+                // An implementation refused by its `where` equality is reported
+                // through the equality, naming the two types it settles.
+                if (try self.reportRefusedEquality(id, of, unmet.trait, &.{})) return try self.record(id, .poison);
                 try self.reportUnimplemented(
                     self.ast.fileOfExpr(id),
                     self.ast.exprSpan(id),
                     "its implementation's bounds are not met by this type's arguments",
                     "`{s}` comes from `{s}`, and `{s}` does not implement it",
-                    .{ name, self.ast.tokenText(self.ast.declName(unmet)), (try self.typeName(of)) },
-                    unmet,
+                    .{ name, self.ast.tokenText(self.ast.declName(unmet.trait)), (try self.typeName(of)) },
+                    unmet.trait,
                     &.{},
                     of,
                 );
@@ -27389,6 +28037,15 @@ const Checker = struct {
         if (self.res.refused_operations.contains(self.ast.tokenName(self.ast.exprMain(id)))) return try self.record(id, .poison);
         const visible = if (self.sealedHere(of)) null else field;
         const missing = visible == null and declaring != .none and !try self.answersDeclared(of, declaring);
+        // A `Sequence` operation reaches an iterator through its `Iterator`
+        // implementation, so one refused by its `where` equality is the
+        // reason, reported through the equality.
+        if (missing) {
+            if (try self.reportRefusedEquality(id, of, declaring, &.{})) return self.record(id, .poison);
+            if (declaring == self.sequence_decl) if (self.iterator_decl) |iterator| {
+                if (try self.reportRefusedEquality(id, of, iterator, &.{})) return self.record(id, .poison);
+            };
+        }
         const help: []const u8 = if (visible) |held| help: {
             if (!self.holdsACallable(held))
                 break :help try std.fmt.allocPrint(self.sink.arena, "`{s}` is a field holding `{s}`, and a call does not reach a field", .{ name, (try self.typeName(held)) });
@@ -28160,7 +28817,7 @@ const Checker = struct {
         const held = settled[0][lists.own - 1];
         if (held == .poison) return false;
         if (settled[2].len > 0) {
-            try self.checkImplementationExists(id, (try self.valueImplementation(id, lists, settled)).?);
+            _ = try self.checkImplementationExists(id, (try self.valueImplementation(id, lists, settled)).?, false);
             if (self.sink.error_count != before) return false;
         } else if (!try self.dischargesDeclared(held, lists.trait, &.{})) {
             try self.reportSelfUnimplemented(self.locOf(id), self.ast.declName(lists.trait), held);
@@ -30003,7 +30660,7 @@ const Checker = struct {
         };
         if (choice.supplier == .bound) {
             const elem = self.index_elem orelse return .unusable;
-            const settled = try self.builder.settledAt(trait.index(), &args, head, elem, "Elem");
+            const settled = (try self.builder.settledAtWithin(self.generic, trait.index(), &args, head, elem, "Elem")).ty;
             const row: u32 = @intCast(self.expansions.items.len);
             const enclosing = self.res.implEnclosing(self.generic);
             const owner = if (enclosing != .none) enclosing else self.generic;
@@ -30043,7 +30700,7 @@ const Checker = struct {
         try self.projected_at.put(self.gpa, at, row);
 
         const elem = self.index_elem orelse return .unusable;
-        const settled = try self.builder.settledBy(found, elem, choice.impl_args) orelse return .unusable;
+        const settled = try self.builder.settledByWithin(self.generic, found, elem, choice.impl_args) orelse return .unusable;
         return .{ .place = settled };
     }
 
@@ -30187,7 +30844,7 @@ const Checker = struct {
                 };
                 if (choice.supplier == .bound) {
                     answer.deferred_trait = trait;
-                    answer.settled = try self.builder.settledAt(@intCast(trait.index()), &.{key}, field.ty, elem, "Elem");
+                    answer.settled = (try self.builder.settledAtWithin(impl, @intCast(trait.index()), &.{key}, field.ty, elem, "Elem")).ty;
                 } else {
                     const selected = choice.declaredImplementation() orelse {
                         if (reporting) try self.delegationError(impl, "the backing field has no concrete indexing projection");
@@ -35734,6 +36391,68 @@ const Checker = struct {
         return true;
     }
 
+    /// A signature equality read over the member's type parameters, with the
+    /// implementation supplying the trait arguments and the receiver.
+    fn memberEqualityType(
+        self: *Checker,
+        within: node.DeclId,
+        ty: TypeId,
+        sig: node.DeclId,
+        own_and_self: []const TypeId,
+        trait_decl: node.DeclId,
+        trait_args: []const TypeId,
+    ) std.mem.Allocator.Error!TypeId {
+        const own = try self.builder.substituteWithin(within, ty, sig.index(), own_and_self);
+        if (trait_args.len == 0) return own;
+        return self.builder.substituteWithin(within, own, trait_decl.index(), trait_args);
+    }
+
+    /// An implementation and its signature must admit the same calls. Prove
+    /// each signature equality in the member's scope, then each member equality
+    /// from the signature's classes at this receiver. In the latter direction
+    /// only the enclosing implementation's own assumptions are available.
+    fn checkMemberEqualities(
+        self: *Checker,
+        code: Code,
+        trait_decl: node.DeclId,
+        trait_args: []const TypeId,
+        sig: node.DeclId,
+        member: node.DeclId,
+    ) std.mem.Allocator.Error!void {
+        const equalities = &self.contextual_constraints.equalities;
+        const declared = equalities.ownSides(sig);
+        const supplied = equalities.ownSides(member);
+        if (declared.len == 0 and supplied.len == 0) return;
+        const parent = self.constraintParent(member);
+        const params = self.param_types[member.index()];
+        const own_and_self = try self.withSettledSelf(sig, params);
+        defer if (own_and_self.ptr != params.ptr) self.gpa.free(own_and_self);
+        var promised: EqualityClasses = .{};
+        defer promised.deinit(self.gpa);
+        for (declared) |side| {
+            const lhs = try self.memberEqualityType(parent, side.lhs, sig, own_and_self, trait_decl, trait_args);
+            const rhs = try self.memberEqualityType(parent, side.rhs, sig, own_and_self, trait_decl, trait_args);
+            if (lhs == .poison or rhs == .poison or lhs == rhs) continue;
+            if (supplied.len > 0) _ = try promised.join(self.gpa, &self.builder, lhs, rhs, side.predicate);
+            // These types already use the member's parameters. Reading them
+            // once in the member's scope applies the classes its body sees.
+            const left = try self.builder.substituteWithin(member, lhs, member.index(), params);
+            const right = try self.builder.substituteWithin(member, rhs, member.index(), params);
+            if (left == right or left == .poison or right == .poison) continue;
+            const predicate = self.predicateAt(side.predicate);
+            const at = self.ast.declName(member);
+            return self.sink.addErrorFmt(code, self.ast.fileOf(at), self.ast.tokenSpan(at), "require the equality the trait signature declares", "the signature of `{s}` requires `{s} == {s}`, and this implementation does not", .{ self.ast.tokenText(at), try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject), try spellWrittenOwned(self.sink.arena, self.ast, predicate.equals) });
+        }
+        for (supplied) |side| {
+            const lhs = try self.builder.substituteWithin(parent, side.lhs, member.index(), params);
+            const rhs = try self.builder.substituteWithin(parent, side.rhs, member.index(), params);
+            if (lhs == rhs or lhs == .poison or rhs == .poison) continue;
+            if (promised.classOf(lhs)) |left| if (left == promised.classOf(rhs)) continue;
+            const predicate = self.predicateAt(side.predicate);
+            return self.sink.addErrorFmt(code, self.ast.fileOf(predicate.subject.at), self.equalitySpan(predicate), "drop the equality because callers use the trait signature", "the signature of `{s}` does not require `{s} == {s}`", .{ self.ast.tokenText(self.ast.declName(member)), try spellWrittenOwned(self.sink.arena, self.ast, predicate.subject), try spellWrittenOwned(self.sink.arena, self.ast, predicate.equals) });
+        }
+    }
+
     /// Applies the one callable compatibility rule to a member/signature pair.
     /// A call is typed against the signature and runs the member's body, so
     /// their conventions, defaults, parameter types and result must agree even
@@ -35905,6 +36624,10 @@ const Checker = struct {
         self.self_at_call = held;
         self.self_settled = true;
         self.trait_args_at_call = trait_args;
+
+        const previous_errors = self.sink.error_count;
+        try self.checkMemberEqualities(mismatch_code, trait_decl, trait_args, sig, member);
+        if (self.sink.error_count != previous_errors) return;
 
         // Only the trait signature supplies defaults. Check this even when
         // an implementation's callable signature cannot be constructed.
@@ -37924,8 +38647,14 @@ const Checker = struct {
             }
         }
 
-        var callbacks = try CallbackWork.init(self.gpa, args.len, settling);
-        defer callbacks.deinit(self.gpa);
+        const equalities = self.equalityInputs(d, settling);
+        const equality_count = if (equalities) |inputs| inputs.sides.len * 2 else 0;
+        var work = try InferenceWork.init(self.gpa, args.len + equality_count, settling);
+        defer work.deinit(self.gpa);
+        const callback_bounds = try self.gpa.alloc(TypeId, args.len);
+        defer self.gpa.free(callback_bounds);
+        const structural_callbacks = try self.gpa.alloc(bool, args.len);
+        defer self.gpa.free(structural_callbacks);
         for (args, 0..) |a, j| {
             if (j >= params.len) break;
             if (a == .none or walked[j]) continue;
@@ -37936,21 +38665,21 @@ const Checker = struct {
             // A callback whose type names none of the parameters being settled
             // waits for nothing; the ordinary argument check converts it.
             if (!self.mentionsSettling(declared, settling)) continue;
-            callbacks.bounds[j] = try self.boundAtCall(d, declared, callback.signature);
-            callbacks.structural[j] = callback.structural;
+            callback_bounds[j] = try self.boundAtCall(d, declared, callback.signature);
+            structural_callbacks[j] = callback.structural;
             var dependencies: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
             defer dependencies.deinit(self.gpa);
             var visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
             defer visited.deinit(self.gpa);
-            if (callbacks.bounds[j] != .poison) switch (self.builder.get(callbacks.bounds[j])) {
+            if (callback_bounds[j] != .poison) switch (self.builder.get(callback_bounds[j])) {
                 .callable => |signature| {
                     for (self.builder.callableParams(signature)) |parameter| {
-                        try self.openCallbackParameters(parameter.ty, settling, &dependencies, &visited);
+                        try self.openInferenceParameters(parameter.ty, settling, &dependencies, &visited);
                     }
                     if (self.contextualConstructor(value)) {
                         const contextual_result = try self.callableContext(signature.result, settling);
                         if (self.declaringType(contextual_result) == null) {
-                            try self.openCallbackParameters(signature.result, settling, &dependencies, &visited);
+                            try self.openInferenceParameters(signature.result, settling, &dependencies, &visited);
                         } else if (try self.constructorSelection(self.ast.withoutGroups(value), contextual_result, false)) |selection| {
                             const callable_parameters = self.builder.callableParams(signature);
                             if (selection.result != .poison and
@@ -37967,7 +38696,7 @@ const Checker = struct {
                                 _ = try self.settleSignatureTypes(payload, callable_parameters[0].ty, selection.declaration, inferred, &clash);
                                 if (self.builder.instanceOf(selection.result)) |instance| {
                                     for (inferred, self.builder.argsOf(instance)) |found, argument| {
-                                        if (found == .poison) try self.openCallbackParameters(argument, settling, &dependencies, &visited);
+                                        if (found == .poison) try self.openInferenceParameters(argument, settling, &dependencies, &visited);
                                     }
                                 }
                             }
@@ -37977,26 +38706,32 @@ const Checker = struct {
                 else => {},
             };
             var keys = dependencies.keyIterator();
-            while (keys.next()) |key| try callbacks.waitFor(self.gpa, key.*, j);
-            if (callbacks.remaining[j] == 0) callbacks.ready.appendAssumeCapacity(j);
+            while (keys.next()) |key| try work.waitFor(self.gpa, key.*, j);
+            if (work.remaining[j] == 0) work.ready.appendAssumeCapacity(j);
         }
+
+        if (equalities) |inputs| try self.queueEqualityInputs(inputs, &work, args.len);
 
         var delayed_refused = false;
         // Lambdas whose bodies settled none of the parameters their result
         // names, each with the parameter it was passed to and its bound.
         var unsettled_lambdas: std.ArrayList(UnsettledLambda) = .empty;
         defer unsettled_lambdas.deinit(self.gpa);
-        var next_callback: usize = 0;
-        while (next_callback < callbacks.ready.items.len) : (next_callback += 1) {
-            const j = callbacks.ready.items[next_callback];
-            defer callbacks.wake(settling);
+        var next_input: usize = 0;
+        while (next_input < work.ready.items.len) : (next_input += 1) {
+            const j = work.ready.items[next_input];
+            defer work.wake(settling);
+            if (j >= args.len) {
+                if (!try self.settleEqualityInput(id, equalities.?, j - args.len)) return null;
+                continue;
+            }
             const a = args[j];
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
             const declared = try paramType(self, d, j);
-            var bound = callbacks.bounds[j];
+            var bound = callback_bounds[j];
             // A callable bound keeps the argument's own type; a structural
             // callable parameter converts the argument to its signature.
-            const callable_context = !callbacks.structural[j];
+            const callable_context = !structural_callbacks[j];
             // A bound that is a type parameter is the callable type it settles
             // to. Settled, it supplies context as a written bound does.
             // Unsettled, the callback's own signature settles it, so the
@@ -38107,7 +38842,7 @@ const Checker = struct {
         // An argument of another type than its parameter is the reason the
         // callbacks beside it wait: it is reported once, and they are not.
         var mismatch_reported = false;
-        for (callbacks.remaining, 0..) |remaining, j| {
+        for (work.remaining[0..args.len], 0..) |remaining, j| {
             if (remaining == 0 or walked[j]) continue;
             const a = args[j];
             const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
@@ -38267,24 +39002,87 @@ const Checker = struct {
         return out;
     }
 
-    /// Each callback enters the ready queue once. Input type nodes are visited
-    /// once per callback; each dependency edge wakes once. Detecting newly
-    /// settled parameters costs O(callbacks * generic parameters).
-    const CallbackWork = struct {
-        bounds: []TypeId,
-        structural: []bool,
+    const EqualityInputs = struct {
+        sides: []const types_mod.TypeEqualities.Side,
+        slot: Settling,
+    };
+
+    fn equalityInputs(self: *const Checker, d: node.DeclId, settling: []const Settling) ?EqualityInputs {
+        const sides = self.contextual_constraints.equalities.ownSides(d);
+        if (sides.len == 0) return null;
+        for (settling) |slot| {
+            if (slot.owner == d and std.mem.indexOfScalar(TypeId, slot.found, .poison) != null)
+                return .{ .sides = sides, .slot = slot };
+        }
+        return null;
+    }
+
+    /// Each side waits on the same parameter events as a callback input.
+    /// Either may settle parameters needed by the other.
+    fn queueEqualityInputs(self: *Checker, inputs: EqualityInputs, work: *InferenceWork, start: usize) std.mem.Allocator.Error!void {
+        var dependencies: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer dependencies.deinit(self.gpa);
+        var visited: std.AutoHashMapUnmanaged(TypeId, void) = .empty;
+        defer visited.deinit(self.gpa);
+        for (inputs.sides, 0..) |side, i| {
+            for ([_]TypeId{ side.lhs, side.rhs }, 0..) |ty, direction| {
+                dependencies.clearRetainingCapacity();
+                visited.clearRetainingCapacity();
+                const partial = try self.equalitySideWhileOpen(inputs.slot.owner, ty, inputs.slot);
+                if (partial == .poison) continue;
+                try self.openInferenceParameters(partial, &.{inputs.slot}, &dependencies, &visited);
+                const job = start + i * 2 + direction;
+                var keys = dependencies.keyIterator();
+                while (keys.next()) |key| try work.waitFor(self.gpa, key.*, job);
+                if (work.remaining[job] == 0) work.ready.appendAssumeCapacity(job);
+            }
+        }
+    }
+
+    /// One side is known. Match the opposite side to it where its shape can
+    /// determine any parameters left open by arguments and other constraints.
+    fn settleEqualityInput(self: *Checker, id: ExprId, inputs: EqualityInputs, job: usize) std.mem.Allocator.Error!bool {
+        const s = inputs.slot;
+        const d = s.owner;
+        const side = inputs.sides[job / 2];
+        const left_open = job % 2 != 0;
+        const original = if (left_open) side.lhs else side.rhs;
+        const open = try self.equalitySideWhileOpen(d, original, s);
+        if (open == .poison or !try self.hasOpenParameter(open, &.{s})) return true;
+        const settled = try self.equalitySideWhileOpen(d, if (left_open) side.rhs else side.lhs, s);
+        if (settled == .poison) return true;
+        var clash: ?Clash = null;
+        const matched = try self.settle(open, settled, d, s.found, &clash);
+        const now = try self.equalitySideWhileOpen(d, original, s);
+        if (matched and !try self.hasOpenParameter(now, &.{s})) return true;
+        // An associated type does not determine its receiver. Another
+        // equality may still determine that receiver and wake this side.
+        if (self.builder.standinOf(now) != null and try self.hasOpenParameter(now, &.{s})) return true;
+        try self.reportEqualityUnmet(d, side.predicate, if (left_open) now else settled, if (left_open) settled else now, self.ast.fileOf(self.ast.exprMain(id)), self.ast.tokenSpan(self.ast.exprMain(id)));
+        return false;
+    }
+
+    /// One side of `d`'s equality with what the call has settled so far
+    /// substituted, and each parameter still open standing for itself.
+    fn equalitySideWhileOpen(self: *Checker, d: node.DeclId, side: TypeId, s: Settling) std.mem.Allocator.Error!TypeId {
+        const partial = try self.gpa.alloc(TypeId, s.found.len);
+        defer self.gpa.free(partial);
+        for (partial, s.found, 0..) |*slot, found, k| slot.* = if (found != .poison) found else if (k < s.parameters.len) s.parameters[k] else .poison;
+        const with_self = try self.withSettledSelf(d, partial);
+        defer if (with_self.ptr != partial.ptr) self.gpa.free(with_self);
+        return self.builder.substituteWithin(self.generic, side, d.index(), with_self);
+    }
+
+    /// Each pending input enters the ready queue once. Input type nodes are visited
+    /// once per input; each dependency edge wakes once. Detecting newly
+    /// settled parameters costs O(inputs * generic parameters).
+    const InferenceWork = struct {
         remaining: []usize,
         notified: []bool,
         waiting: std.AutoHashMapUnmanaged(TypeId, std.ArrayList(usize)) = .empty,
         ready: std.ArrayList(usize) = .empty,
 
-        fn init(gpa: std.mem.Allocator, count: usize, settling: []const Settling) !CallbackWork {
-            const bounds = try gpa.alloc(TypeId, count);
-            errdefer gpa.free(bounds);
-            @memset(bounds, .poison);
-            const structural = try gpa.alloc(bool, count);
-            errdefer gpa.free(structural);
-            @memset(structural, false);
+        fn init(gpa: std.mem.Allocator, count: usize, settling: []const Settling) !InferenceWork {
             const remaining = try gpa.alloc(usize, count);
             errdefer gpa.free(remaining);
             @memset(remaining, 0);
@@ -38299,37 +39097,35 @@ const Checker = struct {
             };
             var ready: std.ArrayList(usize) = .empty;
             try ready.ensureTotalCapacity(gpa, count);
-            return .{ .bounds = bounds, .structural = structural, .remaining = remaining, .notified = notified, .ready = ready };
+            return .{ .remaining = remaining, .notified = notified, .ready = ready };
         }
 
-        fn deinit(self: *CallbackWork, gpa: std.mem.Allocator) void {
+        fn deinit(self: *InferenceWork, gpa: std.mem.Allocator) void {
             var lists = self.waiting.valueIterator();
             while (lists.next()) |list| list.deinit(gpa);
             self.waiting.deinit(gpa);
             self.ready.deinit(gpa);
-            gpa.free(self.bounds);
-            gpa.free(self.structural);
             gpa.free(self.remaining);
             gpa.free(self.notified);
         }
 
-        fn waitFor(self: *CallbackWork, gpa: std.mem.Allocator, parameter: TypeId, callback: usize) !void {
+        fn waitFor(self: *InferenceWork, gpa: std.mem.Allocator, parameter: TypeId, input: usize) !void {
             const entry = try self.waiting.getOrPut(gpa, parameter);
             if (!entry.found_existing) entry.value_ptr.* = .empty;
-            try entry.value_ptr.append(gpa, callback);
-            self.remaining[callback] += 1;
+            try entry.value_ptr.append(gpa, input);
+            self.remaining[input] += 1;
         }
 
-        fn wake(self: *CallbackWork, settling: []const Settling) void {
+        fn wake(self: *InferenceWork, settling: []const Settling) void {
             var index: usize = 0;
             for (settling) |slot| for (slot.found, slot.parameters) |found, parameter| {
                 defer index += 1;
                 if (self.notified[index] or found == .poison) continue;
                 self.notified[index] = true;
                 const waiting = self.waiting.get(parameter) orelse continue;
-                for (waiting.items) |callback| {
-                    self.remaining[callback] -= 1;
-                    if (self.remaining[callback] == 0) self.ready.appendAssumeCapacity(callback);
+                for (waiting.items) |input| {
+                    self.remaining[input] -= 1;
+                    if (self.remaining[input] == 0) self.ready.appendAssumeCapacity(input);
                 }
             };
         }
@@ -38432,31 +39228,31 @@ const Checker = struct {
         _ = try self.report(.t_infer, value, "the callable signature depends on a type no other argument or result settles", .{}, "settle every input type before this callable value");
     }
 
-    fn openCallbackParameters(self: *const Checker, ty: TypeId, settling: []const Settling, out: *std.AutoHashMapUnmanaged(TypeId, void), visited: *std.AutoHashMapUnmanaged(TypeId, void)) std.mem.Allocator.Error!void {
+    fn openInferenceParameters(self: *const Checker, ty: TypeId, settling: []const Settling, out: *std.AutoHashMapUnmanaged(TypeId, void), visited: *std.AutoHashMapUnmanaged(TypeId, void)) std.mem.Allocator.Error!void {
         const entry = try visited.getOrPut(self.gpa, ty);
         if (entry.found_existing) return;
         if (self.builder.standinOf(ty)) |standin| {
-            try self.openCallbackParameters(standin.held, settling, out, visited);
-            for (self.builder.standinArgsOf(standin)) |arg| try self.openCallbackParameters(arg, settling, out, visited);
+            try self.openInferenceParameters(standin.held, settling, out, visited);
+            for (self.builder.standinArgsOf(standin)) |arg| try self.openInferenceParameters(arg, settling, out, visited);
             return;
         }
         switch (self.builder.get(ty)) {
             .parameter => if (try self.hasOpenParameter(ty, settling)) {
                 try out.put(self.gpa, ty, {});
             },
-            .array => |array| try self.openCallbackParameters(array.element, settling, out, visited),
-            .borrow => |borrowed| try self.openCallbackParameters(borrowed.referent, settling, out, visited),
+            .array => |array| try self.openInferenceParameters(array.element, settling, out, visited),
+            .borrow => |borrowed| try self.openInferenceParameters(borrowed.referent, settling, out, visited),
             .callable => |signature| {
-                for (self.builder.callableParams(signature)) |parameter| try self.openCallbackParameters(parameter.ty, settling, out, visited);
-                try self.openCallbackParameters(signature.result, settling, out, visited);
+                for (self.builder.callableParams(signature)) |parameter| try self.openInferenceParameters(parameter.ty, settling, out, visited);
+                try self.openInferenceParameters(signature.result, settling, out, visited);
             },
             .closure => |closure| {
-                for (self.builder.closureArgs(closure)) |arg| try self.openCallbackParameters(arg, settling, out, visited);
-                for (self.builder.closureImplArgs(closure)) |arg| try self.openCallbackParameters(arg, settling, out, visited);
-                if (closure.self_ty != .poison) try self.openCallbackParameters(closure.self_ty, settling, out, visited);
+                for (self.builder.closureArgs(closure)) |arg| try self.openInferenceParameters(arg, settling, out, visited);
+                for (self.builder.closureImplArgs(closure)) |arg| try self.openInferenceParameters(arg, settling, out, visited);
+                if (closure.self_ty != .poison) try self.openInferenceParameters(closure.self_ty, settling, out, visited);
             },
             else => if (self.builder.instanceOf(ty)) |instance| {
-                for (self.builder.argsOf(instance)) |arg| try self.openCallbackParameters(arg, settling, out, visited);
+                for (self.builder.argsOf(instance)) |arg| try self.openInferenceParameters(arg, settling, out, visited);
             },
         }
     }
@@ -39088,9 +39884,9 @@ const Checker = struct {
         // being read at the call's `Self` a second time.
         const bound = try self.withSymbolicSelf(d, settled.own);
         defer if (bound.ptr != settled.own.ptr) self.gpa.free(bound);
-        const own = try self.builder.substitute(ty, @intCast(d.index()), bound);
-        if (over == node.DeclId.none) return own;
-        return self.builder.substitute(own, @intCast(over.index()), settled.head);
+        const own = try self.builder.substituteWithin(self.generic, ty, d.index(), bound);
+        if (over == .none) return own;
+        return self.builder.substituteWithin(self.generic, own, over.index(), settled.head);
     }
 
     /// Records which member of a family a call reached, for lowering to emit

@@ -1,0 +1,21 @@
+fn _early[I: Iterator, J: Iterator, K: Iterator](_a: I, _b: J, _c: K, sink v: I.Item) -> Option[K.Item] where
+    J.Item == K.Item,
+    I.Item == Option[J.Item],
+    I.Item == Option[K.Item],
+    carries(v)
+{
+    v
+}
+
+fn _late[I: Iterator, J: Iterator, K: Iterator](_a: I, _b: J, _c: K, sink v: I.Item) -> Option[J.Item] where
+    Option[K.Item] == I.Item,
+    Option[J.Item] == I.Item,
+    K.Item == J.Item,
+    carries(v)
+{
+    v
+}
+
+fn main() -> UInt8 {
+    0
+}

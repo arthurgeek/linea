@@ -1,0 +1,14 @@
+// `I.Iter` reads as `I` once implementations have settled, so this equality
+// makes two type parameters one type, which is refused at the predicate.
+fn pick[I: Iterator + Sequence, J: Iterator](inout i: I, inout _j: J) -> Option[I.Item] where I.Iter == J, carries(.Some: i) {
+    &i.next()
+}
+
+fn main() -> UInt8 {
+    var a = UInt8(3)..9
+    var b = UInt16(300)..400
+    match pick(&a, &b) {
+        Some(v) => v,
+        None => 0,
+    }
+}

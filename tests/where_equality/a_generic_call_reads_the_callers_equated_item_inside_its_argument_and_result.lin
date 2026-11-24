@@ -1,0 +1,16 @@
+fn next_pair[I: Iterator](inout items: I, sink fallback: Option[I.Item]) -> Option[I.Item] where carries(.Some: items, fallback), I.Item: Discardable {
+    match &items.next() {
+        Some(item) => .Some(item),
+        None => fallback,
+    }
+}
+
+fn next_byte[I: Iterator](inout items: I) -> UInt8 where I.Item == UInt8 {
+    let fallback = Option.Some(UInt8(17))
+    next_pair(&items, fallback).unwrap_or(0)
+}
+
+fn main() -> UInt8 {
+    var empty = UInt8(0)..0
+    next_byte(&empty)
+}
