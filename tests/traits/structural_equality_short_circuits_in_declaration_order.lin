@@ -24,12 +24,11 @@ impl Equatable for Later {
     }
 }
 
+@derive(Equatable)
 struct Pair {
     first: First,
     later: Later,
 }
-
-derive Equatable for Pair
 
 fn main() -> UInt8 {
     let left: Pair = .{ first = .{}, later = .{} }

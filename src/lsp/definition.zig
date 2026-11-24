@@ -271,11 +271,11 @@ test "structural derive source names reach source declarations" {
         declared_name: []const u8,
     };
     const cases = [_]Case{
-        .{ .cursor = "    Inspect[UInt64]", .within = 5, .declared_name = "Inspect" },
-        .{ .cursor = "    Marker[T]", .within = 5, .declared_name = "Marker" },
+        .{ .cursor = "(Inspect[UInt64]", .within = 1, .declared_name = "Inspect" },
+        .{ .cursor = ", Marker[T]", .within = 2, .declared_name = "Marker" },
         .{ .cursor = "reflect.components: Lookup", .within = 21, .declared_name = "Lookup" },
-        .{ .cursor = ") for Box[T]", .within = 7, .declared_name = "Box" },
-        .{ .cursor = ") for Box[T]", .within = 10, .declared_name = "T" },
+        .{ .cursor = "struct Box[T]", .within = 7, .declared_name = "Box" },
+        .{ .cursor = ", Marker[T]", .within = 9, .declared_name = "T" },
         .{ .cursor = "T.Item: Lookup", .within = 3, .declared_name = "Item" },
     };
 

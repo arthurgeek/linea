@@ -6,14 +6,10 @@ trait Ready {}
 
 template impl Ready where reflect.components: Required {}
 
+@derive(MissingTemplate, Ready)
 struct Box {
     value: UInt8,
 }
-
-derive (
-    MissingTemplate,
-    Ready,
-) for Box
 
 fn main() -> UInt8 {
     let _box: Box = .{ value = 0 }

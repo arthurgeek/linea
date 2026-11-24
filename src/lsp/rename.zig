@@ -2170,14 +2170,14 @@ test "component requirement rename edits source only" {
         count: usize,
     };
     const cases = [_]Case{
-        .{ .cursor = "    Inspect[UInt64]", .within = 5, .replacement = "Inspectable", .count = 3 },
-        .{ .cursor = "    Marker[T]", .within = 5, .replacement = "Marked", .count = 4 },
+        .{ .cursor = "(Inspect[UInt64]", .within = 1, .replacement = "Inspectable", .count = 3 },
+        .{ .cursor = ", Marker[T]", .within = 2, .replacement = "Marked", .count = 4 },
         .{ .cursor = "reflect.components: Lookup", .within = 21, .replacement = "Find", .count = 4 },
         .{ .cursor = "Linear + Project", .within = 10, .replacement = "Projected", .count = 2 },
-        .{ .cursor = ") for Box[T]", .within = 7, .replacement = "Crate", .count = 3 },
-        .{ .cursor = ") for Box[T]", .within = 10, .replacement = "Element", .count = 4 },
+        .{ .cursor = "struct Box[T]", .within = 7, .replacement = "Crate", .count = 2 },
+        .{ .cursor = ", Marker[T]", .within = 9, .replacement = "Element", .count = 5 },
         .{ .cursor = "T.Item: Lookup", .within = 3, .replacement = "Output", .count = 2 },
-        .{ .cursor = "    Plain,", .within = 5, .replacement = "Ordinary", .count = 3 },
+        .{ .cursor = "@derive(Plain)", .within = 8, .replacement = "Ordinary", .count = 3 },
     };
 
     for (cases) |case| {
@@ -2614,8 +2614,8 @@ test "construction descriptor rename includes its component type" {
         \\        }, {})
         \\    }
         \\}
+        \\@derive(Zero)
         \\struct Pair { first: UInt8, second: UInt8 }
-        \\derive Zero for Pair
         \\fn main() -> UInt8 { let pair: Pair = Zero.zero(); pair.first + pair.second }
     ;
     var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
@@ -3277,8 +3277,8 @@ const construction_closure_rename_program =
     \\        }, {})
     \\    }
     \\}
+    \\@derive(Zero)
     \\struct Pair { first: UInt64, second: UInt64 }
-    \\derive Zero for Pair
     \\fn main() -> UInt8 {
     \\    let pair: Pair = Zero.zero()
     \\    if pair.first == 0 && pair.second == 0 { 0 } else { 1 }

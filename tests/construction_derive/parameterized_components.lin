@@ -22,22 +22,24 @@ template impl[A] Count[A] where reflect.components: Count[A] {
     }
 }
 
+// `[A]` after `derive` binds a parameter only the trait's argument names, so
+// `Plain` counts under every context `A`, and `Holder` under every context
+// its value counts under.
+@derive[A](Count[A])
 struct Plain {
     value: UInt64,
 }
 
+@derive[A](Count[A] where T: Count[A])
 struct Holder[T] {
     value: T,
 }
 
-derive[A] Count[A] for Plain
-
-derive[A, T: Count[A]] Count[A] for Holder[T]
-
 fn main() -> UInt8 {
     let plain: Plain = .{ value = 3 }
     let holder: Holder[UInt64] = .{ value = 4 }
-    if Count.count(plain, UInt8(1)) + Count.count(holder, false) == 7 {
+    let total = Count.count(plain, UInt8(1)) + Count.count(plain, true) + Count.count(holder, false)
+    if total == 10 {
         0
     } else {
         1

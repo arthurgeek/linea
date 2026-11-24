@@ -6,6 +6,7 @@ use iter.DoubleEnded
 
 // A Range holds the endpoints of lo..hi or lo..=hi and whether hi is
 // included. Empty and descending ranges are valid values.
+@derive(Equatable, Equivalent, Debug, Release)
 pub struct Range[T] {
     lo: T,
     hi: T,
@@ -13,14 +14,6 @@ pub struct Range[T] {
     /// a type's maximum, such as 0..=255 for UInt8, without a larger endpoint.
     inclusive: Bool,
 }
-
-derive[T: Equatable] Equatable for Range[T]
-
-derive[T: Equivalent] Equivalent for Range[T]
-
-derive[T: Debug] Debug for Range[T]
-
-derive[T: Release] Release for Range[T]
 
 // Accept any Equivalent value, so a call proves its argument's type is one.
 fn range_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {

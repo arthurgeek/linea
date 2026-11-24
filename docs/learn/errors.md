@@ -36,6 +36,7 @@ for the code in brackets to reach the rule itself.
 | `O-Universe` | error | Copying, settling and sealing: [A copyable type can only hold copyable things](04-copying-settling-and-sealing.md#a-copyable-type-can-only-hold-copyable-things) | [§5.2 Matching](../linea-semantics.md#52-matching), at `[O-Universe]` |
 | `S-Continuation` | note | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Continuation]` |
 | `S-Defer` | error | Copying, settling and sealing: [A `defer` cannot hold another `defer`](04-copying-settling-and-sealing.md#a-defer-cannot-hold-another-defer) | [§4 Types](../linea-semantics.md#4-types), at `[S-Defer]` |
+| `S-Derive` | error | Calling things: [`for`: a derive for one application](02-calling-things.md#for-a-derive-for-one-application) | [§4 Types](../linea-semantics.md#4-types), at `[S-Derive]` |
 | `S-Entry` | error | Linea in an hour: [`read`, `inout` and `sink`](01-linea-in-an-hour.md#read-inout-and-sink) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Entry]` |
 | `S-Mutation` | error | Calling things: [`&` marks a receiver the call will change](02-calling-things.md#-marks-a-receiver-the-call-will-change) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Mutation]` |
 | `S-Params` | error | Calling things: [A parameter that takes a pair apart](02-calling-things.md#a-parameter-that-takes-a-pair-apart) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Params]` |

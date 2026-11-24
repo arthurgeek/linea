@@ -5,18 +5,11 @@ import std.testing
 // A Result holds a successful value or an error. Payloads may be copyable,
 // affine, or linear; Result[T, E] keeps their ownership requirements.
 @copyable
+@derive(Equatable, Equivalent, Debug, Release)
 pub enum Result[T, E] {
     Ok(T),
     Err(E),
 }
-
-derive[T: Equatable, E: Equatable] Equatable for Result[T, E]
-
-derive[T: Equivalent, E: Equivalent] Equivalent for Result[T, E]
-
-derive[T: Debug, E: Debug] Debug for Result[T, E]
-
-derive[T: Release, E: Release] Release for Result[T, E]
 
 // Accept any Equivalent value, so a call proves its argument's type is one.
 fn result_test_accepts_equivalent[T: Equivalent](_value: T) -> Bool {

@@ -1,12 +1,11 @@
 import std.mem
 
 @copyable
+@derive(Release)
 struct Point {
     x: UInt8,
     y: UInt8,
 }
-
-derive Release for Point
 
 fn read_at[T: Copyable, A: Allocator](values: Vec[T, A], position: UInt64) -> T {
     copy(values[position])

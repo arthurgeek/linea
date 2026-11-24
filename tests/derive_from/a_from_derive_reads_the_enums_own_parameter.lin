@@ -1,15 +1,14 @@
-// A standalone derive applies the enum to its own parameters, so a payload
-// naming the enum's parameter is read as the parameter the head applies.
+// A derive's trait arguments name the enum's own parameters, so `From[Report[T]]`
+// converts the `Report[T]` its `Reported` variant holds, for every `T`.
 struct Report[T] {
     detail: T,
 }
 
+@derive(From[Report[T]])
 enum Failure[T] {
     Reported(Report[T]),
     Silent,
 }
-
-derive[U] From[Report[U]] for Failure[U]
 
 fn check(detail: UInt8) -> Result[UInt8, Report[UInt8]] {
     if detail > 5 {

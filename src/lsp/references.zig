@@ -1059,18 +1059,10 @@ pub const structural_derive_source =
     \\
     \\template impl Marker {}
     \\
+    \\@derive(Inspect[UInt64], Marker[T] where T: Linear + Project + Lookup[UInt64], T.Item: Lookup[UInt64])
     \\struct Box[T] { value: T }
+    \\@derive(Marker[UInt64])
     \\struct Solo {}
-    \\
-    \\derive[T: Linear + Project + Lookup[UInt64]] (
-    \\    Inspect[UInt64],
-    \\    Marker[T],
-    \\) for Box[T] where
-    \\    T.Item: Lookup[UInt64],
-    \\
-    \\derive (
-    \\    Marker[UInt64],
-    \\) for Solo
     \\
     \\trait Plain {
     \\    fn value(self: Self) -> UInt8
@@ -1078,10 +1070,8 @@ pub const structural_derive_source =
     \\template impl Plain {
     \\    fn value(_self: Self) -> UInt8 { 1 }
     \\}
+    \\@derive(Plain)
     \\struct Generated {}
-    \\derive (
-    \\    Plain,
-    \\) for Generated
     \\
     \\fn main() -> UInt8 {
     \\    let _box: Box[UInt64] = .{ value = 1 }
@@ -1103,15 +1093,6 @@ test "grouped derive references stay in source" {
     }
     try testing.expect(generated_plain);
 
-    var grouped_plain = false;
-    for (0..checked.program.ast.declCount()) |i| {
-        const d = DeclId.at(@intCast(i));
-        if (checked.program.ast.declTag(d) != .derive_impl) continue;
-        if (!std.mem.eql(u8, checked.program.ast.tokenText(checked.program.ast.declName(d)), "Generated")) continue;
-        grouped_plain = checked.program.ast.deriveIsGrouped(d);
-    }
-    try testing.expect(grouped_plain);
-
     const Case = struct {
         cursor: []const u8,
         within: usize = 0,
@@ -1119,13 +1100,13 @@ test "grouped derive references stay in source" {
         count: usize,
     };
     const cases = [_]Case{
-        .{ .cursor = "    Inspect[UInt64]", .within = 5, .spelling = "Inspect", .count = 3 },
-        .{ .cursor = "    Marker[T]", .within = 5, .spelling = "Marker", .count = 4 },
+        .{ .cursor = "(Inspect[UInt64]", .within = 1, .spelling = "Inspect", .count = 3 },
+        .{ .cursor = ", Marker[T]", .within = 2, .spelling = "Marker", .count = 4 },
         .{ .cursor = "reflect.components: Lookup", .within = 21, .spelling = "Lookup", .count = 4 },
-        .{ .cursor = ") for Box[T]", .within = 7, .spelling = "Box", .count = 3 },
-        .{ .cursor = ") for Box[T]", .within = 10, .spelling = "T", .count = 4 },
+        .{ .cursor = "struct Box[T]", .within = 7, .spelling = "Box", .count = 2 },
+        .{ .cursor = ", Marker[T]", .within = 9, .spelling = "T", .count = 5 },
         .{ .cursor = "T.Item: Lookup", .within = 2, .spelling = "Item", .count = 2 },
-        .{ .cursor = "    Plain,", .within = 5, .spelling = "Plain", .count = 3 },
+        .{ .cursor = "@derive(Plain)", .within = 8, .spelling = "Plain", .count = 3 },
     };
 
     for (cases) |case| {

@@ -110,10 +110,13 @@ Component requirements and grouped derives
 ==================
 
 template impl Inspect where reflect.components: Inspect + Lookup[UInt64], reflect.supertraits: derived {}
-derive[T: Inspect] (
-    Inspect,
-) for Box[T] where T: Lookup[UInt64]
-derive (Inspect, Lookup[UInt64]) for Pair
+@derive(
+    Inspect
+    where T: Lookup[UInt64],
+)
+struct Box[T] { value: T }
+@derive(Inspect, Lookup[UInt64])
+struct Pair { left: UInt64 }
 
 ---
 
@@ -137,39 +140,46 @@ derive (Inspect, Lookup[UInt64]) for Pair
         (reflection_root)
         supertraits: (identifier)
         evidence: (identifier))))
-  (derive_declaration
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            trait: (trait_reference
+              name: (type_identifier)))
+          (where_clause
+            (where_predicate
+              subject: (type_identifier)
+              (bound
+                (trait_reference
+                  name: (type_identifier)
+                  (type_arguments
+                    (type_identifier)))))))))
+    name: (type_identifier)
     (type_parameters
       (type_parameter
-        name: (type_identifier)
-        (bound
-          (trait_reference
-            name: (type_identifier)))))
-    (derive_traits
-      (derive_trait
-        trait: (trait_reference
-          name: (type_identifier))))
-    type: (type_identifier)
-    (type_arguments
-      (type_identifier))
-    (where_clause
-      (where_predicate
-        subject: (type_identifier)
-        (bound
-          (trait_reference
-            name: (type_identifier)
-            (type_arguments
-              (type_identifier)))))))
-  (derive_declaration
-    (derive_traits
-      (derive_trait
-        trait: (trait_reference
-          name: (type_identifier)))
-      (derive_trait
-        trait: (trait_reference
-          name: (type_identifier)
-          (type_arguments
-            (type_identifier)))))
-    type: (type_identifier)))
+        name: (type_identifier)))
+    (field_list
+      (field
+        name: (identifier)
+        type: (type_identifier))))
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            trait: (trait_reference
+              name: (type_identifier)))
+          (derive_trait
+            trait: (trait_reference
+              name: (type_identifier)
+              (type_arguments
+                (type_identifier)))))))
+    name: (type_identifier)
+    (field_list
+      (field
+        name: (identifier)
+        type: (type_identifier)))))
 
 ==================
 Parameterized struct construction template header

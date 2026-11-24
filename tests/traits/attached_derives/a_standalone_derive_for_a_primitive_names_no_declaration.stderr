@@ -1,0 +1,20 @@
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+ --> tests/traits/attached_derives/a_standalone_derive_for_a_primitive_names_no_declaration.lin:9:1
+  |
+9 | derive Marker for UInt8
+  | ^^^^^^ a derive targets a concrete declaration, not a primitive
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_for_a_primitive_names_no_declaration.lin:11:1
+   |
+11 | derive Marker for ()
+   | ^^^^^^ a derive targets a concrete declaration, not a primitive
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+  --> tests/traits/attached_derives/a_standalone_derive_for_a_primitive_names_no_declaration.lin:13:1
+   |
+13 | derive Marker for Nope
+   | ^^^^^^ write `@derive(...)` above the declaration of the type it is for
+error[N-Undefined]: undefined name `Nope`
+  --> tests/traits/attached_derives/a_standalone_derive_for_a_primitive_names_no_declaration.lin:13:19
+   |
+13 | derive Marker for Nope
+   |                   ^^^^ no type with this name is declared here

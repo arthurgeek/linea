@@ -10,17 +10,13 @@ use collections.Map
 // invalid sequence of values, containers nested past hard_depth, or a number
 // was not finite. A writer's own error is an encoding failure of that writer,
 // so an encoder propagates a direct write with `?`.
-@derive(From[E])
+@derive(From[E], Release, Debug)
 pub enum EncodeError[E] {
     Writer(E),
     InvalidState,
     DepthLimit,
     NonFiniteNumber,
 }
-
-derive[E: Release] Release for EncodeError[E]
-
-derive[E: Debug] Debug for EncodeError[E]
 
 test "encoding errors preserve writer details in debug output" {
     defer let error: EncodeError[UInt8] = .Writer(7)
@@ -69,17 +65,15 @@ template impl Encode where
 }
 
 // EncodeRecord and EncodeEmpty derive Encode, with and without fields.
+@derive(Encode)
 struct EncodeRecord {
     name: Str,
     retries: UInt8,
     enabled: Option[Bool],
 }
 
-derive Encode for EncodeRecord
-
+@derive(Encode)
 struct EncodeEmpty {}
-
-derive Encode for EncodeEmpty
 
 test "derived record encoding uses field order and null option values" {
     let settings: EncodeRecord = .{ name = "tea", retries = 3, enabled = .None }
@@ -264,9 +258,8 @@ fn encoded_write[E](inout encoder: Encoder, sink result: Result[(), E]) -> Resul
 
 // NestedInvalidCodec writes nothing, two values, an unclosed array, a value
 // after closing its caller's array, or a value followed by an error.
+@derive(Release)
 struct NestedInvalidCodec { mode: UInt8 }
-
-derive Release for NestedInvalidCodec
 
 impl Encode for NestedInvalidCodec {
     fn encode[W: Writer](self: Self, inout encoder: Encoder, inout writer: W) -> Result[(), EncodeError[W.Error]] {

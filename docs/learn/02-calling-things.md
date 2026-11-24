@@ -900,6 +900,148 @@ Rust's `#[derive(PartialEq)]`
 instead demands `T: PartialEq` of every `T`, even one that never appears in a
 field; Linea asks only of the field types.
 
+### `where`: bounds a derive states itself
+
+Sometimes the implementation should ask more of `T` than its fields need.
+Write `where` after the traits, and the bounds you write are the whole of
+what the implementation asks; nothing is read from the fields. Here a `Cell`
+compares only values it can copy, so `==` on a cell never asks for more than
+a copy of what it holds:
+
+```linea
+import std.io
+
+@derive(Debug)
+@derive(Equatable where T: Equatable + Copyable)
+struct Cell[T] {
+    value: T,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let left = Cell[UInt8] { value = 4 }
+    let right = Cell[UInt8] { value = 4 }
+    io.println("{left:?} equals {right:?}: {left == right}")?
+    .Ok(0)
+}
+```
+
+```
+Cell { value: 4 } equals Cell { value: 4 }: true
+```
+
+A `where` covers every trait in its own `@derive(...)`, so `Debug` sits in an
+attribute of its own and keeps asking only that `T` prints. In Rust this is
+the `impl<T: PartialEq + Copy> PartialEq for Cell<T>` you would write by hand.
+
+### `for`: a derive for one application
+
+`for` after the traits derives them for one application of a generic type
+and no other. Here only a `Reading[Int64]` prints with `{value:?}`:
+
+```linea
+import std.io
+
+@derive(Debug for Reading[Int64])
+struct Reading[T] {
+    value: T,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let celsius = Reading[Int64] { value = 21 }
+    io.println("{celsius:?}")?
+    .Ok(0)
+}
+```
+
+```
+Reading { value: 21 }
+```
+
+Write one attribute per application, `@derive(Debug for Reading[Int64])`
+beside `@derive(Debug for Reading[Bool])`, and each type gets its own
+implementation.
+
+A derive is always written on the type's declaration. Written on a line of
+its own, as Rust's `impl` would be, it is refused, and the error writes the
+attribute for you:
+
+```linea
+import std.io
+
+struct Reading[T] {
+    value: T,
+}
+
+derive Debug for Reading[Int64]
+
+fn main() -> Result[UInt8, io.IoError] {
+    let celsius = Reading[Int64] { value = 21 }
+    io.println("{celsius:?}")?
+    .Ok(0)
+}
+```
+
+```
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+ --> reading_standalone.lin:7:1
+  |
+7 | derive Debug for Reading[Int64]
+  | ^^^^^^ write `@derive(Debug for Reading[Int64])` above `struct Reading`
+```
+
+The refusal is the only report: the rest of the program is checked as though
+the attribute were written, so `{celsius:?}` is not reported as well. Move the
+line into the attribute the error writes and the program runs.
+
+### `[A]`: a parameter only the trait names
+
+A trait can take a type argument the type itself does not have. Name it in
+`[...]` after `derive`, and the derive is written for every type you put
+there. Here a reading holds no allocator, yet decodes into any allocator a
+caller names:
+
+```linea
+import std.io
+import std.json
+import std.mem
+
+use mem.Lender
+
+// `[A: Allocator]` binds the allocator `json.Decode` takes. `Reading` holds
+// no allocator, so it decodes into whichever one the caller names.
+@derive(Release)
+@derive[A: Allocator](json.Decode[A])
+struct Reading {
+    celsius: Int64,
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let text = r#"{"celsius":21}"#
+    let first: Reading = json.decode(text) else |error| {
+        defer error.release()
+        io.println("{error}")?
+        return .Ok(1)
+    }
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    let second: Reading = json.decode_in(arena.handle(), text) else |error| {
+        defer error.release()
+        io.println("{error}")?
+        return .Ok(1)
+    }
+    io.println("{first.celsius} and {second.celsius}")?
+    .Ok(0)
+}
+```
+
+```
+21 and 21
+```
+
+The binder names only parameters the type does not declare: the type's own,
+like `T` in `Cell[T]`, are already in scope inside the attribute, and writing
+one again as a binder is an error. In Rust this is the `impl<A> Trait<A> for
+Reading` you would write by hand.
+
 ### Arrays compare, print and hash like their elements
 
 An array supports `==`, `Debug` and `Hash` wherever its element type does, so

@@ -269,26 +269,34 @@ impl[A, B] Show for (A, B) {
           (integer_literal))))))
 
 ==================
-A derive request may name a tuple as its target
+A derive's for clause may name a tuple
 ==================
 
-derive[A, B] Debug for (A, B)
+@derive(Debug for (UInt8, UInt8))
+struct Pair { left: UInt8, right: UInt8 }
 
 ---
 
 (source_file
-  (derive_declaration
-    (type_parameters
-      (type_parameter
+  (struct_declaration
+    (attribute
+      (derive_attribute
+        (derive_traits
+          (derive_trait
+            (trait_reference
+              (type_identifier)))
+          (derive_application
+            (tuple_type
+              (type_identifier)
+              (type_identifier))))))
+    (type_identifier)
+    (field_list
+      (field
+        (identifier)
         (type_identifier))
-      (type_parameter
-        (type_identifier)))
-    (derive_trait
-      (trait_reference
-        (type_identifier)))
-    (tuple_type
-      (type_identifier)
-      (type_identifier))))
+      (field
+        (identifier)
+        (type_identifier)))))
 
 ==================
 A lambda parameter may be a tuple pattern

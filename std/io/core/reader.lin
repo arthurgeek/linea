@@ -15,14 +15,11 @@ pub trait Reader {
 // operation on a generic Reader reports bytes consumed since that operation
 // began.
 @copyable
+@derive(Debug, Release)
 pub struct InputFailure[E] {
     reason: E,
     stream_offset: UInt64,
 }
-
-derive[E: Debug] Debug for InputFailure[E]
-
-derive[E: Release] Release for InputFailure[E]
 
 impl[E: Display] Display for InputFailure[E] {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {

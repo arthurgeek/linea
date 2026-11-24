@@ -87,12 +87,11 @@ impl[P: Allocator] Extract[P] for Guest {
 // A value its field cannot be read from answers 400, naming it. A field the
 // route has no value for, or a single value read from a route with several,
 // is a mistake in the program rather than the request, and answers 500.
+// Releasing a `Path` releases the value it holds.
+@derive(Release)
 pub struct Path[T] {
     value: T,
 }
-
-// Releasing a `Path` releases the value it holds.
-derive[T: Release] Release for Path[T]
 
 impl[T] Extracted for Path[T] {
     type Output = T
@@ -191,12 +190,11 @@ test "a path reads its fields from the path values" {
 // named more than once, and a value its field cannot be read from answer
 // 400, naming the value. Every value a query holds has a name, so a `Query`
 // reads a `Params`, not a single value.
+// Releasing a `Query` releases the value it holds.
+@derive(Release)
 pub struct Query[T] {
     value: T,
 }
-
-// Releasing a `Query` releases the value it holds.
-derive[T: Release] Release for Query[T]
 
 impl[T] Extracted for Query[T] {
     type Output = T
@@ -297,12 +295,11 @@ test "a query answers a refusal of a params of its own" {
 // exactly as `Query` answers the same mistakes in a query.
 // `Limits.max_form_pairs` bounds how many pairs a body may hold, and one
 // past it answers 413 before the body is decoded, when the request is read.
+// Releasing a `Form` releases the value it holds.
+@derive(Release)
 pub struct Form[T] {
     value: T,
 }
-
-// Releasing a `Form` releases the value it holds.
-derive[T: Release] Release for Form[T]
 
 impl[T] Extracted for Form[T] {
     type Output = T
@@ -403,12 +400,11 @@ test "a request extracts a form by its field names" {
 // 422, naming the problem and where it is, such as
 // `missing field at $["sender"]`. An arena too small for the value answers
 // 500.
+// Releasing a `Json` releases the value it holds.
+@derive(Release)
 pub struct Json[T] {
     value: T,
 }
-
-// Releasing a `Json` releases the value it holds.
-derive[T: Release] Release for Json[T]
 
 impl[T] Extracted for Json[T] {
     type Output = T

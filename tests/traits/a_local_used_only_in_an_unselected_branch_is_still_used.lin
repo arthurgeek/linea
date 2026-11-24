@@ -31,18 +31,16 @@ fn print(text: Str) {
     }
 }
 
+@derive(Listing)
 struct Single {
     only: UInt8,
 }
 
+@derive(Listing)
 struct Pair {
     left: UInt8,
     right: UInt8,
 }
-
-derive Listing for Single
-
-derive Listing for Pair
 
 fn main() -> UInt8 {
     let single: Single = .{ only = 1 }

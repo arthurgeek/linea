@@ -223,8 +223,8 @@ test "generated parameters do not enter the source region property" {
         \\template impl Value {
         \\    fn value(_self: Self) -> UInt8 { 7 }
         \\}
+        \\@derive(Value)
         \\struct Mark { value: UInt8 }
-        \\derive Value for Mark
         \\fn main() -> UInt8 {
         \\    let mark: Mark = .{ value = 1 }
         \\    Value.value(mark)

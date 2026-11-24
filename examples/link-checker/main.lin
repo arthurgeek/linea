@@ -26,6 +26,7 @@ import std.testing
 
 // What checking one link found: the page answered, moved to another URL, was
 // missing or failing on the server, or could not be fetched at all.
+@derive(Release)
 enum Outcome {
     Fine(UInt16),
     Moved(UInt16, String),
@@ -33,15 +34,12 @@ enum Outcome {
     Unreachable(http.ClientError),
 }
 
-derive Release for Outcome
-
 // A link and what checking it found.
+@derive(Release)
 struct Checked {
     url: String,
     outcome: Outcome,
 }
-
-derive Release for Checked
 
 impl Display for Checked {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {

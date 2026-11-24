@@ -27,9 +27,8 @@ template impl Rebuild where reflect.components: Zero {
     }
 }
 
+@derive(Rebuild)
 enum Shape { Pair(UInt64, UInt64), Empty }
-
-derive Rebuild for Shape
 
 fn main() -> UInt8 {
     let original: Shape = .Pair(4, 7)

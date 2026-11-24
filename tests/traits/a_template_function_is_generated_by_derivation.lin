@@ -8,11 +8,10 @@ template impl Structural {
     }
 }
 
+@derive(Structural)
 struct Mark {
     value: UInt8,
 }
-
-derive Structural for Mark
 
 fn main() -> UInt8 {
     let mark: Mark = .{ value = 1 }

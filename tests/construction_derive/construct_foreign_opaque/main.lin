@@ -17,9 +17,8 @@ template impl Build where reflect.target: struct {
     }
 }
 
+@derive(Build)
 struct Holder { token: vault.Token }
-
-derive Build for Holder
 
 fn main() -> UInt8 {
     let _holder: Holder = Build.build()

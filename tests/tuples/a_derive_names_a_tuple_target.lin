@@ -1,8 +1,14 @@
-// A derive request may name a tuple as its target. The tuple is the prelude's
-// `Tuple2`, which the standard library declares, so a program's own module
-// cannot derive a trait for it: a derive and its target share a module.
-derive Debug for (UInt8, Bool)
+// A tuple is the prelude's `Tuple2`, so `for (UInt8, Bool)` names an
+// application of `Tuple2` and not of the type the attribute is written on,
+// which is the only type the attribute requests implementations for.
+@derive(Debug for (UInt8, Bool))
+struct Pair[A, B] { first: A, second: B }
 
 fn main() -> UInt8 {
-    0
+    let pair: Pair[UInt8, Bool] = .{ first = 0, second = true }
+    if pair.second {
+        pair.first
+    } else {
+        1
+    }
 }

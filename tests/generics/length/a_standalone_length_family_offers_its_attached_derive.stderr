@@ -1,0 +1,5 @@
+error[S-Derive]: a derive is requested by `@derive(...)` on the declaration of the type it is for
+ --> tests/generics/length/a_standalone_length_family_offers_its_attached_derive.lin:5:1
+  |
+5 | derive[let count: UInt64] Equatable for Readings[count]
+  | ^^^^^^ write `@derive(Equatable)` above `struct Readings`

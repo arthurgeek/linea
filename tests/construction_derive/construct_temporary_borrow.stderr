@@ -1,11 +1,11 @@
 error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
-  --> tests/construction_derive/construct_temporary_borrow.lin:21:8
+  --> tests/construction_derive/construct_temporary_borrow.lin:19:9
    |
 2  |     fn build() -> Self
    |        ----- this implementation adopts `Build.build`'s `where carries()`
 7  |         reflect.construct(
    |         ------------------ generated from this template code for `View.value`
-19 | struct View { value: borrow UInt64 }
+19 | @derive(Build)
+   |         ^^^^^ escape observations only from the signature's declared sources
+20 | struct View { value: borrow UInt64 }
    |               ----- the code was generated for this field
-21 | derive Build for View
-   |        ^^^^^ escape observations only from the signature's declared sources

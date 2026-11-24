@@ -23,12 +23,11 @@ template impl Zero where reflect.target: struct, reflect.components: Zero {
     }
 }
 
+@derive(Zero)
 struct Pair {
     left: UInt64,
     right: UInt64,
 }
-
-derive Zero for Pair
 
 fn main() -> UInt8 {
     let pair: Pair = Zero.zero()

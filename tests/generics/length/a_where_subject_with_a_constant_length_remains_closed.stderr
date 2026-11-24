@@ -1,0 +1,5 @@
+error[T-Where]: a `where` predicate constrains an open type
+ --> tests/generics/length/a_where_subject_with_a_constant_length_remains_closed.lin:6:7
+  |
+6 | where [UInt8; 1]: Mark {
+  |       ^^^^^^^^^^ this subject depends on no type parameter in scope

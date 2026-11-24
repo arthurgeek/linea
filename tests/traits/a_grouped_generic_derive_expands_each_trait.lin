@@ -6,15 +6,11 @@ trait Second {}
 
 template impl Second {}
 
+@derive(First, Second)
 struct Pair[T] {
     left: T,
     right: T,
 }
-
-derive[T] (
-    First,
-    Second,
-) for Pair[T]
 
 fn accepts_first[T: First](_value: T) -> UInt8 {
     3

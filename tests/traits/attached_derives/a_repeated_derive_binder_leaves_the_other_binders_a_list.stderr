@@ -1,0 +1,10 @@
+error[T-Derive]: `T` is a parameter of `Box`, and a binder names one the type does not have
+  --> tests/traits/attached_derives/a_repeated_derive_binder_leaves_the_other_binders_a_list.lin:14:9
+   |
+14 | @derive[T, A](Count[A])
+   |         ^ drop it: the type's own parameters are in scope in the attribute already
+error[T-Derive]: `T` is a parameter of `Crate`, and a binder names one the type does not have
+  --> tests/traits/attached_derives/a_repeated_derive_binder_leaves_the_other_binders_a_list.lin:19:12
+   |
+19 | @derive[A, T](Count[A])
+   |            ^ drop it: the type's own parameters are in scope in the attribute already

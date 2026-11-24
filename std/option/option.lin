@@ -4,22 +4,11 @@ import std.testing
 // An Option holds a value that may be absent. T may be copyable, affine, or
 // linear; Option[T] keeps the payload type's ownership requirements.
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[T] {
     None,
     Some(T),
 }
-
-derive[T: Equatable] Equatable for Option[T]
-
-derive[T: Equivalent] Equivalent for Option[T]
-
-derive[T: Comparable] Comparable for Option[T]
-
-derive[T: Ordered] Ordered for Option[T]
-
-derive[T: Debug] Debug for Option[T]
-
-derive[T: Release] Release for Option[T]
 
 // Accept any Equivalent or Ordered value, so a call proves its argument's type
 // is one.

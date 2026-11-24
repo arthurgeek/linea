@@ -1,4 +1,4 @@
-// A standalone derive names the type it is for. `Mark[UInt8]` and
+// `for` names the application a derive is for. `Mark[UInt8]` and
 // `Mark[UInt16]` are two types, so a derive for each is two requests and
 // each type gets its own implementation.
 trait Score {
@@ -11,13 +11,11 @@ template impl Score {
     }
 }
 
+@derive(Score for Mark[UInt8])
+@derive(Score for Mark[UInt16])
 struct Mark[T] {
     value: T,
 }
-
-derive Score for Mark[UInt8]
-
-derive Score for Mark[UInt16]
 
 fn main() -> UInt8 {
     let byte: Mark[UInt8] = .{ value = 3 }

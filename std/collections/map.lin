@@ -7,40 +7,25 @@ use mem.Lender
 use hash.Hash
 use hash.Key
 
+@derive(Release, Equatable, Debug)
 pub struct Entry[K, V] {
     key: K,
     value: V,
 }
 
+@derive(Release, Equatable, Debug)
 pub struct InsertFailure[K, V] {
     reason: mem.Oom,
     key: K,
     value: V,
 }
 
+@derive(Release, Equatable, Debug)
 pub enum UpsertFailure[K, V, E] {
     Allocation(mem.Oom),
     Factory(E),
     KeyMismatch(Entry[K, V]),
 }
-
-derive[K: Release, V: Release, E: Release] Release for UpsertFailure[K, V, E]
-
-derive[K: Equatable, V: Equatable, E: Equatable] Equatable for UpsertFailure[K, V, E]
-
-derive[K: Debug, V: Debug, E: Debug] Debug for UpsertFailure[K, V, E]
-
-derive[K: Release, V: Release] Release for Entry[K, V]
-
-derive[K: Equatable, V: Equatable] Equatable for Entry[K, V]
-
-derive[K: Debug, V: Debug] Debug for Entry[K, V]
-
-derive[K: Release, V: Release] Release for InsertFailure[K, V]
-
-derive[K: Equatable, V: Equatable] Equatable for InsertFailure[K, V]
-
-derive[K: Debug, V: Debug] Debug for InsertFailure[K, V]
 
 impl[K, V] InsertFailure[K, V] {
     // Return whether this failure is a refused allocation, which an
@@ -61,17 +46,12 @@ impl[K, V, E] UpsertFailure[K, V, E] {
 // UpsertReason says why an upsert failed once the entry a mismatched factory
 // built has been released. `settled()` turns an `UpsertFailure` into it.
 @copyable
+@derive(Release, Equatable, Debug)
 pub enum UpsertReason[E] {
     Allocation(mem.Oom),
     Factory(E),
     KeyMismatch,
 }
-
-derive[E: Release] Release for UpsertReason[E]
-
-derive[E: Equatable] Equatable for UpsertReason[E]
-
-derive[E: Debug] Debug for UpsertReason[E]
 
 // Display renders the allocation refusal and borrows the returned key and value.
 impl[K, V] Display for InsertFailure[K, V] {
@@ -225,18 +205,18 @@ struct Resident[K, V] {
 // probe steps past, so entries filed further along the same chain stay
 // reachable. A full bucket stores the entry with its hash code, so a probe
 // compares keys only when the codes agree and growth never rehashes a key.
+@derive(Release)
 enum Bucket[K, V] {
     Empty,
     Tombstone,
     Full(UInt64, Entry[K, V]),
 }
 
-derive[K: Release, V: Release] Release for Bucket[K, V]
-
 // A map is a hash table with open addressing and linear probing. `len` counts
 // live entries; `used` counts buckets that are full or tombstones, since both
 // lengthen probes. Growth keeps `used` below half of the buckets.
 @opaque
+@derive(Release)
 struct Map[K, V, A: Allocator = mem.SystemAllocator] {
     slots: Vec[Bucket[K, V], A],
     allocator: A,
@@ -1329,6 +1309,7 @@ impl[K, V, A: Allocator] Map[K, V, A] {
 // A drain takes entries out of a map's buckets, from the last bucket down.
 // `remaining` counts the entries it has not handed out yet.
 @opaque
+@derive(Release)
 struct Drain[K, V, A: Allocator = mem.SystemAllocator] {
     slots: Vec[Bucket[K, V], A],
     remaining: UInt64,
@@ -1466,10 +1447,6 @@ impl[K, V, A: Allocator] Map[K, V, A] {
         testing.assert_eq(kept, UInt64(1), "finish changed the map it returned")?
     }
 }
-
-derive[K: Release, V: Release, A: Allocator] Release for Map[K, V, A]
-
-derive[K: Release, V: Release, A: Allocator] Release for Drain[K, V, A]
 
 fn release_maps[K: Release, V: Release, A: Allocator](sink maps: Vec[Map[K, V, A], A]) {
     maps.release()

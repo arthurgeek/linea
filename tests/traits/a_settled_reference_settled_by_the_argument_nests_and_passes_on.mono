@@ -3,6 +3,7 @@ struct Counter {
 }
 
 @copyable
+@derive(Equatable, Equivalent, Comparable, Ordered, Debug, Release)
 pub enum Option[UInt8] {
     None,
     Some(UInt8),

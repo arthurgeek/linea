@@ -103,20 +103,15 @@ fn dumpDecl(
         .copyable => "copyable ",
         .linear => "linear ",
     };
-    const derive_form = if (tag == .derive_impl)
-        (if (ast.deriveIsGrouped(id)) " grouped" else " single")
-    else
-        "";
     // A head written as a tuple or a callable type has no name token, so it is
     // printed as it was written; unit's head is the `(` that opens it.
-    const tuple_head = (tag == .impl_ or tag == .derive_impl) and ast.declHead(id).kind == .tuple;
-    const name = if (tag == .impl_ or tag == .derive_impl) ast.implHeadText(id) else ast.tokenText(ast.declName(id));
-    try w.print("decl {s}{s}{s}{s}{s} \"{s}\" tokens {d}..{d}\n", .{
+    const tuple_head = tag == .impl_ and ast.declHead(id).kind == .tuple;
+    const name = if (tag == .impl_) ast.implHeadText(id) else ast.tokenText(ast.declName(id));
+    try w.print("decl {s}{s}{s}{s} \"{s}\" tokens {d}..{d}\n", .{
         visibility,
         is_export,
         policy,
         @tagName(tag),
-        derive_form,
         name,
         r.start.index() - offsets.token,
         r.end.index() - offsets.token,
@@ -142,14 +137,7 @@ fn dumpDecl(
     // two it is decides where the member lives -- a trait implementation's
     // members belong to the trait -- so a tree printing only the owner drops
     // the half that answers it.
-    if (tag == .derive_impl) {
-        for (ast.deriveTraits(id)) |trait| {
-            try indent(w, depth + 1);
-            try w.writeAll("trait ");
-            try dumpTraitRef(w, ast, trait.ref);
-            try w.writeAll("\n");
-        }
-    } else if (ast.declTrait(id) != TokenId.none) {
+    if (ast.declTrait(id) != TokenId.none) {
         try indent(w, depth + 1);
         try w.writeAll("of trait ");
         try dumpTraitRef(w, ast, ast.declTraitRef(id));
@@ -159,7 +147,7 @@ fn dumpDecl(
     // What an implementation applied its head to. The name alone renders a
     // family and a single type identically, and which of the two it is decides
     // what every call through the implementation binds.
-    if ((tag == .impl_ or tag == .derive_impl) and !tuple_head and ast.declHead(id).args.len() != 0) {
+    if (tag == .impl_ and !tuple_head and ast.declHead(id).args.len() != 0) {
         try indent(w, depth + 1);
         try w.writeAll("head");
         try dumpTypeArgs(w, ast, ast.declHead(id).args);
@@ -459,12 +447,12 @@ test "a tuple type prints as written and a tuple literal prints its components" 
     , out.written());
 }
 
-test "an implementation and a derive on a tuple head are named by the tuple" {
+test "an implementation on a tuple head is named by the tuple" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
 
-    const source: Source = .{ .path = "t.lin", .text = "impl (UInt8, Bool) {}\nderive Debug for (UInt8, Bool)" };
+    const source: Source = .{ .path = "t.lin", .text = "impl (UInt8, Bool) {}" };
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
     const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
@@ -484,20 +472,6 @@ test "an implementation and a derive on a tuple head are named by the tuple" {
         .body = .none,
         .variants = .{ .start = 0, .end = 0 },
     });
-    try b.addTypeRef(.{ .kind = .named, .at = TokenId.at(12), .name = TokenId.at(12) });
-    try b.addTypeRef(.{ .kind = .named, .at = TokenId.at(14), .name = TokenId.at(14) });
-    _ = try b.addDecl(.{
-        .tag = .derive_impl,
-        .main_token = TokenId.at(8),
-        .token_range = .{ .start = TokenId.at(8), .end = TokenId.at(16) },
-        .name = TokenId.at(11),
-        .head_args = .{ .start = 2, .end = 4 },
-        .head_kind = .tuple,
-        .params = .{ .start = 0, .end = 0 },
-        .returns = .{ .name = TokenId.none },
-        .body = .none,
-        .variants = .{ .start = 0, .end = 0 },
-    });
 
     var ast = try b.finishOne(source.path, source.text, .from(0), tokens);
 
@@ -505,9 +479,8 @@ test "an implementation and a derive on a tuple head are named by the tuple" {
     try dumpAst(&out.writer, &ast, DeclarationSelection.all(ast.declCount()));
 
     try testing.expectEqualStrings(
-        \\program decls=2
+        \\program decls=1
         \\  decl impl_ "(UInt8, Bool)" tokens 0..8
-        \\  decl derive_impl single "(UInt8, Bool)" tokens 8..16
         \\
     , out.written());
 }

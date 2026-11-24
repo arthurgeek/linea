@@ -95,6 +95,24 @@ pub const Sink = struct {
         self.list.items[at] = try self.bounded(d);
     }
 
+    pub const Checkpoint = struct {
+        len: usize,
+        errors: u32,
+        warnings: u32,
+    };
+
+    pub fn checkpoint(self: *const Sink) Checkpoint {
+        return .{ .len = self.list.items.len, .errors = self.error_count, .warnings = self.warning_count };
+    }
+
+    /// Discards reports appended since the checkpoint. Revisions to reports
+    /// in the prefix keep their severity and stay in the list.
+    pub fn restore(self: *Sink, saved: Checkpoint) void {
+        self.list.shrinkRetainingCapacity(saved.len);
+        self.error_count = saved.errors;
+        self.warning_count = saved.warnings;
+    }
+
     /// Replaces every diagnostic with `kept`, counted and cut as `add`
     /// counts and cuts them. `kept` may be a slice of `items()`.
     ///
@@ -591,6 +609,23 @@ test "a revised diagnostic is cut as an added one is, and keeps the totals" {
 
     try testing.expectEqual(max_text_bytes + truncated.len, sink.items()[0].notes[0].len);
     try testing.expectEqual(@as(u32, 1), sink.error_count);
+}
+
+test "restoring diagnostics retains revisions and counts only the retained reports" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    try sink.add(.{ .severity = .warning, .message = "one" });
+    const saved = sink.checkpoint();
+    try sink.add(.{ .severity = .err, .message = "two" });
+    try sink.add(.{ .severity = .warning, .message = "three" });
+    try sink.revise(0, .{ .severity = .warning, .message = "revised" });
+
+    sink.restore(saved);
+    try testing.expectEqual(1, sink.items().len);
+    try testing.expectEqualStrings("revised", sink.items()[0].message);
+    try testing.expectEqual(0, sink.error_count);
+    try testing.expectEqual(1, sink.warning_count);
 }
 
 test "replacing every diagnostic recounts and cuts them" {

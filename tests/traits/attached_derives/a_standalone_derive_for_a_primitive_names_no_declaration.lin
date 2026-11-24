@@ -1,0 +1,17 @@
+// A derive is written on the declaration of the type it is for, so a
+// standalone request for a primitive or unit has no attribute to write: its
+// help says a derive targets a declared type. A request for a name nothing
+// declares names no declaration either, beside the report of the name.
+trait Marker {}
+
+template impl Marker {}
+
+derive Marker for UInt8
+
+derive Marker for ()
+
+derive Marker for Nope
+
+fn main() -> UInt8 {
+    0
+}

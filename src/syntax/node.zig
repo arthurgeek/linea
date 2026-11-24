@@ -565,10 +565,60 @@ pub const DeriveTraitRange = struct {
     }
 };
 
-/// One trait named by a single or grouped derive request.
+/// One trait named by a `derive(...)` attribute item.
 pub const DeriveTrait = struct {
     ref: TraitRef,
     tokens: TokenRange,
+    /// What the item writes after its traits, shared by every trait it names.
+    clause: DeriveClause = .{},
+};
+
+/// The clause a `derive(...)` item writes after its traits, which decides the
+/// environment of the implementation each trait requests.
+pub const DeriveClause = struct {
+    kind: Kind = .inferred,
+    /// The `for` or `where` keyword, or `.none` for an item with no clause.
+    keyword: TokenId = .none,
+    /// The application `for` names. For a refused standalone request, the
+    /// head it wrote, which names the type it is for.
+    head: TypeRef = .{ .name = .none },
+    /// The predicates `where` writes. Empty for every other kind.
+    where_predicates: WherePredicateRange = WherePredicateRange.empty,
+    /// The parameters written in `[...]` after `derive`, which only the
+    /// traits' arguments name and the type does not declare. Each is a
+    /// parameter of every implementation the item requests.
+    binders: TypeParamRange = TypeParamRange.empty,
+    /// The `[` that opens the binders, or `.none` where none were written.
+    binders_open: TokenId = .none,
+
+    pub const Kind = enum(u8) {
+        /// `derive(Trait)`: the implementation holds where each field type
+        /// naming a parameter meets the template's component bounds.
+        inferred,
+        /// `derive(Trait where P: B)`: the type's bounds and the predicates
+        /// written are the whole environment.
+        environment,
+        /// `derive(Trait for Type[Args])`: the implementation for that one
+        /// application.
+        application,
+        /// A trait a refused standalone `derive … for …` names whose request
+        /// has no attached meaning the compiler can read: its names are
+        /// resolved, and it requests nothing.
+        refused,
+    };
+
+    /// Whether the implementation's environment is written rather than read
+    /// from the fields.
+    pub fn statesEnvironment(self: DeriveClause) bool {
+        return self.kind != .inferred;
+    }
+
+    /// The token that tells this item's traits from another item's: its
+    /// binders' `[`, else its clause's keyword, or `.none` for an item that
+    /// writes neither and so shares nothing among its traits.
+    pub fn item(self: DeriveClause) TokenId {
+        return if (self.binders_open != .none) self.binders_open else self.keyword;
+    }
 };
 
 pub const AttributeItemKind = enum(u8) { opaque_, linear, copyable, carrier, unshareable, shareable, derive, unknown };
@@ -1008,15 +1058,9 @@ pub const Decl = struct {
         via: TokenId = .none,
         target: TokenId = .none,
     } = .{},
-    /// The traits a derive request names. Empty for every other declaration.
+    /// The traits the declaration's `derive(...)` attribute items name, in
+    /// order. Empty for every other declaration.
     derive_traits: DeriveTraitRange = DeriveTraitRange.empty,
-    derive_syntax: struct {
-        /// Parentheses retained when the source used grouped derive syntax.
-        group_open: TokenId = .none,
-        group_close: TokenId = .none,
-        /// Parser admission of the derive's constructor-uniform receiver shape.
-        head_valid: bool = true,
-    } = .{},
     /// Structural requirements written on a template implementation.
     template_requirements: TemplateRequirementRange = TemplateRequirementRange.empty,
     /// The arguments an `impl` wrote on its head: `impl[T] Show for Holder[T]`
@@ -1126,9 +1170,6 @@ pub const Decl = struct {
         /// `template impl Trait { .. }`. An impl-shaped structural recipe owned
         /// by the trait rather than an implementation row for a concrete type.
         template_impl,
-        /// `derive Trait for Type`. A bodyless request for the trait's
-        /// structural template to produce an implementation for the type.
-        derive_impl,
         /// `trait Name { fn f(…) -> T }`. Declares a set of signatures and no
         /// representation, so its braces hold neither fields nor variants and
         /// no modifier describing one can reach it.

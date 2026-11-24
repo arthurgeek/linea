@@ -2,11 +2,10 @@ import protocol as operations
 import tokens as symbols
 
 @opaque
+@derive(operations.Echo[symbols.Token])
 struct Box[T] {
     value: T,
 }
-
-derive[T] operations.Echo[symbols.Token] for Box[T]
 
 pub fn run() -> UInt8 {
     let box: Box[UInt8] = .{ value = 1 }

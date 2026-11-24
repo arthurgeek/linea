@@ -393,9 +393,7 @@ pub const CheckedLibrary = struct {
         // The library compiled as itself shares nothing with the copy a
         // prefix holds; it is loaded on its own.
         if (try isStandard(gpa, files, dirOfEntry(entry))) return loader_mod.loadInputs(gpa, given, table, sink, interner, entry, module, files, purpose, true, null);
-        const diagnostic_count = sink.list.items.len;
-        const error_count = sink.error_count;
-        const warning_count = sink.warning_count;
+        const diagnostics = sink.checkpoint();
         interner.* = try Interner.initPrefix(gpa, &self.resolved.interner);
         for (self.sources.table.sources.items) |source| _ = try table.add(gpa, source);
         // Borrow while deciding eligibility: copied source buffers belong to the
@@ -434,9 +432,7 @@ pub const CheckedLibrary = struct {
         table.deinit(gpa);
         interner.* = .empty;
         table.* = .empty;
-        sink.list.items.len = diagnostic_count;
-        sink.error_count = error_count;
-        sink.warning_count = warning_count;
+        sink.restore(diagnostics);
         if (compatible) {
             interner.* = try Interner.initPrefix(gpa, &self.resolved.interner);
             for (self.sources.table.sources.items) |source| _ = try table.add(gpa, source);
@@ -5193,8 +5189,8 @@ test "a generated implementation preserves a qualified derive bound" {
     const got = try checkModules(testing.allocator, &.{
         .{ .path = "app/main.lin", .text =
         \\import protocol as p
+        \\@derive(p.Mark)
         \\struct Box[T] { value: T }
-        \\derive[T: p.Mark] p.Mark for Box[T]
         \\fn main() -> UInt8 { let _box: Box[UInt8] = .{ value = 1 }; 0 }
         },
         .{ .path = "app/protocol/protocol.lin", .text =
@@ -5212,11 +5208,11 @@ test "grouped generated implementations import every qualified bound module" {
         \\import second
         \\import protocol as p
         \\import formatting as f
+        \\@derive(p.Render, f.Inspect where T: first.Mark + second.Tag)
         \\struct Box[T] { value: T }
         \\struct Value {}
         \\impl first.Mark for Value {}
         \\impl second.Tag for Value {}
-        \\derive[T: first.Mark + second.Tag] (p.Render, f.Inspect) for Box[T]
         \\fn main() -> UInt8 { let _box: Box[Value] = .{ value = .{} }; 0 }
         },
         .{ .path = "app/first/first.lin", .text = "pub trait Mark {}\n" },
@@ -6381,7 +6377,7 @@ test "slow: checked library resumes a program that derives, with the diagnostics
     defer with_json.deinit();
     const texts = [_][]const u8{
         "@derive(Equatable, Debug)\nstruct Point { x: UInt8, y: UInt8 }\nfn main() -> UInt8 { let a: Point = .{ x = 1, y = 2 }; let b: Point = .{ x = 1, y = 2 }; if a == b { 0 } else { 1 } }",
-        "enum Shade { Light, Dark }\nderive Equatable for Shade\nfn main() -> UInt8 { if Shade.Light == Shade.Dark { 1 } else { 0 } }",
+        "@derive(Equatable)\nenum Shade { Light, Dark }\nfn main() -> UInt8 { if Shade.Light == Shade.Dark { 1 } else { 0 } }",
         "@derive(Equatable)\nstruct Holder { inner: Missing }\nfn main() -> UInt8 { 0 }",
         // A trait from a library module the prelude does not reach.
         "import std.json\n@derive(json.Encode)\nstruct Reply { count: UInt8 }\nfn main() -> UInt8 { let _reply: Reply = .{ count = 3 }; 0 }",
@@ -6393,8 +6389,8 @@ test "slow: checked library resumes a program that derives, with the diagnostics
         // The traits the library derives for its own types, derived again
         // here for an application type.
         "@derive(Equatable, Equivalent, Hash)\nstruct Key { id: UInt32, tag: UInt8 }\nfn main() -> UInt8 { let a: Key = .{ id = 3, tag = 1 }; let b: Key = .{ id = 3, tag = 1 }; if a == b { 0 } else { 1 } }",
-        // Two modules' worth of generated names: one derive in two forms.
-        "struct Left { a: UInt8 }\nstruct Right { b: Left }\n@derive(Equatable)\nstruct Top { r: Right }\nderive Equatable for Left\nderive Equatable for Right\nfn main() -> UInt8 { let t: Top = .{ r = .{ b = .{ a = 1 } } }; if t == t { 0 } else { 1 } }",
+        // Deriving several types keeps their generated names distinct.
+        "@derive(Equatable)\nstruct Left { a: UInt8 }\n@derive(Equatable)\nstruct Right { b: Left }\n@derive(Equatable)\nstruct Top { r: Right }\nfn main() -> UInt8 { let t: Top = .{ r = .{ b = .{ a = 1 } } }; if t == t { 0 } else { 1 } }",
         // An application template, and a derive of it.
         "trait Size {\n    fn size(self: Self) -> UInt64\n}\nimpl Size for UInt8 {\n    fn size(self: Self) -> UInt64 { 1 }\n}\ntemplate impl Size where reflect.components: Size {\n    fn size(self: Self) -> UInt64 {\n        var total: UInt64 = 0\n        for component in reflect.components(self) { total += Size.size(component) }\n        total\n    }\n}\n@derive(Size)\nstruct Two { a: UInt8, b: UInt8 }\nfn main() -> UInt8 { let two: Two = .{ a = 1, b = 2 }; if Size.size(two) == 2 { 0 } else { 1 } }",
         // Refusals: a repeated trait, and a trait with no template.
@@ -6507,7 +6503,6 @@ test "slow: checked library session matches fresh diagnostics and inferred sourc
     const cases = [_]struct { text: []const u8, reused: bool, ambiguous_traversal: bool = false }{
         .{ .text = "fn main() -> UInt8 { missing }", .reused = true },
         .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
-        .{ .text = "struct Value {}\nderive Equatable for Value\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
         .{ .text =
         \\import std.mem
         \\fn main() -> UInt8 {
@@ -6666,7 +6661,6 @@ test "slow: checked library reuse and fallback preserve emitted MLIR" {
         .{ .text = "fn main() -> UInt8 { let n = \"42\".parse[UInt8]().unwrap_or(0); n - 42 }", .reused = true },
         .{ .text = "fn main() -> UInt8 { let held: UInt8 = 7; let apply = [held] || held; apply() }", .reused = false },
         .{ .text = "@derive(Equatable)\nstruct Value {}\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
-        .{ .text = "struct Value {}\nderive Equatable for Value\nfn main() -> UInt8 { let _value: Value = .{}; 0 }", .reused = true },
         .{ .text = "export fn square(num: Int32) -> Int32 { num * num }", .reused = true, .library = true },
         .{ .reused = true, .text =
         \\struct Board {
@@ -7573,8 +7567,9 @@ test "slow: checked construction derives survive library reuse and fallback" {
         \\        }, {})
         \\    }
         \\}
+        \\@derive(ConstructSeed)
         \\pub struct Constructed[T] { first: T, second: T }
-        \\derive[Item: ConstructSeed] ConstructSeed for Constructed[Item]
+        \\
     };
     var library_sink = Sink.init(sources_gpa);
     prefix.sources.program = try loadFromMemory(
@@ -7609,8 +7604,8 @@ test "slow: checked construction derives survive library reuse and fallback" {
         .{ .text = try std.mem.concat(gpa, u8, &.{
             files[library.files.len].text,
             \\
+            \\@derive(ConstructSeed)
             \\struct Local { first: UInt64, second: UInt8 }
-            \\derive ConstructSeed for Local
             \\fn main() -> UInt8 {
             \\    let pair: Constructed[UInt64] = ConstructSeed.seed(7)
             \\    let local: Local = ConstructSeed.seed(3)
