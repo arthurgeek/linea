@@ -1,2 +1,2 @@
 trap
-linea: panic: called Option.unwrap on None at std/option/option.lin:L:C
+linea: panic: called Option.unwrap on None at tests/option/unwrap_of_none_panics.lin:3:12

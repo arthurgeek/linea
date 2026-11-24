@@ -15801,6 +15801,9 @@ const Resolver = struct {
 
             .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal => {},
 
+            // `caller` names no binding: it stands for the call's location.
+            .caller_location => {},
+
             .reflection_root => try self.reportReflection(
                 id,
                 "use a supported reflection operation inside a structural-template member",
@@ -16327,7 +16330,7 @@ const Resolver = struct {
                 }
             },
 
-            .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .logical_and, .logical_or => {
+            .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .logical_and, .logical_or, .panic_at => {
                 const b = self.ast.binary(id);
                 try self.expr(b.lhs);
                 try self.expr(b.rhs);
@@ -16433,7 +16436,7 @@ const Resolver = struct {
         if (id == ExprId.none) return true;
         return switch (self.ast.exprTag(id)) {
             .err => true,
-            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .struct_pattern, .tuple_pattern => false,
+            .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .caller_location, .struct_pattern, .tuple_pattern => false,
             .lambda => blk: {
                 const lambda = self.ast.lambda(id);
                 for (lambda.captures) |capture| if (self.containsErr(capture.source)) break :blk true;
@@ -16486,7 +16489,7 @@ const Resolver = struct {
                 }
                 break :blk false;
             },
-            .index, .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .while_, .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign, .logical_and, .logical_or => blk: {
+            .index, .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .while_, .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign, .logical_and, .logical_or, .panic_at => blk: {
                 const b = self.ast.binary(id);
                 break :blk self.containsErr(b.lhs) or self.containsErr(b.rhs);
             },

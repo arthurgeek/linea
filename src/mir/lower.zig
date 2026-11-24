@@ -454,6 +454,10 @@ pub fn lower(
             typing.typeOfDecl(d) orelse .poison
         else
             .poison,
+        .panic_location_type = if (preludeDecl(ast, resolution, "Location")) |d|
+            typing.typeOfDecl(d) orelse .poison
+        else
+            .poison,
         .entry = entry,
     };
 }
@@ -1511,6 +1515,7 @@ const Lowerer = struct {
             .call, .call_indirect => self.mono.callResultRole(ty),
             .constant,
             .bytes_addr,
+            .source_site,
             .address_bits,
             .borrow,
             .load_raw,
@@ -1657,7 +1662,9 @@ const Lowerer = struct {
         return switch (self.ast.exprTag(id)) {
             // Patterns are read by whatever destructures them; none reaches
             // lowering as an expression of its own.
-            .err, .reflection_root, .struct_pattern, .tuple_pattern => unreachable,
+            // A `caller` default is spliced at each call that omits it, and is
+            // refused anywhere else, so none is lowered where it is written.
+            .err, .reflection_root, .caller_location, .struct_pattern, .tuple_pattern => unreachable,
 
             .while_ => self.whileLoop(id, span),
 
@@ -1686,6 +1693,7 @@ const Lowerer = struct {
 
             .call => self.callExpr(id, ty, span, dest),
             .panic => self.panicExpr(id, span),
+            .panic_at => self.panicAtExpr(id, span),
 
             .lambda => self.closureValue(ty, span, dest),
 
@@ -3363,14 +3371,49 @@ const Lowerer = struct {
 
     fn panicExpr(self: *Lowerer, id: ExprId, span: Span) std.mem.Allocator.Error!InstId {
         const message_expr = self.ast.unaryOperand(id);
-        const message = try self.expr(message_expr);
-        if (try self.typeAt(message_expr) == .never) return message;
+        const evaluated = try self.expr(message_expr);
+        const message_type = try self.typeAt(message_expr);
+        if (message_type == .never) return evaluated;
+        const message = try self.trapOperand(evaluated, message_type, span);
 
         _ = try self.b.setTerminator(self.block, .{
             .tag = .trap,
             .ty = .unit,
             .span = span,
             .data = .{ .trap = .{ .kind = .panic, .message = message } },
+        });
+        return self.afterNoreturn(span);
+    }
+
+    /// `operand` as a panic trap in the current block reads it. A trap reads
+    /// its operands from its own block, and an operand may have been built in
+    /// an earlier one: a capture or a `match` binder is reached through an
+    /// address registered where it was bound, and a later operand that
+    /// branches ends the block the earlier one was evaluated in. Such an
+    /// operand's address is named again in this block.
+    fn trapOperand(self: *Lowerer, operand: InstId, ty: TypeId, span: Span) std.mem.Allocator.Error!InstId {
+        if (self.b.block_of.items[operand.index()] == self.block.index()) return operand;
+        return self.fieldAddr(operand, ty, 0, .none, span);
+    }
+
+    /// `panic(message, at)`: the message, then the `Location` the trap reports
+    /// in place of its own span.
+    fn panicAtExpr(self: *Lowerer, id: ExprId, span: Span) std.mem.Allocator.Error!InstId {
+        const operands = self.ast.binary(id);
+        const evaluated = try self.expr(operands.lhs);
+        const message_type = try self.typeAt(operands.lhs);
+        if (message_type == .never) return evaluated;
+        const located = try self.expr(operands.rhs);
+        const location_type = try self.typeAt(operands.rhs);
+        if (location_type == .never) return located;
+        const message = try self.trapOperand(evaluated, message_type, span);
+        const location = try self.trapOperand(located, location_type, span);
+
+        _ = try self.b.setTerminator(self.block, .{
+            .tag = .trap,
+            .ty = .unit,
+            .span = span,
+            .data = .{ .trap = .{ .kind = .panic, .message = message, .location = location } },
         });
         return self.afterNoreturn(span);
     }
@@ -5114,7 +5157,7 @@ const Lowerer = struct {
             // parameter is declared, so what arrives is a value and the call
             // below sees a list every parameter of which was given something.
             if (a == ExprId.none) {
-                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, at, span));
+                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, at, span, self.callSiteSpan(c.callee, span)));
                 continue;
             }
             const param = self.typing.callableParams(self.typing.get(normal.signature).callable)[at];
@@ -5428,7 +5471,7 @@ const Lowerer = struct {
         defer args.deinit(self.gpa);
         for (normal.args, 0..) |arg, at| {
             if (arg == ExprId.none) {
-                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, at, span));
+                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, at, span, self.callSiteSpan(callee_expr, span)));
                 continue;
             }
             if (try self.appendCallArgument(&args, arg, self.typing.callableParams(self.typing.get(normal.signature).callable)[at])) |stopped| return stopped;
@@ -5457,7 +5500,7 @@ const Lowerer = struct {
         defer args.deinit(self.gpa);
         for (normal.args, 0..) |arg, at| {
             if (arg == ExprId.none) {
-                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, at, span));
+                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, at, span, self.callSiteSpan(callee_expr, span)));
                 continue;
             }
             if (try self.appendCallArgument(&args, arg, self.typing.callableParams(self.typing.get(normal.signature).callable)[at])) |stopped| return stopped;
@@ -5510,7 +5553,7 @@ const Lowerer = struct {
         defer args.deinit(self.gpa);
         for (normal.args, 0..) |arg, position| {
             if (arg == ExprId.none) {
-                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, position, span));
+                try args.append(self.gpa, try self.splicedCallableDefault(normal.signature, position, span, self.callSiteSpan(callee_expr, span)));
                 continue;
             }
             if (try self.appendCallArgument(&args, arg, self.typing.callableParams(self.typing.get(normal.signature).callable)[position])) |stopped| return stopped;
@@ -5767,15 +5810,53 @@ const Lowerer = struct {
         }
     }
 
-    fn splicedCallableDefault(self: *Lowerer, signature_type: TypeId, at: usize, span: Span) !InstId {
+    /// What fills a parameter a call leaves out: the constant its default
+    /// folded to, or for `caller` the location of the call, at `site`.
+    fn splicedCallableDefault(self: *Lowerer, signature_type: TypeId, at: usize, span: Span, site: Span) !InstId {
         const signature = self.typing.get(signature_type).callable;
         const params = self.typing.callableParams(signature);
         if (at >= params.len) return self.poison(span);
+        const ty = try self.substituted(params[at].ty);
         const value = switch (params[at].default) {
             .absent => return self.poison(span),
             .value => |value| value,
+            .call_site => return self.callSiteLocation(ty, site),
         };
-        return self.materializeConstant(value, try self.substituted(params[at].ty), span);
+        return self.materializeConstant(value, ty, span);
+    }
+
+    /// Where a call is reported as made: the name of what it calls, which for
+    /// `value.op()` is `op`, so a chain continued on another line reports the
+    /// line the operation's name is on.
+    fn callSiteSpan(self: *Lowerer, callee: ExprId, span: Span) Span {
+        const at = self.ast.withoutGroups(callee);
+        if (at == ExprId.none) return span;
+        return switch (self.ast.exprTag(at)) {
+            .field, .name_ref => self.opSpan(at),
+            // `value.op[T]()` writes its type arguments after the name.
+            .index => self.callSiteSpan(self.ast.binary(at).lhs, span),
+            else => self.ast.exprSpan(at),
+        };
+    }
+
+    /// A `Location` naming `site` in the file of the function being lowered:
+    /// the path's bytes, then the line and the column, each a `source_site`
+    /// the backend answers from the span.
+    fn callSiteLocation(self: *Lowerer, ty: TypeId, site: Span) std.mem.Allocator.Error!InstId {
+        const base = try self.baseFor(ty, site, null);
+        const file = self.libraryField(ty, "file");
+        const text = self.types().textFields(file.ty) orelse
+            @panic("compiler defect: a `Location`'s file is not a `Str`");
+        const address = try self.emit(.source_site, text.at.ty, site, .{ .site = .file_address });
+        try self.writeThrough(try self.fieldAddr(base, text.at.ty, file.offset + text.at.offset, .none, site), text.at.ty, address, site);
+        const length = try self.emit(.source_site, text.len.ty, site, .{ .site = .file_length });
+        try self.writeThrough(try self.fieldAddr(base, text.len.ty, file.offset + text.len.offset, .none, site), text.len.ty, length, site);
+        inline for (.{ .{ "line", mir_mod.Inst.SitePart.line }, .{ "column", mir_mod.Inst.SitePart.column } }) |part| {
+            const field = self.libraryField(ty, part[0]);
+            const value = try self.emit(.source_site, field.ty, site, .{ .site = part[1] });
+            try self.writeThrough(try self.fieldAddr(base, field.ty, field.offset, .none, site), field.ty, value, site);
+        }
+        return base;
     }
 
     /// `Name(e)` or `Name?(e)`, a newtype's construction.

@@ -3742,7 +3742,7 @@ const Analysis = struct {
                     .marked => try self.applyLentStep(state, at),
                     // The operation runs once both operands are evaluated, so
                     // what each observes must survive the other's effects.
-                    .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
+                    .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .panic_at => {
                         const operands = self.ast.binary(at);
                         try self.stale(try self.value(state, operands.lhs), .{ .used = operands.lhs }, report);
                         try self.stale(try self.value(state, operands.rhs), .{ .used = operands.rhs }, report);
@@ -3884,7 +3884,7 @@ const Analysis = struct {
                     try self.addCallUses(cells, normalized);
                 },
                 .marked => try self.addUses(cells, self.ast.unaryOperand(at)),
-                .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
+                .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .panic_at => {
                     const operands = self.ast.binary(at);
                     try self.addUses(cells, operands.lhs);
                     try self.addUses(cells, operands.rhs);

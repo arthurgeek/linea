@@ -128,7 +128,7 @@ error[T-Mismatch]: expected `Str`, found `{interpolation Str}`
 7   |     if &line.append("weather in {city}").is_err() {
     |                     ^^^^^^^^^^^^^^^^^^^ expected `Str`, found `{interpolation Str}`
    ::: std/text/string.lin
-413 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
+530 |     pub fn append(inout self: Self, text: Str) -> Result[(), Oom] where carries() {
     |                                     ---- expected because of this parameter
 ```
 
@@ -585,6 +585,89 @@ so it gives an empty first half and the whole text. `split` is the operation
 for every field rather than the first two parts, and it refuses an empty
 separator.
 
+## Putting text together: `join` and `from_parts`
+
+Going the other way, `String.join(parts, separator)` builds one `String` out of
+several pieces with a separator between each neighbouring pair, and
+`String.from_parts(parts)` puts the pieces side by side with nothing between
+them. Both take the parts as a slice, so an array of literals is lent with
+`as_slice()`:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let toppings = ["cheese", "basil", "olives"]
+    // `join` writes the separator between neighbouring parts only, so no
+    // comma follows the last topping.
+    let menu_line = String.join(toppings.as_slice(), ", ") else |refusal| {
+        return .Ok(refusal.report("the menu line"))
+    }
+    defer menu_line.release()
+    io.println("pizza with {menu_line}")?
+
+    // `from_parts` puts the parts side by side, with nothing between them.
+    let file_name = String.from_parts(["report-", "2026", ".csv"].as_slice()) else |refusal| {
+        return .Ok(refusal.report("the file name"))
+    }
+    defer file_name.release()
+    io.println(file_name.view())?
+    .Ok(0)
+}
+```
+
+```
+pizza with cheese, basil, olives
+report-2026.csv
+```
+
+The separator goes only between parts, so a list of one part is that part
+alone, and joining no parts answers empty text. This is JavaScript's
+`["cheese", "basil"].join(", ")` and Rust's `parts.join(", ")`, except that
+the result is memory the program owns: both answer a `Result` whose error is
+a `mem.Oom`, and the `String` is released like any other. Before copying
+anything they add up the length of every part and every separator and ask the
+allocator for all of it at once, so the text is allocated once however many
+parts there are, and a refusal leaves no half-built text behind.
+
+The parts can be owned text as well as views. A `Vec[String]` lends its
+elements with `as_slice()` too, and `join` reads each one through its view:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    defer var guests: Vec[String] = Vec.new()
+    for name in ["ada", "grace", "linus"] {
+        // `to_owned` copies each name into a `String` the vector keeps.
+        let owned = name.to_owned() else |refusal| {
+            return .Ok(refusal.report("a guest's name"))
+        }
+        if &guests.push(owned).settled().is_err() {
+            return .Ok(1)
+        }
+    }
+    // The parts may be owned text too: `join` reads each `String` through
+    // its view.
+    let list = String.join(guests.as_slice(), " and ") else |refusal| {
+        return .Ok(refusal.report("the guest list"))
+    }
+    defer list.release()
+    io.println("tonight: {list}")?
+    .Ok(0)
+}
+```
+
+```
+tonight: ada and grace and linus
+```
+
+`String.join_in(allocator, parts, separator)` and
+`String.from_parts_in(allocator, parts)` build the text in an allocator you
+choose, such as an arena ([Memory](07-memory.md)). A part can be any type that
+implements `text.AsStr`, the trait that views a value as a `Str`; `Str` and
+every `String` implement it.
+
 ## Reading text as a value
 
 `parse` goes the other way: `"8080".parse[UInt16]()` reads text as a number
@@ -1005,6 +1088,8 @@ server](../../examples/welcome_back.lin) escapes a name taken from the address.
 | a view of a computed value past its statement | bind the value with `let` first; a temporary lasts to the end of its statement |
 | the lines of a text, without their terminators | `for line in text.lines()` |
 | the parts of a line around a separator | `let (name, value) = line.split_once("=") else { … }` |
+| one text from several parts, with a separator between them | `String.join(parts.as_slice(), ", ")`, or `String.join_in(allocator, …)` |
+| several parts side by side | `String.from_parts(parts.as_slice())`, or `String.from_parts_in(allocator, …)` |
 | a number or your own type from text | `"80".parse[UInt16]()`, `impl text.Parse for T` |
 | braces or backslashes as text | `r"…"`, or `r#"…"#` when the text has a `"` |
 | several lines | a run of `\\` lines |

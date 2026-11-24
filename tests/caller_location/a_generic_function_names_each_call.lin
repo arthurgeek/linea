@@ -1,0 +1,16 @@
+// Every instantiation of `present` shares one body, and each call still names
+// its own line.
+fn present[T](sink value: Option[T], at: Location = caller) -> T {
+    value.expect("nothing was present", at)
+}
+
+fn main() -> UInt8 {
+    let count: UInt8 = present(.Some(2))
+    let on: Bool = present(.Some(true))
+    let missing: UInt8 = present(.None)
+    if on {
+        count + missing
+    } else {
+        0
+    }
+}

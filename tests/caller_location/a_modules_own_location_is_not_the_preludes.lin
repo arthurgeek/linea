@@ -1,0 +1,11 @@
+struct Location {
+    line: UInt32,
+}
+
+fn report(at: Location = caller) -> UInt32 {
+    at.line
+}
+
+fn main() -> UInt8 {
+    UInt8(report() % 2)
+}

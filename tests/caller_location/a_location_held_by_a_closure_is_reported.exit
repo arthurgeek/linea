@@ -1,0 +1,2 @@
+trap
+linea: panic: the shelf is empty at tests/caller_location/a_location_held_by_a_closure_is_reported.lin:15:17

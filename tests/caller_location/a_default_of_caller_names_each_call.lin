@@ -1,0 +1,13 @@
+import std.io
+
+fn spot(at: Location = caller) -> Location {
+    copy(at)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let first = spot()
+    let second = spot()
+    io.println("{first}")?
+    io.println("{second}")?
+    .Ok(0)
+}

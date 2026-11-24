@@ -913,11 +913,15 @@ fn walkFrom(
 pub const CallableDefault = union(enum) {
     absent,
     value: ConstantValue,
+    /// `caller`: the location of the call that leaves the argument out, so
+    /// two calls omitting it receive two values. Built where the call is
+    /// lowered, which is the one place that knows the call's position.
+    call_site,
 
     pub fn eql(a: CallableDefault, b: CallableDefault) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
         return switch (a) {
-            .absent => true,
+            .absent, .call_site => true,
             .value => |value| value.eql(b.value),
         };
     }
@@ -1936,13 +1940,14 @@ pub const InferredSource = union(enum) {
 /// **Bound:** one pass over the signature's parameters.
 pub fn inferredSource(builder: *Typing.Builder, params: []const CallableParam, result: TypeId, carrier: ?u32) !InferredSource {
     if (!try builder.mayCarryDependencies(result)) return .none;
+    const weighing = try SourceWeighing.of(builder, params, result);
     var found: InferredSource = .none;
     var ambiguous = false;
     var carrier_eligible = false;
     var other_place_lent = false;
     for (params, 0..) |parameter, index| {
+        if (!try weighing.weighs(builder, parameter, result)) continue;
         const place = lendsPlace(builder, parameter, result);
-        if (!place and !try builder.mayCarryDependencies(parameter.ty)) continue;
         const is_carrier = carrier != null and carrier.? == index;
         if (is_carrier) carrier_eligible = true;
         if (place and !is_carrier) other_place_lent = true;
@@ -1961,12 +1966,39 @@ fn lendsPlace(builder: *Typing.Builder, parameter: CallableParam, result: TypeId
     return builder.get(result) == .borrow and builder.get(result).borrow.referent == parameter.ty and suppliesEscapingPlace(parameter.convention);
 }
 
-/// Whether `parameter` is one of the sources `inferredSource` weighs for
-/// `result`; a diagnostic that lists the candidates asks this rather than
-/// deciding eligibility again.
-pub fn isEligibleSource(builder: *Typing.Builder, parameter: CallableParam, result: TypeId) !bool {
-    return lendsPlace(builder, parameter, result) or try builder.mayCarryDependencies(parameter.ty);
-}
+/// Which parameters `inferredSource` weighs as sources of a result; a
+/// diagnostic that lists the candidates asks this rather than deciding
+/// eligibility again.
+///
+/// A parameter defaulted to `caller` is filled with the program's own source
+/// position, which a result rarely holds. It is weighed only where no other
+/// parameter could be the source, so adding one to a signature leaves the
+/// source that signature had, and a function that only returns the location
+/// it was given still needs no clause.
+pub const SourceWeighing = struct {
+    /// Whether a parameter that is not defaulted to `caller` could be the
+    /// source.
+    declared: bool,
+
+    /// **Bound:** one pass over the signature's parameters.
+    pub fn of(builder: *Typing.Builder, params: []const CallableParam, result: TypeId) !SourceWeighing {
+        for (params) |parameter| {
+            if (parameter.default != .call_site and try couldSupply(builder, parameter, result)) return .{ .declared = true };
+        }
+        return .{ .declared = false };
+    }
+
+    pub fn weighs(self: SourceWeighing, builder: *Typing.Builder, parameter: CallableParam, result: TypeId) !bool {
+        if (parameter.default == .call_site and self.declared) return false;
+        return couldSupply(builder, parameter, result);
+    }
+
+    /// Whether `parameter`'s type and convention let it lend the result's
+    /// place or forward dependencies into it.
+    fn couldSupply(builder: *Typing.Builder, parameter: CallableParam, result: TypeId) !bool {
+        return lendsPlace(builder, parameter, result) or try builder.mayCarryDependencies(parameter.ty);
+    }
+};
 
 /// A source a clause names: the parameter's spelling, and whether the clause
 /// is `borrows`, for a result that observes the parameter's place, or
@@ -2169,6 +2201,12 @@ test inferredSource {
         try inferredSource(&b, &.{ other, carried }, observed, 1),
     );
     try testing.expectEqual(InferredSource.none, try inferredSource(&b, &.{carried}, .u8, 0));
+    // A parameter defaulted to `caller` gives way to any other source, and is
+    // the source where there is no other.
+    const at: CallableParam = .{ .spelling = "at", .convention = .read, .ty = observed, .default = .call_site };
+    try testing.expectEqual(InferredSource{ .one = .{ .parameter = 1, .place = false } }, try inferredSource(&b, &.{ at, carried }, observed, null));
+    try testing.expectEqual(InferredSource.ambiguous, try inferredSource(&b, &.{ at, other, carried }, observed, null));
+    try testing.expectEqual(InferredSource{ .one = .{ .parameter = 1, .place = false } }, try inferredSource(&b, &.{ count, at }, observed, null));
 }
 
 fn sameContractPath(a: ContractPath, b: ContractPath) bool {
@@ -2630,6 +2668,7 @@ fn renderCallable(
                 try rendered.appendSlice(gpa, " = ");
                 try rendered.appendSlice(gpa, folded);
             },
+            .call_site => try rendered.appendSlice(gpa, " = caller"),
         }
     }
     try rendered.append(gpa, ')');
@@ -5861,7 +5900,8 @@ pub const SupplyIndex = struct {
 /// declaration that declares it. Sized by the defaults a program writes -- a
 /// declaration with none records nothing, which is nearly all of them.
 pub const Defaults = struct {
-    values: std.AutoHashMapUnmanaged(u64, ConstantValue) = .empty,
+    /// Never `.absent`: a parameter with no default records nothing.
+    values: std.AutoHashMapUnmanaged(u64, CallableDefault) = .empty,
 
     fn key(decl: u32, param: u32) u64 {
         return (@as(u64, decl) << 32) | param;
@@ -5872,12 +5912,13 @@ pub const Defaults = struct {
         gpa: std.mem.Allocator,
         decl: u32,
         param: u32,
-        value: ConstantValue,
+        value: CallableDefault,
     ) !void {
+        std.debug.assert(value != .absent);
         try self.values.put(gpa, key(decl, param), value);
     }
 
-    pub fn get(self: *const Defaults, decl: u32, param: u32) ?ConstantValue {
+    pub fn get(self: *const Defaults, decl: u32, param: u32) ?CallableDefault {
         return self.values.get(key(decl, param));
     }
 
@@ -7772,6 +7813,7 @@ pub const Typing = struct {
                             defer gpa.free(folded);
                             try out.appendSlice(gpa, folded);
                         },
+                        .call_site => try out.appendSlice(gpa, ":caller"),
                     }
                 }
                 try out.appendSlice(gpa, ")->");
@@ -12892,7 +12934,7 @@ pub const Typing = struct {
                 h.update(std.mem.asBytes(&ty));
                 h.update(std.mem.asBytes(&default_tag));
                 switch (param.default) {
-                    .absent => {},
+                    .absent, .call_site => {},
                     .value => |value| value.hash(&h),
                 }
             }

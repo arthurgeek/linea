@@ -364,11 +364,12 @@ impl[T, E] Result[T, E] {
 
     // Return the success, and panic on an error with the fixed message
     // `called Result.unwrap on Err`. The error payload is not rendered, so no
-    // display bound is required.
-    pub fn unwrap(sink self: Self) -> T where carries(self) {
+    // display bound is required. The panic reports `at`, the location of the
+    // call to `unwrap`, which the compiler fills in when it is left out.
+    pub fn unwrap(sink self: Self, at: Location = caller) -> T where carries(self) {
         match self {
             Ok(value) => value,
-            Err(_) => panic("called Result.unwrap on Err"),
+            Err(_) => panic("called Result.unwrap on Err", at),
         }
     }
 
@@ -382,6 +383,28 @@ impl[T, E] Result[T, E] {
     test trap "unwrap traps on err" -> Result[(), testing.Failure] {
         let failure: Result[UInt8, UInt8] = .Err(3)
         let _unwrapped = failure.unwrap()
+        .Ok(())
+    }
+
+    // Return the success, and panic on an error with `message`, which says
+    // why the caller relied on success. The error is dropped unrendered, as
+    // `unwrap` drops it, and the panic reports the location of the call to
+    // `expect`.
+    pub fn expect(sink self: Self, message: Str, at: Location = caller) -> T where carries(self) {
+        match self {
+            Ok(value) => value,
+            Err(_) => panic(message, at),
+        }
+    }
+
+    test "expect returns ok" {
+        let success: Result[UInt8, UInt8] = .Ok(5)
+        testing.assert_eq(success.expect("a success"), 5, "expect did not return the Ok payload")?
+    }
+
+    test trap "expect traps on err" -> Result[(), testing.Failure] {
+        let failure: Result[UInt8, UInt8] = .Err(3)
+        let _expected = failure.expect("a success that failed")
         .Ok(())
     }
 

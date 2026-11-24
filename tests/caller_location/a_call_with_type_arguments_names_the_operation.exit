@@ -1,0 +1,2 @@
+trap
+linea: panic: the book is not on the shelf at tests/caller_location/a_call_with_type_arguments_names_the_operation.lin:21:10

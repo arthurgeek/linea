@@ -628,6 +628,33 @@ impl[T, A: Allocator] Vec[T, A] {
         testing.assert_eq(values.as_slice(), [UInt64(4), 6].as_slice(), "the view changed the live elements or exposed spare capacity")?
     }
 
+    // Borrow the first element, or answer None when the vector is empty.
+    pub fn first(self: Self) -> Option[borrow T] where borrows(.Some: self) {
+        self.as_slice().first()
+    }
+
+    test "vec first borrows the first element or answers none when empty" {
+        defer var values: Vec[UInt64] = Vec.new()
+        testing.assert(values.first().is_none(), "an empty vector had a first element")?
+        &values.push(4).unwrap()
+        &values.push(6).unwrap()
+        testing.assert_eq(*values.first().unwrap(), UInt64(4), "first borrowed another element")?
+    }
+
+    // Borrow the last element, or answer None when the vector is empty.
+    pub fn last(self: Self) -> Option[borrow T] where borrows(.Some: self) {
+        self.as_slice().last()
+    }
+
+    test "vec last borrows the last element or answers none when empty" {
+        defer var values: Vec[UInt64] = Vec.new()
+        &values.reserve(8).unwrap()
+        testing.assert(values.last().is_none(), "an empty vector exposed spare capacity as its last element")?
+        &values.push(4).unwrap()
+        &values.push(6).unwrap()
+        testing.assert_eq(*values.last().unwrap(), UInt64(6), "last borrowed another element")?
+    }
+
     // Reserve room for additional elements without changing the live prefix.
     // Allocate before moving elements so refusal leaves the vector intact.
     pub fn reserve(inout self: Self, additional: UInt64) -> Result[(), Oom] where carries() {

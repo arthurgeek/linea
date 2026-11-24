@@ -1855,12 +1855,20 @@ location.
 
 An expression typed `Never` lowers without a result value. Ordinary transfers
 retain their return, break or continue edges; panic becomes a message-bearing
-trap; an infinite loop retains only its loop edges; and a direct or indirect
+trap, which `panic(message, at)` also hands the address of the `Location` it
+reports; an infinite loop retains only its loop edges; and a direct or indirect
 call returning `Never` becomes the corresponding noreturn-call terminator.
 Reading a named `Never` binding emits an `unreachable_reached` trap rather than
 materialising a value. These forms are structural MIR terminators because a
 normal call promises a following instruction and no side table can remove that
 successor.
+
+A call that leaves out a parameter defaulted to `caller` is given a `Location`
+built where the call is lowered: its file's path, line and column are
+`source_site` instructions carrying the span of the called name, which the
+backend answers from the same line map and file global a trap's own location
+uses (ADR 0305). Lowering holds no source text, so the position is left to the
+pass that does.
 
 ### Verifier — `src/mir/verify.zig`
 
@@ -1910,7 +1918,7 @@ an external function with two `read UInt64` parameters, no defaults, and a
 For no-value control flow it proves that no value-producing instruction has
 type `Never`, normal and noreturn calls agree with the callee's settled result,
 a `Never`-returning function has no normal return, and only a panic trap carries
-one `Str` message.
+one `Str` message and, optionally, one `Location` address.
 
 #### Storage ownership
 

@@ -21470,12 +21470,15 @@ const EmittedLine = union(enum) {
         // and a line compared as provenance is compared as nothing.
         if (std.mem.startsWith(u8, op, "llvm.mlir.global internal constant @linea_file")) return .provenance;
         if (std.mem.startsWith(u8, op, "%" ++ mlir_backend.trap_file_name) or
-            std.mem.startsWith(u8, op, "%" ++ mlir_backend.panic_file_name)) return .provenance;
+            std.mem.startsWith(u8, op, "%" ++ mlir_backend.panic_file_name) or
+            std.mem.startsWith(u8, op, "%" ++ mlir_backend.site_file_name)) return .provenance;
         // The prefixes are the emitter's own spellings, imported rather than
         // copied: the claim "these constants hold position" is the emitter's,
         // and a second spelling here would be the rule twice.
         if (std.mem.startsWith(u8, op, "%" ++ mlir_backend.trap_line_name) or
-            std.mem.startsWith(u8, op, "%" ++ mlir_backend.trap_col_name))
+            std.mem.startsWith(u8, op, "%" ++ mlir_backend.trap_col_name) or
+            std.mem.startsWith(u8, op, "%" ++ mlir_backend.site_line_name) or
+            std.mem.startsWith(u8, op, "%" ++ mlir_backend.site_col_name))
         {
             if (std.mem.indexOf(u8, body, "= arith.constant ")) |at| return .{ .trap = body[0..at] };
         }
@@ -21598,6 +21601,28 @@ test "a trap's position is not its code" {
     const kind_one = "    %tk3 = arith.constant 0 : i32";
     const kind_two = "    %tk3 = arith.constant 2 : i32";
     try testing.expect(!sameCode(kind_one, kind_two));
+}
+
+test "a call site's position and path are not its code" {
+    const one =
+        "    %sf7 = arith.constant 6 : i32 loc(\"a.lin\":12:9)\n" ++
+        "    %v7 = arith.extui %sf7 : i32 to i64 loc(\"a.lin\":12:9)\n" ++
+        "    %sl8 = arith.constant 12 : i32 loc(\"a.lin\":12:9)\n" ++
+        "    %sc9 = arith.constant 9 : i32 loc(\"a.lin\":12:9)";
+    const other =
+        "    %sf7 = arith.constant 11 : i32 loc(\"bcdef.lin\":40:2)\n" ++
+        "    %v7 = arith.extui %sf7 : i32 to i64 loc(\"bcdef.lin\":40:2)\n" ++
+        "    %sl8 = arith.constant 40 : i32 loc(\"bcdef.lin\":40:2)\n" ++
+        "    %sc9 = arith.constant 2 : i32 loc(\"bcdef.lin\":40:2)";
+    try testing.expect(sameCode(one, other));
+
+    // The widening that turns the position into a value is code.
+    const narrowed =
+        "    %sf7 = arith.constant 6 : i32 loc(\"a.lin\":12:9)\n" ++
+        "    %v7 = arith.extsi %sf7 : i32 to i64 loc(\"a.lin\":12:9)\n" ++
+        "    %sl8 = arith.constant 12 : i32 loc(\"a.lin\":12:9)\n" ++
+        "    %sc9 = arith.constant 9 : i32 loc(\"a.lin\":12:9)";
+    try testing.expect(!sameCode(one, narrowed));
 }
 
 /// Every rule the compiler can emit is provoked by some case.

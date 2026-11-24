@@ -550,13 +550,12 @@ the program:
 ```
 ok    a banner frames its title
 FAIL  every allocation the banner asks for can fail
-        linea: panic: called Result.unwrap on Err at std/result/result.lin:371:23
+        linea: panic: called Result.unwrap on Err at banner.lin:11:25
 
 1 passed, 1 failed
 ```
 
-The location is the line inside the standard library's `unwrap` that stopped
-the program; the `unwrap` to look for is the one in `banner_in`.
+The location is the `unwrap` in `banner_in`, line 11 of `banner.lin`.
 
 `each_allocation_failure` is built on `testing.TestAllocator`, which you can use
 directly to refuse one chosen allocation. `testing.TestAllocator.open(backing)`

@@ -23,6 +23,7 @@ pub fn witnessOf(tag: Inst.Tag) []const u8 {
         // anywhere has to be classified here before the build succeeds.
         .constant,
         .bytes_addr,
+        .source_site,
         .static_addr,
         .address_bits,
         .load,

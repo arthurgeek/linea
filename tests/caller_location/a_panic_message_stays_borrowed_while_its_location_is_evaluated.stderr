@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/caller_location/a_panic_message_stays_borrowed_while_its_location_is_evaluated.lin:8:9
+  |
+7 |     panic(text.view(), {
+  |           ----------- the observation is still used here
+8 |         text.release()
+  |         ^^^^ keep this place available until the last use of its observation

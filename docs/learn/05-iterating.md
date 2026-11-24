@@ -1318,6 +1318,58 @@ number: 400
   the next `next`: taking the item would leave the view pointing at nothing,
   and the compiler refuses that with `[O-Borrow]`.
 
+## The ends of a list: `first` and `last`
+
+`first()` and `last()` answer the first and the last element of a `Vec` or a
+slice without walking anything. A list can be empty, so each answers an
+`Option`: `.Some` with the element, or `.None` when there is none:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Lap times in seconds, in the order they were run.
+    defer var laps: Vec[UInt64] = Vec.new()
+    // An empty vector has no first element, so `first` answers `.None`.
+    if laps.first().is_none() {
+        io.println("no laps yet")?
+    }
+    for seconds in [UInt64(92), 88, 85, 87] {
+        if &laps.push(seconds).is_err() {
+            return .Ok(1)
+        }
+    }
+    // `first` and `last` borrow the element, and `*` reads the number.
+    let opening = laps.first() else {
+        return .Ok(1)
+    }
+    let closing = laps.last() else {
+        return .Ok(1)
+    }
+    io.println("first lap {*opening} s, last lap {*closing} s")?
+    // A slice has its own ends: the last of the first three laps.
+    let early = laps.as_slice().subspan(start: 0, count: 3).unwrap()
+    match early.last() {
+        Some(lap) => io.println("third lap {*lap} s")?,
+        None => io.println("fewer than three laps")?,
+    }
+    .Ok(0)
+}
+```
+
+```
+no laps yet
+first lap 92 s, last lap 87 s
+third lap 85 s
+```
+
+`first` and `last` lend the element rather than give it away, as walking a
+slice does, so the vector still holds every lap and `*opening` reads the
+number the answer points at. `laps[0]` names the first element too, but it
+stops the program when the vector is empty; `first` and `last` let you say
+what happens instead. `&laps.pop()`, which a later section shows, takes the
+last element out of the vector.
+
 ## `filter` drops what it rejects; `filter_map` hands it to you
 
 `filter` drops every item its predicate rejects. That is fine for numbers and
@@ -2610,7 +2662,8 @@ holds and lists its largest files.
 | the items of two sequences, paired | `for (a, b) in xs.zip(ys)`, with Discardable items in `xs` |
 | the first few items, or all but the first few | `xs.take(n)`, `xs.skip(n)` |
 | a chain over a source that never ends | an adapter runs only as the walk asks, so end it with `take(n)` |
-| a vector's last element | `&v.pop()` |
+| a look at the first or last element, if there is one | `v.first()`, `v.last()`, on a `Vec` or a slice |
+| to take a vector's last element out | `&v.pop()` |
 | a vector's elements, first to last | `v.drain()` |
 | to walk a drain of values that must be consumed | `var pending = v.drain()`, `for x in &pending`, then `pending.finish()` |
 | the records of a JSON Lines file, one at a time | `json.Lines.open(file)`, `.decoded[T]()`, `for item in &lines`, then `lines.abandon()` |

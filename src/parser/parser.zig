@@ -4302,7 +4302,10 @@ const Parser = struct {
                 defer self.in_lambda_default = outer_default;
                 // A callable type's default is read by every reading of a
                 // bracket around the type, as an array's length is.
-                default = switch (site) {
+                default = if (self.atCallerLocation()) blk: {
+                    const word = self.cursor.advance();
+                    break :blk try self.builder.addLiteral(.caller_location, word, self.rangeFrom(word));
+                } else switch (site) {
                     .callable_type => try self.parseTypeExpression(),
                     .declaration => try self.parseFull(),
                 };
@@ -7150,7 +7153,9 @@ const Parser = struct {
         return e;
     }
 
-    /// `panic(message)`, dedicated termination syntax rather than a call.
+    /// `panic(message)` or `panic(message, at)`, dedicated termination syntax
+    /// rather than a call. The second operand is the `Location` reported in
+    /// place of the panic's own.
     fn parsePanic(self: *Parser) std.mem.Allocator.Error!ExprId {
         const start = self.cursor.current();
         _ = self.cursor.advance();
@@ -7162,13 +7167,32 @@ const Parser = struct {
 
         const message = try self.parseFull();
         var valid = self.builder.exprTag(message) != .err;
+        var location: ExprId = .none;
+        if (self.cursor.eat(.comma) != null) {
+            location = try self.parseFull();
+            if (self.builder.exprTag(location) == .err) valid = false;
+        }
         if (self.cursor.eat(.r_paren) == null) {
             try self.reportAt(.s_paren, self.cursor.current(), "expected `)`", "this panic is never closed");
             valid = false;
         }
 
         if (!valid) return self.builder.addLiteral(.err, start, self.rangeFrom(start));
+        if (location != .none) return self.builder.addBinary(.panic_at, start, self.rangeFrom(start), message, location);
         return self.builder.addUnary(.panic, start, self.rangeFrom(start), message);
+    }
+
+    /// Whether a parameter's default is the word `caller` alone, which stands
+    /// for the location of the call that leaves the argument out. Followed by
+    /// what ends a parameter, so `caller` beginning a longer expression is the
+    /// name it spells.
+    fn atCallerLocation(self: *Parser) bool {
+        if (!self.cursor.at(.identifier)) return false;
+        if (!std.mem.eql(u8, self.cursor.textOf(self.cursor.current()), token.contextual_words.caller_location)) return false;
+        return switch (self.cursor.peekAt(1)) {
+            .comma, .r_paren, .pipe => true,
+            else => false,
+        };
     }
 
     /// `embed("path")` or `embed_bytes("path")`: a file the loader reads when
@@ -7414,6 +7438,8 @@ const Parser = struct {
             .borrow,
             .dereference,
             .panic,
+            .panic_at,
+            .caller_location,
             .assign,
             .add_assign,
             .sub_assign,

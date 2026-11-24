@@ -1,0 +1,2 @@
+trap
+linea: panic: called Option.unwrap on None at tests/caller_location/a_call_in_another_module_names_its_own_file/depot/crates.lin:2:11

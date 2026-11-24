@@ -83,17 +83,9 @@ impl[A: Allocator] Note[A] {
         }
     }
 
-    // Format tags as a comma-separated string: "tag1, tag2".
+    // Format tags as a comma-separated string: "tag1, tag2". `String.join`
+    // puts the separator only between tags and sizes the text once.
     pub fn tags_display(self: Self) -> String[mem.SystemAllocator] {
-        var result = String.new()
-        var first = true
-        for read tag in self.tags {
-            if !first {
-                &result.append(", ").unwrap()
-            }
-            &result.append(tag.view()).unwrap()
-            first = false
-        }
-        result
+        String.join(self.tags.as_slice(), ", ").unwrap()
     }
 }

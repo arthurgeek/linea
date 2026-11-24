@@ -112,6 +112,40 @@ impl[T] Slice[T] {
         .Ok(())
     }
 
+    // Borrow the first element, or answer None when the view is empty.
+    pub fn first(self: Self) -> Option[borrow T] where carries(self) {
+        self.get(0)
+    }
+
+    test "first borrows the first element or answers none when empty" {
+        let values = [UInt64(3), 5, 8]
+        testing.assert_eq(*values.as_slice().first().unwrap(), UInt64(3), "first borrowed another element")?
+        let tail = values.as_slice().subspan(start: 2, count: 1).unwrap()
+        testing.assert_eq(*tail.first().unwrap(), UInt64(8), "first ignored where the subspan starts")?
+        let empty = values.as_slice().subspan(start: 3, count: 0).unwrap()
+        testing.assert(empty.first().is_none(), "an empty view had a first element")?
+        .Ok(())
+    }
+
+    // Borrow the last element, or answer None when the view is empty.
+    pub fn last(self: Self) -> Option[borrow T] where carries(self) {
+        if self.len == 0 {
+            .None
+        } else {
+            self.get(self.len - 1)
+        }
+    }
+
+    test "last borrows the last element or answers none when empty" {
+        let values = [UInt64(3), 5, 8]
+        testing.assert_eq(*values.as_slice().last().unwrap(), UInt64(8), "last borrowed another element")?
+        let head = values.as_slice().subspan(start: 0, count: 2).unwrap()
+        testing.assert_eq(*head.last().unwrap(), UInt64(5), "last reached past the end of the subspan")?
+        let empty = values.as_slice().subspan(start: 0, count: 0).unwrap()
+        testing.assert(empty.last().is_none(), "an empty view had a last element")?
+        .Ok(())
+    }
+
     // Return the `count` elements from `start`, or None when they do not all
     // lie within the view. An empty span at the end of the view is accepted.
     pub fn subspan(self: Self, start: UInt64, count: UInt64) -> Option[Slice[T]] where carries(self) {

@@ -142,6 +142,12 @@
 ((call_expression callee: (index_expression index: (identifier) @type.builtin))
  (#match? @type.builtin "^(Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64|Bool|Float32|Float64|Never)$"))
 (parameter name: (identifier) @variable.parameter)
+; A parameter's default naming the call that leaves the argument out. `caller`
+; is an ordinary name, so the grammar reads it as one and only the whole
+; default of a parameter is coloured. This rule follows the one for a name
+; because the last pattern capturing a token colours it.
+((parameter default: (identifier) @keyword.control)
+ (#eq? @keyword.control "caller"))
 (named_argument name: (identifier) @variable.parameter)
 (field_expression field: (identifier) @variable.other.member)
 (template_requirement target: (identifier) @variable.other.member)

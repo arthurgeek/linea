@@ -267,6 +267,13 @@ contexts:
     - match: '(?<=\bwhere)\s+(it)\b(?=\s+in\b)'
       captures:
         1: keyword.control.linea
+    # `caller` is a parameter's default naming the call that leaves the
+    # argument out, and an ordinary name everywhere else, so it is coloured
+    # only as the whole default of a `Location`, spaced as `linea fmt` writes
+    # it. A field initialised from a variable named `caller` keeps its colour.
+    - match: '(?<=\bLocation = )(caller)\b(?=\s*[,)|])'
+      captures:
+        1: keyword.control.linea
     - match: '\b(import|use)\b'
       scope: keyword.control.import.linea
       push: import-path

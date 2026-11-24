@@ -1,0 +1,3 @@
+pub fn unload(sink crate: Option[UInt8]) -> UInt8 {
+    crate.unwrap()
+}

@@ -271,7 +271,7 @@ test "retained typing relocates generated semantic records without changing type
     try saved.traversal_positions.put(gpa, .at(1), .{ .expression = .at(3) });
     try saved.expansion_of_impl.put(gpa, .at(2), 2);
     try saved.try_conversions.put(gpa, .at(3), .{ .trait = .at(2), .member = .at(1), .source = .u8, .target = .u16 });
-    try saved.defaults.note(gpa, 2, 9, .{ .integer = 11 });
+    try saved.defaults.note(gpa, 2, 9, .{ .value = .{ .integer = 11 } });
     saved.supply_index = try types.SupplyIndex.build(gpa, 3, &.{.{ .impl = .at(1), .sig = .at(2), .member = .at(0) }});
     const r: Relocation = .{
         .source = .{ .decls = 2, .exprs = 2, .tokens = 2 },
@@ -332,7 +332,7 @@ test "retained typing relocates generated semantic records without changing type
     try testing.expectEqualDeep(types.VariantIdentity{ .receiver = .u16, .ordinal = @enumFromInt(3) }, attached.contract_variants.get(.at(6)).?);
     try testing.expect(!attached.contract_variants.contains(.at(2)));
     try testing.expectEqualDeep(types.VariantIdentity{ .receiver = .u16, .ordinal = @enumFromInt(3) }, saved.contract_variants.get(.at(2)).?);
-    try testing.expectEqual(@as(i128, 11), attached.defaults.get(5, 9).?.integer);
+    try testing.expectEqual(@as(i128, 11), attached.defaults.get(5, 9).?.value.integer);
     try testing.expectEqual(node.DeclId.at(0), attached.supply_index.memberOf(.at(1), .at(5)).?);
     try testing.expectEqualSlices(u32, &.{0}, attached.supply_index.membersOf(.at(5)));
     try testing.expectEqual(node.DeclId.at(5), attached.supply_index.signatureOf(.at(0)).?);

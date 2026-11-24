@@ -152,6 +152,7 @@ pub const not_yet_generated = [_]NotYet{
             .t_missing_argument,
             .t_default,
             .t_argument_default,
+            .t_caller,
             .t_defaulted_allocator,
             .t_unreachable,
             .t_refutable,

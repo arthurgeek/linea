@@ -1,0 +1,2 @@
+trap
+linea: panic: called Option.unwrap on None at tests/caller_location/a_named_location_is_passed_in_place_of_the_call.lin:8:18

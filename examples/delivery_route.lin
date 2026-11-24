@@ -1,0 +1,53 @@
+// Print a delivery route: where the van sets out, where it ends its day, and
+// every stop in order.
+import std.io
+import std.mem
+import std.testing
+
+use io.IoError
+use io.println
+
+// A route with no stops is a mistake in the code that planned it, so
+// `terminus` stops the program rather than answering an error.
+// `at: Location = caller` receives the location of each call that leaves the
+// argument out, and `expect` reports its message there: the panic names the
+// line that passed the empty route, not a line inside `terminus`.
+fn terminus(stops: mem.Slice[Str], at: Location = caller) -> Str {
+    // `last` answers `.None` for an empty slice and borrows the element
+    // otherwise, so `*` reads the name it points at.
+    copy(*stops.last().expect("a route has at least one stop", at))
+}
+
+test "the route ends at its last stop" {
+    testing.assert_eq(terminus(["depot", "bakery", "harbour"].as_slice()), "harbour", "the route ended somewhere else")?
+    testing.assert_eq(terminus(["depot"].as_slice()), "depot", "a route of one stop ends where it starts")?
+}
+
+test trap "a route without stops stops the program" {
+    let nowhere: [Str; 0] = []
+    let _end = terminus(nowhere.as_slice())
+}
+
+fn main() -> Result[UInt8, IoError] {
+    let stops = ["depot", "bakery", "school", "harbour"]
+    let route = stops.as_slice()
+
+    // `first` answers an `Option` too, and `let … else` says what this
+    // program does with an empty route instead of stopping.
+    let origin = route.first() else {
+        println("no deliveries today")?
+        return .Ok(0)
+    }
+    println("sets out from the {*origin}")?
+    println("ends the day at the {terminus(route)}")?
+
+    // `String.join` writes the arrow between neighbouring stops only, and
+    // answers text the program owns and releases. A refused allocation is
+    // reported by `refusal.report`, which answers the exit status.
+    let path = String.join(route, " -> ") else |refusal| {
+        return .Ok(refusal.report("the route"))
+    }
+    defer path.release()
+    println("route: {path}")?
+    .Ok(0)
+}

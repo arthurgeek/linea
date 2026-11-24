@@ -138,6 +138,8 @@ pub fn reachOfExpr(tag: Expr.Tag) Reach {
         .str_literal => .{ .impossible = "the generator names no library declaration, so it cannot name `Str`" },
         .embed, .embed_bytes => .{ .impossible = "the generator writes a program and no file beside it, so nothing it writes can embed one" },
         .panic => .{ .impossible = "the generator names no library declaration, so it cannot type a panic message as `Str`" },
+        .panic_at => .{ .impossible = "the generator names no library declaration, so it cannot type a panic message as `Str` or its place as `Location`" },
+        .caller_location => .{ .impossible = "the generator names no library declaration, so it cannot type a parameter as `Location`" },
         // For the same reason, and one more: what an interpolation renders is
         // reached through `Display`, which the library declares.
         .interp => .{ .impossible = "the generator names no library declaration, so it cannot name `Str` or `Display`" },
@@ -592,6 +594,8 @@ pub fn reachOfInst(tag: Inst.Tag) Reach {
         // generator names no library declaration, so it cannot write `Str`.
         .bytes_addr => .{ .impossible = "the generator names no library declaration, so it cannot name `Str`" },
         .address_bits => .{ .impossible = "the generator names no library declaration, so it cannot construct a checked array view" },
+        // Emitted only where a call fills in a `Location`, the library's type.
+        .source_site => .{ .impossible = "the generator names no library declaration, so it cannot name `Location`" },
         .load_raw, .store_raw, .storage_addr => .{ .impossible = "the generator names no library declaration, so it cannot name private storage operations" },
         .constant,
         .load,

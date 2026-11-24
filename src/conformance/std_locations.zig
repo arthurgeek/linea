@@ -16,7 +16,8 @@
 //!     standard-library lines included, so a diagnostic naming a `std/` file is
 //!     re-rendered at the width its own files' lines need.
 //!   * The backend hands the runtime a trap's or panic's line and column as the
-//!     constants `%tl<n>` and `%tc<n>`. When such a constant carries a
+//!     constants `%tl<n>` and `%tc<n>`, and builds a call's `Location` from
+//!     the constants `%sl<n>` and `%sc<n>`. When such a constant carries a
 //!     library `loc(...)`, its value is that library line or column and
 //!     becomes `L` or `C`. The trap kind `%tk<n>` and every other constant
 //!     are code and stay exact.
@@ -56,7 +57,7 @@ pub fn normalise(gpa: std.mem.Allocator, text: []const u8) std.mem.Allocator.Err
     return positionConstants(gpa, located);
 }
 
-/// Copies `text`, masking the value of each `%tl<n>`/`%tc<n>` constant whose
+/// Copies `text`, masking the value of each `%tl<n>`/`%tc<n>`/`%sl<n>`/`%sc<n>` constant whose
 /// `loc` is already masked as a library location: the value is that source
 /// line or column.
 fn positionConstants(gpa: std.mem.Allocator, text: []const u8) std.mem.Allocator.Error![]u8 {
@@ -83,16 +84,18 @@ const PositionValue = struct { start: usize, end: usize, placeholder: []const u8
 /// or null when `line` is not a library trap line or column constant.
 fn positionConstant(line: []const u8) ?PositionValue {
     const indent = std.mem.indexOfNone(u8, line, " ") orelse return null;
-    const line_name = "%" ++ mlir_backend.trap_line_name;
-    const column_name = "%" ++ mlir_backend.trap_col_name;
+    const names = [_]struct { []const u8, []const u8 }{
+        .{ "%" ++ mlir_backend.trap_line_name, line_placeholder },
+        .{ "%" ++ mlir_backend.trap_col_name, column_placeholder },
+        .{ "%" ++ mlir_backend.site_line_name, line_placeholder },
+        .{ "%" ++ mlir_backend.site_col_name, column_placeholder },
+    };
     var at = indent;
-    var placeholder: []const u8 = undefined;
-    if (std.mem.startsWith(u8, line[at..], line_name)) {
-        at += line_name.len;
-        placeholder = line_placeholder;
-    } else if (std.mem.startsWith(u8, line[at..], column_name)) {
-        at += column_name.len;
-        placeholder = column_placeholder;
+    const placeholder: []const u8 = for (names) |name| {
+        if (std.mem.startsWith(u8, line[at..], name[0])) {
+            at += name[0].len;
+            break name[1];
+        }
     } else return null;
     const digits = std.mem.indexOfNonePos(u8, line, at, "0123456789") orelse return null;
     if (digits == at) return null;
@@ -316,6 +319,17 @@ test "a trap's library line and column constants are masked, its kind is not" {
         "    %tk1 = arith.constant 6 : i32 loc(\"std/text/str.lin\":141:19)\n" ++
             "    %tl1 = arith.constant 141 : i32 loc(\"std/text/str.lin\":141:19)\n" ++
             "    %tc1 = arith.constant 19 : i32 loc(\"std/text/str.lin\":141:19)\n",
+    );
+}
+
+test "a call site's library line and column constants are masked, its widening is not" {
+    try expectNormalised(
+        "    %sl4 = arith.constant L : i32 loc(\"std/option/option.lin\":L:C)\n" ++
+            "    %v4 = arith.extui %sl4 : i32 to i64 loc(\"std/option/option.lin\":L:C)\n" ++
+            "    %sc5 = arith.constant C : i32 loc(\"std/option/option.lin\":L:C)\n",
+        "    %sl4 = arith.constant 88 : i32 loc(\"std/option/option.lin\":88:21)\n" ++
+            "    %v4 = arith.extui %sl4 : i32 to i64 loc(\"std/option/option.lin\":88:21)\n" ++
+            "    %sc5 = arith.constant 21 : i32 loc(\"std/option/option.lin\":88:21)\n",
     );
 }
 

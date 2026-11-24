@@ -1,0 +1,11 @@
+fn spot(at: Location = caller) -> Location {
+    copy(at)
+}
+
+fn main() -> UInt8 {
+    var text = "the message".to_owned().unwrap()
+    panic(text.view(), {
+        text.release()
+        spot()
+    })
+}

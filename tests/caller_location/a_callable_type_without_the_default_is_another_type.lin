@@ -1,0 +1,14 @@
+// A default is part of a callable type, `caller` included: `unwrap` has a
+// second parameter, so it is no function of one. A callable type that writes
+// `at: Location = caller` takes it, and so does a lambda that calls it.
+fn apply(f: fn(sink value: Option[UInt8]) -> UInt8) -> UInt8 {
+    f(.Some(3))
+}
+
+fn located(f: fn(sink value: Option[UInt8], at: Location = caller) -> UInt8) -> UInt8 {
+    f(.Some(3))
+}
+
+fn main() -> UInt8 {
+    located(Option.unwrap) + apply(|sink value| value.unwrap()) + apply(Option.unwrap)
+}

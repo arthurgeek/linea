@@ -295,6 +295,11 @@ pub const Code = enum {
     /// A type written without the argument of a defaulted allocator parameter,
     /// inside a declaration that declares an allocator parameter of its own.
     t_defaulted_allocator,
+    /// `caller` is the default of a parameter whose type is not the
+    /// prelude's `Location`, or the default of anything but a function's
+    /// parameter: only a call to a declared function has a location to fill
+    /// in.
+    t_caller,
     t_cover,
     /// A `match`'s coverage check would build more matrix cells than its
     /// budget allows. Nested patterns make exhaustiveness NP-complete, so the
@@ -523,6 +528,7 @@ pub const Code = enum {
             .t_default => "T-Default",
             .t_argument_default => "T-ArgumentDefault",
             .t_defaulted_allocator => "T-DefaultedAllocator",
+            .t_caller => "T-Caller",
             .t_cover => "T-Cover",
             .t_cover_limit => "T-CoverLimit",
             .t_unreachable => "T-Unreachable",

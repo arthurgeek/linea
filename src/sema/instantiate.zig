@@ -1511,6 +1511,7 @@ const Discovery = struct {
             .name_ref,
             .param_argument,
             .reflection_root,
+            .caller_location,
             .struct_pattern,
             .tuple_pattern,
             => {},
@@ -1594,6 +1595,11 @@ const Discovery = struct {
                 try self.expr(ends.rhs);
             },
             .grouped, .negate, .not, .marked, .field, .dereference, .copy_, .borrow, .panic, .from_end => try self.expr(self.ast.unaryOperand(id)),
+            .panic_at => {
+                const operands = self.ast.binary(id);
+                try self.expr(operands.lhs);
+                try self.expr(operands.rhs);
+            },
             .variant_ref => {},
 
             .interp => for (self.ast.interpolation(id).pieces) |part| try self.expr(part),

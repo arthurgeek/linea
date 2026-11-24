@@ -23,6 +23,7 @@ import iter
 import tuple
 import session
 import task
+import location
 
 // Equality, comparison and stepping support ==, < and ranges.
 pub use cmp.Equatable
@@ -60,6 +61,10 @@ pub use tuple.Tuple8
 pub use text.Str
 pub use fmt.Display
 pub use fmt.Debug
+
+// A parameter defaulted to `caller` has type Location, and `panic(message, at)`
+// reports the Location it is given.
+pub use location.Location
 
 // The prelude also holds the core vocabulary. No syntax requires these names;
 // they are here because most programs write them in signatures and bounds.

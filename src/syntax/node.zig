@@ -1376,6 +1376,11 @@ pub const Expr = struct {
         /// `panic(message)`. Evaluates one `Str` message, reports it at this
         /// expression's location, and has no continuation.
         panic,
+        /// `panic(message, at)`. Evaluates the `Str` message, then the
+        /// `Location` it reports in place of its own, and has no continuation.
+        /// A tag of its own rather than an optional operand of `panic`, so
+        /// every reader of a binary payload finds both operands present.
+        panic_at,
         /// `e?`. Yields what a successful `Option` or `Result` carries, and
         /// returns the unsuccessful one from the enclosing function.
         ///
@@ -1429,6 +1434,10 @@ pub const Expr = struct {
         /// operations. Selections and calls above it retain their ordinary
         /// field and call shapes until resolver-integrated expansion erases it.
         reflection_root,
+        /// `caller`, written as a function parameter's default: the location of
+        /// the call that leaves the argument out. A leaf whose main token is
+        /// the word; the parser reads it only in that position.
+        caller_location,
         grouped,
         negate,
         /// `!e`. The only unary operator over `Bool`.
@@ -1480,10 +1489,10 @@ pub const Expr = struct {
                 .lambda => .lambda,
                 .for_, .for_read, .for_inout => .call,
                 .copy_, .panic, .borrow, .dereference => .unary,
-                .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .err, .continue_ => .none,
+                .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .caller_location, .err, .continue_ => .none,
                 .grouped, .negate, .not, .loop_, .break_, .return_, .marked, .variant_ref, .field, .try_ => .unary,
                 .from_end => .unary,
-                .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .index => .binary,
+                .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .index, .panic_at => .binary,
                 .logical_and, .logical_or => .binary,
                 .while_, .assign => .binary,
                 .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign => .binary,
@@ -1505,9 +1514,9 @@ pub const Expr = struct {
                 .match_, .match_read, .struct_literal, .struct_pattern, .array_literal, .interp, .unwrap_else => false,
                 .tuple_literal, .tuple_pattern => false,
                 .for_, .for_read, .for_inout => false,
-                .block, .conditional, .borrow, .dereference, .copy_, .panic, .grouped, .negate, .not, .from_end, .lambda => false,
+                .block, .conditional, .borrow, .dereference, .copy_, .panic, .panic_at, .grouped, .negate, .not, .from_end, .lambda => false,
                 .loop_, .break_, .return_, .marked, .variant_ref, .field, .try_ => false,
-                .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .err, .continue_ => false,
+                .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .caller_location, .err, .continue_ => false,
                 .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .index => false,
                 .logical_and, .logical_or, .while_, .assign => false,
                 .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign => false,

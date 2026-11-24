@@ -1969,6 +1969,7 @@ pub const Phase = struct {
             .observe,
             .constant,
             .bytes_addr,
+            .source_site,
             .static_addr,
             .load_raw,
             .store_raw,
