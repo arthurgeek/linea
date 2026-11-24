@@ -11807,6 +11807,14 @@ test "string literal postfix preserves numeric restrictions and newline boundari
     try testing.expectEqual(@as(u32, 0), separated.errors);
 }
 
+test "a computed length argument prints its expression" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const parsed = try parseProgramText(arena.allocator(), "alias Four = Block[2 + 2]\n");
+    try testing.expectEqual(@as(u32, 0), parsed.errors);
+    try testing.expect(std.mem.indexOf(u8, parsed.dump, "Block[2 + 2]") != null);
+}
+
 test "inferred array lengths remain syntax rather than name expressions" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
