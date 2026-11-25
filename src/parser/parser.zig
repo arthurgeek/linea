@@ -826,8 +826,12 @@ const Parser = struct {
             const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
             const default_at = if (self.atDefaultImplementation()) self.cursor.advance() else TokenId.none;
 
-            if (self.cursor.at(.keyword_impl) or self.cursor.at(.keyword_template)) {
-                const is_template = self.cursor.at(.keyword_template);
+            // `template Label …` with its `impl` left out or misspelt is still a
+            // template: at the start of a declaration, `template` followed by
+            // a name begins nothing else, so it is read as one and refused
+            // once, rather than as a statement the recovery skips into.
+            const is_template = self.atTemplateImplementation() or self.atTemplateMissingImpl();
+            if (self.cursor.at(.keyword_impl) or is_template) {
                 // An `impl` declares no name, so there is nothing for `pub` to
                 // export and nothing for `linear` to describe: a modifier here
                 // was read and dropped, which is the shape of a mistake that
@@ -1277,6 +1281,9 @@ const Parser = struct {
         const start = if (default_at != .none) default_at else self.cursor.current();
         _ = self.cursor.advance();
         if (is_template and self.cursor.eat(.keyword_impl) == null) {
+            // `template imp Label`: a misspelt `impl` is stepped over, so the
+            // trait after it is still the one the template names.
+            if (self.cursor.at(.identifier) and self.cursor.peekAt(1) == .identifier and self.nextOnThisLine(1)) _ = self.cursor.advance();
             try self.reportAt(.s_entry, self.cursor.current(), "expected `impl` after `template`", "a structural template is an impl recipe");
         }
 
@@ -2740,6 +2747,42 @@ const Parser = struct {
         return self.cursor.peekAt(1) == .keyword_impl;
     }
 
+    /// Whether `template` begins a structural template here.
+    ///
+    /// `template` is a contextual word: before `impl` at the start of a
+    /// declaration it marks a template, and anywhere else it is a name, so a
+    /// parameter, a field or a function may be called `template`.
+    fn atTemplateImplementation(self: *const Parser) bool {
+        if (!self.cursor.at(.identifier)) return false;
+        if (!std.mem.eql(u8, self.cursor.textOf(self.cursor.current()), token.contextual_words.template_implementation)) return false;
+        return self.cursor.peekAt(1) == .keyword_impl;
+    }
+
+    /// Whether `template` is followed by a name where a declaration begins:
+    /// a template whose `impl` is missing or misspelt, since a name followed
+    /// by another name starts no other declaration.
+    /// The name must sit on the line `template` does: a stray `template`
+    /// line is not read into the declaration below it.
+    fn atTemplateMissingImpl(self: *const Parser) bool {
+        if (!self.cursor.at(.identifier)) return false;
+        if (!std.mem.eql(u8, self.cursor.textOf(self.cursor.current()), token.contextual_words.template_implementation)) return false;
+        return self.cursor.peekAt(1) == .identifier and self.nextOnThisLine(1);
+    }
+
+    /// Whether the token `n` significant tokens ahead sits on the line the
+    /// current token does. Reads the gap between consecutive tokens only.
+    fn nextOnThisLine(self: *const Parser, n: u32) bool {
+        var from = self.cursor.current();
+        var k: u32 = 1;
+        while (k <= n) : (k += 1) {
+            const to = self.cursor.ahead(k) orelse return false;
+            const gap = self.cursor.source[self.cursor.spanAt(from).end..self.cursor.spanAt(to).start];
+            if (std.mem.indexOfScalar(u8, gap, '\n') != null) return false;
+            from = to;
+        }
+        return true;
+    }
+
     /// Which braces a declared type is being read in, and so what it may say.
     const TypeMember = enum {
         /// A trait's. The type is asked for here and settled elsewhere.
@@ -2877,7 +2920,7 @@ const Parser = struct {
     /// Whether the cursor sits where a declaration can begin. One place, so
     /// recovery and dispatch cannot disagree about what a declaration is.
     fn atDeclaration(self: *const Parser) bool {
-        if (self.atDefaultImplementation()) return true;
+        if (self.atDefaultImplementation() or self.atTemplateImplementation()) return true;
         return switch (self.cursor.peek()) {
             .keyword_pub,
             .keyword_internal,
@@ -2890,7 +2933,6 @@ const Parser = struct {
             .keyword_unshareable,
             .keyword_shareable,
             .keyword_test,
-            .keyword_template,
             .keyword_derive,
             .keyword_impl,
             .keyword_fn,

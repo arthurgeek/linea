@@ -1,0 +1,10 @@
+error[S-Entry]: expected `impl` after `template`
+  --> tests/recovery/a_template_missing_its_impl_is_one_mistake.lin:12:10
+   |
+12 | template Label where reflect.target: struct {
+   |          ^^^^^ a structural template is an impl recipe
+error[S-Entry]: expected `impl` after `template`
+  --> tests/recovery/a_template_missing_its_impl_is_one_mistake.lin:18:14
+   |
+18 | template imp Tag where reflect.target: enum {
+   |              ^^^ a structural template is an impl recipe

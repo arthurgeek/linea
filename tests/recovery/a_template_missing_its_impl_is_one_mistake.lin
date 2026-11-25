@@ -1,0 +1,26 @@
+// A template whose `impl` is left out, and one whose `impl` is misspelt, are
+// each one mistake: the trait, the requirement and the body after them are
+// still read as the template's.
+trait Label {
+    fn label(_self: Self) -> UInt8
+}
+
+trait Tag {
+    fn tag(_self: Self) -> UInt8
+}
+
+template Label where reflect.target: struct {
+    fn label(_self: Self) -> UInt8 {
+        7
+    }
+}
+
+template imp Tag where reflect.target: enum {
+    fn tag(_self: Self) -> UInt8 {
+        8
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

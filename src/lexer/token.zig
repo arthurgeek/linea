@@ -136,7 +136,6 @@ pub const Tag = enum(u8) {
     keyword_panic,
     keyword_embed,
     keyword_embed_bytes,
-    keyword_template,
     keyword_derive,
     keyword_reflect,
     keyword_impl,
@@ -556,6 +555,11 @@ pub const contextual_words = struct {
     /// declare an operation named `default`.
     pub const default_implementation = "default";
 
+    /// `template impl Trait where reflect.target: struct { … }`, a structural
+    /// template. Only before `impl` at the start of a declaration, so a
+    /// program may still name a parameter, a field or a function `template`.
+    pub const template_implementation = "template";
+
     /// `alias Name = Type` at the top of a file: another name for a type that
     /// already exists. Only where a declaration begins and a name follows, so
     /// a program may still bind `alias` as a value.
@@ -567,7 +571,7 @@ pub const contextual_words = struct {
     pub const caller_location = "caller";
 
     /// Every one of them, for a gate that must cover each.
-    pub const all = [_][]const u8{ declared_type, projection, traversal, refinement_value, delegation, default_implementation, type_alias, caller_location };
+    pub const all = [_][]const u8{ declared_type, projection, traversal, refinement_value, delegation, default_implementation, template_implementation, type_alias, caller_location };
 };
 
 /// What every tag naming a reserved word is named with.

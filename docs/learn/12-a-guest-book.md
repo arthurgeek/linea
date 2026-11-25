@@ -340,12 +340,12 @@ struct Field {
     value: Value,
 }
 
-// Copy `form` to `w`, replacing each `{{name}}` with the first matching field in
+// Copy `template` to `w`, replacing each `{{name}}` with the first matching field in
 // `fields`. Unknown placeholders (`{{unknown}}`) and unclosed delimiters (`{{unclosed`)
 // are intentionally preserved as literal text. A test checks that filling each production
 // template leaves no `{{` behind.
-fn fill[W: Writer](inout w: W, form: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
-    var rest = copy(form)
+fn fill[W: Writer](inout w: W, template: Str, fields: [Field; 3]) -> Result[(), W.Error] where carries(.Err: w) {
+    var rest = copy(template)
     loop {
         let (before, opened) = rest.split_once(r"{{") else {
             break
