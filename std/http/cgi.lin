@@ -5,7 +5,6 @@ import std.mem
 import std.testing
 import std.time
 
-use env.Entries
 use env.Entry
 
 // A CGI program answers one request and exits. The web server starts it for
@@ -183,26 +182,17 @@ impl CgiOutput for StandardOutput {
     }
 }
 
-// `CgiVariables` walks the variables a CGI request is described by, as the
-// bytes they hold: the process environment, or the variables a test gives.
-trait CgiVariables {
-    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self)
-}
-
-impl CgiVariables for Entries {
-    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self) {
-        &self.next()
-    }
-}
-
-// `Given` walks variables a test lists.
+// `Given` walks variables a test lists, yielding each `Entry` as
+// `env.entries()` yields the process environment's.
 struct Given {
     variables: mem.Slice[Entry],
     index: UInt64,
 }
 
-impl CgiVariables for Given {
-    fn next_variable(inout self: Self) -> Option[Entry] where carries(.Some: self) {
+impl Iterator for Given {
+    type Item = Entry
+
+    fn next(inout self: Self) -> Option[Entry] where carries(.Some: self) {
         if self.index == self.variables.length() {
             return .None
         }
@@ -239,7 +229,7 @@ let header_line_framing_bytes: UInt64 = 4
 // `describe_request` reads the request `variables` describe into `memory`.
 // A missing `REQUEST_METHOD` is `NotCgi` however else the variables are
 // refused.
-fn describe_request[V: CgiVariables, P: Allocator](inout variables: V, memory: mem.Handle[P], limits: Limits) -> Result[Described[P], CgiRefusal] where carries(.Ok: memory) {
+fn describe_request[V: Iterator, P: Allocator](inout variables: V, memory: mem.Handle[P], limits: Limits) -> Result[Described[P], CgiRefusal] where V.Item == Entry, carries(.Ok: memory) {
     var head = String.new_in(memory)
     var header_fields: Vec[Field, mem.Handle[P]] = Vec.new_in(memory)
     var tally = no_headers
@@ -252,7 +242,7 @@ fn describe_request[V: CgiVariables, P: Allocator](inout variables: V, memory: m
     var sized = false
     var refused: Option[RequestError] = .None
     loop {
-        let variable = &variables.next_variable() else {
+        let variable = &variables.next() else {
             break
         }
         let header: Option[Str] = if variable.name == "REQUEST_METHOD".as_bytes() {
@@ -528,7 +518,7 @@ fn read_described[R: io.Reader, P: Allocator](sink described { head, line, heade
 // `handler`, writing the response to `output`, which `destination` settles
 // once it is flushed, and tell `handler` how the exchange ended. Nothing this
 // allocates in `memory` outlives the call.
-fn answer_cgi[V: CgiVariables, R: io.Reader + Discardable, D: CgiOutput, H: Handler[(), P] + Observer, P: Allocator](inout variables: V, sink input: R, sink output: Output[P], inout destination: D, inout handler: H, memory: mem.Handle[P], limits: Limits) -> Result[(), CgiError] where R.Error: Into[io.IoError] {
+fn answer_cgi[V: Iterator, R: io.Reader + Discardable, D: CgiOutput, H: Handler[(), P] + Observer, P: Allocator](inout variables: V, sink input: R, sink output: Output[P], inout destination: D, inout handler: H, memory: mem.Handle[P], limits: Limits) -> Result[(), CgiError] where V.Item == Entry, R.Error: Into[io.IoError] {
     var unanswered = output
     let described = match describe_request(&variables, memory, limits) {
         Ok(described) => described,

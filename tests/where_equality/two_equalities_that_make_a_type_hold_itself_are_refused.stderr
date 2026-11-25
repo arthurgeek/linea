@@ -1,0 +1,5 @@
+error[T-Equal]: with this equality `J.Item` must be `Vec[J.Item, mem.SystemAllocator]`, which holds it
+ --> tests/where_equality/two_equalities_that_make_a_type_hold_itself_are_refused.lin:3:65
+  |
+3 | fn _wrap[I: Iterator, J: Iterator](_i: I, _j: J) -> UInt8 where I.Item == Vec[J.Item], J.Item == I.Item {
+  |                                                                 ^^^^^^^^^^^^^ no type contains itself, so no settling meets these equalities; remove one of them

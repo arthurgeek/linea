@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Label` is already implemented for `Labelled[I]`
+  --> tests/where_equality/implementations_differing_only_by_an_equality_overlap.lin:18:19
+   |
+12 | impl[I: Iterator] Label for Labelled[I] where I.Item == UInt8 {
+   |                   ----- already implemented here
+18 | impl[I: Iterator] Label for Labelled[I] where I.Item == UInt16 {
+   |                   ^^^^^ a trait is implemented once for a type

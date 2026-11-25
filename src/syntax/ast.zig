@@ -694,6 +694,12 @@ pub const Ast = struct {
         return self.where_predicates[r.start..r.end];
     }
 
+    /// Where `declWherePredicates(id)` starts in the tree's predicate table,
+    /// so a reader can name one predicate by one index.
+    pub fn declWherePredicateStart(self: *const Ast, id: DeclId) u32 {
+        return self.decls.items(.where_predicates)[id.index()].start;
+    }
+
     pub fn declWhereToken(self: *const Ast, id: DeclId) TokenId {
         return self.decls.items(.where_at)[id.index()];
     }

@@ -1,0 +1,5 @@
+error[T-Equal]: `I.Iter` is `I`, so this `where` clause makes the type parameters `I` and `J` one type
+ --> tests/where_equality/two_parameters_equated_once_implementations_settle_are_refused.lin:3:95
+  |
+3 | fn pick[I: Iterator + Sequence, J: Iterator](inout i: I, inout _j: J) -> Option[I.Item] where I.Iter == J, carries(.Some ...
+  |                                                                                               ^^^^^^^^^^^ declare one type parameter and write it for both

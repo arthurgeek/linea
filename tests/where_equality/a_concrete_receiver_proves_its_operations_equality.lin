@@ -1,0 +1,19 @@
+trait Census {
+    type Count
+
+    fn tally(self: Self) -> UInt8 where Self.Count == UInt8
+}
+
+struct Poll { count: UInt8 }
+
+impl Census for Poll {
+    type Count = UInt8
+
+    fn tally(self: Self) -> UInt8 {
+        self.count
+    }
+}
+
+fn main() -> UInt8 {
+    (Poll { count = 5 }).tally()
+}

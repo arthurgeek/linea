@@ -1,0 +1,2 @@
+fn _same[A: Source, B: Source]() where A.Item == B.Item {}
+//                                            ^ operator

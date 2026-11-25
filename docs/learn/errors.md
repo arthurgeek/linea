@@ -55,6 +55,7 @@ for the code in brackets to reach the rule itself.
 | `T-Derive` | error | Calling things: [`@derive`: implementations the compiler writes](02-calling-things.md#derive-implementations-the-compiler-writes) | [§4 Types](../linea-semantics.md#4-types), at `[T-Derive]` |
 | `T-Discard` | error | Linea in an hour: [Where a statement ends](01-linea-in-an-hour.md#where-a-statement-ends) | [§4 Types](../linea-semantics.md#4-types), at `[T-Discard]` |
 | `T-Dual` | error | Copying, settling and sealing: [Protocols: tags that name each other](04-copying-settling-and-sealing.md#protocols-tags-that-name-each-other) | [§4 Types](../linea-semantics.md#4-types), at `[T-Dual]` |
+| `T-Equal` | error | Iterating: [One sequence after another: `chain`](05-iterating.md#one-sequence-after-another-chain) | [§4 Types](../linea-semantics.md#4-types), at `[T-Equal]` |
 | `T-ExternCallback` | error | Calling C: [Callbacks: C calling Linea](11-calling-c.md#callbacks-c-calling-linea) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternCallback]` |
 | `T-ExternHandle` | error | Calling C: [A C object stays with one task unless its wrapper says otherwise](11-calling-c.md#a-c-object-stays-with-one-task-unless-its-wrapper-says-otherwise) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternHandle]` |
 | `T-ExternPrototype` | error | Calling C: [The compiler holds each `extern` to C's prototype](11-calling-c.md#the-compiler-holds-each-extern-to-cs-prototype) | [§4 Types](../linea-semantics.md#4-types), at `[T-ExternPrototype]` |

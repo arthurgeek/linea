@@ -1,0 +1,48 @@
+// A provided operation equates `Self.Iter.Item` with a pair of its own type
+// parameters, and a call settles them from the receiver's items.
+trait Ledger {
+    type Iter: Iterator
+
+    fn entries(sink self: Self) -> Self.Iter
+
+    fn last_amount[L: Discardable, R: Discardable](sink self: Self) -> Option[R] where Self.Iter.Item == (L, R), Self.Iter: Discardable {
+        var last: Option[R] = .None
+        for entry in self.entries() {
+            let (_label, amount) = entry
+            last = .Some(amount)
+        }
+        last
+    }
+}
+
+struct Countdown {
+    left: UInt8,
+}
+
+impl Iterator for Countdown {
+    type Item = (Bool, UInt8)
+
+    fn next(inout self: Self) -> Option[(Bool, UInt8)] {
+        if self.left == 0 {
+            return .None
+        }
+        self.left -= 1
+        .Some((self.left == 0, self.left + 20))
+    }
+}
+
+impl Ledger for Countdown {
+    type Iter = Countdown
+
+    fn entries(sink self: Countdown) -> Countdown {
+        self
+    }
+}
+
+fn main() -> UInt8 {
+    let countdown = Countdown { left = 3 }
+    match countdown.last_amount() {
+        Some(amount) => amount,
+        None => 0,
+    }
+}

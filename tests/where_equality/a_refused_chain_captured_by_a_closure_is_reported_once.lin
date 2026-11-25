@@ -1,0 +1,12 @@
+// A refused `chain` captured by a closure is reported once, at `chain`, and
+// not again where the closure asks it for an item.
+fn main() -> UInt8 {
+    var c = (UInt8(0)..3).chain(UInt16(5)..9)
+    var f = inout [inout c] || -> UInt8 {
+        match &c.next() {
+            Some(v) => v,
+            None => 0,
+        }
+    }
+    &f()
+}

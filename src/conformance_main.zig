@@ -13346,6 +13346,11 @@ fn settledRefsWritten(ast: *const Ast, program: *const Program, in_library: []co
                 }
             }
             if (ownSettledRef(ast, in_library, ast.declReturnRef(d))) n += 1;
+            // An equality's right-hand side is a written type no other type
+            // holds, as a signature's are.
+            for (ast.declWherePredicates(d)) |predicate| {
+                if (predicate.isEquality() and ownSettledRef(ast, in_library, predicate.equals)) n += 1;
+            }
         }
     }
 
@@ -13794,6 +13799,9 @@ fn checkSettledRefs(
                 for (ast.typeArgs(predicate.subject.args)) |a| {
                     try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, a);
                 }
+                // An equality's right-hand side is a written type like a
+                // signature's, and holds what it writes as one does.
+                if (predicate.isEquality()) try heldToWhatSettles(gpa, &work, ast, program, typing, in_library, d, predicate.equals);
                 try heldBoundArguments(gpa, &work, ast, program, typing, in_library, d, ast.boundsIn(predicate.bounds));
             }
         }
@@ -14551,6 +14559,40 @@ fn namesTheBoundThatDeclaresIt(
     // reference reads as that definition -- which may itself be a key of
     // another trait awaiting an instantiation, `I.Item` for `I.Out`.
     if (readAsHeadDefinition(ast, typing, written.last)) return .through_a_bound;
+    const selected = reading.?;
+    var source_args: std.ArrayList(u8) = .empty;
+    defer source_args.deinit(gpa);
+    // Whether the source spells every argument, so there is a whole key to
+    // hold the recorded one to.
+    const spelled_all = spelled: {
+        if (selected.args.len != ast.declTypeParams(trait).len) break :spelled false;
+        for (selected.args, 0..) |arg, i| {
+            const name = try spellReadArg(gpa, ast, work.res, arg, selected.outer) orelse break :spelled false;
+            defer gpa.free(name);
+            if (i > 0) try source_args.appendSlice(gpa, ", ");
+            try source_args.appendSlice(gpa, name);
+        }
+        break :spelled true;
+    };
+
+    // The reference may name a different member of the same equality class.
+    for (typing.contextual_constraints.equalities.membersWithin(held_by)) |equated| {
+        if (equated.representative != resolved) continue;
+        const candidate = typing.standinOf(equated.ty) orelse continue;
+        if (candidate.trait != trait.index() or candidate.member != member or
+            !std.mem.eql(u8, typing.nameOf(candidate.held), from.items)) continue;
+        if (spelled_all) {
+            var arguments: std.ArrayList(u8) = .empty;
+            defer arguments.deinit(gpa);
+            for (typing.standinArgsOf(candidate), 0..) |arg, i| {
+                if (i > 0) try arguments.appendSlice(gpa, ", ");
+                try arguments.appendSlice(gpa, typing.nameOf(arg));
+            }
+            if (!std.mem.eql(u8, arguments.items, source_args.items)) continue;
+        }
+        return if (spelled_all) .through_a_bound else .no_bound_the_source_names;
+    }
+
     const key = typing.standinOf(resolved) orelse {
         try work.failures.append(gpa, .{
             .path = work.display_path,
@@ -14572,22 +14614,7 @@ fn namesTheBoundThatDeclaresIt(
     // read off. One trait may bound a parameter at several argument lists and
     // each settles the member its own way, so a key naming the right trait at
     // other arguments names another type.
-    const selected = reading.?;
     const recorded_args = typing.standinArgsOf(key);
-    var source_args: std.ArrayList(u8) = .empty;
-    defer source_args.deinit(gpa);
-    // Whether the source spells every argument, so there is a whole key to
-    // hold the recorded one to.
-    const spelled_all = spelled: {
-        if (selected.args.len != ast.declTypeParams(trait).len) break :spelled false;
-        for (selected.args, 0..) |arg, i| {
-            const name = try spellReadArg(gpa, ast, work.res, arg, selected.outer) orelse break :spelled false;
-            defer gpa.free(name);
-            if (i > 0) try source_args.appendSlice(gpa, ", ");
-            try source_args.appendSlice(gpa, name);
-        }
-        break :spelled true;
-    };
     var key_args: std.ArrayList(u8) = .empty;
     defer key_args.deinit(gpa);
     for (recorded_args, 0..) |arg, i| {

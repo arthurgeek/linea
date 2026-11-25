@@ -1,0 +1,45 @@
+==================
+A where clause equates two types
+==================
+
+fn same[A: Iterator, B: Iterator](first: A, second: B) where B.Item == A.Item, A.Item: Discardable {}
+
+---
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    (type_parameters
+      (type_parameter
+        name: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier))))
+      (type_parameter
+        name: (type_identifier)
+        (bound
+          (trait_reference
+            name: (type_identifier)))))
+    (parameter_list
+      (parameter
+        name: (identifier)
+        type: (type_identifier))
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    (where_clause
+      (where_predicate
+        subject: (settled_ref_type
+          base: (type_identifier)
+          member: (type_identifier))
+        equals: (settled_ref_type
+          base: (type_identifier)
+          member: (type_identifier)))
+      (where_predicate
+        subject: (settled_ref_type
+          base: (type_identifier)
+          member: (type_identifier))
+        (bound
+          (trait_reference
+            name: (type_identifier)))))
+    body: (block)))

@@ -1,0 +1,17 @@
+trait HasItem {
+    type Item
+}
+
+struct Pair {}
+
+impl HasItem for Pair {
+    type Item = [UInt8; 2]
+}
+
+fn take[I: HasItem, let n: UInt64](_item: I, _values: [UInt8; n]) -> UInt8 where I.Item == [UInt8; n] {
+    0
+}
+
+fn main() -> UInt8 {
+    take[Pair, 2](Pair {}, [1, 2])
+}

@@ -5,7 +5,8 @@ const StringId = @import("../support/interner.zig").StringId;
 const Ast = @import("../syntax/ast.zig").Ast;
 const node = @import("../syntax/node.zig");
 
-/// Generic-list bounds and trailing predicates, normalized once.
+/// Generic-list bounds and trailing bound predicates, normalized once. An
+/// equality predicate states no bound and is read by the type checker alone.
 ///
 /// A direct predicate joins the parameter's own requirement run. A projected
 /// predicate remains a record with its complete subject. Both passes that read
@@ -55,6 +56,7 @@ pub const Constraints = struct {
                 if (!entry.found_existing) entry.value_ptr.* = at;
             }
             for (ast.declWherePredicates(d)) |predicate| {
+                if (predicate.isEquality()) continue;
                 if (directPredicateParameter(ast, predicate, &names)) |at| {
                     counts[at] += predicate.bounds.len();
                 } else {
@@ -88,6 +90,7 @@ pub const Constraints = struct {
                 if (!entry.found_existing) entry.value_ptr.* = at;
             }
             for (ast.declWherePredicates(d)) |predicate| {
+                if (predicate.isEquality()) continue;
                 const at = directPredicateParameter(ast, predicate, &names) orelse continue;
                 const written = ast.boundsIn(predicate.bounds);
                 @memcpy(items[counts[at]..][0..written.len], written);
@@ -120,7 +123,7 @@ pub const Constraints = struct {
                 if (!entry.found_existing) entry.value_ptr.* = @intCast(k);
             }
             for (ast.declWherePredicates(d)) |predicate| {
-                if (directPredicateParameter(ast, predicate, &names) != null) continue;
+                if (predicate.isEquality() or directPredicateParameter(ast, predicate, &names) != null) continue;
                 const written = ast.boundsIn(predicate.bounds);
                 @memcpy(items[item_at..][0..written.len], written);
                 records[record_at] = .{

@@ -1,0 +1,12 @@
+// The mismatch is between two written integer types, and the equality has
+// nothing to do with it, so no note names the clause.
+fn total[I: Iterator](inout _i: I) -> UInt8 where I.Item == UInt8 {
+    let wide: UInt64 = 3
+    let narrow: UInt8 = wide
+    narrow
+}
+
+fn main() -> UInt8 {
+    var r = UInt8(0)..3
+    total(&r)
+}

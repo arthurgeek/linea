@@ -1,0 +1,27 @@
+trait Mark {
+    fn flag(self: Self) -> UInt8
+}
+
+struct Other { value: UInt8 }
+
+impl Mark for Other {
+    fn flag(self: Self) -> UInt8 {
+        self.value
+    }
+}
+
+struct Wrap[I] { value: I }
+
+impl[I: Iterator] Iterator for Wrap[I] where I.Item == UInt8 {
+    type Item = UInt8
+
+    fn next(inout self: Self) -> Option[UInt8] where carries(.Some: self) {
+        &self.value.next()
+    }
+}
+
+fn main() -> UInt8 {
+    let used = (Other { value = 1 }).flag()
+    let wrap: Wrap[Range[UInt16]] = .{ value = UInt16(1)..3 }
+    used + wrap.flag()
+}

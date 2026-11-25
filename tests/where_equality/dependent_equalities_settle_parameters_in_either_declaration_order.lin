@@ -1,0 +1,28 @@
+trait Layer {
+    type Inner
+}
+
+struct Leaf { value: UInt8 }
+
+struct Trunk { tip: Leaf }
+
+impl Layer for Leaf {
+    type Inner = UInt8
+}
+
+impl Layer for Trunk {
+    type Inner = Leaf
+}
+
+fn leaf_first[J: Layer, I: Layer, T](_root: J) -> UInt8 where I.Inner == T, J.Inner == I {
+    3
+}
+
+fn root_first[J: Layer, I: Layer, T](_root: J) -> UInt8 where J.Inner == I, I.Inner == T {
+    3
+}
+
+fn main() -> UInt8 {
+    let root = Trunk { tip = Leaf { value = 0 } }
+    leaf_first(root) + root_first(root)
+}

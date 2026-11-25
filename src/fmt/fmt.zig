@@ -1294,8 +1294,7 @@ const Printer = struct {
                     if (broken) {
                         if (!self.at_line_start) try self.newline();
                     } else if (i != 0) try self.write(" ");
-                    try self.writeWrittenType(predicate.subject);
-                    try self.writeBounds(self.ast.boundsIn(predicate.bounds));
+                    try self.writePredicate(predicate);
                     if (broken) try self.write(",");
                 }
                 if (broken and !self.at_line_start) {
@@ -1855,6 +1854,15 @@ const Printer = struct {
         if (broken) self.indent -= 1;
     }
 
+    fn writePredicate(self: *Printer, predicate: node.WherePredicate) Error!void {
+        try self.writeWrittenType(predicate.subject);
+        if (predicate.isEquality()) {
+            try self.write(" == ");
+            try self.writeWrittenType(predicate.equals);
+        }
+        try self.writeBounds(self.ast.boundsIn(predicate.bounds));
+    }
+
     fn writeWhereClause(self: *Printer, d: DeclId) Error!void {
         const predicates = self.ast.declWherePredicates(d);
         const contracts = self.ast.declContracts(d);
@@ -1907,8 +1915,7 @@ const Printer = struct {
                 ci = try self.writeContract(contracts, ci);
             } else {
                 const predicate = predicates[pi];
-                try self.writeWrittenType(predicate.subject);
-                try self.writeBounds(self.ast.boundsIn(predicate.bounds));
+                try self.writePredicate(predicate);
                 pi += 1;
             }
             if (!broken) continue;
@@ -6023,4 +6030,14 @@ test "a tuple ending in a lambda or holding a broken chain is a normal form" {
         const result = try checkProperties(gpa, text);
         try testing.expectEqualStrings(want, result.checked.formatted);
     }
+}
+
+test "attached derive environment keeps both equality sides" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    try check(arena.allocator(), "@derive(Label where I.Item==UInt8)\nstruct Product[I: Source] { value: I.Item }\n",
+        \\@derive(Label where I.Item == UInt8)
+        \\struct Product[I: Source] { value: I.Item }
+        \\
+    );
 }

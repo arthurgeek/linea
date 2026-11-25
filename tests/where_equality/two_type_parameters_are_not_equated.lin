@@ -1,0 +1,7 @@
+// An equality between two type parameters says the declaration has one
+// parameter too many: write the one type for both.
+fn _same[T, U](_left: T, _right: U) where T == U {}
+
+fn main() -> UInt8 {
+    0
+}

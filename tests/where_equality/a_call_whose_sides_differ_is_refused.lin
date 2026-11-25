@@ -1,0 +1,47 @@
+// `then` requires the argument's items to be the receiver's items. A `Span`
+// yields `UInt8` and a `Wide` yields `UInt16`, so the call is refused, naming
+// both types and the clause that requires them to be one.
+struct Chain[A, B] {
+    first: A,
+    second: B,
+    first_done: Bool,
+}
+
+trait Source {
+    type Iter: Iterator
+
+    fn open(sink self: Self) -> Self.Iter
+
+    fn then[S: Source](sink self: Self, sink other: S) -> Chain[Self.Iter, S.Iter] where S.Iter.Item == Self.Iter.Item, carries(self, other) {
+        .{ first = self.open(), second = other.open(), first_done = false }
+    }
+}
+
+struct Span {
+    stop: UInt8,
+}
+
+impl Source for Span {
+    type Iter = Range[UInt8]
+
+    fn open(sink self: Span) -> Range[UInt8] {
+        0..self.stop
+    }
+}
+
+struct Wide {
+    stop: UInt16,
+}
+
+impl Source for Wide {
+    type Iter = Range[UInt16]
+
+    fn open(sink self: Wide) -> Range[UInt16] {
+        0..self.stop
+    }
+}
+
+fn main() -> UInt8 {
+    let _joined = Span { stop = 3 }.then(Wide { stop = 3 })
+    0
+}

@@ -38,7 +38,7 @@ Strings, collections, parsing, and files.
 - [prime_sieve.lin](prime_sieve.lin): counts primes below a limit; `Vec` as a runtime-sized table.
 - [warehouse_stock.lin](warehouse_stock.lin): totals deliveries per warehouse; `Map` and `@derive`.
 - [parcel_inspection.lin](parcel_inspection.lin): stops at the first overweight parcel; iterator chains.
-- [parcel_manifest.lin](parcel_manifest.lin): builds a shipping manifest; `filter`, `collect`, and lent counters.
+- [parcel_manifest.lin](parcel_manifest.lin): builds a shipping manifest with a lent counter, then chains late deliveries from two scanners.
 - [upcoming_leap_years.lin](upcoming_leap_years.lin): lists the next five leap years from a walk of years that never ends; lazy `filter` and `take`.
 - [trail_profile.lin](trail_profile.lin): reports a hike's climb, longest ascent and summit from its marker elevations; `windows`, `scan`, `peekable`, `position` and `rev`.
 - [pricing_rules.lin](pricing_rules.lin): prices a cart through a list of rules; closures in a `Vec`.

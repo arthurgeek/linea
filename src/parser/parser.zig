@@ -4241,8 +4241,18 @@ const Parser = struct {
 
     fn parseWherePredicate(self: *Parser) !void {
         const subject = try self.parseWrittenType();
+        // `A = B` is read as the equality it misspells, so the clause and the
+        // declaration after it parse and the one mistake is one report.
+        if (self.cursor.at(.equal_equal) or self.cursor.at(.equal)) {
+            if (self.cursor.eat(.equal)) |operator| {
+                try self.reportAt(.s_type, operator, "expected `:` or `==`", "write `==` to say two types are the same");
+            } else _ = self.cursor.advance();
+            const equals = try self.parseWrittenType();
+            try self.builder.addWherePredicate(.{ .subject = subject, .bounds = .{ .start = self.builder.boundMark(), .end = self.builder.boundMark() }, .equals = equals });
+            return;
+        }
         if (!self.cursor.at(.colon)) {
-            try self.reportAt(.s_type, self.cursor.current(), "expected `:`", "a where predicate bounds its subject");
+            try self.reportAt(.s_type, self.cursor.current(), "expected `:` or `==`", "a where predicate bounds its subject or equates it with another type");
         }
         const bounds = try self.parseBounds();
         try self.builder.addWherePredicate(.{ .subject = subject, .bounds = bounds });

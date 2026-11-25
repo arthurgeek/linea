@@ -1,0 +1,5 @@
+error[T-Equal]: this `where` clause makes the type parameter `T` always `UInt8`
+ --> tests/where_equality/a_type_parameter_is_not_equated_with_a_written_type.lin:3:31
+  |
+3 | fn _bytes[T](_value: T) where T == UInt8 {}
+  |                               ^^^^^^^^^^ write `UInt8` where `T` is written, and drop the parameter

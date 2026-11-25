@@ -1,0 +1,18 @@
+error[T-Equal]: `I.Item` must be the same type as `UInt8`, and here they are `UInt32` and `UInt8`
+  --> tests/where_equality/two_applied_trait_operations_report_their_own_equality.lin:21:13
+   |
+7  | impl[I: Iterator] Measure[UInt8] for Wrap[I] where I.Item == UInt8 {
+   |                                                    --------------- required by this `where` clause
+21 |     let a = wrap.count_as(UInt8(1))
+   |             ^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[UInt8]` implementation does not serve `Wrap[Range[UInt32]]`
+error[T-Equal]: `I.Item` must be the same type as `UInt16`, and here they are `UInt32` and `UInt16`
+  --> tests/where_equality/two_applied_trait_operations_report_their_own_equality.lin:22:9
+   |
+13 | impl[I: Iterator] Measure[UInt16] for Wrap[I] where I.Item == UInt16 {
+   |                                                     ---------------- required by this `where` clause
+22 |     a + wrap.count_as(UInt16(1))
+   |         ^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[UInt16]` implementation does not serve `Wrap[Range[UInt32]]`

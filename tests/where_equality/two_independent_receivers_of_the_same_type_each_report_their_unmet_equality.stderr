@@ -1,0 +1,18 @@
+error[T-Equal]: `B.Item` must be the same type as `A.Item`, and here they are `UInt16` and `UInt8`
+  --> tests/where_equality/two_independent_receivers_of_the_same_type_each_report_their_unmet_equality.lin:17:17
+   |
+6  | impl[A: Iterator, B: Iterator] Iterator for Chain2[A, B] where B.Item == A.Item {
+   |                                                                ---------------- required by this `where` clause
+17 |     let _one = &north.next()
+   |                 ^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Iterator` implementation does not serve `Chain2[Range[UInt8], Range[UInt16]]`
+error[T-Equal]: `B.Item` must be the same type as `A.Item`, and here they are `UInt16` and `UInt8`
+  --> tests/where_equality/two_independent_receivers_of_the_same_type_each_report_their_unmet_equality.lin:18:19
+   |
+6  | impl[A: Iterator, B: Iterator] Iterator for Chain2[A, B] where B.Item == A.Item {
+   |                                                                ---------------- required by this `where` clause
+18 |     let _other = &south.next()
+   |                   ^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Iterator` implementation does not serve `Chain2[Range[UInt8], Range[UInt16]]`

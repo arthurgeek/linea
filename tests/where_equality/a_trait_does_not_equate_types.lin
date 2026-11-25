@@ -1,0 +1,20 @@
+// A trait's own `where` clause cannot equate two types: what each
+// implementation settles is checked where the operation needing it is
+// written, so the equality goes on that operation.
+trait Source {
+    type Item
+
+    fn get(self: Self) -> Self.Item
+}
+
+trait Bytes: Source where Self.Item == UInt8 {
+    fn byte(self: Self) -> UInt8
+}
+
+fn _first_byte[B: Bytes](source: B) -> UInt8 {
+    source.byte()
+}
+
+fn main() -> UInt8 {
+    0
+}

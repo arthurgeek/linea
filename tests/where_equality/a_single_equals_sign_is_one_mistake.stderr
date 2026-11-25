@@ -1,0 +1,5 @@
+error[S-Type]: expected `:` or `==`
+ --> tests/where_equality/a_single_equals_sign_is_one_mistake.lin:8:70
+  |
+8 | impl[A: Iterator, B: Iterator] Iterator for Chain[A, B] where B.Item = A.Item {
+  |                                                                      ^ write `==` to say two types are the same

@@ -1,0 +1,9 @@
+// Together the two equalities make `I.Item` a `Vec` of itself, which no
+// settling meets, though neither says so alone.
+fn _wrap[I: Iterator, J: Iterator](_i: I, _j: J) -> UInt8 where I.Item == Vec[J.Item], J.Item == I.Item {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

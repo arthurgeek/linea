@@ -1,0 +1,31 @@
+// The implementation serves a `Chain` whose halves yield one type. Halves that
+// yield `UInt8` and `UInt16` have no `Iterator` implementation, and the walk
+// is refused through the clause.
+struct Chain[A, B] {
+    first: A,
+    second: B,
+    first_done: Bool,
+}
+
+impl[A: Iterator, B: Iterator] Iterator for Chain[A, B] where B.Item == A.Item {
+    type Item = A.Item
+
+    fn next(inout self: Self) -> Option[A.Item] where carries(.Some: self) {
+        if !self.first_done {
+            match &self.first.next() {
+                Some(x) => return .Some(x),
+                None => self.first_done = true,
+            }
+        }
+        &self.second.next()
+    }
+}
+
+fn main() -> UInt8 {
+    let joined: Chain[Range[UInt8], Range[UInt16]] = .{ first = UInt8(1)..3, second = UInt16(5)..7, first_done = false }
+    var count: UInt8 = 0
+    for _x in joined {
+        count += 1
+    }
+    count
+}

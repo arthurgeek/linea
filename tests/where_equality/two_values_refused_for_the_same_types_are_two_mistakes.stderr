@@ -1,0 +1,17 @@
+error[T-Equal]: `S.Iter.Item` must be the same type as `Self.Iter.Item`, and here they are `UInt16` and `UInt8`
+  --> tests/where_equality/two_values_refused_for_the_same_types_are_two_mistakes.lin:18:33
+   |
+18 |     let _joined = (UInt8(0)..3).chain(UInt16(5)..9)
+   |                                 ^^^^^ `chain` hands out the second sequence's items as the first's, so both must yield one type; `map` one of them to the other's item first
+  ::: std/iter/iter.lin
+L  |         S.Iter.Item == Self.Iter.Item
+   |         ----------------------------- required by this `where` clause
+error[T-Equal]: `B.Item` must be the same type as `A.Item`, and here they are `UInt16` and `UInt8`
+  --> tests/where_equality/two_values_refused_for_the_same_types_are_two_mistakes.lin:20:12
+   |
+9  | impl[A: Iterator, B: Iterator] Iterator for Chain2[A, B] where B.Item == A.Item {
+   |                                                                ---------------- required by this `where` clause
+20 |     match &mine.next() {
+   |            ^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Iterator` implementation does not serve `Chain2[Range[UInt8], Range[UInt16]]`

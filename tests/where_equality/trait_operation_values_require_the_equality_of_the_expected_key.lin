@@ -1,0 +1,28 @@
+trait Measure[T] {
+    fn count_as(self: Self, _x: T) -> UInt8
+}
+
+struct Wrap[I] { value: I, stamp: UInt8 }
+
+impl[I: Iterator] Measure[UInt8] for Wrap[I] where I.Item == UInt8 {
+    fn count_as(self: Self, _x: UInt8) -> UInt8 {
+        self.stamp
+    }
+}
+
+impl[I: Iterator] Measure[UInt16] for Wrap[I] where I.Item == UInt16 {
+    fn count_as(self: Self, _x: UInt16) -> UInt8 {
+        self.stamp
+    }
+}
+
+fn _choose_wide[I: Iterator](_wrap: Wrap[I]) -> UInt8 {
+    let _operation: fn(self: Wrap[I], _x: UInt16) -> UInt8 = Measure.count_as
+    0
+}
+
+fn main() -> UInt8 {
+    let _small: fn(self: Wrap[Range[UInt32]], _x: UInt8) -> UInt8 = Measure.count_as
+    let _wide: fn(self: Wrap[Range[UInt32]], _x: UInt16) -> UInt8 = Measure.count_as
+    0
+}

@@ -1,0 +1,7 @@
+// No type is an `Option` of itself, so a projection equated with a type that
+// holds it could never be settled.
+fn _nested[I: Iterator](_source: I) where I.Item == Option[I.Item] {}
+
+fn main() -> UInt8 {
+    0
+}

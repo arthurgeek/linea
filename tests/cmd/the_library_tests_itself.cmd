@@ -928,6 +928,7 @@ The library tests itself.
   ok    io.whole_input_failure retains a partial scalar and its stream offset
   ok    iter.a double ended map yields from both ends until they meet
   ok    iter.a failed collection can be released whole
+  ok    iter.a failed unzip displays its reason
   ok    iter.a filter releases its inner iterator
   ok    iter.a filter sequence preserves selected order
   ok    iter.a filter_map releases its inner iterator
@@ -944,6 +945,9 @@ The library tests itself.
   ok    iter.all short circuits and is true for empty
   ok    iter.an iterator walks as a sequence of itself
   ok    iter.any short circuits and is false for empty
+  ok    iter.chain asks an ended first sequence nothing more
+  ok    iter.chain recovers both sources as far as each advanced
+  ok    iter.chain yields the first sequence then the second
   ok    iter.collect empty input succeeds with an exhausted allocator
   ok    iter.collect first push refusal returns the item and advanced linear captures
   ok    iter.collect preserves result items and returns exhausted state
@@ -1002,6 +1006,7 @@ The library tests itself.
   ok    iter.position hands linear items to its predicate
   ok    iter.position lends a predicate the caller uses again
   ok    iter.reduce combines from the first item
+  ok    iter.releasing a chain releases both iterators once
   ok    iter.releasing a copied releases its iterator once
   ok    iter.releasing a filter releases its iterator once
   ok    iter.releasing a filter_map releases its iterator once
@@ -1019,6 +1024,7 @@ The library tests itself.
   ok    iter.scan runs its step only for items asked for
   ok    iter.scan yields each running total
   ok    iter.settling a failed collection keeps the allocation reason
+  ok    iter.settling a failed unzip keeps the allocation reason
   ok    iter.skip disposes of what it passes
   ok    iter.skip ends with its source while passing
   ok    iter.skip into_inner returns the advanced iterator
@@ -1029,6 +1035,8 @@ The library tests itself.
   ok    iter.text adapters preserve the borrowed backing
   ok    iter.type changing adapters preserve borrowed outputs
   ok    iter.type changing adapters transfer linear outputs
+  ok    iter.unzip hands back the refused pair and the pairs before it
+  ok    iter.unzip splits pairs into two vectors in order
   ok    iter.zip asks the second sequence nothing once the first ends
   ok    iter.zip disposes of the first item taken past the end
   ok    iter.zip recovers both sources as far as each advanced
@@ -1971,4 +1979,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1968 passed, 0 failed
+  1976 passed, 0 failed

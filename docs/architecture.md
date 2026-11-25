@@ -1195,7 +1195,11 @@ projections, then uses those promises and the existing implementation lookup to
 discharge both ordinary bounds and trailing predicates. An instantiation
 substitutes the recorded subjects and requirements as part of the declaration's
 existing type check; no ownership, reachability or lowering pass checks a bound
-again.
+again. A trailing equality records its two written sides and the class of
+types they name in the declaration. The type pool reads a projection through
+that class when settling the declaration's signature and body. Calls use the
+recorded sides to infer open arguments and check their settled types.
+Implementation selection checks its own sides at the requested key.
 
 Also owns interpolation trait selection. An ordinary value piece requires
 `Display`; a `?` piece requires `Debug`. [T-Format] holds a spec's number parts

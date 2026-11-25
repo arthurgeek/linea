@@ -1,0 +1,18 @@
+// `S.Iter.Item == (L, R)` says each item is a pair, and the call settles `L`
+// and `R` from the items the argument yields: nothing else names them.
+fn last_second[L: Discardable, R: Discardable, S: Sequence](sink pairs: S) -> Option[R] where S.Iter.Item == (L, R), S.Iter: Discardable {
+    var last: Option[R] = .None
+    for pair in pairs {
+        let (_first, second) = pair
+        last = .Some(second)
+    }
+    last
+}
+
+fn main() -> UInt8 {
+    let last = last_second((UInt16(1)..4).zip(UInt8(10)..13))
+    match last {
+        Some(second) => second,
+        None => 0,
+    }
+}

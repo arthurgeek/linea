@@ -1,0 +1,30 @@
+// The implementation serves a `Chain` whose halves yield one type. Asking a
+// `Chain` of `UInt8` and `UInt16` halves for an item is refused through the
+// clause, naming both item types.
+struct Chain[A, B] {
+    first: A,
+    second: B,
+    first_done: Bool,
+}
+
+impl[A: Iterator, B: Iterator] Iterator for Chain[A, B] where B.Item == A.Item {
+    type Item = A.Item
+
+    fn next(inout self: Self) -> Option[A.Item] where carries(.Some: self) {
+        if !self.first_done {
+            match &self.first.next() {
+                Some(x) => return .Some(x),
+                None => self.first_done = true,
+            }
+        }
+        &self.second.next()
+    }
+}
+
+fn main() -> UInt8 {
+    var joined: Chain[Range[UInt8], Range[UInt16]] = .{ first = UInt8(1)..3, second = UInt16(5)..7, first_done = false }
+    match &joined.next() {
+        Some(v) => v,
+        None => 0,
+    }
+}

@@ -223,6 +223,10 @@ fn dumpDecl(
         try indent(w, depth + 1);
         try w.writeAll("where ");
         try dumpWrittenType(w, ast, predicate.subject);
+        if (predicate.isEquality()) {
+            try w.writeAll(" == ");
+            try dumpWrittenType(w, ast, predicate.equals);
+        }
         for (ast.boundsIn(predicate.bounds), 0..) |b, i| {
             try w.writeAll(if (i == 0) " : " else " + ");
             try dumpBound(w, ast, b);

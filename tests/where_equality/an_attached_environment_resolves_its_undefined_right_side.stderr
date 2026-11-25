@@ -1,0 +1,5 @@
+error[N-Undefined]: undefined name `Missing`
+  --> tests/where_equality/an_attached_environment_resolves_its_undefined_right_side.lin:21:31
+   |
+21 | @derive(Label where I.Item == Missing)
+   |                               ^^^^^^^ no type with this name is declared here

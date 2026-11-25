@@ -523,9 +523,17 @@ pub const WherePredicateRange = struct {
 /// The subject is a whole written type so a projected subject can use the same
 /// record when it is admitted. Requirements use the existing bound table, so a
 /// bound has one representation wherever it is written.
+///
+/// An equality, `A == B`, writes its right-hand type in `equals` and no
+/// bounds; a bound predicate leaves `equals` unwritten.
 pub const WherePredicate = struct {
     subject: TypeRef,
     bounds: BoundRange,
+    equals: TypeRef = .{ .name = .none },
+
+    pub fn isEquality(self: WherePredicate) bool {
+        return self.equals.wasWritten();
+    }
 };
 
 /// One written reference to a trait.

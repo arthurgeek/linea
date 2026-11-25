@@ -1,0 +1,27 @@
+// An equality restricts the instantiations an implementation serves, but it
+// does not make two implementations disjoint: both of these could answer for a
+// `Labelled[I]`, so they overlap.
+trait Label {
+    fn label(_self: Self) -> UInt8
+}
+
+struct Labelled[I] {
+    source: I,
+}
+
+impl[I: Iterator] Label for Labelled[I] where I.Item == UInt8 {
+    fn label(_self: Self) -> UInt8 {
+        8
+    }
+}
+
+impl[I: Iterator] Label for Labelled[I] where I.Item == UInt16 {
+    fn label(_self: Self) -> UInt8 {
+        16
+    }
+}
+
+fn main() -> UInt8 {
+    let labelled: Labelled[Range[UInt8]] = .{ source = UInt8(0)..1 }
+    labelled.label()
+}

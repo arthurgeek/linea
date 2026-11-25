@@ -1,0 +1,5 @@
+error[T-Equal]: a trait's `where` clause cannot equate `Self.Item` with `UInt8`
+  --> tests/where_equality/a_trait_does_not_equate_types.lin:10:27
+   |
+10 | trait Bytes: Source where Self.Item == UInt8 {
+   |                           ^^^^^^^^^^^^^^^^^^ write the equality on the operation or implementation that needs it

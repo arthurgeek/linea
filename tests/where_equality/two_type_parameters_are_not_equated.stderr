@@ -1,0 +1,5 @@
+error[T-Equal]: this `where` clause makes the type parameters `T` and `U` one type
+ --> tests/where_equality/two_type_parameters_are_not_equated.lin:3:43
+  |
+3 | fn _same[T, U](_left: T, _right: U) where T == U {}
+  |                                           ^^^^^^ declare one type parameter and write it for both

@@ -1,0 +1,5 @@
+error[T-Equal]: `I.Item` cannot be the same type as `Option[I.Item]`, which holds it
+ --> tests/where_equality/a_projection_cannot_equal_a_type_containing_it.lin:3:43
+  |
+3 | fn _nested[I: Iterator](_source: I) where I.Item == Option[I.Item] {}
+  |                                           ^^^^^^^^^^^^^^^^ no type contains itself, so no settling meets this; equate the projection with a type that does not hold it

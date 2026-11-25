@@ -112,6 +112,10 @@ generics/a_generic_inherent_head_sits_beside_a_nested_one.lin
 generics/inherent_heads_that_never_meet_offer_their_own_members.lin
 # Two lambdas passed by name, whose closures keep their names in either order.
 function_values/lambdas_passed_by_name_in_either_order.lin
+# Equality classes read the same with declarations reversed: members before their implementation.
+where_equality/an_implementation_reads_two_equated_items_as_one_type.lin
+where_equality/an_operation_equates_its_arguments_items_with_its_receivers.lin
+where_equality/a_provided_operation_settles_the_parts_of_its_receivers_pairs.lin
 # Length parameters: settled through a struct, and one function at several lengths.
 generics/length/infers_through_a_struct.lin
 generics/length/instances_per_length.lin

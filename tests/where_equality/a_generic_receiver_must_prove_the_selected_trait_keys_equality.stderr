@@ -1,0 +1,9 @@
+error[T-Equal]: `I.Item` must be the same type as `UInt16`, and here they are `I.Item` and `UInt16`
+  --> tests/where_equality/a_generic_receiver_must_prove_the_selected_trait_keys_equality.lin:20:5
+   |
+13 | impl[I: Iterator] Measure[UInt16] for Wrap[I] where I.Item == UInt16 {
+   |                                                     ---------------- required by this `where` clause
+20 |     wrap.count_as(UInt16(1))
+   |     ^^^^^^^^^^^^^ both sides of the equality must settle to one type
+   |
+   = note: so the `Measure[UInt16]` implementation does not serve `Wrap[I]`

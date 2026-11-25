@@ -1,6 +1,7 @@
 # 107. A trailing where predicate constrains any open type expression
 
-Status: Accepted - 2026-08-28
+Status: Accepted - 2026-08-28. Extended by
+[0306](0306-a-where-clause-may-equate-two-types.md) for type equalities.
 
 ## Context
 

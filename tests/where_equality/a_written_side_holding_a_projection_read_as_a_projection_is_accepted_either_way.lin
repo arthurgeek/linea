@@ -1,0 +1,7 @@
+// The same declaration with `K.Item == J.Item` written the other way round is
+// accepted too.
+fn _wrap[I: Iterator, J: Iterator, K: Iterator](_i: I, _j: J, _k: K) where I.Item == Option[J.Item], K.Item == J.Item {}
+
+fn main() -> UInt8 {
+    0
+}

@@ -85,7 +85,7 @@ fn kindOf(tag: node.Decl.Tag) ?Kind {
 
 /// The declaration's text up to what it holds.
 ///
-/// Bounded by the first `{` or `=` inside the declaration, whichever comes
+/// Bounded by the first top-level `{` or `=` inside the declaration, whichever comes
 /// first: those are the two ways a declaration opens onto what it contains --
 /// a function's body and a type's representation are braced, and a constant is
 /// bound with `=`. Everything before that is what the author wrote to describe
@@ -103,10 +103,13 @@ fn headerSpan(ast: *const Ast, d: DeclId) Span {
     const whole = ast.declSpan(d);
     const run = ast.declTokens(d);
 
+    var depth: usize = 0;
     var i = run.start.index() + 1;
     while (i < run.end.index()) : (i += 1) {
         switch (ast.tokenTag(TokenId.at(i))) {
-            .l_brace, .equal => return .{
+            .l_paren, .l_bracket => depth += 1,
+            .r_paren, .r_bracket => depth -|= 1,
+            .l_brace, .equal => if (depth == 0) return .{
                 .start = whole.start,
                 .end = ast.tokenSpan(TokenId.at(i - 1)).end,
             },
@@ -405,4 +408,13 @@ test "an export's header is the text that was written" {
         // And it is text this file holds, at the offset it was taken from.
         try testing.expect(std.mem.indexOf(u8, text, got.header) != null);
     }
+}
+
+test "a generic export keeps its equality after a parameter default" {
+    const gpa = testing.allocator;
+    const header = "pub fn size[I: Iterator, T = UInt8](_it: I) where I.Item == T";
+    const found = try exportsOf(gpa, "vault/main.lin", header ++ " {}\n");
+    defer free(gpa, found);
+    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqualStrings(header, found[0].header);
 }

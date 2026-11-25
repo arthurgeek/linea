@@ -6,7 +6,8 @@ This chapter covers the ways to do that. It starts with the plain `for` loop,
 which is all most walks need, then the other ways a `for` can hold what it
 walks, and how a type of your own becomes something a `for` can walk. Next come
 **chains** such as `prices.map(…).filter(…).fold(…)`, which say in one line
-what a loop would do, the pairs `enumerate` and `zip` hand out, and the
+what a loop would do, the pairs `enumerate` and `zip` hand out, how `chain`
+joins sequences and `unzip` splits pairs, and the
 operations that answer the common questions in one call: `sum`, `min`,
 `position`, walking backwards with `rev`, neighbours with `windows`, running
 totals with `scan` and looking ahead with `peekable`. The later sections
@@ -850,6 +851,185 @@ the first source stopped at 2, the second at 102
 line. `map`, `filter_map` and `filter` offer `into_parts` too, and answer the
 source and the callback.
 
+## One sequence after another: `chain`
+
+`chain` walks one sequence to its end and then walks a second. Here a museum
+counts its visitors in the morning and in the evening, and one loop adds up
+the day:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    let morning = [UInt64(12), 9]
+    let evening = [UInt64(4), 7, 3]
+    var visitors = 0
+    // `chain` walks the morning counts, then the evening ones.
+    for count in morning.as_slice().chain(evening.as_slice()) {
+        visitors += *count
+    }
+    io.println("{visitors} visitors today")?
+    .Ok(0)
+}
+```
+
+```
+35 visitors today
+```
+
+A chain hands out every item as one type, so both sequences must yield the
+same one. If the evening counts were kept as `UInt8`, the call is refused:
+
+<!-- guide: edit 5 let evening = [UInt64(4), 7, 3] -->
+```linea
+    let evening = [UInt8(4), 7, 3]
+```
+
+```
+error[T-Equal]: `S.Iter.Item` must be the same type as `Self.Iter.Item`, and here they are `borrow UInt8` and `borrow UInt64`
+   --> museum.lin:8:37
+    |
+8   |     for count in morning.as_slice().chain(evening.as_slice()) {
+    |                                     ^^^^^ `chain` hands out the second sequence's items as the first's, so both must yield one type; `map` one of them to the other's item first
+   ::: std/iter/iter.lin
+448 |         S.Iter.Item == Self.Iter.Item
+    |         ----------------------------- required by this `where` clause
+```
+
+The `where` clause the error points at is `chain`'s own, and the next section
+shows how to write one.
+
+### Two types that must be one: `where A == B`
+
+A generic function can say that two types it reads through its parameters are
+the same type, with `==` in its `where` clause. `agree` compares two
+thermometer logs hour by hour. Each log is an iterator of its own type, `A` and
+`B`, and `where B.Item == A.Item` says both hand out one type of reading, so
+`a != b` compares two values of it:
+
+```linea
+import std.io
+
+// `agree` says whether two thermometer logs read the same at every hour both
+// logged. `where B.Item == A.Item` says the two logs hand out one type, so
+// `a != b` compares two values of it.
+fn agree[A: Iterator, B: Iterator](sink first: A, sink second: B) -> Bool where
+    B.Item == A.Item,
+    A.Item: Equatable + Discardable,
+    A: Discardable,
+    B: Discardable
+{
+    for (a, b) in first.zip(second) {
+        if a != b {
+            return false
+        }
+    }
+    true
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let hall = [Int64(19), 20, 21]
+    let porch = [Int64(19), 20, 23]
+    if agree(hall.as_slice().map(|sink c| *c), porch.as_slice().map(|sink c| *c)) {
+        io.println("the thermometers agree")?
+    } else {
+        io.println("the thermometers disagree")?
+    }
+    .Ok(0)
+}
+```
+
+```
+the thermometers disagree
+```
+
+Inside `agree`, a `B.Item` is an `A.Item`, so the bounds written on `A.Item`
+cover the porch readings too: `b` may be dropped when the loop returns early.
+Without the equality the two are unrelated types, even when each has the
+bounds it needs, and the comparison is refused:
+
+<!-- guide: edit 7 B.Item == A.Item, -->
+```linea
+    B.Item: Equatable + Discardable,
+```
+
+```
+error[T-Operands]: expected `A.Item`, found `B.Item`
+  --> agree_unrelated.lin:13:17
+   |
+13 |         if a != b {
+   |            - expected because of this operand
+   |                 ^ expected `A.Item`, found `B.Item`
+```
+
+The equality is checked where `agree` is called: both logs must yield one
+type there. A porch log kept as `UInt8` is refused at the call, naming the two
+types and the clause:
+
+<!-- guide: edit 22 let porch = [Int64(19), 20, 23] -->
+```linea
+    let porch = [UInt8(19), 20, 23]
+```
+
+```
+error[T-Equal]: `B.Item` must be the same type as `A.Item`, and here they are `UInt8` and `Int64`
+  --> agree_bytes.lin:23:8
+   |
+7  |     B.Item == A.Item,
+   |     ---------------- required by this `where` clause
+23 |     if agree(hall.as_slice().map(|sink c| *c), porch.as_slice().map(|sink c| *c)) {
+   |        ^^^^^ both sides of the equality must settle to one type
+```
+
+At least one side of `==` reads a type through a bound, as `A.Item` does.
+`where T == UInt8` on a plain parameter `T` is refused, because the function
+could write `UInt8` wherever it writes `T`. Rust says the same thing inside
+the bound, `B: Iterator<Item = A::Item>`; Linea writes it in the `where`
+clause, beside the bounds.
+
+### Taking pairs apart: `unzip`
+
+`unzip` is the other way round from `zip`: it takes a sequence of pairs and
+collects the left halves into one vector and the right halves into another.
+Its `where` clause says `Self.Iter.Item == (L, R)`, and the call settles `L`
+and `R` from the pairs, so nothing names them:
+
+```linea
+import std.io
+
+fn main() -> Result[UInt8, io.IoError] {
+    // Each reading pairs the hour it was taken with the temperature then.
+    let readings = [(UInt8(6), Int64(4)), (12, 11), (18, 8)]
+    // `unzip` splits the pairs into a vector of hours and a vector of
+    // temperatures.
+    let { lefts: hours, rights: temperatures, iterator: _ } = readings
+        .as_slice()
+        .map(|sink reading| copy(*reading))
+        .unzip()
+        .settled() else |_| {
+        return .Ok(1)
+    }
+    defer hours.release()
+    defer temperatures.release()
+    io.println("{hours.length()} readings, from {hours[0]}:00 to {hours[2]}:00")?
+    io.println("the warmest was {temperatures[1]} degrees")?
+    .Ok(0)
+}
+```
+
+```
+3 readings, from 6:00 to 18:00
+the warmest was 11 degrees
+```
+
+`unzip` answers as `collect` does ([Collecting into a `Vec`](#collecting-into-a-vec)):
+the two vectors, `lefts` and `rights`, beside the chain it walked, and on a
+refused half everything gathered so far with the pair that half came from.
+`settled()` turns that refusal into its reason, `mem.Oom`. `copy(*reading)`
+makes an owned pair from the one the slice lends, because the vectors keep
+what they are given. `unzip_in(allocator)` does the same from an allocator you
+choose ([Memory](07-memory.md)).
+
 ## Asking questions: `any`, `all` and `find`
 
 `fold` walks the chain as soon as it is called, and so do the operations
@@ -1038,7 +1218,7 @@ error[T-Bound]: `Self.Iter.Item` requires `Additive`, and `borrow UInt64` does n
 5   |     let total = prices.as_slice().sum()
     |                                   ^^^ only the library, which declares `Additive`, may implement it for `borrow UInt64`; pass a value whose type implements it
    ::: std/iter/iter.lin
-600 |         Self.Iter.Item: num.Additive
+652 |         Self.Iter.Item: num.Additive
     |         -------------- required by this `where` clause
 ```
 
@@ -1167,7 +1347,7 @@ error[T-Bound]: `Self.Iter` requires `DoubleEnded`, and `Countdown` does not imp
 18  |     for n in (Countdown { left = 3 }).rev() {
     |                                       ^^^ implement it for that type
    ::: std/iter/iter.lin
-512 |         Self.Iter: DoubleEnded
+564 |         Self.Iter: DoubleEnded
     |         --------- required by this `where` clause
 ```
 
@@ -1799,7 +1979,7 @@ error[S-Mutation]: this argument is mutated, so it is marked `&`
 31  |     let total = order.as_slice().map(|sink line| line.cents * line.quantity).fold(0, adding)
     |                                                                                      ^^^^^^ expected `&` here
    ::: std/iter/iter.lin
-830 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
+882 |     ](sink self: Self, sink initial: A, inout combine: F) -> A where
     |                                               ------- declared `inout`
 ```
 
@@ -2661,6 +2841,9 @@ holds and lists its largest files.
 | each item with its position | `for (i, x) in xs.enumerate()` |
 | the items of two sequences, paired | `for (a, b) in xs.zip(ys)`, with Discardable items in `xs` |
 | the first few items, or all but the first few | `xs.take(n)`, `xs.skip(n)` |
+| one sequence, then another of the same item type | `for x in xs.chain(ys)` |
+| to say two types a function reads are one | `where B.Item == A.Item` |
+| the halves of pairs in two vectors | `let { lefts, rights, iterator: _ } = pairs.unzip().settled() else …` |
 | a chain over a source that never ends | an adapter runs only as the walk asks, so end it with `take(n)` |
 | a look at the first or last element, if there is one | `v.first()`, `v.last()`, on a `Vec` or a slice |
 | to take a vector's last element out | `&v.pop()` |

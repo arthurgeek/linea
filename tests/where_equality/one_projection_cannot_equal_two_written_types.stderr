@@ -1,0 +1,5 @@
+error[T-Equal]: an earlier equality makes `I.Item` the type `UInt8`, and this one makes it `UInt16`
+ --> tests/where_equality/one_projection_cannot_equal_two_written_types.lin:3:60
+  |
+3 | fn _narrow[I: Iterator](_source: I) where I.Item == UInt8, I.Item == UInt16 {}
+  |                                                            ^^^^^^^^^^^^^^^^ one type cannot be both; remove one of the equalities

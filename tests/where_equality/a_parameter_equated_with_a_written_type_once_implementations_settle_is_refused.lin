@@ -1,0 +1,13 @@
+// `I.Iter` reads as `I` once implementations have settled, so this equality
+// makes the type parameter `I` always a range of `UInt16`, which is refused.
+fn pick[I: Iterator + Sequence](inout i: I) -> Option[I.Item] where I.Iter == Range[UInt16], carries(.Some: i) {
+    &i.next()
+}
+
+fn main() -> UInt8 {
+    var a = UInt8(3)..9
+    match pick(&a) {
+        Some(v) => v,
+        None => 0,
+    }
+}

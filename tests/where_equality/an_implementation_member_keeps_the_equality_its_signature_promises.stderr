@@ -1,0 +1,5 @@
+error[T-Impl]: the signature of `read_count` requires `I.Item == UInt8`, and this implementation does not
+ --> tests/where_equality/an_implementation_member_keeps_the_equality_its_signature_promises.lin:8:8
+  |
+8 |     fn read_count[I: Iterator](self: Self, _items: I) -> UInt8 {
+  |        ^^^^^^^^^^ require the equality the trait signature declares

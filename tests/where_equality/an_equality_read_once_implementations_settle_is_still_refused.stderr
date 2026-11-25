@@ -1,0 +1,5 @@
+error[T-Equal]: an earlier equality makes `I.Item` the type `UInt8`, and this one makes it `UInt16`
+ --> tests/where_equality/an_equality_read_once_implementations_settle_is_still_refused.lin:4:88
+  |
+4 | fn first_byte[I: Iterator + Sequence](inout i: I) -> UInt8 where I.Iter.Item == UInt8, I.Item == UInt16 {
+  |                                                                                        ^^^^^^^^^^^^^^^^ one type cannot be both; remove one of the equalities

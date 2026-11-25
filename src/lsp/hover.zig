@@ -541,6 +541,23 @@ test "a type read through a subtrait bound says what the supertrait bound says" 
     try testing.expectEqualStrings(direct, inherited);
 }
 
+test "a projection in a function result shows the type its equality names" {
+    const gpa = testing.allocator;
+    const text =
+        \\trait Source {
+        \\    type Item
+        \\    fn take(sink self: Self) -> Self.Item
+        \\}
+        \\fn _byte[I: Source](sink source: I) -> I.Item where I.Item == UInt8 {
+        \\    Source.take(source)
+        \\}
+        \\fn main() -> UInt8 { 0 }
+    ;
+    const shown = try said(gpa, text, std.mem.indexOf(u8, text, "I.Item").? + 3);
+    defer gpa.free(shown);
+    try testing.expectEqualStrings("UInt8", shown);
+}
+
 const alias_program =
     \\alias Pricing = fn(cents: UInt64) -> UInt64
     \\

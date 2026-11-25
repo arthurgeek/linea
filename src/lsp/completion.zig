@@ -3587,6 +3587,20 @@ test "written type selection completion uses the checked base" {
     }
 }
 
+test "both projections of a where equality offer their declared member" {
+    const gpa = testing.allocator;
+    const text =
+        \\trait Source { type Item }
+        \\fn _same[A: Source, B: Source](_a: A, _b: B) where A.Item == B.Item {}
+        \\fn main() -> UInt8 { 0 }
+    ;
+    for ([_][]const u8{ "A.Item", "B.Item" }) |written| {
+        const items = try offeredAfter(gpa, text, written);
+        defer releaseAll(gpa, items);
+        try testing.expect(holds(items, "Item"));
+    }
+}
+
 test "written type selection completion preserves promised members" {
     const gpa = testing.allocator;
     const text =

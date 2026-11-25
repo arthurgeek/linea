@@ -248,6 +248,9 @@ pub const Code = enum {
     /// A trailing predicate must constrain a type that depends on an open
     /// parameter supplied by its declaration or enclosing generic scope.
     t_where,
+    /// A `where` equality is malformed where it is written, or the types a
+    /// use settles its two sides to differ.
+    t_equal,
     /// An implementation supplies exactly the operations its trait declares.
     t_impl,
     /// An implementation of `session.Protocol` whose dual's dual is not
@@ -515,6 +518,7 @@ pub const Code = enum {
             .t_length_parameter => "T-LengthParameter",
             .t_format => "T-Format",
             .t_where => "T-Where",
+            .t_equal => "T-Equal",
             .t_impl => "T-Impl",
             .t_dual => "T-Dual",
             .t_template => "T-Template",

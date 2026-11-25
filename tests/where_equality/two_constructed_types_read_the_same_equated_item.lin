@@ -1,0 +1,12 @@
+fn _convert[I: Iterator, J: Iterator, K: Iterator, L: Iterator](_a: I, _b: J, _c: K, _d: L, sink v: I.Item) -> K.Item where
+    I.Item == Option[J.Item],
+    K.Item == Option[L.Item],
+    J.Item == L.Item,
+    carries(v)
+{
+    v
+}
+
+fn main() -> UInt8 {
+    0
+}

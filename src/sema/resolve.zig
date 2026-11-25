@@ -4494,7 +4494,7 @@ fn resolveInternal(
                                     .application => if (clause.head.kind == .tuple or clause.head.name != .none) try r.useRef(clause.head),
                                     .environment => for (r.clause_predicates) |predicate| {
                                         try r.classifyBounds(ast.boundsIn(predicate.bounds));
-                                        try r.useRef(predicate.subject);
+                                        try r.usePredicateTypes(predicate);
                                         if (!r.boundsArityHolds(ast.boundsIn(predicate.bounds))) try r.refused_clauses.put(gpa, clause_item, {});
                                     },
                                 }
@@ -12642,15 +12642,18 @@ const Resolver = struct {
             try self.classifyBounds(self.constraints.requirementsOf(constraint));
         }
         try self.classifyBounds(self.ast.declBounds(d));
-        for (self.ast.declWherePredicates(d)) |predicate| {
-            try self.useRef(predicate.subject);
-        }
+        for (self.ast.declWherePredicates(d)) |predicate| try self.usePredicateTypes(predicate);
         // A default is a written type like any other, read where the
         // declaration is.
         for (params) |parameter| {
             if (parameter.default.wasWritten()) try self.useRef(parameter.default);
             if (parameter.length_type.wasWritten()) try self.useRef(parameter.length_type);
         }
+    }
+
+    fn usePredicateTypes(self: *Resolver, predicate: node.WherePredicate) !void {
+        try self.useRef(predicate.subject);
+        if (predicate.isEquality()) try self.useRef(predicate.equals);
     }
 
     /// Whether every trait bound `d` writes supplies as many arguments as its
@@ -20284,4 +20287,30 @@ test "the library gives a primitive its methods in more than one inherent impl" 
         try testing.expectEqual(@as(u32, 1), duplicated.error_count);
         try testing.expectEqual(Code.n_duplicate, duplicated.list.items[0].code.?);
     }
+}
+
+test "attached derive equality records the original right side binding" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const result = try resolveSource(arena.allocator(),
+        \\trait Source { type Item }
+        \\struct Byte {}
+        \\trait Label {}
+        \\template impl Label where reflect.target: struct {}
+        \\@derive(Label where I.Item == Byte)
+        \\struct Product[I: Source] { value: I.Item }
+        \\fn _accept[I: Source](_value: Product[I]) {}
+        \\fn main() -> UInt8 { 0 }
+    );
+    const ast = &result.ast;
+    const decls = node.DeclRange{ .start = 0, .end = ast.declCount() };
+    const product = declSpelledIn(ast, decls, "Product");
+    const clause = ast.attachedDeriveTraits(product)[0].clause;
+    const predicate = ast.where_predicates[clause.where_predicates.start];
+    try testing.expect(result.res.writtenAt(predicate.equals.name) != .none);
+    try testing.expectEqual(@as(u32, 0), result.errors);
+    try testing.expectEqual(
+        declSpelledIn(ast, decls, "Byte"),
+        result.res.declaredBy(result.res.writtenAt(predicate.equals.name)),
+    );
 }
