@@ -271,10 +271,14 @@ such as `read`, `copy`, `sink`, `embed`, `embed_bytes`, `impl`, `opaque`,
 `linear`, `copyable` and `carrier`, so a reader can decide whether a name is
 legal without knowing the parser's state.
 
-`type`, `alias`, `proj`, `trav`, `it`, `via` and `default` are contextual
-words, not reserved words, and so are `case`, `components`, `supertraits`,
-`target`, `derived` and `value`, which the grammar reads only after a `.` or in
-a template requirement.
+`type`, `alias`, `proj`, `trav`, `it`, `via`, `default` and `template` are
+contextual words, not reserved words, and so are `case`, `components`,
+`supertraits`, `target`, `derived` and `value`, which the grammar reads only
+after a `.` or in a template requirement.
+
+`template` begins a structural template when it immediately precedes `impl` at
+the start of a declaration. Elsewhere it is a name, so a parameter, a local, a
+field and a function may all be called `template`.
 
 `default` marks a default implementation when it immediately precedes `impl`
 at the start of a declaration. Elsewhere it is a name, so the prelude's
