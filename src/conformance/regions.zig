@@ -146,7 +146,7 @@ fn nameOf(ast: *const Ast, res: *const Resolution, b: BindingId, text: []const u
         // A declaration rather than a binding some region encloses: a constant
         // is reachable wherever its module is, exactly as a function is, so
         // there is no extent for a use of one to escape.
-        .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => null,
+        .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => null,
     };
 }
 

@@ -1,0 +1,16 @@
+// A closure inside a generic body reads the length parameter like any other
+// name in scope.
+fn scaled[let n: UInt64](values: [UInt64; n]) -> UInt64 {
+    let per_item = |value: UInt64| -> UInt64 {
+        value * n
+    }
+    var sum: UInt64 = 0
+    for read value in values {
+        sum = sum + per_item(value)
+    }
+    sum
+}
+
+fn main() -> UInt8 {
+    UInt8(scaled([1, 2, 3]))
+}

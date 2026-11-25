@@ -239,7 +239,7 @@ pub fn lower(
             .constructor => |constructor| constructor.enclosing,
             .erased_entry => typing.raw_accesses.closure_entry,
             .erased_settle => typing.raw_accesses.closure_settle,
-            .built_in, .viewed => |at| at.member,
+            .built_in => |at| at.member,
         };
 
         // What the receiver bound the enclosing implementation's parameters
@@ -345,7 +345,7 @@ pub fn lower(
     errdefer gpa.free(external);
     for (instances.instances, 0..) |instance, i| external[i] = switch (instance.key.body) {
         .declaration => |decl| ast.declIsExtern(decl),
-        .closure_release, .closure, .constructor, .erased_entry, .erased_settle, .built_in, .viewed => false,
+        .closure_release, .closure, .constructor, .erased_entry, .erased_settle, .built_in => false,
     };
     // Defined here, whatever else is not: this pass wrote its body.
     if (dispatches) external[external.len - 1] = false;
@@ -374,7 +374,7 @@ pub fn lower(
         for (instances.instances, 0..) |instance, i| {
             const decl = switch (instance.key.body) {
                 .declaration => |decl| decl,
-                .closure_release, .closure, .constructor, .erased_entry, .erased_settle, .built_in, .viewed => continue,
+                .closure_release, .closure, .constructor, .erased_entry, .erased_settle, .built_in => continue,
             };
             if (!program.publishesExport(decl)) continue;
             exported[i] = try gpa.dupe(u8, ast.tokenText(ast.declName(decl)));
@@ -627,11 +627,9 @@ fn lowerClosureRelease(gpa: std.mem.Allocator, ast: *const Ast, typing: *const T
     return b.finish(block, place.file);
 }
 
-/// The body a function value holds for an operation the compiler provides,
-/// or one an array answers through its slice view. It takes the operation's
-/// arguments as a direct call to the trait member passes them, and answers as
-/// such a call is lowered: with the instruction the compiler provides, or by
-/// viewing each array argument and calling the slice's member.
+/// The body a function value holds for an operation the compiler provides.
+/// It takes the operation's arguments as a direct call to the trait member
+/// passes them, and answers with the instruction the compiler provides.
 fn lowerBuiltInBody(
     gpa: std.mem.Allocator,
     ast: *const Ast,
@@ -646,7 +644,7 @@ fn lowerBuiltInBody(
     library: LibraryDecls,
 ) !Mir {
     const built_in = switch (instance.body) {
-        .built_in, .viewed => |at| at,
+        .built_in => |at| at,
         else => unreachable,
     };
     const span = ast.tokenSpan(ast.declName(built_in.member));
@@ -694,19 +692,8 @@ fn lowerBuiltInBody(
         else
             try l.loadLocal(slot, ty, span));
     }
-    const result = if (instance.body == .built_in)
-        try l.builtInOperation(built_in.member, b.return_type, span, span, args.items) orelse
-            @panic("compiler defect: a built-in operation value names no operation the compiler provides")
-    else viewed: {
-        const choice = mono.instances.selectedChoice(built_in.trait, &.{}, built_in.receiver);
-        const selected = instantiate_mod.selectedMember(ast, &mono.instances.typing, choice, built_in.member) orelse
-            @panic("compiler defect: a viewed operation's slice supplies no member");
-        for (params, args.items) |param, *argument| {
-            if (param.ty == built_in.receiver) argument.* = try l.receiverArgument(argument.*, built_in.receiver, choice, span);
-        }
-        const callee = mono.idFor(selected.body.declaration, &.{}, selected.self_ty, selected.impl_args);
-        break :viewed try l.directCall(b.return_type, span, callee, args.items);
-    };
+    const result = try l.builtInOperation(built_in.member, b.return_type, span, span, args.items) orelse
+        @panic("compiler defect: a built-in operation value names no operation the compiler provides");
     try l.returnFrom(result, span);
 
     b.return_type = mono.pool.erased(b.return_type);
@@ -1059,7 +1046,7 @@ fn lowerFunction(
     if (instance.body == .closure_release) return lowerClosureRelease(gpa, ast, typing, mono, instance.body.closure_release);
     if (instance.body == .erased_entry or instance.body == .erased_settle)
         return lowerErasedBody(gpa, ast, resolution, typing, disposals, calls, local_of_binding, touched, instance, mono, library);
-    if (instance.body == .built_in or instance.body == .viewed)
+    if (instance.body == .built_in)
         return lowerBuiltInBody(gpa, ast, resolution, typing, disposals, calls, local_of_binding, touched, instance, mono, library);
     const d = instance.decl;
     const SourceBody = struct {
@@ -1071,7 +1058,7 @@ fn lowerFunction(
         file: FileId,
     };
     const source: SourceBody = switch (instance.body) {
-        .closure_release, .erased_entry, .erased_settle, .built_in, .viewed => unreachable,
+        .closure_release, .erased_entry, .erased_settle, .built_in => unreachable,
         .declaration => |decl| .{
             .body = ast.declBody(decl),
             .params = ast.declParams(decl),
@@ -1641,6 +1628,11 @@ const Lowerer = struct {
         // verification refuses as invalid compiler output.
         if (ty == TypeId.poison) return self.poison(span);
 
+        if (self.typing.lengthRead(id)) |parameter| {
+            const length = try self.substituted(parameter);
+            return self.emit(.constant, ty, span, .{ .constant = self.types().concreteCount(length) });
+        }
+
         if (self.typing.integerProperty(id)) |property| {
             const receiver = try self.substituted(property.receiver);
             const value = property.endpoint.value(receiver).?;
@@ -1952,7 +1944,7 @@ const Lowerer = struct {
                 } orelse return self.poison(span);
                 const member = (self.typing.supply_index.memberOf(row.decl, sig) orelse
                     return self.poison(span));
-                const held = instantiate_mod.receiverKeying(self.ast, row.decl, choice.implementedFor());
+                const held = instantiate_mod.receiverKeying(self.ast, row.decl, choice.receiver);
                 const impl_args = self.mono.instances.selectedArguments(trait.?, &.{}, operand);
                 const callee = self.mono.idFor(member, &.{}, held, impl_args);
                 return self.b.addCall(self.block, .value, .bool_, span, callee, &.{ left, right });
@@ -3684,7 +3676,7 @@ const Lowerer = struct {
         return .{
             .row = row,
             .member = supplied,
-            .held = instantiate_mod.receiverKeying(self.ast, impl, self.mono.instances.selectedChoice(declared, args, held).implementedFor()),
+            .held = instantiate_mod.receiverKeying(self.ast, impl, self.mono.instances.selectedChoice(declared, args, held).receiver),
             .impl_args = self.mono.instances.selectedArguments(declared, args, held),
         };
     }
@@ -3720,7 +3712,7 @@ const Lowerer = struct {
         // head *is* decides only how the positions are found.
         if (self.ast.exprTag(id) != .for_) return self.lendingWalk(id, ty, span, walked);
         return switch (self.types().get(walked)) {
-            .array => |a| self.arrayWalk(id, ty, span, a.count),
+            .array => |a| self.arrayWalk(id, ty, span, self.types().concreteCount(a.length)),
             else => self.sequenceWalk(id, ty, span, walked),
         };
     }
@@ -3766,7 +3758,7 @@ const Lowerer = struct {
 
         // Where the positions come from, settled here and read below.
         const counted: ?u32 = switch (self.types().get(walked)) {
-            .array => |a| a.count,
+            .array => |a| self.types().concreteCount(a.length),
             else => null,
         };
 
@@ -4038,7 +4030,7 @@ const Lowerer = struct {
         }
         return switch (d.source) {
             .expression => |expression| self.splicedExpr(expression, site),
-            .array => |array| self.constantTraversalRange(d.positions, array.count, site),
+            .array => |array| self.constantTraversalRange(d.positions, self.types().concreteCount(try self.substituted(array.length)), site),
         };
     }
 
@@ -4061,6 +4053,47 @@ const Lowerer = struct {
             const constant = try self.emit(.constant, field.ty, span, .{ .constant = value });
             try self.writeThrough(at, field.ty, constant, span);
         }
+        return base;
+    }
+
+    /// `[T; n]` holding `n` copies of `value`, written by a counted loop so
+    /// the instructions emitted do not grow with `n`.
+    fn filledArray(self: *Lowerer, ty: TypeId, element: TypeId, value: InstId, span: Span) std.mem.Allocator.Error!InstId {
+        const count = self.types().concreteCount(self.types().get(ty).array.length);
+        const base = try self.baseFor(ty, span, null);
+
+        const counter = try self.b.addLocal(.u64, .value);
+        try self.storeLocal(counter, .u64, span, try self.emit(.constant, .u64, span, .{ .constant = 0 }));
+        const header = try self.b.addBlock();
+        const body = try self.b.addBlock();
+        const exit = try self.b.addBlock();
+        _ = try self.b.setTerminator(self.block, .{ .tag = .jump, .ty = .unit, .span = span, .data = .{ .target = header } });
+
+        self.block = header;
+        const position = try self.loadLocal(counter, .u64, span);
+        const length = try self.emit(.constant, .u64, span, .{ .constant = count });
+        const more = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = position, .rhs = length } });
+        _ = try self.b.setTerminator(self.block, .{
+            .tag = .branch,
+            .ty = .unit,
+            .span = span,
+            .data = .{ .branch = .{ .cond = more, .then_block = body, .else_block = exit } },
+        });
+
+        self.block = body;
+        const at = try self.loadLocal(counter, .u64, span);
+        const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(element) });
+        const offset = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = at, .rhs = stride } });
+        const place = try self.emit(.field_addr, element, span, .{ .field = .{ .base = base, .offset = offset } });
+        if (self.isAggregate(element)) {
+            if (self.carriesBytes(element)) _ = try self.emit(.copy_value, element, span, .{ .binary = .{ .lhs = place, .rhs = value } });
+        } else try self.writeThrough(place, element, value, span);
+        const one = try self.emit(.constant, .u64, span, .{ .constant = 1 });
+        const next = try self.emit(.add, .u64, span, .{ .binary = .{ .lhs = at, .rhs = one } });
+        try self.storeLocal(counter, .u64, span, next);
+        _ = try self.b.setTerminator(self.block, .{ .tag = .jump, .ty = .unit, .span = span, .data = .{ .target = header } });
+
+        self.block = exit;
         return base;
     }
 
@@ -4765,6 +4798,24 @@ const Lowerer = struct {
         // formed, and this is what they settled to -- so no check is emitted,
         // which is the same nothing a settled index costs.
         if (self.calls.rangePlaceOf(self.typing, id)) |place| {
+            // Settled against a length parameter: the instance's length is
+            // known here, and a place that does not fit it traps where it is
+            // formed, as an index past the end does, before anything reads it.
+            if (place.fits_within > self.types().concreteCount(arr.length)) {
+                _ = try self.b.setTerminator(self.block, .{
+                    .tag = .trap,
+                    .ty = .unit,
+                    .span = span,
+                    .data = .{ .trap = .{ .kind = .index_out_of_bounds } },
+                });
+                // What follows reads or writes through an address, so the
+                // block nothing reaches still holds one. The array is too
+                // short to stand for the place, so it is a slot of the
+                // place's own type.
+                _ = try self.afterNoreturn(span);
+                const slot = try self.b.addLocal(result_ty, .value);
+                return self.emit(.addr_of, result_ty, span, .{ .local = slot });
+            }
             return self.fieldAddr(base, result_ty, @intCast(stride * place.first), .none, span);
         }
 
@@ -4786,17 +4837,17 @@ const Lowerer = struct {
         const wrote = position.expression();
         if (self.typing.from_end != .poison and index_ty == self.typing.from_end) {
             if (wrote != .none) if (self.foldedCountBack(wrote)) |k| {
-                if (Typing.elementSlot(arr.count, k, true)) |slot|
+                if (Typing.elementSlot(self.types().concreteCount(arr.length), k, true)) |slot|
                     return self.fieldAddr(base, result_ty, @intCast(stride * slot), .at(@intCast(slot)), span);
             };
             const k = switch (position) {
                 .wrote => |expression| try self.fromEndCount(expression, span),
                 .held => |held| try self.countIn(held.value, held.ty, span),
             };
-            return self.fromEndValueAddress(k, base, result_ty, arr.count, stride, span);
+            return self.fromEndValueAddress(k, base, result_ty, self.types().concreteCount(arr.length), stride, span);
         }
         if (wrote != .none) if (self.foldedIndex(wrote)) |at| {
-            if (Typing.elementSlot(arr.count, at, false)) |slot|
+            if (Typing.elementSlot(self.types().concreteCount(arr.length), at, false)) |slot|
                 return self.fieldAddr(base, result_ty, @intCast(stride * slot), .at(@intCast(slot)), span);
         };
         const idx = switch (position) {
@@ -4814,7 +4865,7 @@ const Lowerer = struct {
             _ = try self.check(low, .bool_, span, .index_out_of_bounds);
             address_index = try self.check(idx, .u64, span, .conversion_out_of_range);
         }
-        const count = try self.emit(.constant, .u64, span, .{ .constant = arr.count });
+        const count = try self.emit(.constant, .u64, span, .{ .constant = self.types().concreteCount(arr.length) });
         const ok = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = address_index, .rhs = count } });
         _ = try self.check(ok, .bool_, span, .index_out_of_bounds);
         const by = try self.emit(.constant, .u64, span, .{ .constant = stride });
@@ -5044,7 +5095,7 @@ const Lowerer = struct {
                 else
                     try self.borrowedAddress(source, span);
                 const bits = try self.emit(.address_bits, .u64, span, .{ .unary = address });
-                const count = try self.emit(.constant, .u64, span, .{ .constant = self.types().get(source_type).array.count });
+                const count = try self.emit(.constant, .u64, span, .{ .constant = self.types().concreteCount(self.types().get(source_type).array.length) });
                 return self.buildSpan(ty, bits, count, span);
             },
             .array_length => {
@@ -5054,7 +5105,7 @@ const Lowerer = struct {
                 const value = try self.expr(source);
                 if (try self.typeAt(source) == .never) return value;
                 const array_type = try self.substituted(normal.receiver_adjustments[0].?.receiver);
-                return self.emit(.constant, .u64, span, .{ .constant = self.types().get(array_type).array.count });
+                return self.emit(.constant, .u64, span, .{ .constant = self.types().concreteCount(self.types().get(array_type).array.length) });
             },
             .closure_recovery => {
                 const receiver = normal.args[0];
@@ -5129,12 +5180,6 @@ const Lowerer = struct {
                         defer self.gpa.free(trait_args);
                         for (rec.args, 0..) |argument, i| trait_args[i] = try self.substituted(argument);
                         const choice = self.mono.instances.selectedChoice(DeclId.at(rec.trait), trait_args, try self.substituted(rec.self_ty));
-                        if (choice.view != .poison and try self.typeAt(a) != .never) {
-                            const value = try self.expr(a);
-                            const layered = try self.observationArgument(value, try self.typeAt(a), receiver, false, span);
-                            try args.append(self.gpa, try self.receiverArgument(layered, receiver, choice, span));
-                            continue;
-                        }
                         observations += choice.observations;
                         receiver = choice.receiver;
                     }
@@ -5217,6 +5262,7 @@ const Lowerer = struct {
         if (d == self.library.raw.stride) {
             return self.emit(.constant, .u64, span, .{ .constant = @max(self.types().layoutOf(settled[0]).size, 1) });
         }
+        if (d == self.library.raw.array_filled) return self.filledArray(ty, settled[0], args.items[0], span);
         if (d == self.library.raw.closure_size)
             return self.emit(.constant, .u64, span, .{ .constant = self.types().layoutOf(settled[0]).size });
         // The address of slots `offset` bytes into a buffer: the buffer's
@@ -6000,32 +6046,9 @@ const Lowerer = struct {
     }
 
     /// Converts a whole-`Self` argument to what a selected implementation
-    /// takes: it reads through the choice's observations, then, where the
-    /// array those reach answers through its `Slice` view, builds that view of
-    /// the same elements.
+    /// takes: it reads through the choice's observations.
     fn receiverArgument(self: *Lowerer, argument: InstId, from: TypeId, choice: types_mod.ImplementationChoice, span: Span) !InstId {
-        if (choice.view == .poison) return self.observationArgument(argument, from, choice.receiver, false, span);
-        const address = if (choice.observations > 0)
-            try self.observeLayers(argument, from, choice.observations, span)
-        else
-            try self.valueAddress(argument, choice.receiver, span);
-        return self.arrayView(address, choice.receiver, choice.view, span);
-    }
-
-    /// Returns where a value of `ty` is held. An aggregate already is its
-    /// address, and a register value is stored in a slot of its own first.
-    fn valueAddress(self: *Lowerer, value: InstId, ty: TypeId, span: Span) !InstId {
-        if (self.isAggregate(ty)) return value;
-        const local = try self.b.addLocal(ty, .value);
-        try self.storeLocal(local, ty, span, value);
-        return self.emit(.addr_of, ty, span, .{ .local = local });
-    }
-
-    /// Builds the `Slice` that observes every element of the array at `address`.
-    fn arrayView(self: *Lowerer, address: InstId, array: TypeId, view: TypeId, span: Span) !InstId {
-        const bits = try self.emit(.address_bits, .u64, span, .{ .unary = address });
-        const count = try self.emit(.constant, .u64, span, .{ .constant = self.types().get(array).array.count });
-        return self.buildSpan(view, bits, count, span);
+        return self.observationArgument(argument, from, choice.receiver, false, span);
     }
 
     /// Lay out one value through the library function discovery chose for its
@@ -6096,7 +6119,7 @@ const Lowerer = struct {
             return self.poison(span));
 
         const choice = self.mono.instances.selectedChoice(trait, &.{}, piece);
-        const held = instantiate_mod.receiverKeying(self.ast, impl, choice.implementedFor());
+        const held = instantiate_mod.receiverKeying(self.ast, impl, choice.receiver);
         const callee = self.mono.idFor(member, settled, held, choice.impl_args);
         const argument = try self.receiverArgument(value, piece, choice, span);
         return self.directCall(answer, span, callee, &.{ argument, writer });
@@ -6173,7 +6196,7 @@ const Lowerer = struct {
             @panic("compiler defect: selected implementation has no member body");
         return switch (selected.body) {
             .declaration => |member| .{ .implemented = .{ .member = member, .held = selected.self_ty, .impl_args = selected.impl_args } },
-            .closure_release, .built_in, .viewed => .{ .generated = selected.body },
+            .closure_release, .built_in => .{ .generated = selected.body },
             .closure, .constructor, .erased_entry, .erased_settle => unreachable,
         };
     }

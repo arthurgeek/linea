@@ -5675,6 +5675,86 @@ fn exitModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
     return out.toOwnedSlice();
 }
 
+/// One function generic over a length, called at `n` distinct lengths each
+/// written by hand: every length is one interned entry, one instance and one
+/// symbol, so the cost stays linear in `n`.
+fn lengthInstancesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    return lengthInstancesFrom(gpa, n, 1,
+        \\struct Tag[phantom let n: UInt64] {}
+        \\
+        \\fn probe[let n: UInt64](_tag: Tag[n]) -> UInt64 {
+        \\    n
+        \\}
+        \\
+    , "probe(Tag[{d}] {{}})");
+}
+
+/// Each call specializes the array in the enum payload. Unit elements keep
+/// its storage size zero at every count and the empty variant constructs no
+/// elements. Checking, substituting and laying out the array still see n.
+fn largeLengthInstancesModule(gpa: std.mem.Allocator, n: u32) ![]u8 {
+    return lengthInstancesFrom(gpa, n, 4_000_000_000,
+        \\enum Rows[let n: UInt64] {
+        \\    Empty,
+        \\    Elements([(); n]),
+        \\}
+        \\
+        \\fn probe[let n: UInt64](sink row: Rows[n]) -> UInt64 {
+        \\    match row {
+        \\        Empty => n,
+        \\        Elements(values) => values.length(),
+        \\    }
+        \\}
+        \\
+    , "probe[{d}](.Empty)");
+}
+
+fn lengthInstancesFrom(gpa: std.mem.Allocator, n: u32, first: u64, declarations: []const u8, comptime call: []const u8) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    const w = &out.writer;
+    try w.writeAll(declarations);
+    try w.writeAll(
+        \\
+        \\fn main() -> UInt8 {
+        \\    var total: UInt64 = 0
+        \\
+    );
+    for (0..n) |i| try w.print("    total = total % 7 + " ++ call ++ "\n", .{first + i});
+    try w.writeAll(
+        \\    UInt8(total % 7)
+        \\}
+        \\
+    );
+    return out.toOwnedSlice();
+}
+
+test "the large length sweep lays out distinct real arrays" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const source: Source = .{ .path = "cost.lin", .text = try largeLengthInstancesModule(gpa, 3) };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    var resolved = try resolveTree(gpa, &ast, &sink);
+    var typing = try typecheckTree(gpa, &resolved, &sink);
+    var ownership = try checkOwnershipTree(gpa, &resolved, &typing, &sink);
+    try testing.expect(!sink.hasErrors());
+    const module = (try lowerTree(gpa, &resolved, &typing, &ownership, &sink, .program)).?;
+    try testing.expect(!sink.hasErrors());
+    var seen = [_]bool{false} ** 3;
+    for (module.types.pool, 0..) |ty, i| {
+        if (ty != .array) continue;
+        const count = module.types.arrayCount(ty.array.length) orelse continue;
+        if (count < 4_000_000_000 or count >= 4_000_000_003) continue;
+        try testing.expectEqual(@as(u64, 0), module.types.layoutOf(@enumFromInt(i)).size);
+        seen[count - 4_000_000_000] = true;
+    }
+    try testing.expectEqual([_]bool{true} ** 3, seen);
+}
+
 /// Runs the front end over one module and says what it cost.
 fn costOf(gpa: std.mem.Allocator, io: std.Io, text: []const u8) !Cost {
     return treeCost(gpa, io, text, .emit);
@@ -7269,6 +7349,8 @@ const sweep_dimensions = [_]Dimension{
     .{ .name = "borrowed constants", .n = 2000, .cost = throughTheTree(borrowedConstantsModule) },
     .{ .name = "generic helper depth", .n = 1000, .cost = throughTheTree(genericHelperDepthModule) },
     .{ .name = "generic helper width", .n = 500, .cost = throughTheTree(genericHelperWidthModule) },
+    .{ .name = "length instantiations", .n = 2000, .cost = throughTheTree(lengthInstancesModule) },
+    .{ .name = "length instantiations, large lengths", .n = 2000, .cost = throughTheTree(largeLengthInstancesModule) },
     .{ .name = "generic helper suppliers", .n = 2000, .cost = throughTheTree(genericHelperSuppliersModule) },
     .{ .name = "generic parameter origin depth", .n = 8, .grows = false, .cost = throughTreeBatch(genericOriginDepthModule, .emit, 128) },
     .{ .name = "generic shared DAG checking", .n = 8, .cost = throughTreeBatch(genericSharedDagModule, .check, 128) },
@@ -8445,6 +8527,7 @@ const RenameSubject = enum {
     capture,
     associated_type,
     type_parameter,
+    length_parameter,
     type_alias,
 };
 
@@ -8466,6 +8549,7 @@ fn subjectOf(ast: *const Ast, kind: resolve_mod.Kind, d: node_mod.DeclId) Rename
         // first asks about the same relation from whichever end.
         .associated_type => .associated_type,
         .type_parameter => .type_parameter,
+        .length_parameter => .length_parameter,
         .type_alias => .type_alias,
         .function => blk: {
             if (d == node_mod.DeclId.none) break :blk .function;
@@ -8766,6 +8850,7 @@ const GeneratedSettings = struct {
 
 fn checkGeneratedProgram(
     scratch: std.mem.Allocator,
+    scratch_parent: std.mem.Allocator,
     keep: std.mem.Allocator,
     io: std.Io,
     settings: GeneratedSettings,
@@ -8947,7 +9032,7 @@ fn checkGeneratedProgram(
             result.err = err;
             break :generated;
         };
-        const walked = checkWalkLoops(scratch, io, settings.cache, settings.library, settings.env.sanitize, &failures, .{
+        const walked = checkWalkLoops(scratch, scratch_parent, io, settings.cache, settings.library, settings.env.sanitize, &failures, .{
             .display_path = display_path,
             .entry = source.path,
             .files = &.{.{ .path = source.path, .text = source.text }},
@@ -9061,6 +9146,7 @@ const GeneratedWalk = struct {
             _ = per_seed.reset(.{ .retain_with_limit = 4 << 20 });
             results[at] = checkGeneratedProgram(
                 per_seed.allocator(),
+                per_seed.child_allocator,
                 keep.allocator(),
                 io,
                 settings,
@@ -10563,6 +10649,7 @@ test "a generated result retains failures past its seed scratch" {
 
     const result = try checkGeneratedProgram(
         scratch.allocator(),
+        scratch.child_allocator,
         keep.allocator(),
         testing.io,
         .{ .library = test_library.get(), .cache = &cache, .env = .{
@@ -12477,9 +12564,10 @@ test "scope membership checks every reference and preserves failure order" {
     defer arena.deinit();
     const gpa = arena.allocator();
     const source: Source = .{ .path = "scope.lin", .text =
+        \\fn length[let n: UInt64](_row: [Bool; n]) -> UInt64 { n }
         \\fn first(left: UInt8) -> UInt8 { left }
         \\fn second(right: UInt8) -> UInt8 { right }
-        \\fn main() -> UInt8 { first(second(0)) }
+        \\fn main() -> UInt8 { first(second(UInt8(length([true])))) }
     };
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
@@ -14682,7 +14770,7 @@ fn writeSourceType(
     const x = ast.withoutTypeGroups(ref);
     if (depth > source_alias_depth) return error.TooDeep;
     if (reading) |read| {
-        if (x.kind == .named and x.args.len() == 0 and ast.tokenTag(x.name) == .identifier) {
+        if ((x.kind == .named or x.kind == .length_argument) and x.args.len() == 0 and x.name != .none and ast.tokenTag(x.name) == .identifier) {
             for (ast.declTypeParams(read.alias), 0..) |param, i| {
                 if (ast.tokenName(param.name) != ast.tokenName(x.name) or i >= read.args.len) continue;
                 return writeSourceType(gpa, ast, res, memo, out, read.args[i], read.outer, depth + 1);
@@ -14716,8 +14804,12 @@ fn writeSourceType(
             if (x.inferred_length != TokenId.none) {
                 try out.appendSlice(gpa, "inferred");
             } else {
-                try writeSourceConstant(gpa, ast, res, memo, out, x.length);
+                try writeSourceType(gpa, ast, res, memo, out, node_mod.lengthArgument(ast, x.at, x.length), reading, depth + 1);
             }
+        },
+        .length_argument => {
+            try out.appendSlice(gpa, "length(");
+            try writeSourceConstant(gpa, ast, res, memo, out, x.length);
         },
         .callable => {
             const callable = ast.callableType(x);
@@ -20497,6 +20589,7 @@ const WalkSubject = struct {
 /// Answers whether any file held a walk this could write out.
 fn checkWalkLoops(
     gpa: std.mem.Allocator,
+    scratch_parent: std.mem.Allocator,
     io: std.Io,
     cache: *const OutcomeCache,
     checked_library: ?*const loader.CheckedLibrary,
@@ -20506,7 +20599,7 @@ fn checkWalkLoops(
     subject: WalkSubject,
 ) !bool {
     // One rewrite's compilation, released before the next one's.
-    var per_rewrite = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var per_rewrite = std.heap.ArenaAllocator.init(scratch_parent);
     defer per_rewrite.deinit();
     var claimed = false;
     for (subject.files, subject.file_ids, 0..) |file, file_id, k| {
@@ -20515,7 +20608,7 @@ fn checkWalkLoops(
         const retained_upto = failures.items.len;
         var semantics = subject.semantics;
         semantics.file = id;
-        if (try compareWalkLoops(gpa, per_rewrite.allocator(), io, cache, checked_library, sanitize, failures, subject, semantics, k, file)) claimed = true;
+        if (try compareWalkLoops(gpa, per_rewrite.allocator(), scratch_parent, io, cache, checked_library, sanitize, failures, subject, semantics, k, file)) claimed = true;
         try retainFrom(gpa, failures, retained_upto);
     }
     return claimed;
@@ -20524,6 +20617,7 @@ fn checkWalkLoops(
 fn compareWalkLoops(
     gpa: std.mem.Allocator,
     scratch: std.mem.Allocator,
+    ownership_scratch: std.mem.Allocator,
     io: std.Io,
     cache: *const OutcomeCache,
     checked_library: ?*const loader.CheckedLibrary,
@@ -20541,7 +20635,7 @@ fn compareWalkLoops(
     var inputs: std.ArrayList(loader.InMemoryFile) = .empty;
     for (subject.files, 0..) |other, j| try inputs.append(scratch, if (j == k) .{ .path = other.path, .text = rewritten } else other);
     try inputs.appendSlice(scratch, subject.beside);
-    const loaded = try generate.checkLoaded(scratch, subject.entry, inputs.items, checked_library);
+    const loaded = try generate.checkLoaded(scratch, ownership_scratch, subject.entry, inputs.items, checked_library);
     const table = &loaded.table;
     const sink = &loaded.sink;
     const settled = &loaded.semantics;
@@ -20576,6 +20670,48 @@ fn compareWalkLoops(
     const suffix = try std.fmt.allocPrint(scratch, "walks{d}", .{k});
     _ = try compareRewrittenRun(gpa, scratch, io, cache, run.env, failures, run.answered, suffix, why, ir.written());
     return true;
+}
+
+test "a walk rewrite returns ownership scratch before its checked result is released" {
+    var original = std.heap.ArenaAllocator.init(testing.allocator);
+    defer original.deinit();
+    const file: loader.InMemoryFile = .{ .path = "main.lin", .text =
+        \\fn main() -> UInt8 {
+        \\    let xs: [UInt8; 2] = [1, 2]
+        \\    var total: UInt8 = 0
+        \\    for x in xs { total += x }
+        \\    total
+        \\}
+        \\
+    };
+    const checked_library = test_library.get();
+    const loaded = try generate.checkLoadedText(original.allocator(), file.path, file.text, checked_library);
+    try testing.expect(!loaded.sink.hasErrors());
+    const id = loaded.program.primaryFile();
+    const subject: WalkSubject = .{
+        .display_path = file.path,
+        .entry = file.path,
+        .files = &.{file},
+        .file_ids = &.{id},
+        .semantics = .{
+            .ast = &loaded.semantics.expanded.ast,
+            .program = &loaded.program,
+            .res = &loaded.semantics.res,
+            .typing = &loaded.semantics.typing,
+            .file = id,
+        },
+        .rules = "",
+    };
+    var rewrite = std.heap.ArenaAllocator.init(testing.allocator);
+    defer rewrite.deinit();
+    var ownership = testing.FailingAllocator.init(testing.allocator, .{});
+    var failures: std.ArrayList(Failure) = .empty;
+    defer failures.deinit(testing.allocator);
+    const cache: OutcomeCache = .{ .dir = "", .salt = 0 };
+    try testing.expect(try compareWalkLoops(testing.allocator, rewrite.allocator(), ownership.allocator(), testing.io, &cache, checked_library, null, &failures, subject, subject.semantics, 0, file));
+    try testing.expectEqual(0, failures.items.len);
+    try testing.expect(ownership.allocated_bytes > 0);
+    try testing.expectEqual(ownership.allocated_bytes, ownership.freed_bytes);
 }
 
 /// One file, parsed and resolved on its own.
@@ -23709,7 +23845,7 @@ fn checkCase(
                 if (std.mem.eql(u8, table.get(part.file).path, cf.path)) break part.file;
             } else null;
         }
-        walks_written_out = try checkWalkLoops(gpa, io, env.cache, env.library, env.sanitize, &w.failures, .{
+        walks_written_out = try checkWalkLoops(gpa, scratch_parent, io, env.cache, env.library, env.sanitize, &w.failures, .{
             .display_path = display_path,
             .entry = case.entry,
             .files = case.files,

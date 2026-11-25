@@ -64,6 +64,7 @@ Ownership transfer, `defer let`, and explicit endings.
 Traits, allocator parameters, borrow contracts, and `From`.
 
 - [cash_register.lin](cash_register.lin): totals coins and notes; a trait and a bounded generic function.
+- [packing_checklist.lin](packing_checklist.lin): reports how much of two checklists is done; a length parameter, `let n: UInt64`, for arrays of any length.
 - [network_allowlist.lin](network_allowlist.lin): checks connections against rules; a generic type and `Equatable` bounds.
 - [release_comparison.lin](release_comparison.lin): plans an upgrade from release versions; derived ordering.
 - [temperature_conversion.lin](temperature_conversion.lin): converts sensor readings; `From` and `TryFrom` conversions.

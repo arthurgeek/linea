@@ -566,6 +566,7 @@ pub fn reachOfType(tag: TypeTag) Reach {
         .struct_,
         .newtype,
         .array,
+        .length,
         .callable,
         .closure,
         .never,
@@ -666,6 +667,33 @@ const Seen = struct {
     operations: std.EnumSet(Operation),
 };
 
+/// A concrete count belongs to the observed array even though a value that
+/// reads the count has type UInt64. A symbolic count has no concrete entry.
+fn noteType(typing: *const Typing, ty: TypeId, seen: *std.EnumSet(TypeTag)) void {
+    if (ty == .poison) return;
+    const entry = typing.get(ty);
+    seen.insert(std.meta.activeTag(entry));
+    if (entry == .array and typing.arrayCount(entry.array.length) != null) seen.insert(.length);
+}
+
+test "a length is observed through the concrete array that uses it" {
+    var builder = try Typing.Builder.init(testing.allocator);
+    defer builder.deinit();
+    const parameter = try builder.addParameter("n", 0, 0, .unrestricted, &.{});
+    builder.pool.items[parameter.index()].parameter.length = true;
+    const symbolic = try builder.arrayOfLength(.u8, parameter);
+    const concrete = try builder.arrayOf(.u8, 0);
+    var typing = try builder.finish(.empty);
+    defer typing.deinit(testing.allocator);
+
+    var seen: std.EnumSet(TypeTag) = .initEmpty();
+    noteType(&typing, symbolic, &seen);
+    try testing.expect(seen.contains(.array));
+    try testing.expect(!seen.contains(.length));
+    noteType(&typing, concrete, &seen);
+    try testing.expect(seen.contains(.length));
+}
+
 /// What a run of the generator reaches, across every axis at once so the whole
 /// pipeline runs once per program rather than once per axis.
 fn sweep(backing: std.mem.Allocator, seeds: usize) !Seen {
@@ -713,15 +741,9 @@ fn sweep(backing: std.mem.Allocator, seeds: usize) !Seen {
             for (ast.declParams(d)) |p| seen.conventions.insert(p.convention);
         }
         noteNestings(&typing, &seen);
-        for (typing.expr_types) |ty| {
-            if (ty != .poison) seen.types.insert(std.meta.activeTag(typing.pool[ty.index()]));
-        }
+        for (typing.expr_types) |ty| noteType(&typing, ty, &seen.types);
         var binding_types = typing.binding_types.pairs();
-        while (binding_types.next()) |pair| {
-            if (pair.value != .poison) {
-                seen.types.insert(std.meta.activeTag(typing.pool[pair.value.index()]));
-            }
-        }
+        while (binding_types.next()) |pair| noteType(&typing, pair.value, &seen.types);
         noteSpellings(&ast, &typing, &seen);
 
         // Lowered from the program loaded beside the library, because a tuple's
@@ -911,6 +933,7 @@ test "observations and callable signatures do not contain their referenced types
             .struct_,
             .newtype,
             .array,
+            .length,
             => true,
             // Observations address referents; callables address code with
             // parameter and result types. Neither contains those types inline.

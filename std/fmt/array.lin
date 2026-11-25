@@ -1,0 +1,19 @@
+import std.testing
+
+// Debug lists an array's elements between brackets, as an array literal is
+// written.
+impl[T: Debug, let n: UInt64] Debug for [T; n] {
+    fn debug[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        self.as_slice().debug(&w)
+    }
+}
+
+test "an array debugs as its elements in brackets" {
+    let words = ["tea", "jam"]
+    let empty: [Bool; _] = []
+    var rendered = testing.Recorder.of(32).unwrap()
+    let wrote = words.debug(&rendered).is_ok() && empty.debug(&rendered).is_ok()
+    let listed = rendered.holds(r#"["tea", "jam"][]"#)
+    rendered.release()
+    testing.assert(wrote && listed, "the elements were not listed")?
+}

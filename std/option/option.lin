@@ -52,7 +52,7 @@ test "derived option release releases only a present payload" {
     absent.release()
     let present: Option[mem.ReleaseTag] = .Some(log.tag(10))
     present.release()
-    let released = log.holds([UInt64(10)].as_slice())
+    let released = log.holds([10])
     log.release()
     testing.assert(released, "derived release skipped or repeated the payload")?
 }

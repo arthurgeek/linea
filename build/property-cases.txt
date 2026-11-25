@@ -116,6 +116,9 @@ function_values/lambdas_passed_by_name_in_either_order.lin
 where_equality/an_implementation_reads_two_equated_items_as_one_type.lin
 where_equality/an_operation_equates_its_arguments_items_with_its_receivers.lin
 where_equality/a_provided_operation_settles_the_parts_of_its_receivers_pairs.lin
+# Length parameters: settled through a struct, and one function at several lengths.
+generics/length/infers_through_a_struct.lin
+generics/length/instances_per_length.lin
 # Labelled pattern parameters: named and positional calls, defaults, nested parts, and each convention.
 pattern_parameters/a_labelled_tuple_parameter_takes_its_argument_apart.lin
 pattern_parameters/a_pattern_parameter_takes_its_default_apart.lin

@@ -58,7 +58,7 @@ true of a different implementation.
 | --- | --- | --- |
 | [0013](0013-no-undefined-behaviour.md) | No operation has undefined behaviour | Accepted; extended by 0091, 0228 and 0249 |
 | [0014](0014-unused-declarations-are-errors.md) | An unused declaration is an error | Accepted |
-| [0189](0189-a-names-case-is-part-of-its-kind.md) | A name's case is part of its kind | Accepted; extended by 0190 |
+| [0189](0189-a-names-case-is-part-of-its-kind.md) | A name's case is part of its kind | Accepted; extended by 0190 and 0307 |
 | [0194](0194-an-alias-names-a-type-that-exists.md) | An alias names a type that exists | Accepted; extended by 0206 and 0215; path clause for a generic alias superseded by 0211 |
 | [0211](0211-a-generic-alias-heads-a-path-and-the-call-settles-its-parameters.md) | A generic alias heads a path, and the call settles its parameters | Accepted; supersedes the path clause of 0194; extends 0206 |
 | [0215](0215-a-type-parameter-may-default-its-argument.md) | A type parameter may default its argument | Accepted; supersedes 0206; extends 0098 and 0194; extended by 0217, 0219 and 0225 |
@@ -116,7 +116,7 @@ true of a different implementation.
 | [0073](0073-a-scope-exit-names-a-stretch-of-the-live-stack.md) | A scope exit names a stretch of the live stack | Accepted; refines 0066 |
 | [0074](0074-a-module-is-emitted-as-several-compilation-units.md) | A module is emitted as several compilation units | Superseded by 0094 |
 | [0075](0075-a-program-root-is-a-directory-holding-a-manifest.md) | A program root is a directory holding a manifest | Accepted; command-line-file clause superseded by 0171; extended by 0227 and 0280 |
-| [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) | An array is a value of a fixed-size type | Accepted; extended by 0083, 0137, 0149, 0166, 0172, 0198 and 0207 |
+| [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) | An array is a value of a fixed-size type | Accepted; extended by 0083, 0137, 0149, 0166, 0172, 0198, 0207 and 0307 |
 | [0062](0062-an-indexed-place-is-a-place-and-every-index-is-checked.md) | An indexed place is a place, and every index is checked | Accepted; bracket clause, never implemented, replaced by 0181 |
 | [0063](0063-disposal-is-scheduled-never-inserted.md) | Disposal is scheduled, never inserted | Accepted; extends 0034, extended by 0104 and 0208, refined by 0114 |
 | [0103](0103-linear-constrains-consumption-release-grants-one-way.md) | Linear constrains consumption; Release grants one way to consume | Accepted; extends 0104 with container decisions; extended by 0124 and 0138 |
@@ -129,11 +129,13 @@ true of a different implementation.
 | [0182](0182-a-types-own-implementation-may-fix-its-type-arguments.md) | A type's own implementation may fix its type arguments | Accepted; partially supersedes 0081; head clause superseded by 0252 |
 | [0252](0252-a-types-own-implementation-may-write-a-parameter-inside-an-argument.md) | A type's own implementation may write a parameter inside an argument | Accepted; supersedes the head clause of 0182 |
 | [0082](0082-a-comparison-is-a-trait-call.md) | A comparison is a call on the trait it names | Accepted; extended by 0112 and 0138 |
-| [0083](0083-an-arrays-length-is-part-of-its-type-everywhere-it-is-written.md) | An array's length is part of its type, everywhere it is written | Accepted; extends 0061 and 0020; extended by 0149, 0172 and 0198 |
+| [0083](0083-an-arrays-length-is-part-of-its-type-everywhere-it-is-written.md) | An array's length is part of its type, everywhere it is written | Accepted; extends 0061 and 0020; extended by 0149, 0172, 0198 and 0307 |
+| [0307](0307-a-length-may-be-a-parameter.md) | A length may be a parameter: `let n: UInt64` | Accepted; extends 0061, 0083, 0181 and 0189; supersedes the view rows of 0166 |
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted; function-modifier premise superseded by 0277 |
 | [0247](0247-a-test-in-an-impl-is-a-member-of-nothing.md) | A test in an inherent `impl` is a member of nothing | Accepted; extended by 0269; namespace clause superseded by 0277 |
 | [0269](0269-a-test-in-a-trait-declaration-is-a-member-of-nothing.md) | A test in a trait declaration is a member of nothing | Accepted; extends 0247; namespace clause superseded by 0277 |
 | [0277](0277-a-test-is-named-by-a-string.md) | A test is named by a string | Accepted; supersedes the function-modifier premise of 0084 and the namespace clauses of 0247 and 0269 |
+| [0304](0304-template-is-a-contextual-word.md) | `template` is a contextual word | Accepted; builds on 0084 and 0179 |
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
 | [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229 and 0295; boolean grant superseded by 0228; direct runtime call clause superseded by 0255 |
 | [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md) | The prelude holds the core vocabulary, and yields to a module's own names | Accepted; supersedes the minimal-prelude and no-shadowing clauses of 0085 |
@@ -219,7 +221,7 @@ true of a different implementation.
 | [0187](0187-a-bound-brings-its-traits-operations-into-reach.md) | A bound brings its trait's operations into reach | Accepted; extends 0160 and 0186; extended by 0243 |
 | [0243](0243-a-bound-reaches-its-supertraits-associated-types.md) | A bound reaches the associated types its supertraits declare | Accepted; extends 0187 |
 | [0161](0161-a-postfix-call-reaches-an-operation-never-a-field.md) | A postfix call reaches an operation, never a field | Accepted; replaces the field-precedence sentence of the semantics; extended by 0181 |
-| [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176; extended by 0275, which replaces its cost consequence |
+| [0181](0181-a-call-may-name-its-type-arguments.md) | A call may name its type arguments | Accepted; replaces the unimplemented bracket clause of 0062; extends 0161; refines 0176; extended by 0275, which replaces its cost consequence; extended by 0307 |
 | [0275](0275-an-expression-inside-a-type-is-read-once.md) | An expression inside a type is read once | Accepted; extends 0181 and replaces its cost consequence |
 | [0162](0162-question-mark-converts-an-error-through-from.md) | `?` converts a different error through `From` | Accepted; extended by 0184 and 0218 |
 | [0163](0163-a-raw-string-literal-holds-its-bytes.md) | A raw string literal holds its bytes: `r"…"`, with hashes for embedded quotes | Accepted |
@@ -355,7 +357,7 @@ ones most likely to be superseded as the compiler grows.
 | [0148](0148-parameter-heads-match-complete-trait-keys.md) | Parameter-headed implementations match complete trait keys | Accepted; supersedes head/partition clauses in 0081 and 0093; derived-cycle clause superseded by 0165; disjointness refined by 0192; extended by 0213 |
 | [0149](0149-local-array-literals-infer-written-lengths.md) | Local array literals infer written lengths | Accepted; extends 0061 and 0083; extended by 0198 |
 | [0198](0198-array-literal-bindings-infer-written-lengths.md) | Array literal bindings infer written lengths | Accepted; extends 0061, 0083 and 0149 |
-| [0166](0166-an-array-compares-through-its-slice-view.md) | An array compares, hashes and prints through its slice view | Accepted; extends 0061 and 0137 |
+| [0166](0166-an-array-compares-through-its-slice-view.md) | An array compares, hashes and prints through its slice view | Accepted; extends 0061 and 0137; view rows superseded by 0307 |
 | [0172](0172-an-array-reports-its-length.md) | An array reports its length | Accepted; extends 0061, 0083 and 0137 |
 | [0192](0192-iterator-operations-belong-to-every-sequence.md) | Iterator operations belong to every sequence, and every iterator is a sequence | Accepted; builds on 0186 and 0187; refines 0148 and 0152; extended by 0203, 0245 and 0306; `_inout` forms superseded by 0267 |
 | [0204](0204-mir-verification-re-derives-storage-safety.md) | MIR verification re-derives the storage safety ownership promised | Accepted; extends 0049 and 0050; extended by 0246 |

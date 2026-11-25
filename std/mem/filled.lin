@@ -1,0 +1,20 @@
+import std.testing
+
+// An array of `n` copies of `value`. `n` is settled by the type the caller
+// expects, `let row: [UInt8; 4] = mem.filled(0)`, or written in the call,
+// `mem.filled[UInt8, 4](0)`. The element is copied into every slot, so it must
+// be Copyable.
+pub fn filled[T: Copyable, let n: UInt64](value: T) -> [T; n] {
+    array_filled(value)
+}
+
+test "filled copies one value into every slot" {
+    let row: [UInt8; 4] = filled(7)
+    testing.assert_eq(row, [7, 7, 7, 7], "every slot holds the value")?
+    let none: [Bool; 0] = filled(true)
+    testing.assert_eq(none.length(), 0, "an array of no slots holds nothing")?
+}
+
+// The compiler replaces this declaration: it writes `value` into each of the
+// array's `n` slots with a loop, so the program does not grow with `n`.
+extern fn array_filled[T: Copyable, let n: UInt64](value: T) -> [T; n]

@@ -1,0 +1,18 @@
+// A struct may take a length parameter and size a field with it. A function
+// over the struct settles the length from the struct's type argument.
+struct Ring[T, let n: UInt64] {
+    items: [T; n],
+    next: UInt64,
+}
+
+fn push[let n: UInt64](inout ring: Ring[UInt8, n], item: UInt8) {
+    ring.items[ring.next] = item
+    ring.next = (ring.next + 1) % n
+}
+
+fn main() -> UInt8 {
+    var ring = Ring[UInt8, 4] { items = [0, 0, 0, 0], next = 0 }
+    push(&ring, 5)
+    push(&ring, 6)
+    ring.items[0] + ring.items[1] + UInt8(ring.next)
+}

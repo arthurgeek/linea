@@ -384,7 +384,7 @@ pub fn atOffset(
 
     var shadowing: std.StringHashMapUnmanaged(void) = .empty;
     defer shadowing.deinit(gpa);
-    try namesShadowingImports(gpa, program, res, cursors, file, offset, visible.items, &shadowing);
+    try namesShadowingImports(gpa, program, res, typing, cursors, file, offset, visible.items, &shadowing);
     for (visible.items) |b| {
         if (res.kindOf(b) != .module) continue;
         if (!importedIn(ast, res, b, file)) continue;
@@ -424,6 +424,7 @@ fn namesShadowingImports(
     gpa: std.mem.Allocator,
     program: *const program_mod.Program,
     res: *const Resolution,
+    typing: *const Typing,
     cursors: *const positions.Index,
     file: FileId,
     offset: u32,
@@ -440,6 +441,7 @@ fn namesShadowingImports(
         else => return,
     };
     if (ast.exprTag(named) != .name_ref or ast.exprMain(named) != written) return;
+    if (typing.value_names_in_type_slots.contains(written)) return;
 
     for (visible) |b| {
         if (!resolve.kindShadowsAnImport(res.kindOf(b))) continue;
@@ -2162,6 +2164,8 @@ fn detailOf(res: *const Resolution, typing: *const Typing, b: BindingId) ?[]cons
         .local, .parameter, .capture, .binder, .constant => typing.settledName(typing.bindingType(b)),
         // An alias's name is not the type it names, so the detail says which.
         .type_alias => typing.settledName(typing.aliasedType(res.declaredBy(b))),
+        // A length parameter is read as a `UInt64`, the type it is declared with.
+        .length_parameter => "UInt64",
         .declared_type, .builtin_type, .function, .trait, .module, .associated_type, .type_parameter => null,
     };
 }
@@ -2185,7 +2189,7 @@ fn kindOf(kind: resolve.Kind) Item.Kind {
         .declared_type, .builtin_type => .Struct,
         // A name standing for a type an implementation settles, which is what
         // the protocol's type parameter is.
-        .associated_type, .type_parameter, .type_alias => .TypeParameter,
+        .associated_type, .type_parameter, .length_parameter, .type_alias => .TypeParameter,
         .trait => .Interface,
         .module => .Module,
     };
@@ -2341,6 +2345,30 @@ test "a point in a body is offered what the chain makes visible there" {
     try testing.expect(holds(in_main, "total"));
     try testing.expect(!holds(in_main, "a"));
     try testing.expect(!holds(in_main, "b"));
+}
+
+test "a length parameter in the editor is completed in its function" {
+    const gpa = testing.allocator;
+    const text =
+        \\fn count[let width: UInt64](_items: [Bool; width]) -> UInt64 {
+        \\    width
+        \\}
+        \\fn main() -> UInt8 {
+        \\    UInt8(count([true]))
+        \\}
+    ;
+    const header = std.mem.indexOf(u8, text, "width]").?;
+    const in_header = try offeredAt(gpa, text, header + 2);
+    defer releaseAll(gpa, in_header);
+    try testing.expect(holds(in_header, "width"));
+    const inside = std.mem.indexOf(u8, text, "    width").? + 4;
+    const here = try offeredAt(gpa, text, inside);
+    defer releaseAll(gpa, here);
+    try testing.expect(holds(here, "width"));
+    const outside = std.mem.indexOf(u8, text, "    UInt8(count").? + 4;
+    const there = try offeredAt(gpa, text, outside);
+    defer releaseAll(gpa, there);
+    try testing.expect(!holds(there, "width"));
 }
 
 test "a point after a lambda body name remains in the lambda scope" {
@@ -4270,6 +4298,79 @@ test "an unfinished dot on a local that shadows a module offers the local's memb
     try testing.expect(holds(members, "length"));
     try testing.expect(!holds(members, "ParseError"));
     try testing.expect(!holds(members, "text.ParseError"));
+}
+
+test "a half-typed name in a generic argument completes a module type only for a type parameter" {
+    const gpa = testing.allocator;
+    const text =
+        \\import std.text
+        \\struct Row[T, let n: UInt64] { items: [T; n] }
+        \\fn size(text: Str) -> UInt64 {
+        \\    let _row: Option[Row[te, te]] = .None
+        \\    let _partial: Option[Row[te]] = .None
+        \\    text.length()
+        \\}
+    ;
+    const start = std.mem.indexOf(u8, text, "Row[te, te]").?;
+    const type_items = try offeredAt(gpa, text, start + "Row[te".len);
+    defer releaseAll(gpa, type_items);
+    try testing.expect(holds(type_items, "text.ParseError"));
+    const length_items = try offeredAt(gpa, text, start + "Row[te, te".len);
+    defer releaseAll(gpa, length_items);
+    try testing.expect(!holds(length_items, "text.ParseError"));
+    const partial = std.mem.indexOf(u8, text, "Row[te]").? + "Row[te".len;
+    const partial_items = try offeredAt(gpa, text, partial);
+    defer releaseAll(gpa, partial_items);
+    try testing.expect(holds(partial_items, "text.ParseError"));
+}
+
+test "a half-typed name in a nested type keeps its parameter kind when an outer argument is missing" {
+    const gpa = testing.allocator;
+    const text =
+        \\import std.text
+        \\struct Row[T, let n: UInt64] { items: [T; n] }
+        \\fn size(text: Str) -> UInt64 {
+        \\    let _partial: Option[Row[Option[te]]] = .None
+        \\    let _complete: Option[Row[Option[te], 0]] = .None
+        \\    let _length: Option[Row[Row[UInt8, te]]] = .None
+        \\    text.length()
+        \\}
+    ;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text = text }}, "main.lin");
+    defer checked.deinit();
+    const cases = [_]struct { prefix: []const u8, offers_type: bool }{
+        .{ .prefix = "_partial: Option[Row[Option[te", .offers_type = true },
+        .{ .prefix = "_complete: Option[Row[Option[te", .offers_type = true },
+        .{ .prefix = "_length: Option[Row[Row[UInt8, te", .offers_type = false },
+    };
+    for (cases) |case| {
+        const offset = std.mem.indexOf(u8, text, case.prefix).? + case.prefix.len;
+        const items = try offeredIn(gpa, &checked, checked.fileNamed("main.lin").?, offset);
+        defer free(gpa, items);
+        const offers_type = for (items) |item| {
+            if (std.mem.eql(u8, item.label, "text.ParseError")) break true;
+        } else false;
+        try testing.expectEqual(case.offers_type, offers_type);
+    }
+}
+
+test "a half-typed name in a method's type argument can complete a module type" {
+    const gpa = testing.allocator;
+    const text =
+        \\import std.text
+        \\struct Shelf {}
+        \\impl Shelf {
+        \\    fn empty[T](_self: Shelf) -> Option[T] { .None }
+        \\}
+        \\fn size(text: Str, shelf: Shelf) -> UInt64 {
+        \\    let _item = shelf.empty[te]()
+        \\    text.length()
+        \\}
+    ;
+    const at = std.mem.indexOf(u8, text, "empty[te]").? + "empty[te".len;
+    const items = try offeredAt(gpa, text, at);
+    defer releaseAll(gpa, items);
+    try testing.expect(holds(items, "text.ParseError"));
 }
 
 test "a half-typed name completes no module items a local shadows in an expression" {

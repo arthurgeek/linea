@@ -1,0 +1,5 @@
+error[T-Infer]: nothing here says what `n` is
+ --> tests/generics/length/an_unsettled_length.lin:9:15
+  |
+9 |     let row = blank()
+  |               ^^^^^^^ no argument determines it, and nothing expects a type of it

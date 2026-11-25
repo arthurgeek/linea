@@ -25,6 +25,22 @@ pub fn isTupleArity(count: usize) bool {
     return count >= min_tuple_arity and count <= max_tuple_arity;
 }
 
+/// A count written in an array type or a list of arguments. A bare name
+/// can stand for a length parameter when the type is read at an application.
+pub fn lengthArgument(tree: anytype, at: TokenId, length: ExprId) TypeRef {
+    const name = if (length != .none and tree.exprTag(length) == .name_ref) tree.exprMain(length) else TokenId.none;
+    return .{ .kind = .length_argument, .at = at, .name = name, .length = length };
+}
+
+/// An array head applies its constructor to its element and length, in that
+/// order. Other heads apply the arguments written in their brackets.
+pub fn appliedHeadArguments(tree: anytype, head: TypeRef, array: *[2]TypeRef) []const TypeRef {
+    const written = tree.typeArgs(head.args);
+    if (head.kind != .array or written.len != 1) return written;
+    array.* = .{ written[0], lengthArgument(tree, head.at, head.length) };
+    return array;
+}
+
 /// Whether a head applies its declaration's own parameters and nothing else:
 /// each argument a bare name spelling one of `declared`, in the order they
 /// are declared, none twice. With `allow_subset` the head may leave
@@ -40,7 +56,7 @@ pub fn headAppliesItsParameters(names: anytype, applied: []const TypeRef, declar
     if (!allow_subset and applied.len != declared.len) return false;
     var next: usize = 0;
     for (applied) |argument| {
-        if (argument.kind != .named or argument.args.len() != 0 or argument.name == .none) return false;
+        if ((argument.kind != .named and argument.kind != .length_argument) or argument.args.len() != 0 or argument.name == .none) return false;
         while (next < declared.len and !std.mem.eql(u8, names.textOf(argument.name), names.textOf(declared[next].name))) : (next += 1) {}
         if (next == declared.len) return false;
         next += 1;
@@ -466,8 +482,16 @@ pub const TypeParam = struct {
     /// modifier on a thing the parser already builds.
     phantom: bool = false,
     /// The type written after `=`: the argument a written type omits for this
-    /// parameter. Absent where `wasWritten` is false.
+    /// parameter. Absent where `wasWritten` is false. For a length parameter
+    /// it is a `.length_argument` holding the constant written after `=`.
     default: TypeRef = .{ .name = .none },
+    /// Whether it declares a type or, written `let n: UInt64`, a length.
+    kind: Kind = .type,
+    /// The type written after a length parameter's `:`. Absent for a type
+    /// parameter.
+    length_type: TypeRef = .{ .name = .none },
+
+    pub const Kind = enum { type, length };
 };
 
 /// A half-open range into the bound table.
@@ -884,7 +908,7 @@ pub const TypeRef = struct {
         return switch (self.kind) {
             .named => self.name != TokenId.none,
             .selection => self.dot != .none,
-            .array, .callable, .borrow, .grouped, .tuple => true,
+            .array, .callable, .borrow, .grouped, .tuple, .length_argument => true,
         };
     }
 
@@ -904,6 +928,9 @@ pub const TypeRef = struct {
         named,
         /// `[T; N]`: the element in `args`, the count in `length`.
         array,
+        /// A length written where a generic argument stands, `16` in
+        /// `Ring[UInt8, 16]` or `n` in `total[n]`: the expression in `length`.
+        length_argument,
         /// `fn(parameters) -> result`, held in the callable-type table.
         callable,
         /// A namespace member or associated type selected from `base`.

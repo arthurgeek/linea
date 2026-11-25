@@ -562,6 +562,24 @@ const Gen = struct {
                 \\
                 \\
             );
+            // A length parameter on a structure and on a function, and calls
+            // that settle it at two lengths, so a generated program holds the
+            // form every rewrite has to keep: a declaration generic over an
+            // array's length, inferred from the argument it is called with.
+            try out.writer.writeAll(
+                \\pub struct GL[T, let n: UInt64] { items: [T; n] }
+                \\
+                \\pub fn glen[T, let n: UInt64](_items: [T; n]) -> UInt64 {
+                \\    n
+                \\}
+                \\
+                \\pub fn glens() -> UInt64 {
+                \\    let pair: GL[UInt8, 2] = .{ items = [1, 2] }
+                \\    glen(pair.items) + glen([true, false, true])
+                \\}
+                \\
+                \\
+            );
             // An implementation generic over its head, so a generated program
             // holds one and every rewrite over the corpus reaches the position
             // at whatever size the flag asks for. Written for `GP`, whose
@@ -1771,7 +1789,7 @@ const Gen = struct {
             second,
         });
         try indent(w, at);
-        try w.print("if {s} != 16 {{ return 251; }}\n", .{answer});
+        try w.print("if {s} != 16 || glens() != 5 {{ return 251; }}\n", .{answer});
     }
 
     fn structuralGroup(self: *Gen, w: *std.Io.Writer, at: u32, shape: StructuralShape) Error!void {
@@ -3170,11 +3188,12 @@ pub const Loaded = struct {
 };
 
 /// Loads and checks `files`, entered at `entry`, as a program, through `library`
-/// where one is held and from the embedded sources otherwise. Allocates from
-/// `gpa` and never frees: the caller supplies an arena or a compilation's
-/// lifetime.
+/// where one is held and from the embedded sources otherwise. The caller's
+/// arena retains the compilation. Ownership releases its temporary storage
+/// to `ownership_scratch` before the checked program returns.
 pub fn checkLoaded(
     gpa: std.mem.Allocator,
+    ownership_scratch: std.mem.Allocator,
     entry: []const u8,
     files: []const loader.InMemoryFile,
     library: ?*const loader.CheckedLibrary,
@@ -3189,9 +3208,9 @@ pub fn checkLoaded(
         try loader.loadFromMemory(gpa, &loaded.table, &loaded.sink, &loaded.interner, entry, files, .program, true, .borrow);
     try loaded.table.buildMaps(gpa);
     loaded.semantics = if (library) |checked|
-        try checked.checkProgram(gpa, gpa, &loaded.program, &loaded.interner, &loaded.sink, .program)
+        try checked.checkProgram(gpa, ownership_scratch, &loaded.program, &loaded.interner, &loaded.sink, .program)
     else
-        try loader.checkProgram(gpa, gpa, &loaded.program, &loaded.interner, &loaded.sink, .program);
+        try loader.checkProgram(gpa, ownership_scratch, &loaded.program, &loaded.interner, &loaded.sink, .program);
     return loaded;
 }
 
@@ -3203,7 +3222,7 @@ pub fn checkLoadedText(
     library: ?*const loader.CheckedLibrary,
 ) !*Loaded {
     const files = try gpa.dupe(loader.InMemoryFile, &.{.{ .path = path, .text = text }});
-    return checkLoaded(gpa, path, files, library);
+    return checkLoaded(gpa, gpa, path, files, library);
 }
 
 test "checkLoaded accepts a tuple program and refuses an ill-typed one" {
@@ -3219,7 +3238,7 @@ test "checkLoaded accepts a tuple program and refuses an ill-typed one" {
             var arena = std.heap.ArenaAllocator.init(testing.allocator);
             defer arena.deinit();
             const files = [_]loader.InMemoryFile{.{ .path = "main.lin", .text = c.text }};
-            const loaded = try checkLoaded(arena.allocator(), "main.lin", &files, held);
+            const loaded = try checkLoaded(arena.allocator(), testing.allocator, "main.lin", &files, held);
             try testing.expectEqual(c.accepted, !loaded.sink.hasErrors());
         }
     }

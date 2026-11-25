@@ -1,0 +1,20 @@
+// [T-Bound]. `Shelf[T, n]` implements `Equatable` when its array of `T` does,
+// and that is when `T` does.
+struct Box {
+    weight: UInt8,
+}
+
+@derive(Equatable)
+struct Shelf[T, let n: UInt64] {
+    items: [T; n],
+}
+
+fn main() -> UInt8 {
+    let a = Shelf[Box, 1] { items = [Box { weight = 1 }] }
+    let b = Shelf[Box, 1] { items = [Box { weight = 1 }] }
+    if a == b {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,12 @@
+// Each length a call settles makes its own instance of the function, so the
+// same body answers 1, 2 and 3.
+import std.io
+
+fn count[let n: UInt64](_flags: [Bool; n]) -> UInt64 {
+    n
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    io.println("{count([true])} {count([true, false])} {count([true, false, true])}")?
+    .Ok(0)
+}

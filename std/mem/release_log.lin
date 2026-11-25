@@ -35,8 +35,8 @@ impl ReleaseLog {
     test "a new release log holds no releases" {
         let log = ReleaseLog.open(2)
         let nothing: [UInt64; 0] = []
-        let empty = log.holds([UInt64(0)].as_slice())
-        let none = log.holds(nothing.as_slice())
+        let empty = log.holds([0])
+        let none = log.holds(nothing)
         log.release()
         testing.assert(!empty, "a new log recorded a release")?
         testing.assert(none, "a new log did not hold the empty sequence")?
@@ -51,9 +51,9 @@ impl ReleaseLog {
         let log = ReleaseLog.open(1)
         let tag = log.tag(42)
         let nothing: [UInt64; 0] = []
-        let before = log.holds(nothing.as_slice())
+        let before = log.holds(nothing)
         tag.release()
-        let after = log.holds([UInt64(42)].as_slice())
+        let after = log.holds([42])
         log.release()
         testing.assert(before, "making a tag recorded a release")?
         testing.assert(after, "releasing a tag did not record its code")?
@@ -66,10 +66,12 @@ impl ReleaseLog {
         (self.buffer.at, self.buffer.len)
     }
 
-    // Return whether the log recorded exactly `codes`, in order.
-    internal fn holds(self: Self, codes: Slice[UInt64]) -> Bool {
+    // Return whether the log recorded exactly `codes`, in order. `n` is how
+    // many codes the array holds, so a test writes the codes it expects as a
+    // literal of any length.
+    internal fn holds[let n: UInt64](self: Self, codes: [UInt64; n]) -> Bool {
         let count = self.buffer.load(0)
-        if count != codes.length() {
+        if count != n {
             return false
         }
         for index in UInt64(0)..count {
@@ -86,9 +88,9 @@ impl ReleaseLog {
         let second = log.tag(9)
         second.release()
         first.release()
-        let ordered = log.holds([UInt64(9), 7].as_slice())
-        let reversed = log.holds([UInt64(7), 9].as_slice())
-        let shorter = log.holds([UInt64(9)].as_slice())
+        let ordered = log.holds([9, 7])
+        let reversed = log.holds([7, 9])
+        let shorter = log.holds([9])
         log.release()
         testing.assert(ordered, "the log lost or reordered a release")?
         testing.assert(!reversed, "the log ignored the release order")?

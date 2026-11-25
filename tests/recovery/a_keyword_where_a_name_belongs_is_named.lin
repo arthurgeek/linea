@@ -6,7 +6,7 @@ struct Box {
 }
 
 enum Kind {
-    template,
+    phantom,
     Plain(UInt8),
 }
 
@@ -19,7 +19,7 @@ fn take[for](count: UInt8, match: UInt8) -> UInt8 {
 }
 
 fn main() -> UInt8 {
-    let template = 3
+    let phantom = 3
     let _pick = |match: UInt8| 1
     for match in [1, 2] {}
     let box = Box { size = 1 }

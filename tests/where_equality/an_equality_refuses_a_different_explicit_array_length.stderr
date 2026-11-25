@@ -1,0 +1,7 @@
+error[T-Equal]: `I.Item` must be the same type as `[UInt8; n]`, and here they are `[UInt8; 2]` and `[UInt8; 3]`
+  --> tests/where_equality/an_equality_refuses_a_different_explicit_array_length.lin:16:5
+   |
+11 | fn take[I: HasItem, let n: UInt64](_item: I, _values: [UInt8; n]) -> UInt8 where I.Item == [UInt8; n] {
+   |                                                                                  -------------------- required by this `where` clause
+16 |     take[Pair, 3](Pair {}, [1, 2, 3])
+   |     ^^^^ both sides of the equality must settle to one type

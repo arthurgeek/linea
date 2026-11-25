@@ -1,0 +1,10 @@
+// A range place over an array of a length parameter's length has the type its
+// bounds give it, and whether it fits is checked when the program runs.
+fn first_two[let n: UInt64](items: [UInt8; n]) -> [UInt8; 2] {
+    copy(items[0..2])
+}
+
+fn main() -> UInt8 {
+    let pair = first_two([4, 5, 6])
+    pair[0] + pair[1]
+}

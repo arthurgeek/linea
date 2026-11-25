@@ -1,0 +1,10 @@
+struct Readings[let n: UInt64] {
+    values: [UInt8; n],
+}
+
+derive[let count: UInt64] Equatable for Readings[count]
+
+fn main() -> UInt8 {
+    let _readings = Readings[1] { values = [UInt8(1)] }
+    0
+}

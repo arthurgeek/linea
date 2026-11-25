@@ -1,0 +1,5 @@
+error[N-Case]: length parameters start with a lowercase letter
+ --> tests/generics/length/a_length_parameter_is_lowercase.lin:3:14
+  |
+3 | fn count[let N: UInt64](_flags: [Bool; N]) -> UInt64 {
+  |              ^ rename it `n`

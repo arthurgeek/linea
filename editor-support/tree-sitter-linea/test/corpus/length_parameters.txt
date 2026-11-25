@@ -1,0 +1,101 @@
+==================
+Length parameters
+==================
+
+struct Ring[T, let n: UInt64 = 16] {
+    items: [T; n],
+}
+
+fn total[let n: UInt64](prices: [UInt64; n]) -> Ring[UInt64, 4] {
+    first[UInt64, 3](prices)
+}
+
+---
+
+(source_file
+  (struct_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (length_parameter
+          (identifier)
+          (type_identifier)
+          (integer_literal))))
+    (field_list
+      (field
+        (identifier)
+        (array_type
+          (type_identifier)
+          (identifier)))))
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (length_parameter
+          (identifier)
+          (type_identifier))))
+    (parameter_list
+      (parameter
+        (identifier)
+        (array_type
+          (type_identifier)
+          (identifier))))
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (type_identifier)
+        (integer_literal)))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier)
+            (integer_literal))
+          (argument_list
+            (identifier)))))))
+
+==================
+Constant expressions as length arguments
+==================
+
+fn make[let n: UInt64](items: Ring[2 + 2]) -> Ring[n] {
+    first[UInt64, 2 + 2](items)
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (length_parameter
+          (identifier)
+          (type_identifier))))
+    (parameter_list
+      (parameter
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (binary_expression
+              (integer_literal)
+              (integer_literal))))))
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (type_identifier)))
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier)
+            (binary_expression
+              (integer_literal)
+              (integer_literal)))
+          (argument_list
+            (identifier)))))))

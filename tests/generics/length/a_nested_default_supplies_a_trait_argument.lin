@@ -1,0 +1,18 @@
+struct Bytes[T, let n: UInt64 = 2] {
+    items: [T; n],
+}
+
+struct Wrapper[T = Bytes[UInt8]] {
+    item: T,
+}
+
+trait Inspect[phantom T] {}
+
+struct Reader {}
+
+impl Inspect[Wrapper] for Reader {}
+
+fn main() -> UInt8 {
+    let _reader = Reader {}
+    0
+}

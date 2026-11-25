@@ -826,8 +826,12 @@ const Parser = struct {
             const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
             const default_at = if (self.atDefaultImplementation()) self.cursor.advance() else TokenId.none;
 
-            if (self.cursor.at(.keyword_impl) or self.cursor.at(.keyword_template)) {
-                const is_template = self.cursor.at(.keyword_template);
+            // `template Label …` with its `impl` left out or misspelt is still a
+            // template: at the start of a declaration, `template` followed by
+            // a name begins nothing else, so it is read as one and refused
+            // once, rather than as a statement the recovery skips into.
+            const is_template = self.atTemplateImplementation() or self.atTemplateMissingImpl();
+            if (self.cursor.at(.keyword_impl) or is_template) {
                 // An `impl` declares no name, so there is nothing for `pub` to
                 // export and nothing for `linear` to describe: a modifier here
                 // was read and dropped, which is the shape of a mistake that
@@ -1277,6 +1281,9 @@ const Parser = struct {
         const start = if (default_at != .none) default_at else self.cursor.current();
         _ = self.cursor.advance();
         if (is_template and self.cursor.eat(.keyword_impl) == null) {
+            // `template imp Label`: a misspelt `impl` is stepped over, so the
+            // trait after it is still the one the template names.
+            if (self.cursor.at(.identifier) and self.cursor.peekAt(1) == .identifier and self.nextOnThisLine(1)) _ = self.cursor.advance();
             try self.reportAt(.s_entry, self.cursor.current(), "expected `impl` after `template`", "a structural template is an impl recipe");
         }
 
@@ -1588,6 +1595,7 @@ const Parser = struct {
         }
         if (self.cursor.at(.keyword_borrow)) return self.parseWrittenType();
         if (after_for and self.startsCallableType()) return self.parseCallableType();
+        if (after_for and self.cursor.at(.l_bracket)) return self.parseArrayType();
         if (allow_unit and self.cursor.at(.l_paren)) {
             const head = try self.parseUnitType();
             try self.refuseAGroupedHead(head, if (after_for) "an implementation names the type that satisfies the trait" else "an impl names the type it belongs to");
@@ -1689,6 +1697,13 @@ const Parser = struct {
                 if (seen.* == skip) return ref.name;
                 seen.* += 1;
             },
+            // A length names a length parameter where it is that name alone.
+            .array, .length_argument => if (self.lengthNamed(ref.length)) |name| {
+                if (std.mem.eql(u8, self.cursor.textOf(name), spelling)) {
+                    if (seen.* == skip) return name;
+                    seen.* += 1;
+                }
+            },
             .selection => if (ref.base != .none) {
                 if (self.typeNameIn(self.builder.type_refs.items[ref.base.index()], spelling, seen, skip)) |at| return at;
             },
@@ -1702,6 +1717,12 @@ const Parser = struct {
             else => {},
         }
         return self.typeNameAfter(ref, spelling, seen, skip);
+    }
+
+    /// The name a written length is, where it is a name alone.
+    fn lengthNamed(self: *Parser, length: ExprId) ?TokenId {
+        if (length == ExprId.none or self.builder.exprTag(length) != .name_ref) return null;
+        return self.builder.exprMain(length);
     }
 
     /// How many times `spelling` stands in a type's position inside `ref`: as
@@ -1726,7 +1747,9 @@ const Parser = struct {
         // A grouped head names nothing, and was refused where it was written;
         // what it applies is not a further question.
         if (head.kind == .grouped) return false;
-        if (node.headAppliesItsParameters(&self.cursor, self.builder.typeArgs(head.args), self.builder.typeParams(type_params), allow_subset)) return true;
+        var array_arguments: [2]node.TypeRef = undefined;
+        const applied = node.appliedHeadArguments(self.builder, head, &array_arguments);
+        if (node.headAppliesItsParameters(&self.cursor, applied, self.builder.typeParams(type_params), allow_subset)) return true;
 
         try self.reportAt(
             code,
@@ -1904,8 +1927,7 @@ const Parser = struct {
                 for (params) |parameter| {
                     var applied = false;
                     for (head_args) |argument| {
-                        if (argument.kind == .named and argument.args.len() == 0 and argument.name != .none and
-                            std.mem.eql(u8, self.cursor.textOf(argument.name), self.cursor.textOf(parameter.name))) applied = true;
+                        if (self.argumentNamesParameter(argument, parameter.name)) applied = true;
                     }
                     if (!applied) kind = .refused;
                 }
@@ -2193,9 +2215,7 @@ const Parser = struct {
             t.* = f.*;
             p.* = null;
             for (head_args, 0..) |argument, i| {
-                if (argument.kind == .named and argument.args.len() == 0 and argument.name != .none and
-                    std.mem.eql(u8, self.cursor.textOf(argument.name), f.*))
-                {
+                if (self.argumentNamesParameter(argument, parameter.name)) {
                     p.* = i;
                     if (i < target_params.len) t.* = self.cursor.textOf(target_params[i].name);
                 }
@@ -2400,6 +2420,13 @@ const Parser = struct {
             return null;
         }
     };
+
+    /// Whether a head argument is the parameter's bare type or length name.
+    fn argumentNamesParameter(self: *const Parser, argument: node.TypeRef, name: TokenId) bool {
+        return (argument.kind == .named or argument.kind == .length_argument) and
+            argument.args.len() == 0 and argument.name != .none and
+            std.mem.eql(u8, self.cursor.textOf(argument.name), self.cursor.textOf(name));
+    }
 
     /// The tokens of a parameter's bounds, after its `:` and before a `,`,
     /// `=` or `]` outside brackets, or null where it writes none.
@@ -2740,6 +2767,42 @@ const Parser = struct {
         return self.cursor.peekAt(1) == .keyword_impl;
     }
 
+    /// Whether `template` begins a structural template here.
+    ///
+    /// `template` is a contextual word: before `impl` at the start of a
+    /// declaration it marks a template, and anywhere else it is a name, so a
+    /// parameter, a field or a function may be called `template`.
+    fn atTemplateImplementation(self: *const Parser) bool {
+        if (!self.cursor.at(.identifier)) return false;
+        if (!std.mem.eql(u8, self.cursor.textOf(self.cursor.current()), token.contextual_words.template_implementation)) return false;
+        return self.cursor.peekAt(1) == .keyword_impl;
+    }
+
+    /// Whether `template` is followed by a name where a declaration begins:
+    /// a template whose `impl` is missing or misspelt, since a name followed
+    /// by another name starts no other declaration.
+    /// The name must sit on the line `template` does: a stray `template`
+    /// line is not read into the declaration below it.
+    fn atTemplateMissingImpl(self: *const Parser) bool {
+        if (!self.cursor.at(.identifier)) return false;
+        if (!std.mem.eql(u8, self.cursor.textOf(self.cursor.current()), token.contextual_words.template_implementation)) return false;
+        return self.cursor.peekAt(1) == .identifier and self.nextOnThisLine(1);
+    }
+
+    /// Whether the token `n` significant tokens ahead sits on the line the
+    /// current token does. Reads the gap between consecutive tokens only.
+    fn nextOnThisLine(self: *const Parser, n: u32) bool {
+        var from = self.cursor.current();
+        var k: u32 = 1;
+        while (k <= n) : (k += 1) {
+            const to = self.cursor.ahead(k) orelse return false;
+            const gap = self.cursor.source[self.cursor.spanAt(from).end..self.cursor.spanAt(to).start];
+            if (std.mem.indexOfScalar(u8, gap, '\n') != null) return false;
+            from = to;
+        }
+        return true;
+    }
+
     /// Which braces a declared type is being read in, and so what it may say.
     const TypeMember = enum {
         /// A trait's. The type is asked for here and settled elsewhere.
@@ -2846,11 +2909,12 @@ const Parser = struct {
         where_predicates: node.WherePredicateRange,
         template_requirements: node.TemplateRequirementRange,
     ) std.mem.Allocator.Error!node.DeclId {
-        // A callable head is kept whole as the one argument of its declaration:
-        // its signature lives in the callable-type table, which a declaration's
-        // own columns have no field for.
+        // A callable or an array head is kept whole as the one argument of its
+        // declaration: a signature lives in the callable-type table and a
+        // length is an expression, which a declaration's own columns have no
+        // field for.
         var head_args = head.args;
-        if (head.kind == .callable) {
+        if (head.kind == .callable or head.kind == .array) {
             const first = self.builder.typeRefMark();
             try self.builder.addTypeRef(head);
             head_args = .{ .start = first, .end = first + 1 };
@@ -2877,7 +2941,7 @@ const Parser = struct {
     /// Whether the cursor sits where a declaration can begin. One place, so
     /// recovery and dispatch cannot disagree about what a declaration is.
     fn atDeclaration(self: *const Parser) bool {
-        if (self.atDefaultImplementation()) return true;
+        if (self.atDefaultImplementation() or self.atTemplateImplementation()) return true;
         return switch (self.cursor.peek()) {
             .keyword_pub,
             .keyword_internal,
@@ -2890,7 +2954,6 @@ const Parser = struct {
             .keyword_unshareable,
             .keyword_shareable,
             .keyword_test,
-            .keyword_template,
             .keyword_derive,
             .keyword_impl,
             .keyword_fn,
@@ -4624,6 +4687,12 @@ const Parser = struct {
 
         while (!self.cursor.atEnd() and !self.cursor.at(.r_bracket)) {
             const name = self.cursor.current();
+            if (self.startsLengthArgument()) {
+                const length = try self.parseTypeExpression();
+                try written.append(self.gpa, node.lengthArgument(self.builder, name, length));
+                if (self.cursor.eat(.comma) == null) break;
+                continue;
+            }
             if (!self.cursor.at(.identifier) and !self.cursor.at(.l_bracket) and
                 !self.cursor.at(.l_paren) and !self.startsCallableType() and !self.cursor.at(.keyword_borrow))
             {
@@ -4651,6 +4720,21 @@ const Parser = struct {
         return .{ .start = start, .end = self.builder.typeRefMark() };
     }
 
+    /// Whether a generic argument starting here is a length rather than a
+    /// type. Case decides it: a type's name, and the last name of a path to
+    /// one, is capitalised, and a value's is not. An integer literal starts
+    /// a length too.
+    fn startsLengthArgument(self: *const Parser) bool {
+        if (self.cursor.at(.l_bracket) or self.cursor.at(.l_paren) or
+            self.startsCallableType() or self.cursor.at(.keyword_borrow)) return false;
+        if (self.cursor.at(.int_literal)) return true;
+        if (!self.cursor.at(.identifier)) return false;
+        var offset: u32 = 0;
+        while (self.cursor.peekAt(offset + 1) == .dot and self.cursor.peekAt(offset + 2) == .identifier) offset += 2;
+        const last = self.cursor.textOf(self.cursor.ahead(offset) orelse return false);
+        return name_case.of(last) == .lower;
+    }
+
     /// `[T]`, `[T: Copyable + Weigh]`, or `[A: Allocator = SystemAllocator]`,
     /// after a declaration's name.
     ///
@@ -4674,6 +4758,13 @@ const Parser = struct {
             // before what it modifies. Whether it may be said here at all is
             // the resolver's question, which knows what the parameter names.
             const phantom = self.cursor.eat(.keyword_phantom) != null;
+            if (self.cursor.at(.keyword_let)) {
+                if (try self.parseLengthParam(phantom, defaults, &defaulted)) |parameter| {
+                    try self.builder.addTypeParam(parameter);
+                }
+                if (self.cursor.eat(.comma) == null) break;
+                continue;
+            }
             const at = self.cursor.current();
             const name = try self.expectName(.s_name, "expected a name", "a type parameter is a name");
             if (name == .none) break;
@@ -4728,6 +4819,60 @@ const Parser = struct {
         return .{ .start = start, .end = self.builder.typeParamMark() };
     }
 
+    /// `let n: UInt64`, `let n: UInt64 = 16`: a length parameter, the cursor
+    /// on `let`. The written type is checked against `UInt64` by the checker,
+    /// which knows what the name means. Null where no name follows `let`.
+    fn parseLengthParam(
+        self: *Parser,
+        phantom: bool,
+        defaults: DefaultsAdmitted,
+        defaulted: *?TokenId,
+    ) !?node.TypeParam {
+        _ = self.cursor.advance();
+        const at = self.cursor.current();
+        const name = try self.expectName(.s_name, "expected a name", "a length parameter is written `let n: UInt64`");
+        if (name == .none) return null;
+        if (self.cursor.tags[at.index()] != .identifier) return null;
+        var length_type: node.TypeRef = .{ .at = self.cursor.current(), .name = .none };
+        if (self.cursor.eat(.colon) == null) {
+            try self.reportAt(.s_params, self.cursor.current(), "expected `:`", "a length parameter is written `let n: UInt64`");
+        } else {
+            length_type = try self.parseWrittenType();
+        }
+        var default: node.TypeRef = .{ .name = .none };
+        if (self.cursor.at(.equal)) {
+            const equal = self.cursor.advance();
+            const value_at = self.cursor.current();
+            const value = try self.parseFull();
+            if (defaults == .refused) {
+                try self.reportAt(
+                    .t_argument_default,
+                    equal,
+                    "only a struct, an enum or an alias gives a length parameter a default",
+                    "this declaration's lengths are written or settled by a call",
+                );
+            } else {
+                default = .{ .kind = .length_argument, .at = value_at, .name = .none, .length = value };
+                if (defaulted.* == null) defaulted.* = name;
+            }
+        } else if (defaulted.* != null) {
+            try self.reportAt(
+                .t_argument_default,
+                name,
+                "a type parameter without a default cannot follow one that has a default",
+                "give it a default, or declare it before the defaulted parameters",
+            );
+        }
+        return .{
+            .name = name,
+            .bounds = .empty,
+            .phantom = phantom,
+            .default = default,
+            .kind = .length,
+            .length_type = length_type,
+        };
+    }
+
     /// Whether a declaration's type parameter list may give a parameter a
     /// default type argument.
     const DefaultsAdmitted = enum { admitted, refused };
@@ -4746,7 +4891,10 @@ const Parser = struct {
                 try self.reportAt(
                     .t_argument_default,
                     parameter.default.at,
-                    "a default is a type that names no type parameter",
+                    if (parameter.kind == .length)
+                        "a default is a constant that names no parameter"
+                    else
+                        "a default is a type that names no type parameter",
                     "this names a parameter of the same list",
                 );
                 break;
@@ -7214,8 +7362,19 @@ const Parser = struct {
                 path = false;
                 const open = self.cursor.current();
                 const close = self.bracketMayHoldTypes(base, open, after_path);
-                const types: TypeReading = if (close) |end| try self.tryTypeList(end) else .none;
-                const idx = switch (types) {
+                // One expression that begins as a length does is both the
+                // index and the one length argument, so it is read once and
+                // the type reading names the same node.
+                const shared: ?ExprId = if (close != null and self.lengthArgumentFollows())
+                    try self.tryWholeIndex(close.?)
+                else
+                    null;
+                const types: TypeReading = if (shared) |length| blk: {
+                    const first = self.builder.typeRefMark();
+                    try self.builder.addTypeRef(node.lengthArgument(self.builder, TokenId.at(open.index() + 1), length));
+                    break :blk .{ .types = .{ .start = first, .end = self.builder.typeRefMark() } };
+                } else if (close) |end| try self.tryTypeList(end) else .none;
+                const idx = shared orelse switch (types) {
                     .types => try self.tryIndex(open, close.?),
                     .none => try self.parseIndex(),
                     .too_deep => try self.skipTooDeepBracket(open, close.?),
@@ -7368,6 +7527,24 @@ const Parser = struct {
         if (!attempt.finish(self, close, true)) return if (attempt.too_deep) .too_deep else .none;
         if (args.len() == 0) return .none;
         return .{ .types = args };
+    }
+
+    /// Whether the bracket the cursor is on begins with a length argument.
+    fn lengthArgumentFollows(self: *Parser) bool {
+        const on_bracket = self.cursor;
+        defer self.cursor = on_bracket;
+        _ = self.cursor.advance();
+        return self.startsLengthArgument();
+    }
+
+    /// The bracket's contents as one index expression, where they read as
+    /// one whole and without a diagnostic; the cursor is then past `close`.
+    /// Null, with the cursor still on the `[`, where they do not.
+    fn tryWholeIndex(self: *Parser, close: TokenId) std.mem.Allocator.Error!?ExprId {
+        var attempt: Attempt = undefined;
+        attempt.begin(self);
+        const idx = try self.parseIndex();
+        return if (attempt.finish(self, close, false)) idx else null;
     }
 
     /// A bracket whose type reading ran past the nesting limit. Reported once,
@@ -10472,6 +10649,37 @@ test "a standalone derive is refused with the attribute that requests it" {
     , fixed.items);
 }
 
+test "a standalone length family offers its attached derive" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const helps = try helpsOf(arena.allocator(),
+        \\struct Readings[let n: UInt64] { values: [UInt8; n] }
+        \\derive[let count: UInt64] Equatable for Readings[count]
+        \\fn main() -> UInt8 { 0 }
+    );
+    try testing.expectEqual(@as(usize, 1), helps.len);
+    try testing.expectEqualStrings("write `@derive(Equatable)` above `struct Readings`", helps[0]);
+}
+
+test "a standalone length family preserves its recovered derive" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const source: Source = .{ .path = "t.lin", .text =
+        \\struct Readings[let n: UInt64] { values: [UInt8; n] }
+        \\derive[let count: UInt64] Equatable for Readings[count]
+        \\fn main() -> UInt8 { 0 }
+    };
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    try testing.expectEqual(@as(?Code, .s_derive), sink.items()[0].code);
+    try testing.expectEqual(@as(usize, 1), ast.derive_traits.len);
+    try testing.expectEqual(node.DeriveClause.Kind.inferred, ast.derive_traits[0].clause.kind);
+}
+
 test "a standalone derive's help writes the attribute for each form it took" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -12190,8 +12398,8 @@ test "named literal lookahead crosses nested type arguments once" {
 test "an index still takes exactly one expression" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const parsed = try parseProgramText(arena.allocator(), "fn main() -> UInt8 { let values = [1, 2]; values[0, 1] }");
-    try testing.expect(parsed.errors > 0);
+    const codes = try codesOf(arena.allocator(), "fn main() -> UInt8 { let values = [1, 2]; (values)[0, 1] }");
+    try testing.expectEqualSlices(?Code, &.{ .s_bracket, .s_separator }, codes);
 }
 
 test "field delegation parses implementation and traversal without bodies" {
@@ -12393,6 +12601,14 @@ test "string literal postfix preserves numeric restrictions and newline boundari
         \\}
     );
     try testing.expectEqual(@as(u32, 0), separated.errors);
+}
+
+test "a computed length argument prints its expression" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const parsed = try parseProgramText(arena.allocator(), "alias Four = Block[2 + 2]\n");
+    try testing.expectEqual(@as(u32, 0), parsed.errors);
+    try testing.expect(std.mem.indexOf(u8, parsed.dump, "Block[2 + 2]") != null);
 }
 
 test "inferred array lengths remain syntax rather than name expressions" {

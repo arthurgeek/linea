@@ -367,6 +367,27 @@ test "a generic call says what it instantiated to" {
     try testing.expectEqualStrings("ident[Bool] -> Bool", of_bool);
 }
 
+test "a length parameter read as a value says it is a UInt64, and a call says the length it settled" {
+    const gpa = testing.allocator;
+    const text =
+        \\fn count[let n: UInt64](_flags: [Bool; n]) -> UInt64 {
+        \\    n
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    UInt8(count([true, false, true]))
+        \\}
+        \\
+    ;
+    const of_value = try said(gpa, text, std.mem.indexOf(u8, text, "    n\n").? + 4);
+    defer gpa.free(of_value);
+    try testing.expectEqualStrings("UInt64", of_value);
+
+    const of_call = try said(gpa, text, std.mem.indexOf(u8, text, "count([").? + 1);
+    defer gpa.free(of_call);
+    try testing.expectEqualStrings("count[3] -> UInt64", of_call);
+}
+
 test "a call naming its type arguments says what it instantiated to" {
     const gpa = testing.allocator;
     const text =

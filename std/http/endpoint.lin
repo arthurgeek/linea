@@ -536,7 +536,7 @@ fn probed_t6(inout calls: CallCount, _p0: First, _p1: Second, _p2: Third, _p3: F
 // Route one handler of each shape that reads probes, and report whether a
 // request through `target` that asks `refused` to refuse answers `answer`
 // and leaves the log holding exactly `released`.
-fn probe(inout router: Router[CallCount], target: Str, refused: Str, answer: Str, released: mem.Slice[UInt64]) -> Bool {
+fn probe[let n: UInt64](inout router: Router[CallCount], target: Str, refused: Str, answer: Str, released: [UInt64; n]) -> Bool {
     let log = mem.ReleaseLog.open(8)
     // Releasing one tag records a leading 0 that every expectation starts
     // with.
@@ -569,60 +569,60 @@ test "every shape releases its extractors last first and stops at a refusal" {
     testing.assert_ok_eq(&router.route("GET /t4", probed_t4), (), "registering 4 probes failed")?
     testing.assert_ok_eq(&router.route("GET /t5", probed_t5), (), "registering 5 probes failed")?
     testing.assert_ok_eq(&router.route("GET /t6", probed_t6), (), "registering 6 probes failed")?
-    testing.assert(probe(&router, "/s1", "", "200 called", [UInt64(0), 1].as_slice()), "1 probes were not released last first")?
-    testing.assert(probe(&router, "/s1", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 1 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s2", "", "200 called", [UInt64(0), 2, 1].as_slice()), "2 probes were not released last first")?
-    testing.assert(probe(&router, "/s2", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 2 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s2", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 2 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s3", "", "200 called", [UInt64(0), 3, 2, 1].as_slice()), "3 probes were not released last first")?
-    testing.assert(probe(&router, "/s3", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 3 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s3", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 3 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s3", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 3 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s4", "", "200 called", [UInt64(0), 4, 3, 2, 1].as_slice()), "4 probes were not released last first")?
-    testing.assert(probe(&router, "/s4", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s4", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s4", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s4", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s5", "", "200 called", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "5 probes were not released last first")?
-    testing.assert(probe(&router, "/s5", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s5", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s5", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s5", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s5", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s6", "", "200 called", [UInt64(0), 6, 5, 4, 3, 2, 1].as_slice()), "6 probes were not released last first")?
-    testing.assert(probe(&router, "/s6", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s6", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s6", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s6", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s6", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/s6", "Sixth", "400 Sixth refused", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "a refusal at probe 6 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t1", "", "200 called", [UInt64(0), 1].as_slice()), "1 probes were not released last first")?
-    testing.assert(probe(&router, "/t1", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 1 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t2", "", "200 called", [UInt64(0), 2, 1].as_slice()), "2 probes were not released last first")?
-    testing.assert(probe(&router, "/t2", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 2 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t2", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 2 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t3", "", "200 called", [UInt64(0), 3, 2, 1].as_slice()), "3 probes were not released last first")?
-    testing.assert(probe(&router, "/t3", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 3 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t3", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 3 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t3", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 3 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t4", "", "200 called", [UInt64(0), 4, 3, 2, 1].as_slice()), "4 probes were not released last first")?
-    testing.assert(probe(&router, "/t4", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t4", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t4", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t4", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 4 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t5", "", "200 called", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "5 probes were not released last first")?
-    testing.assert(probe(&router, "/t5", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t5", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t5", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t5", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t5", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 5 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t6", "", "200 called", [UInt64(0), 6, 5, 4, 3, 2, 1].as_slice()), "6 probes were not released last first")?
-    testing.assert(probe(&router, "/t6", "First", "400 First refused", [UInt64(0)].as_slice()), "a refusal at probe 1 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t6", "Second", "400 Second refused", [UInt64(0), 1].as_slice()), "a refusal at probe 2 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t6", "Third", "400 Third refused", [UInt64(0), 2, 1].as_slice()), "a refusal at probe 3 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t6", "Fourth", "400 Fourth refused", [UInt64(0), 3, 2, 1].as_slice()), "a refusal at probe 4 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t6", "Fifth", "400 Fifth refused", [UInt64(0), 4, 3, 2, 1].as_slice()), "a refusal at probe 5 of 6 did not stop and release what was read")?
-    testing.assert(probe(&router, "/t6", "Sixth", "400 Sixth refused", [UInt64(0), 5, 4, 3, 2, 1].as_slice()), "a refusal at probe 6 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s1", "", "200 called", [0, 1]), "1 probes were not released last first")?
+    testing.assert(probe(&router, "/s1", "First", "400 First refused", [0]), "a refusal at probe 1 of 1 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s2", "", "200 called", [0, 2, 1]), "2 probes were not released last first")?
+    testing.assert(probe(&router, "/s2", "First", "400 First refused", [0]), "a refusal at probe 1 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s2", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s3", "", "200 called", [0, 3, 2, 1]), "3 probes were not released last first")?
+    testing.assert(probe(&router, "/s3", "First", "400 First refused", [0]), "a refusal at probe 1 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s3", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s3", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "", "200 called", [0, 4, 3, 2, 1]), "4 probes were not released last first")?
+    testing.assert(probe(&router, "/s4", "First", "400 First refused", [0]), "a refusal at probe 1 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s4", "Fourth", "400 Fourth refused", [0, 3, 2, 1]), "a refusal at probe 4 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "", "200 called", [0, 5, 4, 3, 2, 1]), "5 probes were not released last first")?
+    testing.assert(probe(&router, "/s5", "First", "400 First refused", [0]), "a refusal at probe 1 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Fourth", "400 Fourth refused", [0, 3, 2, 1]), "a refusal at probe 4 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s5", "Fifth", "400 Fifth refused", [0, 4, 3, 2, 1]), "a refusal at probe 5 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "", "200 called", [0, 6, 5, 4, 3, 2, 1]), "6 probes were not released last first")?
+    testing.assert(probe(&router, "/s6", "First", "400 First refused", [0]), "a refusal at probe 1 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Fourth", "400 Fourth refused", [0, 3, 2, 1]), "a refusal at probe 4 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Fifth", "400 Fifth refused", [0, 4, 3, 2, 1]), "a refusal at probe 5 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/s6", "Sixth", "400 Sixth refused", [0, 5, 4, 3, 2, 1]), "a refusal at probe 6 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t1", "", "200 called", [0, 1]), "1 probes were not released last first")?
+    testing.assert(probe(&router, "/t1", "First", "400 First refused", [0]), "a refusal at probe 1 of 1 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t2", "", "200 called", [0, 2, 1]), "2 probes were not released last first")?
+    testing.assert(probe(&router, "/t2", "First", "400 First refused", [0]), "a refusal at probe 1 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t2", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 2 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t3", "", "200 called", [0, 3, 2, 1]), "3 probes were not released last first")?
+    testing.assert(probe(&router, "/t3", "First", "400 First refused", [0]), "a refusal at probe 1 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t3", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t3", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 3 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "", "200 called", [0, 4, 3, 2, 1]), "4 probes were not released last first")?
+    testing.assert(probe(&router, "/t4", "First", "400 First refused", [0]), "a refusal at probe 1 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t4", "Fourth", "400 Fourth refused", [0, 3, 2, 1]), "a refusal at probe 4 of 4 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "", "200 called", [0, 5, 4, 3, 2, 1]), "5 probes were not released last first")?
+    testing.assert(probe(&router, "/t5", "First", "400 First refused", [0]), "a refusal at probe 1 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Fourth", "400 Fourth refused", [0, 3, 2, 1]), "a refusal at probe 4 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t5", "Fifth", "400 Fifth refused", [0, 4, 3, 2, 1]), "a refusal at probe 5 of 5 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "", "200 called", [0, 6, 5, 4, 3, 2, 1]), "6 probes were not released last first")?
+    testing.assert(probe(&router, "/t6", "First", "400 First refused", [0]), "a refusal at probe 1 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Second", "400 Second refused", [0, 1]), "a refusal at probe 2 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Third", "400 Third refused", [0, 2, 1]), "a refusal at probe 3 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Fourth", "400 Fourth refused", [0, 3, 2, 1]), "a refusal at probe 4 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Fifth", "400 Fifth refused", [0, 4, 3, 2, 1]), "a refusal at probe 5 of 6 did not stop and release what was read")?
+    testing.assert(probe(&router, "/t6", "Sixth", "400 Sixth refused", [0, 5, 4, 3, 2, 1]), "a refusal at probe 6 of 6 did not stop and release what was read")?
     .Ok(())
 }
 
@@ -643,7 +643,7 @@ test "an extractor the arena cannot hold answers 500 and releases what was read"
     let at_text = fmt.render_owned("{at}").unwrap()
     let extent_text = fmt.render_owned("{extent}").unwrap()
     let described = served_headed(&router, &calls, "/greedy", ["X-Log-At", at_text.view(), "X-Log-Extent", extent_text.view()].as_slice(), arena_bytes: 4096)
-    let held = log.holds([UInt64(0), 1].as_slice())
+    let held = log.holds([0, 1])
     let status = described.starts_with("500")
     at_text.release()
     extent_text.release()

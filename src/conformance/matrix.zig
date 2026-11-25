@@ -54,6 +54,10 @@ pub const Storage = enum {
     field,
     /// A fixed array, whose storage is the local itself.
     array,
+    /// A fixed array whose length is a length parameter, `[UInt64; n]`: the
+    /// cell runs in a function generic over `n`, so ownership meets the array
+    /// once for every length.
+    sized_array,
     /// A vector lent by a `for inout` walk, `for inout owner in owners`: the
     /// owner is the walk's binder, and every operation and observation sits
     /// inside the walk's body.
@@ -94,7 +98,7 @@ pub const Storage = enum {
             \\&owner.insert(2, 20).unwrap().release()
             \\&owner.insert(3, 30).unwrap().release()
             ,
-            .scalar, .array, .handle => unreachable,
+            .scalar, .array, .sized_array, .handle => unreachable,
         };
     }
 
@@ -143,6 +147,10 @@ pub const Operation = enum {
     element_write,
     /// An assignment of a whole new array.
     array_assign,
+    /// An assignment to one element of an array of any length.
+    sized_element_write,
+    /// An assignment of a whole new array of any length.
+    sized_array_assign,
     /// A push through a `for inout` walk's binder.
     walk_push,
     /// A clear through a `for inout` walk's binder.
@@ -162,6 +170,7 @@ pub const Operation = enum {
             .assign, .compound_assign => .scalar,
             .reset_holder, .field_push => .field,
             .element_write, .array_assign => .array,
+            .sized_element_write, .sized_array_assign => .sized_array,
             .walk_push, .walk_clear => .walked,
             .handle_change, .handle_close, .handle_renew => .handle,
         };
@@ -242,6 +251,8 @@ pub const Operation = enum {
             .field_push => "&owner.push(4).unwrap()",
             .element_write => "owner[0] = 9",
             .array_assign => "owner = [UInt64(4), 5, 6]",
+            .sized_element_write => "owner[0] = 9",
+            .sized_array_assign => "owner = mem.filled(4)",
             .walk_push => "&owner.push(4).unwrap()",
             .walk_clear => "&owner.clear()",
             .handle_change => "let _cleared = memset(owner, 0, 16)",
@@ -281,7 +292,7 @@ pub const Operation = enum {
             .handle_change => "match memset(owner, 0, 16) { _ => {} }",
             .handle_close => "free(owner)",
             .handle_renew => "renew(&owner)",
-            .index_write, .assign, .compound_assign, .element_write, .array_assign => null,
+            .index_write, .assign, .compound_assign, .element_write, .array_assign, .sized_element_write, .sized_array_assign => null,
         };
     }
 
@@ -387,8 +398,8 @@ pub const Observation = enum {
     /// pushes.
     pub fn fits(self: Observation, storage: Storage) bool {
         return switch (self) {
-            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture, .carried_read, .task_read => storage == .vec or storage == .field or storage == .array or storage == .walked,
-            .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array or storage == .walked,
+            .slice, .wrapped, .subspan, .element, .iterator, .mapped, .filtered, .lent_walk, .read_capture, .carried_read, .task_read => storage == .vec or storage == .field or storage == .array or storage == .sized_array or storage == .walked,
+            .bare_slice, .bare_iterator, .bare_mapped => storage == .vec or storage == .field or storage == .array or storage == .sized_array or storage == .walked,
             .inout_capture, .carried_inout, .task_inout => storage == .vec or storage == .walked,
             .value_view, .entries, .map_inout_capture, .bare_entries, .task_map_read => storage == .map,
             .scalar_inout_capture, .scalar_read_capture, .scalar_carried_inout, .task_scalar_read, .task_scalar_inout, .stored_scalar_inout, .erased_scalar_inout => storage == .scalar,
@@ -786,6 +797,8 @@ test "the matrix holds every applicable cell of the three axes" {
     const scalar = 2 * 3 * 8 - 2 * 3 - 2 * 2;
     const field = 2 * (10 * 8 - 1 + 3);
     const array = 2 * (10 * 7 - 1 + 3);
+    // An array of a length parameter's length meets what a fixed array does.
+    const sized_array = array;
     const walked = 2 * (12 * 8 - 2 - 1 + 3);
     const handle = 3 * 8 - 1 * 2 + 1;
     // A live task's handle meets each operation of its storage at the five
@@ -797,17 +810,18 @@ test "the matrix holds every applicable cell of the three axes" {
     const scalar_tasks = 2 * 4 + 2 * 3;
     const field_tasks = 2 * 5;
     const array_tasks = 2 * 4;
+    const sized_array_tasks = array_tasks;
     const walked_tasks = 2 * 5 + 2 * 4;
     // Each other way of starting a task meets the vector operations, or the
     // scalar ones, once more: a read through `task.start` and a lend through
     // `task.start_in` of a vector, and a lend through `task.prepare_in` of a
     // scalar.
     const entry_tasks = (10 * 5 - 1) + (10 * 4 - 1) + 2 * 3;
-    const tasks = vec_tasks + map_tasks + scalar_tasks + field_tasks + array_tasks + walked_tasks + entry_tasks;
+    const tasks = vec_tasks + map_tasks + scalar_tasks + field_tasks + array_tasks + sized_array_tasks + walked_tasks + entry_tasks;
     // A closure holding a scalar lent `inout`, kept in a vector and erased
     // into a `mem.Closure`, meets the two assignments as a task's lend does.
     const kept = 2 * (2 * 3);
-    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + walked + handle + tasks + kept), all.len);
+    try testing.expectEqual(@as(usize, vec + map + scalar + field + array + sized_array + walked + handle + tasks + kept), all.len);
     for (all) |cell| try testing.expect(cell.applies());
     // The shape the matrix exists for is one of its cells.
     var motivating = false;
@@ -944,7 +958,9 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
                 \\
             );
         },
-        .scalar, .array => {},
+        .scalar, .array, .sized_array => {
+            if (operation == .sized_array_assign or observation == .wrapped or observation.carried()) try w.raw("import std.mem\n\n");
+        },
     }
     // A vector lent to a call beside its own release is, in the `live`
     // program, given straight to the `sink` parameter that releases it.
@@ -964,7 +980,6 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         \\
     );
     if (observation == .wrapped) {
-        if (storage == .array) try w.raw("import std.mem\n\n");
         try w.raw(
             \\@copyable
             \\type Wrapped = mem.Slice[UInt64]
@@ -982,7 +997,6 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         );
     }
     if (observation.carried()) {
-        if (storage == .scalar or storage == .array) try w.raw("import std.mem\n\n");
         try w.raw(
             \\struct Ticket[F] {
             \\    number: UInt64,
@@ -1055,7 +1069,10 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         \\
         \\
     );
-    try w.raw("fn main() -> UInt8 {\n");
+    if (storage == .sized_array) {
+        try w.raw("fn main() -> UInt8 {\n    cell([UInt64(1), 2, 3])\n}\n\n");
+        try w.raw("fn cell[let n: UInt64](sink start: [UInt64; n]) -> UInt8 {\n");
+    } else try w.raw("fn main() -> UInt8 {\n");
     try w.line(1, "var total: UInt64 = 0");
     if (observation.task()) try w.line(1, "let execution = io.Loop.open(carriers: 1).unwrap()");
     switch (storage) {
@@ -1073,6 +1090,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
             try w.line(1, storage.fill());
         },
         .array => try w.line(1, "var owner = [UInt64(1), 2, 3]"),
+        .sized_array => try w.line(1, "var owner = start"),
         .handle => try w.line(1, "var owner = calloc(1, 16)"),
         .walked => {
             try w.line(1, "var owners: [Vec[UInt64, mem.SystemAllocator]; 1] = [Vec.new()]");
@@ -1220,7 +1238,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
         .vec, .map => if (!settled) try w.line(1, "owner.release()"),
         .handle => if (!settled) try w.line(1, "free(owner)"),
         .field => try w.line(1, "let Holder { items } = holder\nitems.release()"),
-        .scalar, .array => {},
+        .scalar, .array, .sized_array => {},
         .walked => {
             w.extra = 0;
             try w.line(1, "}");
@@ -1229,7 +1247,7 @@ pub fn render(gpa: std.mem.Allocator, cell: Cell, liveness: Liveness) ![]const u
     }
     const measured = switch (storage) {
         .scalar => "total + owner",
-        .array => "total + owner[0]",
+        .array, .sized_array => "total + owner[0]",
         .vec, .map, .field, .walked, .handle => "total",
     };
     try w.print(1, "if {s} > {d} {{", .{ measured, total_bound });

@@ -1,0 +1,5 @@
+error[T-ArgumentDefault]: a default is a constant that names no parameter
+ --> tests/generics/length/a_length_default_names_no_parameter.lin:3:53
+  |
+3 | struct Grid[let width: UInt64, let height: UInt64 = width] {
+  |                                                     ^^^^^ this names a parameter of the same list

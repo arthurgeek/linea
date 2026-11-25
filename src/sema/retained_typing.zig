@@ -56,13 +56,12 @@ pub fn attach(gpa: Allocator, saved: *const types.Typing, relocation: Relocation
 fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, saved: *const types.Typing, relocation: Relocation, result: *types.Typing) !void {
     const name = field.name;
     if (comptime in(name, &.{
-        "literal_values",          "conversion_targets",      "integer_properties",  "selected_places",     "place_projections",
-        "implicit_test_successes", "field_names",             "type_selections",     "contract_variants",   "readonly_places",
-        "carried_places",          "borrowed_temporaries",    "constant_values",     "contract_parameters", "variant_uses",
-        "part_selections",         "interpolation_positions", "refused",             "folded_indices",      "field_name_spellings",
-        "traversal_positions",     "expansion_of_impl",       "try_conversions",     "declined_contracts",  "adopted_contracts",
-        "binding_labels",          "aliased",                 "defaulted_contracts", "fixed_functions",     "refused_members",
-        "written_arrays",
+        "literal_values",          "conversion_targets", "integer_properties",        "length_reads",        "selected_places",     "place_projections",
+        "implicit_test_successes", "field_names",        "type_selections",           "contract_variants",   "readonly_places",     "carried_places",
+        "borrowed_temporaries",    "constant_values",    "contract_parameters",       "variant_uses",        "part_selections",     "interpolation_positions",
+        "refused",                 "folded_indices",     "field_name_spellings",      "traversal_positions", "expansion_of_impl",   "try_conversions",
+        "declined_contracts",      "adopted_contracts",  "binding_labels",            "aliased",             "defaulted_contracts", "fixed_functions",
+        "refused_members",         "written_arrays",     "value_names_in_type_slots",
     })) {
         @field(result, name) = try mapMap(gpa, relocation, @field(saved, name));
     } else if (comptime in(name, &.{
@@ -258,7 +257,7 @@ test "retained typing relocates generated semantic records without changing type
             },
         },
         .traversals = &.{
-            .{ .at = .at(2), .decl = .at(2), .impl_args = &.{.u16}, .positions = .{ .array = .{ .key = .u64, .count = 4, .iterator = .u32 } } },
+            .{ .at = .at(2), .decl = .at(2), .impl_args = &.{.u16}, .positions = .{ .array = .{ .key = .u64, .length = .u16, .iterator = .u32 } } },
             .{ .at = .at(3), .decl = .at(1), .positions = .{ .expression = .at(3) } },
         },
         .standins = &.{.{ .trait = 2, .member = .at(2), .held = .u8, .ty = .u8, .named = "Item" }},
@@ -267,7 +266,7 @@ test "retained typing relocates generated semantic records without changing type
     saved.float_math.declarations[sqrt_index] = .at(2);
     try saved.literal_values.put(gpa, .at(2), .{ .integer = 7 });
     try saved.contract_variants.put(gpa, .at(2), .{ .receiver = .u16, .ordinal = @enumFromInt(3) });
-    try saved.traversal_positions.put(gpa, .at(2), .{ .array = .{ .key = .u64, .count = 4, .iterator = .u32 } });
+    try saved.traversal_positions.put(gpa, .at(2), .{ .array = .{ .key = .u64, .length = .u16, .iterator = .u32 } });
     try saved.traversal_positions.put(gpa, .at(1), .{ .expression = .at(3) });
     try saved.expansion_of_impl.put(gpa, .at(2), 2);
     try saved.try_conversions.put(gpa, .at(3), .{ .trait = .at(2), .member = .at(1), .source = .u8, .target = .u16 });

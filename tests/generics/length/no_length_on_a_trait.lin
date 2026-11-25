@@ -1,0 +1,8 @@
+// [T-LengthParameter]. A trait's parameter list declares types only.
+trait _Sized[let n: UInt64] {
+    fn size(self: Self) -> [UInt8; n]
+}
+
+fn main() -> UInt8 {
+    0
+}

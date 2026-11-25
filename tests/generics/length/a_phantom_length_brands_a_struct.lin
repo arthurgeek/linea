@@ -1,0 +1,15 @@
+// A length no field mentions is declared `phantom`: it tells two types apart
+// without being stored. A function generic over it still reads it.
+struct Units[phantom let n: UInt64] {
+    value: UInt64,
+}
+
+fn scale[let n: UInt64](units: Units[n]) -> UInt64 {
+    units.value * n
+}
+
+fn main() -> UInt8 {
+    let metres: Units[10] = .{ value = 3 }
+    let kilos: Units[1000] = .{ value = 0 }
+    UInt8(scale(metres) + scale(kilos))
+}

@@ -1,0 +1,11 @@
+// An array belongs to no module, so only the module that declares a trait may
+// implement it for arrays. `Display` is the library's.
+impl[T, let n: UInt64] Display for [T; n] {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+        Display.fmt(self.length(), &w)
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

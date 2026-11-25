@@ -1,0 +1,11 @@
+template impl Label where reflect.target: struct {
+// <- keyword.storage.type
+    fn label(_self: Self) -> UInt8 { 7 }
+}
+
+fn holes(template: Str) -> UInt8 {
+//       ^ variable.parameter
+    let rest = template
+//             ^ variable
+    0
+}

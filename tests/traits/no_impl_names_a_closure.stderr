@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Show`, and `<closure>` does not implement it
+  --> tests/traits/no_impl_names_a_closure.lin:12:14
+   |
+12 |     let _n = display(|y: Int64| y + 1)
+   |              ^^^^^^^ no `impl` can name `<closure>`; pass a value whose type implements it, or drop the bound

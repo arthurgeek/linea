@@ -1,0 +1,12 @@
+// Every slot of a filled array holds a copy of one value, so the value's type
+// must be Copyable.
+import std.mem
+
+struct Token {
+    id: UInt8,
+}
+
+fn main() -> UInt8 {
+    let tokens: [Token; 2] = mem.filled(Token { id = 1 })
+    tokens[0].id
+}

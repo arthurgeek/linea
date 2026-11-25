@@ -1,0 +1,25 @@
+trait HasItem {
+    type Item
+}
+
+struct Pair {}
+
+impl HasItem for Pair {
+    type Item = [UInt8; 2]
+}
+
+fn same[I: HasItem, let n: UInt64](sink value: I.Item) -> [UInt8; n] where I.Item == [UInt8; n] {
+    value
+}
+
+fn check_items(sink values: [UInt8; 2]) -> UInt8 {
+    if values[0] == 7 && values[1] == 11 {
+        0
+    } else {
+        1
+    }
+}
+
+fn main() -> UInt8 {
+    check_items(same[Pair, 2]([UInt8(7), 11]))
+}

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Inspect` is already implemented for `Reader` with the same arguments
+  --> tests/generics/length/an_omitted_length_in_a_trait_argument_uses_its_default.lin:19:6
+   |
+13 | impl Inspect[Bytes[UInt8]] for Reader {
+   |      ------- already implemented here
+19 | impl Inspect[Bytes[UInt8, 2]] for Reader {
+   |      ^^^^^^^ a trait is implemented once per arguments and type

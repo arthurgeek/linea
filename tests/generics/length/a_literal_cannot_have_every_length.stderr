@@ -1,0 +1,7 @@
+error[T-ArrayLength]: an array literal has a fixed count, and `n` is any length
+ --> tests/generics/length/a_literal_cannot_have_every_length.lin:4:5
+  |
+4 |     [first, first]
+  |     ^^^^^^^^^^^^^^ 2 elements
+  |
+  = help: `n` is a length parameter, so the array has as many elements as each instance says

@@ -1,0 +1,16 @@
+// An inherent implementation may fix a length argument, and its operations
+// belong to that length alone.
+struct Block[let n: UInt64] {
+    bytes: [UInt8; n],
+}
+
+impl Block[4] {
+    fn word(self: Self) -> UInt64 {
+        UInt64(self.bytes[0]) + UInt64(self.bytes[3])
+    }
+}
+
+fn main() -> UInt8 {
+    let block = Block[4] { bytes = [1, 2, 3, 4] }
+    UInt8(block.word())
+}

@@ -1,0 +1,5 @@
+error[T-Derive]: this derive entry is not supported
+  --> tests/generics/length/a_derive_application_trait_argument_names_no_nested_own_length.lin:11:9
+   |
+11 | @derive(Score[[UInt8; n]] for Readings[1])
+   |         ^^^^^ an application's request names types, and its trait's arguments name none of the type's parameters
