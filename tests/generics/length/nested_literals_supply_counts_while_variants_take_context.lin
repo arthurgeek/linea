@@ -1,0 +1,13 @@
+fn first[let n: UInt64, let m: UInt64, let depth: UInt64](grid: [[[Option[UInt8]; n]; m]; depth]) -> UInt8 {
+    match copy(grid[0][0][0]) {
+        Some(value) => value,
+        None => 0,
+    }
+}
+
+fn main() -> UInt8 {
+    let inferred = first([[[.Some(7), .None]]])
+    let explicit = first[2, 1, 1]([[[.Some(2), .None]]])
+    let grouped = first(([[([.Some(3), .None])]]))
+    inferred + explicit + grouped
+}

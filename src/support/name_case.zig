@@ -24,6 +24,7 @@ pub const Kind = enum {
     associated_type,
     variant,
     type_parameter,
+    length_parameter,
     function,
     projection,
     traversal,
@@ -40,7 +41,7 @@ pub const Kind = enum {
     pub fn case(self: Kind) Case {
         return switch (self) {
             .declared_type, .trait, .associated_type, .variant, .type_parameter => .capital,
-            .function, .projection, .traversal, .field, .parameter, .constant, .module, .capture, .binding => .lower,
+            .length_parameter, .function, .projection, .traversal, .field, .parameter, .constant, .module, .capture, .binding => .lower,
         };
     }
 
@@ -52,6 +53,7 @@ pub const Kind = enum {
             .associated_type => "associated types",
             .variant => "variants",
             .type_parameter => "type parameters",
+            .length_parameter => "length parameters",
             .function => "functions",
             .projection => "projections",
             .traversal => "traversals",

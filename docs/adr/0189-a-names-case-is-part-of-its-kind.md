@@ -1,7 +1,8 @@
 # 189. A name's case is part of its kind
 
 Status: Accepted — 2026-09-27. Extended by
-[0190](0190-a-variant-line-is-not-a-continuation.md).
+[0190](0190-a-variant-line-is-not-a-continuation.md) and [0307](0307-a-length-may-be-a-parameter.md), which adds
+length parameters to the lowercase kinds.
 
 ## Context
 

@@ -596,12 +596,13 @@ const Members = struct {
             // three exemptions above are held to.
             .array => |a| blk: {
                 const stride = types.strideOf(a.element);
-                if (stride == 0 or a.count == 0) break :blk false;
+                const count = types.concreteCount(a.length);
+                if (stride == 0 or count == 0) break :blk false;
                 const which = off / stride;
-                if (which >= a.count) break :blk false;
+                if (which >= count) break :blk false;
                 if (try self.partHolds(a.element, @intCast(which * stride), off, width)) break :blk true;
                 break :blk off % stride == 0 and width % stride == 0 and
-                    off + width <= a.count * stride;
+                    off + width <= count * stride;
             },
             .enum_ => blk: {
                 // The tag occupies a full word at the front, and every variant
@@ -672,9 +673,10 @@ const Members = struct {
             },
             .array => |array| blk: {
                 const stride = types.strideOf(array.element);
-                if (stride == 0 or array.count == 0) break :blk false;
+                const count = types.concreteCount(array.length);
+                if (stride == 0 or count == 0) break :blk false;
                 const which = off / stride;
-                if (which >= array.count) break :blk false;
+                if (which >= count) break :blk false;
                 break :blk self.hasMemberOfType(array.element, off - @as(u32, @intCast(which * stride)), want);
             },
             .enum_ => blk: {
@@ -2819,6 +2821,8 @@ pub const Harness = struct {
     /// `Left(Big)` or `Right(Big)`: two payloads sharing their bytes, which
     /// only the variant an address names tells apart.
     pub const either: TypeId = @enumFromInt(TypeId.builtins.len + 23);
+    /// The length both arrays above have.
+    const two: TypeId = @enumFromInt(TypeId.builtins.len + 24);
 
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
@@ -2844,7 +2848,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 24;
+            const fixed_type_count = TypeId.builtins.len + 25;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2861,15 +2865,16 @@ pub const Harness = struct {
             pool[@intFromEnum(returns_callable)] = .{ .callable = .{ .first_param = 4, .param_count = 0, .result = callable, .name = "fn() -> fn(read value: UInt8) -> UInt8" } };
             pool[@intFromEnum(never_callable)] = .{ .callable = .{ .first_param = 4, .param_count = 0, .result = .never, .name = "fn() -> Never" } };
             pool[@intFromEnum(callback_pair)] = .{ .struct_ = .{ .name = "CallbackPair", .first_field = 6, .field_count = 2 } };
-            pool[@intFromEnum(callback_array)] = .{ .array = .{ .name = "[CallbackPair; 2]", .element = callback_pair, .count = 2 } };
-            pool[@intFromEnum(callable_array)] = .{ .array = .{ .name = "[fn() -> UInt8; 2]", .element = nullary_callable, .count = 2 } };
+            pool[@intFromEnum(callback_array)] = .{ .array = .{ .name = "[CallbackPair; 2]", .element = callback_pair, .length = two } };
+            pool[@intFromEnum(callable_array)] = .{ .array = .{ .name = "[fn() -> UInt8; 2]", .element = nullary_callable, .length = two } };
+            pool[@intFromEnum(two)] = .{ .length = .{ .value = 2, .name = "2" } };
             pool[@intFromEnum(big_borrow)] = .{ .borrow = .{ .referent = big, .name = "borrow Big" } };
             pool[@intFromEnum(pair_borrow)] = .{ .borrow = .{ .referent = pair, .name = "borrow Pair" } };
             pool[@intFromEnum(token)] = .{ .struct_ = .{ .name = "Token", .first_field = 0, .field_count = 0, .ownership_policy = .linear } };
             pool[@intFromEnum(plain)] = .{ .struct_ = .{ .name = "Plain", .first_field = 17, .field_count = 2 } };
             pool[@intFromEnum(holder)] = .{ .struct_ = .{ .name = "Holder", .first_field = 19, .field_count = 2 } };
             pool[@intFromEnum(tokens)] = .{ .struct_ = .{ .name = "Tokens", .first_field = 21, .field_count = 2, .ownership_policy = .linear } };
-            pool[@intFromEnum(token_array)] = .{ .array = .{ .name = "[Token; 2]", .element = token, .count = 2 } };
+            pool[@intFromEnum(token_array)] = .{ .array = .{ .name = "[Token; 2]", .element = token, .length = two } };
             pool[@intFromEnum(callback_enum)] = .{ .enum_ = .{ .name = "Callbacks", .first_variant = 2, .variant_count = 5 } };
             pool[@intFromEnum(either)] = .{ .enum_ = .{ .name = "Either", .first_variant = 7, .variant_count = 2 } };
             const callable_params = [_]types_mod.CallableParam{

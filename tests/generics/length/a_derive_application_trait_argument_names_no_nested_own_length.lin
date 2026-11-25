@@ -1,0 +1,19 @@
+trait Score[T] {
+    fn score(self: Self, value: T) -> UInt8
+}
+
+template impl[T] Score[T] {
+    fn score(_self: Self, _value: T) -> UInt8 {
+        0
+    }
+}
+
+@derive(Score[[UInt8; n]] for Readings[1])
+struct Readings[let n: UInt64] {
+    values: [UInt8; n],
+}
+
+fn main() -> UInt8 {
+    let _readings = Readings[1] { values = [UInt8(1)] }
+    0
+}

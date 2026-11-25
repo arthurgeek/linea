@@ -1,0 +1,24 @@
+// [N-Duplicate]. Bytes[2] and [UInt8; 2] name the same trait argument.
+alias Bytes[let n: UInt64] = [UInt8; n]
+
+trait Last[T] {
+    fn last(self: Self, items: T) -> UInt8
+}
+
+struct Reader {}
+
+impl Last[Bytes[2]] for Reader {
+    fn last(_self: Self, items: Bytes[2]) -> UInt8 {
+        items[1]
+    }
+}
+
+impl Last[[UInt8; 2]] for Reader {
+    fn last(_self: Self, items: [UInt8; 2]) -> UInt8 {
+        items[1]
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

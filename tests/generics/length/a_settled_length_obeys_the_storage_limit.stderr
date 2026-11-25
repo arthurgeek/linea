@@ -1,0 +1,7 @@
+error[L-Size]: a type is at most 4294967295 bytes wide, and `Row[UInt16, 2147483648]` is wider
+ --> tests/generics/length/a_settled_length_obeys_the_storage_limit.lin:3:8
+  |
+3 | struct Row[T, let n: UInt64] {
+  |        ^^^ hold fewer parts, or nest them less deeply
+  |
+  = help: its part `items` is `[UInt16; 2147483648]`, which is too wide by itself

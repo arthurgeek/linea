@@ -761,12 +761,14 @@ fn typecheckInternal(
     defer c.open_types.deinit(gpa);
     defer c.conversion_targets.deinit(gpa);
     defer c.integer_properties.deinit(gpa);
+    defer c.length_reads.deinit(gpa);
     defer c.selected_places.deinit(gpa);
     defer c.place_projections.deinit(gpa);
     defer c.implicit_test_successes.deinit(gpa);
     defer c.try_conversions.deinit(gpa);
     defer c.field_names.deinit(gpa);
     defer c.type_selections.deinit(gpa);
+    defer c.value_names_in_type_slots.deinit(gpa);
     defer c.contract_variants.deinit(gpa);
     defer c.readonly_places.deinit(gpa);
     defer c.carried_places.deinit(gpa);
@@ -1325,6 +1327,7 @@ fn typecheckInternal(
                 capabilityDemandedBy(ast, resolution, bounds, reaches),
                 &.{},
             );
+            c.builder.pool.items[row[k].index()].parameter.length = p.kind == .length;
             c.builder.pool.items[row[k].index()].parameter.integer = integerDemandedBy(ast, resolution, bounds, reaches);
             c.builder.pool.items[row[k].index()].parameter.owned = containmentBound(ast, resolution, bounds, .owned) != null;
             c.builder.pool.items[row[k].index()].parameter.shareable = containmentBound(ast, resolution, bounds, .shareable) != null;
@@ -1345,6 +1348,7 @@ fn typecheckInternal(
             try c.builder.setBoundTraits(param_types[i][k], traits);
         }
     }
+    try c.checkLengthParameters();
     try c.reportRefusedParts();
     // A shape read before a part was refused may be one reading it would
     // not terminate, so aliases are read again from here.
@@ -1453,7 +1457,7 @@ fn typecheckInternal(
         // implementation head is settled yet to answer it.
         c.deferring_selections = true;
         c.skipped_selection = false;
-        i.args = try c.traitArgumentsOf(i.decl);
+        i.args = try c.traitArgumentsOf(i.decl, DeclId.at(i.trait));
         try c.settleHead(i);
         c.deferring_selections = false;
         // Whether the key recovers every parameter is asked of the key, so
@@ -1999,6 +2003,8 @@ fn typecheckInternal(
     c.literal_values = .empty;
     typing.integer_properties = c.integer_properties;
     c.integer_properties = .empty;
+    typing.length_reads = c.length_reads;
+    c.length_reads = .empty;
     typing.conversion_targets = c.conversion_targets;
     c.conversion_targets = .empty;
     typing.implicit_test_successes = c.implicit_test_successes;
@@ -2011,6 +2017,8 @@ fn typecheckInternal(
     c.field_names = .empty;
     typing.type_selections = c.type_selections;
     c.type_selections = .empty;
+    typing.value_names_in_type_slots = c.value_names_in_type_slots;
+    c.value_names_in_type_slots = .empty;
     typing.contract_variants = c.contract_variants;
     c.contract_variants = .empty;
     typing.readonly_places = c.readonly_places;
@@ -2359,6 +2367,10 @@ fn spellWritten(
             try out.appendSlice(gpa, "; ");
             try out.appendSlice(gpa, ast.arrayLengthText(ref));
             try out.append(gpa, ']');
+            return;
+        },
+        .length_argument => {
+            try out.appendSlice(gpa, ast.exprText(ref.length));
             return;
         },
         .callable => {
@@ -4639,8 +4651,11 @@ const TypeWriter = struct {
             .array => |a| {
                 try w.writeAll("[");
                 try self.write(w, a.element);
-                return w.print("; {d}]", .{a.count});
+                try w.writeAll("; ");
+                try self.write(w, a.length);
+                return w.writeAll("]");
             },
+            .length => |l| return w.writeAll(l.name),
             .borrow => |b| {
                 try w.writeAll("borrow ");
                 return self.write(w, b.referent);
@@ -4872,7 +4887,7 @@ fn collectImplementations(
         // components, which is the declaration the resolver keyed the head
         // under. An arity the prelude does not publish was reported there,
         // and names nothing here either.
-        const ty: TypeId = if (written_head.kind == .borrow or written_head.kind == .callable or parameter_head)
+        const ty: TypeId = if (written_head.kind == .borrow or written_head.kind == .callable or written_head.kind == .array or parameter_head)
             .poison
         else if (written_head.kind == .tuple) blk: {
             names = res.tupleDecl(written_head.args.len()) orelse continue;
@@ -4893,7 +4908,7 @@ fn collectImplementations(
         const applies = ast.declHead(d).args.len() > 0;
         try out.append(gpa, .{
             .trait = trait,
-            .head = if (ast.declIsDefault(d)) .default_ else if (parameter_head) .parameter else if (written_head.kind == .borrow) .borrow_ else if (shape) |keyed| .{ .callable_ = keyed } else if (applies and names != null)
+            .head = if (ast.declIsDefault(d)) .default_ else if (parameter_head) .parameter else if (written_head.kind == .borrow) .borrow_ else if (written_head.kind == .array) .array else if (shape) |keyed| .{ .callable_ = keyed } else if (applies and names != null)
                 .{ .applied = names.? }
             else
                 .{ .whole = ty },
@@ -5006,7 +5021,6 @@ fn appendAmbient(
             },
             .decl = .none,
             .ambient = true,
-            .viewed = provided.viewed,
             .array_element_member = if (provided.over == .array and index_trait != null and provided.trait == index_trait.?) array_element_member else .none,
         });
     }
@@ -5976,7 +5990,7 @@ const NotAValue = struct {
 fn notAValue(kind: resolve_mod.Kind) ?NotAValue {
     if (resolve_mod.kindIsAValue(kind)) return null;
     return switch (kind) {
-        .local, .parameter, .capture, .binder, .constant => unreachable,
+        .local, .parameter, .capture, .binder, .constant, .length_parameter => unreachable,
         .function => .{
             .noun = "a function",
             .hint = "call it, or name what it returns",
@@ -6029,7 +6043,7 @@ fn notAValue(kind: resolve_mod.Kind) ?NotAValue {
 fn memberNotAValue(kind: resolve_mod.Kind) ?NotAValue {
     return switch (kind) {
         .function, .associated_type, .type_parameter, .type_alias => notAValue(kind),
-        .local, .parameter, .capture, .binder, .constant => null,
+        .local, .parameter, .capture, .binder, .constant, .length_parameter => null,
         .declared_type, .builtin_type, .trait, .module => null,
     };
 }
@@ -6532,12 +6546,15 @@ const Checker = struct {
     open_types: open_types_mod.OpenTypes = .{},
     conversion_targets: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     integer_properties: std.AutoHashMapUnmanaged(ExprId, types_mod.IntegerProperty) = .empty,
+    /// A length parameter read as a value, and the parameter it reads.
+    length_reads: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     selected_places: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     place_projections: std.AutoHashMapUnmanaged(ExprId, types_mod.PlaceProjection) = .empty,
     implicit_test_successes: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     try_conversions: std.AutoHashMapUnmanaged(ExprId, types_mod.TryConversion) = .empty,
     field_names: std.AutoHashMapUnmanaged(TokenId, types_mod.FieldIdentity) = .empty,
     type_selections: std.AutoHashMapUnmanaged(TokenId, types_mod.TypeSelection) = .empty,
+    value_names_in_type_slots: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
     contract_variants: std.AutoHashMapUnmanaged(TokenId, types_mod.VariantIdentity) = .empty,
     readonly_places: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     carried_places: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
@@ -6552,7 +6569,7 @@ const Checker = struct {
     receivers_checked: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// What each array type's written length counts, keyed by the length
     /// expression; null where it was refused. `arrayLength` fills it.
-    array_lengths: std.AutoHashMapUnmanaged(ExprId, ?u32) = .empty,
+    array_lengths: std.AutoHashMapUnmanaged(ExprId, ?TypeId) = .empty,
     /// The expressions the checker gave no value; `Typing.refused` holds them.
     refused: std.AutoHashMapUnmanaged(ExprId, void) = .empty,
     /// The written types `reportBrokenBounds` refused; `Typing.broken_types`
@@ -6986,7 +7003,7 @@ const Checker = struct {
         @memcpy(self.binding_owners[0..prefix.seed.binding_owners.len], prefix.seed.binding_owners);
         for (prefix.seed.declarations, 0..) |checked, i| self.defaults_folded[i] = checked;
         for (0..saved.binding_types.len()) |i| self.constant_taken[i] = self.res.kindOf(BindingId.at(@intCast(i))) == .constant;
-        inline for (.{ "literal_values", "conversion_targets", "integer_properties", "selected_places", "place_projections", "implicit_test_successes", "try_conversions", "field_names", "type_selections", "contract_variants", "readonly_places", "carried_places", "borrowed_temporaries", "interpolation_positions", "refused", "folded_indices", "constant_values", "field_name_spellings", "variant_uses", "part_selections", "contract_parameters", "traversal_positions", "binding_labels" }) |field| {
+        inline for (.{ "literal_values", "conversion_targets", "integer_properties", "length_reads", "selected_places", "place_projections", "implicit_test_successes", "try_conversions", "field_names", "type_selections", "value_names_in_type_slots", "contract_variants", "readonly_places", "carried_places", "borrowed_temporaries", "interpolation_positions", "refused", "folded_indices", "constant_values", "field_name_spellings", "variant_uses", "part_selections", "contract_parameters", "traversal_positions", "binding_labels" }) |field| {
             @field(self, field) = try @field(saved, field).clone(gpa);
         }
         var plans = saved.constant_materializations.iterator();
@@ -7273,7 +7290,7 @@ const Checker = struct {
     }
 
     fn whereSubjectDependsOnOpen(self: *const Checker, d: node.DeclId, ref: node.TypeRef) bool {
-        if (self.mentionsTypeParameter(d, ref)) return true;
+        if (self.mentionsTypeParameter(d, ref) or self.mentionsLengthParameter(ref)) return true;
 
         const enclosing = self.res.implEnclosing(d);
         if (enclosing != .none and enclosing != d and self.mentionsTypeParameter(enclosing, ref)) return true;
@@ -7560,6 +7577,42 @@ const Checker = struct {
         d: node.DeclId,
         ref: node.TypeRef,
     };
+
+    /// [T-LengthParameter]: a length parameter is a `UInt64`, the type of
+    /// `length()` and of an index, and a trait's parameters are types.
+    ///
+    /// **Bound:** each declaration's parameter list once.
+    fn checkLengthParameters(self: *Checker) std.mem.Allocator.Error!void {
+        for (0..self.ast.declCount()) |i| {
+            const d = node.DeclId.at(@intCast(i));
+            if (self.isRetained(d)) continue;
+            for (self.ast.declTypeParams(d)) |parameter| {
+                if (parameter.kind != .length) continue;
+                if (self.ast.declTag(d) == .trait_) {
+                    try self.sink.addErrorFmt(
+                        .t_length_parameter,
+                        self.ast.fileOf(parameter.name),
+                        self.ast.tokenSpan(parameter.name),
+                        "a trait is generic over types; declare the length on the function or type that needs it",
+                        "a trait declares no length parameter",
+                        .{},
+                    );
+                    continue;
+                }
+                if (!parameter.length_type.wasWritten()) continue;
+                const written = try self.typeOfRefOf(self.program.moduleOf(d), d, parameter.length_type);
+                if (written == .poison or written == .u64) continue;
+                try self.sink.addErrorFmt(
+                    .t_length_parameter,
+                    self.ast.fileOf(parameter.length_type.at),
+                    self.ast.writtenSpan(parameter.length_type),
+                    "write `UInt64`, the type of `length()` and of an index",
+                    "a length parameter is a `UInt64`, and this is `{s}`",
+                    .{try self.typeName(written)},
+                );
+            }
+        }
+    }
 
     /// Refuses a written part that no substitution and no layout can answer.
     ///
@@ -8083,7 +8136,7 @@ const Checker = struct {
                 return;
             },
             .selection => return,
-            .callable, .borrow => return,
+            .callable, .borrow, .length_argument => return,
             .named => {},
         }
         if (self.namesTypeParameter(p.d, ref.name)) return;
@@ -8108,7 +8161,7 @@ const Checker = struct {
                 return added;
             },
             .selection => return false,
-            .callable, .borrow => return false,
+            .callable, .borrow, .length_argument => return false,
             .named => {},
         }
         if (self.parameterIndex(p.d, ref.name)) |k| return held.mark(p.d, k);
@@ -8258,6 +8311,27 @@ const Checker = struct {
         };
         for (self.ast.typeArgs(ref.args)) |a| {
             if (self.mentionsWrittenParameter(d, k, a)) return true;
+        }
+        return false;
+    }
+
+    /// Whether a length written anywhere in `ref` is a length parameter or
+    /// computes with one.
+    ///
+    /// **Bound:** the written types beneath `ref` and each length's arithmetic
+    /// nodes once.
+    fn mentionsLengthParameter(self: *const Checker, ref: node.TypeRef) bool {
+        if (ref.kind == .callable) {
+            const callable = self.ast.callableType(ref);
+            for (self.ast.params[callable.params.start..callable.params.end]) |param| {
+                if (self.mentionsLengthParameter(param.written)) return true;
+            }
+            return self.mentionsLengthParameter(callable.result);
+        }
+        if (ref.kind == .selection and self.mentionsLengthParameter(self.ast.selectionBase(ref))) return true;
+        if ((ref.kind == .array or ref.kind == .length_argument) and self.computedLengthParameter(ref.length)) return true;
+        for (self.ast.typeArgs(ref.args)) |a| {
+            if (self.mentionsLengthParameter(a)) return true;
         }
         return false;
     }
@@ -8421,6 +8495,7 @@ const Checker = struct {
                 return self.declaredTypeOf(owner, ref);
             },
             .array => return self.arrayTypeOf(m, owner, ref),
+            .length_argument => return self.lengthArgumentOf(ref),
             .callable => return self.callableTypeOf(m, owner, ref),
             .tuple => return self.tupleTypeOf(m, owner, ref),
             // A dotted name whose head is a module names the type that module
@@ -8437,6 +8512,21 @@ const Checker = struct {
             },
         }
         const settled = try self.settleRef(m, owner, ref.name, ref.args);
+        // A length parameter is written in a length's position; where a type
+        // is written it names none.
+        if (settled != .poison and self.builder.isLength(settled)) {
+            if (self.refusedBefore(ref.name)) return .poison;
+            try self.noteRefused(ref.name);
+            try self.sink.addErrorFmt(
+                .n_not_a_type,
+                self.ast.fileOf(ref.name),
+                self.ast.tokenSpan(ref.name),
+                "a length parameter stands for an array's length",
+                "`{s}` is a length parameter, not a type",
+                .{self.ast.tokenText(ref.name)},
+            );
+            return .poison;
+        }
         self.recordWritten(owner, ref.name, settled);
         return settled;
     }
@@ -10662,7 +10752,7 @@ const Checker = struct {
         if (ref.inferred_length != .none) return self.refuseArrayInference(ref, false);
         if (ref.length == ExprId.none) return .poison;
         const length = try self.arrayLength(ref.length) orelse return .poison;
-        const array = try self.builder.arrayOf(element, length);
+        const array = try self.builder.arrayOfLength(element, length);
         const written = try self.written_arrays.getOrPut(self.gpa, array);
         if (!written.found_existing) written.value_ptr.* = self.locOfWritten(ref);
         return array;
@@ -10675,7 +10765,7 @@ const Checker = struct {
     /// it is named -- a structure's field types are read each time it is laid
     /// out -- and checking the length again would report each mistake in it
     /// again and record each value of an interpolated literal again.
-    fn arrayLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+    fn arrayLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?TypeId {
         if (self.array_lengths.get(length)) |counted| return counted;
         // Null until counted, so a length whose own check reads it again
         // reads a refusal rather than counting itself.
@@ -10728,7 +10818,27 @@ const Checker = struct {
         self.lengths_waiting.clearRetainingCapacity();
     }
 
-    fn countLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?u32 {
+    fn countLength(self: *Checker, length: ExprId) std.mem.Allocator.Error!?TypeId {
+        // A length parameter's name stands for whatever length an instance
+        // supplies. It is the one form a length may take that is not a
+        // constant, and an expression computing with one is refused before
+        // it is folded: its value is not known until an instance runs.
+        if (self.lengthParameterNamed(length)) |parameter| {
+            _ = try self.record(length, .u64);
+            return parameter;
+        }
+        if (self.computedLengthParameter(length)) {
+            const at = self.sink.items().len;
+            _ = try self.report(
+                .t_array_size,
+                length,
+                "a length parameter cannot be computed with in a type",
+                .{},
+                try std.fmt.allocPrint(self.sink.arena, "`{s}` is not a length", .{self.ast.exprText(length)}),
+            );
+            try self.addNote(at, "a length in a type is a constant or a length parameter");
+            return null;
+        }
         var named: std.ArrayList(BindingId) = .empty;
         defer named.deinit(self.gpa);
         var unread: Unread = .{};
@@ -10742,7 +10852,7 @@ const Checker = struct {
         if (!self.constants_typed and named.items.len != 0) {
             try self.lengths_waiting.append(self.gpa, .{ .length = length, .module = self.current, .owner = self.generic });
             return switch (try self.worth(length)) {
-                .integer => |count| if (count >= 0 and count <= std.math.maxInt(u32)) @intCast(count) else null,
+                .integer => |count| if (count >= 0 and count <= std.math.maxInt(u32)) try self.builder.lengthOf(@intCast(count)) else null,
                 else => null,
             };
         }
@@ -10822,7 +10932,39 @@ const Checker = struct {
             return null;
         }
 
-        return @intCast(folded);
+        return try self.builder.lengthOf(@intCast(folded));
+    }
+
+    /// The length parameter an expression is, where it is that name alone.
+    fn lengthParameterNamed(self: *const Checker, expression: ExprId) ?TypeId {
+        if (expression == ExprId.none or self.ast.exprTag(expression) != .name_ref) return null;
+        return self.lengthParameterOf(self.res.targetOf(expression));
+    }
+
+    /// The pool entry a length parameter's binding stands for, or null where
+    /// the binding is not a length parameter.
+    fn lengthParameterOf(self: *const Checker, binding: BindingId) ?TypeId {
+        if (binding == BindingId.none or self.res.kindOf(binding) != .length_parameter) return null;
+        const row = self.param_types[self.res.typeParameterOwner(binding).index()];
+        const at = self.res.paramIndexOf(binding);
+        return if (at < row.len) row[at] else null;
+    }
+
+    /// Whether arithmetic in `expression` reaches a length parameter, where
+    /// the expression is not that name alone.
+    ///
+    /// **Bound:** the expression's arithmetic nodes once.
+    fn computedLengthParameter(self: *const Checker, expression: ExprId) bool {
+        if (expression == ExprId.none) return false;
+        return switch (self.ast.exprTag(expression)) {
+            .name_ref => self.lengthParameterOf(self.res.targetOf(expression)) != null,
+            .add, .sub, .mul, .div, .rem => blk: {
+                const b = self.ast.binary(expression);
+                break :blk self.computedLengthParameter(b.lhs) or self.computedLengthParameter(b.rhs);
+            },
+            .grouped, .negate => self.computedLengthParameter(self.ast.unaryOperand(expression)),
+            else => false,
+        };
     }
 
     /// A written type, resolved with `owner`'s parameters in scope.
@@ -10891,21 +11033,25 @@ const Checker = struct {
 
         if (written > wanted or written < required) {
             if (self.refusedBefore(tok)) return .poison;
+            try self.noteUnreadArgumentNames(m, owner, of, args);
             try self.noteRefused(tok);
             try self.refuseTypeArity(self.ast.tokenSpan(tok), tok, required, wanted, written, null);
             return .poison;
         }
 
         const decl = of orelse return .poison;
-        if (written < wanted and try self.refusedDefaultedAllocator(owner, tok, .none, decl, written)) return .poison;
+        if (written < wanted) {
+            const reported = self.refusedBefore(tok);
+            if (try self.refusedDefaultedAllocator(owner, tok, .none, decl, written)) {
+                if (!reported) try self.noteUnreadArgumentNames(m, owner, decl, args);
+                return .poison;
+            }
+        }
 
         const supplied = try self.gpa.alloc(TypeId, wanted);
         defer self.gpa.free(supplied);
-        var refused = false;
-        for (self.ast.typeArgs(args), 0..) |a, i| {
-            supplied[i] = try self.typeOfRefOf(m, owner, a);
-            if (supplied[i] == .poison) refused = true;
-        }
+        try self.readAppliedArguments(m, owner, decl, args, supplied);
+        const valid = std.mem.indexOfScalar(TypeId, supplied[0..written], .poison) == null;
         try self.fillDefaults(decl, supplied, written);
         for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, decl, i);
         const made = try self.builder.instantiate(head, decl, supplied);
@@ -10917,7 +11063,102 @@ const Checker = struct {
         if (self.callable_effects_ready) try self.bound_sites.append(self.gpa, .{ .ty = made, .at = tok, .within = owner });
         // An argument that was refused was reported where it is written, and
         // the type applied to it is that refusal's consequence.
-        return if (refused) .poison else made;
+        return if (valid) made else .poison;
+    }
+
+    /// Reads the arguments of a type, alias, callable or trait where they
+    /// occur. A slot whose argument has the wrong kind holds poison.
+    fn readAppliedArguments(
+        self: *Checker,
+        m: ModuleId,
+        owner: DeclId,
+        decl: DeclId,
+        args: node.TypeRefRange,
+        supplied: []TypeId,
+    ) std.mem.Allocator.Error!void {
+        for (self.ast.typeArgs(args), 0..) |argument, i| {
+            const ty = try self.typeOfRefOf(m, owner, argument);
+            supplied[i] = if (try self.argumentKindFits(decl, i, argument, ty)) ty else .poison;
+        }
+    }
+
+    /// [T-Bound] for a generic argument of the wrong kind: a type where
+    /// `decl` declares a length, or a length where it declares a type.
+    /// Answers whether the argument's kind fits; a refused argument fits, as
+    /// it was reported where it is written.
+    fn argumentKindFits(self: *Checker, decl: node.DeclId, index: usize, written: node.TypeRef, supplied: TypeId) std.mem.Allocator.Error!bool {
+        if (decl == .none) return true;
+        const parameters = self.ast.declTypeParams(decl);
+        if (index >= parameters.len) return true;
+        const parameter = parameters[index];
+        try self.noteTypeArgumentName(parameter, written);
+        if (supplied == .poison) return true;
+        const wants_length = parameter.kind == .length;
+        if (wants_length == self.builder.isLength(supplied)) return true;
+        const at = if (written.at != .none) written.at else written.name;
+        if (self.refusedBefore(at)) return false;
+        try self.noteRefused(at);
+        try self.sink.addErrorFmt(
+            .t_bound,
+            self.ast.fileOf(at),
+            self.ast.writtenSpan(written),
+            if (wants_length) "this is a type" else "this is a length",
+            "`{s}` declares `{s}` as a {s}, and `{s}` is a {s}",
+            .{
+                self.ast.tokenText(self.ast.declName(decl)),
+                self.ast.tokenText(parameter.name),
+                if (wants_length) "length" else "type",
+                self.ast.writtenText(written),
+                if (wants_length) "type" else "length",
+            },
+        );
+        return false;
+    }
+
+    fn noteTypeArgumentName(self: *Checker, parameter: node.TypeParam, argument: node.TypeRef) std.mem.Allocator.Error!void {
+        if (parameter.kind == .type and argument.kind == .length_argument and argument.name != .none) {
+            try self.value_names_in_type_slots.put(self.gpa, argument.name, {});
+        }
+    }
+
+    /// An arity or allocator diagnostic can end an application before its
+    /// arguments are checked. Each nested application still has the parameter
+    /// kinds of its own declaration. Visit only the written types under this
+    /// refusal, once when it is reported. The parser bounds their nesting.
+    fn noteUnreadArgumentNames(self: *Checker, m: ModuleId, owner: DeclId, decl: ?DeclId, args: node.TypeRefRange) std.mem.Allocator.Error!void {
+        const parameters: []const node.TypeParam = if (decl) |d| self.ast.declTypeParams(d) else &.{};
+        for (self.ast.typeArgs(args), 0..) |argument, i| {
+            if (i < parameters.len) try self.noteTypeArgumentName(parameters[i], argument);
+            try self.noteUnreadTypeNames(m, owner, argument);
+        }
+    }
+
+    fn noteUnreadTypeNames(self: *Checker, m: ModuleId, owner: DeclId, ref: node.TypeRef) std.mem.Allocator.Error!void {
+        if (ref.stepped_to != .none) return;
+        switch (ref.kind) {
+            .callable => {
+                const callable = self.ast.callableType(ref);
+                for (self.ast.params[callable.params.start..callable.params.end]) |parameter| {
+                    try self.noteUnreadTypeNames(m, owner, parameter.written);
+                }
+                try self.noteUnreadTypeNames(m, owner, callable.result);
+            },
+            .selection => try self.noteUnreadTypeNames(m, owner, self.ast.selectionBase(ref)),
+            .named, .array, .tuple, .grouped, .borrow, .length_argument => {},
+        }
+        if (ref.args.len() == 0) return;
+        const decl = switch (ref.kind) {
+            .named, .selection => self.declOfWritten(m, owner, ref),
+            else => null,
+        };
+        try self.noteUnreadArgumentNames(m, owner, decl, ref.args);
+    }
+
+    /// A length written where a generic argument stands: a constant, or a
+    /// length parameter in scope. The memo `arrayLength` keeps is what makes
+    /// reading it again report nothing again.
+    fn lengthArgumentOf(self: *Checker, ref: node.TypeRef) std.mem.Allocator.Error!TypeId {
+        return try self.arrayLength(ref.length) orelse .poison;
     }
 
     /// The arguments a written type omitted, read from the defaults the
@@ -11200,6 +11441,9 @@ const Checker = struct {
             );
             return .poison;
         }
+        // A default that names a parameter of its own list was refused where
+        // it is written, and stands for nothing where an argument is left out.
+        if (self.mentionsTypeParameter(decl, parameter.default) or self.mentionsLengthParameter(parameter.default)) return .poison;
         try self.defaults_reading.put(self.gpa, key, {});
         defer _ = self.defaults_reading.remove(key);
         const outer = self.reading_default;
@@ -11757,11 +12001,18 @@ const Checker = struct {
         const written = args.len();
         if (written > wanted or written < required) {
             if (self.refusedBefore(tok)) return .poison;
+            try self.noteUnreadArgumentNames(m, owner, alias, args);
             try self.noteRefused(tok);
             try self.refuseTypeArity(self.ast.tokenSpan(tok), tok, required, wanted, written, null);
             return .poison;
         }
-        if (written < wanted and try self.refusedDefaultedAllocator(owner, tok, .none, alias, written)) return .poison;
+        if (written < wanted) {
+            const reported = self.refusedBefore(tok);
+            if (try self.refusedDefaultedAllocator(owner, tok, .none, alias, written)) {
+                if (!reported) try self.noteUnreadArgumentNames(m, owner, alias, args);
+                return .poison;
+            }
+        }
 
         const named = try self.aliasedType(alias);
         try self.checkCarriedOmission(owner, tok, alias, alias_body);
@@ -11771,7 +12022,7 @@ const Checker = struct {
         // argument may itself apply an alias, which keeps its arguments first.
         const supplied = try self.gpa.alloc(TypeId, wanted);
         defer self.gpa.free(supplied);
-        for (self.ast.typeArgs(args), supplied[0..written]) |a, *t| t.* = try self.typeOfRefOf(m, owner, a);
+        try self.readAppliedArguments(m, owner, alias, args, supplied);
         try self.fillDefaults(alias, supplied, written);
         for (written..wanted) |i| try self.checkCarriedOmission(owner, tok, alias, i);
         for (supplied) |t| if (t == .poison) return .poison;
@@ -11831,7 +12082,7 @@ const Checker = struct {
                 }
                 if (callable.result.wasWritten() and try self.writtenSelects(callable.result)) return true;
             },
-            .array, .tuple, .borrow, .grouped => {},
+            .array, .tuple, .borrow, .grouped, .length_argument => {},
         }
         for (self.ast.typeArgs(x.args)) |argument| {
             if (try self.writtenSelects(argument)) return true;
@@ -12406,7 +12657,7 @@ const Checker = struct {
         switch (self.builder.get(ty)) {
             .parameter => return true,
             .borrow => |b| return self.mentionsAnyParameter(b.referent),
-            .array => |a| return self.mentionsAnyParameter(a.element),
+            .array => |a| return self.mentionsAnyParameter(a.length) or self.mentionsAnyParameter(a.element),
             .callable => |signature| {
                 for (self.builder.callableParams(signature)) |param| if (self.mentionsAnyParameter(param.ty)) return true;
                 return self.mentionsAnyParameter(signature.result);
@@ -14930,12 +15181,11 @@ const Checker = struct {
     /// Who owns the type side of an implementation for `held`, read from
     /// the head the implementation index looks `held` up by. The heads the
     /// resolver admits are the heads that index records, so a type whose head
-    /// no written `impl` produces, a closure's or an array's, is unnameable.
+    /// no written `impl` produces, a closure's, is unnameable.
     fn implTypeSide(self: *const Checker, held: TypeId) resolve_mod.ImplTypeSide {
         return switch (self.builder.headOf(held)) {
             .applied => |d| .{ .declared = self.program.moduleOf(d) },
-            .array => .unnameable,
-            .borrow_, .callable_, .parameter, .default_ => .unowned,
+            .array, .borrow_, .callable_, .parameter, .default_ => .unowned,
             .whole => if (self.declaringType(held)) |d| .{ .declared = self.program.moduleOf(d) } else switch (self.builder.get(held)) {
                 .integer, .boolean, .float, .never => .primitive,
                 .unit, .parameter => .unowned,
@@ -17801,7 +18051,9 @@ const Checker = struct {
             .string => {},
             .unit => if (shape != .unit) return .refused,
             .array => |values| {
-                if (shape != .array or shape.array.count != values.len) return .refused;
+                if (shape != .array) return .refused;
+                const count = self.builder.arrayCount(shape.array.length) orelse return .refused;
+                if (count != values.len) return .refused;
                 for (values) |child| {
                     const planned = try self.planConstant(child, shape.array.element);
                     if (planned != .planned) return planned;
@@ -18245,6 +18497,16 @@ const Checker = struct {
                 // constant this reaches may be written below the one reading
                 // it and may not have been taken yet.
                 if (self.res.kindOf(target) == .constant) try self.ensureConstant(target);
+
+                // A length parameter read as a value is the instance's length,
+                // which lowering reads from the substituted parameter. It is
+                // not a constant expression, as `T.max` is not while `T` is
+                // symbolic.
+                if (self.lengthParameterOf(target)) |parameter| {
+                    try self.length_reads.put(self.gpa, id, parameter);
+                    try self.markNotConstant(id);
+                    break :blk try self.expect(id, .u64, expected);
+                }
 
                 const t = self.binding_types.get(target);
                 self.folds.set(id, .of(try self.worth(id)));
@@ -19698,7 +19960,9 @@ const Checker = struct {
             const magnitude_bits: u7 = @intCast(info.bits - @intFromBool(info.signed));
             maximum = @min(maximum, (@as(u128, 1) << magnitude_bits) - 1);
         }
-        if (array.count > maximum) {
+        // A length parameter's array may hold any count a `u32` does, so its
+        // key has to reach that far for every instance.
+        if ((self.builder.arrayCount(array.length) orelse std.math.maxInt(u32)) > maximum) {
             try self.traversalDelegationError(at, "the array length is not representable as this key's exclusive range bound");
             return;
         }
@@ -19710,7 +19974,7 @@ const Checker = struct {
         const errors_before = self.sink.error_count;
         try self.checkTraversalType(iterator, at);
         if (self.sink.error_count != errors_before) return;
-        try self.traversal_positions.put(self.gpa, d, .{ .array = .{ .key = key, .count = array.count, .iterator = iterator } });
+        try self.traversal_positions.put(self.gpa, d, .{ .array = .{ .key = key, .length = array.length, .iterator = iterator } });
     }
 
     const IntegerIndexKey = union(enum) {
@@ -22540,6 +22804,14 @@ const Checker = struct {
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
         if (d == raw.stride or d == raw.number_address or raw.processText(d) != null) return contracts.len == 0;
+        // Each slot holds a copy of the value, so the array carries what the
+        // value carries, and no more.
+        if (d == raw.array_filled) {
+            if (contracts.len == 0) return true;
+            const carried = contracts[0];
+            return contracts.len == 1 and carried.kind == .carries and carried.destination == null and
+                carried.source.root == .parameter and carried.source.root.parameter == 0;
+        }
         if (contracts.len != 1) return false;
         const effect = contracts[0];
         if (effect.target.len != 0 or effect.source.fields.len != 0 or effect.borrows_source) return false;
@@ -22563,6 +22835,15 @@ const Checker = struct {
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.array_filled) {
+            // `array_filled[T: Copyable, let n: UInt64](value: T) -> [T; n]`.
+            const element = self.param_types[d.index()][0];
+            const length = self.param_types[d.index()][1];
+            return tps[1].kind == .length and ps.len == 1 and ps[0].convention == .read and
+                try self.declaredParamType(d, 0) == element and
+                result == try self.builder.arrayOfLength(element, length) and
+                self.builder.get(element).parameter.requirement == .copyable;
+        }
         if (d == raw.number_address) {
             return ps.len == 1 and self.addressOf(result) == self.param_types[d.index()][0] and ps[0].convention == .read and
                 try self.declaredParamType(d, 0) == .u64;
@@ -23792,14 +24073,15 @@ const Checker = struct {
     }
 
     /// Records unit for the index reading of brackets that hold type
-    /// arguments. Its nodes are the type's names, which hold no value, and
-    /// what the brackets mean is read from the type reading.
+    /// arguments. Its nodes are the type's names and the arithmetic of a
+    /// length written inside one, which hold no value here, and what the
+    /// brackets mean is read from the type reading.
     fn recordTypeWrittenAsIndex(self: *Checker, id: ExprId) std.mem.Allocator.Error!void {
         if (id == ExprId.none) return;
         _ = try self.record(id, .unit);
         switch (self.ast.exprTag(id)) {
-            .field, .grouped => try self.recordTypeWrittenAsIndex(self.ast.unaryOperand(id)),
-            .index => {
+            .field, .grouped, .negate => try self.recordTypeWrittenAsIndex(self.ast.unaryOperand(id)),
+            .index, .add, .sub, .mul, .div, .rem => {
                 const b = self.ast.binary(id);
                 try self.recordTypeWrittenAsIndex(b.lhs);
                 try self.recordTypeWrittenAsIndex(b.rhs);
@@ -23818,16 +24100,12 @@ const Checker = struct {
         if (self.res.bracketReading(bracket).? == .type_arguments) try self.noteQualifier(head);
         try self.recordTypeWrittenAsIndex(self.ast.binary(bracket).rhs);
         const written = try self.sink.arena.alloc(TypeId, refs.len);
-        var valid = true;
-        for (refs, written) |ref, *ty| {
-            ty.* = try self.typeOfRef(ref);
-            if (ty.* == .poison) valid = false;
-        }
+        try self.readAppliedArguments(self.current, self.generic, d, self.ast.bracketTypes(bracket).?, written);
         if (refs.len != generics.len) {
             try self.refuseCallArity(bracket, d, refs.len);
             return null;
         }
-        if (!valid) return null;
+        if (std.mem.indexOfScalar(TypeId, written, .poison) != null) return null;
         return written;
     }
 
@@ -24382,6 +24660,7 @@ const Checker = struct {
             for (call.args) |arg| try self.checkRecoveredArgument(arg);
             return try self.record(id, .poison);
         };
+        defer matched.releaseOrder(self.gpa);
         const args = if (matched.owned)
             @constCast(matched.args)
         else
@@ -24478,6 +24757,7 @@ const Checker = struct {
             for (call.args) |arg| try self.checkRecoveredArgument(arg);
             return try self.record(id, .poison);
         };
+        defer matched.releaseOrder(self.gpa);
         const args = matched.args;
         var args_owned = matched.owned;
         defer if (args_owned) self.gpa.free(args);
@@ -24938,7 +25218,17 @@ const Checker = struct {
     /// tree's, handed back untouched because nothing needed reordering. The
     /// caller either transfers or frees the first and must not free the second;
     /// the normalized row duplicates an unowned list when it commits it.
-    const Matched = struct { args: []const ExprId, owned: bool };
+    const Matched = struct {
+        args: []const ExprId,
+        owned: bool,
+        /// Present for named arguments. The pairing found in source order is
+        /// retained so inference attributes a conflict to the later argument.
+        written_slots: ?[]?u32 = null,
+
+        fn releaseOrder(self: Matched, gpa: std.mem.Allocator) void {
+            if (self.written_slots) |slots| gpa.free(slots);
+        }
+    };
 
     fn retainRecoveredGiven(
         self: *Checker,
@@ -25075,7 +25365,7 @@ const Checker = struct {
         errdefer self.gpa.free(filled);
         @memset(filled, ExprId.none);
         const recovered_slots = try self.gpa.alloc(?u32, given.len);
-        defer self.gpa.free(recovered_slots);
+        errdefer self.gpa.free(recovered_slots);
         @memset(recovered_slots, null);
 
         var refused = pairing_end != null;
@@ -25180,9 +25470,10 @@ const Checker = struct {
         if (refused) {
             try self.retainRecoveredGiven(id, owner, target, given, recovered_slots);
             self.gpa.free(filled);
+            self.gpa.free(recovered_slots);
             return null;
         }
-        return .{ .args = filled, .owned = true };
+        return .{ .args = filled, .owned = true, .written_slots = recovered_slots };
     }
 
     /// The pairing where the call names nothing, which is nearly every call.
@@ -25330,6 +25621,14 @@ const Checker = struct {
             return;
         }
         const got_name = try self.typeName(clash.got);
+        if (self.builder.isLength(clash.was)) {
+            const lengths = .{ parameter, try self.typeName(clash.was), got_name };
+            _ = if (in_brackets)
+                try self.report(.t_mismatch, at, "the call names `{s}` as `{s}` in its brackets, and this settles it as `{s}`", lengths, "one length parameter, two lengths")
+            else
+                try self.report(.t_mismatch, at, "`{s}` was already settled as `{s}`, and this settles it as `{s}`", lengths, "one length parameter, two lengths");
+            return;
+        }
         const spelled = .{ parameter, try self.typeName(clash.was), article.before(got_name), got_name };
         const reported_at = self.sink.items().len;
         _ = if (in_brackets)
@@ -25883,6 +26182,7 @@ const Checker = struct {
             for (given[given.len - self.ast.callNames(id).len ..]) |a| try self.checkRecoveredArgument(a);
             return try self.record(id, .poison);
         };
+        defer matched.releaseOrder(self.gpa);
         const args = matched.args;
 
         // The normalized row owns its complete argument run. An allocation the
@@ -25972,7 +26272,7 @@ const Checker = struct {
         // such implementation binds one list, which is the same walk with
         // nothing in the second.
         const over = self.headParametersOf(d);
-        const settled = (try self.inferCall(id, d, over, args, walked, expected, written)) orelse {
+        const settled = (try self.inferCall(id, d, over, args, matched.written_slots, walked, expected, written)) orelse {
             try self.retainRecoveredMatched(id, .{ .declaration = d }, target, args);
             return try self.record(id, .poison);
         };
@@ -27009,7 +27309,7 @@ const Checker = struct {
         self.whole_place = self.ast.withoutGroups(of);
         defer self.whole_place = outer;
 
-        const t = try self.check(of, expected);
+        const t = try self.checkResult(id, of, expected);
         if (t == .poison) return try self.record(id, .poison);
         if (t == .never) return self.expect(id, .never, expected);
 
@@ -28167,8 +28467,7 @@ const Checker = struct {
         }
         if (self.builder.get(held) == .parameter) return true;
         // A concrete `Self` names its body now. A receiver that answers only
-        // through an observation of itself has no body taking it as it is;
-        // an array answering through its slice view has one generated.
+        // through an observation of itself has no body taking it as it is.
         const choice = try self.builder.implementationChoiceWithin(self.generic, lists.trait, settled[2], held) orelse return true;
         if (choice.observations == 0) return true;
         try reportBodilessOperation(self.sink, self.ast.fileOfExpr(id), self.ast.exprSpan(id), self.ast.tokenText(self.ast.declName(d)), (try self.typeName(held)));
@@ -28732,7 +29031,22 @@ const Checker = struct {
                         if (found == .never) diverges = true;
                     }
 
-                    if (c.args.len != arr.count) return try self.report(
+                    const count = self.builder.arrayCount(arr.length) orelse {
+                        // A length refused where it was written says nothing about how
+                        // many elements belong here.
+                        if (arr.length == .poison) return try self.record(id, .poison);
+                        const at = self.sink.items().len;
+                        _ = try self.report(
+                            .t_array_length,
+                            id,
+                            "an array literal has a fixed count, and `{s}` is any length",
+                            .{self.builder.nameOf(arr.length)},
+                            try std.fmt.allocPrint(self.sink.arena, "{d} elements", .{c.args.len}),
+                        );
+                        try self.addNote(at, try std.fmt.allocPrint(self.sink.arena, "`{s}` is a length parameter, so the array has as many elements as each instance says", .{self.builder.nameOf(arr.length)}));
+                        return try self.record(id, .poison);
+                    };
+                    if (c.args.len != count) return try self.report(
                         .t_array_length,
                         id,
                         "an array's length is part of its type, so a literal has as many elements as the type says",
@@ -28740,7 +29054,7 @@ const Checker = struct {
                         try std.fmt.allocPrint(
                             self.sink.arena,
                             "this has {d}, and the type says {d}",
-                            .{ c.args.len, arr.count },
+                            .{ c.args.len, count },
                         ),
                     );
                     if (diverges) return self.expect(id, .never, expected);
@@ -28794,7 +29108,22 @@ const Checker = struct {
             }
         }
 
-        const element = try self.check(c.args[settles], null);
+        // A sibling may supply counts that a call in the determining element
+        // needs for its result. The element is still checked for its own type,
+        // which supplies the expectation for every remaining sibling.
+        const element = element: {
+            const previous = self.success_expected;
+            defer self.success_expected = previous;
+            if (self.successExpectationAt(id)) |hint| if (hint.depth == 0) switch (self.builder.get(hint.expected.ty)) {
+                .array => |array| if (self.builder.get(array.element) == .array) {
+                    var want = hint.expected;
+                    want.ty = array.element;
+                    self.success_expected = .{ .target = self.ast.withoutGroups(c.args[settles]), .depth = 0, .expected = want };
+                },
+                else => {},
+            };
+            break :element try self.check(c.args[settles], null);
+        };
         if (element == .poison) {
             for (c.args, 0..) |a, i| {
                 if (i != settles) _ = try self.check(a, null);
@@ -28972,7 +29301,7 @@ const Checker = struct {
         // which values an array is indexed by.
         if (try self.rangeIndexType()) |key| {
             if (index == key and try self.arrayInterprets(head, index)) {
-                return self.checkRangePlace(id, b.rhs, arr.element, arr.count, expected);
+                return self.checkRangePlace(id, b.rhs, arr.element, self.builder.arrayCount(arr.length), expected);
             }
         }
 
@@ -28988,7 +29317,7 @@ const Checker = struct {
                 // both spellings, and a count no element sits at is refused by
                 // the rule an index no element sits at is refused by.
                 if (self.settledElement(id)) |at| {
-                    if (try self.refuseSettledIndex(b.rhs, arr.count, at, .count_back)) {
+                    if (try self.refuseSettledIndex(b.rhs, self.builder.concreteCount(arr.length), at, .count_back)) {
                         return self.refusedElement(id, arr.element, expected);
                     }
                 }
@@ -29012,7 +29341,7 @@ const Checker = struct {
         }
 
         if (self.settledElement(id)) |at| {
-            if (try self.refuseSettledIndex(b.rhs, arr.count, at, .index)) return self.refusedElement(id, arr.element, expected);
+            if (try self.refuseSettledIndex(b.rhs, self.builder.concreteCount(arr.length), at, .index)) return self.refusedElement(id, arr.element, expected);
         }
 
         return self.finishSelection(id, arr.element, expected);
@@ -29155,7 +29484,9 @@ const Checker = struct {
         id: ExprId,
         rhs: ExprId,
         element: TypeId,
-        count: u32,
+        /// Null for an array of a length parameter's length, whose bounds are
+        /// checked where an instance runs.
+        count: ?u32,
         expected: ?Expected,
     ) std.mem.Allocator.Error!TypeId {
         if (self.whole_place != id) return try self.refuseRangePlaceUse(id);
@@ -29190,9 +29521,18 @@ const Checker = struct {
             return try self.record(id, .poison);
         }
 
-        if (try self.refuseSettledIndex(ends.lhs, count, lo, .index)) return try self.record(id, .poison);
-        const wrote: Wrote = if (inclusive) .index else .end;
-        if (try self.refuseSettledIndex(ends.rhs, count, last, wrote)) return try self.record(id, .poison);
+        if (lo < 0) {
+            _ = try self.refuseSettledIndex(ends.lhs, count orelse 0, lo, .index);
+            return try self.record(id, .poison);
+        }
+        if (count) |known| {
+            if (try self.refuseSettledIndex(ends.lhs, known, lo, .index)) return try self.record(id, .poison);
+            const wrote: Wrote = if (inclusive) .index else .end;
+            if (try self.refuseSettledIndex(ends.rhs, known, last, wrote)) return try self.record(id, .poison);
+        } else if (last >= std.math.maxInt(u32)) {
+            _ = try self.refuseSettledIndex(ends.rhs, std.math.maxInt(u32), last, if (inclusive) .index else .end);
+            return try self.record(id, .poison);
+        }
 
         // Where the place begins, recorded where it was settled: lowering emits
         // that offset rather than folding the bounds again, which is the same
@@ -29200,6 +29540,7 @@ const Checker = struct {
         try self.range_places.append(self.gpa, .{
             .at = id,
             .first = @intCast(lo),
+            .fits_within = if (count == null) @intCast(last + 1) else 0,
         });
 
         const made = try self.builder.arrayOf(element, @intCast(last - lo + 1));
@@ -29376,7 +29717,7 @@ const Checker = struct {
         if (self.ast.exprTag(at) != .index) return null;
         const b = self.ast.binary(at);
         const count = switch (self.builder.view().get(self.builder.exprType(b.lhs))) {
-            .array => |a| a.count,
+            .array => |a| self.builder.arrayCount(a.length) orelse return null,
             else => return null,
         };
         if (self.foldedFromEnd(b.rhs)) |k| return @as(i128, count) - k;
@@ -29672,8 +30013,11 @@ const Checker = struct {
                 .array => |array| array,
                 else => return false,
             };
-            const at = if (from_end) @as(i128, array.count) - value else value;
-            return self.refuseSettledIndex(wrote, array.count, at, if (from_end) .count_back else .index);
+            // A length parameter's count is known only to an instance, whose
+            // index is checked where it runs.
+            const count = self.builder.arrayCount(array.length) orelse return false;
+            const at = if (from_end) @as(i128, count) - value else value;
+            return self.refuseSettledIndex(wrote, count, at, if (from_end) .count_back else .index);
         }
         if (found.index == types_mod.Expansion.no_binding) return false;
         var refused = false;
@@ -29686,9 +30030,9 @@ const Checker = struct {
             const back = from_end or fills == .back;
             const head = try self.projectionType(found, self.builder.exprType(parts.lhs), impl_args);
             switch (self.builder.get(head)) {
-                .array => |array| {
-                    const at = if (back) @as(i128, array.count) - value else value;
-                    const rejected = try self.refuseSettledIndex(wrote, array.count, at, if (back) .count_back else .index);
+                .array => |array| if (self.builder.arrayCount(array.length)) |count| {
+                    const at = if (back) @as(i128, count) - value else value;
+                    const rejected = try self.refuseSettledIndex(wrote, count, at, if (back) .count_back else .index);
                     refused = refused or rejected;
                 },
                 else => {
@@ -31014,7 +31358,7 @@ const Checker = struct {
         for (self.unsettled_heads.items) |at| {
             const implementation = &implementations[at];
             const d = implementation.decl;
-            const args = try self.traitArgumentsOf(d);
+            const args = try self.traitArgumentsOf(d, DeclId.at(implementation.trait));
             self.gpa.free(implementation.args);
             implementation.args = args;
             implementation.ty = try self.typeOfRefOf(self.program.moduleOf(d), d, self.ast.declHead(d));
@@ -33875,13 +34219,13 @@ const Checker = struct {
     fn traitArgumentsOf(
         self: *Checker,
         impl: node.DeclId,
+        trait: node.DeclId,
     ) std.mem.Allocator.Error![]TypeId {
-        const written = self.ast.typeArgs(self.ast.declTraitArgs(impl));
-        const out = try self.gpa.alloc(TypeId, written.len);
+        const args = self.ast.declTraitArgs(impl);
+        const out = try self.gpa.alloc(TypeId, args.len());
         errdefer self.gpa.free(out);
 
-        const m = self.program.moduleOf(impl);
-        for (written, 0..) |a, k| out[k] = try self.typeOfRefOf(m, impl, a);
+        try self.readAppliedArguments(self.program.moduleOf(impl), impl, trait, args, out);
         return out;
     }
 
@@ -34628,7 +34972,8 @@ const Checker = struct {
         if (written.len == 0) return &.{};
         const out = try self.gpa.alloc(TypeId, written.len);
         errdefer self.gpa.free(out);
-        for (written, 0..) |a, k| out[k] = try self.typeOfRefOf(ctx.module, ctx.owner, a);
+        const trait = traitAt(self.ast, self.res, bound.named.name) orelse .none;
+        try self.readAppliedArguments(ctx.module, ctx.owner, trait, bound.named.args, out);
         return out;
     }
 
@@ -36659,7 +37004,7 @@ const Checker = struct {
                 return switch (step) {
                     .argument => |position| .{ .known = position.head },
                     .borrow_ => .{ .known = .borrow_ },
-                    .array => .{ .known = .array },
+                    .array, .array_length => .{ .known = .array },
                     .callable_parameter, .callable_result => .callable,
                 };
             }
@@ -37143,7 +37488,7 @@ const Checker = struct {
                         if (pool.fieldCount(key.ty) < 2) try self.contribute(terms, closed_source, outer, 0);
                         return;
                     },
-                    .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
+                    .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype, .length => {},
                 }
                 for (pool.appliedTo(key.ty)) |argument| try self.childHeight(terms, argument, key.substitute, outer);
                 if (pool.appliedTo(key.ty).len == 0) try self.contribute(terms, closed_source, outer, 0);
@@ -37393,7 +37738,7 @@ const Checker = struct {
             }
             switch (pool.get(ty)) {
                 .parameter => |p| return (p.owner == self.owner.index() or (self.other != .none and p.owner == self.other.index())) and (self.index == null or p.index == self.index.?),
-                .array => |array| return self.visit(array.element),
+                .array => |array| return try self.visit(array.length) or try self.visit(array.element),
                 .borrow => |observation| return self.visit(observation.referent),
                 .callable => |signature| {
                     for (pool.callableParams(signature)) |parameter| if (try self.visit(parameter.ty)) return true;
@@ -37408,7 +37753,7 @@ const Checker = struct {
                     var at: u32 = 1;
                     while (at < pool.fieldCount(ty)) : (at += 2) if (try self.visit(pool.view().fieldType(ty, at))) return true;
                 },
-                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype => {},
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .newtype, .length => {},
             }
             for (pool.appliedTo(ty)) |argument| if (try self.visit(argument)) return true;
             return false;
@@ -37505,12 +37850,6 @@ const Checker = struct {
                 clash.* = .{ .index = p.index, .was = found[p.index], .got = actual };
                 return false;
             },
-            // An array is the one constructed type that is not an
-            // instantiation, so the walk below cannot reach inside it. The
-            // length is written down and settles nothing, so only the element
-            // is matched -- and two arrays of different lengths are different
-            // types, which is a mismatch to report rather than a parameter to
-            // settle.
             .borrow => |wanted| {
                 const got = switch (self.builder.get(actual)) {
                     .borrow => |b| b,
@@ -37518,12 +37857,17 @@ const Checker = struct {
                 };
                 return self.settlePartInContext(wanted.referent, got.referent, d, found, clash, settlement, open_context);
             },
+            // An array is the one constructed type that is not an
+            // instantiation, so the walk below cannot reach inside it. Its
+            // length settles a length parameter as its element settles a type
+            // parameter; two constant lengths that differ are different types,
+            // which is a mismatch to report rather than a parameter to settle.
             .array => |w| {
                 const g = switch (self.builder.get(actual)) {
                     .array => |x| x,
                     else => return true,
                 };
-                if (w.count != g.count) return true;
+                if (!try self.settlePartInContext(w.length, g.length, d, found, clash, settlement, open_context)) return false;
                 return self.settlePartInContext(w.element, g.element, d, found, clash, settlement, open_context);
             },
             .callable => |want| {
@@ -37786,12 +38130,148 @@ const Checker = struct {
         head: []const TypeId = &.{},
     };
 
+    /// A supplied argument, or the count supplied by an array literal,
+    /// settles the same slots and attributes a conflict to this argument.
+    fn settleCallArgument(
+        self: *Checker,
+        argument: ExprId,
+        position: usize,
+        declaration: DeclId,
+        declared: TypeId,
+        supplied: TypeId,
+        explicit: bool,
+        settling: []const Settling,
+    ) std.mem.Allocator.Error!bool {
+        for (settling) |slot| {
+            var conflict: ?Clash = null;
+            if (try self.settle(declared, supplied, slot.owner, slot.found, &conflict)) continue;
+            const generic = slot.generics[conflict.?.index];
+            const own = slot.owner == declaration;
+            try self.reportSettledTwice(argument, self.ast.tokenText(generic.name), conflict.?, own and explicit, if (own) .{
+                .decl = declaration,
+                .param = position,
+                .generic = generic,
+            } else null);
+            return false;
+        }
+        return true;
+    }
+
+    const LiteralLengths = enum { complete, needs_row_type, conflict };
+    const LengthEvidence = struct {
+        position: usize,
+        declaration: DeclId,
+        explicit: bool,
+        settling: []const Settling,
+        hints: ?*Typing.Builder.ParameterHints = null,
+
+        fn open(self: LengthEvidence, checker: *const Checker, length: TypeId) !bool {
+            if (self.hints) |hints| if (hints.contains(length)) return false;
+            return checker.hasOpenParameter(length, self.settling);
+        }
+
+        fn supply(self: LengthEvidence, checker: *Checker, row: ExprId, length: TypeId, actual: TypeId) !bool {
+            if (self.hints) |hints| {
+                if (actual != .poison) try hints.putNoClobber(checker.gpa, length, actual);
+                return true;
+            }
+            return checker.settleCallArgument(row, self.position, self.declaration, length, actual, self.explicit, self.settling);
+        }
+    };
+
+    /// An array literal supplies its count before its elements need a type.
+    /// Nested rows supply theirs in written order. An expression in place
+    /// of a row supplies its array type through the ordinary element check,
+    /// so settlement stops there. For a result hint only the first witness
+    /// to each still-open count is needed, including witnesses past that row.
+    /// The walk keeps one frame per nested literal in the parameter.
+    fn settleLiteralLengths(
+        self: *Checker,
+        argument: ExprId,
+        declared: TypeId,
+        evidence: LengthEvidence,
+    ) std.mem.Allocator.Error!LiteralLengths {
+        const array = switch (self.builder.get(declared)) {
+            .array => |array| array,
+            else => return .complete,
+        };
+        const value = if (self.ast.exprTag(argument) == .marked) self.ast.unaryOperand(argument) else argument;
+        const literal = self.ast.withoutGroups(value);
+        if (self.ast.exprTag(literal) != .array_literal) return .complete;
+        const elements = self.ast.call(literal).args;
+        if (self.builder.get(array.length) == .parameter) {
+            const parameter = self.builder.get(array.length).parameter;
+            if ((parameter.owner != evidence.declaration.index() or !evidence.explicit) and
+                (evidence.hints == null or try evidence.open(self, array.length)))
+            {
+                const actual = try self.builder.lengthOf(@intCast(elements.len));
+                if (!try evidence.supply(self, argument, array.length, actual)) return .conflict;
+            }
+        }
+        if (self.builder.get(array.element) == .array) for (elements) |row| {
+            var source = self.ast.withoutGroups(row);
+            if (self.ast.exprTag(source) != .array_literal) {
+                // A row already bound to a type supplies its open counts before
+                // later arguments. Its elements and any mismatch with a settled
+                // count still belong to the ordinary argument check.
+                while (self.ast.exprTag(source) == .copy_) source = self.ast.withoutGroups(self.ast.unaryOperand(source));
+                const binding = self.res.targetOf(source);
+                if (binding != .none) {
+                    var known = self.binding_types.get(binding);
+                    var formal = array.element;
+                    while (self.builder.get(known) == .array and self.builder.get(formal) == .array) {
+                        const actual = self.builder.get(known).array;
+                        const required = self.builder.get(formal).array;
+                        if (self.builder.get(required.length) == .parameter and try evidence.open(self, required.length)) {
+                            if (!try evidence.supply(self, row, required.length, actual.length)) return .conflict;
+                        }
+                        known = actual.element;
+                        formal = required.element;
+                    }
+                }
+                if (evidence.hints == null) return .needs_row_type;
+                continue;
+            }
+            const result = try self.settleLiteralLengths(row, array.element, evidence);
+            if (result != .complete) return result;
+        };
+        return .complete;
+    }
+
+    /// Counts beyond an unchecked row can supply an expected result to a call
+    /// in that row. They cannot settle the enclosing call before the row
+    /// itself: an independently determined result still supplies its own width.
+    /// The map holds only the distinct open widths this argument supplies.
+    fn siblingLengthHint(
+        self: *Checker,
+        argument: ExprId,
+        declared: TypeId,
+        evidence: LengthEvidence,
+    ) std.mem.Allocator.Error!?TypeId {
+        if (self.ast.exprTag(self.ast.withoutGroups(argument)) != .array_literal) return null;
+        var nested = declared;
+        while (self.builder.get(nested) == .array) {
+            const row = self.builder.get(nested).array;
+            if (self.builder.get(row.length) == .parameter and try evidence.open(self, row.length)) break;
+            nested = row.element;
+        } else return null;
+
+        var hints: Typing.Builder.ParameterHints = .empty;
+        defer hints.deinit(self.gpa);
+        var provisional = evidence;
+        provisional.hints = &hints;
+        _ = try self.settleLiteralLengths(argument, declared, provisional);
+        if (hints.count() == 0) return null;
+        return try self.contextWithHints(declared, evidence.settling, &hints);
+    }
+
     fn inferCall(
         self: *Checker,
         id: ExprId,
         d: node.DeclId,
         over: node.DeclId,
         args: []const ExprId,
+        written_slots: ?[]const ?u32,
         walked: []bool,
         expected: ?Expected,
         written: []const TypeId,
@@ -37844,7 +38324,10 @@ const Checker = struct {
         // check below, which propagates that type into the expression.
         for ([_]bool{ true, false }, 0..) |speaking, pass| {
             if (pass == 1) try self.settleCallResult(d, args, settling, expected, self.successExpectationAt(id), self.failureExpectationAt(id), self.methodExpectationAt(id));
-            for (args, 0..) |a, j| {
+            const supplied_count = if (written_slots) |order| order.len else args.len;
+            for (0..supplied_count) |index| {
+                const j: usize = if (written_slots) |order| order[index].? else index;
+                const a = args[j];
                 if (j >= params.len) break;
                 // An omitted parameter determines nothing. Its default is a
                 // constant of the parameter's declared type, and a type
@@ -37858,6 +38341,8 @@ const Checker = struct {
                 if (pass != 0 and walked[j]) continue;
                 const declared = try paramType(self, d, j);
                 const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
+                const lengths: LengthEvidence = .{ .position = j, .declaration = d, .explicit = written.len > 0, .settling = settling };
+                if (speaking and try self.settleLiteralLengths(a, declared, lengths) == .conflict) return null;
                 if (!walked[j] and self.needsCallableContext(value) and self.callbackParameter(declared) != null) {
                     if (speaking) try self.settleFromLambdaParameters(d, declared, value, settling);
                     continue;
@@ -37876,6 +38361,15 @@ const Checker = struct {
                 // is about to do properly.
                 if (!speaking and !try self.hasOpenParameter(declared, settling)) continue;
 
+                const previous = self.success_expected;
+                defer self.success_expected = previous;
+                if (!speaking) if (try self.siblingLengthHint(value, declared, lengths)) |hint| {
+                    self.success_expected = .{
+                        .target = self.ast.withoutGroups(value),
+                        .depth = 0,
+                        .expected = .{ .ty = hint, .reason = .parameter, .at = self.locOf(a), .inference = settling },
+                    };
+                };
                 const observed = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
                 const got = if (over != .none and readsSelf(self.ast, params[j])) try self.inherentReceiver(d, observed) else observed;
                 walked[j] = true;
@@ -37884,13 +38378,7 @@ const Checker = struct {
                     continue;
                 }
 
-                for (settling) |s| {
-                    var clash: ?Clash = null;
-                    if (try self.settle(declared, got, s.owner, s.found, &clash)) continue;
-
-                    try self.reportSettledTwice(a, self.ast.tokenText(s.generics[clash.?.index].name), clash.?, s.owner == d and written.len > 0, if (s.owner == d) .{ .decl = d, .param = j, .generic = s.generics[clash.?.index] } else null);
-                    return null;
-                }
+                if (!try self.settleCallArgument(a, j, d, declared, got, written.len > 0, settling)) return null;
 
                 // A checked callable's bound relates its signature to the
                 // callee's other type parameters, beyond the callable type itself.
@@ -38440,7 +38928,10 @@ const Checker = struct {
             .parameter => if (try self.hasOpenParameter(ty, settling)) {
                 try out.put(self.gpa, ty, {});
             },
-            .array => |array| try self.openCallbackParameters(array.element, settling, out, visited),
+            .array => |array| {
+                try self.openCallbackParameters(array.length, settling, out, visited);
+                try self.openCallbackParameters(array.element, settling, out, visited);
+            },
             .borrow => |borrowed| try self.openCallbackParameters(borrowed.referent, settling, out, visited),
             .callable => |signature| {
                 for (self.builder.callableParams(signature)) |parameter| try self.openCallbackParameters(parameter.ty, settling, out, visited);
@@ -38532,14 +39023,13 @@ const Checker = struct {
 
     /// Keep undetermined result parameters symbolic while supplying known inputs.
     fn callableContext(self: *Checker, ty: TypeId, settling: []const Settling) !TypeId {
+        return self.contextWithHints(ty, settling, &.empty);
+    }
+
+    fn contextWithHints(self: *Checker, ty: TypeId, settling: []const Settling, hints: *const Typing.Builder.ParameterHints) !TypeId {
         var result = ty;
         for (settling) |slot| {
-            const replacements = try self.gpa.dupe(TypeId, slot.found);
-            defer self.gpa.free(replacements);
-            for (replacements, self.param_types[slot.owner.index()]) |*replacement, parameter| {
-                if (replacement.* == .poison) replacement.* = parameter;
-            }
-            result = try self.builder.substitute(result, slot.owner.index(), replacements);
+            result = try self.builder.substituteInferred(result, slot.owner.index(), slot.found, hints);
         }
         return result;
     }
@@ -38905,7 +39395,11 @@ const Checker = struct {
             };
             for (settling) |s| {
                 var ignored: ?Clash = null;
-                _ = try self.settle(answers, want.ty, s.owner, s.found, &ignored);
+                // A sibling's count may be known while its element type is
+                // still open in the enclosing call. Only its known parts
+                // can determine the result of this one.
+                const open = if (index == 1 and success.?.depth == 0) want.inference else null;
+                _ = try self.settleByInContext(answers, want.ty, s.owner, s.found, &ignored, .matching, open);
             }
         }
         if (failure) |want| {
@@ -39025,7 +39519,7 @@ const Checker = struct {
                 }
                 return false;
             },
-            .array => |array| return self.hasOpenParameterPast(array.element, settling, closed),
+            .array => |array| return try self.hasOpenParameterPast(array.length, settling, closed) or try self.hasOpenParameterPast(array.element, settling, closed),
             .borrow => |b| return self.hasOpenParameterPast(b.referent, settling, closed),
             .callable => |signature| {
                 for (self.builder.callableParams(signature)) |parameter| {
@@ -40149,6 +40643,64 @@ fn typingOf(gpa: std.mem.Allocator, text: []const u8, sink: *Sink) !types_mod.Ty
 fn checkSource(gpa: std.mem.Allocator, text: []const u8) !u32 {
     var sink = Sink.init(gpa);
     return checkSourceInto(gpa, text, &sink);
+}
+
+test "independent array length hints allocate for the argument that needs a width" {
+    const measure = struct {
+        fn bytes(widths: usize, hinted: usize) !i64 {
+            var arena = std.heap.ArenaAllocator.init(testing.allocator);
+            defer arena.deinit();
+            const gpa = arena.allocator();
+            var text: std.ArrayList(u8) = .empty;
+            try text.appendSlice(gpa, "fn blank[let n: UInt64]() -> [UInt8; n] { loop {} }\nfn widths[");
+            for (0..widths) |i| {
+                if (i != 0) try text.appendSlice(gpa, ", ");
+                try text.print(gpa, "let n{d}: UInt64", .{i});
+            }
+            try text.appendSlice(gpa, "](");
+            for (0..widths) |i| {
+                if (i != 0) try text.appendSlice(gpa, ", ");
+                try text.print(gpa, "_a{d}: [[UInt8; n{d}]; 2]", .{ i, i });
+            }
+            try text.appendSlice(gpa, ") -> UInt8 { 0 }\nfn main() -> UInt8 { widths(");
+            for (0..widths) |i| {
+                if (i != 0) try text.appendSlice(gpa, ", ");
+                try text.appendSlice(gpa, if (i < hinted) "[blank(), [1, 2]]" else "[[1, 2], blank()]");
+            }
+            try text.appendSlice(gpa, ") }\n");
+
+            // Every growing buffer allocates its new extent, regardless of
+            // which of the two row orders last allocated in the arena.
+            var counted = testing.FailingAllocator.init(gpa, .{ .resize_fail_index = 0 });
+            var sink = Sink.init(counted.allocator());
+            const source: Source = .{ .path = "widths.lin", .text = text.items };
+            var interner: Interner = .empty;
+            const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+            var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+            const res = try resolveTree(gpa, &ast, &sink);
+            const before = counted.allocated_bytes;
+            _ = try typecheckTree(counted.allocator(), &res, &sink);
+            try testing.expectEqual(@as(u32, 0), sink.error_count);
+            return @intCast(counted.allocated_bytes - before);
+        }
+    }.bytes;
+
+    const sizes = [_]usize{ 32, 64, 128 };
+    var single: [sizes.len]i64 = undefined;
+    var all: [sizes.len]i64 = undefined;
+    // Reversing the rows supplies the width before blank() needs it. Subtract
+    // that equally wide call to isolate the extra work of the result hints.
+    for (sizes, 0..) |size, i| {
+        const control = try measure(size, 0);
+        single[i] = try measure(size, 1) - control;
+        all[i] = try measure(size, size) - control;
+    }
+    for (1..sizes.len) |i| {
+        if (single[i] > single[i - 1] + 64 or all[i] > 2 * all[i - 1] + 128) {
+            std.debug.print("widths {any}, one hint {any} bytes, all hints {any} bytes\n", .{ sizes, single, all });
+            return error.TestUnexpectedResult;
+        }
+    }
 }
 
 /// An allocator that refuses the one allocation numbered `refuse_at` and
@@ -45806,6 +46358,124 @@ test "generic callee result annotations reject mismatched values" {
         _ = try checkSourceInto(gpa, source, &sink);
         try testing.expect(sink.hasErrors());
     }
+}
+
+test "a where subject can depend on a length" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    _ = try checkSourceInto(arena.allocator(),
+        \\trait Mark {}
+        \\
+        \\impl[T, let n: UInt64] Mark for [T; n] {}
+        \\
+        \\fn count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+        \\where [UInt8; n]: Mark {
+        \\    0
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    count[1]([UInt8(1)])
+        \\}
+    , &sink);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+}
+
+test "a where subject with a constant length remains closed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    _ = try checkSourceInto(arena.allocator(),
+        \\trait Mark {}
+        \\
+        \\impl[T, let n: UInt64] Mark for [T; n] {}
+        \\
+        \\fn count(_values: [UInt8; 1]) -> UInt8
+        \\where [UInt8; 1]: Mark {
+        \\    0
+        \\}
+        \\
+        \\fn main() -> UInt8 {
+        \\    count([UInt8(1)])
+        \\}
+    , &sink);
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    try testing.expectEqual(@as(?@import("../diagnostics/diagnostic.zig").Code, .t_where), sink.items()[0].code);
+}
+
+test "a where subject can depend on a callable parameter length" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    _ = try checkSourceInto(arena.allocator(),
+        \\trait Mark {}
+        \\
+        \\fn _count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+        \\where fn(values: [UInt8; n]) -> UInt8: Mark {
+        \\    0
+        \\}
+        \\
+        \\fn main() -> UInt8 { 0 }
+    , &sink);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+}
+
+test "a where subject can depend on a callable result length" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    _ = try checkSourceInto(arena.allocator(),
+        \\trait Mark {}
+        \\
+        \\fn _count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+        \\where fn() -> [UInt8; n]: Mark {
+        \\    0
+        \\}
+        \\
+        \\fn main() -> UInt8 { 0 }
+    , &sink);
+    try testing.expectEqual(@as(u32, 0), sink.error_count);
+}
+
+test "a where subject can depend on a selection base length" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var sink = Sink.init(arena.allocator());
+    _ = try checkSourceInto(arena.allocator(),
+        \\trait Mark {}
+        \\trait HasItem { type Item }
+        \\
+        \\struct Holder[let n: UInt64] { values: [UInt8; n] }
+        \\impl[let n: UInt64] HasItem for Holder[n] { type Item = UInt8 }
+        \\impl Mark for UInt8 {}
+        \\
+        \\fn _count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+        \\where Holder[n]: HasItem, Holder[n].Item: Mark {
+        \\    0
+        \\}
+        \\
+        \\fn main() -> UInt8 { 0 }
+    , &sink);
+    try testing.expectEqual(@as(usize, 1), sink.items().len);
+    try testing.expectEqual(@as(?@import("../diagnostics/diagnostic.zig").Code, .t_impl), sink.items()[0].code);
+    var type_sink = Sink.init(arena.allocator());
+    _ = try checkSourceInto(arena.allocator(),
+        \\trait Mark {}
+        \\trait HasItem { type Item }
+        \\
+        \\struct Holder[T] { values: T }
+        \\impl[T] HasItem for Holder[T] { type Item = UInt8 }
+        \\impl Mark for UInt8 {}
+        \\
+        \\fn _count[T](_values: T) -> UInt8
+        \\where Holder[T]: HasItem, Holder[T].Item: Mark {
+        \\    0
+        \\}
+        \\
+        \\fn main() -> UInt8 { 0 }
+    , &type_sink);
+    try testing.expectEqual(@as(usize, 1), type_sink.items().len);
+    try testing.expectEqual(type_sink.items()[0].code, sink.items()[0].code);
 }
 
 test "generic callee malformed where subjects preserve frontend recovery" {

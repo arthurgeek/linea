@@ -33,6 +33,8 @@ module.exports = grammar({
     [$.literal_type, $._expression],
     [$._result_type, $._type_only],
     [$.type_arguments, $._type_only],
+    [$.type_arguments, $.call_generic_arguments],
+    [$.type_arguments, $.call_type_arguments, $.call_generic_arguments],
     [$.call_type_arguments, $._call_type],
     [$._expression, $.call_only_generic_type, $.call_generic_type, $.literal_type],
     [$._result_type, $._call_type],
@@ -59,6 +61,8 @@ module.exports = grammar({
     [$._result_type, $._call_listed_type],
     [$._expression, $._call_type],
     [$._expression, $._call_type, $.literal_type],
+    [$._result_type, $._expression, $._call_type, $.literal_type],
+    [$._result_type, $._expression, $._call_type],
   ],
 
   rules: {
@@ -109,11 +113,26 @@ module.exports = grammar({
     // enum, an alias or a function may end the list with defaults:
     // `A: Allocator = SystemAllocator` is the argument a written type or a
     // call may omit.
-    type_parameter: $ => seq(
+    type_parameter: $ => choice(
+      seq(
+        optional('phantom'),
+        field('name', alias($.identifier, $.type_identifier)),
+        optional(seq(':', sep1($.bound, '+'))),
+        optional(seq('=', field('default', $._type))),
+      ),
+      $.length_parameter,
+    ),
+
+    // `let n: UInt64`: a length an array type and a type's arguments may
+    // name, read as a value in the body. It may be `phantom` and take a
+    // constant default.
+    length_parameter: $ => seq(
       optional('phantom'),
-      field('name', alias($.identifier, $.type_identifier)),
-      optional(seq(':', sep1($.bound, '+'))),
-      optional(seq('=', field('default', $._type))),
+      'let',
+      field('name', $.identifier),
+      ':',
+      field('type', $._type),
+      optional(seq('=', field('default', $._expression))),
     ),
 
     // A bound names a trait and what it applies: `Index[UInt64]` bounds by
@@ -130,8 +149,10 @@ module.exports = grammar({
       optional($.type_arguments),
     ),
 
-    // `[UInt8, Cell[T]]`. An argument is itself a written type, so this nests.
-    type_arguments: $ => seq('[', commaSep1($._type), ']'),
+    // `[UInt8, Cell[T]]`. An argument is itself a written type, so this nests,
+    // or a length: `Ring[UInt8, 16]`. A length parameter's name reads as a
+    // type name here, as the grammar does not know case.
+    type_arguments: $ => seq('[', commaSep1(choice($._type, $.integer_literal, $.binary_expression)), ']'),
 
     // An `extern` declares an operation without a source body, so
     // it is a header ended by a line break the way a trait's signature is.
@@ -311,8 +332,8 @@ module.exports = grammar({
     _refinement_bound: $ => seq(optional('-'), $.integer_literal),
 
     // A source implementation may name a declared constructor, Unit, a tuple,
-    // a borrow or, after `for`, a callable type. Arrays have no source-owned
-    // coherence head.
+    // a borrow or, after `for`, a callable type or an array, which only the
+    // trait's own module may implement for.
     impl_block: $ => seq(
       optional('default'),
       'impl',
@@ -334,6 +355,7 @@ module.exports = grammar({
         field('type', $.tuple_type),
         field('type', $.borrow_type),
         field('type', $.callable_type),
+        field('type', $.array_type),
       ),
       optional($.where_clause),
       choice(
@@ -836,10 +858,11 @@ module.exports = grammar({
     // comma, or one type that is no expression. A generic type here carries
     // no precedence of its own: `a[b[1]]` reads `b[` as an index as readily
     // as a type's arguments, and a precedence would settle that before the
-    // `1` shows which it is.
+    // `1` shows which it is. A list may also hold a length written as a
+    // number, `first[UInt8, 3]`; one number alone stays an index.
     call_type_arguments: $ => seq('[', choice(
-      seq($._call_listed_type, repeat1(seq(',', $._call_listed_type)), optional(',')),
-      seq($._call_listed_type, ','),
+      seq(choice($._call_listed_type, $.integer_literal, $.binary_expression), repeat1(seq(',', choice($._call_listed_type, $.integer_literal, $.binary_expression))), optional(',')),
+      seq(choice($._call_listed_type, $.integer_literal, $.binary_expression), ','),
       $._type_only,
     ), ']'),
     // A type among several, or before a comma: the comma shows the brackets
@@ -872,7 +895,7 @@ module.exports = grammar({
     _type_only: $ => choice($.array_type, $.callable_type, $.unit_type, alias($.call_only_generic_type, $.generic_type)),
     call_only_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_type_arguments, $.type_arguments)),
     call_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_generic_arguments, $.type_arguments)),
-    call_generic_arguments: $ => seq('[', commaSep1($._call_listed_type), ']'),
+    call_generic_arguments: $ => seq('[', commaSep1(choice($._call_listed_type, $.integer_literal, $.binary_expression)), ']'),
 
     // `Name?(e)`, a newtype's construction declining. One node, because the
     // parser reads it as one form and not as a `?` applied to something that

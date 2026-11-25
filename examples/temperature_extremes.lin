@@ -7,9 +7,9 @@ use io.IoError
 use io.println
 
 // A tuple suits a result whose two parts are obvious from context: the
-// signature promises (lowest, highest). `min` and `max` answer None only for
-// no readings, and a week always has seven, so `unwrap` cannot fail here.
-fn bounds(readings: [Int64; 7]) -> (Int64, Int64) {
+// signature promises (lowest, highest). An empty array has no extremes, so
+// unwrapping the minimum stops the program when n is zero.
+fn bounds[let n: UInt64](readings: [Int64; n]) -> (Int64, Int64) {
     let lowest = readings.as_slice().copied().min().unwrap()
     let highest = readings.as_slice().copied().max().unwrap()
     (lowest, highest)
@@ -23,6 +23,11 @@ test "the extremes span the whole week" {
 
 test "a constant week has equal extremes" {
     testing.assert_eq(bounds([6, 6, 6, 6, 6, 6, 6]), (6, 6), "every reading is 6")?
+}
+
+test "a fortnight takes the extremes of both weeks" {
+    let fortnight = [4, -3, 7, 0, -8, 12, 5, 1, 2, -11, 3, 14, 0, 6]
+    testing.assert_eq(bounds(fortnight), (-11, 14), "the fortnight spans -11 to 14")?
 }
 
 fn main() -> Result[UInt8, IoError] {

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/generics/length/a_borrow_into_an_array_of_any_length.lin:5:5
+  |
+5 |     values[0] = values[0] + 1
+  |     ^^^^^^^^^ keep this place available until the last use of its observation
+6 |     first[0]
+  |     -------- the observation is still used here

@@ -1,0 +1,11 @@
+// [T-Infer]. Nothing the call passes or expects says how long the array is.
+import std.mem
+
+fn blank[let n: UInt64]() -> [UInt8; n] {
+    mem.filled(0)
+}
+
+fn main() -> UInt8 {
+    let row = blank()
+    row[0]
+}

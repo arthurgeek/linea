@@ -1,0 +1,10 @@
+error[T-Bound]: `Block` declares `n` as a length, and `Bool` is a type
+ --> tests/generics/length/aliases_take_arguments_of_the_declared_kind.lin:5:32
+  |
+5 | fn _wrong_length(_bytes: Block[Bool]) {}
+  |                                ^^^^ this is a type
+error[T-Bound]: `Element` declares `T` as a type, and `2` is a length
+ --> tests/generics/length/aliases_take_arguments_of_the_declared_kind.lin:7:32
+  |
+7 | fn _wrong_type(_value: Element[2]) {}
+  |                                ^ this is a length

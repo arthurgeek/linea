@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Last` is already implemented for `Reader` with the same arguments
+  --> tests/generics/length/an_alias_and_its_array_are_one_trait_argument.lin:16:6
+   |
+10 | impl Last[Bytes[2]] for Reader {
+   |      ---- already implemented here
+16 | impl Last[[UInt8; 2]] for Reader {
+   |      ^^^^ a trait is implemented once per arguments and type

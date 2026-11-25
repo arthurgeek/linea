@@ -1,0 +1,5 @@
+error[T-Derive]: `for` names one application of `Readings`, by its types
+ --> tests/generics/length/a_derive_application_names_no_own_length.lin:5:28
+  |
+5 | @derive(Score for Readings[n])
+  |                            ^ drop `for` to request every application, or name the types of one

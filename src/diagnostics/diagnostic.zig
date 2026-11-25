@@ -238,6 +238,9 @@ pub const Code = enum {
     /// type was named with the wrong number of them. One rule: both are the
     /// question of whether what was supplied is what the parameter admits.
     t_bound,
+    /// A length parameter declared with a type other than `UInt64`, or in a
+    /// trait's own parameter list.
+    t_length_parameter,
     /// A format spec asks for a part the value's type does not take: a sign or
     /// zero padding on a value that is not a number, or a precision on one
     /// that is not a float.
@@ -504,6 +507,7 @@ pub const Code = enum {
             .t_array_length => "T-ArrayLength",
             .t_index => "T-Index",
             .t_bound => "T-Bound",
+            .t_length_parameter => "T-LengthParameter",
             .t_format => "T-Format",
             .t_where => "T-Where",
             .t_impl => "T-Impl",

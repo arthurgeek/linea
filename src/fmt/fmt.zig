@@ -2071,7 +2071,12 @@ const Printer = struct {
             if (self.alreadyCopied(p.name)) continue;
 
             if (p.phantom) try self.write("phantom ");
+            if (p.kind == .length) try self.write("let ");
             try self.write(self.ast.tokenText(p.name));
+            if (p.kind == .length and p.length_type.wasWritten()) {
+                try self.write(": ");
+                try self.writeWrittenType(p.length_type);
+            }
             try self.writeBounds(self.ast.boundsOf(p));
             if (p.default.wasWritten()) {
                 try self.write(" = ");
@@ -2154,6 +2159,7 @@ const Printer = struct {
                 if (ref.length != ExprId.none) try self.writeExpr(ref.length);
                 try self.write("]");
             },
+            .length_argument => try self.writeExpr(ref.length),
             .callable => {
                 const callable = self.ast.callableType(ref);
                 if (callable.invocation_token != .none) {
@@ -2252,7 +2258,7 @@ const Printer = struct {
     }
 
     /// The `[` opening the type parameter list whose first parameter is
-    /// `first`. Only comments and `phantom` stand between the two. A search
+    /// `first`. Comments, `phantom` and `let` may precede the name. A search
     /// forward from the declaration's first token would stop at a bracket in
     /// an attribute written before it, `@derive(Show[UInt8])`.
     fn typeParamsOpen(self: *const Printer, first: node.TypeParam) TokenId {
@@ -2260,7 +2266,7 @@ const Printer = struct {
         var i = first.name.index();
         while (i > 0) {
             i -= 1;
-            if (tags[i] != .comment and tags[i] != .keyword_phantom) break;
+            if (tags[i] != .comment and tags[i] != .keyword_phantom and tags[i] != .keyword_let) break;
         }
         return TokenId.at(i);
     }

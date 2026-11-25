@@ -1,0 +1,10 @@
+// A filled array counts its elements even when each occupies zero bytes.
+import std.mem
+
+@copyable
+struct Token {}
+
+fn main() -> UInt8 {
+    let tokens = mem.filled[Token, 4](Token {})
+    UInt8(tokens.length())
+}

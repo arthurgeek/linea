@@ -1,0 +1,15 @@
+// A struct's length parameter may take a constant default. A written type that
+// leaves the length out takes it, and one that writes it takes what it says.
+struct Ring[T, let n: UInt64 = 4] {
+    items: [T; n],
+}
+
+fn slots[T, let n: UInt64](_ring: Ring[T, n]) -> UInt64 {
+    n
+}
+
+fn main() -> UInt8 {
+    let small: Ring[UInt8] = .{ items = [0, 0, 0, 0] }
+    let large: Ring[UInt8, 6] = .{ items = [0, 0, 0, 0, 0, 0] }
+    UInt8(slots(small) * 10 + slots(large))
+}

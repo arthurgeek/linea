@@ -1,0 +1,17 @@
+// [L-Size]. A row may hold the largest count of bytes. Half as many
+// two-byte elements, rounded up, exceed the storage limit.
+struct Row[T, let n: UInt64] {
+    items: [T; n],
+}
+
+fn _bytes(_row: borrow Row[UInt8, 4294967295]) -> UInt8 {
+    0
+}
+
+fn _words(_row: borrow Row[UInt16, 2147483648]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

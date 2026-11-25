@@ -372,8 +372,9 @@ pub const Ast = struct {
     /// named constructor was applied to. Unit starts at `(` and has no name in
     /// the language, but remains one complete written type here.
     pub fn declHead(self: *const Ast, id: DeclId) node.TypeRef {
-        if (self.decls.items(.head_kind)[id.index()] == .callable) {
-            return self.typeArgs(self.decls.items(.head_args)[id.index()])[0];
+        switch (self.decls.items(.head_kind)[id.index()]) {
+            .callable, .array => return self.typeArgs(self.decls.items(.head_args)[id.index()])[0],
+            else => {},
         }
         return .{
             .at = self.declName(id),
@@ -388,7 +389,7 @@ pub const Ast = struct {
     /// for unit, and by its name otherwise.
     pub fn implHeadText(self: *const Ast, id: DeclId) []const u8 {
         const head = self.declHead(id);
-        if (head.kind == .tuple or head.kind == .callable) return self.writtenText(head);
+        if (head.kind == .tuple or head.kind == .callable or head.kind == .array) return self.writtenText(head);
         if (self.isUnitType(head)) return "()";
         return self.tokenText(self.declName(id));
     }
@@ -987,6 +988,7 @@ pub const Ast = struct {
         };
         // `[T; N]` and `(A, B)` name no token, so each spans its brackets.
         if (ref.kind == .array or ref.kind == .tuple) return self.firstBracketsSpan(ref.at);
+        if (ref.kind == .length_argument) return self.exprSpan(ref.length);
         if (ref.name == TokenId.none) return self.tokenSpan(ref.at);
         const head = self.tokenSpan(ref.name);
         if (self.isUnitType(ref)) {
@@ -2160,6 +2162,12 @@ pub const Ast = struct {
         /// a subexpression was already reported.
         pub fn exprTag(self: *const Builder, id: ExprId) Expr.Tag {
             return self.exprs.items(.tag)[id.index()];
+        }
+
+        /// The main token of an already-built expression: a name's own token
+        /// for a `name_ref`.
+        pub fn exprMain(self: *const Builder, id: ExprId) TokenId {
+            return self.exprs.items(.main_token)[id.index()];
         }
 
         pub fn addLiteral(self: *Builder, tag: Expr.Tag, at: TokenId, range: TokenRange) !ExprId {

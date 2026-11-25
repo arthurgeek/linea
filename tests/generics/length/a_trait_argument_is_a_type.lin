@@ -1,0 +1,13 @@
+// A trait takes types in an implementation and in a generic bound.
+trait Label[phantom T] {}
+
+struct Reader {}
+
+impl Label[2] for Reader {}
+
+fn _read[R: Label[3]](_reader: R) {}
+
+fn main() -> UInt8 {
+    let _reader = Reader {}
+    0
+}

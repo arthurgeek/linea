@@ -401,7 +401,7 @@ test "transient accept failures are retried until a connection is served" {
     let client = send(listener.local_address().unwrap(), health_request)
     let exhausted = io.IoError { operation = .Accept, category = .ResourceExhausted, code = .None, progress = 0 }
     let reset = io.IoError { operation = .Accept, category = .ConnectionReset, code = .None, progress = 0 }
-    let scripted = net.scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset)), .None, .None], .None)
+    let scripted = net.scripted(listener, [.Some(.Io(exhausted)), .Some(.Io(reset))], .None)
     let served = serve(scripted, health_router, limits: serving(1), policy: .Sequential)
     defer let received = read_to_end(client)
     testing.assert_eq(served, .Ok(()), "serving did not retry")?
@@ -438,7 +438,7 @@ test "a fatal accept failure ends serving and closes the listener" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let bound = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
-    let scripted = net.scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .None)
+    let scripted = net.scripted(listener, [.Some(.Io(copy(invalid)))], .None)
     let served = serve(scripted, health_router, limits: serving(1), policy: .Sequential)
     let refused = match net.connect(bound) {
         Ok(connection) => {
@@ -455,7 +455,7 @@ test "a fatal accept failure ends serving and closes the listener" {
 test "a failed listener close ends serving with close" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let failure = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
-    let scripted = net.scripted(listener, [.None, .None, .None, .None], .Some(copy(failure)))
+    let scripted = net.scripted[0](listener, [], .Some(copy(failure)))
     let served = serve(scripted, health_router, limits: serving(0), policy: .Sequential)
     testing.assert_eq(served, .Err(.Close(failure)), "a failed close was not reported")?
     .Ok(())
@@ -1172,7 +1172,7 @@ test "a bound address that cannot be read closes the listener" {
     let listener = net.listen(net.loopback(0)).unwrap()
     let address = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Listen, category = .InvalidDescriptor, code = .None, progress = 0 }
-    let scripted = net.scripted(listener, [.None, .None, .None, .None], .None)
+    let scripted = net.scripted[0](listener, [], .None)
     let served = serve_opened(scripted, .Err(.Io(copy(invalid))), mem.system(), health_router, serving(1), policy: .Sequential)
     let refused = match net.connect(address) {
         Ok(connection) => {
@@ -1191,7 +1191,7 @@ test "serving reports an accept failure when closing the listener fails too" {
     let address = listener.local_address().unwrap()
     let invalid = io.IoError { operation = .Accept, category = .InvalidDescriptor, code = .None, progress = 0 }
     let broken = io.IoError { operation = .Close, category = .InvalidDescriptor, code = .None, progress = 0 }
-    let scripted = net.scripted(listener, [.Some(.Io(copy(invalid))), .None, .None, .None], .Some(broken))
+    let scripted = net.scripted(listener, [.Some(.Io(copy(invalid)))], .Some(broken))
     let served = serve_opened(scripted, .Ok(address), mem.system(), health_router, serving(1), policy: .Sequential)
     testing.assert_eq(served, .Err(.Serve(.Accept(.Io(invalid)))), "the close failure replaced the accept failure")?
     .Ok(())

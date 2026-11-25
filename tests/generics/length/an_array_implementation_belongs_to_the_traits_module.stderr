@@ -1,0 +1,5 @@
+error[M-Impl]: an array has no declaring module
+ --> tests/generics/length/an_array_implementation_belongs_to_the_traits_module.lin:3:36
+  |
+3 | impl[T, let n: UInt64] Display for [T; n] {
+  |                                    ^^^^^^ write the implementation where the trait is declared

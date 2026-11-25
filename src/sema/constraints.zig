@@ -185,7 +185,7 @@ pub const Constraints = struct {
         return switch (subject.kind) {
             .named => subject.name,
             .selection => subject.name,
-            .array, .callable, .borrow, .grouped, .tuple => subject.at,
+            .array, .callable, .borrow, .grouped, .tuple, .length_argument => subject.at,
         };
     }
 };

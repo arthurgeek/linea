@@ -1,0 +1,11 @@
+// An alias checks the kind of each argument before substituting it.
+alias Block[let n: UInt64] = [UInt8; n]
+alias Element[T] = T
+
+fn _wrong_length(_bytes: Block[Bool]) {}
+
+fn _wrong_type(_value: Element[2]) {}
+
+fn main() -> UInt8 {
+    0
+}

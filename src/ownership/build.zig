@@ -1071,6 +1071,9 @@ const Builder = struct {
                     // says which side of this it falls on before the build
                     // succeeds.
                     .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
+                    // A length parameter's value is the instance's length, a
+                    // number no storage holds.
+                    .length_parameter => return,
                     .constant => return self.staticRead(id),
                 }
                 try self.emit(
@@ -1381,7 +1384,7 @@ const Builder = struct {
             // A function or a type is not a value and has no state.
             // Exhaustive, with no `else`, so a kind of name added later says
             // which side of this it falls on before the build succeeds.
-            .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
+            .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
         }
 
         if (self.at == .none) return;
@@ -1499,7 +1502,7 @@ const Builder = struct {
             if (b == BindingId.none) return true;
             switch (self.res.kindOf(b)) {
                 .local, .parameter, .binder, .capture => {},
-                .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return false,
+                .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return false,
             }
         }
         if (self.ast.refersToBinding(id)) return self.placeType(id) == .poison;
@@ -1562,7 +1565,7 @@ const Builder = struct {
             // A function or a type is not a value and has no state.
             // Exhaustive, with no `else`, so a kind of name added later says
             // which side of this it falls on before the build succeeds.
-            .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
+            .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
         }
 
         try self.emit(
@@ -1736,7 +1739,7 @@ const Builder = struct {
                 if (b == BindingId.none) return;
                 switch (self.res.kindOf(b)) {
                     .local, .parameter, .binder, .capture => {},
-                    .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
+                    .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => return,
                 }
                 try self.emit(.held, .{ .root = b, .depth = path.depth }, at);
             },
@@ -1908,7 +1911,7 @@ const Builder = struct {
         if (b == BindingId.none) return;
         switch (self.res.kindOf(b)) {
             .local, .parameter, .binder, .capture => try self.emit(.unsettled, .{ .root = b }, named),
-            .constant, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => {},
+            .constant, .length_parameter, .function, .declared_type, .builtin_type, .trait, .module, .associated_type, .type_parameter, .type_alias => {},
         }
     }
 

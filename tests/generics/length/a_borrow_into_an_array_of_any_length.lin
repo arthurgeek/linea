@@ -1,0 +1,12 @@
+// [O-Borrow]. A view of an array of any length observes the array, so an
+// element cannot be written while the view is still used.
+fn bump[let n: UInt64](inout values: [UInt8; n]) -> UInt8 {
+    let first = values.as_slice()
+    values[0] = values[0] + 1
+    first[0]
+}
+
+fn main() -> UInt8 {
+    var values: [UInt8; 2] = [1, 2]
+    bump(&values)
+}

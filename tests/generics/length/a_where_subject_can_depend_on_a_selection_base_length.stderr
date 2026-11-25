@@ -1,0 +1,5 @@
+error[T-Impl]: `Holder[n]` has no available associated type `Item`
+  --> tests/generics/length/a_where_subject_can_depend_on_a_selection_base_length.lin:16:27
+   |
+16 | where Holder[n]: HasItem, Holder[n].Item: Mark {
+   |                           ^^^^^^^^^^^^^^ bring the trait into scope or add a bound declaring this associated type

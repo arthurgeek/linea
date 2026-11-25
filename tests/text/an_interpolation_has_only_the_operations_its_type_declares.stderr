@@ -43,11 +43,11 @@ error[T-UnknownOperation]: `{interpolation Str}` has no operation `parse`
    |
 15 |     let _typed = "hi {name}".parse[UInt8]()
    |                  ^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
-error[T-UnknownField]: `{interpolation Str}` has no field `parse`
+error[T-UnknownOperation]: `{interpolation Str}` has no operation `parse`
   --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:16:20
    |
 16 |     let _indexed = "hi {name}".parse[0]()
-   |                    ^^^^^^^^^^^^^^^^^ not a field of this value
+   |                    ^^^^^^^^^^^^^^^^^ no operation of this name is declared for this type
 error[T-UnknownOperation]: `{interpolation UInt8}` has no operation `trim`
   --> tests/text/an_interpolation_has_only_the_operations_its_type_declares.lin:18:14
    |

@@ -1,0 +1,7 @@
+error[N-Duplicate]: `Inspect` is already implemented for `Reader` with the same arguments
+  --> tests/generics/length/an_explicit_argument_meets_its_nested_default.lin:15:6
+   |
+13 | impl Inspect[Wrapper] for Reader {}
+   |      ------- already implemented here
+15 | impl Inspect[Wrapper[Bytes[UInt8, 2]]] for Reader {}
+   |      ^^^^^^^ a trait is implemented once per arguments and type

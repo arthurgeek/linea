@@ -1,0 +1,5 @@
+error[N-Undefined]: unknown trait `UInt64`
+ --> tests/generics/length/a_capital_bound_names_a_type.lin:3:13
+  |
+3 | fn count[N: UInt64](_flag: N) -> UInt64 {
+  |             ^^^^^^ no trait with this name is declared

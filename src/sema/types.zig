@@ -322,6 +322,9 @@ pub const Type = union(enum) {
         /// The capability promised by the parameter's normalized bounds.
         requirement: CapabilityRequirement = .unrestricted,
         integer: bool = false,
+        /// Declared `let n: UInt64`: it stands for an array's length, and an
+        /// argument for it is a `.length` entry or another length parameter.
+        length: bool = false,
         /// Whether its bounds promise `Owned`: every admitted argument carries
         /// no dependency, so the parameter seeds none.
         owned: bool = false,
@@ -360,12 +363,22 @@ pub const Type = union(enum) {
     /// a question the type already settles.
     array: struct {
         element: TypeId,
-        count: u32,
+        /// A `.length` entry, or a parameter standing for one.
+        length: TypeId,
         /// How it is written. Minted where the type is, for the reason an
         /// instantiation's is: a diagnostic naming two arrays has to tell them
         /// apart, and `<compound>` on both sides of a mismatch says nothing
         /// about which length was wanted.
         name: []const u8 = "",
+    },
+    /// An array's count, as a pool entry rather than a number inside the
+    /// array, so a length substitutes, settles by inference and keys an
+    /// instance through the channels type arguments already use. It is not a
+    /// type: no value has it, and a position expecting a type refuses it.
+    length: struct {
+        value: u32,
+        /// Its digits, so an argument list naming it spells like any other.
+        name: []const u8,
     },
     /// A structural function value, identified by its complete signature.
     callable: CallableSignature,
@@ -406,6 +419,15 @@ pub const Type = union(enum) {
         foreign: bool = false,
     },
 };
+
+/// An array's count in the type pool. A symbolic count has no number until
+/// its parameter is settled.
+fn arrayCountIn(pool: []const Type, length: TypeId) ?u32 {
+    return switch (pool[length.index()]) {
+        .length => |count| count.value,
+        else => null,
+    };
+}
 
 /// One named part of a structure.
 pub const Field = struct {
@@ -746,11 +768,16 @@ const Arrangement = struct {
                 // `compute` here laid the element out once per array holding
                 // it, and an array of an array of a structure paid that at
                 // every level -- the cost this table exists to stop.
+                // An array of a parameter's length is a placeholder for the
+                // reason a parameter is: only an instantiation is laid out.
+                const count = arrayCountIn(self.pool, a.length) orelse break :blk .scalar;
                 const of = self.layoutOf(a.element);
                 const stride = Layout.alignUp(of.size, of.alignment);
-                const size = @min(stride *| a.count, Layout.stop);
+                const size = @min(stride *| count, Layout.stop);
                 break :blk Layout.recorded(@intCast(size), of.alignment, true);
             },
+            // A length is not a type, so nothing is laid out at one.
+            .length => .{ .size = 0, .alignment = 1 },
 
             .enum_ => |e| blk: {
                 // The tag occupies a full word, which ADR 0028 chose deliberately:
@@ -901,7 +928,7 @@ fn walkFrom(
         // acyclic by default and laid out by whoever asked for its size
         // first.
         .closure => |closure| if (try walkFrom(gpa, typing, closure.environment, marks, path)) |at| return at,
-        .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable => {},
+        .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .parameter, .callable, .length => {},
     }
 
     _ = path.pop();
@@ -1152,11 +1179,13 @@ const CapabilityFacts = struct {
                 if (nominal.ownership_policy != .copyable) try self.markNoncopyable(gpa, ty);
                 try self.edge(gpa, builder, ty, nominal.base);
             },
-            .array => |array| if (array.count != 0) {
+            // A parameter's length may be anything, zero or not, so only a
+            // known zero holds nothing.
+            .array => |array| if ((builder.arrayCount(array.length) orelse 1) != 0) {
                 try self.edge(gpa, builder, ty, array.element);
             },
             .closure => |closure| try self.edge(gpa, builder, ty, closure.environment),
-            .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
+            .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison, .length => {},
         }
         if (builder.certified_storage != .none and builder.declOfType(ty) == builder.certified_storage) {
             if (builder.instanceOf(ty)) |instance| {
@@ -1595,7 +1624,7 @@ const BorrowContainment = struct {
             .closure => |closure| try visit.child(.environment, closure.environment),
             .borrow => |observation| if (mode != .raw_carriers) try visit.child(.element, observation.referent),
             .parameter => {},
-            .array => |array| if (array.count != 0) {
+            .array => |array| if ((source.arrayCount(array.length) orelse 1) != 0) {
                 try visit.child(.element, array.element);
             },
             .newtype => |newtype| try visit.child(.base, newtype.base),
@@ -2357,8 +2386,15 @@ pub const DependencyCoverage = struct {
                     if (pool.mayCarryDependencies(pool.variantFieldType(ty, @intCast(variant), @intCast(index)))) count += 1;
                 }
             },
-            .array => |array| {
-                count = if (pool.mayCarryDependencies(array.element)) array.count else 0;
+            .array => |array| if (!pool.mayCarryDependencies(array.element)) {
+                count = 0;
+            } else if (pool.arrayCount(array.length)) |known| {
+                count = known;
+            } else {
+                // Paths name slots by index, and no set of indexes is known to
+                // cover every slot of a parameter's length.
+                try self.capable_children.put(gpa, ty, null);
+                return null;
             },
             else => {
                 try self.capable_children.put(gpa, ty, null);
@@ -2399,8 +2435,9 @@ pub const DependencyCoverage = struct {
             if (!pool.mayCarryDependencies(child_ty)) continue;
             if (try self.covers(Path, gpa, pool, child_ty, child.value_ptr.items, context)) {
                 if (shape == .array) {
-                    const range = context.arrayRange(child.key_ptr.*, shape.array.count) orelse continue;
-                    if (range.first > range.last or range.last >= shape.array.count) continue;
+                    const count = pool.concreteCount(shape.array.length);
+                    const range = context.arrayRange(child.key_ptr.*, count) orelse continue;
+                    if (range.first > range.last or range.last >= count) continue;
                     try ranges.append(gpa, range);
                 } else covered += 1;
             }
@@ -3012,10 +3049,6 @@ pub const Implementation = struct {
     derived: bool = false,
     /// Whether the compiler provides it rather than a source declaring it.
     ambient: bool = false,
-    /// Is true when this row the compiler provides for arrays answers through
-    /// the array's `Slice` view: it applies where the view's implementation
-    /// does, and a selection of it runs the view's members.
-    viewed: bool = false,
     /// How many parameters the implementation declares of its own, which is
     /// what a receiver binds and what its trait's arguments are substituted
     /// through. Not the head's arity: a head naming fewer than the
@@ -3064,6 +3097,7 @@ pub const ImplementationParameters = struct {
         argument: struct { head: Head, index: u32 },
         borrow_,
         array,
+        array_length,
         callable_parameter: u32,
         callable_result,
 
@@ -3077,6 +3111,7 @@ pub const ImplementationParameters = struct {
                 } else null,
                 .borrow_ => if (pool.get(ty) == .borrow) pool.get(ty).borrow.referent else null,
                 .array => if (pool.get(ty) == .array) pool.get(ty).array.element else null,
+                .array_length => if (pool.get(ty) == .array) pool.get(ty).array.length else null,
                 .callable_parameter => |index| if (pool.get(ty) == .callable) blk: {
                     const params = pool.callableParams(pool.get(ty).callable);
                     break :blk if (index < params.len) params[index].ty else null;
@@ -3142,7 +3177,10 @@ pub const ImplementationParameters = struct {
                 }
                 switch (self.pool.get(ty)) {
                     .borrow => |observation| try self.child(observation.referent, root, .borrow_),
-                    .array => |array| try self.child(array.element, root, .array),
+                    .array => |array| {
+                        try self.child(array.element, root, .array);
+                        try self.child(array.length, root, .array_length);
+                    },
                     .callable => |signature| {
                         for (self.pool.callableParams(signature), 0..) |parameter, index| try self.child(parameter.ty, root, .{ .callable_parameter = @intCast(index) });
                         try self.child(signature.result, root, .callable_result);
@@ -4171,7 +4209,7 @@ pub const ImplIndex = struct {
                 try self.measure_work.appendSlice(self.gpa, pool.appliedTo(ty));
                 switch (pool.get(ty)) {
                     .borrow => |value| try self.measure_work.append(self.gpa, value.referent),
-                    .array => |value| try self.measure_work.append(self.gpa, value.element),
+                    .array => |value| try self.measure_work.appendSlice(self.gpa, &.{ value.element, value.length }),
                     .callable => |value| {
                         try self.measure_work.append(self.gpa, value.result);
                         for (pool.callableParams(value)) |parameter| try self.measure_work.append(self.gpa, parameter.ty);
@@ -5066,7 +5104,16 @@ pub const ImplIndex = struct {
                 else => false,
             },
             .array => |want| switch (pool.get(actual)) {
-                .array => |got| got.count == want.count and try self.matchesSubstitutionIn(
+                .array => |got| try self.matchesSubstitutionIn(
+                    memo,
+                    impls,
+                    pool,
+                    decided,
+                    got.length,
+                    want.length,
+                    owner,
+                    bindings,
+                ) and try self.matchesSubstitutionIn(
                     memo,
                     impls,
                     pool,
@@ -5320,7 +5367,7 @@ pub const ImplIndex = struct {
                 else => false,
             },
             .array => |want| switch (pool.get(actual)) {
-                .array => |got| got.count == want.count and bindKeyPast(pool, got.element, want.element, owner, bindings, matched),
+                .array => |got| bindKeyPast(pool, got.length, want.length, owner, bindings, matched) and bindKeyPast(pool, got.element, want.element, owner, bindings, matched),
                 else => false,
             },
             .callable => |want| switch (pool.get(actual)) {
@@ -5549,12 +5596,6 @@ pub const ImplIndex = struct {
                     try pool.substitute(predicate.subject, im.decl.index(), bindings);
                 if (!try self.meetsDemand(impls, pool, decided, im, bindings, subject, predicate.demand)) break :blk false;
             }
-            // A viewed array row applies exactly where the view's own
-            // implementation does, so the two cannot disagree.
-            if (im.viewed) {
-                const view = try pool.arrayViewOf(held) orelse break :blk false;
-                if (try self.findOnce(impls, pool, decided, im.trait, args, view) == null) break :blk false;
-            }
             break :blk true;
         };
         if (matched) return .{ .header_matches = true, .arguments = bindings };
@@ -5702,7 +5743,10 @@ pub const TraversalPositions = union(enum) {
     expression: ExprId,
     array: struct {
         key: TypeId,
-        count: u32,
+        /// The field's array length, which lowering substitutes: a
+        /// structure generic over its length walks as many positions as
+        /// each instance holds.
+        length: TypeId,
         iterator: TypeId,
     },
 };
@@ -5746,6 +5790,10 @@ pub const RangePlace = struct {
     at: ExprId,
     /// The index of the first element the place names.
     first: u32,
+    /// How many elements the array must hold for the place to fit, where its
+    /// length is a parameter and only an instance knows it; zero where the
+    /// checker held the bounds against a known length.
+    fits_within: u32 = 0,
 };
 
 /// One signature a trait declares, and the `impl` member supplying it.
@@ -6445,10 +6493,6 @@ pub const BodyOrigin = union(enum) {
     /// A body for an operation the compiler provides, where a function value
     /// holds it: the trait member and the type it runs for.
     built_in: OperationAt,
-    /// A body for an operation an array answers through its slice view,
-    /// where a function value holds it: it views each array argument and
-    /// calls the slice's implementation.
-    viewed: OperationAt,
 };
 
 /// A trait operation at one type that answers it, as a body of its own.
@@ -6648,17 +6692,6 @@ pub const ImplementationChoice = struct {
     /// record.
     trait_args: []const TypeId = &.{},
     observations: u32 = 0,
-    /// Names the `Slice` view that the array the observations reach answers
-    /// through, and is `.poison` where it answers for itself. The supplier is then the view's
-    /// implementation, and a call passes the view of each whole-`Self`
-    /// argument to it.
-    view: TypeId = .poison,
-
-    /// Returns the type the supplying implementation runs for: the view where
-    /// the receiver answers through one, and the receiver otherwise.
-    pub fn implementedFor(self: ImplementationChoice) TypeId {
-        return if (self.view != .poison) self.view else self.receiver;
-    }
 
     pub fn declaredImplementation(self: ImplementationChoice) ?ImplementationId {
         return switch (self.supplier) {
@@ -6865,6 +6898,9 @@ pub const Typing = struct {
     literal_values: std.AutoHashMapUnmanaged(ExprId, LiteralValue) = .empty,
     conversion_targets: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     integer_properties: std.AutoHashMapUnmanaged(ExprId, IntegerProperty) = .empty,
+    /// A length parameter read as a value, and the parameter whose
+    /// substituted `.length` lowering reads.
+    length_reads: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     /// Resolved field and index types, independent of contextual type
     /// mismatches. Rejected selection steps have no entry.
     selected_places: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
@@ -6877,6 +6913,9 @@ pub const Typing = struct {
     /// The parameters a call through each local or capture holding a
     /// callable names its arguments by, where something declared them.
     binding_labels: std.AutoHashMapUnmanaged(ids.BindingId, node.ParamRange) = .empty,
+    /// Bare value names supplied to type parameters. A completion can extend
+    /// such a name to a qualified type even if its module is shadowed in expressions.
+    value_names_in_type_slots: std.AutoHashMapUnmanaged(TokenId, void) = .empty,
     /// Associated selection facts keyed by the written dot, including recovery.
     type_selections: std.AutoHashMapUnmanaged(TokenId, TypeSelection) = .empty,
     contract_variants: std.AutoHashMapUnmanaged(TokenId, VariantIdentity) = .empty,
@@ -7241,6 +7280,12 @@ pub const Typing = struct {
         return self.integer_properties.get(expression);
     }
 
+    /// The length parameter an expression reads as a value, or null where it
+    /// reads none.
+    pub fn lengthRead(self: *const Typing, expression: ExprId) ?TypeId {
+        return self.length_reads.get(expression);
+    }
+
     /// Choose the library routine a format spec lays a value of this type out
     /// through: the one for integers, the one for Float64, or the one that
     /// pads any value's rendered text.
@@ -7348,6 +7393,7 @@ pub const Typing = struct {
         self.literal_values.deinit(gpa);
         self.conversion_targets.deinit(gpa);
         self.integer_properties.deinit(gpa);
+        self.length_reads.deinit(gpa);
         self.selected_places.deinit(gpa);
         self.place_projections.deinit(gpa);
         self.implicit_test_successes.deinit(gpa);
@@ -7355,6 +7401,7 @@ pub const Typing = struct {
         self.field_names.deinit(gpa);
         self.binding_labels.deinit(gpa);
         self.type_selections.deinit(gpa);
+        self.value_names_in_type_slots.deinit(gpa);
         self.contract_variants.deinit(gpa);
         self.readonly_places.deinit(gpa);
         self.carried_places.deinit(gpa);
@@ -7492,6 +7539,7 @@ pub const Typing = struct {
             .struct_ => |x| x.name,
             .newtype => |n| n.name,
             .array => |a| a.name,
+            .length => |l| l.name,
             .callable => |c| c.name,
             .borrow => |b| b.name,
             .closure => "<closure>",
@@ -7772,9 +7820,15 @@ pub const Typing = struct {
             .array => |a| {
                 try out.append(gpa, '[');
                 try self.appendMangledWith(gpa, out, a.element, shared);
-                const count = try std.fmt.allocPrint(gpa, ";{d}]", .{a.count});
-                defer gpa.free(count);
-                try out.appendSlice(gpa, count);
+                try out.append(gpa, ';');
+                try self.appendMangledWith(gpa, out, a.length, shared);
+                try out.append(gpa, ']');
+                return;
+            },
+            // Digits, which no type name begins with, so a length argument
+            // and a type argument never spell alike.
+            .length => |l| {
+                try out.appendSlice(gpa, l.name);
                 return;
             },
             .callable => |signature| {
@@ -8037,7 +8091,7 @@ pub const Typing = struct {
                 if (shape.finish()) |exact| return .{ .callable_ = exact };
                 if (signature.shape_of != .poison) return .{ .callable_ = .long(@intFromEnum(signature.shape_of)) };
             },
-            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure => {},
+            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .struct_, .newtype, .parameter, .closure, .length => {},
         }
         return .{ .whole = t };
     }
@@ -9123,11 +9177,11 @@ pub const Typing = struct {
                 parts.variants_end = sum.first_variant + sum.variant_count;
             },
             .newtype => |nominal| parts.single = nominal.base,
-            .array => |array| if (array.count != 0) {
+            .array => |array| if (self.arrayCount(array.length) != 0) {
                 parts.single = array.element;
             },
             .closure => |closure| parts.single = closure.environment,
-            .parameter, .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison => {},
+            .parameter, .borrow, .callable, .integer, .open_integer, .open_float, .open_type, .boolean, .float, .unit, .never, .poison, .length => {},
         }
         if (self.raw_accesses.storage != .none and self.declOfType(t) == self.raw_accesses.storage) {
             if (self.instanceOf(t)) |instance| {
@@ -9288,7 +9342,7 @@ pub const Typing = struct {
             // program can act on -- so the addition decides here before the
             // build succeeds.
             .closure => |closure| self.fieldOffset(closure.environment, i),
-            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .parameter, .array, .newtype, .callable, .borrow => 0,
+            .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .enum_, .parameter, .array, .newtype, .callable, .borrow, .length => 0,
         };
     }
 
@@ -9362,6 +9416,29 @@ pub const Typing = struct {
         return self.pool[@intFromEnum(t)];
     }
 
+    /// The count an array's length names, or null when the length is a
+    /// parameter that only an instantiation settles. Every question about an
+    /// array's count is answered here.
+    pub fn arrayCount(self: *const Typing, length: TypeId) ?u32 {
+        return arrayCountIn(self.pool, length);
+    }
+
+    /// Whether `ty` stands for a length rather than a type: a `.length`
+    /// entry, or a parameter declared `let n: UInt64`.
+    pub fn isLength(self: *const Typing, ty: TypeId) bool {
+        return switch (self.get(ty)) {
+            .length => true,
+            .parameter => |p| p.length,
+            else => false,
+        };
+    }
+
+    /// The count of an array type that is known to be concrete: every type
+    /// after instance discovery, and every array written with a constant.
+    pub fn concreteCount(self: *const Typing, length: TypeId) u32 {
+        return self.arrayCount(length) orelse unreachable;
+    }
+
     /// Whether a type can represent a value. Takes an `i128` so one signature
     /// covers both `Int64`'s minimum and `UInt64`'s maximum, which is why the
     /// checker folds constants into `i128` rather than the operand type.
@@ -9380,7 +9457,7 @@ pub const Typing = struct {
             // produces a second range diagnostic. An open integer holds
             // anything for now: its values are checked when its type settles.
             .poison, .open_integer => true,
-            .unit, .never, .open_type, .open_float => false,
+            .unit, .never, .open_type, .open_float, .length => false,
             // Not a numeric domain either: an enum's values are its variants,
             // and a structure's are whatever its parts hold. A parameter has
             // no domain of its own at all -- it stands for one.
@@ -9435,7 +9512,7 @@ pub const Typing = struct {
 
     /// Accumulates types while checking. The checker owns one and discards it.
     pub const Builder = struct {
-        const ArrayKey = struct { element: TypeId, count: u32 };
+        const ArrayKey = struct { element: TypeId, length: TypeId };
 
         gpa: std.mem.Allocator,
         constant_pool: *const constants.Pool = &.{},
@@ -9511,6 +9588,7 @@ pub const Typing = struct {
         /// from, which is always the older of the two. An array that was in
         /// the pool before a substitution arrived at it has no entry.
         array_sources: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
+        interned_lengths: std.AutoHashMapUnmanaged(u32, TypeId) = .empty,
         borrowed_types: std.AutoHashMapUnmanaged(TypeId, TypeId) = .empty,
         capability_facts: CapabilityFacts = .{},
         scoped_capability_facts: ScopedCapabilityFacts = .{},
@@ -10148,7 +10226,7 @@ pub const Typing = struct {
             decl: u32,
             args: []const TypeId,
         ) std.mem.Allocator.Error!TypeId {
-            if (self.substitutionLeaf(ty, decl, args)) |answer| return answer;
+            if (self.substitutionLeaf(ty, decl, args, null)) |answer| return answer;
             const held = try self.gpa.dupe(TypeId, args);
             defer self.gpa.free(held);
             var substitution: TypeSubstitution = .{ .decl = decl, .args = held, .within = owner };
@@ -10156,19 +10234,40 @@ pub const Typing = struct {
             return substitution.apply(self, ty);
         }
 
+        pub const ParameterHints = std.AutoHashMapUnmanaged(TypeId, TypeId);
+
+        /// Reads a type while a call is settling `decl`. An open slot takes
+        /// its hint, if any, and otherwise keeps the parameter itself. The
+        /// caller owns both tables outside the pool, so interning during
+        /// substitution cannot invalidate them. Only parameters reached from
+        /// `ty` need a lookup.
+        pub fn substituteInferred(
+            self: *Builder,
+            ty: TypeId,
+            decl: u32,
+            found: []const TypeId,
+            hints: *const ParameterHints,
+        ) std.mem.Allocator.Error!TypeId {
+            var substitution: TypeSubstitution = .{ .decl = decl, .args = found, .hints = hints };
+            defer substitution.memo.deinit(self.gpa);
+            return substitution.apply(self, ty);
+        }
+
         /// Leaves cannot grow the pool, so they need neither a stable copy
         /// of the replacement vector nor a structural traversal memo.
-        fn substitutionLeaf(self: *const Builder, ty: TypeId, decl: u32, args: []const TypeId) ?TypeId {
+        fn substitutionLeaf(self: *const Builder, ty: TypeId, decl: u32, args: []const TypeId, hints: ?*const ParameterHints) ?TypeId {
             return switch (self.get(ty)) {
                 .parameter => |parameter| if (self.standinOf(ty) != null)
                     null
                 else if (parameter.owner != decl)
                     ty
-                else if (parameter.index < args.len)
-                    args[parameter.index]
+                else if (parameter.index >= args.len)
+                    .poison
+                else if (hints != null and args[parameter.index] == .poison)
+                    hints.?.get(ty) orelse ty
                 else
-                    .poison,
-                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never => ty,
+                    args[parameter.index],
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .length => ty,
                 .struct_ => if (self.isInterpolation(ty) or self.instanceOf(ty) != null or self.closure_of_environment.contains(ty)) null else ty,
                 .enum_, .newtype => if (self.instanceOf(ty) != null) null else ty,
                 .borrow, .array, .callable, .closure => null,
@@ -10184,6 +10283,8 @@ pub const Typing = struct {
         const TypeSubstitution = struct {
             decl: u32,
             args: []const TypeId,
+            /// Present during inference, when empty slots stay symbolic.
+            hints: ?*const ParameterHints = null,
             /// Open integers to replace with what they settled on, when set.
             open: ?*OpenTypes = null,
             /// The declaration whose `where` clauses a projected member is
@@ -10206,7 +10307,7 @@ pub const Typing = struct {
                     self.foreign = true;
                     return ty;
                 };
-                if (builder.substitutionLeaf(ty, self.decl, self.args)) |answer| return answer;
+                if (builder.substitutionLeaf(ty, self.decl, self.args, self.hints)) |answer| return answer;
                 if (self.memo.get(ty)) |answer| return answer;
                 const answer = try builder.substituteOne(ty, self);
                 try self.memo.put(builder.gpa, ty, answer);
@@ -10218,15 +10319,15 @@ pub const Typing = struct {
             switch (self.pool.items[@intFromEnum(ty)]) {
                 .borrow => |b| return self.borrowOf(try substitution.apply(self, b.referent)),
                 .parameter => return self.substituteStandin(self.standinOf(ty).?, substitution),
-                // The length is written down and substitution cannot touch it,
-                // so only the element moves -- and an array of a parameter is
-                // the one constructed type that is not an instantiation, so it
-                // is not reached by the template machinery below.
+                // An array is the one constructed type that is not an
+                // instantiation, so it is not reached by the template machinery
+                // below: its element and its length move here.
                 .array => |a| {
-                    const to = try substitution.apply(self, a.element);
-                    if (to == a.element) return ty;
+                    const element = try substitution.apply(self, a.element);
+                    const length = try substitution.apply(self, a.length);
+                    if (element == a.element and length == a.length) return ty;
                     const minted_from = self.pool.items.len;
-                    const made = try self.arrayOf(to, a.count);
+                    const made = try self.arrayOfLength(element, length);
                     if (@intFromEnum(made) >= minted_from) try self.array_sources.put(self.gpa, made, ty);
                     return made;
                 },
@@ -10274,7 +10375,7 @@ pub const Typing = struct {
                     return self.get(try substitution.apply(self, closure)).closure.environment;
                 },
                 .enum_, .newtype => {},
-                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never => unreachable,
+                .integer, .open_integer, .open_float, .open_type, .boolean, .float, .poison, .unit, .never, .length => unreachable,
             }
 
             const origin = self.instanceOf(ty) orelse return ty;
@@ -10790,7 +10891,8 @@ pub const Typing = struct {
                     if (position) |at| return words.appendSlice(self.gpa, &.{ 0, at });
                 },
                 .array => |array| {
-                    try words.appendSlice(self.gpa, &.{ 4, array.count });
+                    try words.append(self.gpa, 4);
+                    try self.encodeRenamed(words, renaming, array.length);
                     return self.encodeRenamed(words, renaming, array.element);
                 },
                 .borrow => |borrow| {
@@ -12236,6 +12338,7 @@ pub const Typing = struct {
             self.interned_callables.deinit(self.gpa);
             self.interned_arrays.deinit(self.gpa);
             self.array_sources.deinit(self.gpa);
+            self.interned_lengths.deinit(self.gpa);
             self.capability_facts.deinit(self.gpa);
             self.scoped_capability_facts.deinit(self.gpa);
             self.prepared_implementations.deinit(self.gpa);
@@ -12481,7 +12584,13 @@ pub const Typing = struct {
         /// Expected O(1) lookup per structural array key, independent of the
         /// number of nominal types entered before its first occurrence.
         pub fn arrayOf(self: *Builder, element: TypeId, count: u32) !TypeId {
-            const key: ArrayKey = .{ .element = element, .count = count };
+            return self.arrayOfLength(element, try self.lengthOf(count));
+        }
+
+        /// The array of `element` whose length is `length`: a `.length`
+        /// entry, or a parameter standing for one.
+        pub fn arrayOfLength(self: *Builder, element: TypeId, length: TypeId) !TypeId {
+            const key: ArrayKey = .{ .element = element, .length = length };
             if (self.interned_arrays.get(key)) |existing| return existing;
 
             self.grows();
@@ -12490,9 +12599,11 @@ pub const Typing = struct {
             defer rendered.text.deinit(self.gpa);
             try rendered.append(self.gpa, '[');
             try rendered.appendSlice(self.gpa, self.nameOf(element));
-            var extent_buffer: [16]u8 = undefined;
-            const extent = std.fmt.bufPrint(&extent_buffer, "; {d}]", .{count}) catch unreachable;
-            try rendered.appendSlice(self.gpa, extent);
+            try rendered.appendSlice(self.gpa, "; ");
+            try rendered.appendSlice(self.gpa, self.nameOf(length));
+            try rendered.append(self.gpa, ']');
+            try self.pool.ensureUnusedCapacity(self.gpa, 1);
+            try self.laid_out.ensureUnusedCapacity(self.gpa, 1);
             const name = try rendered.finish(self.gpa);
             self.owned_names.append(self.gpa, name) catch |err| {
                 self.gpa.free(name);
@@ -12500,13 +12611,67 @@ pub const Typing = struct {
             };
 
             const i: u32 = @intCast(self.pool.items.len);
-            try self.laid_out.append(self.gpa, .{});
-            try self.pool.append(self.gpa, .{
-                .array = .{ .element = element, .count = count, .name = name },
+            self.laid_out.appendAssumeCapacity(.{});
+            self.pool.appendAssumeCapacity(.{
+                .array = .{ .element = element, .length = length, .name = name },
             });
             const id: TypeId = @enumFromInt(i);
             self.interned_arrays.putAssumeCapacity(key, id);
             return id;
+        }
+
+        /// The `.length` entry for `value`, interned by value.
+        pub fn lengthOf(self: *Builder, value: u32) !TypeId {
+            if (self.interned_lengths.get(value)) |existing| return existing;
+            self.grows();
+            try self.interned_lengths.ensureUnusedCapacity(self.gpa, 1);
+            try self.pool.ensureUnusedCapacity(self.gpa, 1);
+            try self.laid_out.ensureUnusedCapacity(self.gpa, 1);
+            const name = try std.fmt.allocPrint(self.gpa, "{d}", .{value});
+            self.owned_names.append(self.gpa, name) catch |err| {
+                self.gpa.free(name);
+                return err;
+            };
+            const id: TypeId = @enumFromInt(@as(u32, @intCast(self.pool.items.len)));
+            self.laid_out.appendAssumeCapacity(.{});
+            self.pool.appendAssumeCapacity(.{ .length = .{ .value = value, .name = name } });
+            self.interned_lengths.putAssumeCapacity(value, id);
+            return id;
+        }
+
+        test "a length is interned by value and spells as its digits" {
+            const gpa = testing.allocator;
+            var building = try Builder.init(gpa);
+            defer building.deinit();
+            const three = try building.lengthOf(3);
+            try testing.expectEqual(three, try building.lengthOf(3));
+            const array = try building.arrayOf(.u8, 3);
+            try testing.expectEqual(three, building.get(array).array.length);
+            try testing.expectEqual(@as(?u32, 3), building.arrayCount(three));
+            try testing.expect(building.isLength(three));
+            try testing.expect(!building.isLength(.u8));
+            var spelled: std.ArrayList(u8) = .empty;
+            defer spelled.deinit(gpa);
+            const typing = building.view();
+            try typing.appendMangled(gpa, &spelled, three);
+            try testing.expectEqualStrings("3", spelled.items);
+            // A type's name never begins with a digit, so `f[3]` and `f[UInt8]`
+            // cannot name one symbol.
+            spelled.clearRetainingCapacity();
+            try typing.appendMangled(gpa, &spelled, .u8);
+            try testing.expect(!std.ascii.isDigit(spelled.items[0]));
+        }
+
+        pub fn arrayCount(self: *const Builder, length: TypeId) ?u32 {
+            return self.view().arrayCount(length);
+        }
+
+        pub fn concreteCount(self: *const Builder, length: TypeId) u32 {
+            return self.view().concreteCount(length);
+        }
+
+        pub fn isLength(self: *const Builder, ty: TypeId) bool {
+            return self.view().isLength(ty);
         }
 
         /// Settles the pool as `finish` does and refuses any further growth.
@@ -12707,9 +12872,12 @@ pub const Typing = struct {
         /// does not compile until it says what it holds.
         pub fn visitParts(self: *Builder, ty: TypeId, visitor: anytype) std.mem.Allocator.Error!void {
             switch (self.get(ty)) {
-                .integer, .boolean, .float, .poison, .unit, .never, .open_integer, .open_float, .open_type, .parameter => {},
+                .integer, .boolean, .float, .poison, .unit, .never, .open_integer, .open_float, .open_type, .parameter, .length => {},
                 .borrow => |b| try visitor.part(b.referent),
-                .array => |a| try visitor.part(a.element),
+                .array => |a| {
+                    try visitor.part(a.element);
+                    try visitor.part(a.length);
+                },
                 .callable => |signature| {
                     for (self.callableParams(signature)) |param| try visitor.part(param.ty);
                     try visitor.part(signature.result);
@@ -12738,7 +12906,8 @@ pub const Typing = struct {
         }
 
         pub fn intern(self: *Builder, t: Type) !TypeId {
-            if (t == .array) return self.arrayOf(t.array.element, t.array.count);
+            if (t == .array) return self.arrayOfLength(t.array.element, t.array.length);
+            if (t == .length) return self.lengthOf(t.length.value);
             for (self.pool.items, 0..) |existing, i| {
                 if (std.meta.eql(existing, t)) return @enumFromInt(i);
             }
@@ -13399,25 +13568,7 @@ pub const Typing = struct {
             };
             if (self.sealed) @panic("compiler defect: implementation selection was not settled before emission");
             const found = try self.impl_index.find(self.gpa, self.implementations, self, trait.index(), args, receiver, scope);
-            const selected = try self.throughArrayView(owner, trait, args, found);
-            return self.implementation_selections.record(self.gpa, scope, trait, args, receiver, selected);
-        }
-
-        /// Rewrites a selection of a viewed array row as the view's
-        /// implementation it runs. The row applies only where that
-        /// implementation does, so the second lookup answers.
-        fn throughArrayView(self: *Builder, owner: DeclId, trait: DeclId, args: []const TypeId, found: ?ImplementationChoice) std.mem.Allocator.Error!?ImplementationChoice {
-            const choice = found orelse return null;
-            const id = choice.declaredImplementation() orelse return choice;
-            if (!self.implementations[id.index()].viewed) return choice;
-            const array_view = try self.arrayViewOf(choice.receiver) orelse
-                @panic("compiler defect: a viewed array row applied without a view");
-            var through = try self.implementationChoiceWithin(owner, trait, args, array_view) orelse
-                @panic("compiler defect: a viewed array row applied without its view's implementation");
-            through.receiver = choice.receiver;
-            through.observations = choice.observations;
-            through.view = array_view;
-            return through;
+            return self.implementation_selections.record(self.gpa, scope, trait, args, receiver, found);
         }
 
         /// Returns the `Slice` that views an array's elements. It returns null
@@ -14615,6 +14766,8 @@ pub const Typing = struct {
             self.interned_arrays = .empty;
             self.array_sources.deinit(self.gpa);
             self.array_sources = .empty;
+            self.interned_lengths.deinit(self.gpa);
+            self.interned_lengths = .empty;
             self.borrowed_types.deinit(self.gpa);
             self.borrowed_types = .empty;
             self.interned_callables = .empty;
@@ -14890,7 +15043,8 @@ pub const Typing = struct {
             b.implementation_selections = try t.implementation_selections.clone(gpa);
             try b.pool.appendSlice(gpa, t.pool);
             for (t.pool, 0..) |entry, i| {
-                if (entry == .array) try b.interned_arrays.put(gpa, .{ .element = entry.array.element, .count = entry.array.count }, @enumFromInt(@as(u32, @intCast(i))));
+                if (entry == .array) try b.interned_arrays.put(gpa, .{ .element = entry.array.element, .length = entry.array.length }, @enumFromInt(@as(u32, @intCast(i))));
+                if (entry == .length) try b.interned_lengths.put(gpa, entry.length.value, @enumFromInt(@as(u32, @intCast(i))));
                 if (entry == .borrow) try b.borrowed_types.put(gpa, entry.borrow.referent, @enumFromInt(@as(u32, @intCast(i))));
                 // Associated projections have their own interning key. Only
                 // ordinary parameters participate in declaration/position lookup.
@@ -15062,9 +15216,10 @@ fn occursIn(
     if ((try cleared.getOrPut(gpa, r)).found_existing) return false;
     switch (typing.get(r)) {
         // The one constructed type an instantiation never wraps -- an array's
-        // element is reached directly, the same way `substitute` reaches it.
-        .array => |a| return occursIn(gpa, typing, subst, cleared, p, a.element),
-        .borrow => |b| return occursIn(gpa, typing, subst, cleared, p, b.referent),
+        // element and length are reached directly, the way `substitute`
+        // reaches them.
+        .array => |a| return try occursIn(gpa, typing, subst, cleared, p, a.length) or try occursIn(gpa, typing, subst, cleared, p, a.element),
+        .borrow => |b| return try occursIn(gpa, typing, subst, cleared, p, b.referent),
         .callable => |signature| {
             for (typing.callableParams(signature)) |param| {
                 if (try occursIn(gpa, typing, subst, cleared, p, param.ty)) return true;
@@ -15118,7 +15273,7 @@ fn groundOnce(pool: anytype, t: TypeId, memo: anytype) std.mem.Allocator.Error!b
     if (pool.standinOf(t) != null) return false;
     switch (pool.get(t)) {
         .parameter => return false,
-        .array => |a| return memo.ground(a.element),
+        .array => |a| return try memo.ground(a.length) and try memo.ground(a.element),
         .borrow => |b| return memo.ground(b.referent),
         .callable => |signature| {
             for (pool.callableParams(signature)) |param| {
@@ -15285,7 +15440,7 @@ pub fn unifyWitness(
         }
 
         if (tx == .array and ty_ == .array) {
-            if (tx.array.count != ty_.array.count) return null;
+            try worklist.append(gpa, .{ .x = tx.array.length, .y = ty_.array.length });
             try worklist.append(gpa, .{ .x = tx.array.element, .y = ty_.array.element });
             continue;
         }
@@ -15549,7 +15704,8 @@ fn resolveDeepOnce(
         .borrow => |b| return pool.borrowOf(try resolveDeep(gpa, pool, subst, resolved, b.referent)),
         .array => |a| {
             const elem = try resolveDeep(gpa, pool, subst, resolved, a.element);
-            return if (elem == a.element) r else pool.arrayOf(elem, a.count);
+            const length = try resolveDeep(gpa, pool, subst, resolved, a.length);
+            return if (elem == a.element and length == a.length) r else pool.arrayOfLength(elem, length);
         },
         .callable => |signature| {
             const params = pool.callableParams(signature);
@@ -17328,8 +17484,11 @@ test "array interning preserves structural handles across reopened pools" {
     const other_count = try builder.arrayOf(nominal, 3);
     try testing.expect(first != other_element);
     try testing.expect(first != other_count);
+    // One length is interned per count, and arrays of one count share it.
+    try testing.expectEqual(builder.get(first).array.length, builder.get(other_element).array.length);
+    try testing.expect(builder.get(first).array.length != builder.get(other_count).array.length);
     try testing.expectEqual(first.index() + 1, other_element.index());
-    try testing.expectEqual(other_element.index() + 1, other_count.index());
+    try testing.expectEqual(other_element.index() + 2, other_count.index());
     const count = builder.pool.items.len;
     try testing.expectEqual(first, try builder.arrayOf(nominal, 2));
     try testing.expectEqual(first, try builder.intern(builder.get(first)));
@@ -17344,7 +17503,8 @@ test "array interning preserves structural handles across reopened pools" {
     try testing.expectEqual(other_count, try reopened.arrayOf(nominal, 3));
     try testing.expectEqual(count, reopened.pool.items.len);
     const added = try reopened.arrayOf(nominal, 4);
-    try testing.expectEqual(count, added.index());
+    // The new count's length is interned first, then the array.
+    try testing.expectEqual(count + 1, added.index());
     try testing.expectEqual(added, try reopened.arrayOf(nominal, 4));
     try testing.expectEqualStrings("[Element; 2]", finished.nameOf(first));
 }

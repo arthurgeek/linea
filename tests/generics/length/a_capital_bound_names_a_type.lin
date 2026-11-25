@@ -1,0 +1,9 @@
+// [N-Undefined]. Without `let`, `N: UInt64` declares a type parameter bounded
+// by `UInt64`, and `UInt64` is a type, not a trait.
+fn count[N: UInt64](_flag: N) -> UInt64 {
+    1
+}
+
+fn main() -> UInt8 {
+    UInt8(count(true))
+}

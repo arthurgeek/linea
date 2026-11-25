@@ -1,0 +1,10 @@
+trait Mark {}
+
+fn _count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+where fn() -> [UInt8; n]: Mark {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

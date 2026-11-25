@@ -1,0 +1,9 @@
+// A function's length parameter is settled by its call, so it is never
+// `phantom`.
+fn count[phantom let n: UInt64]() -> UInt64 {
+    n
+}
+
+fn main() -> UInt8 {
+    UInt8(count[3]())
+}

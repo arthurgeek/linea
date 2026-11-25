@@ -1,0 +1,22 @@
+// [T-Mismatch]. Both parameters are `[Int64; n]`, so the first argument
+// settles `n` and the second must have that many elements too.
+fn pairwise_max[let n: UInt64](a: [Int64; n], b: [Int64; n]) -> Int64 {
+    var best: Int64 = 0
+    for read x in a {
+        if x > best {
+            best = x
+        }
+    }
+    for read y in b {
+        if y > best {
+            best = y
+        }
+    }
+    best
+}
+
+fn main() -> UInt8 {
+    let home: [Int64; 3] = [3, 1, 2]
+    let away: [Int64; 4] = [4, 0, 1, 2]
+    UInt8(pairwise_max(home, away))
+}

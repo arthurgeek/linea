@@ -1,0 +1,17 @@
+// `mem.filled` builds an array of `n` copies of a copyable value. The length is
+// written in the call or settled by the type the caller expects, and a generic
+// body uses it to make an array of its own length.
+import std.io
+import std.mem
+
+fn cleared[let n: UInt64](_old: [UInt8; n]) -> [UInt8; n] {
+    mem.filled(0)
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let named = mem.filled[Str, 3]("x")
+    let expected: [Bool; 2] = mem.filled(true)
+    let empty: [UInt64; 0] = mem.filled(9)
+    io.println("{named:?} {expected:?} {empty:?} {cleared([4, 5, 6, 7]):?}")?
+    .Ok(0)
+}

@@ -1,0 +1,12 @@
+trait Mark {}
+
+impl[T, let n: UInt64] Mark for [T; n] {}
+
+fn count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+where [UInt8; n]: Mark {
+    0
+}
+
+fn main() -> UInt8 {
+    count[1]([UInt8(1)])
+}

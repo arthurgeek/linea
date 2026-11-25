@@ -988,7 +988,6 @@ pub const discards_allowed = [_]DiscardAllowed{
     .{ .path = "sema/typecheck.zig", .function = "sameBoundArgs", .callee = "resolve_mod.sameBoundArgs", .reason = "reading settled tables has an empty error set" },
     .{ .path = "sema/typecheck.zig", .function = "mentionsParameterAt", .callee = "search.visit", .reason = "the search is given no cache, and only caching allocates" },
     .{ .path = "sema/types.zig", .function = "internInterpolation", .callee = "w.print", .reason = "a specification packed into 64 bits spells at most 21 bytes, which fit the 32-byte buffer" },
-    .{ .path = "sema/types.zig", .function = "arrayOf", .callee = "std.fmt.bufPrint", .reason = "three bytes and the digits of a 32-bit count fit the 16-byte buffer" },
     .{ .path = "syntax/format_spec.zig", .function = "format", .callee = "std.unicode.utf8Encode", .reason = "the fill is a scalar the specification decoded, and four bytes hold any scalar" },
     .{ .path = "syntax/format_spec.zig", .function = "scalarAt", .callee = "std.unicode.utf8ByteSequenceLength", .reason = "bytes that begin no scalar are no fill, which is the answer" },
     .{ .path = "syntax/format_spec.zig", .function = "scalarAt", .callee = "std.unicode.utf8Decode", .reason = "bytes that decode to no scalar are no fill, which is the answer" },

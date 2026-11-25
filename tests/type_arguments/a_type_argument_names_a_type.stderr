@@ -1,13 +1,13 @@
-error[N-NotAType]: `count` is not a type
-  --> tests/type_arguments/a_type_argument_names_a_type.lin:24:27
-   |
-24 |     let _second = nothing[count]()
-   |                           ^^^^^ the brackets before a call hold types
-error[N-NotAType]: `count` is not a type
+error[T-Bound]: `empty` declares `T` as a type, and `count` is a length
   --> tests/type_arguments/a_type_argument_names_a_type.lin:23:30
    |
 23 |     let _first = shelf.empty[count]()
-   |                              ^^^^^ the brackets before a call hold types
+   |                              ^^^^^ this is a length
+error[T-Bound]: `nothing` declares `T` as a type, and `count` is a length
+  --> tests/type_arguments/a_type_argument_names_a_type.lin:24:27
+   |
+24 |     let _second = nothing[count]()
+   |                           ^^^^^ this is a length
 error[N-Undefined]: undefined name `Shelve`
   --> tests/type_arguments/a_type_argument_names_a_type.lin:25:30
    |

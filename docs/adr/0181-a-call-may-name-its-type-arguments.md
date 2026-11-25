@@ -6,7 +6,7 @@ was never implemented; extends
 [0161](0161-a-postfix-call-reaches-an-operation-never-a-field.md); refines
 [0176](0176-a-function-name-is-a-value-its-uses-instantiate.md). Extended by
 [0275](0275-an-expression-inside-a-type-is-read-once.md), which replaces the
-cost consequence.
+cost consequence. [0307](0307-a-length-may-be-a-parameter.md): a bracket argument may be a length.
 
 ## Context
 

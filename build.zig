@@ -3501,6 +3501,7 @@ const rejected_by_the_compiler = [_][]const u8{
     "tests/traits/attached_derives/a_standalone_derive_for_a_primitive_names_no_declaration.lin",
     "tests/traits/attached_derives/a_standalone_derive_joins_the_attribute_its_type_writes.lin",
     "tests/traits/attached_derives/a_standalone_derive_s_fix_leaves_out_the_bounds_its_type_declares.lin",
+    "tests/generics/length/a_standalone_length_family_offers_its_attached_derive.lin",
     "tests/tuples/a_pattern_refused_by_the_parser_is_reported_once.lin",
     "tests/tuples/a_refused_tuple_arm_does_not_make_the_next_arm_unreachable.lin",
     "tests/patterns/a_part_that_is_no_pattern_leaves_the_tuple_whole.lin",
