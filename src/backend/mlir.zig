@@ -53,6 +53,14 @@ pub const panic_file_name = "pf";
 pub const trap_line_name = "tl";
 pub const trap_col_name = "tc";
 
+/// The names a `source_site` gives the constant it reads its part from: the
+/// path's address or length, or the line or column of a call a `Location`
+/// names. Public and reserved for the reason the trap names are: the values
+/// are position, so the comparator classifies them by these names.
+pub const site_file_name = "sf";
+pub const site_line_name = "sl";
+pub const site_col_name = "sc";
+
 /// The version of the contract between generated code and the runtime. The
 /// symbol it builds is resolved by the linker on every program, so a program
 /// built against the wrong runtime refuses to link rather than running with
@@ -1853,7 +1861,7 @@ const FunctionEmitter = struct {
                 const n = self.fresh();
                 const trap = mir.trapOf(id);
                 if (trap.kind == .panic) {
-                    try self.panicAndStop(n, trap.message, span);
+                    try self.panicAndStop(n, trap.message, trap.location, span);
                 } else {
                     try self.trapAndStop(n, trap.kind, span);
                 }
@@ -2003,6 +2011,38 @@ const FunctionEmitter = struct {
                     id.index(), mir.staticOf(id),
                 });
                 try self.here(span);
+            },
+
+            // The file's path is the one a trap names, held in the global
+            // every function of the file reports through; the line and column
+            // are the span's, counted as a trap counts them.
+            //
+            // Each part is first held under a site name and then widened to
+            // the value, so the constant that is position and the value that
+            // is code sit on separate lines.
+            .source_site => switch (mir.siteOf(id)) {
+                .file_address => {
+                    const n = id.index();
+                    try self.w.print("    %{s}{d} = llvm.mlir.addressof @linea_file{d} : !llvm.ptr", .{ site_file_name, n, self.file_symbol });
+                    try self.here(span);
+                    try self.w.print("    %v{d} = llvm.ptrtoint %{s}{d} : !llvm.ptr to {s}", .{ n, site_file_name, n, int_type });
+                    try self.here(span);
+                },
+                .file_length, .line, .column => |part| {
+                    const at = self.position(span);
+                    const name, const value: usize = switch (part) {
+                        .file_length => .{ site_file_name, self.path.len },
+                        .line => .{ site_line_name, at.line },
+                        .column => .{ site_col_name, at.column },
+                        .file_address => unreachable,
+                    };
+                    try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ name, id.index(), value, runtime_int });
+                    try self.here(span);
+                    try self.w.print("    %v{d} = arith.extui %{s}{d} : {s} to {s}", .{
+                        id.index(), name, id.index(), runtime_int, computationType(self.module.representationOf(mir.typeOf(id)).computation),
+                    });
+                    try self.here(span);
+                },
             },
 
             .bytes_addr => {
@@ -2875,18 +2915,36 @@ const FunctionEmitter = struct {
         try self.here(span);
     }
 
-    fn panicAndStop(self: *FunctionEmitter, n: u32, message: InstId, span: Span) std.Io.Writer.Error!void {
+    /// Reports a panic's message and where it happened: the trap's own span,
+    /// or the `Location` at `location` where the panic names one. A
+    /// `Location`'s file addresses the same NUL-terminated global a span's
+    /// does, so the runtime reads either as a C string.
+    fn panicAndStop(self: *FunctionEmitter, n: u32, message: InstId, location: InstId, span: Span) std.Io.Writer.Error!void {
         const fields = self.module.types.textFields(self.module.panic_message_type).?;
-        const at = self.position(span);
 
         try self.panicField(n, "a", message, fields.at.offset, span);
         try self.panicField(n, "l", message, fields.len.offset, span);
-        try self.w.print("    %{s}{d} = llvm.mlir.addressof @linea_file{d} : !llvm.ptr", .{ panic_file_name, n, self.file_symbol });
-        try self.here(span);
-        try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_line_name, n, at.line, runtime_int });
-        try self.here(span);
-        try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_col_name, n, at.column, runtime_int });
-        try self.here(span);
+        if (location == .none) {
+            const at = self.position(span);
+            try self.w.print("    %{s}{d} = llvm.mlir.addressof @linea_file{d} : !llvm.ptr", .{ panic_file_name, n, self.file_symbol });
+            try self.here(span);
+            try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_line_name, n, at.line, runtime_int });
+            try self.here(span);
+            try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_col_name, n, at.column, runtime_int });
+            try self.here(span);
+        } else {
+            const types = self.module.types;
+            const located = self.module.panic_location_type;
+            const file = types.lookupField(located, "file").?;
+            const file_text = types.textFields(file.ty).?;
+            const line = types.lookupField(located, "line").?;
+            const column = types.lookupField(located, "column").?;
+            try self.panicField(n, "f", location, file.offset + file_text.at.offset, span);
+            try self.w.print("    %{s}{d} = llvm.inttoptr %pvf{d} : {s} to !llvm.ptr", .{ panic_file_name, n, n, int_type });
+            try self.here(span);
+            try self.locationField(n, trap_line_name, location, line.offset, span);
+            try self.locationField(n, trap_col_name, location, column.offset, span);
+        }
         try writeMigrationGuard(self.w, runtime_symbols.panic_signature);
         try self.w.print("    func.call @{s}(%pva{d}, %pvl{d}, %{s}{d}, %{s}{d}, %{s}{d})", .{
             runtime_symbols.panic, n, n, panic_file_name, n, trap_line_name, n, trap_col_name, n,
@@ -2894,6 +2952,26 @@ const FunctionEmitter = struct {
         try writeOwnedCallType(self.w, runtime_symbols.panic_signature);
         try self.here(span);
         try self.w.writeAll("    llvm.unreachable");
+        try self.here(span);
+    }
+
+    /// Loads a `UInt32` part of a `Location` as the runtime's `int`, under the
+    /// name the runtime call reads it by.
+    fn locationField(
+        self: *FunctionEmitter,
+        n: u32,
+        comptime name: []const u8,
+        location: InstId,
+        offset: u32,
+        span: Span,
+    ) std.Io.Writer.Error!void {
+        try self.w.print("    %po{s}{d} = arith.constant {d} : {s}", .{ name, n, offset, int_type });
+        try self.here(span);
+        try self.w.print("    %pp{s}{d} = llvm.getelementptr ", .{ name, n });
+        try self.writeValue(location);
+        try self.w.print("[%po{s}{d}] : (!llvm.ptr, i64) -> !llvm.ptr, i8", .{ name, n });
+        try self.here(span);
+        try self.w.print("    %{s}{d} = llvm.load %pp{s}{d} : !llvm.ptr -> {s}", .{ name, n, name, n, runtime_int });
         try self.here(span);
     }
 

@@ -1,0 +1,32 @@
+// A `match read` binds the message and the place without taking them, and a
+// panic in a branch of the arm reports both.
+fn stop(words: Option[Str], place: Option[Location], fatal: Bool) -> UInt8 {
+    match read words {
+        Some(text) => {
+            match read place {
+                Some(found) => {
+                    if fatal {
+                        panic(text, found)
+                    }
+                    0
+                },
+                None => {
+                    if fatal {
+                        panic(text)
+                    }
+                    1
+                },
+            }
+        },
+        None => 2,
+    }
+}
+
+fn spot(at: Location = caller) -> Location {
+    copy(at)
+}
+
+fn main() -> UInt8 {
+    let here = spot()
+    stop(.Some("stopped where the place says"), .Some(here), true)
+}

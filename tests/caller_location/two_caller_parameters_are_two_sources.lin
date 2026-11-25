@@ -1,0 +1,12 @@
+// Neither location gives way to the other, so the signature says which one
+// the result comes from.
+fn file_of(opened: Location = caller, closed: Location = caller) -> Str {
+    if opened.line() > closed.line() {
+        return opened.file()
+    }
+    closed.file()
+}
+
+fn main() -> UInt8 {
+    UInt8(file_of().length())
+}

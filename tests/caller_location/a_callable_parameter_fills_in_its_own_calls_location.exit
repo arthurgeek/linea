@@ -1,0 +1,2 @@
+trap
+linea: panic: a requirement failed at tests/caller_location/a_callable_parameter_fills_in_its_own_calls_location.lin:11:5

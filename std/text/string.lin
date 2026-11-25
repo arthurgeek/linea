@@ -56,6 +56,46 @@ impl String[mem.SystemAllocator] {
         text.release()
         testing.assert(empty, "new text was not empty")?
     }
+
+    // Concatenate `parts` in order, with `separator` between each neighbouring
+    // pair, into storage from the system allocator.
+    pub fn join[T: AsStr](parts: mem.Slice[T], separator: Str) -> Result[String[mem.SystemAllocator], Oom] where carries() {
+        String.join_in(mem.system(), parts, separator)
+    }
+
+    test "join puts the separator only between parts" {
+        defer let joined = testing.allocated(String.join(["tea", "milk", "eggs"].as_slice(), ", "), "the joined text was refused")?
+        testing.assert_eq(joined.view(), "tea, milk, eggs", "the separator was misplaced")?
+        defer let alone = testing.allocated(String.join(["tea"].as_slice(), ", "), "the joined text was refused")?
+        testing.assert_eq(alone.view(), "tea", "a single part gained a separator")?
+        let none: [Str; 0] = []
+        defer let empty = testing.allocated(String.join(none.as_slice(), ", "), "the joined text was refused")?
+        testing.assert_eq(empty.view(), "", "joining no parts produced text")?
+        .Ok(())
+    }
+
+    test "join reads owned text held in a vector" {
+        defer var names: Vec[String] = Vec.new()
+        &names.push("Ada".to_owned().unwrap()).unwrap()
+        &names.push("Grace".to_owned().unwrap()).unwrap()
+        defer let joined = testing.allocated(String.join(names.as_slice(), " & "), "the joined text was refused")?
+        testing.assert_eq(joined.view(), "Ada & Grace", "owned parts were joined out of order")?
+        .Ok(())
+    }
+
+    // Concatenate `parts` in order into storage from the system allocator.
+    pub fn from_parts[T: AsStr](parts: mem.Slice[T]) -> Result[String[mem.SystemAllocator], Oom] where carries() {
+        String.from_parts_in(mem.system(), parts)
+    }
+
+    test "from_parts concatenates without a separator" {
+        defer let word = testing.allocated(String.from_parts(["ol", "á", "", "!"].as_slice()), "the concatenated text was refused")?
+        testing.assert_eq(word.view(), "olá!", "the parts were not concatenated in order")?
+        let none: [Str; 0] = []
+        defer let empty = testing.allocated(String.from_parts(none.as_slice()), "the concatenated text was refused")?
+        testing.assert_eq(empty.view(), "", "no parts produced text")?
+        .Ok(())
+    }
 }
 
 impl[A: Allocator] String[A] {
@@ -73,6 +113,83 @@ impl[A: Allocator] String[A] {
         let copied_empty = copied.length() == 0 && copied.view() == ""
         copied.release()
         testing.assert(opened_empty && copied_empty, "empty text required allocator capacity")?
+    }
+
+    // Concatenate `parts` in order, with `separator` between each neighbouring
+    // pair, into storage from `allocator`. The whole length is reserved before
+    // any byte is copied, so the text is allocated once, and a refusal returns
+    // no partial text. When every part and separator is empty,
+    // nothing is allocated.
+    pub fn join_in[T: AsStr](allocator: A, parts: mem.Slice[T], separator: Str) -> Result[String[A], Oom] where carries(.Ok: allocator) {
+        // A length the sum cannot hold is more storage than any allocator can
+        // hand out, so it is refused as exhaustion before anything is copied.
+        var total: UInt64 = 0
+        for read part in parts {
+            let length = part.as_str().length()
+            if length > UInt64.max - total {
+                return .Err(Oom.Exhausted)
+            }
+            total += length
+        }
+        if parts.length() > 1 && separator.length() > 0 {
+            let separators = parts.length() - 1
+            if separators > (UInt64.max - total) / separator.length() {
+                return .Err(Oom.Exhausted)
+            }
+            total += separators * separator.length()
+        }
+        defer var joined = String.new_in(allocator)
+        &joined.bytes.reserve(total)?
+        for index in 0..parts.length() {
+            if index > 0 {
+                &joined.append(separator)?
+            }
+            &joined.append(parts[index].as_str())?
+        }
+        .Ok(joined)
+    }
+
+    test "join_in builds the text in an arena" {
+        defer let arena = mem.Arena.open(mem.system(), 64)
+        defer let joined = testing.allocated(String.join_in(arena.handle(), ["a", "b", "c"].as_slice(), "-"), "the arena text was refused")?
+        testing.assert_eq(joined.view(), "a-b-c", "the arena text lost a part")?
+        // The cursor fills this arena, so only empty text can be built in it.
+        defer let full = mem.Arena.open(mem.system(), 8)
+        defer let empty = testing.allocated(String.join_in(full.handle(), ["", ""].as_slice(), ""), "the empty text was refused")?
+        testing.assert_eq(empty.view(), "", "joining empty parts produced text")?
+        .Ok(())
+    }
+
+    test "join_in allocates once and a refusal leaves no text" -> Result[(), testing.Failure] {
+        let attempts = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), Oom] {
+                defer let joined = String.join_in(allocator, ["first", "second, long enough to grow text", "third"].as_slice(), "; ")?
+                return .Ok(())
+            },
+            Oom.is_refusal,
+        )?
+        testing.assert_eq(attempts, UInt64(1), "joining grew the text more than once")?
+        .Ok(())
+    }
+
+    // Concatenate `parts` in order into storage from `allocator`, reserving
+    // their whole length once before copying.
+    pub fn from_parts_in[T: AsStr](allocator: A, parts: mem.Slice[T]) -> Result[String[A], Oom] where carries(.Ok: allocator) {
+        String.join_in(allocator, parts, "")
+    }
+
+    test "from_parts_in allocates once" -> Result[(), testing.Failure] {
+        let attempts = testing.each_allocation_failure(
+            mem.system(),
+            |allocator| -> Result[(), Oom] {
+                defer let built = String.from_parts_in(allocator, ["GET ", "/index.html", " HTTP/1.1"].as_slice())?
+                return .Ok(())
+            },
+            Oom.is_refusal,
+        )?
+        testing.assert_eq(attempts, UInt64(1), "concatenation grew the text more than once")?
+        .Ok(())
     }
 
     // Take the bytes as text when they are valid UTF-8, or hand them back with
@@ -503,6 +620,19 @@ impl[A: Allocator] String[A] {
         testing.assert(checked.is_ok(), "a growing byte append sequence was reported as failing")?
         .Ok(())
     }
+}
+
+// Owned text answers its view.
+impl[A: Allocator] AsStr for String[A] {
+    fn as_str(self: Self) -> Str where borrows(self) {
+        self.view()
+    }
+}
+
+test "owned text as text is its view" {
+    defer let text = "olá".to_owned().unwrap()
+    testing.assert_eq(AsStr.as_str(text), "olá", "owned text changed when viewed as text")?
+    .Ok(())
 }
 
 impl[A: Allocator] Release for String[A] {

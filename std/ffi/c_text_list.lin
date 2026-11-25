@@ -15,16 +15,17 @@ let pointer_bytes: UInt64 = 8
 impl CTextList {
     // Entry `index` of a list C said holds `count` entries. The entry is a
     // null pointer where C stored one, as SQLite does for a NULL column. An
-    // index past `count` stops the program rather than reading past the list.
-    pub fn get(self: Self, index: UInt64, count: UInt64) -> CText where carries(self) {
+    // index past `count` stops the program rather than reading past the list,
+    // and the panic names the line of the call that asked for it.
+    pub fn get(self: Self, index: UInt64, count: UInt64, at: Location = caller) -> CText where carries(self) {
         if index >= count {
-            panic("a C string list was read past the count C gave for it")
+            panic("a C string list was read past the count C gave for it", at)
         }
-        let read CTextList(at) = self
-        if at == 0 {
-            panic("a null C string list was read")
+        let read CTextList(address) = self
+        if address == 0 {
+            panic("a null C string list was read", at)
         }
-        CText(mem.foreign_word(mem.foreign_at(at), index * pointer_bytes))
+        CText(mem.foreign_word(mem.foreign_at(address), index * pointer_bytes))
     }
 
     test "entries are read where the list holds them" {
@@ -42,5 +43,10 @@ impl CTextList {
         defer let name = named.unwrap()
         testing.assert_eq(name.view(), "Grace", "the second entry was read from elsewhere")?
         .Ok(())
+    }
+
+    test trap "an index past the count stops the program" {
+        let empty = CTextList(0)
+        let _entry = empty.get(0, count: 0)
     }
 }

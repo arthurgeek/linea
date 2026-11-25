@@ -1,0 +1,10 @@
+fn run(check: fn(line: UInt32 = caller)) {
+    check()
+}
+
+fn ignore(_line: UInt32 = 0) {}
+
+fn main() -> UInt8 {
+    run(ignore)
+    0
+}

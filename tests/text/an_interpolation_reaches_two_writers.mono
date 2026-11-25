@@ -82,6 +82,14 @@ struct Str {
     bytes: std.mem.Slice[UInt8],
 }
 
+@(opaque, copyable)
+struct Location {
+    // The file as the compiler was given it, relative to where it ran.
+    file: std.text.Str,
+    line: UInt32,
+    column: UInt32,
+}
+
 @(opaque, copyable, derive(Release))
 struct Slice[UInt8] {
     at: UInt64,
@@ -387,10 +395,10 @@ pub fn std.mem;Slice[UInt8].subspan(self: std.mem.Slice[UInt8], start: UInt64, c
     }
 }
 
-pub fn std.option;Option[std.mem.Slice[UInt8]].unwrap(sink self: std.option.Option[std.mem.Slice[UInt8]]) -> std.mem.Slice[UInt8] where carries(self) {
+pub fn std.option;Option[std.mem.Slice[UInt8]].unwrap(sink self: std.option.Option[std.mem.Slice[UInt8]], at: std.location.Location = caller) -> std.mem.Slice[UInt8] where carries(self) {
     match self {
         Some(value) => value,
-        None => panic("called Option.unwrap on None"),
+        None => panic("called Option.unwrap on None", at),
     }
 }
 

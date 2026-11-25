@@ -1,0 +1,12 @@
+// `at` gives way to `text` as the source of a result, so a function that
+// returns part of the location says so in a clause.
+fn origin(text: Str, at: Location = caller) -> Str {
+    if text.length() == 0 {
+        return at.file()
+    }
+    copy(text)
+}
+
+fn main() -> UInt8 {
+    UInt8(origin("").length())
+}

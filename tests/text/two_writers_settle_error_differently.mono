@@ -96,6 +96,14 @@ struct Str {
     bytes: std.mem.Slice[UInt8],
 }
 
+@(opaque, copyable)
+struct Location {
+    // The file as the compiler was given it, relative to where it ran.
+    file: std.text.Str,
+    line: UInt32,
+    column: UInt32,
+}
+
 @derive(Equatable, Equivalent, Debug, Release)
 pub struct Range[UInt64] {
     lo: UInt64,
@@ -363,10 +371,10 @@ pub fn std.mem;Slice[UInt8].subspan(self: std.mem.Slice[UInt8], start: UInt64, c
     }
 }
 
-pub fn std.option;Option[std.mem.Slice[UInt8]].unwrap(sink self: std.option.Option[std.mem.Slice[UInt8]]) -> std.mem.Slice[UInt8] where carries(self) {
+pub fn std.option;Option[std.mem.Slice[UInt8]].unwrap(sink self: std.option.Option[std.mem.Slice[UInt8]], at: std.location.Location = caller) -> std.mem.Slice[UInt8] where carries(self) {
     match self {
         Some(value) => value,
-        None => panic("called Option.unwrap on None"),
+        None => panic("called Option.unwrap on None", at),
     }
 }
 
@@ -565,10 +573,10 @@ fn std.option.Option[std.mem.Buffer[std.mem.SystemAllocator]];std.release;Releas
         None => {
             {}
         },
-        Some(_linea_derive_3003_1_0_0) => {
+        Some(_linea_derive_3031_1_0_0) => {
             {
                 {
-                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_3003_1_0_0)
+                    std.mem.Buffer[std.mem.SystemAllocator];std.release;Release.release(_linea_derive_3031_1_0_0)
                 }
             }
         },

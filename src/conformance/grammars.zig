@@ -55,13 +55,41 @@ fn quoted(buf: []u8, word: []const u8) ![]const u8 {
 /// below covers, which is how `type` came to be spelled three ways.
 const every_word: []const []const u8 = token.reserved_words.keys() ++ token.contextual_words.all;
 
-test "every reserved word is a terminal in the tree-sitter grammar" {
+/// The contextual words the tree-sitter grammar reads as a name and colours
+/// by a query on that name's text.
+///
+/// `caller` is a keyword only as the whole default of a parameter, where an
+/// expression is also valid. A tree-sitter terminal for it would be lexed as
+/// the keyword wherever a default starts, so `count: UInt32 = caller + 1`
+/// would not parse. The grammar therefore has no terminal, and the highlight
+/// query matches the identifier by an `#eq?` predicate.
+const named_in_tree_sitter = [_][]const u8{token.contextual_words.caller_location};
+
+/// Whether the tree-sitter grammar spells `word`: as a terminal, or for a
+/// word it reads as a name, in an `#eq?` predicate of the highlight query.
+fn spelledForTreeSitter(word: []const u8) !bool {
+    var buf: [96]u8 = undefined;
+    for (named_in_tree_sitter) |named| {
+        if (!std.mem.eql(u8, named, word)) continue;
+        const predicate = try std.fmt.bufPrint(&buf, "(#eq? @keyword.control \"{s}\")", .{word});
+        return std.mem.indexOf(u8, highlights, predicate) != null;
+    }
+    return std.mem.indexOf(u8, grammar_json, try quoted(&buf, word)) != null;
+}
+
+test "every reserved word is a terminal in the tree-sitter grammar, or a name its query colours" {
     for (every_word) |word| {
-        var buf: [64]u8 = undefined;
-        if (std.mem.indexOf(u8, grammar_json, try quoted(&buf, word)) == null) {
+        if (!try spelledForTreeSitter(word)) {
             std.debug.print("reserved word missing from grammar.js: {s}\n", .{word});
             return error.MissingFromTreeSitterGrammar;
         }
+    }
+}
+
+test "a word the tree-sitter grammar reads as a name is no terminal in it" {
+    for (named_in_tree_sitter) |word| {
+        var buf: [64]u8 = undefined;
+        try testing.expect(std.mem.indexOf(u8, grammar_json, try quoted(&buf, word)) == null);
     }
 }
 
@@ -273,8 +301,7 @@ test "the two grammars carry the same reserved words" {
     const code = try withoutComments(arena.allocator(), sublime, '#');
 
     for (every_word) |word| {
-        var buf: [64]u8 = undefined;
-        const in_ts = std.mem.indexOf(u8, grammar_json, try quoted(&buf, word)) != null;
+        const in_ts = try spelledForTreeSitter(word);
         if (in_ts != try inAlternation(code, word)) {
             std.debug.print("grammars disagree about: {s}\n", .{word});
             return error.GrammarsDisagree;

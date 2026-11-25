@@ -1,0 +1,14 @@
+fn run(check: fn(holds: Bool, at: Location = caller)) {
+    check(true)
+}
+
+fn main() -> UInt8 {
+    run(
+        |holds, at| {
+            if !holds {
+                panic("a requirement failed", at)
+            }
+        },
+    )
+    0
+}

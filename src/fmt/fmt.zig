@@ -3342,6 +3342,15 @@ const Printer = struct {
                 try self.write(")");
             },
 
+            .panic_at => {
+                const operands = self.ast.binary(e);
+                try self.write("panic(");
+                try self.writeExpr(operands.lhs);
+                try self.write(", ");
+                try self.writeExpr(operands.rhs);
+                try self.write(")");
+            },
+
             // The literal naming the file is written back as it was spelled,
             // raw or quoted, between the word and its parentheses.
             .embed, .embed_bytes => {
@@ -3394,7 +3403,7 @@ const Printer = struct {
 
             // A lexeme copied exactly as written: casing, leading zeros and the
             // bytes between a string's quotes are the author's.
-            .int_literal, .float_literal, .str_literal, .bool_literal, .name_ref, .reflection_root => {
+            .int_literal, .float_literal, .str_literal, .bool_literal, .name_ref, .reflection_root, .caller_location => {
                 if (tag == .str_literal and self.ast.tokenTag(self.ast.exprMain(e)) == .string_line) {
                     return self.writeStringLines(e, began_line);
                 }

@@ -1,0 +1,54 @@
+==================
+`caller` is the location of a call only as a parameter's whole default
+==================
+
+fn require(holds: Bool, at: Location = caller) {
+    panic("a requirement failed", at)
+}
+
+fn later(count: UInt32 = caller + 1, most: UInt32 = caller.max(2)) -> UInt32 {
+    count + most
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier))
+      (parameter
+        (identifier)
+        (type_identifier)
+        (identifier)))
+    (block
+      (expression_statement
+        (panic_expression
+          (string_literal)
+          (identifier)))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)
+        (binary_expression
+          (identifier)
+          (integer_literal)))
+      (parameter
+        (identifier)
+        (type_identifier)
+        (call_expression
+          (field_expression
+            (identifier)
+            (identifier))
+          (argument_list
+            (integer_literal)))))
+    (type_identifier)
+    (block
+      (expression_statement
+        (binary_expression
+          (identifier)
+          (identifier))))))

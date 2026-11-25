@@ -1,0 +1,5 @@
+error[T-Caller]: `caller` stands for the location of a call, and only a function's parameter has one to fill in
+ --> tests/caller_location/caller_is_not_a_lambda_default.lin:2:32
+  |
+2 |     let spot = |at: Location = caller| at.line()
+  |                                ^^^^^^ a lambda's default is worked out where the lambda is written, and no call is there

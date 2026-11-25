@@ -565,8 +565,13 @@ pub const contextual_words = struct {
     /// a program may still bind `alias` as a value.
     pub const type_alias = "alias";
 
+    /// `at: Location = caller`, a function parameter's default: the location
+    /// of the call that leaves the argument out. Only as the whole default of
+    /// a parameter, so a program may still bind `caller` as a value.
+    pub const caller_location = "caller";
+
     /// Every one of them, for a gate that must cover each.
-    pub const all = [_][]const u8{ declared_type, projection, traversal, refinement_value, delegation, default_implementation, template_implementation, type_alias };
+    pub const all = [_][]const u8{ declared_type, projection, traversal, refinement_value, delegation, default_implementation, template_implementation, type_alias, caller_location };
 };
 
 /// What every tag naming a reserved word is named with.

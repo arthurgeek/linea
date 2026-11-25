@@ -1,0 +1,2 @@
+trap
+linea: panic: an empty crate at tests/caller_location/a_trait_operation_names_the_call_through_a_bound.lin:21:29

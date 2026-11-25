@@ -1,0 +1,12 @@
+fn require(holds: Bool, at: Location = caller) {
+    if !holds {
+        panic("a requirement failed", at)
+    }
+}
+
+fn main() -> UInt8 {
+    let check = require
+    check(true)
+    check(false)
+    0
+}

@@ -279,6 +279,7 @@ pub fn dumpMono(
                 for (params, param_defaults) |param, *default| switch (param.default) {
                     .absent => {},
                     .value => |value| default.* = try value.text(gpa, pool.constant_pool),
+                    .call_site => default.* = try gpa.dupe(u8, "caller"),
                 };
                 // The body names its parameters as the lambda does: a
                 // parameter's name is not part of the signature's type.

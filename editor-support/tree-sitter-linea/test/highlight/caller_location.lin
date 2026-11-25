@@ -1,0 +1,12 @@
+fn require(holds: Bool, at: Location = caller) {
+//                                     ^ keyword.control
+    if !holds {
+        panic("a requirement failed", at)
+//      ^ keyword.control.return
+    }
+}
+
+fn later(count: UInt32 = caller + 1) -> UInt32 {
+//                       ^ variable
+    count
+}

@@ -1,0 +1,2 @@
+trap
+linea: panic: stopped where the place says at tests/caller_location/a_panic_reports_a_message_and_a_place_a_match_binds.lin:30:16

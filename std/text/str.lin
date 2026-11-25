@@ -298,6 +298,26 @@ impl Comparable for Str {
 // Every pair of strings has one order, determined by bytes and then length.
 impl Ordered for Str {}
 
+// AsStr views a value as text. `String.join` and `String.from_parts` take a
+// slice of any type that implements it, so the parts may be literals, views
+// or owned text.
+pub trait AsStr {
+    fn as_str(self: Self) -> Str where borrows(self)
+}
+
+// A view is already text, so it answers itself and keeps what it carries.
+impl AsStr for Str {
+    fn as_str(self: Self) -> Str where carries(self) {
+        copy(self)
+    }
+}
+
+test "a view as text is itself" {
+    let text = "olá"
+    testing.assert_eq(AsStr.as_str(text), "olá", "a view changed when viewed as text")?
+    .Ok(())
+}
+
 test "text equality and order are total by bytes" {
     let samples = ["", "a", "a", "aa", "b", "á"]
     for read a in samples {

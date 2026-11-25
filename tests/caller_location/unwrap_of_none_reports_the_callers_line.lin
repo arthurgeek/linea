@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    let absent: Option[UInt8] = .None
+    let doubled = absent
+        .unwrap()
+    doubled * 2
+}

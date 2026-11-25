@@ -1,0 +1,23 @@
+// A call that writes its type arguments is reported where the operation's
+// name is, as a call that leaves them out is.
+struct Shelf {
+    books: UInt8,
+}
+
+impl Shelf {
+    fn take[T: Equatable](self: Self, wanted: T, held: T, at: Location = caller) -> UInt8 {
+        if wanted != held {
+            panic("the book is not on the shelf", at)
+        }
+        self.books
+    }
+}
+
+fn main() -> UInt8 {
+    let shelf = Shelf { books = 3 }
+    let found = shelf
+        .take[UInt8](4, 4)
+    let missing = shelf
+        .take[UInt8](4, 5)
+    found + missing
+}

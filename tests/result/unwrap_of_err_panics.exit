@@ -1,2 +1,2 @@
 trap
-linea: panic: called Result.unwrap on Err at std/result/result.lin:L:C
+linea: panic: called Result.unwrap on Err at tests/result/unwrap_of_err_panics.lin:3:13

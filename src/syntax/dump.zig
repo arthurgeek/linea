@@ -624,7 +624,7 @@ fn dumpExpr(
     });
 
     switch (tag) {
-        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .name_ref, .param_argument, .reflection_root => {
+        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .name_ref, .param_argument, .reflection_root, .caller_location => {
             // A multi-line literal is spelled by every line it spans, with the
             // layout between them, so its spelling is escaped to stay on the
             // dump's one line.
@@ -743,7 +743,7 @@ fn dumpExpr(
         },
         // A while prints its condition then its body, an assignment its target
         // then its value, so all three read in the order they are written.
-        .index, .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .while_, .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign, .logical_and, .logical_or => {
+        .index, .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .while_, .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign, .logical_and, .logical_or, .panic_at => {
             try w.writeByte('\n');
             const bin = ast.binary(id);
             try dumpExpr(w, ast, offsets, bin.lhs, depth + 1);

@@ -1,0 +1,2 @@
+trap
+linea: panic: nothing was present at tests/caller_location/a_generic_function_names_each_call.lin:10:26

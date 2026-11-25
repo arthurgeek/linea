@@ -1028,8 +1028,15 @@ const Function = struct {
         switch (mir.tagOf(id).payload()) {
             .constant => {},
             .trap => {
-                const message = mir.trapOf(id).message;
-                if (message != .none and !try self.operandInRange(id, message)) return false;
+                const trap = mir.trapOf(id);
+                if (trap.message != .none and !try self.operandInRange(id, trap.message)) return false;
+                if (trap.location != .none and !try self.operandInRange(id, trap.location)) return false;
+            },
+            // A part of a position is a number, or the address of a path,
+            // which travels as an integer like every other address.
+            .site => if (self.module.representationOf(mir.typeOf(id)).computation != .integer) {
+                try self.report(span, "%{d} source_site produces no integer", .{id.index()});
+                return false;
             },
             .bytes => if (!try self.bytesInRange(id, mir.bytesOf(id))) return false,
             .static => if (!try self.staticNamed(id, mir.staticOf(id))) return false,
@@ -1296,7 +1303,7 @@ const Function = struct {
             mir_mod.ResultRepresentation{ .computation = .code_pointer },
         );
         switch (tag) {
-            .constant, .bytes_addr => if (produces_pointer) {
+            .constant, .bytes_addr, .source_site => if (produces_pointer) {
                 try self.report(mir.spanOf(id), "%{d} {s} cannot produce a code pointer", .{ id.index(), @tagName(tag) });
                 return false;
             },
@@ -1468,9 +1475,10 @@ const Function = struct {
                 },
                 .trap => blk: {
                     single[0] = mir.trapOf(user).message;
-                    break :blk single[0..1];
+                    single[1] = mir.trapOf(user).location;
+                    break :blk single[0..2];
                 },
-                .constant, .bytes, .static, .local, .function, .target => continue,
+                .constant, .bytes, .site, .static, .local, .function, .target => continue,
             };
             for (used) |operand| if (try self.refuseForeignEntry(user, operand)) return false;
         }
@@ -1982,6 +1990,7 @@ const Function = struct {
                 => .none,
                 .constant,
                 .bytes_addr,
+                .source_site,
                 .address_bits,
                 .borrow,
                 .add,
@@ -2057,8 +2066,8 @@ const Function = struct {
     fn trapMessage(self: *Function, id: InstId) std.mem.Allocator.Error!bool {
         const trap = self.mir.trapOf(id);
         if (trap.kind != .panic) {
-            if (trap.message == .none) return true;
-            try self.report(self.mir.spanOf(id), "%{d} non-panic trap carries a message", .{id.index()});
+            if (trap.message == .none and trap.location == .none) return true;
+            try self.report(self.mir.spanOf(id), "%{d} non-panic trap carries a message or a location", .{id.index()});
             return false;
         }
         if (trap.message == .none) {
@@ -2073,6 +2082,17 @@ const Function = struct {
             self.mir.resultRoleOf(trap.message) == .none)
         {
             try self.report(self.mir.spanOf(id), "%{d} panic message is not the module's canonical Str value", .{id.index()});
+            return false;
+        }
+        if (trap.location == .none) return true;
+        if (!self.precedes(trap.location, id)) {
+            try self.report(self.mir.spanOf(id), "%{d} panic location does not dominate its trap", .{id.index()});
+            return false;
+        }
+        if (self.mir.typeOf(trap.location) != self.module.panic_location_type or
+            self.mir.resultRoleOf(trap.location) != .managed_address)
+        {
+            try self.report(self.mir.spanOf(id), "%{d} panic location is not the module's canonical Location value", .{id.index()});
             return false;
         }
         return true;
@@ -2978,6 +2998,7 @@ pub const Harness = struct {
                 .layouts = layouts,
                 .representations = representations,
                 .panic_message_type = big,
+                .panic_location_type = big,
                 .entry = FunctionId.at(0),
             },
         };
@@ -3318,6 +3339,103 @@ test "a non-panic trap cannot carry a message" {
     const checked = try h.run();
     try testing.expect(!checked.ok);
     try expectSaid(checked.said, "non-panic trap carries a message");
+}
+
+/// A panic carrying a valid message and a location of `location_type`, held
+/// in a slot; `location_elsewhere` takes the location's address in a block
+/// that does not reach the trap.
+fn locatedTrapFunction(gpa: std.mem.Allocator, kind: mir_mod.TrapKind, location_type: TypeId, location_elsewhere: bool) !Mir {
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.signature = Harness.nullary_callable;
+    b.return_type = .u8;
+    const entry = try b.addBlock();
+    const location_block = if (location_elsewhere) try b.addBlock() else entry;
+    const message = if (kind == .panic) try b.addInst(entry, .{
+        .tag = .addr_of,
+        .result_role = .managed_address,
+        .ty = Harness.big,
+        .span = Span.empty,
+        .data = .{ .local = try b.addLocal(Harness.big, .value) },
+    }) else InstId.none;
+    const location = try b.addInst(location_block, .{
+        .tag = .addr_of,
+        .result_role = .managed_address,
+        .ty = location_type,
+        .span = Span.empty,
+        .data = .{ .local = try b.addLocal(location_type, .value) },
+    });
+    if (location_elsewhere) {
+        _ = try b.setTerminator(location_block, .{
+            .tag = .trap,
+            .ty = .unit,
+            .span = Span.empty,
+            .data = .{ .trap = .{ .kind = .overflow } },
+        });
+    }
+    _ = try b.setTerminator(entry, .{
+        .tag = .trap,
+        .ty = .unit,
+        .span = Span.empty,
+        .data = .{ .trap = .{ .kind = kind, .message = message, .location = location } },
+    });
+    return b.finish(entry, .from(0));
+}
+
+test "a panic trap may carry the module's canonical Location" {
+    const gpa = testing.allocator;
+    var h = try Harness.init(gpa, try oneFunction(gpa, try locatedTrapFunction(gpa, .panic, Harness.big, false)));
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(checked.ok);
+}
+
+test "a panic location must be the module's canonical Location value" {
+    const gpa = testing.allocator;
+    var h = try Harness.init(gpa, try oneFunction(gpa, try locatedTrapFunction(gpa, .panic, .u64, false)));
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "panic location is not the module's canonical Location value");
+}
+
+test "a panic location must dominate its trap" {
+    const gpa = testing.allocator;
+    var h = try Harness.init(gpa, try oneFunction(gpa, try locatedTrapFunction(gpa, .panic, Harness.big, true)));
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "panic location does not dominate its trap");
+}
+
+test "a non-panic trap cannot carry a location" {
+    const gpa = testing.allocator;
+    var h = try Harness.init(gpa, try oneFunction(gpa, try locatedTrapFunction(gpa, .overflow, Harness.big, false)));
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "non-panic trap carries a message");
+}
+
+test "a source site produces an integer" {
+    const gpa = testing.allocator;
+    var b = Builder.init(gpa);
+    defer b.deinit();
+    b.signature = Harness.nullary_callable;
+    b.return_type = .u8;
+    const entry = try b.addBlock();
+    _ = try b.addInst(entry, .{ .tag = .source_site, .ty = .bool_, .span = Span.empty, .data = .{ .site = .line } });
+    _ = try b.setTerminator(entry, .{ .tag = .trap, .ty = .unit, .span = Span.empty, .data = .{ .trap = .{ .kind = .overflow } } });
+    var h = try Harness.init(gpa, try oneFunction(gpa, try b.finish(entry, .from(0))));
+    defer h.deinit();
+
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "source_site produces no integer");
 }
 
 fn pointerOperationCaller(gpa: std.mem.Allocator, tag: mir_mod.Inst.Tag) !Mir {

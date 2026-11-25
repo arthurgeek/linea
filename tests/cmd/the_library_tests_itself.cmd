@@ -200,6 +200,7 @@ The library tests itself.
   ok    env.every variable has a name and no equals sign in it
   ok    env.raw arguments preserve existing storage and missing indices
   ok    ffi.a view of nothing is lent at an address
+  ok    ffi.an index past the count stops the program
   ok    ffi.bytes are copied from an address
   ok    ffi.bytes past a nul are copied by length
   ok    ffi.entries are read where the list holds them
@@ -1227,6 +1228,10 @@ The library tests itself.
   ok    json.write_line writes one document on one line
   ok    json.wrong kind insertion returns the complete subtree
   ok    json.zero limits are restrictions and container depth excludes scalars
+  ok    location.a location displays as file line and column
+  ok    location.a location names the column of the call
+  ok    location.a location names the file of the call
+  ok    location.a location names the line of the call
   ok    log.a descriptor sink reports a refused line
   ok    log.a field is written as its key and value
   ok    log.a field observes a value its caller keeps
@@ -1349,11 +1354,13 @@ The library tests itself.
   ok    mem.fd reads reject an offset past the buffer
   ok    mem.filled copies one value into every slot
   ok    mem.filled repeats a value in the system allocator
+  ok    mem.first borrows the first element or answers none when empty
   ok    mem.floats sort with a comparison that places nan
   ok    mem.from_fn builds a vector in the system allocator
   ok    mem.from_fn lends an initializer the caller keeps
   ok    mem.from_fn takes an initializer that changes a lent count
   ok    mem.get borrows an element or answers none past the end
+  ok    mem.last borrows the last element or answers none when empty
   ok    mem.length counts the viewed elements
   ok    mem.live_bytes counts what is acquired and not disposed
   ok    mem.load traps at a misaligned offset
@@ -1417,6 +1424,7 @@ The library tests itself.
   ok    mem.vec filled preserves the observations in its seed
   ok    mem.vec finish disposes an empty vector
   ok    mem.vec finish returns nonempty ownership
+  ok    mem.vec first borrows the first element or answers none when empty
   ok    mem.vec first insertion refusal keeps empty storage and the item
   ok    mem.vec from_fn builds its elements in an arena
   ok    mem.vec from_fn constructs linear elements
@@ -1425,6 +1433,7 @@ The library tests itself.
   ok    mem.vec from_fn preserves records borrowed from its callback
   ok    mem.vec from_fn preserves state and constructs linear elements
   ok    mem.vec growth preserves floats booleans and unit elements
+  ok    mem.vec last borrows the last element or answers none when empty
   ok    mem.vec length tracks insertions and removals
   ok    mem.vec new starts empty in the system allocator
   ok    mem.vec new_in starts empty
@@ -1516,6 +1525,8 @@ The library tests itself.
   ok    option.derived option debug renders its case and payload
   ok    option.derived option equality compares cases and payloads
   ok    option.derived option release releases only a present payload
+  ok    option.expect returns some
+  ok    option.expect traps on none
   ok    option.is_some answers whether a value is present
   ok    option.map preserves a record borrowed from its callback
   ok    option.map takes a transform that changes a lent count
@@ -1598,6 +1609,8 @@ The library tests itself.
   ok    result.derived result debug renders both cases
   ok    result.derived result equality compares cases and payloads
   ok    result.derived result release releases the payload of either case
+  ok    result.expect returns ok
+  ok    result.expect traps on err
   ok    result.is_ok answers whether this is a success
   ok    result.map takes a transform that changes a lent count
   ok    result.map transforms ok and preserves err
@@ -1754,6 +1767,7 @@ The library tests itself.
   ok    text.a string written without an allocator is the system string
   ok    text.a user type implements parse by splitting once
   ok    text.a value below 16 is one hex_digit
+  ok    text.a view as text is itself
   ok    text.an argument past the count is nothing
   ok    text.an empty allocator refuses owned text
   ok    text.an empty str has no bytes
@@ -1777,6 +1791,8 @@ The library tests itself.
   ok    text.float32 parsing rounds once to binary32
   ok    text.float64 parses through the parse trait
   ok    text.from_bytes accepts valid utf8 and refuses the rest
+  ok    text.from_parts concatenates without a separator
+  ok    text.from_parts_in allocates once
   ok    text.hex decoding reads two digits a byte in either case
   ok    text.hex decoding refuses an odd count or a letter past f
   ok    text.hex decoding reports a full allocator
@@ -1792,6 +1808,10 @@ The library tests itself.
   ok    text.into_bytes returns the encoded bytes
   ok    text.invalid byte append leaves text and input unchanged
   ok    text.invalid owned bytes are returned with the sequence offset
+  ok    text.join puts the separator only between parts
+  ok    text.join reads owned text held in a vector
+  ok    text.join_in allocates once and a refusal leaves no text
+  ok    text.join_in builds the text in an arena
   ok    text.length counts encoded bytes
   ok    text.length counts the encoded bytes of owned text
   ok    text.lines have no empty final line
@@ -1799,6 +1819,7 @@ The library tests itself.
   ok    text.new owned text is empty system text
   ok    text.owned text accepts unallocated queries
   ok    text.owned text append failure preserves complete text
+  ok    text.owned text as text is its view
   ok    text.owned text checks its prefix
   ok    text.owned text checks its suffix
   ok    text.owned text compares ignoring ascii case
@@ -1958,4 +1979,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1955 passed, 0 failed
+  1976 passed, 0 failed

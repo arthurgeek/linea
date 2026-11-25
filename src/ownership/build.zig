@@ -1035,7 +1035,7 @@ const Builder = struct {
             // A pattern names fields and binders rather than places: what it
             // does to the value is the destructure's business, recorded where
             // the destructure is.
-            .err, .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .reflection_root, .variant_ref, .struct_pattern, .tuple_pattern => {},
+            .err, .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .reflection_root, .caller_location, .variant_ref, .struct_pattern, .tuple_pattern => {},
 
             .lambda => {
                 try self.building.append(self.gpa, id);
@@ -1116,11 +1116,11 @@ const Builder = struct {
 
             .block => try self.body(id, position),
 
-            // Both operands are read, and an operator is a call of the
-            // operation its trait declares, `a == b` being `equals(a, b)`:
-            // each operand is lent until both are evaluated and the
-            // operation runs, exactly as a call's arguments are.
-            .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => {
+            // Both operands stay lent until the operation runs, exactly as a
+            // call's arguments do. A panic reads its message after evaluating
+            // its location, so evaluating that location cannot release or
+            // change storage the message borrows.
+            .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .panic_at => {
                 const p = self.ast.binary(id);
                 try self.building.append(self.gpa, id);
                 defer _ = self.building.pop();
@@ -1335,7 +1335,7 @@ const Builder = struct {
     fn yieldsAnUnnamedValue(tag: node.Expr.Tag) bool {
         return switch (tag) {
             .name_ref, .param_argument, .field, .dereference, .grouped, .marked => false,
-            .err, .reflection_root, .struct_pattern, .tuple_pattern => false,
+            .err, .reflection_root, .caller_location, .struct_pattern, .tuple_pattern => false,
             .block, .conditional, .match_, .match_read, .loop_, .while_ => false,
             .for_, .for_read, .for_inout => false,
             // Its success path yields the payload itself; its failing path
@@ -1344,7 +1344,7 @@ const Builder = struct {
             .logical_and, .logical_or => false,
             // An assignment of either kind yields Unit, which is not a value
             // anything can be left holding.
-            .break_, .continue_, .return_, .panic, .assign => false,
+            .break_, .continue_, .return_, .panic, .panic_at, .assign => false,
             .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign => false,
 
             // A literal builds a value no place names, exactly as the other

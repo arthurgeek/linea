@@ -1,0 +1,7 @@
+// `depot.unload` unwraps an empty crate. The panic names the call inside
+// `depot`, the file that made the mistake, and not the library or `main`.
+import depot
+
+fn main() -> UInt8 {
+    depot.unload(.None)
+}

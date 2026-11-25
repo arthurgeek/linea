@@ -1,0 +1,9 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/caller_location/a_result_from_the_location_names_it.lin:5:16
+  |
+5 |         return at.file()
+  |                ^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: the value comes from `at`; write `where carries(text, at)` to say so
+  = help: an owned copy observes nothing and needs no clause: declare the result `Result[String, mem.Oom]` and return `….to_owned()`, which copies the text and can fail with `mem.Oom`
+  = help: the types this names are reached with `import std.mem`

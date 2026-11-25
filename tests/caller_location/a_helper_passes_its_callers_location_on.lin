@@ -1,0 +1,11 @@
+// `first_byte` passes the location of its own call to `expect`, so a panic
+// names the line in `main` that handed it empty text.
+fn first_byte(text: Str, at: Location = caller) -> UInt8 {
+    text.byte(0).expect("the text is empty", at)
+}
+
+fn main() -> UInt8 {
+    let letter = first_byte("linea")
+    let missing = first_byte("")
+    letter + missing
+}

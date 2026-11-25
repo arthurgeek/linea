@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let spot = |at: Location = caller| at.line()
+    UInt8(spot() % 2)
+}
