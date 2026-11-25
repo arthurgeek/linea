@@ -618,7 +618,7 @@ fn representationFor(
         // An open integer or open type left in the pool is one no recorded use
         // still names: every use was resolved before checking finished. Like a
         // parameter, it has no representation a value could have.
-        .poison, .parameter, .open_integer, .open_float, .open_type => .{ .computation = .invalid, .storage = .invalid },
+        .poison, .parameter, .open_integer, .open_float, .open_type, .length => .{ .computation = .invalid, .storage = .invalid },
     };
 }
 

@@ -1,0 +1,12 @@
+fn rows[let n: UInt64, let m: UInt64](_grid: [[Option[UInt8]; n]; m]) -> UInt64 {
+    n
+}
+
+fn main() -> UInt8 {
+    let _wider = rows([[.Some(7)], [.None, .Some(3)]])
+    let _narrower = rows([[.None, .Some(3)], [.Some(7)]])
+    let typed: [Option[UInt8]; 2] = [.None, .Some(3)]
+    let _typed_first = rows([copy(typed), [.Some(7)]])
+    let _typed_last = rows([[.Some(7)], typed])
+    0
+}

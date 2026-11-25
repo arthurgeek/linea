@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Copyable`, and `Token` does not have that capability
+  --> tests/arrays/filled/a_filled_element_is_copyable.lin:10:34
+   |
+10 |     let tokens: [Token; 2] = mem.filled(Token { id = 1 })
+   |                                  ^^^^^^ mark `Token` `@copyable`

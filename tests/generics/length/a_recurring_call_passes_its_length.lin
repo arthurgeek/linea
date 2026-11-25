@@ -1,0 +1,11 @@
+// [T-PolyRec]. Each call nests the element in another array, so the
+// instances would grow without end; the length passes through unchanged and
+// is not what grows.
+fn deepen[T: Copyable, let n: UInt64](items: [T; n]) -> UInt8 {
+    let wider: [[T; n]; 1] = [copy(items)]
+    deepen[[T; n], 1](wider)
+}
+
+fn main() -> UInt8 {
+    deepen([1, 2])
+}

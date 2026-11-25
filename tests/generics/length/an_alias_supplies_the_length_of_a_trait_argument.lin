@@ -1,0 +1,28 @@
+// An alias supplies its length to the array it names. Each implementation
+// receives the array of its own length.
+alias Bytes[let n: UInt64] = [UInt8; n]
+
+trait Last[T] {
+    fn last(self: Self, items: T) -> UInt8
+}
+
+struct Reader {}
+
+impl Last[Bytes[2]] for Reader {
+    fn last(_self: Self, items: Bytes[2]) -> UInt8 {
+        items[1]
+    }
+}
+
+impl Last[[UInt8; 3]] for Reader {
+    fn last(_self: Self, items: [UInt8; 3]) -> UInt8 {
+        items[2]
+    }
+}
+
+fn main() -> UInt8 {
+    let reader = Reader {}
+    let pair: Bytes[2] = [1, 5]
+    let triple: [UInt8; 3] = [2, 3, 7]
+    reader.last(pair) + reader.last(triple)
+}

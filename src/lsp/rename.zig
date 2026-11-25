@@ -868,7 +868,7 @@ fn spelling(
 fn namesADirectory(kind: Kind) bool {
     return switch (kind) {
         // A value's name, and a value is written where an expression is.
-        .local, .parameter, .capture, .binder, .constant, .function => false,
+        .local, .parameter, .capture, .binder, .constant, .function, .length_parameter => false,
         // A type and a trait are named in source and nowhere else. Every place
         // one is written -- as an expression, as an annotation, as a type
         // argument, as a bound, as an `impl` head -- is a site the reverse

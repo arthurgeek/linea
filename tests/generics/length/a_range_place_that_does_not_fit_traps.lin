@@ -1,0 +1,10 @@
+// Called with one element, a range of two does not fit, and the program stops
+// there as an index past the end does.
+fn first_two[let n: UInt64](items: [UInt8; n]) -> [UInt8; 2] {
+    copy(items[0..2])
+}
+
+fn main() -> UInt8 {
+    let pair = first_two([4])
+    pair[0]
+}

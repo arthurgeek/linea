@@ -1,0 +1,9 @@
+// A length argument is written by position in the call's bracket list, beside
+// the type arguments, and it settles the length before any argument is read.
+fn first[T: Copyable, let n: UInt64](items: [T; n]) -> T {
+    copy(items[0])
+}
+
+fn main() -> UInt8 {
+    first[UInt8, 3]([7, 8, 9])
+}

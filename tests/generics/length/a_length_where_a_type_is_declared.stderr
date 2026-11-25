@@ -1,0 +1,10 @@
+error[T-Bound]: `Ring` declares `T` as a type, and `4` is a length
+ --> tests/generics/length/a_length_where_a_type_is_declared.lin:7:20
+  |
+7 |     let ring: Ring[4, UInt8] = .{ items = [1, 2, 3, 4] }
+  |                    ^ this is a length
+error[T-Bound]: `Ring` declares `n` as a length, and `UInt8` is a type
+ --> tests/generics/length/a_length_where_a_type_is_declared.lin:7:23
+  |
+7 |     let ring: Ring[4, UInt8] = .{ items = [1, 2, 3, 4] }
+  |                       ^^^^^ this is a type

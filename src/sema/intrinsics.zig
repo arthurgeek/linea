@@ -322,6 +322,9 @@ pub const RawAccesses = struct {
     environment_count: DeclId = .none,
     environment_entry: DeclId = .none,
     stride: DeclId = DeclId.none,
+    /// `mem.array_filled`, the `[T; n]` holding `n` copies of a copyable
+    /// value, which lowering writes with a counted loop.
+    array_filled: DeclId = DeclId.none,
     take: DeclId = DeclId.none,
     put: DeclId = DeclId.none,
     place: DeclId = DeclId.none,
@@ -479,6 +482,7 @@ pub const RawAccesses = struct {
             .argument_span = rawAccessDecl(program, ast, "argument_span", 1),
             .environment_span = rawAccessDecl(program, ast, "environment_span", 1),
             .stride = rawAccessDecl(program, ast, "slot_stride", 1),
+            .array_filled = rawAccessDecl(program, ast, "array_filled", 1),
             .take = rawAccessDecl(program, ast, "slot_take", 2),
             .put = rawAccessDecl(program, ast, "slot_put", 3),
             .place = rawAccessDecl(program, ast, "slot_place", 3),
@@ -805,7 +809,7 @@ pub const RawAccesses = struct {
     };
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (d == self.stride or d == self.array_filled or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries

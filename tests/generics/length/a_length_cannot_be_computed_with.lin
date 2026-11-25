@@ -1,0 +1,15 @@
+// [T-ArraySize]. A length in a type is a constant or a length parameter;
+// `n + 1` computes with one, and a local computed from `n` is a value the
+// program works out while it runs.
+import std.mem
+
+fn extended[let n: UInt64](xs: [UInt8; n]) -> UInt8 {
+    let _longer: [UInt8; n + 1] = mem.filled(0)
+    let half = n / 2
+    let _part: [UInt8; half] = mem.filled(0)
+    xs[0]
+}
+
+fn main() -> UInt8 {
+    extended([1, 2])
+}

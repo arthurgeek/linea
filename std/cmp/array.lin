@@ -1,0 +1,54 @@
+import std.testing
+
+// Two arrays of one type have the same length, so they are equal when every
+// pair of elements at one position is equal.
+impl[T: Equatable, let n: UInt64] Equatable for [T; n] {
+    fn equals(self: Self, other: Self) -> Bool {
+        self.as_slice().equals(other.as_slice())
+    }
+}
+
+test "arrays equal by their elements" {
+    let first = [UInt64(3), 5, 8]
+    let same = [UInt64(3), 5, 8]
+    let changed = [UInt64(3), 5, 9]
+    let empty: [Bool; _] = []
+    testing.assert(first == same, "equal elements compared unequal")?
+    testing.assert(first != changed, "a changed element compared equal")?
+    testing.assert(empty == empty, "an empty array compared unequal to itself")?
+}
+
+// An array's equality is an equivalence wherever its elements' is.
+impl[T: Equivalent, let n: UInt64] Equivalent for [T; n] {}
+
+test "an array of equivalent elements is equivalent" {
+    let codes = [UInt8(1), 2]
+    testing.assert(Equatable.equals(codes, codes), "an array was unequal to itself")?
+}
+
+// Order by the first element that differs. An incomparable element pair leaves
+// the arrays unordered, as it does for derived structures.
+impl[T: Comparable, let n: UInt64] Comparable for [T; n] {
+    fn less(self: Self, other: Self) -> Bool {
+        self.as_slice().less(other.as_slice())
+    }
+}
+
+test "arrays order by their first different element" {
+    let low = [UInt8(1), 9]
+    let high = [UInt8(2), 0]
+    testing.assert(low < high, "the first element did not decide")?
+    testing.assert(!(low < low), "an array came before itself")?
+    let unordered = [Float64(0.0) / 0.0, 1.0]
+    let other = [Float64(0.0) / 0.0, 0.0]
+    testing.assert(!(unordered < other) && !(other < unordered), "an incomparable element ordered the arrays")?
+}
+
+// An array's order is total wherever its elements' is.
+impl[T: Ordered, let n: UInt64] Ordered for [T; n] {}
+
+test "an array of ordered elements is ordered" {
+    let earlier = [Int64(-1), 4]
+    let later = [Int64(0), 0]
+    testing.assert(earlier < later && !(later < earlier), "the order was not total")?
+}

@@ -1,0 +1,9 @@
+// [N-Unused]. A declared length parameter is a declaration, and an unused
+// declaration is an error.
+fn zero[T, let n: UInt64](_item: T) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    zero[UInt8, 3](1)
+}

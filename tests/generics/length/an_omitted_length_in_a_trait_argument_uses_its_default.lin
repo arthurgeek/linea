@@ -1,0 +1,27 @@
+// An omitted length in a nominal type names the same trait argument as its
+// explicit default.
+struct Bytes[T, let n: UInt64 = 2] {
+    items: [T; n],
+}
+
+trait Inspect[T] {
+    fn inspect(self: Self, items: T) -> UInt8
+}
+
+struct Reader {}
+
+impl Inspect[Bytes[UInt8]] for Reader {
+    fn inspect(_self: Self, items: Bytes[UInt8]) -> UInt8 {
+        items.items[1]
+    }
+}
+
+impl Inspect[Bytes[UInt8, 2]] for Reader {
+    fn inspect(_self: Self, items: Bytes[UInt8, 2]) -> UInt8 {
+        items.items[1]
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

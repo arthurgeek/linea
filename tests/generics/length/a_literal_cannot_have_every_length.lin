@@ -1,0 +1,9 @@
+// [T-ArrayLength]. A body is checked once for every length, and a literal
+// has one count, so it cannot be an array of `n` elements.
+fn pair[let n: UInt64](first: UInt8) -> [UInt8; n] {
+    [first, first]
+}
+
+fn main() -> UInt8 {
+    pair[2](1)[0]
+}

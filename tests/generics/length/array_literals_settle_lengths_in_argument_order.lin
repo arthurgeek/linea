@@ -1,0 +1,13 @@
+fn both[let n: UInt64](_first: [UInt8; n], _second: [UInt8; n]) -> UInt64 {
+    n
+}
+
+fn main() -> UInt8 {
+    let two: [UInt8; 2] = [1, 2]
+    let three: [UInt8; 3] = [3, 4, 5]
+    let _long = both(two, [3, 4, 5])
+    let _short = both([3, 4, 5], two)
+    let _named = both(_second: two, _first: [3, 4, 5])
+    let _typed = both(three, two)
+    0
+}

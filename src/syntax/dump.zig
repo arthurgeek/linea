@@ -188,7 +188,13 @@ fn dumpDecl(
         // different-program guard reads this dump with spans stripped, and a
         // `phantom` it cannot see is a `phantom` a rewrite could drop.
         if (t.phantom) try w.writeAll("phantom ");
-        try w.print("type param \"{s}\"", .{ast.tokenText(t.name)});
+        if (t.kind == .length) {
+            try w.print("length param \"{s}\"", .{ast.tokenText(t.name)});
+            if (t.length_type.wasWritten()) {
+                try w.writeAll(" : ");
+                try dumpWrittenType(w, ast, t.length_type);
+            }
+        } else try w.print("type param \"{s}\"", .{ast.tokenText(t.name)});
         for (ast.boundsOf(t), 0..) |b, i| {
             try w.writeAll(if (i == 0) " : " else " + ");
             try dumpBound(w, ast, b);
@@ -357,6 +363,7 @@ fn dumpWrittenType(
             try w.writeAll("]");
         },
         .callable => try dumpCallableType(w, ast, ast.callableType(ref)),
+        .length_argument => try w.writeAll(ast.exprText(ref.length)),
         .tuple => {
             try w.writeAll("(");
             for (ast.typeArgs(ref.args), 0..) |component, i| {

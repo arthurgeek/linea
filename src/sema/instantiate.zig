@@ -274,7 +274,7 @@ test "a default's text in a type spelling does not end the list it sits in" {
 /// route or a named type's spelling is followed by `;`, `[` or `.`, and the one
 /// type spelling with `@` after a name is a closure type's
 /// (`types.closure_type_mark`), which no kind here is named.
-const Kind = enum { lambda, closure_release, constructor, closure_entry, closure_settle, built_in, viewed };
+const Kind = enum { lambda, closure_release, constructor, closure_entry, closure_settle, built_in };
 
 /// What a generated body's symbol is named after: a type by its spelling, a
 /// closure or constructor by its name (`Typing.closure_names`), a trait member
@@ -572,7 +572,7 @@ pub fn selectedMember(ast: *const Ast, typing: *const Typing, choice: types_mod.
     // parameters as an implementation's arguments stand for its own.
     if (ast.declIsProvided(member)) return switch (choice.supplier) {
         .bound => null,
-        .declared, .closure_release => .{ .body = .{ .declaration = member }, .self_ty = choice.implementedFor(), .impl_args = choice.trait_args },
+        .declared, .closure_release => .{ .body = .{ .declaration = member }, .self_ty = choice.receiver, .impl_args = choice.trait_args },
     };
     return switch (choice.supplier) {
         .bound => null,
@@ -584,22 +584,20 @@ pub fn selectedMember(ast: *const Ast, typing: *const Typing, choice: types_mod.
             const row = typing.implementations[id.index()];
             if (row.isAmbient()) break :blk null;
             const supplied = typing.supply_index.memberOf(row.decl, member) orelse break :blk null;
-            break :blk .{ .body = .{ .declaration = supplied }, .self_ty = receiverKeying(ast, row.decl, choice.implementedFor()), .impl_args = choice.impl_args };
+            break :blk .{ .body = .{ .declaration = supplied }, .self_ty = receiverKeying(ast, row.decl, choice.receiver), .impl_args = choice.impl_args };
         },
     };
 }
 
 /// The body a function value naming `trait`'s `member` holds, for one
 /// implementation choice: the member that implementation supplies; for an
-/// operation the compiler provides, a body generated to perform it; and for
-/// an array that answers through its slice view, a body generated to view
-/// its array arguments and call the slice's member. Null where the receiver
+/// operation the compiler provides, a body generated to perform it. Null
+/// where the receiver
 /// answers only through an observation of itself, which no body taking the
 /// receiver as it is can stand for.
 pub fn valueMember(ast: *const Ast, typing: *const Typing, choice: types_mod.ImplementationChoice, trait: DeclId, member: DeclId) ?SelectedMember {
     if (choice.observations != 0) return null;
     const at: types_mod.OperationAt = .{ .trait = trait, .member = member, .receiver = choice.receiver };
-    if (choice.view != .poison) return .{ .body = .{ .viewed = at }, .self_ty = .poison, .impl_args = &.{} };
     if (selectedMember(ast, typing, choice, member)) |selected| return selected;
     return switch (choice.supplier) {
         .declared => |id| if (typing.implementations[id.index()].isAmbient())
@@ -658,7 +656,7 @@ pub const InstanceKey = struct {
             .constructor => |constructor| @intFromEnum(constructor.id),
             .erased_entry => |entry| @intFromEnum(entry.callable) ^ (@intFromEnum(entry.signature) << 16),
             .erased_settle => |callable| @intFromEnum(callable),
-            .built_in, .viewed => |at| @as(u32, @intCast(at.member.index())) ^ (@intFromEnum(at.receiver) << 16),
+            .built_in => |at| @as(u32, @intCast(at.member.index())) ^ (@intFromEnum(at.receiver) << 16),
         };
         h.update(std.mem.asBytes(&at));
         h.update(std.mem.asBytes(&self.args.len));
@@ -693,7 +691,7 @@ const no_extern_symbols: ExternSymbols = .empty;
 fn keyedBody(externs: *const ExternSymbols, body: BodyOrigin) BodyOrigin {
     return switch (body) {
         .declaration => |decl| .{ .declaration = externs.get(decl) orelse decl },
-        .closure, .closure_release, .constructor, .erased_entry, .erased_settle, .built_in, .viewed => body,
+        .closure, .closure_release, .constructor, .erased_entry, .erased_settle, .built_in => body,
     };
 }
 
@@ -930,7 +928,6 @@ pub const TableBuilder = struct {
             .erased_entry => |entry| try symbolForGenerated(self.gpa, .closure_entry, .{ .type = entry.callable }, &.{entry.signature}, key.self_ty, owned_impl, pool),
             .erased_settle => |callable| try symbolForGenerated(self.gpa, .closure_settle, .{ .type = callable }, owned, key.self_ty, owned_impl, pool),
             .built_in => |built_in| try symbolForGenerated(self.gpa, .built_in, .{ .member = .{ .program = program, .trait = built_in.trait, .member = built_in.member } }, &.{built_in.receiver}, key.self_ty, owned_impl, pool),
-            .viewed => |viewed| try symbolForGenerated(self.gpa, .viewed, .{ .member = .{ .program = program, .trait = viewed.trait, .member = viewed.member } }, &.{viewed.receiver}, key.self_ty, owned_impl, pool),
         };
         errdefer self.gpa.free(name);
         const claimed: u32 = @intCast(self.instances.items.len);
@@ -1308,18 +1305,6 @@ fn discoverReporting(
             _ = try builtInSignature(ast, typing, pool, built_in);
             return;
         },
-        // A viewed operation calls the slice's member, so that instance is
-        // discovered with the signature the body is read through.
-        .viewed => |viewed| {
-            _ = try builtInSignature(ast, typing, pool, viewed);
-            const choice = try pool.implementationChoice(viewed.trait, &.{}, viewed.receiver) orelse
-                @panic("compiler defect: a viewed operation's receiver answers no implementation");
-            const view = pool.view();
-            const selected = selectedMember(ast, &view, choice, viewed.member) orelse
-                @panic("compiler defect: a viewed operation's slice supplies no member");
-            _ = try builder.intern(.{ .body = selected.body, .args = &.{}, .self_ty = selected.self_ty, .impl_args = selected.impl_args }, program, pool);
-            return;
-        },
         else => {},
     }
     const SourceBody = struct {
@@ -1330,7 +1315,7 @@ fn discoverReporting(
         signature: TypeId,
     };
     const source: SourceBody = switch (key.body) {
-        .closure_release, .erased_entry, .erased_settle, .built_in, .viewed => unreachable,
+        .closure_release, .erased_entry, .erased_settle, .built_in => unreachable,
         .declaration => |decl| .{
             .decl = decl,
             .body = ast.declBody(decl),
@@ -1945,7 +1930,7 @@ const Discovery = struct {
             const implementation = row.decl;
             const member = self.typing.supply_index.memberOf(implementation, signature_for_piece) orelse continue;
             const choice = self.pool.implementation_selections.choiceOf(trait, &.{}, piece).?;
-            const receiver = receiverKeying(self.ast, implementation, choice.implementedFor());
+            const receiver = receiverKeying(self.ast, implementation, choice.receiver);
             _ = try self.table.intern(
                 .{ .body = .{ .declaration = member }, .args = settled, .self_ty = receiver, .impl_args = choice.impl_args },
                 self.program,
@@ -1980,7 +1965,7 @@ const Discovery = struct {
         return .{
             .row = row,
             .member = self.typing.supply_index.memberOf(row.decl, signature) orelse return null,
-            .held = receiverKeying(self.ast, row.decl, choice.implementedFor()),
+            .held = receiverKeying(self.ast, row.decl, choice.receiver),
             .impl_args = choice.impl_args,
         };
     }

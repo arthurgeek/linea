@@ -1,0 +1,10 @@
+error[T-Bound]: `Label` declares `T` as a type, and `3` is a length
+ --> tests/generics/length/a_trait_argument_is_a_type.lin:8:19
+  |
+8 | fn _read[R: Label[3]](_reader: R) {}
+  |                   ^ this is a length
+error[T-Bound]: `Label` declares `T` as a type, and `2` is a length
+ --> tests/generics/length/a_trait_argument_is_a_type.lin:6:12
+  |
+6 | impl Label[2] for Reader {}
+  |            ^ this is a length

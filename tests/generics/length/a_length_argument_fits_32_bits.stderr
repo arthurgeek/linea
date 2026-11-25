@@ -1,0 +1,5 @@
+error[T-ArraySize]: an array's length is part of its type, and this one is too wide to be
+ --> tests/generics/length/a_length_argument_fits_32_bits.lin:8:17
+  |
+8 |     UInt8(count[5000000000]([true]))
+  |                 ^^^^^^^^^^ no array holds this many elements

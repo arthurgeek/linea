@@ -1,0 +1,20 @@
+error[T-Mismatch]: `n` was already settled as `2`, and this settles it as `3`
+ --> tests/generics/length/array_literals_settle_lengths_in_argument_order.lin:8:27
+  |
+8 |     let _long = both(two, [3, 4, 5])
+  |                           ^^^^^^^^^ one length parameter, two lengths
+error[T-Mismatch]: `n` was already settled as `3`, and this settles it as `2`
+ --> tests/generics/length/array_literals_settle_lengths_in_argument_order.lin:9:34
+  |
+9 |     let _short = both([3, 4, 5], two)
+  |                                  ^^^ one length parameter, two lengths
+error[T-Mismatch]: `n` was already settled as `2`, and this settles it as `3`
+  --> tests/generics/length/array_literals_settle_lengths_in_argument_order.lin:10:45
+   |
+10 |     let _named = both(_second: two, _first: [3, 4, 5])
+   |                                             ^^^^^^^^^ one length parameter, two lengths
+error[T-Mismatch]: `n` was already settled as `3`, and this settles it as `2`
+  --> tests/generics/length/array_literals_settle_lengths_in_argument_order.lin:11:30
+   |
+11 |     let _typed = both(three, two)
+   |                              ^^^ one length parameter, two lengths

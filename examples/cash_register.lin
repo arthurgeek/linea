@@ -38,9 +38,11 @@ impl Cash for Notes {
     }
 }
 
-// `[T; 3]` holds exactly three values of the same type. `T: Cash` requires
-// that type to implement Cash, so this function can total either array.
-fn total[T: Cash](registers: [T; 3]) -> UInt64 {
+// `[T; n]` holds `n` values of the same type, where the length parameter `n`
+// is whatever length the caller's array has. `T: Cash` requires that type to
+// implement Cash, so this function can total either kind of drawer, however
+// many registers a shop has.
+fn total[T: Cash, let n: UInt64](registers: [T; n]) -> UInt64 {
     // `map` asks each register for its cents and `sum` adds them up.
     registers.as_slice().map(|sink register| register.cents()).sum()
 }

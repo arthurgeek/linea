@@ -1006,6 +1006,10 @@ error[T-Index]: no element sits here, and the length is part of the type
    |                                ^ the length is 7, so the last index is 6
 ```
 
+Each array keeps the length it was made with. A function can still take arrays
+of any length: a length parameter, `let n: UInt64`, stands for whatever length
+the caller's array has ([Calling things](02-calling-things.md#a-length-parameter-arrays-of-any-size)).
+
 ### Views: `Str` and `Slice`
 
 `weekend` is a `mem.Slice[Int64]`, the `Slice` type of the `std.mem` module; a

@@ -1,0 +1,13 @@
+trait Score {}
+
+template impl Score {}
+
+@derive(Score for Readings[n])
+struct Readings[let n: UInt64] {
+    values: [UInt8; n],
+}
+
+fn main() -> UInt8 {
+    let _readings = Readings[1] { values = [UInt8(1)] }
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Phantom]: `phantom` is not a function's to declare
+ --> tests/generics/length/no_phantom_length_on_a_function.lin:3:22
+  |
+3 | fn count[phantom let n: UInt64]() -> UInt64 {
+  |                      ^ a body can read no parameter for identity alone

@@ -148,6 +148,7 @@
 ; because the last pattern capturing a token colours it.
 ((parameter default: (identifier) @keyword.control)
  (#eq? @keyword.control "caller"))
+(length_parameter name: (identifier) @variable.parameter)
 (named_argument name: (identifier) @variable.parameter)
 (field_expression field: (identifier) @variable.other.member)
 (template_requirement target: (identifier) @variable.other.member)

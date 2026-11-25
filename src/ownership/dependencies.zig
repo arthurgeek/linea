@@ -1133,12 +1133,14 @@ const Analysis = struct {
     fn arrayElementHead(self: *const Analysis, ty: types.TypeId, index: ?KnownIndex) u96 {
         const shape = self.typing.get(ty);
         if (shape != .array) return element;
+        // A parameter's length names no slot: the access is to some element.
+        const count = self.typing.arrayCount(shape.array.length) orelse return element;
         if (index) |known| {
-            if (Typing.elementSlot(shape.array.count, known.value, known.from_end)) |slot| return elementHead(slot);
+            if (Typing.elementSlot(count, known.value, known.from_end)) |slot| return elementHead(slot);
             if (known.from_end) return element;
         }
         // Any successful access into a singleton selects its only slot.
-        return if (shape.array.count == 1) elementHead(0) else element;
+        return if (count == 1) elementHead(0) else element;
     }
 
     fn selectedPath(self: *Analysis, expression: ExprId) Allocator.Error!Selection {

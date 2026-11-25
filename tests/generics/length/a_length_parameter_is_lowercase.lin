@@ -1,0 +1,9 @@
+// [N-Case]. A length parameter is read as a value in its body, and a value's
+// name starts with a lowercase letter.
+fn count[let N: UInt64](_flags: [Bool; N]) -> UInt64 {
+    N
+}
+
+fn main() -> UInt8 {
+    UInt8(count([true]))
+}

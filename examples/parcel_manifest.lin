@@ -56,9 +56,10 @@ fn shipping_weight(sink parcel: borrow UInt64) -> UInt64 {
     *parcel + packaging_grams
 }
 
-// Late parcels already include packaging. `iter.extend` appends them in
-// order; if memory runs out, the manifest keeps the parcels appended so far.
-fn append_late(inout manifest: Vec[UInt64], late: [UInt64; 2]) -> Result[(), Oom] {
+// Late parcels already include packaging. `n` is how many arrive late, so any
+// number of them can be appended. `iter.extend` appends them in order; if
+// memory runs out, the manifest keeps the parcels appended so far.
+fn append_late[let n: UInt64](inout manifest: Vec[UInt64], late: [UInt64; n]) -> Result[(), Oom] {
     var arrivals = late.as_slice().map(|sink parcel| *parcel)
     iter.extend(&manifest, &arrivals).settled()
 }

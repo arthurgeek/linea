@@ -1,0 +1,5 @@
+error[T-Mismatch]: `n` was already settled as `3`, and this settles it as `4`
+  --> tests/generics/length/two_arguments_settle_one_length_differently.lin:21:30
+   |
+21 |     UInt8(pairwise_max(home, away))
+   |                              ^^^^ one length parameter, two lengths

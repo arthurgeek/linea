@@ -1,6 +1,7 @@
 # 166. An array compares, hashes and prints through its slice view
 
-Status: Accepted — 2026-09-24
+Status: Accepted — 2026-09-24. The compiler-supplied view rows are
+superseded by [0307](0307-a-length-may-be-a-parameter.md): the library implements the six traits for `[T; n]`.
 
 Extends [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) and
 [0137](0137-arrays-expose-checked-borrowed-slices.md).

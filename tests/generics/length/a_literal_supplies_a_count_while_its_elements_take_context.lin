@@ -1,0 +1,13 @@
+fn apply[let n: UInt64](choose: fn(values: [Option[UInt8]; n]) -> UInt8, values: [Option[UInt8]; n]) -> UInt8 {
+    choose(values)
+}
+
+fn main() -> UInt8 {
+    apply(
+        |values| match copy(values[0]) {
+            Some(value) => value,
+            None => 0,
+        },
+        [.Some(7), .None],
+    )
+}

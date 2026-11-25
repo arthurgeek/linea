@@ -9,7 +9,9 @@ local bindings initialized with array literals is added by
 constants by [0198](0198-array-literal-bindings-infer-written-lengths.md). Comparison, hashing and
 formatting through the slice view are added by
 [0166](0166-an-array-compares-through-its-slice-view.md). An array's `length()`
-is added by [0172](0172-an-array-reports-its-length.md).
+is added by [0172](0172-an-array-reports-its-length.md). A length parameter, an
+array of any length, is added by
+[0307](0307-a-length-may-be-a-parameter.md).
 
 ## Context
 

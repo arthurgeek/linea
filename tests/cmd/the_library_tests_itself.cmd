@@ -66,6 +66,10 @@ The library tests itself.
   ok    cli.usage formats aligned help documentation
   ok    cli.usage lists positionals before the subcommand
   ok    cli.usage_error answers the usage status
+  ok    cmp.an array of equivalent elements is equivalent
+  ok    cmp.an array of ordered elements is ordered
+  ok    cmp.arrays equal by their elements
+  ok    cmp.arrays order by their first different element
   ok    cmp.unit values are equivalent
   ok    collections.a deleted collision bucket is reused without allocation
   ok    collections.a drain settles linear values without a release implementation
@@ -218,6 +222,7 @@ The library tests itself.
   ok    fmt.a padded spec sets only the width
   ok    fmt.a spec_of the written parts names each one
   ok    fmt.a utf8 failure displays its offset and keeps its bytes
+  ok    fmt.an array debugs as its elements in brackets
   ok    fmt.an impossible close error renders as none
   ok    fmt.boolean renderers name both values
   ok    fmt.decimal_digits count every place
@@ -365,6 +370,7 @@ The library tests itself.
   ok    fs.writing a file reports the bytes written
   ok    hash.boolean hashes distinguish values
   ok    hash.boolean queries match only the same value
+  ok    hash.equal arrays hash equally
   ok    hash.hasher finish observes without resetting or consuming the stream
   ok    hash.hasher new starts with an empty stream
   ok    hash.hasher write_byte preserves byte extremes and limb carries
@@ -1338,6 +1344,7 @@ The library tests itself.
   ok    mem.fail_at refuses a later acquisition through live handles
   ok    mem.fd reads reject a count past the remaining buffer
   ok    mem.fd reads reject an offset past the buffer
+  ok    mem.filled copies one value into every slot
   ok    mem.filled repeats a value in the system allocator
   ok    mem.first borrows the first element or answers none when empty
   ok    mem.floats sort with a comparison that places nan
@@ -1964,4 +1971,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1961 passed, 0 failed
+  1968 passed, 0 failed

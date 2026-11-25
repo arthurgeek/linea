@@ -1,0 +1,25 @@
+// A trait is implemented once per constructor, so an implementation for
+// `Pack[n]` and one for `Pack[3]` would both answer for `Pack[3]`.
+trait Label {
+    fn label(self: Self) -> UInt8
+}
+
+struct Pack[let n: UInt64] {
+    weights: [UInt8; n],
+}
+
+impl[let n: UInt64] Label for Pack[n] {
+    fn label(self: Self) -> UInt8 {
+        self.weights[0]
+    }
+}
+
+impl Label for Pack[3] {
+    fn label(self: Self) -> UInt8 {
+        self.weights[2]
+    }
+}
+
+fn main() -> UInt8 {
+    Pack[3] { weights = [1, 1, 1] }.label()
+}

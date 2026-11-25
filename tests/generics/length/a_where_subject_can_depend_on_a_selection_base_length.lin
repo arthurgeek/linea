@@ -1,0 +1,22 @@
+trait Mark {}
+
+trait HasItem {
+    type Item
+}
+
+struct Holder[let n: UInt64] { values: [UInt8; n] }
+
+impl[let n: UInt64] HasItem for Holder[n] {
+    type Item = UInt8
+}
+
+impl Mark for UInt8 {}
+
+fn _count[let n: UInt64](_values: [UInt8; n]) -> UInt8
+where Holder[n]: HasItem, Holder[n].Item: Mark {
+    0
+}
+
+fn main() -> UInt8 {
+    0
+}

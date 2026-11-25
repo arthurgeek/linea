@@ -134,6 +134,7 @@ pub const not_yet_generated = [_]NotYet{
             .t_infer,
             .t_call,
             .t_array_length,
+            .t_length_parameter,
             .t_index,
             .t_poly_rec,
             .t_bound,

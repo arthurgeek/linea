@@ -1,0 +1,9 @@
+// [T-LengthParameter]. A length parameter has the type `length()` and an index
+// have, `UInt64`.
+fn count[let n: UInt8](_flags: [Bool; n]) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    count([true])
+}

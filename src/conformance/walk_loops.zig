@@ -78,10 +78,13 @@ fn siteOf(semantics: Semantics, id: ExprId, text: []const u8) ?Site {
     const walked = typing.exprType(f.callee);
     if (walked == .poison) return null;
     return switch (typing.get(walked)) {
-        .array => |a| if (a.count == 0 or !typing.isScalarSnapshot(a.element))
-            null
-        else
-            .{ .walk = id, .at = at, .form = .{ .array = a.count } },
+        .array => |a| blk: {
+            const count = typing.arrayCount(a.length) orelse break :blk null;
+            break :blk if (count == 0 or !typing.isScalarSnapshot(a.element))
+                null
+            else
+                .{ .walk = id, .at = at, .form = .{ .array = count } };
+        },
         else => .{ .walk = id, .at = at, .form = .sequence },
     };
 }

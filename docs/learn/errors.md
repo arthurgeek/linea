@@ -44,6 +44,7 @@ for the code in brackets to reach the rule itself.
 | `S-Tuple` | error | Linea in an hour: [Tuples](01-linea-in-an-hour.md#tuples) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-Tuple]` |
 | `S-UnitResult` | error | Linea in an hour: [`read`, `inout` and `sink`](01-linea-in-an-hour.md#read-inout-and-sink) | [§2 Grammar](../linea-semantics.md#2-grammar), at `[S-UnitResult]` |
 | `T-Arity` | error | Memory: [A function's `_in` form takes the allocator](07-memory.md#a-functions-_in-form-takes-the-allocator) | [§4 Types](../linea-semantics.md#4-types), at `[T-Arity]` |
+| `T-ArraySize` | error | Calling things: [What a length cannot be](02-calling-things.md#what-a-length-cannot-be) | [§4 Types](../linea-semantics.md#4-types), at `[T-ArraySize]` |
 | `T-BorrowContract` | error | Borrowing: [`borrows` — my result points into what you gave me](06-borrowing.md#borrows--my-result-points-into-what-you-gave-me) | [§5.5 What is checked](../linea-semantics.md#55-what-is-checked), at `[T-BorrowContract]` |
 | `T-Bound` | error | Calling things: [One trait for two uses of a generic type](02-calling-things.md#one-trait-for-two-uses-of-a-generic-type) | [§4 Types](../linea-semantics.md#4-types), at `[T-Bound]` |
 | `T-Call` | error | Iterating: [Asking questions: `any`, `all` and `find`](05-iterating.md#asking-questions-any-all-and-find) | [§4 Types](../linea-semantics.md#4-types), at `[T-Call]` |
@@ -64,7 +65,7 @@ for the code in brackets to reach the rule itself.
 | `T-Infer` | error | Calling things: [Naming a type argument](02-calling-things.md#naming-a-type-argument) | [§4 Types](../linea-semantics.md#4-types), at `[T-Infer]` |
 | `T-LetElse` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-LetElse]` |
 | `T-Literal` | error | Linea in an hour: [Values and their types](01-linea-in-an-hour.md#values-and-their-types) | [§4 Types](../linea-semantics.md#4-types), at `[T-Literal]` |
-| `T-Mismatch` | error | Errors: [`let … else`: bind the value, or handle the failure right there](03-errors.md#let--else-bind-the-value-or-handle-the-failure-right-there) | [§4 Types](../linea-semantics.md#4-types), at `[T-Mismatch]` |
+| `T-Mismatch` | error | Calling things: [What a length cannot be](02-calling-things.md#what-a-length-cannot-be) | [§4 Types](../linea-semantics.md#4-types), at `[T-Mismatch]` |
 | `T-Operands` | error | Linea in an hour: [Values and their types](01-linea-in-an-hour.md#values-and-their-types) | [§4 Types](../linea-semantics.md#4-types), at `[T-Operands]` |
 | `T-Overflow` | error | Linea in an hour: [Arithmetic is checked](01-linea-in-an-hour.md#arithmetic-is-checked) | [§4 Types](../linea-semantics.md#4-types), at `[T-Overflow]` |
 | `T-PolyRec` | error | Calling things: [A generic function named as a value](02-calling-things.md#a-generic-function-named-as-a-value) | [§4 Types](../linea-semantics.md#4-types), at `[T-PolyRec]` |

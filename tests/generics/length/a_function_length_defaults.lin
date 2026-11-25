@@ -1,0 +1,13 @@
+// A function's length parameter may take a default, which a call that
+// settles no length takes.
+import std.mem
+
+fn blank[let n: UInt64 = 3]() -> [UInt8; n] {
+    mem.filled(0)
+}
+
+fn main() -> UInt8 {
+    let defaulted = blank()
+    let named = blank[5]()
+    UInt8(defaulted.length() * 10 + named.length())
+}
