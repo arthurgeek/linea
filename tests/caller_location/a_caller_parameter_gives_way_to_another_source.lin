@@ -1,0 +1,17 @@
+// `head` returns a view of `text`. `at` is filled in by the compiler and names
+// the program's own source, so the result is taken to come from `text` and the
+// signature needs no `where` clause.
+fn head(text: Str, at: Location = caller) -> Str {
+    if text.length() == 0 {
+        panic("the text is empty", at)
+    }
+    text.slice(0, 1).expect("the first byte ends a character", at)
+}
+
+fn main() -> UInt8 {
+    if head("linea") == "l" {
+        0
+    } else {
+        1
+    }
+}

@@ -161,9 +161,10 @@ means the same as `@copyable` on one line and `@derive(Debug)` on the next.
 the `copyable`.
 
 `unwrap()` takes the value out of an `Option` or `Result` and stops the
-program if there is none. It is right only where failure is impossible,
-such as reading the literal `"8080"` as a number. Anywhere else, use `?`, a
-`match`, or `unwrap_or`, which supplies a fallback:
+program if there is none. `expect(message)` does the same and stops with your
+message, which says what you relied on. Both are right only where failure is
+impossible, such as reading the literal `"8080"` as a number. Anywhere else,
+use `?`, a `match`, or `unwrap_or`, which supplies a fallback:
 
 ```linea
 import std.io
@@ -172,7 +173,7 @@ fn main() -> Result[UInt8, io.IoError] {
     let port = "8080".parse[UInt16]().unwrap()
     let fallback = "eighty".parse[UInt16]().unwrap_or(80)
     io.println("port {port}, fallback {fallback}")?
-    let broken = "eighty".parse[UInt16]().unwrap()
+    let broken = "eighty".parse[UInt16]().expect("the port is a number")
     io.println("never printed: {broken}")?
     .Ok(0)
 }
@@ -180,16 +181,81 @@ fn main() -> Result[UInt8, io.IoError] {
 
 ```
 port 8080, fallback 80
-linea: panic: called Result.unwrap on Err at std/result/result.lin:394:23
+linea: panic: the port is a number at ports.lin:7:43
 ```
 
-The location in the message is the line inside the standard library's
-`unwrap` that stopped the program, not your call, so look for the `unwrap` in
-your own code that was handed an `Err`.
+The location is your call: line 7 of `ports.lin`, column 43, where `expect`
+is written. `unwrap()` reports the same place, with the message
+`called Result.unwrap on Err` in place of yours.
 
-Those three `match`es in `minutes` each do the same thing — return early on
-failure — and they bury the three lines that matter. The next sections remove
-them.
+### Reporting the caller's line
+
+`unwrap` and `expect` name your line, not a line inside the standard library,
+because each takes the location of its call as a parameter,
+`at: Location = caller`. `caller` is a default the compiler fills in at every
+call that leaves the argument out. A function of your own that stops the
+program on a bad argument can take the same parameter and pass it on, so the
+message names the line that passed the bad argument:
+
+```linea
+// `seat_number` hands its own caller's location to `expect`, so a panic
+// names the line in `main` that passed text that is not a number.
+fn seat_number(text: Str, at: Location = caller) -> UInt8 {
+    text.parse[UInt8]().expect("a seat is a number", at)
+}
+
+fn main() -> UInt8 {
+    let first = seat_number("12")
+    let second = seat_number("twelve")
+    first + second
+}
+```
+
+```
+linea: panic: a seat is a number at seat_numbers.lin:9:18
+```
+
+Without `at`, the message would name line 4, inside `seat_number`, which is
+the same for every caller. `panic(message, at)` reports a location the same
+way, for a function that stops the program without an `Option` or a `Result`
+to unwrap. In Rust the function would be marked `#[track_caller]`; in Linea
+the location is an ordinary parameter, so it shows in the signature and is
+passed on by name.
+
+A `Location` is a value like any other, so a function can read it as well
+as pass it on. It prints as `file:line:column`, and `file()`, `line()` and
+`column()` read its parts. Here a log line says where each step was taken:
+
+```linea
+import std.io
+
+// `at` is the place of the call to `step`, so each line names the line of
+// `main` that logged it.
+fn step(message: Str, at: Location = caller) -> Result[(), io.IoError] {
+    io.println("{at}: {message}")?
+    io.println("  (line {at.line()}, column {at.column()})")
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    step("oven heated")?
+    step("bread in")?
+    .Ok(0)
+}
+```
+
+```
+bakery.lin:11:5: oven heated
+  (line 11, column 5)
+bakery.lin:12:5: bread in
+  (line 12, column 5)
+```
+
+Only the compiler builds a `Location`, so one always names a real place in
+the program.
+
+Back to `minutes`: its three `match`es each do the same thing — return early
+on failure — and they bury the three lines that matter. The next sections
+remove them.
 
 ## `?` converts errors with `From`
 

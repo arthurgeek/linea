@@ -1054,13 +1054,15 @@ module {
     %s5 = llvm.alloca %z5 x i8 {alignment = 1 : i64} : (i64) -> !llvm.ptr
     %z6 = arith.constant 24 : i64
     %s6 = llvm.alloca %z6 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z7 = arith.constant 24 : i64
+    %s7 = llvm.alloca %z7 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     llvm.store %a0, %s0 : !llvm.ptr, !llvm.ptr
     llvm.store %a1, %s1 : i64, !llvm.ptr
     llvm.store %a2, %s2 : i64, !llvm.ptr
     %rz57 = arith.constant 24 : i64
     %rs57 = llvm.alloca %rz57 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %rz58 = arith.constant 16 : i64
-    %rs58 = llvm.alloca %rz58 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %rz75 = arith.constant 16 : i64
+    %rs75 = llvm.alloca %rz75 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     cf.br ^b0
   ^b0:
     %v0 = llvm.load %s1 : !llvm.ptr -> i64 loc("std/text/str.lin":L:C)
@@ -1097,8 +1099,8 @@ module {
     %v24 = arith.cmpi eq, %v22, %v23 : i1 loc("std/text/str.lin":L:C)
     cf.cond_br %v24, ^b7, ^b8 loc("std/text/str.lin":L:C)
   ^b6:
-    %rl65 = arith.constant 24 : i64 loc("std/text/str.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s4, %rl65) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
+    %rl82 = arith.constant 24 : i64 loc("std/text/str.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s4, %rl82) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
     func.return loc("std/text/str.lin":L:C)
   ^b7:
     %v26 = arith.constant 1 : i1 loc("std/text/str.lin":L:C)
@@ -1149,13 +1151,34 @@ module {
     %p56 = arith.constant 0 : i64 loc("std/text/str.lin":L:C)
     %v56 = arith.addi %v55, %p56 : i64 loc("std/text/str.lin":L:C)
     func.call @"lin.std.mem;Slice[UInt8].subspan"(%rs57, %v49, %v52, %v56) : (!llvm.ptr, !llvm.ptr, i64, i64) -> () loc("std/text/str.lin":L:C)
-    func.call @"lin.std.option;Option[std.mem.Slice[UInt8]].unwrap"(%rs58, %rs57) : (!llvm.ptr, !llvm.ptr) -> () loc("std/text/str.lin":L:C)
-    %cl59 = arith.constant 16 : i64 loc("std/text/str.lin":L:C)
-    "llvm.intr.memcpy"(%v46, %rs58, %cl59) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
+    %sf59 = llvm.mlir.addressof @linea_file3 : !llvm.ptr loc("std/text/str.lin":L:C)
+    %v59 = llvm.ptrtoint %sf59 : !llvm.ptr to i64 loc("std/text/str.lin":L:C)
+    %v60 = arith.constant 0 : i64 loc("std/text/str.lin":L:C)
+    llvm.store %v59, %s7 : i64, !llvm.ptr loc("std/text/str.lin":L:C)
+    %sf63 = arith.constant 16 : i32 loc("std/text/str.lin":L:C)
+    %v63 = arith.extui %sf63 : i32 to i64 loc("std/text/str.lin":L:C)
+    %v64 = arith.constant 8 : i64 loc("std/text/str.lin":L:C)
+    %v65 = llvm.getelementptr %s7[%v64] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/text/str.lin":L:C)
+    llvm.store %v63, %v65 : i64, !llvm.ptr loc("std/text/str.lin":L:C)
+    %sl67 = arith.constant L : i32 loc("std/text/str.lin":L:C)
+    %v67 = arith.extui %sl67 : i32 to i64 loc("std/text/str.lin":L:C)
+    %v68 = arith.constant 16 : i64 loc("std/text/str.lin":L:C)
+    %v69 = llvm.getelementptr %s7[%v68] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/text/str.lin":L:C)
+    %iw70 = arith.trunci %v67 : i64 to i32 loc("std/text/str.lin":L:C)
+    llvm.store %iw70, %v69 : i32, !llvm.ptr loc("std/text/str.lin":L:C)
+    %sc71 = arith.constant C : i32 loc("std/text/str.lin":L:C)
+    %v71 = arith.extui %sc71 : i32 to i64 loc("std/text/str.lin":L:C)
+    %v72 = arith.constant 20 : i64 loc("std/text/str.lin":L:C)
+    %v73 = llvm.getelementptr %s7[%v72] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/text/str.lin":L:C)
+    %iw74 = arith.trunci %v71 : i64 to i32 loc("std/text/str.lin":L:C)
+    llvm.store %iw74, %v73 : i32, !llvm.ptr loc("std/text/str.lin":L:C)
+    func.call @"lin.std.option;Option[std.mem.Slice[UInt8]].unwrap"(%rs75, %rs57, %s7) : (!llvm.ptr, !llvm.ptr, !llvm.ptr) -> () loc("std/text/str.lin":L:C)
+    %cl76 = arith.constant 16 : i64 loc("std/text/str.lin":L:C)
+    "llvm.intr.memcpy"(%v46, %rs75, %cl76) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
     cf.br ^b12 loc("std/text/str.lin":L:C)
   ^b12:
-    %cl62 = arith.constant 24 : i64 loc("std/text/str.lin":L:C)
-    "llvm.intr.memcpy"(%s4, %s6, %cl62) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
+    %cl79 = arith.constant 24 : i64 loc("std/text/str.lin":L:C)
+    "llvm.intr.memcpy"(%s4, %s6, %cl79) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/text/str.lin":L:C)
     cf.br ^b6 loc("std/text/str.lin":L:C)
   }
   func.func private @"lin.std.option;Option[std.text.Str].unwrap_or"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
@@ -1455,17 +1478,20 @@ module {
     "llvm.intr.memcpy"(%s3, %s4, %cl60) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/mem/slice.lin":L:C)
     cf.br ^b3 loc("std/mem/slice.lin":L:C)
   }
-  func.func private @"lin.std.option;Option[std.mem.Slice[UInt8]].unwrap"(%sret: !llvm.ptr, %a0: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
+  func.func private @"lin.std.option;Option[std.mem.Slice[UInt8]].unwrap"(%sret: !llvm.ptr, %a0: !llvm.ptr, %a1: !llvm.ptr) attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [["probe-stack", "inline-asm"]]} {
     %z0 = arith.constant 24 : i64
     %s0 = llvm.alloca %z0 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
-    %z1 = arith.constant 16 : i64
-    %s1 = llvm.alloca %z1 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z1 = arith.constant 1 : i64
+    %s1 = llvm.alloca %z1 x !llvm.ptr {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z2 = arith.constant 16 : i64
     %s2 = llvm.alloca %z2 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %z3 = arith.constant 16 : i64
     %s3 = llvm.alloca %z3 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+    %z4 = arith.constant 16 : i64
+    %s4 = llvm.alloca %z4 x i8 {alignment = 8 : i64} : (i64) -> !llvm.ptr
     %pl0 = arith.constant 24 : i64
     "llvm.intr.memcpy"(%s0, %a0, %pl0) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> ()
+    llvm.store %a1, %s1 : !llvm.ptr, !llvm.ptr
     cf.br ^b0
   ^b0:
     %v1 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
@@ -1473,8 +1499,8 @@ module {
     %v3 = arith.cmpi eq, %v1, %v2 : i64 loc("std/option/option.lin":L:C)
     cf.cond_br %v3, ^b3, ^b2 loc("std/option/option.lin":L:C)
   ^b1:
-    %rl31 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
-    "llvm.intr.memcpy"(%sret, %s1, %rl31) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
+    %rl32 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
+    "llvm.intr.memcpy"(%sret, %s2, %rl32) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     func.return loc("std/option/option.lin":L:C)
   ^b2:
     %v13 = llvm.load %s0 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
@@ -1485,9 +1511,9 @@ module {
     %v5 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
     %v6 = llvm.getelementptr %s0[%v5] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
     %cl8 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
-    "llvm.intr.memcpy"(%s2, %v6, %cl8) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
+    "llvm.intr.memcpy"(%s3, %v6, %cl8) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     %cl11 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
-    "llvm.intr.memcpy"(%s1, %s2, %cl11) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
+    "llvm.intr.memcpy"(%s2, %s3, %cl11) <{isVolatile = false}> : (!llvm.ptr, !llvm.ptr, i64) -> () loc("std/option/option.lin":L:C)
     cf.br ^b1 loc("std/option/option.lin":L:C)
   ^b4:
     %tk1 = arith.constant 3 : i32 loc("std/option/option.lin":L:C)
@@ -1501,20 +1527,28 @@ module {
     %ba18 = llvm.mlir.addressof @linea_str5 : !llvm.ptr loc("std/option/option.lin":L:C)
     %v18 = llvm.ptrtoint %ba18 : !llvm.ptr to i64 loc("std/option/option.lin":L:C)
     %v19 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
-    llvm.store %v18, %s3 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
+    llvm.store %v18, %s4 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
     %v22 = arith.constant 28 : i64 loc("std/option/option.lin":L:C)
     %v23 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
-    %v24 = llvm.getelementptr %s3[%v23] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %v24 = llvm.getelementptr %s4[%v23] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
     llvm.store %v22, %v24 : i64, !llvm.ptr loc("std/option/option.lin":L:C)
+    %v26 = llvm.load %s1 : !llvm.ptr -> !llvm.ptr loc("std/option/option.lin":L:C)
     %poa2 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
-    %ppa2 = llvm.getelementptr %s3[%poa2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %ppa2 = llvm.getelementptr %s4[%poa2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
     %pva2 = llvm.load %ppa2 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
     %pol2 = arith.constant 8 : i64 loc("std/option/option.lin":L:C)
-    %ppl2 = llvm.getelementptr %s3[%pol2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %ppl2 = llvm.getelementptr %s4[%pol2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
     %pvl2 = llvm.load %ppl2 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
-    %pf2 = llvm.mlir.addressof @linea_file5 : !llvm.ptr loc("std/option/option.lin":L:C)
-    %tl2 = arith.constant L : i32 loc("std/option/option.lin":L:C)
-    %tc2 = arith.constant C : i32 loc("std/option/option.lin":L:C)
+    %pof2 = arith.constant 0 : i64 loc("std/option/option.lin":L:C)
+    %ppf2 = llvm.getelementptr %v26[%pof2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %pvf2 = llvm.load %ppf2 : !llvm.ptr -> i64 loc("std/option/option.lin":L:C)
+    %pf2 = llvm.inttoptr %pvf2 : i64 to !llvm.ptr loc("std/option/option.lin":L:C)
+    %potl2 = arith.constant 16 : i64 loc("std/option/option.lin":L:C)
+    %pptl2 = llvm.getelementptr %v26[%potl2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %tl2 = llvm.load %pptl2 : !llvm.ptr -> i32 loc("std/option/option.lin":L:C)
+    %potc2 = arith.constant 20 : i64 loc("std/option/option.lin":L:C)
+    %pptc2 = llvm.getelementptr %v26[%potc2] : (!llvm.ptr, i64) -> !llvm.ptr, i8 loc("std/option/option.lin":L:C)
+    %tc2 = llvm.load %pptc2 : !llvm.ptr -> i32 loc("std/option/option.lin":L:C)
     func.call @linea_fiber_restrict_current() : () -> ()
     func.call @linea_panic(%pva2, %pvl2, %pf2, %tl2, %tc2) : (i64, i64, !llvm.ptr, i32, i32) -> () loc("std/option/option.lin":L:C)
     llvm.unreachable loc("std/option/option.lin":L:C)

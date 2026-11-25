@@ -1,0 +1,17 @@
+// `check` is called through a parameter whose type defaults `at` to `caller`,
+// so each call through it names the line in `run` that made it.
+fn require(holds: Bool, at: Location = caller) {
+    if !holds {
+        panic("a requirement failed", at)
+    }
+}
+
+fn run(check: fn(holds: Bool, at: Location = caller)) {
+    check(true)
+    check(false)
+}
+
+fn main() -> UInt8 {
+    run(require)
+    0
+}

@@ -269,11 +269,12 @@ impl[T] Option[T] {
     }
 
     // Return the present value, and panic on None with the fixed message
-    // `called Option.unwrap on None`.
-    pub fn unwrap(sink self: Self) -> T where carries(self) {
+    // `called Option.unwrap on None`. The panic reports `at`, the location of
+    // the call to `unwrap`, which the compiler fills in when it is left out.
+    pub fn unwrap(sink self: Self, at: Location = caller) -> T where carries(self) {
         match self {
             Some(value) => value,
-            None => panic("called Option.unwrap on None"),
+            None => panic("called Option.unwrap on None", at),
         }
     }
 
@@ -285,6 +286,27 @@ impl[T] Option[T] {
     test trap "unwrap traps on none" -> Result[(), testing.Failure] {
         let absent: Option[UInt8] = .None
         let _unwrapped = absent.unwrap()
+        .Ok(())
+    }
+
+    // Return the present value, and panic on None with `message`, which says
+    // what the caller relied on being present. Like `unwrap`, the panic
+    // reports the location of the call to `expect`.
+    pub fn expect(sink self: Self, message: Str, at: Location = caller) -> T where carries(self) {
+        match self {
+            Some(value) => value,
+            None => panic(message, at),
+        }
+    }
+
+    test "expect returns some" {
+        let present: Option[UInt8] = .Some(5)
+        testing.assert_eq(present.expect("a present value"), 5, "expect did not return the Some payload")?
+    }
+
+    test trap "expect traps on none" -> Result[(), testing.Failure] {
+        let absent: Option[UInt8] = .None
+        let _expected = absent.expect("a value that is absent")
         .Ok(())
     }
 

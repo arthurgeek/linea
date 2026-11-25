@@ -1,0 +1,5 @@
+error[T-Caller]: `caller` fills in the prelude's `Location`, and `line` has type `UInt32`
+ --> tests/caller_location/caller_in_a_callable_type_defaults_only_a_location.lin:1:33
+  |
+1 | fn run(check: fn(line: UInt32 = caller)) {
+  |                                 ^^^^^^ this default names the call; `(caller)` reads a value named `caller`

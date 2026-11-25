@@ -127,6 +127,12 @@ pub const Inst = struct {
         /// the module's pool, which is keyed by the bytes themselves, so two
         /// literals spelling the same text name one blob.
         bytes_addr,
+        /// One part of the source position of this instruction's span, in the
+        /// file of the function holding it: the address or length of the
+        /// file's path, or the line or column. Kept as a span until the
+        /// backend, which is the pass that holds the source text and the path
+        /// a trap names, so a location built here and a trap's own agree.
+        source_site,
         /// The address of read-only data the module carries. `static` indexes
         /// the module's `statics`, and `ty` is that entry's type. A constant a
         /// program borrows is read from here, so nothing may write through it.
@@ -280,6 +286,7 @@ pub const Inst = struct {
             return switch (self) {
                 .constant => .constant,
                 .bytes_addr => .bytes,
+                .source_site => .site,
                 .static_addr => .static,
                 .load, .addr_of => .local,
                 .load_indirect, .borrow, .observe, .address_bits => .unary,
@@ -304,7 +311,7 @@ pub const Inst = struct {
         }
     };
 
-    pub const Payload = enum { constant, bytes, static, local, store, unary, binary, field, float_math, raw_access, check, call, function, indirect_call, target, branch, trap };
+    pub const Payload = enum { constant, bytes, site, static, local, store, unary, binary, field, float_math, raw_access, check, call, function, indirect_call, target, branch, trap };
 
     /// Which member of a value's type a `field_addr` selects: a field's or a
     /// tuple component's index, a variant payload's position, or the index of
@@ -345,6 +352,9 @@ pub const Inst = struct {
 
     pub const FieldAddr = struct { base: InstId, offset: InstId, part: Part = .none, variant: Variant = .none };
 
+    /// Which part of a source position a `source_site` produces.
+    pub const SitePart = enum(u8) { file_address, file_length, line, column };
+
     /// Named rather than anonymous so a consumer can spell the type it is
     /// handed and pass it on.
     pub const FloatMath = struct {
@@ -357,6 +367,9 @@ pub const Inst = struct {
     pub const Trap = struct {
         kind: TrapKind,
         message: InstId = .none,
+        /// For a panic, the address of the `Location` it reports in place of
+        /// the trap's own span, or none to report the span.
+        location: InstId = .none,
     };
 
     /// A raw memory operation and the checks that make its integer address safe
@@ -400,6 +413,8 @@ pub const Inst = struct {
         trap: Trap,
         /// Which blob of the module's pool, for `bytes_addr`.
         bytes: u32,
+        /// Which part of the position, for `source_site`.
+        site: SitePart,
         /// Which entry of the module's `statics`, for `static_addr`.
         static: u32,
     };
@@ -749,6 +764,8 @@ pub const Module = struct {
     layouts: []const Layout,
     /// The exact prelude `Str` type a panic message must carry.
     panic_message_type: TypeId = .poison,
+    /// The exact prelude `Location` type a panic's reported place must carry.
+    panic_location_type: TypeId = .poison,
     /// Which one the runtime calls, or `.none` where nothing does.
     ///
     /// A library has no entry point and may not declare one, so there is no
@@ -1250,6 +1267,12 @@ pub const Mir = struct {
         return self.insts.items(.data)[i.index()].bytes;
     }
 
+    /// Which part of its span's position a `source_site` produces.
+    pub fn siteOf(self: *const Mir, i: InstId) Inst.SitePart {
+        self.expectPayload(i, .site);
+        return self.insts.items(.data)[i.index()].site;
+    }
+
     /// Which entry of the module's `statics` a `static_addr` names.
     pub fn staticOf(self: *const Mir, i: InstId) u32 {
         self.expectPayload(i, .static);
@@ -1364,6 +1387,7 @@ pub const Mir = struct {
             // Not terminators; a walk asking about one is a defect.
             .constant,
             .bytes_addr,
+            .source_site,
             .static_addr,
             .address_bits,
             .load,

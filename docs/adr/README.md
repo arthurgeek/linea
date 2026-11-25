@@ -73,7 +73,7 @@ true of a different implementation.
 | [0208](0208-defer-let-binds-and-schedules-its-release.md) | `defer let` binds a value and schedules its release | Accepted; extends 0063 and narrows 0104's no-scheduling sentence to "never without a written `defer`" |
 | [0203](0203-zip-and-skip-require-discardable-items-and-zip-is-left-biased.md) | `zip` and `skip` require the items they dispose of to be Discardable, and `zip` is left-biased | Accepted; extends 0192; extended by 0245 |
 | [0245](0245-iterator-adapters-are-lazy.md) | Iterator adapters are lazy, reversal needs a double-ended source, and only a terminal allocates | Accepted; extends 0192 and 0203 |
-| [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106 |
+| [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106; extended by 0305 |
 | [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152, 0207 and 0226 |
 | [0019](0019-entry-point-is-main-returning-u8.md) | A program is `fn main() -> u8` | Superseded by 0024 |
 | [0020](0020-a-constant-expression-is-defined.md) | A constant expression is defined by the language, not discovered by a pass | Accepted; extended by 0059, 0078, 0083, 0127, 0140, 0146 and 0157 |
@@ -149,7 +149,8 @@ true of a different implementation.
 | [0272](0272-two-applications-of-one-type-may-each-implement-a-trait.md) | Two applications of one type may each implement a trait | Accepted; supersedes the constructor key of 0081 and the Duplicates clause of 0213; extends 0093; extended by 0303; standalone application request superseded by 0303 |
 | [0096](0096-a-root-is-a-program-or-a-library.md) | A root is a program or a library, and its manifest says which | Accepted; builds on 0075 and 0024; extended by 0101, 0171, 0227 and 0229 |
 | [0101](0101-a-library-publishes-what-it-exports.md) | A library publishes what it exports, under the name its source spells | Accepted; extends 0096; extended by 0228 |
-| [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017 |
+| [0106](0106-a-non-completing-expression-has-type-never.md) | A non-completing expression has type `Never` | Accepted; refines 0072, preserves 0017; extended by 0305 |
+| [0305](0305-a-call-site-is-a-parameter-default-the-compiler-fills.md) | A call site is a parameter default the compiler fills: `at: Location = caller`, and `panic(message, at)` | Accepted; extends 0017 and 0106 |
 | [0107](0107-a-trailing-where-predicate-constrains-any-open-type-expression.md) | A trailing `where` predicate constrains any open type expression | Accepted |
 | [0108](0108-an-internal-name-stops-at-its-root.md) | An internal name stops at its loaded root | Accepted; extended by 0229 |
 | [0229](0229-an-application-depends-on-a-library-by-path.md) | An application depends on a library by path | Accepted; extends 0096, 0108, 0111 and 0171; extended by 0228 and 0280 |

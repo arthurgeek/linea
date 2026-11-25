@@ -3953,11 +3953,11 @@ fn conditionalDepth(ast: *const Ast, id: ExprId) u32 {
             for (c.args) |a| best = @max(best, conditionalDepth(ast, a));
             break :blk best;
         },
-        .index, .while_, .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign, .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge => blk: {
+        .index, .while_, .assign, .add_assign, .sub_assign, .mul_assign, .div_assign, .rem_assign, .add, .sub, .mul, .div, .rem, .eq, .ne, .lt, .le, .gt, .ge, .panic_at => blk: {
             const b = ast.binary(id);
             break :blk @max(conditionalDepth(ast, b.lhs), conditionalDepth(ast, b.rhs));
         },
-        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .continue_, .err => 0,
+        .int_literal, .float_literal, .str_literal, .embed, .embed_bytes, .bool_literal, .unit_literal, .name_ref, .param_argument, .reflection_root, .caller_location, .continue_, .err => 0,
         // A generated range's ends are literals, so nothing nests inside one
         // for this to find.
         .range => 0,

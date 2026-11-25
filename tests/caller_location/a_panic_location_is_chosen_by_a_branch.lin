@@ -1,0 +1,15 @@
+// The place a panic reports is an expression like any other, so a branch may
+// choose between two locations.
+fn spot(at: Location = caller) -> Location {
+    copy(at)
+}
+
+fn main() -> UInt8 {
+    let early = spot()
+    let late = spot()
+    panic("stopped", if late.line() > early.line() {
+        late
+    } else {
+        early
+    })
+}

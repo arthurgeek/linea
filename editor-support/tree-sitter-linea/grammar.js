@@ -936,7 +936,10 @@ module.exports = grammar({
     borrow_expression: $ => prec.right(9, seq('borrow', $._expression)),
 
     copy_expression: $ => prec(10, seq('copy', '(', $._expression, ')')),
-    panic_expression: $ => prec(10, seq('panic', '(', field('message', $._expression), ')')),
+    panic_expression: $ => prec(10, seq(
+      'panic', '(', field('message', $._expression),
+      optional(seq(',', field('location', $._expression))), ')',
+    )),
     // A file's text or bytes, read when the program is compiled. The path is
     // one string literal, which the compiler holds to a quoted or raw one.
     embed_expression: $ => prec(10, seq(choice('embed', 'embed_bytes'), '(', field('path', $.string_literal), ')')),

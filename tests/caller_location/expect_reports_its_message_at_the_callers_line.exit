@@ -1,0 +1,2 @@
+trap
+linea: panic: the port is a number at tests/caller_location/expect_reports_its_message_at_the_callers_line.lin:3:13

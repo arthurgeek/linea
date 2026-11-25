@@ -1,0 +1,74 @@
+import std.fmt
+import std.testing
+
+// A Location names a position in a program's source: the file, and the line
+// and column of the position, each counted from 1. The compiler builds one for
+// a parameter declared `at: Location = caller`, naming the call that leaves the
+// argument out, and nothing else can build one. `panic(message, at)` reports
+// the location it is given instead of its own.
+@(opaque, copyable)
+struct Location {
+    // The file as the compiler was given it, relative to where it ran.
+    file: Str,
+    line: UInt32,
+    column: UInt32,
+}
+
+impl Location {
+    // Return the path of the file the location is in.
+    pub fn file(self: Self) -> Str {
+        copy(self.file)
+    }
+
+    test "a location names the file of the call" {
+        let at = location_of_this_call()
+        testing.assert(at.file().ends_with("location.lin"), "a location named another file")?
+    }
+
+    // Return the line, counted from 1.
+    pub fn line(self: Self) -> UInt32 {
+        self.line
+    }
+
+    test "a location names the line of the call" {
+        let first = location_of_this_call()
+        let second = location_of_this_call()
+        testing.assert_eq(second.line() - first.line(), UInt32(1), "two calls a line apart were not a line apart")?
+    }
+
+    // Return the column, counted from 1 in bytes.
+    pub fn column(self: Self) -> UInt32 {
+        self.column
+    }
+
+    test "a location names the column of the call" {
+        let (near, far) = (location_of_this_call(), location_of_this_call())
+        testing.assert(far.column() > near.column(), "a call further along the line had no larger column")?
+    }
+}
+
+// Return the location of the call to this function, which the compiler fills
+// in because the call leaves `at` out.
+fn location_of_this_call(at: Location = caller) -> Location {
+    copy(at)
+}
+
+// A location displays as `file:line:column`, the form a panic reports.
+impl Display for Location {
+    fn fmt[W: fmt.Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        &w.write_str(self.file)?
+        &w.write_str(":")?
+        self.line.fmt(&w)?
+        &w.write_str(":")?
+        self.column.fmt(&w)
+    }
+}
+
+test "a location displays as file line and column" {
+    let at = location_of_this_call()
+    defer var shown = String.new()
+    testing.assert(at.fmt(&shown).is_ok(), "a location did not display")?
+    defer var spelled = String.new()
+    testing.assert("{at.file()}:{at.line()}:{at.column()}".fmt(&spelled).is_ok(), "a location's parts did not display")?
+    testing.assert_eq(shown.view(), spelled.view(), "a location did not display as file:line:column")?
+}

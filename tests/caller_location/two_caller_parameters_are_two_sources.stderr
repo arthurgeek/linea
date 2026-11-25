@@ -1,0 +1,5 @@
+error[T-BorrowContract]: the result has more than one eligible observation source
+ --> tests/caller_location/two_caller_parameters_are_two_sources.lin:3:4
+  |
+3 | fn file_of(opened: Location = caller, closed: Location = caller) -> Str {
+  |    ^^^^^^^ the result may come from `opened` or `closed`; add `where carries(opened)` or `where carries(closed)`, or `where carries(opened, closed)` where it may come from either

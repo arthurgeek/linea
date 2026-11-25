@@ -1,0 +1,5 @@
+error[T-Call]: parameter 2 of the expected callable defaults to `caller`, which no lambda's parameter can
+ --> tests/caller_location/a_lambda_cannot_stand_for_a_caller_default.lin:7:17
+  |
+7 |         |holds, at| {
+  |                 ^^ pass a function that declares this parameter

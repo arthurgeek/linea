@@ -1,0 +1,17 @@
+// `check` captures the location `audit` was called at, so a panic inside the
+// closure names the line in `main` that asked for the audit.
+fn audit(stock: UInt8, at: Location = caller) -> UInt8 {
+    let check = [at] |count: UInt8| -> UInt8 {
+        if count == 0 {
+            panic("the shelf is empty", at)
+        }
+        count
+    }
+    check(stock)
+}
+
+fn main() -> UInt8 {
+    let full = audit(4)
+    let empty = audit(0)
+    full + empty
+}

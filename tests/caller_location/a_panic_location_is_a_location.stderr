@@ -1,0 +1,6 @@
+error[T-Mismatch]: expected `Location`, found `Int64`
+ --> tests/caller_location/a_panic_location_is_a_location.lin:2:22
+  |
+2 |     panic("stopped", 12)
+  |     -------------------- the place a panic reports has type `Location`
+  |                      ^^ expected `Location`, found `Int64`

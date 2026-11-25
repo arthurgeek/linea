@@ -1,0 +1,26 @@
+// The trait declares `at`'s default, so every call of `verify`, through a
+// bound included, names the line of that call.
+trait Checked {
+    fn verify(self: Self, at: Location = caller) -> UInt8
+}
+
+struct Crate {
+    items: UInt8,
+}
+
+impl Checked for Crate {
+    fn verify(self: Self, at: Location) -> UInt8 {
+        if self.items == 0 {
+            panic("an empty crate", at)
+        }
+        self.items
+    }
+}
+
+fn total[T: Checked](first: T, second: T) -> UInt8 {
+    first.verify() + second.verify()
+}
+
+fn main() -> UInt8 {
+    total(Crate { items = 3 }, Crate { items = 0 })
+}

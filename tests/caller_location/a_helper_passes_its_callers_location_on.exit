@@ -1,0 +1,2 @@
+trap
+linea: panic: the text is empty at tests/caller_location/a_helper_passes_its_callers_location_on.lin:9:19

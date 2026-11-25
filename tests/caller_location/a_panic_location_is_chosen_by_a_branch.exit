@@ -1,0 +1,2 @@
+trap
+linea: panic: stopped at tests/caller_location/a_panic_location_is_chosen_by_a_branch.lin:9:16

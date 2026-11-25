@@ -1,0 +1,8 @@
+fn probe[T = Location](_at: T = caller) -> UInt8 {
+    0
+}
+
+fn main() -> UInt8 {
+    let byte_probe = probe[UInt8]
+    byte_probe()
+}

@@ -1,0 +1,2 @@
+trap
+linea: panic: a requirement failed at tests/caller_location/a_call_through_a_function_value_names_that_call.lin:10:5

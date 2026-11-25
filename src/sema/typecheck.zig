@@ -706,6 +706,7 @@ fn typecheckInternal(
             .binding_value_locs = try gpa.alloc(Loc, resolution.bindingCount()),
             .option_decl = preludeDecl(ast, resolution, "Option"),
             .str_decl = preludeDecl(ast, resolution, "Str"),
+            .location_decl = preludeDecl(ast, resolution, "Location"),
             .result_decl = preludeDecl(ast, resolution, "Result"),
             .display_decl = formatting.display.trait,
             .formatting = formatting,
@@ -5929,6 +5930,9 @@ const Expected = struct {
         from_end_count,
         /// The message operand of `panic`, which the language fixes to `Str`.
         panic_message,
+        /// The location operand of `panic(message, at)`, which the language
+        /// fixes to `Location`.
+        panic_location,
         /// The `else` of a `let … else`, whose block leaves or supplies the
         /// value a success would have.
         unwrapped,
@@ -5957,6 +5961,7 @@ const Expected = struct {
                 .index_key => "this container is indexed by one integer type, which a bare number takes",
                 .from_end_count => "a count back from the end counts elements, so it is a `UInt64`",
                 .panic_message => "a panic message has type `Str`",
+                .panic_location => "the place a panic reports has type `Location`",
                 .unwrapped => "an `else` block leaves, or yields what a success carries",
             };
         }
@@ -6784,6 +6789,9 @@ const Checker = struct {
     option_decl: ?node.DeclId = null,
     /// The library's `Str`, which is what a string literal is.
     str_decl: ?node.DeclId = null,
+    /// The library's `Location`, which a `caller` default fills in and the
+    /// second operand of `panic(message, at)` reports.
+    location_decl: ?node.DeclId = null,
     result_decl: ?node.DeclId = null,
     /// The trait a failure leaving the entry point must implement, so that it
     /// can be rendered on the way out. Named by the prelude, as `Result` is.
@@ -8698,7 +8706,11 @@ const Checker = struct {
         for (self.ast.params[written.params.start..written.params.end]) |param| {
             const ty = try self.typeOfRefOf(m, owner, param.written);
             var default: types_mod.CallableDefault = .absent;
-            if (param.default != ExprId.none) {
+            if (param.default != ExprId.none and self.ast.exprTag(param.default) == .caller_location) {
+                // A written callable type is called, so each call through a
+                // value of it fills in its own location.
+                if (try self.callerDefaultHolds(param, ty)) default = .call_site else invalid = true;
+            } else if (param.default != ExprId.none) {
                 try self.noteCallableDefault(.{
                     .module = m,
                     .owner = owner,
@@ -8975,9 +8987,10 @@ const Checker = struct {
     /// **Bound:** one pass over the signature's parameters.
     fn carrierParameters(self: *Checker, params: []const types_mod.CallableParam, result: TypeId) !CarrierParameters {
         var found: CarrierParameters = .{};
+        const weighing = try types_mod.SourceWeighing.of(&self.builder, params, result);
         for (params, 0..) |parameter, index| {
             if (!try self.isCarrierType(parameter.ty)) continue;
-            if (!try types_mod.isEligibleSource(&self.builder, parameter, result)) continue;
+            if (!try weighing.weighs(&self.builder, parameter, result)) continue;
             if (found.count == 0) found.first = @intCast(index);
             found.count += 1;
         }
@@ -9073,8 +9086,9 @@ const Checker = struct {
         if (written.len == 0) switch (try types_mod.inferredSource(&self.builder, params, result, carriers.sole())) {
             .none => {},
             .ambiguous => {
+                const weighing = try types_mod.SourceWeighing.of(&self.builder, params, result);
                 var eligible: usize = 0;
-                for (params) |parameter| eligible += @intFromBool(try types_mod.isEligibleSource(&self.builder, parameter, result));
+                for (params) |parameter| eligible += @intFromBool(try weighing.weighs(&self.builder, parameter, result));
                 var sources: std.ArrayList(u8) = .empty;
                 defer sources.deinit(self.gpa);
                 var clauses: std.ArrayList(u8) = .empty;
@@ -9083,7 +9097,7 @@ const Checker = struct {
                 defer every.deinit(self.gpa);
                 var listed: usize = 0;
                 for (params) |parameter| {
-                    if (!try types_mod.isEligibleSource(&self.builder, parameter, result)) continue;
+                    if (!try weighing.weighs(&self.builder, parameter, result)) continue;
                     const separator = if (listed == 0) "" else if (listed + 1 == eligible) " or " else ", ";
                     const source: types_mod.ClauseSource = .{ .spelling = parameter.spelling, .borrows = try types_mod.borrowsFrom(&self.builder, self.gpa, parameter, result) };
                     try every.append(self.gpa, source);
@@ -9101,7 +9115,7 @@ const Checker = struct {
                     var listed_carriers: usize = 0;
                     for (params) |parameter| {
                         if (!try self.isCarrierType(parameter.ty)) continue;
-                        if (!try types_mod.isEligibleSource(&self.builder, parameter, result)) continue;
+                        if (!try weighing.weighs(&self.builder, parameter, result)) continue;
                         const joiner = if (listed_carriers == 0) "" else if (listed_carriers + 1 == carriers.count) " and " else ", ";
                         const alternative = if (listed_carriers == 0) "" else if (listed_carriers + 1 == carriers.count) " or " else ", ";
                         const source: types_mod.ClauseSource = .{ .spelling = parameter.spelling, .borrows = false };
@@ -9303,7 +9317,7 @@ const Checker = struct {
             var default: types_mod.CallableDefault = .absent;
             if (hasDefault(param)) {
                 if (self.defaults.get(@intCast(d.index()), @intCast(i))) |value| {
-                    default = .{ .value = value };
+                    default = value;
                 } else {
                     valid = false;
                 }
@@ -18554,6 +18568,8 @@ const Checker = struct {
             .borrow => self.checkBorrow(id, expected),
             .dereference => self.checkDereference(id, expected),
             .panic => self.checkPanic(id),
+            .panic_at => self.checkPanicAt(id),
+            .caller_location => self.checkCallerLocation(id),
             .try_ => self.checkTry(id, expected),
             .unwrap_else => self.checkUnwrapElse(id, expected),
             // Reached only through whatever destructures it, which types the
@@ -18682,6 +18698,86 @@ const Checker = struct {
             .reason = .panic_message,
         });
         return try self.record(id, .never);
+    }
+
+    /// `panic(message, at)`: `panic(message)`, reporting the `Location` it is
+    /// given rather than its own. The message is checked first, as it runs
+    /// first.
+    fn checkPanicAt(self: *Checker, id: ExprId) std.mem.Allocator.Error!TypeId {
+        const operands = self.ast.binary(id);
+        const message_decl = self.str_decl orelse return self.report(
+            .t_literal,
+            id,
+            "panic has no message type here: the prelude declares no `Str`",
+            .{},
+            "build against a library that declares it",
+        );
+        _ = try self.check(operands.lhs, .{
+            .ty = self.type_of_decl.get(message_decl),
+            .at = self.locOf(id),
+            .reason = .panic_message,
+        });
+        const location_decl = self.location_decl orelse return self.report(
+            .t_caller,
+            operands.rhs,
+            "panic has no location type here: the prelude declares no `Location`",
+            .{},
+            "build against a library that declares it",
+        );
+        _ = try self.check(operands.rhs, .{
+            .ty = self.type_of_decl.get(location_decl),
+            .at = self.locOf(id),
+            .reason = .panic_location,
+        });
+        return self.record(id, .never);
+    }
+
+    /// Records `caller` as a declared function's parameter default: every
+    /// call leaving the argument out receives the location of that call.
+    fn noteCallerDefault(self: *Checker, d: node.DeclId, at: u32, p: node.Param, declared: TypeId) std.mem.Allocator.Error!void {
+        if (try self.callerDefaultHolds(p, declared))
+            try self.defaults.note(self.gpa, @intCast(d.index()), at, .call_site);
+    }
+
+    /// Whether `caller` may default `p`, whose type is `declared`: the
+    /// parameter must have the prelude's `Location` type, since that is what
+    /// the location is built as. Reports where it may not. A function's
+    /// parameter and a written callable type's are held to this one rule.
+    fn callerDefaultHolds(self: *Checker, p: node.Param, declared: TypeId) std.mem.Allocator.Error!bool {
+        if (declared == .poison) return false;
+        const location = if (self.location_decl) |l| self.type_of_decl.get(l) else TypeId.poison;
+        if (declared != location) {
+            // A module's own `Location` shadows the prelude's, and the two
+            // print alike, so the report says which one `caller` builds.
+            const named = try self.typeName(declared);
+            _ = try self.report(
+                .t_caller,
+                p.default,
+                "`caller` fills in the prelude's `Location`, and `{s}` has type `{s}`{s}",
+                .{ self.ast.tokenText(p.name), named, if (std.mem.eql(u8, named, "Location")) ", which this module declares" else "" },
+                "this default names the call; `(caller)` reads a value named `caller`",
+            );
+            return false;
+        }
+        _ = try self.record(p.default, location);
+        return true;
+    }
+
+    /// `caller` reached as an expression to check, which is every place it can
+    /// be written except a declared function's or a written callable type's
+    /// parameter default: those are read where the default is recorded and
+    /// never checked as an expression.
+    /// A lambda is called through a value, and the call site that would fill
+    /// it in is no fact about the lambda, so its default cannot be one.
+    fn checkCallerLocation(self: *Checker, id: ExprId) std.mem.Allocator.Error!TypeId {
+        _ = try self.report(
+            .t_caller,
+            id,
+            "`caller` stands for the location of a call, and only a function's parameter has one to fill in",
+            .{},
+            "a lambda's default is worked out where the lambda is written, and no call is there",
+        );
+        return self.record(id, .poison);
     }
 
     /// `lo..hi` or `lo..=hi`: a construction of `Range`, reached the way
@@ -19650,8 +19746,21 @@ const Checker = struct {
                         "this lambda defaults `{s}` to `{s}`, and parameter {d} of the expected callable defaults to `{s}`",
                         .{ name, (try have.text(arena, &self.folded.pool)), position, wanted_text },
                     ),
+                    // A lambda's `caller` is refused where it is written, so
+                    // its default never reaches a comparison as one.
+                    .call_site => unreachable,
                 }
             },
+            // No lambda can default to `caller`, so the callable is one only a
+            // declared function converts to.
+            .call_site => try self.sink.addErrorFmt(
+                .t_call,
+                file,
+                span,
+                "pass a function that declares this parameter",
+                "parameter {d} of the expected callable defaults to `caller`, which no lambda's parameter can",
+                .{position},
+            ),
         }
         return true;
     }
@@ -23237,6 +23346,10 @@ const Checker = struct {
                 .at = .{ .file = self.ast.fileOf(p.name), .span = self.ast.tokenSpan(p.name) },
                 .reason = .parameter,
             };
+            if (self.ast.exprTag(p.default) == .caller_location) {
+                try self.noteCallerDefault(d, at, p, bound);
+                continue;
+            }
             if (try self.rejectParameterDefault(p.default, declared)) continue;
             const scope = self.openScope();
             const was_default = self.checking_default;
@@ -23278,7 +23391,7 @@ const Checker = struct {
                 if (p.convention != .inout and try self.refuseObligedConstant(.t_default, p.default, declared)) continue;
                 const planned = try self.validateConstant(value, declared);
                 if (planned == .planned) {
-                    try self.defaults.note(self.gpa, @intCast(d.index()), at, value);
+                    try self.defaults.note(self.gpa, @intCast(d.index()), at, .{ .value = value });
                     continue;
                 }
                 if (planned == .uncopyable) {
@@ -26344,7 +26457,7 @@ const Checker = struct {
             var default: types_mod.CallableDefault = .absent;
             if (hasDefault(p)) {
                 if (self.defaults.get(@intCast(d.index()), @intCast(j))) |value| {
-                    default = .{ .value = value };
+                    default = value;
                 } else {
                     signature_valid = false;
                 }
@@ -34010,6 +34123,7 @@ const Checker = struct {
             .copy_,
             .borrow,
             .panic,
+            .panic_at,
             .try_,
             .unwrap_else,
             .match_,
@@ -34049,6 +34163,7 @@ const Checker = struct {
             .name_ref,
             .param_argument,
             .reflection_root,
+            .caller_location,
             .err,
             .grouped,
             .negate,
@@ -43319,8 +43434,8 @@ test "enum constant: a default keeps its variant and its parameter keeps the enu
     }
     // A default's value is the variant it names; the parameter type keeps
     // the two enums apart, so the signatures differ though the values match.
-    const first_default = typing.defaults.get(@intCast(first.index()), 0).?;
-    const second_default = typing.defaults.get(@intCast(second.index()), 0).?;
+    const first_default = typing.defaults.get(@intCast(first.index()), 0).?.value;
+    const second_default = typing.defaults.get(@intCast(second.index()), 0).?.value;
     try testing.expect(first_default == .aggregate);
     try testing.expect(first_default.eql(second_default));
 

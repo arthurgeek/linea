@@ -133,6 +133,7 @@ fn writeInst(
     switch (tag) {
         .constant => try w.print(" {d}", .{mir.constantOf(id)}),
         .bytes_addr => try w.print(" bytes{d}", .{mir.bytesOf(id)}),
+        .source_site => try w.print(" {s}", .{@tagName(mir.siteOf(id))}),
         .static_addr => try w.print(" s{d}", .{mir.staticOf(id)}),
         .load, .addr_of => try w.print(" ${d}", .{mir.localOf(id).index()}),
         .load_indirect, .borrow, .observe, .address_bits => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
@@ -175,6 +176,7 @@ fn writeInst(
             const trap = mir.trapOf(id);
             try w.print(" {s}", .{@tagName(trap.kind)});
             if (trap.message != .none) try w.print(" %{d}", .{trap.message.index()});
+            if (trap.location != .none) try w.print(" at %{d}", .{trap.location.index()});
         },
         .call, .call_noreturn => {
             const c = mir.callOf(id);

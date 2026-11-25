@@ -1,0 +1,11 @@
+// A call that names `at` passes that location, so the panic reports where
+// `opened` was taken and not the call to `unwrap`.
+fn spot(at: Location = caller) -> Location {
+    copy(at)
+}
+
+fn main() -> UInt8 {
+    let opened = spot()
+    let missing: Option[UInt8] = .None
+    missing.unwrap(at: opened)
+}

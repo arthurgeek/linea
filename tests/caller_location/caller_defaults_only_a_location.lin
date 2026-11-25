@@ -1,0 +1,7 @@
+fn line_of(line: UInt32 = caller) -> UInt32 {
+    line
+}
+
+fn main() -> UInt8 {
+    UInt8(line_of() % 2)
+}

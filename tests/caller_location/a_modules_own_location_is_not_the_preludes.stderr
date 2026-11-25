@@ -1,0 +1,5 @@
+error[T-Caller]: `caller` fills in the prelude's `Location`, and `at` has type `Location`, which this module declares
+ --> tests/caller_location/a_modules_own_location_is_not_the_preludes.lin:5:26
+  |
+5 | fn report(at: Location = caller) -> UInt32 {
+  |                          ^^^^^^ this default names the call; `(caller)` reads a value named `caller`

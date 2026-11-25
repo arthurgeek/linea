@@ -1,0 +1,5 @@
+error[T-Caller]: `caller` fills in the prelude's `Location`, and `_at` has type `T`
+ --> tests/caller_location/caller_requires_a_declared_location_type_before_specialization.lin:1:33
+  |
+1 | fn probe[T = Location](_at: T = caller) -> UInt8 {
+  |                                 ^^^^^^ this default names the call; `(caller)` reads a value named `caller`

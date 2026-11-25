@@ -156,7 +156,7 @@ where_clause ::= "where" predicate ("," predicate)* ","?
 predicate    ::= type_name ":" type_bound ("+" type_bound)*
 
 parameters   ::= parameter ("," parameter)* ","?
-parameter    ::= convention? name destructuring? ":" type_name ("=" expression)?
+parameter    ::= convention? name destructuring? ":" type_name ("=" (expression | "caller"))?
 lambda_params ::= lambda_param ("," lambda_param)* ","?
 lambda_param ::= convention? (name destructuring? | destructuring) (":" type_name)? ("=" expression)?
 destructuring ::= tuple_pattern | name? "{" binders "}" | name "(" pattern ")"
@@ -190,7 +190,7 @@ expression   ::= literal | qualified | "(" expression ")" | tuple
                | "-" expression
                | "*" expression
                | "copy" "(" expression ")"
-               | "panic" "(" expression ")"
+               | "panic" "(" expression ("," expression)? ")"
                | ("embed" | "embed_bytes") "(" string ")"
                | expression "." name
               | "!" expression
@@ -280,14 +280,18 @@ such as `read`, `copy`, `sink`, `embed`, `embed_bytes`, `impl`, `opaque`,
 `linear`, `copyable` and `carrier`, so a reader can decide whether a name is
 legal without knowing the parser's state.
 
-`type`, `alias`, `proj`, `trav`, `it`, `via`, `default` and `template` are
-contextual words, not reserved words, and so are `case`, `components`,
+`type`, `alias`, `proj`, `trav`, `it`, `via`, `default`, `template` and `caller`
+are contextual words, not reserved words, and so are `case`, `components`,
 `supertraits`, `target`, `derived` and `value`, which the grammar reads only
 after a `.` or in a template requirement.
 
 `template` begins a structural template when it immediately precedes `impl` at
 the start of a declaration. Elsewhere it is a name, so a parameter, a local, a
 field and a function may all be called `template`.
+
+`caller` names the location of a call when it is the whole default of a
+parameter ([T-Caller]). Elsewhere it is a name, and a default written
+`(caller)` or `caller + 1` reads the name.
 
 `default` marks a default implementation when it immediately precedes `impl`
 at the start of a declaration. Elsewhere it is a name, so the prelude's
@@ -2426,12 +2430,13 @@ A function declared `-> Never` has no normal path to the end of its body. A
 normally completing tail or bare fallthrough is [T-Mismatch]. A direct call or a
 call through `fn(...) -> Never` ends the caller's current block.
 
-`panic(message)` is the only panic form. `panic` is reserved, cannot be
-shadowed, and is neither a declaration nor a callable value. Its single
-argument must have the canonical `Str` type published by the prelude; a
-different type is [T-Mismatch]. The panic expression has type `Never`. The
-message is evaluated exactly once; if evaluation does not complete, the outer
-panic is not reached. Once the message is available, panic writes and flushes
+`panic(message)` and `panic(message, at)` are the panic forms. `panic` is
+reserved, cannot be shadowed, and is neither a declaration nor a callable
+value. Its first argument must have the canonical `Str` type published by the
+prelude, and its second the prelude's `Location`; a different type is
+[T-Mismatch]. The panic expression has type `Never`. The message is evaluated
+exactly once, then the location; if either evaluation does not complete, the
+outer panic is not reached. Once both are available, panic writes and flushes
 standard error, then aborts without unwinding:
 
 ```text
@@ -2441,9 +2446,12 @@ linea: panic: <message> at <file>:<line>:<column>
 The message is written by its recorded byte length, not as a C string or a
 format string, so every byte is
 preserved, including a zero or newline. The file, line and column identify the
-written `panic` expression, so a panic inside a library operation reports that
-library expression rather than an outer caller. It cannot be caught and runs no
-deferred cleanup. Live Linear values are not leaks on the aborting path; values
+written `panic` expression, or with `at` the place that `Location` names. A
+function whose panic should name its caller's line takes a parameter
+`at: Location = caller` ([T-Caller]) and passes it on, as the library's
+`Option.unwrap`, `Option.expect`, `Result.unwrap` and `Result.expect` do
+([ADR 0305](adr/0305-a-call-site-is-a-parameter-default-the-compiler-fills.md)).
+It cannot be caught and runs no deferred cleanup. Live Linear values are not leaks on the aborting path; values
 consumed while evaluating the message follow the ordinary rules until the trap
 is reached.
 
@@ -4892,7 +4900,8 @@ reach.
 once at the declaration, using the same table as [T-Const]. No code runs in the
 parameter list and no call-site scope is available, so calls and parameters of
 the same declaration are invalid default expressions. A default's type must be
-discardable, for the reason [T-Const] gives.
+discardable, for the reason [T-Const] gives. The one default that is not a
+constant is `caller`, the location of the call ([T-Caller]).
 
 A default built from a type's parts, such as `Percent(10)` or `.{ amount = 7 }`,
 is built again at every omission, so the type it builds must be Copyable. The
@@ -4924,6 +4933,38 @@ require a concrete declared type; a type that mentions a type parameter, such as
 holds for `Self` in a trait signature, where it is a parameter bounded by that
 trait ([T-Bound]). A trait operation declares defaults only on its signature
 ([T-Impl]); every call uses that declaration.
+
+**[T-Caller]** A parameter declared `at: Location = caller` defaults to the
+location of the call: every call that leaves the argument out receives a
+`Location` naming the file, line and column of the name of what it calls, the
+operation's name in `value.op()` and in `value.op[T]()`. Unlike any other
+default, the value is not computed at the declaration, and two calls omitting
+it receive two values. A call that passes the argument passes its own location
+on, so a helper that takes `at: Location = caller` and hands `at` to `expect`
+reports the line that called the helper. `caller` is read as the location only
+when it is the whole default of a parameter; anywhere else it is an ordinary
+name. The parameter's declared type must be the prelude's `Location`, not a
+type parameter defaulting to it, and the parameter must belong to a declared
+function: a lambda's default is folded where the
+lambda is written, where no call is, so `caller` there is [T-Caller] too. A
+call through a function value, a callable parameter or a field fills in the
+location of that call, since the default is part of the callable type
+([ADR 0305](adr/0305-a-call-site-is-a-parameter-default-the-compiler-fills.md)).
+For the same reason a function with such a parameter is no value of the
+callable type that leaves the parameter out ([T-Mismatch]). A callable type
+that writes `at: Location = caller` takes it; a lambda fits the shorter type
+and calls the function in its body. Where a signature writes no `where`
+clause, a parameter defaulted to `caller` is weighed as a source of the result
+only if no parameter without that default could be one, so adding it to a
+function leaves the source that function had, and a function that returns the
+location it was given needs no clause. A function that returns part of the
+location beside another source names its sources in a clause ([O-Escapes]),
+and two such parameters that could both be the source are ambiguous
+([T-BorrowContract]).
+
+A `Location` is copyable and opaque: only the compiler builds one, and
+`file()`, `line()` and `column()` read its parts. It displays as
+`file:line:column`, the form a panic reports.
 
 **[O-DeferDead]** A deferred expression is ill-formed if it is skipped on every
 scope-exit path because its consumed value has already moved. Such a schedule
