@@ -156,6 +156,16 @@
           '';
         };
 
+        devShells.gpu = self.devShells.${system}.default.overrideAttrs (old: {
+          buildInputs = old.buildInputs ++ [ pkgs.vulkan-headers pkgs.vulkan-loader pkgs.spirv-tools ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.moltenvk ];
+          LINEA_VULKAN_HEADERS = "${pkgs.vulkan-headers}";
+          LINEA_VULKAN_LOADER = "${pkgs.lib.getLib pkgs.vulkan-loader}";
+          shellHook = old.shellHook + pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+            export VK_DRIVER_FILES="${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json"
+          '';
+        });
+
         # Optional offline reference generator; ordinary builds use committed vectors.
         devShells.math-reference = pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
           buildInputs = [ pkgs.mpfr pkgs.gmp ];

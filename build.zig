@@ -1534,6 +1534,7 @@ const HeavySteps = struct {
 };
 
 pub fn build(b: *std.Build) void {
+    const gpu_probe_logic = @import("build/gpu_probe.zig").add(b);
     checkTheCompilerIsTidy(b);
     checkEveryPropertyAccountsForItself(b);
     checkTheEditorIndentsByWhatTheFormatterDoes(b);
@@ -3453,6 +3454,7 @@ pub fn build(b: *std.Build) void {
                 step.dependOn(native_tls_step);
                 step.dependOn(native_clock_step);
                 step.dependOn(native_math_step);
+                step.dependOn(gpu_probe_logic);
                 step.dependOn(native_runtime_step);
                 step.dependOn(native_task_step);
             }
