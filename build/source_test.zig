@@ -18,7 +18,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "tls.o", "tls_config.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "gpu.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "tls.o", "tls_config.o", "linea_float.o", "math.o" };
     // The members of rustls-ffi's archive follow the runtime's own, which
     // `build.zig` appends after them; none takes a runtime member's name.
     var appended: usize = 0;
@@ -2236,6 +2236,7 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
         .{ "const char *", .{ .scalar = .ptr } },
         .{ "char **", .{ .scalar = .ptr } },
         .{ "void *", .{ .scalar = .ptr } },
+        .{ "const void *", .{ .scalar = .ptr } },
         .{ "void", .{ .scalar = .unit } },
         .{ "u8", .{ .scalar = .u8 } },
         .{ "i32", .{ .scalar = .i32 } },

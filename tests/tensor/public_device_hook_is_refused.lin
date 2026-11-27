@@ -1,0 +1,36 @@
+import std.mem
+import std.tensor
+
+use tensor.MapBody
+use tensor.BinaryBody
+
+struct Custom {}
+
+impl MapBody for Custom {
+    type Element = Float32
+
+    fn call(_self: Self, value: Float32) -> Float32 {
+        value * 2.0
+    }
+
+    fn _device_kernel(_self: Self) -> mem.GpuKernel {
+        mem.GpuKernel.none()
+    }
+}
+
+impl BinaryBody for Custom {
+    type Element = Float32
+
+    fn call(_self: Self, left: Float32, right: Float32) -> Float32 {
+        left + right
+    }
+
+    fn _device_kernel(_self: Self) -> mem.GpuKernel {
+        mem.GpuKernel.none()
+    }
+}
+
+fn main() -> UInt8 {
+    let _custom = Custom {}
+    0
+}

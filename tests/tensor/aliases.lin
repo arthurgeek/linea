@@ -1,0 +1,23 @@
+import std.mem
+import std.tensor
+
+use tensor.Storage
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn identity[S: Storage[Float32]](value: tensor.Matrix[Float32, S]) -> [UInt64; 2] {
+    value.dimensions()
+}
+
+fn main() -> UInt8 {
+    defer let matrix: tensor.Matrix[Float32, tensor.Cpu[mem.SystemAllocator]] = tensor.matrix([[Float32(1.0), 2.0]]).unwrap()
+    defer let scalar: tensor.Scalar[Float32, tensor.Cpu[mem.SystemAllocator]] = matrix.reduce(Float32(0.0), add).unwrap()
+    defer let vector: tensor.Vector[Float32, tensor.Cpu[mem.SystemAllocator]] = tensor.from_slice([Float32(3.0)].as_slice(), [UInt64(1)]).unwrap()
+    if identity(matrix) == [UInt64(1), 2] && scalar.values()[0] == vector.values()[0] {
+        0
+    } else {
+        1
+    }
+}

@@ -1,0 +1,6 @@
+import std.tensor
+
+fn main() -> UInt8 {
+    let _owned = tensor.matrix([[Float32(1.0)]]).unwrap()
+    0
+}

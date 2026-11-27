@@ -353,6 +353,10 @@ pub const RawAccesses = struct {
     closure_entry: DeclId = .none,
     closure_settle: DeclId = .none,
     closure_size: DeclId = .none,
+    gpu_function: DeclId = .none,
+    gpu_reduce_function: DeclId = .none,
+    gpu_matmul_function: DeclId = .none,
+    gpu_download: DeclId = .none,
     /// `task.prepare`, `task.prepare_in`, `task.start` and `task.start_in`,
     /// whose `body` argument crosses into a task ([O-Cross]), and the two
     /// `start` forms, which drop a body a failed start could not keep and so
@@ -388,7 +392,7 @@ pub const RawAccesses = struct {
         "parse_float32_bits", "_spawn",             "read_pipe",        "write_slice_pipe",
         "_tls_client_config", "_tls_server_config", "_tls_client_open", "_tls_receive",
         "_tls_transmit",      "_tls_decrypt",       "_tls_encrypt",     "_tls_alpn",
-        "resolve_name",
+        "resolve_name",       "_gpu_upload",        "_gpu_download",
     };
 
     /// Identify private storage declarations before checking their generic signatures.
@@ -494,6 +498,10 @@ pub const RawAccesses = struct {
             .closure_entry = rawAccessDecl(program, ast, "closure_entry", 1),
             .closure_settle = rawAccessDecl(program, ast, "closure_settle", 1),
             .closure_size = rawAccessDecl(program, ast, "closure_size", 1),
+            .gpu_function = rawAccessDecl(program, ast, "linea_gpu_function", 1),
+            .gpu_reduce_function = rawAccessDecl(program, ast, "linea_gpu_reduce_function", 1),
+            .gpu_matmul_function = rawAccessDecl(program, ast, "linea_gpu_matmul_function", 0),
+            .gpu_download = moduleFunction(program, ast, "mem", "_gpu_download"),
             .task_unstarted = program.libraryDeclIn("task", "Unstarted") orelse .none,
             .task_slot_start = memberOf(program, ast, "task", "Slot", "start"),
             .foreign_bytes = program.libraryDeclIn("ffi", "Bytes") orelse .none,
@@ -588,6 +596,10 @@ pub const RawAccesses = struct {
         return d != DeclId.none and (d == self.closure_open_in or d == self.closure_open);
     }
 
+    pub fn selectsGpu(self: RawAccesses, d: DeclId) bool {
+        return d != .none and (d == self.gpu_function or d == self.gpu_reduce_function or d == self.gpu_matmul_function);
+    }
+
     pub fn contains(self: RawAccesses, d: DeclId) bool {
         return d != DeclId.none and
             (d == self.store or d == self.load or d == self.store8 or d == self.load8 or self.floatBits(d) or self.typed(d));
@@ -654,7 +666,7 @@ pub const RawAccesses = struct {
         .{ .decl = "slice" },
         .{ .decl = "view", .also = &.{"vec_split"} },
         .{ .decl = "closure" },
-        .{ .decl = "vec", .also = &.{ "vector_from_buffer", "vector_into_buffer" } },
+        .{ .decl = "vec", .also = &.{ "vector_from_buffer", "vector_into_buffer", "gpu_download" } },
         .{ .decl = "kept", .also = &.{ "keep_body", "task_slot_start" } },
         .{ .decl = "endpoint" },
         .{ .decl = "owner", .also = &.{ "client_call", "task_own" } },
@@ -690,7 +702,7 @@ pub const RawAccesses = struct {
     /// payload's send and receive, an owning task's call and request, the
     /// release of a vector's elements, the byte vector given back as a
     /// buffer, whose bytes need no settling, and an arena's table of chunks.
-    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve" };
+    const slot_users = [_][]const u8{ "keep_value", "take_value", "keep_body", "take_kept_body", "release_kept_bytes", "closure_erase", "send_payload", "receive_payload", "receive_payload_until", "call_owner", "next_owner_request", "release_from", "vector_into_buffer", "arena_give_back", "arena_reserve", "gpu_download" };
 
     const slots_message = "a slot is taken, put, placed or given up only by `Storage` and `Vec` and the declarations the table names, each of which settles or hands on every value it puts";
     const task_help = "start the task with `task.prepare(body)` and `start()`";
@@ -809,7 +821,7 @@ pub const RawAccesses = struct {
     };
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (d == self.stride or d == self.array_filled or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (self.selectsGpu(d) or d == self.stride or d == self.array_filled or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries

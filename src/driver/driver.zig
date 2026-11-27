@@ -46,6 +46,8 @@ const dumpMir = @import("../mir/dump.zig").dumpModule;
 const mlir_backend = @import("../backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
+const gpu_driver = @import("gpu.zig");
+const gpu_backend = @import("../backend/gpu.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const loader = @import("loader.zig");
 const prototypes = @import("prototypes.zig");
@@ -80,7 +82,7 @@ pub const exit_io: u8 = 74;
 /// classified before this is asked.
 fn refusalStatus(tool: toolchain.Tool) u8 {
     return switch (tool) {
-        .mlir_opt, .mlir_translate => exit_defect,
+        .mlir_opt, .mlir_translate, .spirv_val => exit_defect,
         .cc => exit_io,
     };
 }
@@ -383,6 +385,25 @@ const BuildRequest = struct {
 /// should not have to run the tool again to find out why it refused -- but the
 /// line saying which tool failed is ours, since the tool does not know it is
 /// part of a Linea build.
+const PreparedGpu = union(enum) { images: []gpu_backend.Image, stop: u8 };
+
+fn prepareGpu(gpa: std.mem.Allocator, io: std.Io, module: *const mir.Module, sink: *Sink, prefix: []const u8, err: *std.Io.Writer) !PreparedGpu {
+    return switch (try gpu_driver.prepare(gpa, io, module, sink, prefix, true)) {
+        .images => |images| .{ .images = images },
+        .defect => .{ .stop = exit_defect },
+        .failure => |failure| blk: {
+            defer gpa.free(failure.output);
+            if (failure.missing) {
+                try err.print("error: {s} is not installed\n", .{failure.tool.command()});
+                break :blk .{ .stop = exit_io };
+            }
+            try err.print("error: {s} failed\n", .{failure.tool.command()});
+            try err.writeAll(failure.output);
+            break :blk .{ .stop = refusalStatus(failure.tool) };
+        },
+    };
+}
+
 fn compileArtifact(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -422,6 +443,12 @@ fn compileArtifact(
     const mid = try toolchain.Intermediates.of(gpa, req.out_path);
     defer mid.deinit(gpa);
 
+    const gpu_images = switch (try prepareGpu(gpa, io, req.mir, req.sink, req.out_path, err)) {
+        .images => |images| images,
+        .stop => |status| return status,
+    };
+    defer gpu_driver.deinitImages(gpa, gpu_images);
+
     {
         const file = std.Io.Dir.cwd().createFile(io, mid.ir, .{}) catch {
             try err.print("error: cannot write '{s}'\n", .{mid.ir});
@@ -438,6 +465,7 @@ fn compileArtifact(
         // program: it wrote nothing, and what it wrote nothing about is in the
         // sink for the renderer at the end of the run.
         if (!try emitMlir(gpa, if (callable_proof) &hashed.writer else writer, req.mir, req.table, req.sink, .{
+            .gpu_images = gpu_images,
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
             .migratable_task_entries = req.artifact == .executable,
             .foreign_symbols = req.foreign_symbols,
@@ -487,7 +515,10 @@ fn compileArtifact(
         return refusalStatus(f.tool);
     }
 
-    if (!req.keep) mid.remove(io);
+    if (!req.keep) {
+        mid.remove(io);
+        gpu_driver.removeInputs(gpa, io, req.out_path, gpu_images);
+    }
     return null;
 }
 
@@ -919,6 +950,12 @@ pub fn run(process: std.process.Init) !u8 {
                         defer gpa.free(target);
                         const mid = try toolchain.Intermediates.of(gpa, target);
                         defer mid.deinit(gpa);
+                        const gpu_images = switch (try prepareGpu(gpa, io, &lowered, &sink, target, stderr_w)) {
+                            .images => |images| images,
+                            .stop => |status| return status,
+                        };
+                        defer gpu_driver.deinitImages(gpa, gpu_images);
+                        defer gpu_driver.removeInputs(gpa, io, target, gpu_images);
                         const asm_path = try std.fmt.allocPrint(gpa, "{s}.s", .{target});
                         defer {
                             mid.remove(io);
@@ -932,7 +969,7 @@ pub fn run(process: std.process.Init) !u8 {
                             };
                             defer file.close(io);
                             var out: Out = .{};
-                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{ .foreign_symbols = foreign_symbols })) return exit_defect;
+                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{ .gpu_images = gpu_images, .foreign_symbols = foreign_symbols })) return exit_defect;
                             try out.flush();
                         }
 
@@ -1131,7 +1168,15 @@ pub fn run(process: std.process.Init) !u8 {
                             const stdout_w = stdout.open(io, stdout_file);
                             defer stdout.flush() catch {};
 
-                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .foreign_symbols = foreign_symbols })) {
+                            const gpu_target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-gpu");
+                            defer gpa.free(gpu_target);
+                            const gpu_images = switch (try prepareGpu(gpa, io, &lowered, &sink, gpu_target, stderr_w)) {
+                                .images => |images| images,
+                                .stop => |status| return status,
+                            };
+                            defer gpu_driver.deinitImages(gpa, gpu_images);
+                            defer gpu_driver.removeInputs(gpa, io, gpu_target, gpu_images);
+                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .gpu_images = gpu_images, .foreign_symbols = foreign_symbols })) {
                                 defect = true;
                             }
                         }

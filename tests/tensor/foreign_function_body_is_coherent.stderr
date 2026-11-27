@@ -1,0 +1,5 @@
+error[M-Impl]: a callable type has no declaring module
+ --> tests/tensor/foreign_function_body_is_coherent.lin:5:18
+  |
+5 | impl MapBody for fn(value: Float32) -> Float32 {
+  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ write the implementation where the trait is declared

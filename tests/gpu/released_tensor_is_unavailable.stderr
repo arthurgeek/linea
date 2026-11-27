@@ -1,0 +1,7 @@
+error[O-Move]: `tensor` has already been moved
+ --> tests/gpu/released_tensor_is_unavailable.lin:8:23
+  |
+7 |     tensor.release()
+  |     ------ it was taken here
+8 |     let _dimensions = tensor.dimensions()
+  |                       ^^^^^^ it was already taken, and a value is taken once

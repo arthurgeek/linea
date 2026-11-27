@@ -1,0 +1,216 @@
+import std.mem
+import std.tensor
+import std.testing
+
+@(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
+pub enum GpuError {
+    Unavailable,
+    Allocation,
+    Runtime(Int64),
+    Shape,
+    UnsupportedFunction,
+}
+
+fn runtime_error(code: Int64) -> GpuError {
+    if code == -19 {
+        .Unavailable
+    } else if code == -12 {
+        .Allocation
+    } else {
+        .Runtime(code)
+    }
+}
+
+@(opaque, linear)
+struct Device {
+    resource: mem.GpuDevice,
+}
+
+impl Device {
+    pub fn open() -> Result[Self, GpuError] {
+        match mem.GpuDevice.open() {
+            Ok(resource) => .Ok(.{ resource }),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+
+    test "opening a device reports unavailable capability or owns a device" {
+        match Device.open() {
+            Ok(device) => device.release(),
+            Err(error) => testing.assert(error == .Unavailable || error == .Allocation || match error { Runtime(code) => code < 0, _ => false }, "device opening lost its failure reason")?,
+        }
+        .Ok(())
+    }
+
+    pub fn upload[let rank: UInt64](self: Self, values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[tensor.Tensor[Float32, rank, Storage], GpuError] {
+        let count = tensor.element_count(shape) else {
+            return .Err(.Shape)
+        }
+        if count != values.length() || count > UInt64.max / 4 {
+            return .Err(.Shape)
+        }
+        let data = match mem._gpu_upload(self.resource, values) {
+            Ok(buffer) => Storage { buffer },
+            Err(code) => return .Err(runtime_error(code)),
+        }
+        tensor.Tensor.from_storage(data, shape)
+    }
+
+    test "upload preserves raw bits and checks zero dimensions before overflow" {
+        defer let device = match Device.open() { Ok(value) => value, Err(_) => return .Ok(()) }
+        let values = [Float32.from_bits(2), Float32.from_bits(2143289345), Float32.from_bits(2147483648)]
+        defer let input = device.upload(values.as_slice(), [UInt64(3)]).unwrap()
+        defer let host = download(input).unwrap()
+        for index in UInt64(0)..3 {
+            testing.assert_eq(host[index].to_bits(), values[index].to_bits(), "upload changed raw bits")?
+        }
+        let empty: [Float32; 0] = []
+        defer let zero = device.upload(empty.as_slice(), [UInt64.max, 2, 0]).unwrap()
+        testing.assert_eq(zero.dimensions(), [UInt64.max, 2, 0], "empty shape was multiplied before its zero")?
+        .Ok(())
+    }
+
+    pub fn matrix[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[tensor.Tensor[Float32, 2, Storage], GpuError] {
+        let count = tensor.element_count([rows, columns]) else {
+            return .Err(.Shape)
+        }
+        if count > UInt64.max / 4 {
+            return .Err(.Shape)
+        }
+        defer var flat: mem.Vec[Float32, mem.SystemAllocator] = mem.Vec.new()
+        match &flat.reserve(count) { Ok(_) => {}, Err(_) => return .Err(.Allocation) }
+        if count != 0 {
+            for row in UInt64(0)..rows {
+                for column in UInt64(0)..columns {
+                    &flat.push(values[row][column]).unwrap()
+                }
+            }
+        }
+        self.upload(flat.as_slice(), [rows, columns])
+    }
+
+    test "matrix dimensions follow nested array lengths" {
+        defer let device = match Device.open() { Ok(value) => value, Err(_) => return .Ok(()) }
+        defer let matrix = device.matrix([[Float32(1.0), 2.0], [3.0, 4.0]]).unwrap()
+        testing.assert_eq(matrix.dimensions(), [UInt64(2), 2], "matrix constructor lost dimensions")?
+        defer let host = download(matrix).unwrap()
+        testing.assert_eq(host[3], Float32(4.0), "matrix constructor changed row-major order")?
+        let empty_rows: [[Float32; 0]; 1] = [[]]
+        defer let empty = device.matrix(empty_rows).unwrap()
+        testing.assert_eq(empty.dimensions(), [UInt64(1), 0], "empty columns changed the matrix shape")?
+        defer let empty_host = download(empty).unwrap()
+        testing.assert_eq(empty_host.length(), UInt64(0), "empty columns acquired an element")?
+        .Ok(())
+    }
+}
+
+impl Release for Device {
+    fn release(sink self: Self) {
+        let Device { resource } = self
+        resource.release()
+    }
+}
+
+// Storage owns a device allocation; shape and operations belong to std.tensor.
+@(opaque, linear)
+struct Storage {
+    buffer: mem.GpuBuffer,
+}
+
+impl Release for Storage {
+    fn release(sink self: Self) {
+        let Storage { buffer } = self
+        buffer.release()
+    }
+}
+
+fn completed(sink job: mem.GpuJob) -> Result[Storage, GpuError] {
+    match job._wait() {
+        Ok(buffer) => .Ok(.{ buffer }),
+        Err(code) => .Err(runtime_error(code)),
+    }
+}
+
+impl tensor.Storage[Float32] for Storage {
+    type Error = GpuError
+
+    fn shape_error() -> GpuError {
+        .Shape
+    }
+
+    fn length(self: Self) -> UInt64 {
+        self.buffer._length()
+    }
+
+    fn map[B: tensor.MapBody](self: Self, body: B) -> Result[Self, GpuError] where B.Element == Float32 {
+        let selected = tensor._device_map(body)
+        let kernel = copy(selected.kernel)
+        if !kernel.is_available() {
+            return .Err(.UnsupportedFunction)
+        }
+        let pending = if selected.uses_uniform {
+            mem.GpuJob._uniform(self.buffer, kernel, selected.uniform)
+        } else {
+            mem.GpuJob._start(self.buffer, kernel)
+        }
+        match pending { Ok(job) => completed(job), Err(code) => .Err(runtime_error(code)) }
+    }
+
+    fn zip_with[B: tensor.BinaryBody](self: Self, right: Self, body: B) -> Result[Self, GpuError] where B.Element == Float32 {
+        let kernel = tensor._device_binary(body)
+        if !kernel.is_available() {
+            return .Err(.UnsupportedFunction)
+        }
+        match mem.GpuJob._zip(self.buffer, right.buffer, kernel) { Ok(job) => completed(job), Err(code) => .Err(runtime_error(code)) }
+    }
+
+    fn reduce[B: tensor.BinaryBody](self: Self, initial: Float32, body: B) -> Result[Self, GpuError] where B.Element == Float32 {
+        let kernel = tensor._device_binary(body)
+        if !kernel.is_available() {
+            return .Err(.UnsupportedFunction)
+        }
+        match mem.GpuJob._reduce(self.buffer, kernel, initial) { Ok(job) => completed(job), Err(code) => .Err(runtime_error(code)) }
+    }
+
+    fn matmul(self: Self, right: Self, rows: UInt64, inner: UInt64, columns: UInt64) -> Result[Self, GpuError] {
+        let kernel = mem._gpu_matmul()
+        if !kernel.is_available() {
+            return .Err(.UnsupportedFunction)
+        }
+        match mem.GpuJob._matmul(self.buffer, right.buffer, kernel, rows, inner, columns) { Ok(job) => completed(job), Err(code) => .Err(runtime_error(code)) }
+    }
+}
+
+pub fn download[let rank: UInt64](value: tensor.Tensor[Float32, rank, Storage]) -> Result[mem.Vec[Float32, mem.SystemAllocator], GpuError] {
+    match mem._gpu_download((*value.storage()).buffer) {
+        Ok(values) => .Ok(values),
+        Err(code) => .Err(runtime_error(code)),
+    }
+}
+
+test "completed map preserves GPU subnormals and refuses unsupported ordinary bodies" {
+    defer let device = match Device.open() { Ok(value) => value, Err(_) => return .Ok(()) }
+    let values = [Float32.from_bits(2), Float32(4.0)]
+    defer let input = device.upload(values.as_slice(), [UInt64(2)]).unwrap()
+    defer let output = input.map(_half).unwrap()
+    defer let host = download(output).unwrap()
+    testing.assert_eq(host[0].to_bits(), UInt32(1), "GPU map flushed a subnormal")?
+    testing.assert_eq(host[1], Float32(2.0), "GPU map changed the result")?
+    let refused = match input.map(_host_only) {
+        Err(error) => error == .UnsupportedFunction,
+        Ok(value) => {
+            value.release()
+            false
+        },
+    }
+    testing.assert(refused, "unsupported function silently ran on CPU")?
+    .Ok(())
+}
+
+fn _half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn _host_only(value: Float32) -> Float32 {
+    Float32(Float64(value) * 0.5)
+}

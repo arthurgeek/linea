@@ -161,7 +161,7 @@ pub const Parameter = struct { scalar: Scalar, passing: Passing = .read, callbac
 /// The runtime trusts each such
 /// number, so a symbol taking or answering one is confined to the standard
 /// library module whose types keep it, which the table's test holds.
-pub const Held = enum { none, bytes, descriptor, allocation, stream, child, tls };
+pub const Held = enum { none, bytes, descriptor, allocation, stream, child, tls, gpu };
 
 /// Whether two parameters are the same as C declares them, a callback's shape
 /// compared by what it holds rather than by where it is. Which parameter is an
@@ -253,6 +253,9 @@ pub const Signature = struct {
     /// The runtime calls back into Linea code in a task it starts, so a
     /// body handed to it runs while its caller goes on ([T-ThreadStart]).
     starts_task: bool = false,
+    /// The certified device-acquisition boundary also requires GPU support in
+    /// the compiler, independently of the runtime archive supplied at link time.
+    opens_gpu: bool = false,
     migration_contract: MigrationContract = .unknown,
 };
 
@@ -267,7 +270,7 @@ const typed_bytes: Parameter = .{ .scalar = .u64, .address = true };
 /// A `callback` parameter naming a function C calls with `parameters` and
 /// expects `result` from, whose parameter at `address` is the address the
 /// call was given for it.
-fn cb(comptime parameters: []const Scalar, comptime result: Scalar, comptime address: u8) Parameter {
+fn cb(comptime parameters: []const Scalar, comptime result: Scalar, comptime address: ?u8) Parameter {
     const shape = comptime Callback{ .parameters = parameters, .result = result, .address = address };
     return .{ .scalar = .callback, .callback = &shape };
 }
@@ -294,6 +297,8 @@ const spawned_pipe: Parameter = .{ .scalar = .i32, .passing = .inout, .held = .d
 /// The process ID of a child a linear `process.Child` owns: until `wait`
 /// reaps it, no other process can be given the number.
 const child: Parameter = .{ .scalar = .i32, .held = .child };
+
+const gpu_object: Parameter = .{ .scalar = .u64, .held = .gpu };
 
 /// What C's startup calls: the wrapper the emitted module defines around the
 /// program's entry. The runtime's `linea_set_args` receives what it is passed.
@@ -409,6 +414,9 @@ pub const task_start_migratable_signature: Signature = blk: {
 /// names them; they are owned so that no `export` takes their names.
 pub const internal_functions = [_]Signature{
     task_start_migratable_signature,
+    .{ .symbol = "linea_gpu_submit", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64), p(.ptr), p(.u64), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_gpu_buffer_write", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.ptr), p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_gpu_buffer_read", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.ptr), p(.u64) }, .result = .i64 },
     .{ .symbol = "linea_fiber_metadata_held", .declared_by = .compiler, .parameters = &.{}, .result = .i32 },
     .{ .symbol = "linea_fiber_sim_create", .declared_by = .compiler, .parameters = &.{p(.u64)}, .result = .ptr },
     .{ .symbol = "linea_fiber_sim_switch", .declared_by = .compiler, .parameters = &.{ p(.u64), p(.u64) }, .result = .unit },
@@ -565,6 +573,25 @@ const io_simulation = heldBy("io", "`io.Simulation` and the `io.World` its run l
 /// float-math operations -- are owned by the compiler and refused by name
 /// ([T-Extern]), so they are not repeated here.
 pub const runtime_functions = [_]Signature{
+    .{ .symbol = "linea_gpu_wait", .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the GPU tensor operations" } }, .parameters = &.{gpu_object}, .result = .i64 },
+    .{ .symbol = "linea_gpu_submission_drop", .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the GPU tensor operations" } }, .parameters = &.{gpu_object}, .result = .unit },
+    .{ .symbol = "linea_gpu_open", .opens_gpu = true, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the GPU tensor operations" } }, .parameters = &.{}, .result = .i64 },
+    .{ .symbol = "linea_gpu_close", .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the GPU tensor operations" } }, .parameters = &.{gpu_object}, .result = .unit },
+    .{ .symbol = "linea_gpu_buffer_new", .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the GPU tensor operations" } }, .parameters = &.{ gpu_object, p(.u64) }, .result = .i64 },
+    .{ .symbol = "linea_gpu_buffer_drop", .declared_by = .{ .library = .{ .module = "mem", .reached_through = "the GPU tensor operations" } }, .parameters = &.{gpu_object}, .result = .unit },
+    .{ .symbol = "linea_gpu_buffer_sized_like", .parameters = &.{ gpu_object, p(.u64) }, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor reduction and matrix multiplication" } } },
+    .{ .symbol = "linea_gpu_reduce", .parameters = &.{ gpu_object, gpu_object, gpu_object, p(.u64), p(.u64) }, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor reduction" } } },
+    .{ .symbol = "linea_gpu_matmul", .parameters = &.{ gpu_object, gpu_object, gpu_object, gpu_object, p(.u64), p(.u64), p(.u64) }, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor matrix multiplication" } } },
+    .{ .symbol = "linea_gpu_buffer_like", .parameters = &.{gpu_object}, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor map" } } },
+    .{ .symbol = "linea_gpu_upload", .parameters = &.{ gpu_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor upload" } } },
+    .{ .symbol = "linea_gpu_download", .parameters = &.{ gpu_object, bytes_at, p(.u64) }, .result = .i64, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor download" } } },
+    .{ .symbol = "linea_gpu_map", .parameters = &.{ gpu_object, gpu_object, gpu_object, p(.u64) }, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor map" } } },
+    .{ .symbol = "linea_gpu_map_uniform", .parameters = &.{ gpu_object, gpu_object, gpu_object, p(.u64), p(.u64) }, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor map with uniform parameters" } } },
+    .{ .symbol = "linea_gpu_zip", .parameters = &.{ gpu_object, gpu_object, gpu_object, gpu_object, p(.u64) }, .result = .i64, .answers = .gpu, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor binary elementwise operations" } } },
+    .{ .symbol = "linea_gpu_reduce_function", .parameters = &.{cb(&.{ .f32, .f32 }, .f32, null)}, .result = .u64, .answers = .gpu, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor reduction" } } },
+    .{ .symbol = "linea_gpu_matmul_function", .parameters = &.{}, .result = .u64, .answers = .gpu, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor matrix multiplication" } } },
+    .{ .symbol = "linea_gpu_function", .parameters = &.{cb(&.{.f32}, .f32, null)}, .result = .u64, .answers = .gpu, .provider = .lowering, .declared_by = .{ .library = .{ .module = "mem", .reached_through = "tensor map" } } },
+
     .{ .symbol = "linea_alloc", .parameters = &.{ p(.u64), p(.u64) }, .result = .u64, .answers = .allocation, .declared_by = mem_allocation, .migration_contract = .neutral },
     .{ .symbol = "linea_free", .parameters = &.{ allocation, p(.u64), p(.u64) }, .result = .unit, .declared_by = mem_release, .migration_contract = .neutral },
     // Startup records these process-lifetime views before any task starts.

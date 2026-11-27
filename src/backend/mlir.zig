@@ -18,6 +18,7 @@
 //! its temporary copy and empty return join without changing the MIR.
 
 const std = @import("std");
+const gpu = @import("gpu.zig");
 const tracy = @import("../support/tracy.zig");
 const testing = std.testing;
 
@@ -186,6 +187,47 @@ fn floatBitsOf(computation: mir_mod.ComputationRepresentation) ?u8 {
     };
 }
 
+/// References recorded by the production emitter while it writes selected
+/// bodies. Storage is sized once by the whole module, never once per function.
+/// This records actual implicit operations too (traps, guards and intrinsics),
+/// rather than deriving a second account of lowering from instruction tags.
+const InspectionReferences = struct {
+    functions: []bool,
+    callbacks: []u2,
+    bytes: []bool,
+    statics: []bool,
+    files: []bool,
+    math: [FloatMathOperation.count]bool = @splat(false),
+    trap: bool = false,
+    panic_: bool = false,
+    enter: bool = false,
+    leave: bool = false,
+    restrict: bool = false,
+    assumptions: bool = false,
+    set_args: bool = false,
+
+    fn flags(gpa: std.mem.Allocator, count: usize) ![]bool {
+        const out = try gpa.alloc(bool, count);
+        @memset(out, false);
+        return out;
+    }
+
+    fn init(gpa: std.mem.Allocator, module: *const Module, files: usize, definitions: []const bool) !InspectionReferences {
+        const functions = try gpa.dupe(bool, definitions);
+        const callbacks = try gpa.alloc(u2, module.functions.len);
+        @memset(callbacks, 0);
+        return .{ .functions = functions, .callbacks = callbacks, .bytes = try flags(gpa, module.bytes.len), .statics = try flags(gpa, module.statics.len), .files = try flags(gpa, files) };
+    }
+
+    fn keepsEntry(self: *const InspectionReferences, one: CheckedForeignEntry, definitions: []const bool) bool {
+        return switch (one.entry) {
+            .exported => definitions[one.id.index()],
+            .called_back => self.callbacks[one.id.index()] & 1 != 0,
+            .runtime_called_back => self.callbacks[one.id.index()] & 2 != 0,
+        };
+    }
+};
+
 /// Answers whether anything was written. A refusal has already said why,
 /// through the sink.
 ///
@@ -217,50 +259,95 @@ pub fn emit(
         gpa.free(entries);
     }
 
+    const link_symbols = try linkSymbols(gpa, module, options.foreign_symbols);
+    defer gpa.free(link_symbols);
+    const file_symbols = try gpa.alloc(?u32, table.count());
+    defer gpa.free(file_symbols);
+    @memset(file_symbols, null);
+    var file_order: std.ArrayList(FileId) = .empty;
+    defer file_order.deinit(gpa);
+    for (module.functions) |*f| {
+        if (f.file.index() >= file_symbols.len or file_symbols[f.file.index()] != null) continue;
+        file_symbols[f.file.index()] = @intCast(file_order.items.len);
+        try file_order.append(gpa, f.file);
+    }
+    var reference_arena = std.heap.ArenaAllocator.init(gpa);
+    defer reference_arena.deinit();
+    var references: ?InspectionReferences = if (options.definitions) |definitions|
+        try InspectionReferences.init(reference_arena.allocator(), module, table.count(), definitions)
+    else
+        null;
+    var selected_bodies: std.Io.Writer.Allocating = .init(gpa);
+    defer selected_bodies.deinit();
+    if (references) |*r| {
+        var selected_options = options;
+        selected_options.references = r;
+        for (module.functions, 0..) |*f, i| {
+            const id = FunctionId.at(@intCast(i));
+            if (!options.definitions.?[i] or module.isExternal(id)) continue;
+            try emitFunction(gpa, &selected_bodies.writer, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, selected_options, link_symbols);
+        }
+        for (entries) |one| {
+            if (!r.keepsEntry(one, options.definitions.?)) continue;
+            r.functions[one.id.index()] = true;
+            for (one.body.steps) |step| switch (step) {
+                .enter => r.enter = true,
+                .leave => r.leave = true,
+                else => {},
+            };
+        }
+        // Static initializers can reference byte blobs, but not other statics
+        // or functions: StaticPart.Value is the exhaustive source of truth.
+        for (module.statics, r.statics) |entry, needed| {
+            if (!needed) continue;
+            for (entry.parts) |part| switch (part.value) {
+                .bytes => |blob| r.bytes[blob] = true,
+                .constant => {},
+            };
+        }
+        r.set_args = module.entry != .none and options.definitions.?[module.entry.index()];
+    }
+
     // A type alias is declared outside the module it is used in.
-    for (module.statics, 0..) |entry, i| try writeStaticType(w, module, entry, i);
+    for (module.statics, 0..) |entry, i| {
+        if (references) |r| if (!r.statics[i]) continue;
+        try writeStaticType(w, module, entry, i);
+    }
     try w.writeAll("module {\n");
-    if (module.zeroed_allocator != .none) {
+    if (options.compact and references != null) try w.writeAll(selected_bodies.written());
+    if (if (references) |r| r.assumptions else module.zeroed_allocator != .none) {
         try w.writeAll("  func.func private @llvm.is.constant.i1(i1) -> i1\n");
         try w.writeAll("  func.func private @llvm.assume(i1)\n");
     }
 
-    // A relocation against the runtime's version symbol, pinned by
-    // `llvm.used`. It is never read at run time; its only job is to make a
-    // version mismatch a link failure. The pin is load-bearing and was found
-    // by its absence: an internal global nothing references is dropped at code
-    // generation even unoptimised, and it takes the undefined reference -- the
-    // whole point of the data -- with it. Assembly text needed no pin, because
-    // an assembler emits what is written; a code generator keeps what is used.
-    try w.print(
-        "  llvm.mlir.global external @linea_runtime_abi_{d}() {{addr_space = 0 : i32}} : i64\n",
-        .{runtime_abi},
-    );
-    try w.writeAll("  llvm.mlir.global internal @linea_abi() {addr_space = 0 : i32} : !llvm.ptr {\n");
-    try w.print("    %a = llvm.mlir.addressof @linea_runtime_abi_{d} : !llvm.ptr\n", .{runtime_abi});
-    try w.writeAll("    llvm.return %a : !llvm.ptr\n");
-    try w.writeAll("  }\n");
-    try w.writeAll("  llvm.mlir.global appending @llvm.used() {addr_space = 0 : i32, section = \"llvm.metadata\"} : !llvm.array<1 x ptr> {\n");
-    try w.writeAll("    %a = llvm.mlir.addressof @linea_abi : !llvm.ptr\n");
-    try w.writeAll("    %u = llvm.mlir.undef : !llvm.array<1 x ptr>\n");
-    try w.writeAll("    %v = llvm.insertvalue %a, %u[0] : !llvm.array<1 x ptr>\n");
-    try w.writeAll("    llvm.return %v : !llvm.array<1 x ptr>\n");
-    try w.writeAll("  }\n");
+    if (references == null) {
+        // A relocation against the runtime's version symbol, pinned by
+        // `llvm.used`. It is never read at run time; its only job is to make a
+        // version mismatch a link failure. The pin is load-bearing and was found
+        // by its absence: an internal global nothing references is dropped at code
+        // generation even unoptimised, and it takes the undefined reference -- the
+        // whole point of the data -- with it. Assembly text needed no pin, because
+        // an assembler emits what is written; a code generator keeps what is used.
+        try w.print(
+            "  llvm.mlir.global external @linea_runtime_abi_{d}() {{addr_space = 0 : i32}} : i64\n",
+            .{runtime_abi},
+        );
+        try w.writeAll("  llvm.mlir.global internal @linea_abi() {addr_space = 0 : i32} : !llvm.ptr {\n");
+        try w.print("    %a = llvm.mlir.addressof @linea_runtime_abi_{d} : !llvm.ptr\n", .{runtime_abi});
+        try w.writeAll("    llvm.return %a : !llvm.ptr\n");
+        try w.writeAll("  }\n");
+        try w.writeAll("  llvm.mlir.global appending @llvm.used() {addr_space = 0 : i32, section = \"llvm.metadata\"} : !llvm.array<1 x ptr> {\n");
+        try w.writeAll("    %a = llvm.mlir.addressof @linea_abi : !llvm.ptr\n");
+        try w.writeAll("    %u = llvm.mlir.undef : !llvm.array<1 x ptr>\n");
+        try w.writeAll("    %v = llvm.insertvalue %a, %u[0] : !llvm.array<1 x ptr>\n");
+        try w.writeAll("    llvm.return %v : !llvm.array<1 x ptr>\n");
+        try w.writeAll("  }\n");
+    }
 
-    // File symbols follow first use in the emitted function sequence, so
-    // unrelated source-table entries cannot change generated code. Distinct
-    // files keep distinct symbols even when their diagnostic paths are equal.
-    const file_symbols = try gpa.alloc(?u32, table.count());
-    defer gpa.free(file_symbols);
-    @memset(file_symbols, null);
-    var next_file_symbol: u32 = 0;
-    for (module.functions) |*f| {
-        if (f.file.index() >= file_symbols.len) continue;
-        if (file_symbols[f.file.index()] != null) continue;
-        const ordinal = next_file_symbol;
-        next_file_symbol += 1;
-        file_symbols[f.file.index()] = ordinal;
-        const path = table.get(f.file).path;
+    // Keep production ordinals even when inspection omits other file globals.
+    for (file_order.items, 0..) |file, ordinal| {
+        if (references) |r| if (!r.files[file.index()]) continue;
+        const path = table.get(file).path;
         try w.print("  llvm.mlir.global internal constant @linea_file{d}(\"", .{ordinal});
         try writeMlirString(w, path);
         try w.print("\\00\") : !llvm.array<{d} x i8>\n", .{path.len + 1});
@@ -270,50 +357,60 @@ pub fn emit(
     // length, nothing hands one to C as a C string, and leaving it off is what
     // would let two blobs share a tail later.
     for (module.bytes, 0..) |b, i| {
+        if (references) |r| if (!r.bytes[i]) continue;
         try w.print("  llvm.mlir.global internal constant @linea_str{d}(\"", .{i});
         try writeMlirString(w, b);
         try w.print("\") : !llvm.array<{d} x i8>\n", .{b.len});
     }
 
-    for (module.statics, 0..) |entry, i| try writeStatic(w, module, entry, i);
+    for (module.statics, 0..) |entry, i| {
+        if (references) |r| if (!r.statics[i]) continue;
+        try writeStatic(w, module, entry, i);
+    }
 
     // What the runtime provides, declared: MLIR refuses a call to a name the
     // module does not hold, where an assembler would have left an unknown
     // symbol for the linker.
-    try declareOwned(w, runtime_symbols.set_args_signature);
-    for (module.functions, 0..) |_, i| {
-        const id = FunctionId.at(@intCast(i));
-        if (module.exportedNameOf(id) != null or
-            (module.isExternal(id) and runtime_symbols.signatureOf(module.nameOf(id)) == null))
-        {
-            try declareOwned(w, runtime_symbols.foreign_enter_signature);
-            try declareOwned(w, runtime_symbols.foreign_leave_signature);
-            break;
+    if (references == null or references.?.set_args) try declareOwned(w, runtime_symbols.set_args_signature);
+    if (references) |r| {
+        if (r.enter) try declareOwned(w, runtime_symbols.foreign_enter_signature);
+        if (r.leave) try declareOwned(w, runtime_symbols.foreign_leave_signature);
+    } else {
+        for (module.functions, 0..) |_, i| {
+            const id = FunctionId.at(@intCast(i));
+            if (module.exportedNameOf(id) != null or
+                (module.isExternal(id) and runtime_symbols.signatureOf(module.nameOf(id)) == null))
+            {
+                try declareOwned(w, runtime_symbols.foreign_enter_signature);
+                try declareOwned(w, runtime_symbols.foreign_leave_signature);
+                break;
+            }
         }
     }
     // Generated arithmetic and cleanup can cross a native boundary even
     // when the source function contains no extern declaration.
-    try declareOwned(w, runtime_symbols.fiber_restrict_signature);
+    if (references == null or references.?.restrict) try declareOwned(w, runtime_symbols.fiber_restrict_signature);
     // `noreturn` states interprocedurally what every call site already says
     // locally with `llvm.unreachable`: the trap does not come back. Without
     // it the optimiser must plan a continuation after every trap call it
     // considers moving code around.
-    try declareOwned(w, runtime_symbols.trap_signature);
-    try declareOwned(w, runtime_symbols.panic_signature);
+    if (references == null or references.?.trap) try declareOwned(w, runtime_symbols.trap_signature);
+    if (references == null or references.?.panic_) try declareOwned(w, runtime_symbols.panic_signature);
 
     // Runtime declarations follow the checked operations present in this module.
     var math_operations: [FloatMathOperation.count]bool = @splat(false);
-    for (module.functions) |*function| {
-        for (function.insts.items(.tag), function.insts.items(.data)) |tag, data| {
-            if (tag == .float_math) math_operations[@intFromEnum(data.float_math.operation)] = true;
+    if (references) |r| {
+        math_operations = r.math;
+    } else {
+        for (module.functions) |*function| {
+            for (function.insts.items(.tag), function.insts.items(.data)) |tag, data| {
+                if (tag == .float_math) math_operations[@intFromEnum(data.float_math.operation)] = true;
+            }
         }
     }
     for (math_operations, runtime_symbols.math_functions) |used, signature| {
         if (used) try declareOwned(w, signature);
     }
-
-    const link_symbols = try linkSymbols(gpa, module, options.foreign_symbols);
-    defer gpa.free(link_symbols);
 
     // A declaration per external, because MLIR refuses a call to a name the
     // module does not hold. The body is the linker's to find; writing one here
@@ -325,7 +422,8 @@ pub fn emit(
     defer declared.deinit(gpa);
     for (module.functions, 0..) |*f, i| {
         const id = FunctionId.at(@intCast(i));
-        if (!module.isExternal(id)) continue;
+        if (!module.isExternal(id) or (gpuSelector(module, id) and options.definitions == null)) continue;
+        if (references) |r| if (!r.functions[i]) continue;
         if ((try declared.getOrPut(gpa, link_symbols[i])).found_existing) continue;
         try w.writeAll("  func.func private @");
         try writeCallee(w, module, link_symbols, id);
@@ -352,25 +450,48 @@ pub fn emit(
         try w.writeAll("\n");
     }
 
-    for (module.functions, 0..) |*f, i| {
-        const id = FunctionId.at(@intCast(i));
-        if (module.isExternal(id)) continue;
-        try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options, link_symbols);
+    // Inspection leaves device lookup symbolic: a fabricated no-image body
+    // would describe a fallback rather than the production lookup, and images
+    // belong only to the exact backend artifact.
+    if (options.definitions == null and (module.gpu_function != .none or module.gpu_reduce_function != .none or module.gpu_matmul_function != .none)) try writeGpuSelector(w, module, options.gpu_images, link_symbols);
+
+    if (references) |r| {
+        for (module.functions, 0..) |*f, i| {
+            const id = FunctionId.at(@intCast(i));
+            if (module.isExternal(id) or options.definitions.?[i] or !r.functions[i]) continue;
+            try writeInternalSignature(w, module, f, id, false, options.display_names);
+            try w.writeAll("\n");
+        }
+        if (!options.compact) try w.writeAll(selected_bodies.written());
+    } else {
+        for (module.functions, 0..) |*f, i| {
+            const id = FunctionId.at(@intCast(i));
+            if (module.isExternal(id)) continue;
+            if (options.definitions) |definitions| {
+                if (!definitions[i]) {
+                    try writeInternalSignature(w, module, f, id, false, options.display_names);
+                    try w.writeAll("\n");
+                    continue;
+                }
+            }
+            try emitFunction(gpa, w, module, f, try table.buildMap(gpa, f.file), table.get(f.file).path, id, file_symbols[f.file.index()].?, options, link_symbols);
+        }
     }
 
     // Only where something is to be entered. A library holds no entry point, so
     // there is nothing for the runtime to call and no wrapper that could call
     // it -- and an object without one is exactly what a library is.
-    if (module.entry != .none) try emitEntryWrapper(w, module, options.sanitize);
+    if (module.entry != .none and (references == null or references.?.set_args)) try emitEntryWrapperDisplayed(w, module, options.sanitize, options.display_names);
 
     // What a library is entered through instead: one thunk per export, after
     // every body, so a reader meets a symbol only once its callee is defined,
     // then one C-callable entry per function passed to C as a callback.
     for (entries) |one| {
-        try emitForeignEntry(w, module, &module.functions[one.id.index()], one.id, one.entry, options.sanitize, one.body);
+        if (references) |r| if (!r.keepsEntry(one, options.definitions.?)) continue;
+        try emitForeignEntry(w, module, &module.functions[one.id.index()], one.id, one.entry, options.sanitize, one.body, options);
     }
 
-    if (try moduleStartsMigratableTask(gpa, module, options)) try emitTaskStartFallback(w, options.sanitize);
+    if (references == null and try moduleStartsMigratableTask(gpa, module, options)) try emitTaskStartFallback(w, options.sanitize);
     try w.writeAll("}\n");
     return true;
 }
@@ -405,6 +526,15 @@ pub const Sanitizer = enum {
 
 /// What emission is asked to add to the module beyond what the MIR says.
 pub const Options = struct {
+    /// Inspection externalizes omitted bodies using their internal ABI. Null
+    /// preserves the exact production artifact, including device images.
+    definitions: ?[]const bool = null,
+    display_names: ?[]const ?[]const u8 = null,
+    compact: bool = false,
+    locations: bool = true,
+    /// Internal recording pass used only by inspection; never caller-owned.
+    references: ?*InspectionReferences = null,
+    gpu_images: []const gpu.Image = &.{},
     sanitize: ?Sanitizer = null,
     /// Only complete source executables can prove the native boundaries of
     /// their task bodies. Object and MIR-only emission leave this false.
@@ -571,7 +701,7 @@ test "owned runtime symbols are declared and called with their table's widths" {
 /// where a program reads its arguments: a second shape for how a program starts
 /// would be a second answer to one question. A module with no entry point has
 /// nothing to wrap, and a library never has one.
-fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitizer) std.Io.Writer.Error!void {
+fn emitEntryWrapperDisplayed(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitizer, display_names: ?[]const ?[]const u8) std.Io.Writer.Error!void {
     const entry = runtime_symbols.entry_signature;
     try w.print("  func.func @{s}(%argc: {s}, %argv: {s}) -> {s}", .{
         entry.symbol, mlirType(entry.parameters[0].scalar), mlirType(entry.parameters[1].scalar), mlirType(entry.result),
@@ -586,7 +716,7 @@ fn emitEntryWrapper(w: *std.Io.Writer, module: *const Module, sanitize: ?Sanitiz
     try writeOwnedCallType(w, runtime_symbols.set_args_signature);
     try w.writeAll("\n");
     try w.writeAll("    %status = func.call @");
-    try writeSymbol(w, module, module.entry);
+    try writeDisplayedSymbol(w, module, module.entry, display_names);
     try w.print("() : () -> {s}\n", .{int_type});
     // The status narrows to the runtime's width here and nowhere else -- the
     // one place a 64-bit computation meets a 32-bit interface.
@@ -785,8 +915,12 @@ fn writeForeignGuard(w: *std.Io.Writer, enter: bool) std.Io.Writer.Error!void {
     try w.writeByte('\n');
 }
 
+fn needsMigrationGuard(signature: runtime_symbols.Signature) bool {
+    return signature.migration_contract != .neutral and signature.migration_contract != .runtime_guarded;
+}
+
 fn writeMigrationGuard(w: *std.Io.Writer, signature: runtime_symbols.Signature) std.Io.Writer.Error!void {
-    if (signature.migration_contract == .neutral or signature.migration_contract == .runtime_guarded) return;
+    if (!needsMigrationGuard(signature)) return;
     const guard = runtime_symbols.fiber_restrict_signature;
     try w.print("    func.call @{s}()", .{guard.symbol});
     try writeOwnedCallType(w, guard);
@@ -797,6 +931,14 @@ fn writeMigrationGuard(w: *std.Io.Writer, signature: runtime_symbols.Signature) 
 fn writeCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId, trusted: bool) std.Io.Writer.Error!void {
     try w.writeByte('@');
     try writeSymbolName(w, module.nameOf(id), if (trusted) symbol_names.defined_prefix ++ "runtime_callback." else symbol_names.callback_prefix);
+}
+
+fn writeDisplayedCalledBackName(w: *std.Io.Writer, module: *const Module, id: FunctionId, trusted: bool, display_names: ?[]const ?[]const u8) std.Io.Writer.Error!void {
+    if (display_names) |names| if (names[id.index()]) |name| {
+        try w.writeByte('@');
+        return writeSymbolName(w, name, if (trusted) "native.runtime." else "native.foreign.");
+    };
+    return writeCalledBackName(w, module, id, trusted);
 }
 
 /// What a C-callable entry does to one parameter C hands over.
@@ -1184,6 +1326,7 @@ fn emitForeignEntry(
     entry: ForeignEntry,
     sanitize: ?Sanitizer,
     body: ForeignBody,
+    options: Options,
 ) std.Io.Writer.Error!void {
     const plan = ForeignPlan.of(module, mir, entry);
     // What the thunk itself answers: the declared type, or nothing where that
@@ -1201,7 +1344,7 @@ fn emitForeignEntry(
         .exported => |name| try w.print("  func.func @{s}(", .{name}),
         .called_back, .runtime_called_back => {
             try w.writeAll("  func.func private ");
-            try writeCalledBackName(w, module, id, entry == .runtime_called_back);
+            try writeDisplayedCalledBackName(w, module, id, entry == .runtime_called_back, options.display_names);
             try w.writeAll("(");
         },
     }
@@ -1222,11 +1365,12 @@ fn emitForeignEntry(
     }
     // A callback's entry is reached only through the address the program
     // hands C, so the object publishes no symbol for it, as for a body.
-    if (entry != .exported or sanitize != null or plan.never) {
+    const internal_linkage = entry != .exported and !options.compact;
+    if (internal_linkage or sanitize != null or plan.never) {
         try w.writeAll(" attributes {");
-        if (entry != .exported) try w.writeAll("llvm.linkage = #llvm.linkage<internal>");
+        if (internal_linkage) try w.writeAll("llvm.linkage = #llvm.linkage<internal>");
         if (sanitize != null or plan.never) {
-            if (entry != .exported) try w.writeAll(", ");
+            if (internal_linkage) try w.writeAll(", ");
             try w.writeAll("passthrough = [");
             if (plan.never) try w.writeAll("\"noreturn\"");
             try writeSanitizeEntry(w, sanitize, plan.never);
@@ -1277,7 +1421,7 @@ fn emitForeignEntry(
             } else {
                 try w.writeAll("    func.call @");
             }
-            try writeSymbol(w, module, id);
+            try writeDisplayedSymbol(w, module, id, options.display_names);
             try w.writeAll("(");
             for (body.arguments, 0..) |argument, i| {
                 if (i > 0) try w.writeAll(", ");
@@ -1303,6 +1447,25 @@ fn emitForeignEntry(
         .return_answer => try w.print("    func.return %answer : {s}\n  }}\n", .{foreignTypeOf(module, mir.return_type)}),
         .return_narrowed => try w.print("    func.return %narrow : {s}\n  }}\n", .{foreignTypeOf(module, mir.return_type)}),
     };
+}
+
+/// Both ends of inspection's externalization use the ordinary internal
+/// convention, including widened scalar parameters and indirect results.
+fn writeInternalSignature(w: *std.Io.Writer, module: *const Module, mir: *const Mir, id: FunctionId, named: bool, display_names: ?[]const ?[]const u8) std.Io.Writer.Error!void {
+    const indirect = module.returnsIndirectly(id);
+    try w.writeAll("  func.func private @");
+    try writeDisplayedSymbol(w, module, id, display_names);
+    try w.writeAll("(");
+    if (indirect) try w.writeAll(if (named) "%sret: !llvm.ptr" else "!llvm.ptr");
+    for (0..mir.param_count) |i| {
+        if (i > 0 or indirect) try w.writeAll(", ");
+        if (named) try w.print("%a{d}: ", .{i});
+        try w.writeAll(paramTypeOf(module, id, mir, i));
+    }
+    try w.writeAll(")");
+    if (resultTypeOf(module, id, mir.return_type)) |t| {
+        try w.print(" -> {s}", .{t});
+    }
 }
 
 fn emitFunction(
@@ -1338,18 +1501,7 @@ fn emitFunction(
         .options = options,
     };
 
-    try w.writeAll("  func.func private @");
-    try writeSymbol(w, module, id);
-    try w.writeAll("(");
-    if (indirect) try w.writeAll("%sret: !llvm.ptr");
-    for (0..mir.param_count) |i| {
-        if (i > 0 or indirect) try w.writeAll(", ");
-        try w.print("%a{d}: {s}", .{ i, paramTypeOf(module, id, mir, i) });
-    }
-    try w.writeAll(")");
-    if (resultTypeOf(module, id, mir.return_type)) |t| {
-        try w.print(" -> {s}", .{t});
-    }
+    try writeInternalSignature(w, module, mir, id, true, options.display_names);
     // Internal to LLVM, not only private to MLIR: `private` hides the symbol
     // from other modules' lookups but translates to external linkage, under
     // which the optimiser must keep every out-of-line body and assume callers
@@ -1365,11 +1517,16 @@ fn emitFunction(
     // page in turn as it grows, so no frame steps over the guard pages below
     // a thread's stack into memory beyond them, and an overflow faults in the
     // guard, where the runtime reports it.
-    try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [");
-    if (mir.return_type == .never) try w.writeAll("\"noreturn\", ");
-    try w.writeAll(probe_stack);
-    try writeSanitizeEntry(w, sanitize, true);
-    try w.writeAll("]} {\n");
+    if (options.compact and sanitize == null) {
+        if (mir.return_type == .never) try w.writeAll(" attributes {passthrough = [\"noreturn\"]}");
+        try w.writeAll(" {\n");
+    } else {
+        try w.writeAll(" attributes {llvm.linkage = #llvm.linkage<internal>, passthrough = [");
+        if (mir.return_type == .never) try w.writeAll("\"noreturn\", ");
+        try w.writeAll(probe_stack);
+        try writeSanitizeEntry(w, sanitize, true);
+        try w.writeAll("]} {\n");
+    }
 
     // The entry block, always first, because a function is entered at the block
     // its text begins with while `Mir` says which block that is. Every slot is
@@ -1682,6 +1839,20 @@ const FunctionEmitter = struct {
     /// Expanded operations and trap arguments share their instruction's span.
     last_position: ?struct { offset: u32, at: source_mod.LineCol } = null,
 
+    fn migrationGuard(self: *FunctionEmitter, signature: runtime_symbols.Signature) std.Io.Writer.Error!void {
+        if (self.options.references) |r| if (needsMigrationGuard(signature)) {
+            r.restrict = true;
+        };
+        try writeMigrationGuard(self.w, signature);
+    }
+
+    fn foreignGuard(self: *FunctionEmitter, enter: bool) std.Io.Writer.Error!void {
+        if (self.options.references) |r| {
+            if (enter) r.enter = true else r.leave = true;
+        }
+        try writeForeignGuard(self.w, enter);
+    }
+
     const TailReturn = struct { call: InstId, exit: InstId };
 
     /// Only a final call, optionally copied into an owned slot before an empty
@@ -1740,6 +1911,7 @@ const FunctionEmitter = struct {
     /// operation carries its instruction's location, because the expansion is
     /// that instruction, spelled out.
     fn here(self: *FunctionEmitter, span: Span) std.Io.Writer.Error!void {
+        if (!self.options.locations) return self.w.writeByte('\n');
         const at = self.position(span);
         try self.w.writeAll(" loc(\"");
         try writeMlirString(self.w, self.path);
@@ -1933,7 +2105,8 @@ const FunctionEmitter = struct {
             },
             .float_math => {
                 const math = mir.floatMathOf(id);
-                try writeMigrationGuard(self.w, runtime_symbols.math_functions[@intFromEnum(math.operation)]);
+                if (self.options.references) |r| r.math[@intFromEnum(math.operation)] = true;
+                try self.migrationGuard(runtime_symbols.math_functions[@intFromEnum(math.operation)]);
                 try self.w.print("    %nr{d} = func.call @{s}(%v{d}", .{ id.index(), math.operation.symbol(), math.lhs.index() });
                 if (math.operation.arity() == 2) try self.w.print(", %v{d}", .{math.rhs.index()});
                 try self.w.writeAll(")");
@@ -1973,8 +2146,9 @@ const FunctionEmitter = struct {
             .function_addr => {
                 const n = id.index();
                 const target = mir.functionOf(id);
+                if (self.options.references) |r| r.functions[target.index()] = true;
                 try self.w.print("    %fa{d} = func.constant @", .{n});
-                try writeCallee(self.w, self.module, self.link_symbols, target);
+                try writeDisplayedCallee(self.w, self.module, self.link_symbols, target, self.options.display_names);
                 try self.w.writeAll(" : ");
                 try self.writeFunctionType(target);
                 try self.here(span);
@@ -1988,8 +2162,12 @@ const FunctionEmitter = struct {
                 const n = id.index();
                 const target = mir.functionOf(id);
                 const body = self.module.functionOf(target);
+                if (self.options.references) |r| {
+                    r.functions[target.index()] = true;
+                    r.callbacks[target.index()] |= if (isRuntimeCallback(self.runtime_callbacks, id)) @as(u2, 2) else 1;
+                }
                 try self.w.print("    %fa{d} = func.constant ", .{n});
-                try writeCalledBackName(self.w, self.module, target, isRuntimeCallback(self.runtime_callbacks, id));
+                try writeDisplayedCalledBackName(self.w, self.module, target, isRuntimeCallback(self.runtime_callbacks, id), self.options.display_names);
                 try self.w.writeAll(" : ");
                 try writeForeignEntryType(self.w, self.module, body);
                 try self.here(span);
@@ -2007,6 +2185,7 @@ const FunctionEmitter = struct {
             },
 
             .static_addr => {
+                if (self.options.references) |r| r.statics[mir.staticOf(id)] = true;
                 try self.w.print("    %v{d} = llvm.mlir.addressof @linea_static{d} : !llvm.ptr", .{
                     id.index(), mir.staticOf(id),
                 });
@@ -2022,6 +2201,7 @@ const FunctionEmitter = struct {
             // is code sit on separate lines.
             .source_site => switch (mir.siteOf(id)) {
                 .file_address => {
+                    if (self.options.references) |r| r.files[mir.file.index()] = true;
                     const n = id.index();
                     try self.w.print("    %{s}{d} = llvm.mlir.addressof @linea_file{d} : !llvm.ptr", .{ site_file_name, n, self.file_symbol });
                     try self.here(span);
@@ -2046,6 +2226,7 @@ const FunctionEmitter = struct {
             },
 
             .bytes_addr => {
+                if (self.options.references) |r| r.bytes[mir.bytesOf(id)] = true;
                 const n = id.index();
                 try self.w.print("    %ba{d} = llvm.mlir.addressof @linea_str{d} : !llvm.ptr", .{
                     n, mir.bytesOf(id),
@@ -2123,7 +2304,20 @@ const FunctionEmitter = struct {
         const n = id.index();
         const span = mir.spanOf(id);
         const external = module.isExternal(c.func);
-        const foreign_frame = external and runtime_symbols.signatureOf(module.nameOf(c.func)) == null;
+        const runtime_signature = if (external) runtime_symbols.signatureOf(module.nameOf(c.func)) else null;
+        const foreign_frame = external and runtime_signature == null;
+        // T-Extern admits this registry row only at the standard library's
+        // certified declaration. A different archive cannot enable a device
+        // when the compiler was built without device-image support.
+        if (!@import("build_options").gpu) if (runtime_signature) |signature| {
+            if (signature.opens_gpu) {
+                std.debug.assert(!is_noreturn and c.args.len == 0 and mir.typeOf(id) == .i64);
+                try w.print("    %v{d} = arith.constant -19 : i64", .{n});
+                try self.here(span);
+                return;
+            }
+        };
+        if (self.options.references) |r| r.functions[c.func.index()] = true;
         const indirect = module.returnsIndirectly(c.func);
         const ty = if (is_noreturn) TypeId.never else mir.typeOf(id);
 
@@ -2145,8 +2339,8 @@ const FunctionEmitter = struct {
             try self.here(span);
         };
 
-        if (foreign_frame) try writeForeignGuard(w, true) else if (external) {
-            try writeMigrationGuard(w, runtime_symbols.signatureOf(module.nameOf(c.func)).?.*);
+        if (foreign_frame) try self.foreignGuard(true) else if (external) {
+            try self.migrationGuard(runtime_symbols.signatureOf(module.nameOf(c.func)).?.*);
         }
         if (is_noreturn or indirect or (external and ty == .unit)) {
             try w.writeAll("    func.call @");
@@ -2159,7 +2353,7 @@ const FunctionEmitter = struct {
         }
         if (migratableTaskStart(module, mir, id, self.runtime_callbacks, self.options)) {
             try w.writeAll(runtime_symbols.task_start_migratable_signature.symbol);
-        } else try writeCallee(w, module, self.link_symbols, c.func);
+        } else try writeDisplayedCallee(w, module, self.link_symbols, c.func, self.options.display_names);
         try w.writeAll("(");
         if (indirect) {
             if (id == self.return_call) try w.writeAll("%sret") else try w.print("%rs{d}", .{n});
@@ -2183,7 +2377,7 @@ const FunctionEmitter = struct {
         }
         try self.here(span);
 
-        if (foreign_frame and !is_noreturn) try writeForeignGuard(w, false);
+        if (foreign_frame and !is_noreturn) try self.foreignGuard(false);
 
         if (c.func == module.zeroed_allocator) try self.zeroedAllocation(id, c.args[0]);
 
@@ -2232,6 +2426,7 @@ const FunctionEmitter = struct {
     /// Constant predicates can settle after inlining; otherwise these paths
     /// disappear before machine code, including at unoptimized call sites.
     fn zeroedAllocation(self: *FunctionEmitter, id: InstId, size: InstId) std.Io.Writer.Error!void {
+        if (self.options.references) |r| r.assumptions = true;
         const w = self.w;
         const n = id.index();
         try w.print(
@@ -2894,6 +3089,10 @@ const FunctionEmitter = struct {
     /// One operation rather than two, because a block that has called the trap
     /// is a block control never leaves, and every site that reports wants both.
     fn trapAndStop(self: *FunctionEmitter, n: u32, kind: TrapKind, span: Span) std.Io.Writer.Error!void {
+        if (self.options.references) |r| {
+            r.trap = true;
+            r.files[self.mir.file.index()] = true;
+        }
         const at = self.position(span);
         try self.w.print("    %tk{d} = arith.constant {d} : {s}", .{ n, @intFromEnum(kind), runtime_int });
         try self.here(span);
@@ -2905,7 +3104,7 @@ const FunctionEmitter = struct {
         try self.here(span);
         try self.w.print("    %{s}{d} = arith.constant {d} : {s}", .{ trap_col_name, n, at.column, runtime_int });
         try self.here(span);
-        try writeMigrationGuard(self.w, runtime_symbols.trap_signature);
+        try self.migrationGuard(runtime_symbols.trap_signature);
         try self.w.print("    func.call @{s}(%tk{d}, %{s}{d}, %{s}{d}, %{s}{d})", .{
             runtime_symbols.trap, n, trap_file_name, n, trap_line_name, n, trap_col_name, n,
         });
@@ -2920,6 +3119,10 @@ const FunctionEmitter = struct {
     /// `Location`'s file addresses the same NUL-terminated global a span's
     /// does, so the runtime reads either as a C string.
     fn panicAndStop(self: *FunctionEmitter, n: u32, message: InstId, location: InstId, span: Span) std.Io.Writer.Error!void {
+        if (self.options.references) |r| {
+            r.panic_ = true;
+            if (location == .none) r.files[self.mir.file.index()] = true;
+        }
         const fields = self.module.types.textFields(self.module.panic_message_type).?;
 
         try self.panicField(n, "a", message, fields.at.offset, span);
@@ -2945,7 +3148,7 @@ const FunctionEmitter = struct {
             try self.locationField(n, trap_line_name, location, line.offset, span);
             try self.locationField(n, trap_col_name, location, column.offset, span);
         }
-        try writeMigrationGuard(self.w, runtime_symbols.panic_signature);
+        try self.migrationGuard(runtime_symbols.panic_signature);
         try self.w.print("    func.call @{s}(%pva{d}, %pvl{d}, %{s}{d}, %{s}{d}, %{s}{d})", .{
             runtime_symbols.panic, n, n, panic_file_name, n, trap_line_name, n, trap_col_name, n,
         });
@@ -3283,15 +3486,7 @@ test "a static is written as its parts with zero runs between them" {
 /// a two-digit hex escape -- the one escape form the format defines for
 /// arbitrary bytes. The array type beside the literal counts decoded bytes, so
 /// escaping changes nothing about the length written there.
-fn writeMlirString(w: *std.Io.Writer, bytes: []const u8) std.Io.Writer.Error!void {
-    for (bytes) |b| {
-        if (b == '"' or b == '\\' or b < 0x20 or b > 0x7e) {
-            try w.print("\\{X:0>2}", .{b});
-        } else {
-            try w.writeByte(b);
-        }
-    }
-}
+const writeMlirString = @import("text.zig").writeString;
 
 /// The printed type of one parameter position, read where the function is
 /// defined, where an extern is declared, and where any call types its
@@ -3362,6 +3557,16 @@ fn writeSymbol(w: *std.Io.Writer, module: *const Module, id: FunctionId) std.Io.
         std.debug.assert(name.len <= symbol_names.max_len);
         try writeSymbolName(w, name, symbol_names.defined_prefix);
     }
+}
+
+fn writeDisplayedSymbol(w: *std.Io.Writer, module: *const Module, id: FunctionId, display_names: ?[]const ?[]const u8) std.Io.Writer.Error!void {
+    if (display_names) |names| if (names[id.index()]) |name| return writeSymbolName(w, name, "");
+    return writeSymbol(w, module, id);
+}
+
+fn writeDisplayedCallee(w: *std.Io.Writer, module: *const Module, link_symbols: []const []const u8, id: FunctionId, display_names: ?[]const ?[]const u8) std.Io.Writer.Error!void {
+    if (!module.isExternal(id)) return writeDisplayedSymbol(w, module, id, display_names);
+    return writeCallee(w, module, link_symbols, id);
 }
 
 /// A function as its call, its address and an external's declaration name
@@ -4144,7 +4349,7 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
             defer out.deinit();
             const body = try ForeignBody.of(gpa, &module, &mir, entry);
             defer body.deinit(gpa);
-            try emitForeignEntry(&out.writer, &module, &mir, .at(1), entry, null, body);
+            try emitForeignEntry(&out.writer, &module, &mir, .at(1), entry, null, body, .{});
 
             // The steps about to be written meet what the boundary requires,
             // and steps with one of them taken out, doubled or moved do not.
@@ -4196,5 +4401,123 @@ test "foreign frame guards balance calls and C entries while runtime callbacks s
                 try testing.expect(std.mem.indexOf(u8, out.written(), "arith.trunci %answer") != null);
             }
         }
+    }
+}
+
+fn writeGpuSelector(w: *std.Io.Writer, module: *const Module, images: []const gpu.Image, link_symbols: []const []const u8) !void {
+    for (images) |image| {
+        const n = image.function.index();
+        try w.print("  llvm.mlir.global internal constant @linea_gpu_image{d}(\"", .{n});
+        try writeMlirString(w, image.bytes);
+        try w.print("\") {{alignment = 4 : i64}} : !llvm.array<{d} x i8>\n", .{image.bytes.len});
+        try w.print("  llvm.mlir.global internal constant @linea_gpu_kernel{d}() {{alignment = 8 : i64}} : !llvm.struct<(ptr, i64, i64)> {{\n", .{n});
+        try w.print("    %image = llvm.mlir.addressof @linea_gpu_image{d} : !llvm.ptr\n", .{n});
+        try w.print("    %length = llvm.mlir.constant({d} : i64) : i64\n", .{image.bytes.len});
+        try w.writeAll("    %empty = llvm.mlir.undef : !llvm.struct<(ptr, i64, i64)>\n");
+        try w.writeAll("    %at = llvm.insertvalue %image, %empty[0] : !llvm.struct<(ptr, i64, i64)>\n");
+        try w.writeAll("    %full = llvm.insertvalue %length, %at[1] : !llvm.struct<(ptr, i64, i64)>\n");
+        try w.print("    %kind = llvm.mlir.constant({d} : i64) : i64\n", .{@intFromEnum(image.kind)});
+        try w.writeAll("    %tagged = llvm.insertvalue %kind, %full[2] : !llvm.struct<(ptr, i64, i64)>\n");
+        try w.writeAll("    llvm.return %tagged : !llvm.struct<(ptr, i64, i64)>\n  }\n");
+    }
+    const selectors = [_]struct { id: FunctionId, kind: gpu.Kind }{
+        .{ .id = module.gpu_function, .kind = .map },
+        .{ .id = module.gpu_reduce_function, .kind = .reduce },
+        .{ .id = module.gpu_matmul_function, .kind = .matmul },
+    };
+    for (selectors) |selector| {
+        if (selector.id != .none) try writeGpuLookup(w, module, selector.id, selector.kind, images, link_symbols);
+    }
+}
+
+fn gpuSelector(module: *const Module, id: FunctionId) bool {
+    return id == module.gpu_function or id == module.gpu_reduce_function or id == module.gpu_matmul_function;
+}
+
+fn writeGpuLookup(w: *std.Io.Writer, module: *const Module, selector: FunctionId, kind: gpu.Kind, images: []const gpu.Image, link_symbols: []const []const u8) !void {
+    try w.writeAll("  func.func private @");
+    try writeCallee(w, module, link_symbols, selector);
+    try w.writeAll(if (kind == .matmul) "() -> i64 {\n" else "(%function: !llvm.ptr) -> i64 {\n");
+    const signature = if (kind == .reduce) "(f32, f32) -> f32" else "(f32) -> f32";
+    for (images, 0..) |image, i| {
+        if (image.kind != kind) continue;
+        if (kind != .matmul) {
+            try w.print("    %function{d} = func.constant @", .{i});
+            try writeCallee(w, module, link_symbols, image.function);
+            try w.print(" : {s}\n", .{signature});
+            try w.print("    %pointer{d} = builtin.unrealized_conversion_cast %function{d} : {s} to !llvm.ptr\n", .{ i, i, signature });
+            try w.print("    %matches{d} = llvm.icmp \"eq\" %function, %pointer{d} : !llvm.ptr\n", .{ i, i });
+            try w.print("    cf.cond_br %matches{d}, ^found{d}, ^next{d}\n  ^found{d}:\n", .{ i, i, i, i });
+        }
+        try w.print("    %kernel{d} = llvm.mlir.addressof @linea_gpu_kernel{d} : !llvm.ptr\n", .{ i, image.function.index() });
+        try w.print("    %handle{d} = llvm.ptrtoint %kernel{d} : !llvm.ptr to i64\n", .{ i, i });
+        try w.print("    func.return %handle{d} : i64\n", .{i});
+        if (kind == .matmul) {
+            try w.writeAll("  }\n");
+            return;
+        }
+        try w.print("  ^next{d}:\n", .{i});
+    }
+    try w.writeAll("    %unavailable = arith.constant 0 : i64\n    func.return %unavailable : i64\n  }\n");
+}
+
+test "CPU-only compiler gates only certified device acquisition" {
+    const gpa = testing.allocator;
+    var types = try types_mod.Typing.Builder.init(gpa);
+    defer types.deinit();
+    const layouts = try gpa.alloc(types_mod.Layout, types.pool.items.len);
+    defer gpa.free(layouts);
+    @memset(layouts, .{ .size = 8, .alignment = 8 });
+    var representations = try mir_mod.deriveRepresentations(gpa, &types.view(), layouts);
+    defer representations.deinit(gpa);
+    const source: source_mod.Source = .{ .path = "mode.lin", .text = "GpuDevice.open()" };
+    var map = try SourceMap.init(gpa, &source);
+    defer map.deinit();
+    for ([_]struct { symbol: []const u8, external: bool, parameter: bool = false, acquisition: bool = false }{
+        .{ .symbol = "linea_gpu_open", .external = true, .acquisition = true },
+        .{ .symbol = "linea_gpu_wait", .external = true, .parameter = true },
+        .{ .symbol = "linea_gpu_open", .external = false },
+    }) |boundary| {
+        var builder = Mir.Builder.init(gpa);
+        defer builder.deinit();
+        builder.return_type = .i64;
+        builder.param_count = if (boundary.parameter) 1 else 0;
+        if (boundary.parameter) _ = try builder.addLocal(.u64, .value);
+        const block = try builder.addBlock();
+        const zero = try builder.addInst(block, .{ .tag = .constant, .ty = .u64, .span = Span.empty, .data = .{ .constant = 0 } });
+        const call = try builder.addCall(block, .value, .i64, Span.empty, .at(0), if (boundary.parameter) &.{zero} else &.{});
+        _ = try builder.setTerminator(block, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = call } });
+        var mir = try builder.finish(block, .from(0));
+        defer mir.deinit(gpa);
+        var functions = [_]Mir{mir};
+        var names = [_][]const u8{boundary.symbol};
+        const module: Module = .{
+            .functions = &functions,
+            .external = &.{boundary.external},
+            .bytes = &.{},
+            .names = &names,
+            .origins = &.{},
+            .types = types.view(),
+            .representations = representations,
+            .layouts = layouts,
+            .entry = .none,
+        };
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        var emitter: FunctionEmitter = .{
+            .link_symbols = &names,
+            .w = &out.writer,
+            .mir = &mir,
+            .module = &module,
+            .map = &map,
+            .path = source.path,
+            .indirect = false,
+        };
+        try emitter.call(call, false);
+        const unavailable = !@import("build_options").gpu and boundary.acquisition;
+        try testing.expectEqual(@as(usize, if (unavailable) 1 else 0), std.mem.count(u8, out.written(), "arith.constant -19 : i64"));
+        const invocation = try std.fmt.allocPrint(gpa, "func.call @{s}{s}(", .{ if (boundary.external) "" else symbol_names.defined_prefix, boundary.symbol });
+        defer gpa.free(invocation);
+        try testing.expectEqual(!unavailable, std.mem.indexOf(u8, out.written(), invocation) != null);
     }
 }

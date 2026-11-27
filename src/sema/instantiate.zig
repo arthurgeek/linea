@@ -1782,7 +1782,7 @@ const Discovery = struct {
             _ = try self.table.intern(.{ .body = body, .args = &.{}, .self_ty = .poison }, self.program, self.pool);
             return;
         }
-        if (self.typing.lowers(decl)) return;
+        if (self.typing.lowers(decl) and !self.raw_accesses.selectsGpu(decl)) return;
         if (self.ast.declBody(decl) == ExprId.none and !self.ast.declIsExtern(decl)) return;
         const recorded = normal.selection.own_args;
         const args = try self.gpa.alloc(TypeId, recorded.len);

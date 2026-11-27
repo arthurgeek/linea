@@ -1,0 +1,33 @@
+// Multiply row-major matrices while their buffers stay on the GPU.
+import std.gpu
+import std.io
+import std.testing
+
+use io.IoError
+use io.println
+
+@derive(Display, Release, From[gpu.GpuError], From[IoError])
+enum MatrixError {
+    Gpu(gpu.GpuError),
+    Output(IoError),
+}
+
+fn half(value: Float32) -> Float32 { value * 0.5 }
+
+test "halving preserves small Float32 readings" {
+    let smallest = Float32.from_bits(2)
+    testing.assert_eq(half(smallest).to_bits(), 1, "halving should preserve subnormal values")?
+}
+
+fn main() -> Result[UInt8, MatrixError] {
+    defer let device = gpu.Device.open()?
+    defer let left = device.matrix([[1.0, 2.0], [3.0, 4.0]])?
+    defer let right = device.matrix([[2.0, 0.0], [0.0, 3.0]])?
+    defer let product = left.matmul(right)?
+    defer let result = product.map(half)?
+    defer let host = gpu.download(result)?
+    if host.length() != 4 { return .Ok(1) }
+    println("[{host[0]}, {host[1]}]")?
+    println("[{host[2]}, {host[3]}]")?
+    .Ok(0)
+}

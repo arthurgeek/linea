@@ -1,0 +1,10 @@
+error[M-Opaque]: `_Admission` is opaque outside `tensor`
+ --> tests/tensor/admission_witness_is_opaque.lin:8:38
+  |
+8 |     let _admission = body._admit_map(.{})
+  |                                      ^^^ only its own module can build one
+error[M-Opaque]: `_Admission` is opaque outside `tensor`
+  --> tests/tensor/admission_witness_is_opaque.lin:16:41
+   |
+16 |     let _admission = body._admit_binary(.{})
+   |                                         ^^^ only its own module can build one

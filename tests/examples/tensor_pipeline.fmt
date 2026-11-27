@@ -1,0 +1,58 @@
+// Run one numerical pipeline on host storage and an explicitly opened device.
+import std.gpu
+import std.io
+import std.tensor
+
+use io.IoError
+use io.println
+
+@derive(Display, Release, From[tensor.CpuError], From[gpu.GpuError], From[IoError])
+enum PipelineError {
+    Cpu(tensor.CpuError),
+    Gpu(gpu.GpuError),
+    Output(IoError),
+}
+
+fn scale(value: Float32, factor: Float32) -> Float32 {
+    value * factor
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn compute[S: tensor.Storage[Float32]](left: tensor.Matrix[Float32, S], right: tensor.Matrix[Float32, S]) -> Result[tensor.Scalar[Float32, S], S.Error] where carries(.Ok: left, right) {
+    defer let product = left.matmul(right)?
+    defer let scaled = product.map(tensor.uniform(scale, 0.5))?
+    defer let combined = scaled.zip_with(product, add)?
+    combined.reduce(0.0, add)
+}
+
+fn main() -> Result[UInt8, PipelineError] {
+    defer let host_left = tensor.matrix([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])?
+    defer let host_right = tensor.matrix([[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]])?
+    defer let cpu = compute(host_left, host_right)?
+    let reference = cpu.values()[0]
+    println("CPU: {reference}")?
+
+    defer let device = match gpu.Device.open() {
+        Ok(device) => device,
+        Err(Unavailable) => {
+            println("GPU: unavailable")?
+            return .Ok(0)
+        },
+        Err(error) => return .Err(.Gpu(error)),
+    }
+    defer let left = device.upload(host_left.values(), host_left.dimensions())?
+    defer let right = device.upload(host_right.values(), host_right.dimensions())?
+    defer let result = compute(left, right)?
+    defer let values = gpu.download(result)?
+    println("GPU: {values[0]}")?
+    .Ok(
+        if values[0].to_bits() == reference.to_bits() {
+            0
+        } else {
+            1
+        },
+    )
+}

@@ -1,0 +1,35 @@
+// Calibrate readings on a GPU, then sum them without downloading the vector.
+import std.gpu
+import std.io
+import std.testing
+
+use io.IoError
+use io.println
+
+@derive(Display, Release, From[gpu.GpuError], From[IoError])
+enum ReadingsError {
+    Gpu(gpu.GpuError),
+    Output(IoError),
+}
+
+fn calibrate(value: Float32) -> Float32 {
+    if value < 0.0 { 0.0 } else { value * 0.5 }
+}
+
+fn add(left: Float32, right: Float32) -> Float32 { left + right }
+
+test "calibration ignores negative readings" {
+    testing.assert_eq(calibrate(-2.0), 0.0, "negative readings should be zero")?
+    testing.assert_eq(calibrate(8.0), 4.0, "positive readings should be halved")?
+}
+
+fn main() -> Result[UInt8, ReadingsError] {
+    let values = [Float32(-2.0), 4.0, 6.0, 8.0]
+    defer let device = gpu.Device.open()?
+    defer let input = device.upload(values.as_slice(), [UInt64(4)])?
+    defer let readings = input.map(calibrate)?
+    defer let total = readings.reduce(Float32(0.0), add)?
+    defer let host = gpu.download(total)?
+    println("Calibrated total: {host[0]}")?
+    .Ok(0)
+}

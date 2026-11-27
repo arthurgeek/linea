@@ -1,0 +1,36 @@
+import std.tensor
+
+use tensor.MapBody
+use tensor.BinaryBody
+
+struct Twice {}
+
+impl MapBody for Twice {
+    type Element = Float32
+
+    fn call(_self: Self, value: Float32) -> Float32 {
+        value * 2.0
+    }
+}
+
+struct Add {}
+
+impl BinaryBody for Add {
+    type Element = Float32
+
+    fn call(_self: Self, left: Float32, right: Float32) -> Float32 {
+        left + right
+    }
+}
+
+fn main() -> UInt8 {
+    defer let input = tensor.matrix([[Float32(4.0)]]).unwrap()
+    defer let mapped = input.map(Twice {}).unwrap()
+    defer let zipped = mapped.zip_with(input, Add {}).unwrap()
+    defer let reduced = zipped.reduce(Float32(1.0), Add {}).unwrap()
+    if mapped.values()[0] == 8.0 && reduced.values()[0] == 13.0 {
+        0
+    } else {
+        1
+    }
+}

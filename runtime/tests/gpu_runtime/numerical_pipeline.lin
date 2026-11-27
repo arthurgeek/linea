@@ -1,0 +1,77 @@
+import std.env
+import std.gpu
+import std.io
+import std.mem
+import std.session
+import std.task
+import std.tensor
+
+use session.Chan
+use session.End
+use session.Recv
+use session.Send
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn negate(value: Float32) -> Float32 {
+    -value
+}
+
+fn main() -> UInt8 {
+    let on = io.Loop.open(carriers: 1).unwrap()
+    let arguments = env.args()
+    let operation: fn(value: Float32) -> Float32 = if arguments.count() % 2 == 0 {
+        half
+    } else {
+        negate
+    }
+    let sizes = [UInt64(0), 1, 1000, 1024, arguments.count() + 63]
+    defer let device = gpu.Device.open().unwrap()
+    for entry in sizes.as_slice() {
+        let count = *entry
+        defer var values: mem.Vec[Float32, mem.SystemAllocator] = mem.Vec.new()
+        for i in UInt64(0)..count {
+            &values.push(Float32(i)).settled().unwrap()
+        }
+        let input = device.upload(values.as_slice(), [UInt64(1), count]).unwrap()
+        let numerical = sink [] |sink me: Chan[Recv[(tensor.Tensor[Float32, 2, gpu.Storage], fn(value: Float32) -> Float32), Send[Result[tensor.Tensor[Float32, 2, gpu.Storage], gpu.GpuError], End]]]| {
+            let ((input, selected), next) = me.recv()
+            defer let source = input
+            next.send(source.map(selected)).close()
+        }
+        let gpu_work = task.prepare(numerical, on).settled().unwrap().start().send((input, copy(operation)))
+        let cpu = sink [] |sink me: Chan[Send[UInt64, End]]| {
+            var sum = UInt64(0)
+            for i in UInt64(0)..1000 {
+                sum += i
+            }
+            me.send(sum).close()
+        }
+        let running = task.prepare(cpu, on).settled().unwrap().start()
+        let (sum, cpu_done) = running.recv()
+        cpu_done.close()
+        let (answer, done) = gpu_work.recv()
+        done.close()
+        defer let intermediate = answer.unwrap()
+        if sum != 499500 {
+            return 1
+        }
+        defer let output = intermediate.map(negate).unwrap()
+        let shape = output.dimensions()
+        if shape[0] != 1 || shape[1] != count {
+            return 2
+        }
+        defer let host = gpu.download(output).unwrap()
+        if host.length() != count {
+            return 3
+        }
+        for i in UInt64(0)..count {
+            if host[i].to_bits() != negate(operation(Float32(i))).to_bits() {
+                return 4
+            }
+        }
+    }
+    0
+}

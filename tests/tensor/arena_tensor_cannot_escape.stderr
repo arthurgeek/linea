@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/tensor/arena_tensor_cannot_escape.lin:8:5
+  |
+8 |     tensor.matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `arena` is an allocator `escape` opens and ends, so nothing built in it may leave: take the allocator as a parameter instead, as `escape_in` with `A: Allocator` and `allocator: A` first, and build in `allocator`, so the caller's allocator decides how long the result lives

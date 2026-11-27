@@ -23557,6 +23557,16 @@ const Checker = struct {
     }
 
     fn validStorageSignature(self: *Checker, d: DeclId) !bool {
+        if (self.raw_accesses.selectsGpu(d)) {
+            if (self.ast.declVisibility(d) != .private or self.ast.declTypeParams(d).len != 0) return false;
+            const signature = switch (self.builder.get(self.decl_signatures.get(d))) {
+                .callable => |signature| signature,
+                else => return false,
+            };
+            const arity: ?u32 = if (d == self.raw_accesses.gpu_matmul_function) null else if (d == self.raw_accesses.gpu_function) 1 else 2;
+            return self.builder.view().validGpuSelectorSignature(signature, arity);
+        }
+
         if (self.raw_accesses.erasure(d)) return self.validErasureSignature(d);
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
@@ -24264,7 +24274,7 @@ const Checker = struct {
                 .declared => |decl| decl,
                 else => continue,
             };
-            if (!self.ast.declIsExtern(callee)) continue;
+            if (!self.ast.declIsExtern(callee) or self.raw_accesses.selectsGpu(callee)) continue;
             const declared = self.ast.declParams(callee);
             for (call.args, 0..) |arg, i| {
                 if (arg == ExprId.none or i >= declared.len) continue;

@@ -56,6 +56,8 @@ comptime {
     _ = @import("mir/storage.zig");
     _ = @import("mir/notes.zig");
     _ = @import("backend/mlir.zig");
+    _ = @import("backend/text.zig");
+    _ = @import("backend/gpu.zig");
     _ = @import("driver/toolchain.zig");
     _ = @import("driver/prototypes.zig");
     _ = @import("support/generated_calls.zig");

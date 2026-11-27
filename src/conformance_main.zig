@@ -18928,6 +18928,7 @@ const OutcomeCache = struct {
             stamps.deinit(gpa);
         }
         for (std.enums.values(toolchain.Tool)) |tool| {
+            if (!tool.enabled()) continue;
             try stamps.append(gpa, try stampOf(gpa, io, search_path, tool));
         }
 
@@ -19277,10 +19278,17 @@ test "the cache stamps every tool a build runs" {
     // toolchain that is no longer there -- and a `Tool` added later and left
     // out of the stamps fails here rather than going quiet.
     for (std.enums.values(toolchain.Tool), 0..) |tool, i| {
+        if (!tool.enabled()) continue;
         try bin.dir.writeFile(testing.io, .{ .sub_path = tool.command(), .data = bytes[0 .. 4 + i], .flags = .{ .permissions = .executable_file } });
         const now = try saltOver(gpa, path, where);
         try testing.expect(now != was);
         was = now;
+    }
+    // A disabled GPU tool must not even contribute a stamp: replacing it
+    // cannot invalidate artifacts this compiler never built with it.
+    if (!toolchain.Tool.spirv_val.enabled()) {
+        try bin.dir.writeFile(testing.io, .{ .sub_path = "spirv-val", .data = bytes, .flags = .{ .permissions = .executable_file } });
+        try testing.expectEqual(was, try saltOver(gpa, path, where));
     }
 }
 

@@ -5247,6 +5247,17 @@ from the storage it is given, whose address names the element type, so a
 value kept in bytes is always held by a type that names its own
 ([ADR 0255](adr/0255-an-erased-value-is-reached-through-an-address-that-names-its-type.md)).
 
+The private `std.mem` selectors `linea_gpu_function`,
+`linea_gpu_reduce_function` and `linea_gpu_matmul_function` are also checked
+compiler primitives, not foreign callbacks or runtime calls. They return
+`UInt64`; the first takes `fn(value: Float32) -> Float32`, the second takes
+`fn(left: Float32, right: Float32) -> Float32`, and the third takes no arguments.
+Their private, nongeneric signatures, read conventions and absence of defaults
+or contracts are certified under [T-Extern]. A malformed declaration is refused
+by that existing rule. Their result selects an immutable compiled device image;
+zero means that no image is available for the requested function and profile.
+An ordinary user declaration does not acquire this primitive capability.
+
 The private `std.scalar` declarations `linea_math_sqrt`, `linea_math_floor`,
 `linea_math_ceil`, `linea_math_trunc`, `linea_math_round`, `linea_math_sin`,
 `linea_math_cos`, `linea_math_ln`, and `linea_math_exp` have the exact signature
@@ -7213,6 +7224,133 @@ are part of the runtime interface:
 `3`, `4` and `5` are reserved for reaching unreachable code, a failed assertion
 and a panic, respectively. New kinds are appended; existing kinds are never
 renumbered, including around these reserved entries.
+
+### Device tensors
+
+`std.tensor` supplies `Tensor[T, rank, S]`, where rank is a type-level length
+and `S: tensor.Storage[T]` determines storage and its error type. Sequential
+`tensor.Cpu[A]` stores Float32 elements in an allocator-backed Vec;
+`gpu.Storage` stores them on a device
+([ADR 0308](adr/0308-device-tensors-run-ordinary-numerical-functions.md)).
+Tensor ownership and borrowed dependencies follow its storage: system and device
+allocations require settlement, while arena-backed storage keeps the arena's
+borrowing and affine rules. Rank fixes the length of `dimensions()`' runtime
+`[UInt64; rank]`. Storage is contiguous and row-major.
+
+`tensor.from_slice[_in](values, shape)` copies values to CPU storage, with an
+explicit allocator for the `_in` form. `device.upload(values, shape)` copies
+to device storage. Both check that the entire shape's element count equals the
+slice length and that its byte extent is representable. Any zero dimension
+makes the count zero, including `[UInt64.max, 2, 0]`; rank zero has one element.
+The nested-array `tensor.matrix[_in]` and `device.matrix` constructors infer both
+dimensions and their Float32 element type. `gpu.download(tensor)` returns a
+separate host Vec. Transfers retain no borrow of the source data and preserve
+every Float32 bit pattern. CPU tensor `values()` borrows its resident host data;
+there is no implicit host access to GPU storage.
+
+`map` accepts an ordinary unary Float32 function or a supported callable adapter
+and produces a fresh tensor of the same shape. `tensor.uniform(body, value)`
+supplies a runtime Float32 argument to a binary function for every map element.
+`zip_with` applies a binary body to corresponding elements of two identically
+shaped tensors. It performs no broadcasting. `reduce` takes an initial Float32
+and a binary body and produces a fresh rank-zero tensor. `matmul` takes rank-two
+`[M, K]` and `[K, N]` tensors and produces a fresh `[M, N]` tensor. These numerical
+operations do not modify their inputs. CPU callables may use host facilities
+and captured closures outside the device profile.
+
+Operations return `Result[Output, S.Error]` after completion, with Output the
+operation's tensor type. GPU waiting uses the calling task's existing park:
+a native thread waits, and a fiber releases its carrier until completion.
+Callers introduce concurrency through ordinary tasks and their execution context;
+there is no separate numerical execution policy parameter, public completion
+session or automatic delivery task. No operation implicitly transfers data or
+falls back to CPU execution. Fence waiting releases a fiber's carrier;
+device discovery, allocation, pipeline preparation, submission and host copies
+are synchronous native work and are not promised to release that carrier.
+
+For GPU storage, `GpuError.Shape` reports incompatible dimensions or a host-side
+shape/byte-size overflow. `Unavailable` reports unavailable device capability,
+`Allocation` reports allocation failure, and `Runtime(Int64)` preserves other
+negative native error codes. `UnsupportedFunction` means no admitted device
+image exists for the chosen root. A submitted command whose fence wait reports
+an indeterminate failure is a fatal runtime condition: only confirmed completion
+or device loss authorizes destruction of pending resources. The runtime does not
+turn unknown completion into an ordinary error and free those resources.
+Sequential CPU storage reports its own
+`CpuError.Shape` or `Allocation(mem.Oom)`. These errors do not alter ordinary
+source acceptance for functions outside the GPU profile.
+
+Public `MapBody` and `BinaryBody` traits define only their element type and CPU
+computation, with trusted admission supplied through internal sealed adapters.
+The internal admission methods require an opaque witness with no public
+constructor. Named-function and uniform adapters select their own computation;
+user-defined bodies receive no device image. A valid token for an unrelated
+function cannot be substituted through the public callable interface.
+`mem.GpuKernel` also prevents constructing a native descriptor from an address.
+
+Storage implements Release, without thereby becoming linear. Every tensor
+operation validates its returned storage through the same constructor as
+`from_storage`; a wrong element count settles the returned storage and reports
+the storage's shape error. `Matrix[T, S]`, `Vector[T, S]` and `Scalar[T, S]` are
+aliases for ranks two, one and zero, preserving the underlying type and ownership.
+
+Device allocations keep their device alive, and pending submissions
+retain every buffer they use. Releasing a caller's device or input owner cannot
+invalidate submitted work. Resources referenced by pending commands are destroyed
+only after completion or device loss permits it.
+
+A compiler/runtime built with `-Dgpu=false` retains the same public device API,
+but opening a device reports unavailable capability. It compiles CPU code and
+CPU tensors without Vulkan headers, a loader or SPIR-V tools, and does not
+prepare device images. The default build keeps GPU support enabled.
+
+Device bodies are ordinary source functions over by-value Float32 and Bool
+values. The current profile admits Float32 arithmetic and comparisons, Boolean
+operations, local loads and stores, conditionals, loops, early returns and
+statically named calls whose complete reachable call graph is admitted. It
+excludes recursion, heap allocation, host I/O, `inout`, indirect calls in the
+body and captured closures. Root function values may be selected dynamically
+from ordinary named functions: the ahead-of-time table maps their CPU addresses
+to admitted images. Unsupported selection is a library error, with no CPU
+fallback and no additional source diagnostic rule.
+The table contains only images produced from this compilation's verified MIR.
+A function supplied by a separately compiled external object has no registered
+image and is unsupported; there is no cross-object device-image registry.
+
+Sequential CPU storage calls map and zip bodies in increasing flattened
+row-major index order. Reduction visits lanes 0 through 63, each lane's strided
+positions in ascending order, then widths 32, 16, 8, 4, 2 and 1 with left lanes
+in ascending order, and combines the initial value once at the end. Matrix
+multiplication visits output rows, then columns, then the shared dimension in
+ascending order. These are callback invocation orders, including observable
+CPU effects; GPU admission excludes those host effects. A future parallel CPU
+storage implementation requires its own explicit effect/ordering contract.
+
+Float32 arithmetic and comparisons have the same meaning on the device as in
+§4: each arithmetic operation rounds once to binary32, nearest with ties to
+even, preserves subnormals and produces a canonical computed NaN. Loads,
+stores and copies preserve bits, and negation flips only the sign bit. Signed
+zeros compare equal; NaNs are unordered and unequal, so `!=` is true when either
+operand is NaN. Device execution permits neither fused multiply-add replacing
+two operations nor reassociation that changes their results.
+
+Reduction has a defined order even when its function is not associative. There
+are 64 logical lanes. Lane `i` folds positions `i`, `i + 64`, `i + 128`, and so
+on, starting at its first existing element and combining the accumulator on the
+left with the next input on the right. A lane with no input is absent. Stages
+of width 32, 16, 8, 4, 2 and 1 combine each lane below that width with the lane
+at its index plus the width, again left then right. Two present lanes call the
+body; a single present lane passes through unchanged; two absent lanes remain
+absent. For nonempty input the result is `body(initial, tree_result)`. Empty
+input returns the initial bits unchanged. No identity or associativity property
+is assumed, and a sequential fold can produce a different result.
+
+Matrix multiplication visits `k = 0` through `K - 1` in ascending order for
+each output. Its accumulator starts at positive zero; each product is rounded
+before the separately rounded addition to the accumulator. A zero K produces
+positive-zero outputs, and a zero M or N produces an empty tensor. The current
+runtime uses Vulkan. Hardware validation on the Apple/MoltenVK path does not
+establish CUDA or NVIDIA execution support.
 
 ## §7 Diagnostics
 

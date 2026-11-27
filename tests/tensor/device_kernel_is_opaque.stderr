@@ -1,0 +1,5 @@
+error[M-Opaque]: `GpuKernel` is opaque outside `mem`
+ --> tests/tensor/device_kernel_is_opaque.lin:4:19
+  |
+4 |     let _forged = mem.GpuKernel { handle = 42 }
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

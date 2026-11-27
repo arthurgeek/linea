@@ -1,0 +1,38 @@
+import std.gpu
+
+fn negative(value: Float32) -> Bool {
+    value < 0.0
+}
+
+fn transform(value: Float32) -> Float32 {
+    var take = negative(value)
+    var answer = if take {
+        -value
+    } else {
+        value
+    }
+    var rounds = Float32(0.0)
+    while rounds < 3.0 {
+        answer = answer * 0.5 + 1.0
+        take = !take
+        rounds += 1.0
+    }
+    if take {
+        return answer
+    }
+    answer + 0.0
+}
+
+fn main() -> UInt8 {
+    let values = [Float32(-4.0), 0.0, Float32.from_bits(1), Float32.from_bits(2143289345)]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(4)]).unwrap()
+    defer let result = input.map(transform).unwrap()
+    defer let host = gpu.download(result).unwrap()
+    for i in UInt64(0)..4 {
+        if host[i].to_bits() != transform(values[i]).to_bits() {
+            return 1
+        }
+    }
+    0
+}

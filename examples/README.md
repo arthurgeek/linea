@@ -1,7 +1,9 @@
 # Examples
 
 Every program here is complete: it compiles, runs, and carries its own tests.
-Their expected exit status and output live in `tests/examples/`. The programs
+Their expected exit status and output live in `tests/examples/`. GPU examples
+carry formatting goldens there and run through `zig build test-gpu-language`
+in the Nix shell, because executing them requires a GPU. The programs
 show what a task looks like in Linea; the [guide](../docs/learn/README.md)
 explains each construct. Within a level the programs run from simplest to most
 involved, so reading top to bottom is a path through the language, ending with
@@ -93,6 +95,17 @@ Work on several tasks at once, through sessions the compiler checks or through c
 - [delivery_routes.lin](delivery_routes.lin): plans each delivery van's route on a shared fiber loop and finds the first van that cannot finish within a shift; `task.map`, `task.lazy_map` stopped early with `defer var`, `task.join`, and one `task.Policy` switching between `.Threads(4)` and `.Sequential`.
 - [chat_room.lin](chat_room.lin): hears every member through one wait set; sessions and timer waits share two fiber carriers.
 - [race_against_a_timeout.lin](race_against_a_timeout.lin): races two quote services against a timer on a fiber loop, then collects late replies and joins every task.
+
+## Numerical tensors on CPU and GPU
+
+The shared pipeline runs on CPU storage and explicitly checks GPU capability.
+The GPU-only programs require a Vulkan device; on Apple silicon the Nix shell
+supplies MoltenVK. These examples propagate errors with `?` and keep intermediate
+device results resident. See the [tensor chapter](../docs/learn/15-gpu-tensors.md).
+
+- [tensor_pipeline.lin](tensor_pipeline.lin): runs one generic matrix, map, zip and reduction algorithm on CPU storage, then on a device when available; explicit uploads, downloads, capability recovery and exact-bit comparison.
+- [gpu_readings.lin](gpu_readings.lin): calibrates readings with an ordinary function and reduces their resident tensor to a total.
+- [gpu_matrix.lin](gpu_matrix.lin): multiplies matrices, maps over the resident product and downloads the final result.
 
 ## TCP servers
 

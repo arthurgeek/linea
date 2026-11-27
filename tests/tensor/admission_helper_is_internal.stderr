@@ -1,0 +1,10 @@
+error[M-Vis]: `_device_map` is internal to another root
+  --> tests/tensor/admission_helper_is_internal.lin:12:29
+   |
+12 |     let _admission = tensor._device_map(half)
+   |                             ^^^^^^^^^^^ only modules in the same root may name it
+error[M-Vis]: `_device_binary` is internal to another root
+  --> tests/tensor/admission_helper_is_internal.lin:13:26
+   |
+13 |     let _binary = tensor._device_binary(add)
+   |                          ^^^^^^^^^^^^^^ only modules in the same root may name it

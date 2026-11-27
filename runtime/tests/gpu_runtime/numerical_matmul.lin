@@ -1,0 +1,14 @@
+import std.gpu
+
+fn main() -> UInt8 {
+    let values = [Float32(1.0), 2.0, 3.0, 4.0]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(2), 2]).unwrap()
+    defer let result = input.matmul(input).unwrap()
+    defer let host = gpu.download(result).unwrap()
+    if host.length() == 4 && host[0] == 7.0 && host[1] == 10.0 && host[2] == 15.0 && host[3] == 22.0 {
+        0
+    } else {
+        1
+    }
+}

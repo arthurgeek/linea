@@ -1,0 +1,22 @@
+import std.gpu
+
+fn square(value: Float32) -> Float32 {
+    value * value
+}
+
+fn main() -> UInt8 {
+    if square(3.0).to_bits() != Float32(9.0).to_bits() {
+        return 1
+    }
+    match gpu.Device.open() {
+        Err(reason) => if reason == .Unavailable { 0 } else { 2 },
+        Ok(device) => {
+            defer let owner = device
+            // The compiler sees a reachable device root even though the
+            // unavailable provider prevents reaching it at run time.
+            defer let input = owner.matrix([[Float32(2.0)]]).unwrap()
+            defer let output = input.map(square).unwrap()
+            if output.dimensions()[0] == 1 { 4 } else { 5 }
+        },
+    }
+}

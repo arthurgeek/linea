@@ -1,0 +1,49 @@
+import std.env
+import std.gpu
+import std.tensor
+import std.mem
+
+fn admitted(value: Float32) -> Float32 { value * 0.5 }
+
+fn unsupported(value: Float32) -> Float32 {
+    Float32(Float64(value) * 0.5)
+}
+
+fn generic_identity[T: Copyable](value: T) -> T { copy(value) }
+
+@derive(Release)
+struct Operation {
+    body: fn(value: Float32) -> Float32,
+}
+
+fn forwarded(body: fn(value: Float32) -> Float32) -> fn(value: Float32) -> Float32 {
+    copy(body)
+}
+
+fn checks(input: tensor.Tensor[Float32, 1, gpu.Storage], operation: Operation, unavailable: Bool) -> Bool {
+    match input.map(forwarded(operation.body)) {
+        Err(reason) => unavailable && reason == .UnsupportedFunction,
+        Ok(output) => {
+            defer let held = output
+            defer let host = gpu.download(held).unwrap()
+            !unavailable && host.length() == 1 && host[0].to_bits() == (operation.body)(Float32(4.0)).to_bits()
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    let values = [Float32(4.0)]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(1)]).unwrap()
+    defer var operations: mem.Vec[Operation, mem.SystemAllocator] = mem.Vec.new()
+    &operations.push(Operation { body = admitted }).settled().unwrap()
+    &operations.push(Operation { body = unsupported }).settled().unwrap()
+    &operations.push(Operation { body = generic_identity[Float32] }).settled().unwrap()
+    let arguments = env.args()
+    let first = arguments.count() % 3
+    for step in UInt64(0)..3 {
+        let index = (first + step) % 3
+        if !checks(input, operations[index], index == 1) { return 1 }
+    }
+    0
+}

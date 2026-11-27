@@ -1,0 +1,91 @@
+import std.mem
+import std.tensor
+
+use tensor.Storage
+
+@derive(Equatable, Release)
+enum ShapeError { Shape }
+
+struct Bad { values: mem.Vec[Float32, mem.TestHandle[mem.SystemAllocator]] }
+
+impl Release for Bad {
+    fn release(sink self: Self) {
+        let Bad { values } = self
+        values.release()
+    }
+}
+
+impl Storage[Float32] for Bad {
+    type Error = ShapeError
+
+    fn shape_error() -> ShapeError {
+        .Shape
+    }
+
+    fn length(self: Self) -> UInt64 {
+        self.values.length()
+    }
+
+    fn map[B: tensor.MapBody](self: Self, _body: B) -> Result[Self, ShapeError] where B.Element == Float32 {
+        wrong(self.values.allocator())
+    }
+
+    fn zip_with[B: tensor.BinaryBody](self: Self, _right: Self, _body: B) -> Result[Self, ShapeError] where B.Element == Float32 {
+        wrong(self.values.allocator())
+    }
+
+    fn reduce[B: tensor.BinaryBody](self: Self, _initial: Float32, _body: B) -> Result[Self, ShapeError] where B.Element == Float32 {
+        wrong(self.values.allocator())
+    }
+
+    fn matmul(self: Self, _right: Self, _rows: UInt64, _inner: UInt64, _columns: UInt64) -> Result[Self, ShapeError] {
+        wrong(self.values.allocator())
+    }
+}
+
+fn wrong(allocator: mem.TestHandle[mem.SystemAllocator]) -> Result[Bad, ShapeError] where carries(.Ok: allocator) {
+    .Ok(.{ values = mem.Vec.filled_in(allocator, 2, Float32(7.0)).unwrap() })
+}
+
+fn identity(value: Float32) -> Float32 {
+    value
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn rejected[let rank: UInt64](sink answer: Result[tensor.Tensor[Float32, rank, Bad], ShapeError]) -> Bool {
+    match answer {
+        Err(error) => error == .Shape,
+        Ok(value) => {
+            value.release()
+            false
+        },
+    }
+}
+
+fn main() -> UInt8 {
+    defer let log = mem.TestAllocator.open(mem.system()).unwrap()
+    let data = Bad { values = mem.Vec.filled_in(log.handle(), 1, Float32(1.0)).unwrap() }
+    let input: tensor.Tensor[Float32, 2, Bad] = tensor.Tensor.from_storage(data, [UInt64(1), 1]).unwrap()
+    var failures = UInt8(0)
+    if !rejected(input.map(identity)) {
+        failures += 1
+    }
+    if !rejected(input.zip_with(input, add)) {
+        failures += 2
+    }
+    if !rejected(input.reduce(Float32(0.0), add)) {
+        failures += 4
+    }
+    if !rejected(input.matmul(input)) {
+        failures += 8
+    }
+    let outstanding = log.outstanding()
+    input.release()
+    if outstanding != 1 || !log.all_disposed() {
+        failures += 16
+    }
+    failures
+}

@@ -1,0 +1,11 @@
+import std.gpu
+
+fn main() -> UInt8 {
+    match gpu.Device.open() {
+        Err(_) => 1,
+        Ok(device) => {
+            device.release()
+            0
+        },
+    }
+}

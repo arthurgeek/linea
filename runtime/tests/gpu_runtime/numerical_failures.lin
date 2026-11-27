@@ -1,0 +1,113 @@
+import std.gpu
+import std.tensor
+
+fn identity(value: Float32) -> Float32 {
+    value
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn cpu_only(value: Float32) -> Float32 {
+    Float32(Float64(value) + 0.1)
+}
+
+fn recursive(value: Float32) -> Float32 {
+    if value <= 0.0 { 0.0 } else { recursive(value - 1.0) + 1.0 }
+}
+
+fn mutual_left(value: Float32) -> Float32 {
+    if value <= 0.0 { 0.0 } else { mutual_right(value - 1.0) + 1.0 }
+}
+
+fn mutual_right(value: Float32) -> Float32 { mutual_left(value) }
+
+fn indirect(value: Float32) -> Float32 {
+    let selected: fn(value: Float32) -> Float32 = if value < 0.0 { cpu_only } else { identity }
+    selected(value)
+}
+
+fn refuses(input: tensor.Tensor[Float32, 2, gpu.Storage], body: fn(value: Float32) -> Float32) -> Bool {
+    match input.map(body) {
+        Err(reason) => reason == .UnsupportedFunction,
+        Ok(value) => { value.release(); false },
+    }
+}
+
+fn main() -> UInt8 {
+    let values = [Float32(1.0), 2.0, 3.0, 4.0]
+    defer let device = gpu.Device.open().unwrap()
+    let mismatch: Result[tensor.Tensor[Float32, 1, gpu.Storage], gpu.GpuError] = device.upload(values.as_slice(), [UInt64(3)])
+    let refused = match mismatch {
+        Err(reason) => reason == .Shape,
+        Ok(tensor) => {
+            tensor.release()
+            false
+        },
+    }
+    if !refused {
+        return 1
+    }
+    let overflow: Result[tensor.Tensor[Float32, 2, gpu.Storage], gpu.GpuError] = device.upload(values.as_slice(), [UInt64.max, UInt64(2)])
+    let overflow_refused = match overflow {
+        Err(reason) => reason == .Shape,
+        Ok(tensor) => {
+            tensor.release()
+            false
+        },
+    }
+    if !overflow_refused {
+        return 2
+    }
+    defer let matrix = device.upload(values.as_slice(), [UInt64(2), 2]).unwrap()
+    defer let wrong = device.upload(values.as_slice(), [UInt64(1), 4]).unwrap()
+    let incompatible = match matrix.matmul(wrong) {
+        Err(reason) => reason == .Shape,
+        Ok(running) => {
+            running.release()
+            false
+        },
+    }
+    if !incompatible {
+        return 3
+    }
+    let unsupported = match matrix.map(cpu_only) {
+        Err(reason) => reason == .UnsupportedFunction,
+        Ok(running) => {
+            running.release()
+            false
+        },
+    }
+    if !unsupported {
+        return 4
+    }
+    if recursive(3.0) != 3.0 || mutual_left(3.0) != 3.0 || indirect(3.0) != 3.0 { return 8 }
+    if !refuses(matrix, recursive) || !refuses(matrix, mutual_left) || !refuses(matrix, indirect) { return 9 }
+    let factor = Float32(2.0)
+    let captured = match matrix.map([factor] |value: Float32| value * factor) {
+        Err(reason) => reason == .UnsupportedFunction,
+        Ok(value) => { value.release(); false },
+    }
+    if !captured { return 10 }
+    let empty_values: [Float32; 0] = []
+    defer let empty = device.upload(empty_values.as_slice(), [UInt64.max, UInt64(0)]).unwrap()
+    defer let empty_output = empty.map(identity).unwrap()
+    defer let empty_host = gpu.download(empty_output).unwrap()
+    if empty_host.length() != 0 {
+        return 5
+    }
+    let initial = Float32.from_bits(2143289345)
+    defer let scalar = empty.reduce(initial, add).unwrap()
+    defer let scalar_host = gpu.download(scalar).unwrap()
+    if scalar_host.length() != 1 || scalar_host[0].to_bits() != initial.to_bits() {
+        return 6
+    }
+    defer let original = gpu.download(matrix).unwrap()
+    for i in UInt64(0)..4 {
+        if original[i].to_bits() != values[i].to_bits() {
+            return 7
+        }
+    }
+    0
+}

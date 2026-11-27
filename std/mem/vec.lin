@@ -389,6 +389,21 @@ impl[T] Vec[T, SystemAllocator] {
 }
 
 impl[T, A: Allocator] Vec[T, A] {
+    // Copy the backing allocator's handle, retaining its owner dependencies.
+    // A derived allocation can outlive this vector but not that allocator's owner.
+    pub fn allocator(self: Self) -> A where carries(self) {
+        self.storage.allocator()
+    }
+
+    test "vec allocator preserves the arena after the original vector ends" {
+        defer let arena = Arena.open(system(), 256)
+        let original: Vec[UInt64, Handle] = Vec.new_in(arena.handle())
+        defer var derived: Vec[UInt64, Handle] = Vec.new_in(original.allocator())
+        original.release()
+        &derived.push(41).unwrap()
+        testing.assert_eq(derived[0], UInt64(41), "derived allocation lost its allocator")?
+    }
+
     // Make an empty vector that allocates nothing until an element arrives,
     // and takes its storage from `allocator`. The vector retains the
     // allocator's dependencies. First growth is fallible, and a refused push

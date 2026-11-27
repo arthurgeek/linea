@@ -1,0 +1,73 @@
+Run without a GPU or Vulkan loader:
+
+```sh
+nix develop --command zig build test-gpu-runtime
+```
+
+Only Vulkan headers and the existing ordinary runtime archive are required.
+The native build uses production C99 warnings and trapping instrumentation. It compiles
+one executable; `main.c` includes the actual `runtime/gpu.c`. Typed Vulkan
+functions are substituted through its dynamic-loader boundary. Narrow wrappers
+inject CPU allocation, device mutex initialization, pthread attribute and
+completion-thread creation failures. The actual archive supplies park, fiber,
+task and session implementations unchanged.
+
+The 102 isolated cases check:
+
+- A standard platform Vulkan loader with the build-host path absent; a
+  build-pinned fallback only when the standard loader cannot be opened; no
+  fallback after an opened loader fails symbol validation.
+- Every dynamic symbol lookup and discovery result call; each discovery CPU
+  allocation; missing/unsuitable devices and compute queues; device mutexes.
+- Buffer creation, allocation, bind and mapping failures. Failed output handles
+  are poisoned, so publishing a failed constructor's output fails immediately.
+- Shader, descriptor layout, pipeline layout, pipeline, descriptor pool/set,
+  command pool/buffer, begin/end, fence and QueueSubmit failures. Pipeline error
+  outputs include both null and a valid partial pipeline needing destruction.
+- Submission allocation, pthread attribute and completion-thread failures;
+  restored host access after failed submission; transfer errors; device loss.
+- Synchronous upload/download bit copies, zero-byte and out-of-bounds access;
+  failed invalidation leaves the destination unchanged. Whole-mapping flush
+  and invalidation ranges are checked, together with host-write/compute-read,
+  compute-write/compute-read and compute-write/host-read barrier masks and order.
+- Map/reduction count and initial-bit narrowing, every matrix dimension even
+  in otherwise empty shapes, and each matrix dimension-product overflow.
+- Pending map/reduction/matmul resources, including aliased left/right operands
+  and owners dropped before completion. Resource registries reject duplicate,
+  poisoned or premature destruction. Pool-owned objects are accounted for when
+  their pool is destroyed.
+
+Fresh state is installed only after authoritative cleanup: all GPU handles,
+tracked CPU allocations, device mutexes, attributes and loader ownership have
+settled. This also covers QueueSubmit failure returning before its detached
+completion worker has finished.
+
+The carrier test opens one real `linea_loop_open(1)`. A GPU-awaiting task
+publishes that it is about to call real `linea_gpu_wait`; only then does main
+queue the CPU task. Fake WaitForFences cannot complete until that CPU task
+signals its condition. Both callbacks assert the same loop identity and OS
+carrier thread. Thus CPU progress requires the awaiting task to release its
+carrier. Both task handles are joined and every GPU owner is settled. The loop
+itself is process-lifetime, as defined by the runtime API.
+
+Synchronization uses predicates and condition variables, with ten-second
+operation deadlines and a native thirty-second watchdog. There are no arbitrary
+sleeps. The watchdog also bounds unexpected joins or constructor deadlocks.
+
+Build integration is provided by `build/gpu_fault.zig`:
+
+```zig
+const faults = @import("build/gpu_fault.zig").add(
+    b,
+    ordinary_runtime_archive, // std.Build.LazyPath
+    vulkan_headers_root,     // []const u8
+    runtime_flags.items,
+);
+// Attach faults to the ordinary test graph. It also names test-gpu-runtime.
+```
+
+This tests host failure/lifetime behavior and pending-completion scheduling.
+The fake driver does not execute shader instructions, validate SPIR-V or prove
+numerical GPU behavior. It does not replace or fault-inject the park/task/fiber
+implementations, and does not exhaustively search thread interleavings.
+No ASan or TSan result is claimed.
