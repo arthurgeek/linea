@@ -17923,6 +17923,10 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
         for (case_timings) |one| timing.merge(one);
         timing.report(tests_dir_path, options.properties);
     }
+    const released_libraries = libraries.release();
+    std.debug.print("conformance: corpus joined: released {d} imported-library snapshot(s), {d} bytes of arena capacity\n", .{
+        released_libraries.snapshots, released_libraries.arena_bytes,
+    });
     outcome_stats.report(tests_dir_path, "corpus joined");
 
     const merge_zone = tracy.beginZone(@src(), "corpus.merge");
@@ -18003,7 +18007,7 @@ fn runConformance(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, io
     // which is the order a single walker would have reported them in.
     std.mem.sort(Failure, failures.items, {}, failureLess);
 
-    try checkLibrary(gpa, io, &failures);
+    try checkLibrary(gpa, scratch_backing, io, &failures);
     merge_zone.end();
 
     // The corpus supplies programs someone chose to write, which is a supply
@@ -21979,6 +21983,7 @@ test "a transcript reaches every rule its recorded output names" {
 /// cache would be carried by a compiler that no longer has the source for it.
 fn checkLibrary(
     gpa: std.mem.Allocator,
+    scratch_backing: std.mem.Allocator,
     io: std.Io,
     failures: *std.ArrayList(Failure),
 ) !void {
@@ -22015,17 +22020,7 @@ fn checkLibrary(
     // corpus has runs over cases, and a library file is not a case -- so the
     // three files compiled into every binary the compiler produces were the
     // only Linea in the repository nothing held to its own formatting.
-    for (library.files) |f| {
-        if (!std.mem.endsWith(u8, f.path, ".lin")) continue;
-        const canonical = try formattedText(gpa, f.text) orelse continue;
-        if (std.mem.eql(u8, canonical, f.text)) continue;
-        try failures.append(gpa, .{
-            .path = f.path,
-            .what = "is not written the way the formatter writes it",
-            .expected = canonical,
-            .actual = f.text,
-        });
-    }
+    try checkLibraryFormatting(gpa, scratch_backing, failures, &library.files);
 
     if (on_disk == library.files.len) return;
     try failures.append(gpa, .{
@@ -22034,6 +22029,42 @@ fn checkLibrary(
         .expected = try std.fmt.allocPrint(gpa, "{d} file(s)", .{on_disk}),
         .actual = try std.fmt.allocPrint(gpa, "{d} file(s)", .{library.files.len}),
     });
+}
+
+fn checkLibraryFormatting(gpa: std.mem.Allocator, scratch_backing: std.mem.Allocator, failures: *std.ArrayList(Failure), files: []const InMemoryFile) !void {
+    for (files) |f| {
+        if (!std.mem.endsWith(u8, f.path, ".lin")) continue;
+        var scratch = std.heap.ArenaAllocator.init(scratch_backing);
+        defer scratch.deinit();
+        const canonical = try formattedText(scratch.allocator(), f.text) orelse continue;
+        if (std.mem.eql(u8, canonical, f.text)) continue;
+        try failures.append(gpa, .{
+            .path = f.path,
+            .what = "is not written the way the formatter writes it",
+            .expected = try gpa.dupe(u8, canonical),
+            .actual = f.text,
+        });
+    }
+}
+
+test "library formatting releases parser storage before command compilation" {
+    var retained = testing.FailingAllocator.init(testing.allocator, .{});
+    var keep = std.heap.ArenaAllocator.init(retained.allocator());
+    defer keep.deinit();
+    var temporary = testing.FailingAllocator.init(testing.allocator, .{});
+    var failures: std.ArrayList(Failure) = .empty;
+    const files = [_]InMemoryFile{.{ .path = "std/example.lin", .text = "fn main(){let _value=1}\n" }} ** 8;
+    try checkLibraryFormatting(keep.allocator(), temporary.allocator(), &failures, &files);
+    const held = retained.allocated_bytes - retained.freed_bytes;
+    std.debug.print("library formatting retained backing across {d} files: {d} bytes\n", .{ files.len, held });
+    try testing.expect(held < 16 << 10);
+    try testing.expectEqual(temporary.allocated_bytes, temporary.freed_bytes);
+    try testing.expectEqual(files.len, failures.items.len);
+    for (failures.items) |failure| {
+        try testing.expectEqualStrings("std/example.lin", failure.path);
+        try testing.expectEqualStrings("fn main() {\n    let _value = 1\n}\n", failure.expected);
+        try testing.expectEqualStrings(files[0].text, failure.actual);
+    }
 }
 
 /// The files the language server reads for `program`: its sources and the
@@ -22382,17 +22413,84 @@ const Libraries = struct {
         return .{ .library = slot.library.?, .imported = true };
     }
 
-    fn deinit(self: *Libraries) void {
+    const Released = struct { snapshots: usize = 0, arena_bytes: usize = 0 };
+
+    /// All continuations have finished when the corpus workers join. Later
+    /// phases use the invocation's prelude and the records copied by `retain`.
+    fn release(self: *Libraries) Released {
+        var released: Released = .{};
         var it = self.by_modules.iterator();
         while (it.next()) |entry| {
-            if (entry.value_ptr.*.library) |held| held.deinit();
+            if (entry.value_ptr.*.library) |held| {
+                released.snapshots += 1;
+                released.arena_bytes += held.arena.queryCapacity() + held.sources.arena.queryCapacity() + held.resolved.arena.queryCapacity() + held.checked.arena.queryCapacity();
+                held.deinit();
+            }
             self.backing.destroy(entry.value_ptr.*);
             self.backing.free(entry.key_ptr.*);
         }
         self.by_modules.deinit(self.backing);
+        self.by_modules = .empty;
+        return released;
+    }
+
+    fn deinit(self: *Libraries) void {
+        _ = self.release();
         self.* = undefined;
     }
 };
+
+test "completed corpus releases imported libraries before command compilation" {
+    var backing = testing.FailingAllocator.init(testing.allocator, .{});
+    var libraries: Libraries = .{ .backing = backing.allocator(), .io = testing.io, .environ = .empty, .prelude = test_library.get() };
+    defer libraries.deinit();
+    var keep = std.heap.ArenaAllocator.init(testing.allocator);
+    defer keep.deinit();
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    var directory = testing.tmpDir(.{});
+    defer directory.cleanup();
+    const root = try directory.dir.realPathFileAlloc(testing.io, ".", keep.allocator());
+    const stem = try std.fs.path.join(keep.allocator(), &.{ root, "uses_uuid" });
+    try writeFile(testing.io, try std.mem.concat(keep.allocator(), u8, &.{ stem, ".stderr" }), "deliberately different diagnostic\n");
+    const case: Case = .{
+        .display_path = "uses_uuid.lin",
+        .stem = stem,
+        .entry = "uses_uuid.lin",
+        .files = &.{.{ .path = "uses_uuid.lin", .text = "import std.uuid\n\nfn main() { let _value: uuid.Missing = 0 }\n" }},
+    };
+    const cache: OutcomeCache = .{ .dir = "", .salt = 0 };
+    var work: Work = .{};
+    _ = try checkCase(scratch.allocator(), testing.allocator, testing.io, .{
+        .library = libraries.prelude,
+        .libraries = &libraries,
+        .corpus_properties = false,
+        .cache = &cache,
+        .update = false,
+        .narrowed = true,
+        .sanitize = null,
+        .runtime_path = null,
+        .scratch_dir = root,
+    }, &work, case, 0);
+    try work.retain(keep.allocator(), 0);
+    _ = scratch.reset(.free_all);
+    try testing.expect(work.kept.items.len > 0);
+    const held = backing.allocated_bytes - backing.freed_bytes;
+    try testing.expect(held > 0);
+    std.debug.print("imported-library retained backing: {d} bytes in {d} snapshot(s)\n", .{ held, libraries.by_modules.count() });
+    const released = libraries.release();
+    try testing.expectEqual(@as(usize, 1), released.snapshots);
+    try testing.expect(released.arena_bytes > 0);
+    try testing.expectEqual(backing.allocated_bytes, backing.freed_bytes);
+    try testing.expectEqual(@as(u32, 0), libraries.by_modules.count());
+    for (work.kept.items) |failure| {
+        try testing.expectEqualStrings("uses_uuid.lin", failure.path);
+        try testing.expect(failure.actual.len > 0);
+        try testing.expectEqual(@as(usize, 1), failure.case_ordinal);
+    }
+    // The prelude belongs to the invocation, independently of the corpus cache.
+    try testing.expectEqual(test_library.get(), libraries.prelude);
+}
 
 test "the libraries cases resume from are released with the walk" {
     var libraries: Libraries = .{ .backing = testing.allocator, .io = testing.io, .environ = .empty, .prelude = test_library.get() };
