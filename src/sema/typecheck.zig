@@ -15125,10 +15125,10 @@ const Checker = struct {
     ///
     /// **Bound:** the implementations of the two traits, and for each one
     /// whose source matches, its predicates.
-    fn prepareConversionsFrom(self: *Checker, owner: DeclId, held: TypeId) !void {
+    fn prepareConversionsFrom(self: *Checker, owner: DeclId, held: TypeId, conversions: [2]?DeclId) !void {
         if (held == .poison) return;
-        for ([_][]const u8{ "From", "TryFrom" }) |name| {
-            const from = self.program.libraryDeclIn("convert", name) orelse continue;
+        for (conversions) |declaration| {
+            const from = declaration orelse continue;
             const trait: u32 = @intCast(from.index());
             var rows = self.builder.impl_index.membersOfTrait(trait);
             while (rows.next()) |at| {
@@ -15154,6 +15154,13 @@ const Checker = struct {
     }
 
     fn prepareValueQueries(self: *Checker, prepare_completions: bool) !void {
+        // Declaration identity is independent of the receiver. Resolve it
+        // once, rather than scanning the library's declarations for every
+        // field selection, including those in a retained library prefix.
+        const conversions: [2]?DeclId = if (prepare_completions)
+            .{ self.from_decl, self.program.libraryDeclIn("convert", "TryFrom") }
+        else
+            .{ null, null };
         for (self.expression_owners, 0..) |owner, index| {
             const expression = ExprId.at(@intCast(index));
             try self.builder.prepareCapabilityWithin(owner, self.builder.exprType(expression));
@@ -15164,7 +15171,7 @@ const Checker = struct {
             if (prepare_completions and self.ast.exprTag(expression) == .field) {
                 const receiver = self.ast.unaryOperand(expression);
                 try self.builder.prepareLookupWithin(self.expression_owners[receiver.index()], self.builder.exprType(receiver));
-                try self.prepareConversionsFrom(self.expression_owners[receiver.index()], self.builder.exprType(receiver));
+                try self.prepareConversionsFrom(self.expression_owners[receiver.index()], self.builder.exprType(receiver), conversions);
             }
         }
         // Completion at a written type's dot, finished or not, lists what the
