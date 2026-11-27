@@ -158,6 +158,24 @@ test "CI keeps native sanitizer tests in their matrix job before the corpus" {
     );
 }
 
+test "CI bounds sanitizer work and retains runner resource evidence" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    const sanitize = try workflowJob(workflow, "sanitize");
+    try testing.expectEqualStrings("timeout-minutes: 75", try onlyLineWith(sanitize, "timeout-minutes:"));
+    try testing.expect(std.mem.indexOf(u8, sanitize, "run: .github/scripts/resource-log.sh start") != null);
+    const corpus = try stepText(sanitize, "Conformance suite under ${{ matrix.sanitizer }}");
+    try testing.expect(std.mem.indexOf(u8, corpus, ".github/scripts/resource-log.sh follow") != null);
+    try testing.expectEqualStrings(
+        "nice -n 10 nix develop --command zig build conformance --release=safe -j2 -Dsequential -Dwalkers=2 -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}\" -Dsanitize=${{ matrix.sanitizer }}",
+        try onlyLineWith(corpus, "zig build conformance "),
+    );
+    const saved = try stepText(sanitize, "Keep the resource log");
+    try testing.expect(std.mem.indexOf(u8, saved, "if: always()") != null);
+    try testing.expect(std.mem.indexOf(u8, saved, "resource-log-${{ github.job }}-${{ matrix.sanitizer }}-${{ github.run_attempt }}") != null);
+    try testing.expect(std.mem.indexOf(u8, saved, "path: ${{ runner.temp }}/resource.log") != null);
+}
+
 test "both Linux fiber ABIs execute strict kernel completion regressions" {
     const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(workflow);
@@ -958,6 +976,24 @@ test "conformance walks the directory it is given, or the whole corpus" {
     try testing.expectEqualDeep(test_roots.Walk.whole, try test_roots.walkOf(&.{}));
     try testing.expectEqualDeep(test_roots.Walk{ .narrowed = "tests/cmd/http_json_echo" }, try test_roots.walkOf(&.{"tests/cmd/http_json_echo"}));
     try testing.expectError(error.SeveralDirectories, test_roots.walkOf(&.{ "tests/decl", "tests/cmd" }));
+}
+
+test "both whole conformance roots forward the optional walker count" {
+    const build_zig = try std.Io.Dir.cwd().readFileAlloc(testing.io, "build.zig", testing.allocator, .limited(1 << 22));
+    defer testing.allocator.free(build_zig);
+    for ([_][]const u8{ "fn corpus(self: *const HeavySteps", "fn examples(self: *const HeavySteps" }) |method| {
+        const start = std.mem.indexOf(u8, build_zig, method) orelse return error.MissingWalk;
+        const body = source.indentedUnder(build_zig, start);
+        const guard = std.mem.indexOf(u8, body, "if (self.walkers) |n| {") orelse {
+            std.debug.print("missing optional walker count in {s}\n", .{method});
+            return error.MissingWalkerCount;
+        };
+        try testing.expectEqualStrings(
+            "            run.addArg(\"--walkers\");\n            run.addArg(b.fmt(\"{d}\", .{n}));\n",
+            source.indentedUnder(body, guard),
+        );
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "\"--walkers\""));
+    }
 }
 
 test "test suites partition the full graph without omitting or repeating roots" {

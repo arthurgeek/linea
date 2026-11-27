@@ -1443,6 +1443,10 @@ const HeavySteps = struct {
         // Both corpus processes number their LSP fixtures from zero and clear
         // that directory on startup, so concurrent walks need separate roots.
         run.addArg(b.pathJoin(&.{ self.scratch, "examples" }));
+        if (self.walkers) |n| {
+            run.addArg("--walkers");
+            run.addArg(b.fmt("{d}", .{n}));
+        }
         run.addArg("--sanitize");
         run.addArg(@tagName(self.sanitize));
         if (self.update) run.addArg("--update");
