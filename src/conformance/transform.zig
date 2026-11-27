@@ -2522,6 +2522,178 @@ fn parseText(gpa: std.mem.Allocator, text: []const u8) !Ast {
     return parse(gpa, &source, .from(0), tokens, &sink);
 }
 
+/// Test-only typed fixture. Rewrite eligibility stops after resolution and
+/// type checking; ownership and instance discovery belong to other tests.
+const TypedRewriteFixture = struct {
+    table: FileTable,
+    sink: Sink,
+    interner: Interner,
+    program: *Program,
+    expanded: ExpandedProgram,
+    resolution: Resolution,
+    typing: Typing,
+    type_arena: ?std.heap.ArenaAllocator = null,
+    loaded: usize,
+    reused_library: bool = false,
+
+    fn deinit(self: *TypedRewriteFixture, gpa: std.mem.Allocator) void {
+        if (self.type_arena) |*arena| arena.deinit() else self.typing.deinit(gpa);
+        self.resolution.deinit(gpa);
+        self.expanded.deinit(gpa);
+        self.program.deinit(gpa);
+        gpa.destroy(self.program);
+        self.interner.deinit(gpa);
+        self.table.deinit(gpa);
+    }
+};
+
+fn typedRewriteFixture(gpa: std.mem.Allocator, entry: []const u8, files: []const loader.InMemoryFile, prefix: ?*const loader.CheckedLibrary) !TypedRewriteFixture {
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    errdefer interner.deinit(gpa);
+    var table: FileTable = .empty;
+    errdefer table.deinit(gpa);
+    // ExpandedProgram retains its source pointer, so it must name caller-
+    // owned storage rather than this function's stack frame.
+    const program = try gpa.create(Program);
+    errdefer gpa.destroy(program);
+    program.* = if (prefix) |library|
+        try library.loadFromMemory(gpa, &table, &sink, &interner, entry, files, .program, .borrow)
+    else
+        try loader.loadFromMemory(gpa, &table, &sink, &interner, entry, files, .program, true, .borrow);
+    errdefer program.deinit(gpa);
+    const loaded = sink.items().len;
+    const retained = if (prefix) |library|
+        if (try library.resolved.canResume(gpa, program, &interner)) library else null
+    else
+        null;
+    const resolved = if (retained) |library|
+        try resolve_mod.resolveWithPrefix(gpa, program, &interner, &sink, .program, &library.resolved)
+    else
+        try resolve(gpa, program, &interner, &sink, .program);
+    var expanded = resolved.expanded;
+    errdefer expanded.deinit(gpa);
+    var resolution = resolved.resolution;
+    errdefer resolution.deinit(gpa);
+    var type_arena: ?std.heap.ArenaAllocator = null;
+    const typing = if (retained) |library| continued: {
+        const relocation_mod = @import("../syntax/relocation.zig");
+        const relocation: relocation_mod.Relocation = .{
+            .source = relocation_mod.Mark.of(&library.sources.program.ast),
+            .destination = relocation_mod.Mark.of(&program.ast),
+        };
+        const answer = try @import("../sema/typecheck.zig").typecheckWithPrefix(gpa, &expanded, &resolution, &sink, &library.checked, relocation, false);
+        type_arena = answer.arena;
+        break :continued answer.typing;
+    } else try typecheck(gpa, &expanded, &resolution, &sink);
+    return .{ .table = table, .sink = sink, .interner = interner, .program = program, .expanded = expanded, .resolution = resolution, .typing = typing, .type_arena = type_arena, .loaded = loaded, .reused_library = retained != null };
+}
+
+test "transform typed fixtures reuse the checked prelude without adding ownership" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var fixture = try typedRewriteFixture(gpa, "app/main.lin", &.{.{ .path = "app/main.lin", .text =
+        \\struct Token { value: UInt8 }
+        \\fn take(sink value: Token) -> UInt8 { value.value }
+        \\fn main() -> UInt8 {
+        \\    let token: Token = .{ value = 1 }
+        \\    take(token) + take(token)
+        \\}
+    }}, test_library.get());
+    defer fixture.deinit(gpa);
+    // This source is type-correct but violates ownership. A rewrite fixture
+    // must preserve the original resolve/typecheck-only stage boundary.
+    try testing.expect(!fixture.sink.hasErrors());
+    try testing.expect(fixture.reused_library);
+    try testing.expectEqualStrings("app/main.lin", fixture.table.get(fixture.program.primaryFile()).path);
+    var ownership_sink = Sink.init(gpa);
+    var whole = try test_library.get().checkProgram(gpa, gpa, fixture.program, &fixture.interner, &ownership_sink, .program);
+    defer whole.deinit(gpa);
+    var moved = false;
+    for (ownership_sink.items()) |diagnostic| if (diagnostic.code == .o_move) {
+        moved = true;
+    };
+    try testing.expect(moved);
+}
+
+test "transform typed fixture reuse preserves full diagnostics fallback shadows and derives" {
+    const Case = struct { text: []const u8, rejected: bool = false, reused: ?bool = null, loading_error: bool = false };
+    const cases = [_]Case{
+        .{ .text = "fn main() -> UInt8 { 0 }", .reused = true },
+        .{ .text = "fn main() -> UInt8 { let = ; 0 }", .rejected = true, .loading_error = true },
+        .{ .text = "fn main() -> UInt8 { true }", .rejected = true, .reused = true },
+        .{ .text = "import std.uuid\nfn main() -> UInt8 { let _value: uuid.Missing = 0; 0 }", .rejected = true, .reused = false },
+        .{ .text = "fn main() -> UInt8 { let identity = |value: UInt8| value; identity(0) }", .reused = false },
+        .{ .text = "import std.env as process\nfn main() -> UInt8 { let given = process.args(); let process = given.count(); if process > 0 { 0 } else { 1 } }", .reused = true },
+        .{ .text = "@derive(Equatable)\nstruct Pair { value: UInt8 }\nfn main() -> UInt8 { let pair: Pair = .{ value = 1 }; if pair == pair { 0 } else { 1 } }", .reused = true },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = [_]loader.InMemoryFile{.{ .path = "app/main.lin", .text = case.text }};
+        var fresh = try typedRewriteFixture(gpa, "app/main.lin", &files, null);
+        defer fresh.deinit(gpa);
+        var resumed = try typedRewriteFixture(gpa, "app/main.lin", &files, test_library.get());
+        defer resumed.deinit(gpa);
+        try testing.expect(!fresh.reused_library);
+        if (case.reused) |expected| try testing.expectEqual(expected, resumed.reused_library);
+        try testing.expectEqual(case.rejected, fresh.sink.hasErrors());
+        if (case.loading_error) try testing.expect(fresh.loaded > 0);
+        try testing.expectEqual(fresh.loaded, resumed.loaded);
+        try testing.expectEqualStrings("app/main.lin", fresh.table.get(fresh.program.primaryFile()).path);
+        try testing.expectEqualStrings("app/main.lin", resumed.table.get(resumed.program.primaryFile()).path);
+        try fresh.table.buildMaps(gpa);
+        try resumed.table.buildMaps(gpa);
+        var before: std.Io.Writer.Allocating = .init(gpa);
+        var after: std.Io.Writer.Allocating = .init(gpa);
+        const render_json = @import("../diagnostics/render_json.zig").renderAllJson;
+        try render_json(&before.writer, &fresh.table, &fresh.sink);
+        try render_json(&after.writer, &resumed.table, &resumed.sink);
+        try testing.expectEqualStrings(before.written(), after.written());
+    }
+}
+
+/// The local tree already holds the application's syntax. Do not build a
+/// library-prefix candidate for source the canonical preflight refuses.
+fn postfixFixturePrefix(program: *const Program) ?*const loader.CheckedLibrary {
+    if (!resolve_mod.applicationMayResume(program)) return null;
+    return test_library.get();
+}
+
+test "transform postfix routing skips prefix probes for canonically ineligible source" {
+    const cases = [_]struct { text: []const u8, prefix: bool }{
+        .{ .text = "fn main() -> UInt8 { 0 }", .prefix = true },
+        .{ .text = "fn main() -> UInt8 { let identity = |value: UInt8| value; identity(0) }", .prefix = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var ast = try parseText(gpa, case.text);
+        var sink = Sink.init(gpa);
+        var local = try resolveTree(gpa, &ast, &sink);
+        defer local.deinit(gpa);
+        try testing.expectEqual(case.prefix, postfixFixturePrefix(local.source) != null);
+    }
+    // Generated programs always contain callableGroup's lambdas. Preserve
+    // those inputs and their fresh checking path; do not claim cache savings
+    // or remove the callable group to make them eligible.
+    for ([_]u64{ 0, 17, 127 }) |seed| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const bytes = try generate.choicesFromSeed(gpa, seed, 64);
+        const text = try generate.generate(gpa, bytes, .{ .max_tuples = 0 });
+        var ast = try parseText(gpa, text);
+        var sink = Sink.init(gpa);
+        var local = try resolveTree(gpa, &ast, &sink);
+        defer local.deinit(gpa);
+        try testing.expect(postfixFixturePrefix(local.source) == null);
+    }
+}
+
 fn applyTo(gpa: std.mem.Allocator, t: Transform, text: []const u8) !?[]const u8 {
     var ast = try parseText(gpa, text);
     var sink = Sink.init(gpa);
@@ -2529,25 +2701,16 @@ fn applyTo(gpa: std.mem.Allocator, t: Transform, text: []const u8) !?[]const u8 
     const types_of = try typecheckTree(gpa, &res, &sink);
 
     if (t == .postfix_written_out) {
-        var full_sink = Sink.init(gpa);
-        var interner: Interner = .empty;
-        var table: FileTable = .empty;
         const one = [_]loader.InMemoryFile{.{ .path = "transform.lin", .text = text }};
-        var program = try loader.loadFromMemory(gpa, &table, &full_sink, &interner, "transform.lin", &one, .program, true, .borrow);
-        const resolved = try resolve(gpa, &program, &interner, &full_sink, .program);
-        var expanded = resolved.expanded;
-        defer expanded.deinit(gpa);
-        var full_res = resolved.resolution;
-        defer full_res.deinit(gpa);
-        var full_typing = try typecheck(gpa, &expanded, &full_res, &full_sink);
-        defer full_typing.deinit(gpa);
-        if (full_sink.hasErrors()) return null;
+        var full = try typedRewriteFixture(gpa, "transform.lin", &one, postfixFixturePrefix(res.source));
+        defer full.deinit(gpa);
+        if (full.sink.hasErrors()) return null;
         return t.apply(gpa, &ast, &res.resolution, &types_of, .{
-            .ast = &expanded.ast,
-            .program = &program,
-            .res = &full_res,
-            .typing = &full_typing,
-            .file = program.primaryFile(),
+            .ast = &full.expanded.ast,
+            .program = full.program,
+            .res = &full.resolution,
+            .typing = &full.typing,
+            .file = full.program.primaryFile(),
         }, text);
     }
 
@@ -3751,40 +3914,22 @@ test "a comment after the last argument is not carried into the written-out call
 }
 
 fn checkedPostfixRewrite(gpa: std.mem.Allocator, files: []const loader.InMemoryFile) !?[]const u8 {
-    var sink = Sink.init(gpa);
-    var interner: Interner = .empty;
-    var table: FileTable = .empty;
-    var program = try loader.loadFromMemory(gpa, &table, &sink, &interner, files[0].path, files, .program, true, .borrow);
-    const resolved = try resolve(gpa, &program, &interner, &sink, .program);
-    var expanded = resolved.expanded;
-    defer expanded.deinit(gpa);
-    var res = resolved.resolution;
-    defer res.deinit(gpa);
-    var typing = try typecheck(gpa, &expanded, &res, &sink);
-    defer typing.deinit(gpa);
-    try testing.expect(!sink.hasErrors());
+    var before = try typedRewriteFixture(gpa, files[0].path, files, test_library.get());
+    defer before.deinit(gpa);
+    try testing.expect(!before.sink.hasErrors());
     const rewritten = try postfixWrittenOut(gpa, .{
-        .ast = &expanded.ast,
-        .program = &program,
-        .res = &res,
-        .typing = &typing,
-        .file = program.primaryFile(),
+        .ast = &before.expanded.ast,
+        .program = before.program,
+        .res = &before.resolution,
+        .typing = &before.typing,
+        .file = before.program.primaryFile(),
     }, files[0].text);
     if (rewritten) |text| {
         const after_files = try gpa.dupe(loader.InMemoryFile, files);
         after_files[0].text = text;
-        var after_sink = Sink.init(gpa);
-        var after_interner: Interner = .empty;
-        var after_table: FileTable = .empty;
-        var after_program = try loader.loadFromMemory(gpa, &after_table, &after_sink, &after_interner, files[0].path, after_files, .program, true, .borrow);
-        const after_resolved = try resolve(gpa, &after_program, &after_interner, &after_sink, .program);
-        var after_expanded = after_resolved.expanded;
-        defer after_expanded.deinit(gpa);
-        var after_res = after_resolved.resolution;
-        defer after_res.deinit(gpa);
-        var after_typing = try typecheck(gpa, &after_expanded, &after_res, &after_sink);
-        defer after_typing.deinit(gpa);
-        try testing.expect(!after_sink.hasErrors());
+        var after = try typedRewriteFixture(gpa, files[0].path, after_files, test_library.get());
+        defer after.deinit(gpa);
+        try testing.expect(!after.sink.hasErrors());
     }
     return rewritten;
 }
@@ -3917,19 +4062,7 @@ test "a postfix call on an inferred imported type uses a visible module name" {
         , .{ if (std.mem.eql(u8, module_name, "env")) "" else " as process", module_name });
         const got = (try applyTo(gpa, .postfix_written_out, text)).?;
 
-        var sink = Sink.init(gpa);
-        var interner: Interner = .empty;
-        var table: FileTable = .empty;
-        const one = [_]loader.InMemoryFile{.{ .path = "rewritten.lin", .text = got }};
-        var program = try loader.loadFromMemory(gpa, &table, &sink, &interner, "rewritten.lin", &one, .program, true, .borrow);
-        const resolved = try resolve(gpa, &program, &interner, &sink, .program);
-        var expanded = resolved.expanded;
-        defer expanded.deinit(gpa);
-        var res = resolved.resolution;
-        defer res.deinit(gpa);
-        var typing = try typecheck(gpa, &expanded, &res, &sink);
-        defer typing.deinit(gpa);
-        try testing.expect(!sink.hasErrors());
+        try expectSourceChecks(gpa, got);
         const written_call = try std.fmt.allocPrint(gpa, "{s}.Args.count(given)", .{module_name});
         try testing.expect(std.mem.indexOf(u8, got, written_call) != null);
     }
@@ -3972,19 +4105,10 @@ test "a postfix call marking its receiver passes the receiver marked" {
 }
 
 fn expectSourceChecks(gpa: std.mem.Allocator, text: []const u8) !void {
-    var sink = Sink.init(gpa);
-    var interner: Interner = .empty;
-    var table: FileTable = .empty;
     const files = [_]loader.InMemoryFile{.{ .path = "rewritten.lin", .text = text }};
-    var program = try loader.loadFromMemory(gpa, &table, &sink, &interner, "rewritten.lin", &files, .program, true, .borrow);
-    const resolved = try resolve(gpa, &program, &interner, &sink, .program);
-    var expanded = resolved.expanded;
-    defer expanded.deinit(gpa);
-    var res = resolved.resolution;
-    defer res.deinit(gpa);
-    var typing = try typecheck(gpa, &expanded, &res, &sink);
-    defer typing.deinit(gpa);
-    try testing.expect(!sink.hasErrors());
+    var fixture = try typedRewriteFixture(gpa, "rewritten.lin", &files, test_library.get());
+    defer fixture.deinit(gpa);
+    try testing.expect(!fixture.sink.hasErrors());
 }
 
 fn expectPostfixRewriteChecks(gpa: std.mem.Allocator, text: []const u8, written_call: []const u8) !void {
