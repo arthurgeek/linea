@@ -59,6 +59,7 @@ comptime {
     _ = @import("backend/text.zig");
     _ = @import("backend/gpu.zig");
     _ = @import("driver/toolchain.zig");
+    _ = @import("driver/inspection.zig");
     _ = @import("driver/prototypes.zig");
     _ = @import("support/generated_calls.zig");
     _ = @import("support/module_route.zig");

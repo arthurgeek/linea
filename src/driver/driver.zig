@@ -46,6 +46,7 @@ const dumpMir = @import("../mir/dump.zig").dumpModule;
 const mlir_backend = @import("../backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
+const inspection = @import("inspection.zig");
 const gpu_driver = @import("gpu.zig");
 const gpu_backend = @import("../backend/gpu.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
@@ -164,6 +165,65 @@ pub const Out = struct {
     }
 };
 
+/// Device inspection calls the production producer and conversion boundary,
+/// stopping before either image serialization or Vulkan validation.
+fn dumpGpuInspection(gpa: std.mem.Allocator, io: std.Io, module: *const mir.Module, sink: *Sink, definitions: []const bool, program: *const @import("../syntax/expanded_program.zig").ExpandedProgram, request: inspection.Request, display_names: ?[]const ?[]const u8, scratch: []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !?u8 {
+    if (!@import("build_options").gpu) {
+        try err.writeAll("error: GPU inspection is disabled in this compiler build\n");
+        return exit_usage;
+    }
+    const sources = (try gpu_backend.emitAllInspected(gpa, module, sink, .{
+        .definitions = definitions,
+        .display_names = display_names,
+        .software_bodies = request.scope == .all,
+        .launch_support = request.function == null,
+        .compact = request.detail == .compact,
+    })) orelse return exit_defect;
+    defer {
+        for (sources) |source| gpa.free(source.mlir);
+        gpa.free(sources);
+    }
+    if (sources.len == 0) {
+        try err.writeAll("error: no admitted GPU implementation matches the selected source functions\n");
+        return exit_usage;
+    }
+    try inspection.writeHeader(out, program, module, definitions);
+    const prefix = try toolchain.uniqueTarget(gpa, io, scratch, "linea-inspection");
+    defer gpa.free(prefix);
+    for (sources, 0..) |source, i| {
+        try out.print("// Device implementation {d}; required generated support is retained.\n", .{i});
+        if (request.stage == .lowered) {
+            try out.writeAll(source.mlir);
+            continue;
+        }
+        const input = try std.fmt.allocPrint(gpa, "{s}-{d}.mlir", .{ prefix, i });
+        defer gpa.free(input);
+        const checked = try std.fmt.allocPrint(gpa, "{s}-{d}.spirv.mlir", .{ prefix, i });
+        defer gpa.free(checked);
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = input, .data = source.mlir });
+        const failure = switch (source.format) {
+            .spirv => try toolchain.checkGpuSource(gpa, io, input, checked),
+            .staging => try toolchain.lowerStructuredGpuSource(gpa, io, input, checked),
+        };
+        if (failure) |failed| {
+            defer gpa.free(failed.output);
+            if (failed.missing) {
+                try err.print("error: '{s}' not found on PATH\n", .{failed.tool.command()});
+                return exit_io;
+            }
+            try err.writeAll(failed.output);
+            try err.print("note: inspection input retained at '{s}'\n", .{input});
+            return refusalStatus(failed.tool);
+        }
+        const text = try std.Io.Dir.cwd().readFileAlloc(io, checked, gpa, .unlimited);
+        defer gpa.free(text);
+        try out.writeAll(text);
+        std.Io.Dir.cwd().deleteFile(io, input) catch {};
+        std.Io.Dir.cwd().deleteFile(io, checked) catch {};
+    }
+    return null;
+}
+
 /// Renders what a compile reported. Every command that compiles renders
 /// through this once: where it goes on to run what it built, before running
 /// it, so its notes precede the program's own output; otherwise as it exits.
@@ -216,6 +276,21 @@ const dump_commands = [_]cli.Command{
     .{ .tag = .dump_inferred, .debug = true, .name = "dump-inferred", .operand = "<file>", .help = "print the source with what the checker settled written in" },
     .{ .tag = .dump_mono, .debug = true, .name = "dump-mono", .operand = "<file>", .help = "print the program with its generics gone" },
     .{
+        .tag = .dump_mlir,
+        .debug = true,
+        .name = "dump-mlir",
+        .operand = "<path>",
+        .help = "inspect source-focused MLIR (not a standalone executable)",
+        .options = &.{
+            .{ .name = "--scope", .arity = .value, .metavar = "user|all", .help = "definitions to show (default: user; all primary project modules)" },
+            .{ .name = "--target", .arity = .value, .metavar = "host|gpu", .help = "backend to inspect (default: host)" },
+            .{ .name = "--stage", .arity = .value, .metavar = "lowered|spirv", .help = "stop at this stage (default: lowered; spirv requires gpu)" },
+            .{ .name = "--function", .arity = .value, .metavar = "<qualified-source-function>", .help = "show this source function's concrete instances" },
+            .{ .name = "--detail", .arity = .value, .metavar = "compact|full", .help = "presentation detail (default: compact)" },
+            .{ .name = "--locations", .arity = .flag, .help = "include inline source locations (default: off)" },
+        },
+    },
+    .{
         .tag = .dump_asm,
         .debug = true,
         .name = "dump-asm",
@@ -264,7 +339,7 @@ fn defaultOptLevel(tag: cli.Tag) []const u8 {
 /// The switch names every command, so a new one is decided here.
 fn holdsCDeclarations(tag: cli.Tag) bool {
     return switch (tag) {
-        .check, .run, .build, .@"test", .emit_mlir, .dump_asm => true,
+        .check, .run, .build, .@"test", .emit_mlir, .dump_mlir, .dump_asm => true,
         .fmt, .lsp, .init, .dump_tokens, .dump_ast, .dump_expanded, .dump_mir, .dump_inferred, .dump_mono => false,
     };
 }
@@ -603,6 +678,7 @@ pub fn run(process: std.process.Init) !u8 {
     // before anything trusts it.
     var purpose: Purpose = if (cmd.tag == .@"test") .tests else .program;
     var path: ?[]const u8 = null;
+    var inspect: inspection.Request = .{};
 
     var it: cli.Iterator = .{ .spec = spec, .command = cmd, .args = args[2..] };
     while (it.next()) |item| switch (item) {
@@ -615,7 +691,31 @@ pub fn run(process: std.process.Init) !u8 {
             path = p;
         },
         .option => |o| {
-            if (std.mem.eql(u8, o.name, "-o")) {
+            if (std.mem.eql(u8, o.name, "--scope")) {
+                inspect.scope = std.meta.stringToEnum(inspection.Scope, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --scope value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--target")) {
+                inspect.target = std.meta.stringToEnum(inspection.Target, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --target value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--stage")) {
+                inspect.stage = std.meta.stringToEnum(inspection.Stage, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --stage value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--function")) {
+                inspect.function = o.value;
+            } else if (std.mem.eql(u8, o.name, "--detail")) {
+                inspect.detail = std.meta.stringToEnum(inspection.Detail, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --detail value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--locations")) {
+                inspect.locations = true;
+            } else if (std.mem.eql(u8, o.name, "-o")) {
                 out_path = o.value;
             } else if (std.mem.eql(u8, o.name, "-O")) {
                 if (!knownOptLevel(o.value)) {
@@ -651,6 +751,13 @@ pub fn run(process: std.process.Init) !u8 {
         return exit_usage;
     }
 
+    if (cmd.tag == .dump_mlir) {
+        if (inspect.problem()) |problem| {
+            try stderr_w.print("error: {s}\n", .{problem});
+            return exit_usage;
+        }
+    }
+
     // What the program being run is started with, which is empty for every
     // command that runs nothing. Read off the iterator rather than scanned for
     // here: where the separator sits is the iterator's answer, and a second
@@ -684,6 +791,7 @@ pub fn run(process: std.process.Init) !u8 {
     // Not a debugging aid: this is the compiler's output in another form,
     // and the shape a person reads when generated code misbehaves.
     const is_emit_mlir = cmd.tag == .emit_mlir;
+    const is_dump_mlir = expose_dumps and cmd.tag == .dump_mlir;
     const is_test = cmd.tag == .@"test";
     const is_build = cmd.tag == .build;
     const is_check = cmd.tag == .check;
@@ -1156,6 +1264,37 @@ pub fn run(process: std.process.Init) !u8 {
                             }
                         }
                     }
+                } else if (is_dump_mlir) {
+                    if (!sink.hasErrors()) {
+                        if (try lower(gpa, &settled.expanded, res, typing, disposals, &sink, purpose)) |lowered| {
+                            const definitions = inspection.select(gpa, &settled.expanded, &lowered, inspect) catch |err| switch (err) {
+                                error.OutOfMemory => return error.OutOfMemory,
+                                else => |selection_error| {
+                                    const description: []const u8 = switch (selection_error) {
+                                        error.UnknownFunction => "unknown source function",
+                                        error.AmbiguousFunction => "ambiguous source function",
+                                        error.FunctionOutsideScope => "source function outside --scope=user",
+                                        error.UnmaterializedFunction => "source function has no materialized implementation",
+                                    };
+                                    try stderr_w.print("error: {s}: '{s}'\n", .{ description, inspect.function orelse "" });
+                                    return exit_usage;
+                                },
+                            };
+                            defer gpa.free(definitions);
+                            const display_names = if (inspect.detail == .compact) try inspection.displayNames(gpa, &settled.expanded, &lowered) else null;
+                            defer if (display_names) |names| inspection.deinitNames(gpa, names);
+                            const stdout_file = std.Io.File.stdout();
+                            var stdout: Out = .{};
+                            const stdout_w = stdout.open(io, stdout_file);
+                            defer stdout.flush() catch {};
+                            if (inspect.target == .host) {
+                                try inspection.writeHeader(stdout_w, &settled.expanded, &lowered, definitions);
+                                if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .definitions = definitions, .foreign_symbols = foreign_symbols, .display_names = display_names, .compact = inspect.detail == .compact, .locations = inspect.locations })) defect = true;
+                            } else {
+                                if (try dumpGpuInspection(gpa, io, &lowered, &sink, definitions, &settled.expanded, inspect, display_names, scratchDir(process.minimal.environ), stdout_w, stderr_w)) |status| return status;
+                            }
+                        }
+                    }
                 } else if (is_emit_mlir) {
                     // Generating code is not running it. A program whose result
                     // overflows traps where it runs rather than being refused
@@ -1220,6 +1359,25 @@ test "dumpTokens escapes newlines, tabs, quotes and backslashes" {
     defer out.deinit();
     try lexer_dump.writeEscaped(&out.writer, "a\nb\tc\"d\\e");
     try testing.expectEqualStrings("a\\nb\\tc\\\"d\\\\e", out.written());
+}
+
+test "inspection command follows debugging exposure" {
+    try testing.expect(isDebuggingAid("dump-mlir"));
+    try testing.expectEqual(expose_dumps, spec.find("dump-mlir") != null);
+}
+
+test "inspection command owns its selection options" {
+    const cmd = spec.find("dump-mlir");
+    try testing.expectEqual(expose_dumps, cmd != null);
+    if (!expose_dumps) return;
+    for ([_][]const u8{ "--scope", "--target", "--stage", "--function", "--detail", "--locations" }) |name| {
+        try testing.expectEqualStrings("dump-mlir", spec.declaredBy(name).?.name);
+        for ([_][]const u8{ "emit-mlir", "check", "run", "build" }) |other| {
+            var it: cli.Iterator = .{ .spec = spec, .command = spec.find(other).?, .args = &.{name} };
+            try testing.expect(it.next() == null);
+            try testing.expectEqualStrings("dump-mlir", it.problem.?.wrong_command.belongs_to);
+        }
+    }
 }
 
 test "run is listed as a command" {

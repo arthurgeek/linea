@@ -2442,3 +2442,42 @@ such as `< $LINEA_ROOT/tests/cmd/stdin/formats_supplied_source.stdin`, so the
 file reaches the command directly and no pipe is fed while the command writes
 output. The runner drains standard output and standard error together, so a
 child filling one pipe cannot deadlock against the other.
+
+### MLIR inspection
+
+`emit-mlir` writes the exact complete backend artifact, including dependency
+implementations and device images. `dump-mlir` is a Debug-only debugging aid, like the other dump commands. It uses
+the same producers with a
+FunctionId-indexed definition projection. Its default `--scope=user` includes
+all modules whose loaded root is primary; `--scope=all` includes dependency
+and standard-library bodies too. `--function=module.function` selects an authored
+source declaration and all its concrete instances. Instance comments distinguish
+generated bodies from declarations and display their original declaration ID,
+type arguments and receiver. Selection reads retained expansion and MIR origins,
+never generated symbol spelling.
+
+The default `--target=host --stage=lowered` externalizes omitted bodies using
+their internal signatures, including widened integers and indirect aggregate
+results. Globals, types and generated entry support remain. It never prepares
+device images. `--target=gpu --stage=lowered` stops after production device
+admission and emission. GPU `--stage=spirv` uses the production conversion
+boundary, including ABI/VCE preparation and symbol DCE, and stops before binary
+serialization and Vulkan validation. Host `--stage=spirv` is a usage error.
+`--detail=compact|full` controls presentation independently of scope. Compact
+uses a FunctionId-indexed source-name view, emits bodies before support and
+omits backend presentation attributes. Full retains backend symbols and
+attributes. `--locations` opts into inline locations independently and defaults
+to off. User scope omits generated derive bodies unless explicitly selected.
+The device software arithmetic library is externalized for user scope and
+retained for all scope, regardless of detail. Typed imports are held to the
+actual production helper headers. An explicit scalar selection needs no launch
+wrapper or its globals. No presentation option adds optimization passes.
+
+Device imports carry SPIR-V linkage attributes; required generated support is
+identified as a retained dependency closure. No dump contains image payloads.
+Inspection modules are for reading and MLIR verification, not standalone execution.
+In particular, user-scope SPIR-V linkage imports externalize helper bodies and
+are not a claim that the projection serializes into a valid Vulkan shader.
+Production images retain those bodies and pass the separate SPIR-V validator;
+success certifies only the requested stage. `build --keep` retains full exact
+compilation intermediates.

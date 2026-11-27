@@ -1,0 +1,17 @@
+import std.gpu
+
+fn increment(value: Float32) -> Float32 {
+    value + 1.0
+}
+
+fn twice(value: Float32) -> Float32 {
+    increment(value) * 2.0
+}
+
+fn main() -> UInt8 {
+    defer let device = match gpu.Device.open() { Ok(value) => value, Err(_) => return 0 }
+    let values = [Float32(1.0), 2.0]
+    defer let input = device.upload(values.as_slice(), [UInt64(2)]).unwrap()
+    defer let output = input.map(twice).unwrap()
+    UInt8(output.dimensions()[0])
+}

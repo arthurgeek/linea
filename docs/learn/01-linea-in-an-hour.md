@@ -2130,7 +2130,21 @@ changes;
 `linea check --error-format=json <path>` writes each diagnostic as one line of
 JSON, with those same edits under `fixes`; `linea fmt --check <path>` reports
 the files the formatter would change without writing them; `linea build --keep` retains the intermediate
-files; and `linea emit-mlir <path>` prints the generated MLIR.
+files; and `linea emit-mlir <path>` prints the exact generated MLIR, including
+dependency implementations and device images. For a readable source projection,
+`linea dump-mlir <path>` (in a Debug compiler build) shows all modules of your project and retains declarations
+for omitted library bodies. Add `--scope=all` to show all materialized implementations, or
+`--function=module.function` to inspect a source function's concrete instances.
+The default is `--target=host --stage=lowered --detail=compact`. Compact output
+uses source-oriented symbols and shows selected bodies before their required
+support. `--detail=full` retains backend names and attributes; `--locations`
+adds inline locations independently of detail. User scope omits generated derive
+bodies unless explicitly selected; all scope includes them. Device inspection accepts
+`--target=gpu` with `--stage=lowered` or `--stage=spirv`; the latter runs production
+conversion and stops before binary serialization and Vulkan validation.
+Host inspection never compiles device images, and neither dump stage embeds
+binary payloads. A dump is an inspection module, not a standalone executable;
+success establishes only the requested stage.
 
 ## What you have seen
 
