@@ -32,6 +32,10 @@ const Intermediates = struct {
         gpa.free(self.image);
     }
 
+    fn finish(self: Intermediates, io: std.Io, succeeded: bool, keep: bool, retain_failure: bool) void {
+        if ((succeeded and !keep) or (!succeeded and !retain_failure)) self.remove(io);
+    }
+
     fn remove(self: Intermediates, io: std.Io) void {
         for ([_][]const u8{ self.source, self.checked, self.image }) |path|
             std.Io.Dir.cwd().deleteFile(io, path) catch {};
@@ -54,11 +58,19 @@ pub fn removeInputs(
     prefix: []const u8,
     images: []const backend.Image,
 ) void {
-    for (images) |image| {
-        const path = Intermediates.init(gpa, prefix, image.function) catch continue;
-        defer path.deinit(gpa);
-        path.remove(io);
-    }
+    for (images) |image| removeInput(gpa, io, prefix, image.function);
+}
+
+/// Cleanup after host emission needs only the source identities, not MIR or
+/// the image bytes already embedded in the host module.
+pub fn removeFunctionInputs(gpa: std.mem.Allocator, io: std.Io, prefix: []const u8, functions: []const mir.FunctionId) void {
+    for (functions) |function| removeInput(gpa, io, prefix, function);
+}
+
+fn removeInput(gpa: std.mem.Allocator, io: std.Io, prefix: []const u8, function: mir.FunctionId) void {
+    const path = Intermediates.init(gpa, prefix, function) catch return;
+    defer path.deinit(gpa);
+    path.remove(io);
 }
 
 /// MIR verification and candidate admission belong to the backend. The driver
@@ -71,6 +83,7 @@ pub fn prepare(
     sink: *Sink,
     prefix: []const u8,
     keep: bool,
+    retain_failure: bool,
 ) !Result {
     if (!@import("build_options").gpu) return .{ .images = try gpa.alloc(backend.Image, 0) };
     const sources = (try backend.emitAll(gpa, module, sink)) orelse return .defect;
@@ -91,9 +104,9 @@ pub fn prepare(
     defer gpa.free(paths);
     var path_count: usize = 0;
     defer for (paths[0..path_count]) |path| {
-        // Retain every source and image from an unsuccessful preparation,
-        // including kernels built before the one that failed.
-        if (succeeded and !keep) path.remove(io);
+        // Builds retain failed inputs. Tests settle temporary inputs even
+        // when preparation exits before it can return owned images.
+        path.finish(io, succeeded, keep, retain_failure);
         path.deinit(gpa);
     };
 
@@ -113,4 +126,27 @@ pub fn prepare(
     }
     succeeded = true;
     return .{ .images = images };
+}
+
+test "driver compilation GPU preparation failures settle test inputs only" {
+    const t = std.testing;
+    const io = t.io;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const directory = try tmp.dir.realPathFileAlloc(io, ".", t.allocator);
+    defer t.allocator.free(directory);
+    const prefix = try std.fs.path.join(t.allocator, &.{ directory, "artifact" });
+    defer t.allocator.free(prefix);
+    const paths = try Intermediates.init(t.allocator, prefix, .at(7));
+    defer paths.deinit(t.allocator);
+    for ([_]bool{ true, false }) |retain_failure| {
+        for ([_][]const u8{ paths.source, paths.checked, paths.image }) |path|
+            try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = "prepared" });
+        paths.finish(io, false, true, retain_failure);
+        for ([_][]const u8{ paths.source, paths.checked, paths.image }) |path| {
+            if (retain_failure) {
+                try std.Io.Dir.cwd().access(io, path, .{});
+            } else try t.expectError(error.FileNotFound, std.Io.Dir.cwd().access(io, path, .{}));
+        }
+    }
 }

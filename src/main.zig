@@ -78,6 +78,7 @@ comptime {
     _ = @import("ownership/check.zig");
     _ = @import("ownership/dependencies.zig");
     _ = @import("driver/driver.zig");
+    _ = @import("driver/gpu.zig");
     _ = @import("driver/init.zig");
     _ = @import("driver/format.zig");
     _ = @import("lsp/documents.zig");

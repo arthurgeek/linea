@@ -560,6 +560,17 @@ passes. Passes must consume the loader's recorded results without importing
 `driver/`. The driver imports every pass, so a reverse import would create a
 dependency cycle even though Zig permits such cycles between files.
 
+The command-line driver gives frontend work its own caller-owned arena. Before
+entering the host artifact pipeline, it renders source diagnostics and retains
+an owned native action: tool options and paths, program arguments or test names,
+and cleanup identifiers. Returning from preparation ends every frontend borrow
+and releases that arena before external lowering, linking and test execution.
+GPU serialization, C-header probes and inspection commands still run during
+preparation where they need source facts. The language server keeps its existing
+request lifetimes. This boundary follows ADR 0120; releasing the region proves
+allocation lifetime, rather than promising that an allocator returns pages to
+the operating system immediately.
+
 ### Resolver — `src/sema/resolve.zig`
 
 Owns: **which declaration each name refers to**, whether found locally, through
