@@ -12,6 +12,7 @@ const test_roots = @import("test_roots.zig");
 // Compiles the tests `pool.zig` holds beside the function they test.
 comptime {
     _ = @import("pool.zig");
+    _ = @import("gpu_matrix_layout.zig");
 }
 const runtime_symbols = @import("runtime_symbols");
 

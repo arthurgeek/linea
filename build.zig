@@ -1056,7 +1056,7 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig", "gpu_spirv_check.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig", "gpu_spirv_check.zig", "gpu_matrix_layout.zig" },
         .imported_by = "build.zig",
         .layered = false,
         .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig", "gpu_spirv_check.zig" },
