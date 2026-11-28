@@ -221,7 +221,17 @@ static VkResult VKAPI_CALL fake_QueueSubmit(VkQueue queue, uint32_t submitCount,
 }
 static VkResult VKAPI_CALL fake_WaitForFences(VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout) {
     (void)device; (void)fenceCount; (void)pFences; (void)waitAll; (void)timeout;
-    REQUIRE(fenceCount == 1 && waitAll && timeout == UINT64_MAX); struct timespec end = deadline(); lock_state(); REQUIRE(state.objects[ID(*pFences)].pending); state.wait_entered = 1; changed(); while (!state.allow_completion) wait_changed(&end); pending_resources(ID(*pFences), -1); state.objects[ID(*pFences)].pending = 0; --state.gpu_pending; VkResult result = state.wait_result; changed(); unlock_state(); return result;
+    REQUIRE(fenceCount == 1 && waitAll && timeout == UINT64_MAX);
+    struct timespec end = deadline(); lock_state(); unsigned fence = ID(*pFences);
+    REQUIRE(state.objects[fence].pending);
+    state.wait_entered = 1; state.fence_entered[fence] = 1; changed();
+    while (state.selective_completion ? !state.fence_allowed[fence] : !state.allow_completion) wait_changed(&end);
+    VkResult result = state.wait_result;
+    /* Timeout/allocation failure does not prove that queued work completed. */
+    if (result == VK_SUCCESS || result == VK_ERROR_DEVICE_LOST) {
+        pending_resources(fence, -1); state.objects[fence].pending = 0; --state.gpu_pending;
+    }
+    changed(); unlock_state(); return result;
 }
 static void *test_dlsym(void *library, const char *name) {
     REQUIRE(library == &state); lock_state(); unsigned call = ++state.dlsym_calls; int missing = state.fail_symbol == call; unlock_state(); if (missing) return NULL;

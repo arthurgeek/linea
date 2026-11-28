@@ -18,9 +18,9 @@
 #include "../../loop.h"
 #include "../../task.h"
 
-/* The only substituted interfaces are the dynamic loader and failure-capable
- * CPU resource constructors called directly by gpu.c. Park/task/fiber remain
- * the actual runtime, including their synchronization and context switches. */
+/* Substitute the dynamic loader and failure-capable CPU resource constructors,
+ * and observe production abort before calling the real abort. Park/task/fiber
+ * remain the actual runtime, including synchronization and context switches. */
 static void *test_dlopen(const char *, int);
 static void *test_dlsym(void *, const char *);
 static int test_dlclose(void *);
@@ -32,6 +32,7 @@ static int test_attr_init(pthread_attr_t *);
 static int test_attr_setdetachstate(pthread_attr_t *, int);
 static int test_attr_destroy(pthread_attr_t *);
 static int test_thread_create(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+static void test_abort(void) __attribute__((noreturn));
 #undef LINEA_VULKAN_LIBRARY
 #define LINEA_VULKAN_LIBRARY "/missing-build-host/libvulkan-test"
 #define dlopen test_dlopen
@@ -45,7 +46,9 @@ static int test_thread_create(pthread_t *, const pthread_attr_t *, void *(*)(voi
 #define pthread_attr_setdetachstate test_attr_setdetachstate
 #define pthread_attr_destroy test_attr_destroy
 #define pthread_create test_thread_create
+#define abort test_abort
 #include "../../gpu.c"
+#undef abort
 #undef dlopen
 #undef dlsym
 #undef dlclose
@@ -78,6 +81,7 @@ struct fake_state {
     int standard_only, pinned_only;
     int library_live, fail_loader, no_devices, unsuitable_device, no_queues, no_host_memory;
     int allow_completion, wait_entered, gpu_pending, partial_pipeline;
+    int selective_completion, fence_entered[256], fence_allowed[256];
     int about_wait, cpu_progress, gpu_done;
     int teardown_gate, teardown_entered, allow_teardown, reset_entered, reset_done;
     int monitor_host, allow_host, host_guarded, submit_host_overlap;
@@ -596,6 +600,85 @@ static void arena_submission_paths(void) {
     for (unsigned i = 0; i < 2; ++i) { REQUIRE(linea_gpu_wait((unsigned long)jobs[i]) == 0); linea_gpu_submission_drop((unsigned long)jobs[i]); }
     clean();
 }
+/* Each argument occurrence owns a pin, including repeated read inputs. */
+static void arena_alias_pins(void) {
+    reset(); state.allow_completion = 0;
+    long d = device(), owner = linea_gpu_arena_new((unsigned long)d, 256); REQUIRE(owner > 0);
+    long input = linea_gpu_arena_buffer_new((unsigned long)owner, 4);
+    long output = linea_gpu_buffer_sized_like((unsigned long)input, 4); REQUIRE(input > 0 && output > 0);
+    struct linea_gpu_kernel kernel = {image_words, sizeof(image_words), 1};
+    long handle = linea_gpu_zip((unsigned long)input, (unsigned long)input, (unsigned long)output,
+        (unsigned long)(uintptr_t)&kernel, 1); REQUIRE(handle > 0); wait_started();
+    struct gpu_arena *arena = (struct gpu_arena *)(uintptr_t)owner;
+    struct gpu_buffer *a = (struct gpu_buffer *)(uintptr_t)input, *b = (struct gpu_buffer *)(uintptr_t)output;
+    struct gpu_device *dev = arena->device;
+    linea_park_lock(&dev->storage_changed);
+    REQUIRE(pthread_mutex_lock(&dev->references_lock) == 0);
+    REQUIRE(a->in_flight == 2 && b->in_flight == 1 && arena->pending == 3);
+    REQUIRE(pthread_mutex_unlock(&dev->references_lock) == 0);
+    linea_park_unlock(&dev->storage_changed);
+    release_completion(); REQUIRE(linea_gpu_wait((unsigned long)handle) == 0);
+    linea_park_lock(&dev->storage_changed);
+    REQUIRE(!a->in_flight && !b->in_flight && !arena->pending);
+    struct gpu_submission *job = (struct gpu_submission *)(uintptr_t)handle;
+    REQUIRE(!job->input && !job->right && !job->output);
+    linea_park_unlock(&dev->storage_changed);
+    REQUIRE(linea_gpu_arena_reset((unsigned long)owner) == 0);
+    REQUIRE(linea_gpu_arena_buffer_new((unsigned long)owner, 4) > 0);
+    linea_gpu_arena_drop((unsigned long)owner); linea_gpu_close((unsigned long)d);
+    linea_gpu_submission_drop((unsigned long)handle); clean();
+}
+/* Complete the cross-arena job first while a second job still owns three
+ * occurrences in the other arena. Run both physical arena orderings. */
+static void arena_independent_completion(void) {
+    for (unsigned first = 0; first < 2; ++first) {
+        reset(); state.selective_completion = 1;
+        long d = device(), owners_[2], inputs[2], outputs[2];
+        for (unsigned i = 0; i < 2; ++i) {
+            owners_[i] = linea_gpu_arena_new((unsigned long)d, 256); REQUIRE(owners_[i] > 0);
+            inputs[i] = linea_gpu_arena_buffer_new((unsigned long)owners_[i], 4);
+            outputs[i] = linea_gpu_buffer_sized_like((unsigned long)inputs[i], 4);
+            REQUIRE(inputs[i] > 0 && outputs[i] > 0);
+        }
+        /* The arenas, not the original public handle, must retain the device. */
+        linea_gpu_close((unsigned long)d);
+        unsigned held = 1 - first;
+        struct linea_gpu_kernel kernel = {image_words, sizeof(image_words), 1};
+        long cross = linea_gpu_zip((unsigned long)inputs[first], (unsigned long)inputs[held],
+            (unsigned long)outputs[first], (unsigned long)(uintptr_t)&kernel, 1);
+        long other = linea_gpu_zip((unsigned long)inputs[held], (unsigned long)inputs[held],
+            (unsigned long)outputs[held], (unsigned long)(uintptr_t)&kernel, 1);
+        REQUIRE(cross > 0 && other > 0);
+        struct gpu_submission *jobs[2] = {(struct gpu_submission *)(uintptr_t)cross, (struct gpu_submission *)(uintptr_t)other};
+        unsigned fences[2] = {ID(jobs[0]->fence), ID(jobs[1]->fence)};
+        struct timespec end = deadline(); lock_state();
+        while (!state.fence_entered[fences[0]] || !state.fence_entered[fences[1]]) wait_changed(&end);
+        state.fence_allowed[fences[0]] = 1; changed(); unlock_state();
+        REQUIRE(linea_gpu_wait((unsigned long)cross) == 0);
+        struct gpu_arena *done = (struct gpu_arena *)(uintptr_t)owners_[first];
+        struct gpu_arena *pending = (struct gpu_arena *)(uintptr_t)owners_[held];
+        struct gpu_buffer *input = (struct gpu_buffer *)(uintptr_t)inputs[held];
+        struct gpu_buffer *output = (struct gpu_buffer *)(uintptr_t)outputs[held];
+        struct gpu_device *dev = pending->device;
+        linea_park_lock(&dev->storage_changed);
+        REQUIRE(pthread_mutex_lock(&dev->references_lock) == 0);
+        REQUIRE(!done->pending && pending->pending == 3 && input->in_flight == 2 && output->in_flight == 1);
+        REQUIRE(!jobs[0]->input && !jobs[0]->right && !jobs[0]->output);
+        REQUIRE(jobs[1]->input == input && jobs[1]->right == input && jobs[1]->output == output);
+        REQUIRE(pthread_mutex_unlock(&dev->references_lock) == 0);
+        linea_park_unlock(&dev->storage_changed);
+        REQUIRE(linea_gpu_arena_reset((unsigned long)owners_[first]) == 0);
+        REQUIRE(linea_gpu_arena_buffer_new((unsigned long)owners_[first], 4) > 0);
+        linea_gpu_arena_drop((unsigned long)owners_[first]);
+        lock_state(); REQUIRE(state.objects[fences[1]].pending && state.gpu_pending == 1);
+        state.fence_allowed[fences[1]] = 1; changed(); unlock_state();
+        REQUIRE(linea_gpu_wait((unsigned long)other) == 0);
+        REQUIRE(linea_gpu_arena_reset((unsigned long)owners_[held]) == 0);
+        linea_gpu_arena_drop((unsigned long)owners_[held]);
+        linea_gpu_submission_drop((unsigned long)cross); linea_gpu_submission_drop((unsigned long)other); clean();
+    }
+}
+
 static void *watchdog(void *unused) {
     (void)unused; struct timespec end = deadline(); end.tv_sec += 20;
     REQUIRE(pthread_mutex_lock(&watchdog_lock) == 0);
@@ -715,9 +798,26 @@ static void arena_teardown(void) {
         linea_chan_close(waiting); linea_chan_close(release); clean();
     }
 }
-static void fatal_fence_policy(const char *self) {
-    const char *results[] = { "allocation", "timeout" };
-    for (unsigned i = 0; i < sizeof(results) / sizeof(*results); ++i) {
+static struct gpu_arena *fatal_arena;
+static struct gpu_submission *fatal_job;
+static struct gpu_buffer *fatal_views, *fatal_input, *fatal_output;
+static unsigned long fatal_cursor;
+static void test_abort(void) {
+    /* Observe the actual production fatal boundary in ordinary thread context,
+     * then invoke the real abort. No signal handler reads mutable C objects.
+     * This child has no concurrent reset or owner mutation. */
+    if (fatal_arena) {
+        REQUIRE(fatal_arena->views == fatal_views && fatal_arena->pending == 3);
+        REQUIRE(fatal_arena->blocks->cursor == fatal_cursor);
+        REQUIRE(fatal_input->in_flight == 2 && fatal_output->in_flight == 1);
+        REQUIRE(fatal_job->input == fatal_input && fatal_job->right == fatal_input && fatal_job->output == fatal_output);
+        REQUIRE(fatal_job->fence && state.objects[ID(fatal_job->fence)].pending && state.gpu_pending == 1);
+    }
+    abort();
+}
+static void fatal_fence_policy(const char *self, int arena_only) {
+    const char *results[] = { "allocation", "timeout", "arena-allocation", "arena-timeout" };
+    for (unsigned i = arena_only ? 2u : 0u; i < sizeof(results) / sizeof(*results); ++i) {
         pid_t child = fork(); REQUIRE(child >= 0);
         if (child == 0) { execl(self, self, "--indeterminate-wait", results[i], (char *)NULL); _Exit(127); }
         int status = 0; REQUIRE(waitpid(child, &status, 0) == child);
@@ -726,20 +826,35 @@ static void fatal_fence_policy(const char *self) {
     }
 }
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--arena-alias")) { arena_alias_pins(); return 0; }
+    if (argc == 2 && !strcmp(argv[1], "--arena-orders")) { arena_independent_completion(); return 0; }
+    if (argc == 2 && !strcmp(argv[1], "--arena-fatal")) { fatal_fence_policy(argv[0], 1); return 0; }
     if (argc == 3 && !strcmp(argv[1], "--indeterminate-wait")) {
         struct rlimit core = {0, 0}; REQUIRE(setrlimit(RLIMIT_CORE, &core) == 0);
         alarm(10);
         reset();
-        state.wait_result = !strcmp(argv[2], "allocation") ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_TIMEOUT;
-        long d = device(), a = buffer(d), output = buffer(d);
+        int arena_case = !strncmp(argv[2], "arena-", 6);
+        const char *failure = arena_case ? argv[2] + 6 : argv[2];
+        state.wait_result = !strcmp(failure, "allocation") ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_TIMEOUT;
+        long d = device(), a, output, owner = 0;
+        if (arena_case) {
+            state.allow_completion = 0;
+            owner = linea_gpu_arena_new((unsigned long)d, 256); REQUIRE(owner > 0);
+            a = linea_gpu_arena_buffer_new((unsigned long)owner, 4);
+            output = linea_gpu_buffer_sized_like((unsigned long)a, 4); REQUIRE(a > 0 && output > 0);
+            fatal_arena = (struct gpu_arena *)(uintptr_t)owner;
+            fatal_views = fatal_arena->views; fatal_cursor = fatal_arena->blocks->cursor;
+            fatal_input = (struct gpu_buffer *)(uintptr_t)a; fatal_output = (struct gpu_buffer *)(uintptr_t)output;
+        } else { a = buffer(d); output = buffer(d); }
         long job = linea_gpu_submit((unsigned long)a, (unsigned long)output, image_words, sizeof(image_words), 1);
         REQUIRE(job > 0);
+        if (arena_case) { fatal_job = (struct gpu_submission *)(uintptr_t)job; wait_started(); release_completion(); }
         (void)linea_gpu_wait((unsigned long)job);
         return 91; /* Indeterminate completion must abort, never settle. */
     }
-    fatal_fence_policy(argv[0]);
+    fatal_fence_policy(argv[0], 0);
     pthread_t watcher; REQUIRE(pthread_create(&watcher, NULL, watchdog, NULL) == 0);
-    system_buffer_independence(); arena_geometry(); arena_allocation_fallback(); arena_failures(); arena_teardown(); arena_submission_paths(); loader_policy(); constructors(); dispatch_failures(); transfers(); concurrent_host_access(); narrowing(); pending_and_aliases(); single_carrier();
+    system_buffer_independence(); arena_geometry(); arena_allocation_fallback(); arena_failures(); arena_teardown(); arena_submission_paths(); arena_alias_pins(); arena_independent_completion(); loader_policy(); constructors(); dispatch_failures(); transfers(); concurrent_host_access(); narrowing(); pending_and_aliases(); single_carrier();
     REQUIRE(pthread_mutex_lock(&watchdog_lock) == 0); watchdog_finished = 1;
     REQUIRE(pthread_cond_broadcast(&watchdog_changed) == 0); REQUIRE(pthread_mutex_unlock(&watchdog_lock) == 0);
     REQUIRE(pthread_join(watcher, NULL) == 0);

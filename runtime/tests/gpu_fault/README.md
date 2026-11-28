@@ -72,6 +72,27 @@ cross-arena fence-completion order or simultaneous resets of one owner, and the
 host-copy race uses system buffers rather than claiming a reset/host-copy race
 through invalidated arena handles.
 
+Arena-specific repeated-input tests assert occurrence-based accounting: a zip
+reading the same view twice holds two input pins, one output pin and three
+arena pending occurrences. Completion must clear every occurrence and all job
+view references before reset/reuse. A two-arena test uses individually gated
+fences: one cross-arena job completes while a repeated-input job in the other
+arena remains blocked. Both arena orderings are exercised. The completed arena
+can reset, allocate and release while the other retains exactly its own three
+pins; both arenas outlive the original device handle. This proves those two
+controlled orders, not every cross-arena schedule.
+
+Indeterminate fence timeout and host-allocation failure also run in isolated
+arena subprocesses. The fake driver keeps queued resources pending for those
+answers. A test-only wrapper observes the actual production abort boundary in
+ordinary thread context, checks unchanged arena view metadata/cursor, all three
+pins, live job references and the pending fence, then calls real abort. The
+parent requires SIGABRT, so neither an ordinary error return nor successful
+settlement/reuse is accepted. Isolated production-source mutants that deduplicate
+an alias pin, omit an alias detach, rewind before abort, treat indeterminate
+completion as success, or miss cross-arena detach fail the corresponding
+permanent assertions. These mutants never replace production source.
+
 Synchronization uses predicates and condition variables, with ten-second
 operation deadlines and a native thirty-second watchdog. There are no arbitrary
 sleeps. The watchdog also bounds unexpected joins or constructor deadlocks.
