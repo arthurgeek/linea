@@ -123,3 +123,12 @@ long linea_gpu_zip(unsigned long left, unsigned long right, unsigned long output
     (void)count;
     return -ENODEV;
 }
+
+long linea_gpu_arena_new(unsigned long device, unsigned long limit) {
+    (void)device; (void)limit; return -ENODEV;
+}
+long linea_gpu_arena_buffer_new(unsigned long arena, unsigned long bytes) {
+    (void)arena; (void)bytes; return -ENODEV;
+}
+long linea_gpu_arena_reset(unsigned long arena) { (void)arena; return -ENODEV; }
+void linea_gpu_arena_drop(unsigned long arena) { (void)arena; }

@@ -1,0 +1,11 @@
+import std.gpu
+import std.tensor
+
+fn main() -> UInt8 {
+    defer let device = gpu.Device.open().unwrap()
+    var arena = gpu.Arena.open(device, 65536).unwrap()
+    let value = tensor.matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+    arena.release()
+    let _dimensions = value.dimensions()
+    0
+}

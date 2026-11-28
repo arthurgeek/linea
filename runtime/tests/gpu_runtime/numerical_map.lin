@@ -1,4 +1,5 @@
 import std.gpu
+import std.tensor
 
 fn half(value: Float32) -> Float32 {
     value * 0.5
@@ -17,13 +18,19 @@ fn main() -> UInt8 {
         Float32(1.0),
         Float32.from_bits(2147483648),
     ]
-    defer let device = gpu.Device.open().unwrap()
-    defer let input = device.upload(values.as_slice(), [UInt64(6)]).unwrap()
-    defer let halved = input.map(half).unwrap()
+    let device = gpu.Device.open().unwrap()
+    let input: tensor.Vector[Float32, gpu.Storage] = tensor.from_slice_in(device, values.as_slice(), [UInt64(6)]).unwrap()
+    let rows = [[values[0], values[1], values[2]], [values[3], values[4], values[5]]]
+    defer let matrix: tensor.Matrix[Float32, gpu.Storage] = tensor.matrix_in(device, rows).unwrap()
+    device.release()
+    let halved = input.map(half).unwrap()
+    input.release()
     defer let output = halved.map(negate).unwrap()
+    halved.release()
     defer let host = gpu.download(output).unwrap()
+    defer let matrix_host = gpu.download(matrix).unwrap()
     for i in UInt64(0)..6 {
-        if host[i].to_bits() != negate(half(values[i])).to_bits() {
+        if host[i].to_bits() != negate(half(values[i])).to_bits() || matrix_host[i].to_bits() != values[i].to_bits() {
             return 1
         }
     }

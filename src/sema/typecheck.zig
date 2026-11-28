@@ -10486,6 +10486,7 @@ const Checker = struct {
             const head = self.headParameter(owner, base.name).?;
             return self.throughBounds(ref, run, .{
                 .bounds = self.boundsOnParameter(head.ty),
+                .admitted = self.builder.boundsOn(head.ty),
                 .named = base.name,
                 .ty = head.ty,
                 .settled_once = true,
@@ -10495,6 +10496,7 @@ const Checker = struct {
         if (from.declared != .none and self.ast.declBounds(from.declared).len != 0) {
             return self.throughBounds(ref, run, .{
                 .bounds = self.ast.declBounds(from.declared),
+                .admitted = self.builder.traitsDeclaredFor(@intCast(from.declared.index())),
                 .named = from.named,
                 .ty = from.ty,
                 .settled_once = from.settled_once,
@@ -10584,6 +10586,9 @@ const Checker = struct {
     /// carrying them, and the type they are attached to.
     const ReadThrough = struct {
         bounds: []const node.TraitBound,
+        /// The keys admitted by these declarations, including inherited bounds.
+        /// A settled associated type still selects through its declared keys.
+        admitted: []const types_mod.BoundTrait,
         named: TokenId,
         ty: TypeId,
         settled_once: bool,
@@ -10802,8 +10807,8 @@ const Checker = struct {
         // The trait a bound names is discharged at the arguments it named, so
         // a declared type read through it is settled by the same pair
         // `boundsCarry` discharges at -- read here rather than re-derived from
-        // the bound's written arguments a second time, since the parameter's
-        // own bounds already interned them when it was declared. The bound
+        // the bound's written arguments a second time, since the declaration's
+        // bounds already interned them. The bound
         // the name is read through is what picks the entry, because one trait
         // may bound the parameter at several arguments.
         //
@@ -10815,10 +10820,10 @@ const Checker = struct {
         // requires `Lookup[UInt64]` is the same two in either order. Two
         // written bounds of one trait were already counted as two
         // declarations, so a second entry here is one a supertrait requires.
-        const admitted = admittedAt(self.builder.boundsOn(through.ty), trait);
+        const admitted = admittedAt(through.admitted, trait);
         if (admitted == .several) return self.refuseRequiredTwice(ref, run, self.ast.tokenText(through.named), trait, at);
         const args = if (!found.inherited)
-            self.boundArgsWritten(through.ty, trait, .{ .named = .{ .name = found.bound, .args = found.args } })
+            self.boundArgsWritten(through.admitted, trait, .{ .named = .{ .name = found.bound, .args = found.args } })
         else
             admitted.one;
 
@@ -13389,7 +13394,7 @@ const Checker = struct {
         switch (o.source) {
             .parameter => |ty| {
                 const t = traitAt(self.ast, self.res, bound.named.name) orelse return &.{};
-                const raw = self.boundArgsWritten(ty, t, bound);
+                const raw = self.boundArgsWritten(self.builder.boundsOn(ty), t, bound);
                 return self.substitutedOwnBoundArgs(raw, o);
             },
             .scope => |ctx| {
@@ -36293,14 +36298,14 @@ const Checker = struct {
     /// first entry naming the trait answers for whichever bound was written
     /// first rather than for the one being asked about.
     ///
-    /// **Bound:** the bounds written on the one parameter.
+    /// **Bound:** the bounds on the one declaring parameter or associated type.
     fn boundArgsWritten(
         self: *const Checker,
-        t: TypeId,
+        admitted: []const types_mod.BoundTrait,
         trait: node.DeclId,
         written: node.TraitBound,
     ) []const TypeId {
-        for (self.builder.boundsOn(t)) |seen| {
+        for (admitted) |seen| {
             if (seen.trait != trait) continue;
             if (!self.sameBoundArgs(seen.written.named.args, written.named.args)) continue;
             return seen.args;

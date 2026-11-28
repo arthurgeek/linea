@@ -1,0 +1,59 @@
+// The same concrete store answers at two trait keys. A constructor's
+// promised bound selects the result of a call through its associated store.
+trait Readings[T] {
+    type Reading
+
+    fn at(self: Self, key: T) -> Self.Reading where carries()
+}
+
+struct Samples {}
+
+impl Readings[UInt8] for Samples {
+    type Reading = Bool
+
+    fn at(_self: Self, _key: UInt8) -> Bool {
+        false
+    }
+}
+
+impl Readings[UInt64] for Samples {
+    type Reading = UInt8
+
+    fn at(_self: Self, _key: UInt64) -> UInt8 {
+        7
+    }
+}
+
+trait Wide: Readings[UInt64] {}
+
+impl Wide for Samples {}
+
+trait Source {
+    type Store: Readings[UInt64]
+    type Other: Wide
+
+    fn reading(self: Self) -> Self.Store.Reading
+
+    fn inherited(self: Self) -> Self.Other.Reading
+}
+
+struct Meter {}
+
+impl Source for Meter {
+    type Store = Samples
+    type Other = Samples
+
+    fn inherited(_self: Self) -> UInt8 {
+        9
+    }
+
+    fn reading(_self: Self) -> UInt8 {
+        let samples: Samples = .{}
+        samples.at(UInt64(0))
+    }
+}
+
+fn main() -> UInt8 {
+    let meter: Meter = .{}
+    meter.reading() + meter.inherited()
+}

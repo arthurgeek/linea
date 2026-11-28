@@ -1,0 +1,24 @@
+import std.gpu
+
+@(copyable, derive(Release))
+struct Forged { handle: UInt64 }
+
+// Matching the internal hook's spelling cannot supply its sealed contract.
+impl Forged {
+    pub fn _identity(self: Self, _permit: UInt8) -> UInt64 {
+        self.handle
+    }
+
+    pub fn _length(_self: Self) -> UInt64 {
+        1
+    }
+
+    pub fn sized_like(self: Self, _bytes: UInt64) -> Result[Self, Int64] {
+        .Ok(copy(self))
+    }
+}
+
+fn main() -> UInt8 {
+    let _forged: Option[gpu.Resident[Forged]] = .None
+    0
+}

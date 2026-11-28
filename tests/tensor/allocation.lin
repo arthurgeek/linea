@@ -7,7 +7,19 @@ fn identity(value: Float32) -> Float32 {
     value
 }
 
+fn host_matrix[A: Allocator](allocator: A) -> Result[tensor.Matrix[Float32, tensor.Cpu[A]], tensor.CpuError] where carries(.Ok: allocator) {
+    tensor.matrix_in(allocator, [[Float32(1.0)]])
+}
+
+fn host_vector[A: Allocator](allocator: A) -> Result[tensor.Vector[Float32, tensor.Cpu[A]], tensor.CpuError] where carries(.Ok: allocator) {
+    tensor.from_slice_in(allocator, [Float32(2.0)].as_slice(), [UInt64(1)])
+}
+
 fn main() -> UInt8 {
+    defer let owned = host_vector(mem.system()).unwrap()
+    if owned.values()[0] != 2.0 {
+        return 6
+    }
     defer let empty = mem.Arena.open(mem.system(), 0)
     match tensor.matrix_in(empty.handle(), [[Float32(1.0)]]) {
         Err(error) => {
@@ -23,7 +35,7 @@ fn main() -> UInt8 {
     // The first allocation uses the arena's remaining room. Map must reuse
     // that allocator and report its refusal, rather than switch to system.
     defer let arena = mem.Arena.open(mem.system(), 24)
-    let input = tensor.matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+    let input = host_matrix(arena.handle()).unwrap()
     match input.map(identity) {
         Err(error) => {
             if error != .Allocation(.Exhausted) {

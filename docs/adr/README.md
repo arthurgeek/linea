@@ -142,8 +142,9 @@ true of a different implementation.
 | [0083](0083-an-arrays-length-is-part-of-its-type-everywhere-it-is-written.md) | An array's length is part of its type, everywhere it is written | Accepted; extends 0061 and 0020; extended by 0149, 0172, 0198 and 0307 |
 | [0307](0307-a-length-may-be-a-parameter.md) | A length may be a parameter: `let n: UInt64` | Accepted; extends 0061, 0083, 0181 and 0189; supersedes the view rows of 0166 |
 | [0308](0308-device-tensors-run-ordinary-numerical-functions.md) | Device tensors run ordinary numerical functions | Library placement and result API superseded by 0309 |
-| [0309](0309-tensors-separate-storage-from-numerical-operations.md) | Tensors separate storage from numerical operations | Accepted; supersedes the library placement and result API of 0308; extended by 0310 |
-| [0310](0310-device-admission-is-sealed-from-public-callables.md) | Device admission is sealed from public callables | Accepted; extends 0309 |
+| [0309](0309-tensors-separate-storage-from-numerical-operations.md) | Tensors separate storage from numerical operations | Accepted; supersedes the library placement and result API of 0308; extended by 0310 and 0322 |
+| [0310](0310-device-admission-is-sealed-from-public-callables.md) | Device admission is sealed from public callables | Accepted; extends 0309; extended by 0322 |
+| [0322](0322-device-allocation-domains-retain-arena-observations.md) | Device allocation domains retain arena observations | Accepted; extends 0309 and 0310 |
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted; function-modifier premise superseded by 0277 |
 | [0247](0247-a-test-in-an-impl-is-a-member-of-nothing.md) | A test in an inherent `impl` is a member of nothing | Accepted; extended by 0269; namespace clause superseded by 0277 |
 | [0269](0269-a-test-in-a-trait-declaration-is-a-member-of-nothing.md) | A test in a trait declaration is a member of nothing | Accepted; extends 0247; namespace clause superseded by 0277 |

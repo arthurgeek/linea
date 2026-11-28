@@ -1,0 +1,44 @@
+import std.mem
+
+// A domain copies ordinary Float32 values into the storage it manages.
+// The storage determines the error type and any settlement obligation.
+pub trait AllocationDomain {
+    type Store: Storage[Float32]
+
+    fn copy_slice(self: Self, values: mem.Slice[Float32]) -> Result[Self.Store, Self.Store.Error] where carries(.Ok: self)
+
+    fn copy_rows[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[Self.Store, Self.Store.Error] where carries(.Ok: self)
+}
+
+internal fn float_count[let rank: UInt64](shape: [UInt64; rank]) -> Option[UInt64] {
+    let count = element_count(shape)?
+    if count > UInt64.max / 4 {
+        .None
+    } else {
+        .Some(count)
+    }
+}
+
+fn domain_shape_error[S: Storage[Float32]]() -> S.Error {
+    S.shape_error()
+}
+
+pub fn from_slice_in[D: AllocationDomain, let rank: UInt64](allocator: D, values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[Tensor[Float32, rank, D.Store], D.Store.Error] where carries(.Ok: allocator) {
+    let count = float_count(shape) else {
+        return .Err(domain_shape_error[D.Store]())
+    }
+    if count != values.length() {
+        return .Err(domain_shape_error[D.Store]())
+    }
+    let storage = allocator.copy_slice(values)?
+    Tensor.from_storage(storage, shape)
+}
+
+pub fn matrix_in[D: AllocationDomain, let rows: UInt64, let columns: UInt64](allocator: D, values: [[Float32; columns]; rows]) -> Result[Tensor[Float32, 2, D.Store], D.Store.Error] where carries(.Ok: allocator) {
+    let shape = [rows, columns]
+    if float_count(shape) == .None {
+        return .Err(domain_shape_error[D.Store]())
+    }
+    let storage = allocator.copy_rows(values)?
+    Tensor.from_storage(storage, shape)
+}

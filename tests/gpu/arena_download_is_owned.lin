@@ -1,0 +1,23 @@
+import std.gpu
+import std.tensor
+
+fn main() -> UInt8 {
+    let device = match gpu.Device.open() {
+        Ok(device) => device,
+        Err(error) => return if error == .Unavailable {
+            0
+        } else {
+            1
+        },
+    }
+    let arena = gpu.Arena.open(device, 65536).unwrap()
+    let input = tensor.matrix_in(arena.handle(), [[Float32.from_bits(2)]]).unwrap()
+    defer let host = gpu.download(input).unwrap()
+    arena.release()
+    device.release()
+    if host[0].to_bits() == 2 {
+        0
+    } else {
+        2
+    }
+}

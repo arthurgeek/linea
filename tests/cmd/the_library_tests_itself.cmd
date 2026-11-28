@@ -1,9 +1,9 @@
-The library tests itself. Only the four named GPU outcomes vary with hardware;
+The library tests itself. Only the seven named GPU outcomes vary with hardware;
 GPU marks a separately validated pass or skip. The summary counts non-GPU passes;
 the normalizer rejects failures, unexpected skips and wrong total counts.
 
   $ linea test "$LINEA_ROOT"/std > out
-  $ awk -v expected=2002 -f "$LINEA_ROOT/tests/cmd/fixtures/library_gpu_outcomes.awk" out
+  $ awk -v expected=2005 -f "$LINEA_ROOT/tests/cmd/fixtures/library_gpu_outcomes.awk" out
   ok    bench.benchmark calibration bounds the work on a clock that never advances
   ok    bench.benchmark callback failure during calibration stops before any further invocation
   ok    bench.benchmark callbacks accept functions, closures and return the first error
@@ -380,9 +380,12 @@ the normalizer rejects failures, unexpected skips and wrong total counts.
   ok    fs.skipping a directory's children leaves them out
   ok    fs.temporary names have a fixed ascii extent and a single terminator
   ok    fs.writing a file reports the bytes written
+  GPU   gpu.an arena handle copies rows directly without changing their bits
+  GPU   gpu.an arena opens without committing bytes and rejects a zero budget reservation
   GPU   gpu.completed map preserves GPU subnormals and refuses unsupported ordinary bodies
   GPU   gpu.matrix dimensions follow nested array lengths
   GPU   gpu.opening a device reports unavailable capability or owns a device
+  GPU   gpu.reset permits another epoch after the last observation
   GPU   gpu.upload preserves raw bits and checks zero dimensions before overflow
   ok    hash.boolean hashes distinguish values
   ok    hash.boolean queries match only the same value

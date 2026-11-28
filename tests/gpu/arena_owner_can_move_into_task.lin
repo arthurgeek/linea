@@ -1,0 +1,25 @@
+import std.gpu
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+
+fn main() -> UInt8 {
+    let device = match gpu.Device.open() {
+        Ok(device) => device,
+        Err(error) => return if error == .Unavailable {
+            0
+        } else {
+            1
+        },
+    }
+    let arena = gpu.Arena.open(device, 65536).unwrap()
+    device.release()
+    let body = sink [sink arena] |sink me: Chan[End]| {
+        arena.release()
+        me.close()
+    }
+    task.prepare(body).unwrap().start().close()
+    0
+}

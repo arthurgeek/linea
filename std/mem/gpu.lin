@@ -5,6 +5,14 @@ extern fn linea_gpu_open() -> Int64
 
 extern fn linea_gpu_close(device: UInt64)
 
+extern fn linea_gpu_arena_new(device: UInt64, byte_limit: UInt64) -> Int64
+
+extern fn linea_gpu_arena_buffer_new(arena: UInt64, bytes: UInt64) -> Int64
+
+extern fn linea_gpu_arena_reset(arena: UInt64) -> Int64
+
+extern fn linea_gpu_arena_drop(arena: UInt64)
+
 extern fn linea_gpu_buffer_new(device: UInt64, bytes: UInt64) -> Int64
 
 extern fn linea_gpu_buffer_sized_like(buffer: UInt64, bytes: UInt64) -> Int64
@@ -78,6 +86,12 @@ impl GpuDevice {
         }
     }
 
+    internal fn _upload_rows[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[GpuBuffer, Int64] {
+        let bytes = gpu_row_bytes(rows, columns)?
+        let buffer = self.allocate(bytes)?
+        _gpu_copy_rows(buffer, values)
+    }
+
     internal fn allocate(self: Self, bytes: UInt64) -> Result[GpuBuffer, Int64] {
         let handle = linea_gpu_buffer_new(self.handle, bytes)
         if handle < 0 {
@@ -108,13 +122,206 @@ impl Release for GpuBuffer {
     }
 }
 
+// The native arena owns its view metadata and retains its device independently.
+@(opaque, linear, unshareable)
+struct GpuArena {
+    handle: UInt64,
+}
+
+impl GpuArena {
+    internal fn open(device: GpuDevice, byte_limit: UInt64) -> Result[Self, Int64] {
+        let handle = linea_gpu_arena_new(device.handle, byte_limit)
+        if handle < 0 {
+            .Err(handle)
+        } else {
+            .Ok(.{ handle = UInt64(handle) })
+        }
+    }
+
+    internal fn handle(self: Self) -> GpuArenaHandle where borrows(self) {
+        .{ owner = borrow self }
+    }
+
+    internal fn reset(inout self: Self) -> Result[(), Int64] {
+        let answer = linea_gpu_arena_reset(self.handle)
+        if answer < 0 {
+            .Err(answer)
+        } else {
+            .Ok(())
+        }
+    }
+}
+
+impl Release for GpuArena {
+    fn release(sink self: Self) {
+        let GpuArena { handle } = self
+        linea_gpu_arena_drop(handle)
+    }
+}
+
+@(opaque, copyable)
+struct GpuArenaHandle {
+    owner: borrow GpuArena,
+}
+
+impl GpuArenaHandle {
+    fn allocate(self: Self, bytes: UInt64) -> Result[GpuArenaView, Int64] where carries(.Ok: self) {
+        let handle = linea_gpu_arena_buffer_new((*self.owner).handle, bytes)
+        if handle < 0 {
+            .Err(handle)
+        } else {
+            .Ok(.{ handle = UInt64(handle), bytes, arena = copy(self) })
+        }
+    }
+
+    internal fn _upload_rows[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[GpuArenaView, Int64] where carries(.Ok: self) {
+        let bytes = gpu_row_bytes(rows, columns)?
+        let buffer = self.allocate(bytes)?
+        _gpu_copy_rows(buffer, values)
+    }
+
+    internal fn _upload(self: Self, values: Slice[Float32]) -> Result[GpuArenaView, Int64] where carries(.Ok: self) {
+        if values.length() > UInt64.max / 4 {
+            return .Err(-75)
+        }
+        let bytes = values.length() * 4
+        let buffer = self.allocate(bytes)?
+        _gpu_copy_slice(buffer, values)
+    }
+}
+
+// Views are affine: forgetting one abandons no separately owned C resource.
+// Its arena owns both the descriptor and its reservation until reset/release.
+@opaque
+struct GpuArenaView {
+    handle: UInt64,
+    bytes: UInt64,
+    arena: GpuArenaHandle,
+}
+
+impl Release for GpuArenaView {
+    fn release(sink self: Self) {
+        let GpuArenaView { handle: _, bytes: _, arena: _ } = self
+    }
+}
+
+// No blanket implementation exists. The only two implementations are in mem,
+// and external code cannot name this trait to implement it. Native identities
+// also remain opaque, even to callers inheriting an operation through a bound.
+@opaque
+struct _GpuPermit { seal: UInt8 }
+
+@(opaque, copyable)
+struct _GpuIdentity { handle: UInt64 }
+
+internal trait GpuResidentBuffer: Release {
+    fn _identity(self: Self, permit: _GpuPermit) -> _GpuIdentity
+
+    fn _length(self: Self) -> UInt64
+
+    fn sized_like(self: Self, bytes: UInt64) -> Result[Self, Int64] where carries(.Ok: self)
+}
+
+impl GpuResidentBuffer for GpuBuffer {
+    fn _identity(self: Self, _permit: _GpuPermit) -> _GpuIdentity {
+        .{ handle = self.handle }
+    }
+
+    fn _length(self: Self) -> UInt64 {
+        self.bytes / 4
+    }
+
+    fn sized_like(self: Self, bytes: UInt64) -> Result[Self, Int64] {
+        let handle = linea_gpu_buffer_sized_like(self.handle, bytes)
+        if handle < 0 {
+            .Err(handle)
+        } else {
+            .Ok(.{ handle = UInt64(handle), bytes })
+        }
+    }
+}
+
+impl GpuResidentBuffer for GpuArenaView {
+    fn _identity(self: Self, _permit: _GpuPermit) -> _GpuIdentity {
+        .{ handle = self.handle }
+    }
+
+    fn _length(self: Self) -> UInt64 {
+        self.bytes / 4
+    }
+
+    fn sized_like(self: Self, bytes: UInt64) -> Result[Self, Int64] where carries(.Ok: self) {
+        self.arena.allocate(bytes)
+    }
+}
+
+fn gpu_identity[B: GpuResidentBuffer](buffer: B) -> UInt64 {
+    let identity = buffer._identity(.{ seal = 0 })
+    identity.handle
+}
+
+fn gpu_row_bytes(rows: UInt64, columns: UInt64) -> Result[UInt64, Int64] {
+    if rows == 0 || columns == 0 {
+        return .Ok(0)
+    }
+    if rows > UInt64.max / columns {
+        return .Err(-75)
+    }
+    let count = rows * columns
+    if count > UInt64.max / 4 {
+        .Err(-75)
+    } else {
+        .Ok(count * 4)
+    }
+}
+
+// Arrays have contiguous row-major layout. The byte extent is checked before
+// a host address is selected, and zero columns never require a source address.
+fn _gpu_copy_rows[B: GpuResidentBuffer, let rows: UInt64, let columns: UInt64](sink buffer: B, values: [[Float32; columns]; rows]) -> Result[B, Int64] where carries(.Ok: buffer) {
+    let bytes = match gpu_row_bytes(rows, columns) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            buffer.release()
+            return .Err(error)
+        },
+    }
+    if bytes != buffer._length() * 4 {
+        buffer.release()
+        return .Err(-22)
+    }
+    let answer = if bytes == 0 {
+        Int64(0)
+    } else {
+        linea_gpu_upload(gpu_identity(buffer), address.raw(slice_address(values.as_slice())), bytes)
+    }
+    if answer < 0 {
+        buffer.release()
+        .Err(answer)
+    } else {
+        .Ok(buffer)
+    }
+}
+
 internal fn _gpu_upload(device: GpuDevice, values: Slice[Float32]) -> Result[GpuBuffer, Int64] {
     if values.length() > UInt64.max / 4 {
         return .Err(-75)
     }
     let bytes = values.length() * 4
     let buffer = device.allocate(bytes)?
-    let answer = linea_gpu_upload(buffer.handle, address.raw(slice_address(values)), bytes)
+    _gpu_copy_slice(buffer, values)
+}
+
+fn _gpu_copy_slice[B: GpuResidentBuffer](sink buffer: B, values: Slice[Float32]) -> Result[B, Int64] where carries(.Ok: buffer) {
+    if values.length() > UInt64.max / 4 || values.length() != buffer._length() {
+        buffer.release()
+        return .Err(-75)
+    }
+    let bytes = values.length() * 4
+    let answer = if bytes == 0 {
+        Int64(0)
+    } else {
+        linea_gpu_upload(gpu_identity(buffer), address.raw(slice_address(values)), bytes)
+    }
     if answer < 0 {
         buffer.release()
         .Err(answer)
@@ -125,13 +332,17 @@ internal fn _gpu_upload(device: GpuDevice, values: Slice[Float32]) -> Result[Gpu
 
 // Every bit pattern is a Float32. The runtime fills exactly the extent whose
 // slots become the returned vector, including an empty extent.
-internal fn _gpu_download(buffer: GpuBuffer) -> Result[Vec[Float32], Int64] {
-    let bytes = buffer.bytes
+internal fn _gpu_download[B: GpuResidentBuffer](buffer: B) -> Result[Vec[Float32], Int64] {
+    let bytes = buffer._length() * 4
     let host = match system().acquire(bytes) {
         Ok(value) => value,
         Err(_) => return .Err(-12),
     }
-    let answer = linea_gpu_download(buffer.handle, address.raw(bytes_in(host, 0)), bytes)
+    let answer = if bytes == 0 {
+        Int64(0)
+    } else {
+        linea_gpu_download(gpu_identity(buffer), address.raw(bytes_in(host, 0)), bytes)
+    }
     if answer < 0 {
         host.release()
         return .Err(answer)
@@ -140,40 +351,40 @@ internal fn _gpu_download(buffer: GpuBuffer) -> Result[Vec[Float32], Int64] {
 }
 
 @(opaque, linear)
-struct GpuJob {
+struct GpuJob[B: GpuResidentBuffer] {
     handle: UInt64,
-    output: GpuBuffer,
+    output: B,
 }
 
-impl GpuJob {
-    internal fn _start(input: GpuBuffer, kernel: GpuKernel) -> Result[Self, Int64] {
-        let output = input.sized_like(input.bytes)?
-        let handle = linea_gpu_map(input.handle, output.handle, kernel.handle, input.bytes / 4)
+impl[B: GpuResidentBuffer] GpuJob[B] {
+    internal fn _start(input: B, kernel: GpuKernel) -> Result[Self, Int64] where carries(.Ok: input) {
+        let output = input.sized_like(input._length() * 4)?
+        let handle = linea_gpu_map(gpu_identity(input), gpu_identity(output), kernel.handle, input._length())
         _gpu_job(output, handle)
     }
 
-    internal fn _reduce(input: GpuBuffer, kernel: GpuKernel, initial: Float32) -> Result[Self, Int64] {
+    internal fn _reduce(input: B, kernel: GpuKernel, initial: Float32) -> Result[Self, Int64] where carries(.Ok: input) {
         let output = input.sized_like(4)?
-        let handle = linea_gpu_reduce(input.handle, output.handle, kernel.handle, input.bytes / 4, UInt64(initial.to_bits()))
+        let handle = linea_gpu_reduce(gpu_identity(input), gpu_identity(output), kernel.handle, input._length(), UInt64(initial.to_bits()))
         _gpu_job(output, handle)
     }
 
-    internal fn _uniform(input: GpuBuffer, kernel: GpuKernel, uniform: Float32) -> Result[Self, Int64] {
-        let output = input.sized_like(input.bytes)?
-        let handle = linea_gpu_map_uniform(input.handle, output.handle, kernel.handle, input.bytes / 4, UInt64(uniform.to_bits()))
+    internal fn _uniform(input: B, kernel: GpuKernel, uniform: Float32) -> Result[Self, Int64] where carries(.Ok: input) {
+        let output = input.sized_like(input._length() * 4)?
+        let handle = linea_gpu_map_uniform(gpu_identity(input), gpu_identity(output), kernel.handle, input._length(), UInt64(uniform.to_bits()))
         _gpu_job(output, handle)
     }
 
-    internal fn _zip(left: GpuBuffer, right: GpuBuffer, kernel: GpuKernel) -> Result[Self, Int64] {
-        if left.bytes != right.bytes {
+    internal fn _zip(left: B, right: B, kernel: GpuKernel) -> Result[Self, Int64] where carries(.Ok: left) {
+        if left._length() != right._length() {
             return .Err(-22)
         }
-        let output = left.sized_like(left.bytes)?
-        let handle = linea_gpu_zip(left.handle, right.handle, output.handle, kernel.handle, left.bytes / 4)
+        let output = left.sized_like(left._length() * 4)?
+        let handle = linea_gpu_zip(gpu_identity(left), gpu_identity(right), gpu_identity(output), kernel.handle, left._length())
         _gpu_job(output, handle)
     }
 
-    internal fn _matmul(left: GpuBuffer, right: GpuBuffer, kernel: GpuKernel, rows: UInt64, inner: UInt64, columns: UInt64) -> Result[Self, Int64] {
+    internal fn _matmul(left: B, right: B, kernel: GpuKernel, rows: UInt64, inner: UInt64, columns: UInt64) -> Result[Self, Int64] where carries(.Ok: left) {
         if columns != 0 && rows > UInt64.max / columns {
             return .Err(-75)
         }
@@ -182,11 +393,11 @@ impl GpuJob {
             return .Err(-75)
         }
         let output = left.sized_like(count * 4)?
-        let handle = linea_gpu_matmul(left.handle, right.handle, output.handle, kernel.handle, rows, inner, columns)
+        let handle = linea_gpu_matmul(gpu_identity(left), gpu_identity(right), gpu_identity(output), kernel.handle, rows, inner, columns)
         _gpu_job(output, handle)
     }
 
-    internal fn _wait(sink self: Self) -> Result[GpuBuffer, Int64] {
+    internal fn _wait(sink self: Self) -> Result[B, Int64] where carries(.Ok: self) {
         let GpuJob { handle, output } = self
         let answer = linea_gpu_wait(handle)
         linea_gpu_submission_drop(handle)
@@ -199,7 +410,7 @@ impl GpuJob {
     }
 }
 
-impl Release for GpuJob {
+impl[B: GpuResidentBuffer] Release for GpuJob[B] {
     fn release(sink self: Self) {
         let GpuJob { handle, output } = self
         linea_gpu_submission_drop(handle)
@@ -211,22 +422,7 @@ internal fn _gpu_kernel(body: fn(value: Float32) -> Float32) -> GpuKernel {
     .{ handle = linea_gpu_function(body) }
 }
 
-impl GpuBuffer {
-    internal fn _length(self: Self) -> UInt64 {
-        self.bytes / 4
-    }
-
-    internal fn sized_like(self: Self, bytes: UInt64) -> Result[Self, Int64] {
-        let handle = linea_gpu_buffer_sized_like(self.handle, bytes)
-        if handle < 0 {
-            .Err(handle)
-        } else {
-            .Ok(.{ handle = UInt64(handle), bytes })
-        }
-    }
-}
-
-fn _gpu_job(sink output: GpuBuffer, handle: Int64) -> Result[GpuJob, Int64] {
+fn _gpu_job[B: GpuResidentBuffer](sink output: B, handle: Int64) -> Result[GpuJob[B], Int64] where carries(.Ok: output) {
     if handle < 0 {
         output.release()
         .Err(handle)

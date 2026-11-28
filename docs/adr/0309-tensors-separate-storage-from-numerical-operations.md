@@ -3,7 +3,8 @@
 Status: Accepted — 2026-11-26. Supersedes the library placement and result-session
 API of [0308](0308-device-tensors-run-ordinary-numerical-functions.md). Preserves
 its admission, numerical, explicit-transfer and native-lifetime contracts.
-Extended by [0310](0310-device-admission-is-sealed-from-public-callables.md).
+Extended by [0310](0310-device-admission-is-sealed-from-public-callables.md) and
+[0322](0322-device-allocation-domains-retain-arena-observations.md).
 
 ## Context
 

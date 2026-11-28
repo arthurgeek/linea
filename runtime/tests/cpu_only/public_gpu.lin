@@ -1,4 +1,5 @@
 import std.gpu
+import std.tensor
 
 fn square(value: Float32) -> Float32 {
     value * value
@@ -9,14 +10,27 @@ fn main() -> UInt8 {
         return 1
     }
     match gpu.Device.open() {
-        Err(reason) => if reason == .Unavailable { 0 } else { 2 },
+        Err(reason) => if reason == .Unavailable {
+            0
+        } else {
+            2
+        },
         Ok(device) => {
             defer let owner = device
             // The compiler sees a reachable device root even though the
             // unavailable provider prevents reaching it at run time.
             defer let input = owner.matrix([[Float32(2.0)]]).unwrap()
             defer let output = input.map(square).unwrap()
-            if output.dimensions()[0] == 1 { 4 } else { 5 }
+            defer var arena = gpu.Arena.open(owner, 1048576).unwrap()
+            let resident = tensor.matrix_in(arena.handle(), [[Float32(2.0)]]).unwrap()
+            let mapped = resident.map(square).unwrap()
+            let shape = mapped.dimensions()
+            &arena.reset().unwrap()
+            if output.dimensions()[0] == 1 && shape[0] == 1 {
+                4
+            } else {
+                5
+            }
         },
     }
 }

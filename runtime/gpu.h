@@ -9,6 +9,15 @@
  * Missing loaders/devices remain errors; no CPU execution is substituted. */
 long linea_gpu_open(void);
 void linea_gpu_close(unsigned long device);
+/* Arena limits charge actual VkDeviceMemory commitments. Views are arena-owned;
+ * reset/drop park until native pins detach, then invalidate every old view.
+ * A view reserves at least four descriptor bytes, including for logical zero.
+ * Failed transfers after reservation consume that space until reset. Dropping
+ * an individual arena view is a no-op; the arena owns all view metadata. */
+long linea_gpu_arena_new(unsigned long device, unsigned long byte_limit);
+long linea_gpu_arena_buffer_new(unsigned long arena, unsigned long bytes);
+long linea_gpu_arena_reset(unsigned long arena);
+void linea_gpu_arena_drop(unsigned long arena);
 long linea_gpu_buffer_new(unsigned long device, unsigned long bytes);
 void linea_gpu_buffer_drop(unsigned long buffer);
 

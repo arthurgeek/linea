@@ -1,4 +1,4 @@
-// Run one numerical pipeline on host storage and an explicitly opened device.
+// Run one numerical pipeline on host, system-device and arena-device storage.
 import std.gpu
 import std.io
 import std.tensor
@@ -44,18 +44,28 @@ fn main() -> Result[UInt8, PipelineError] {
         },
         Err(error) => return .Err(.Gpu(error)),
     }
-    defer let left = device.upload(host_left.values(), host_left.dimensions())?
-    defer let right = device.upload(host_right.values(), host_right.dimensions())?
+    defer let left = tensor.from_slice_in(device, host_left.values(), host_left.dimensions())?
+    defer let right = tensor.from_slice_in(device, host_right.values(), host_right.dimensions())?
     defer let result = compute(left, right)?
     defer let values = gpu.download(result)?
     println("GPU: {values[0]}")?
-    .Ok(
-        if values[0].to_bits() == reference.to_bits() {
-            0
-        } else {
-            1
-        },
-    )
+    if values[0].to_bits() != reference.to_bits() {
+        return .Ok(1)
+    }
+
+    defer var arena = gpu.Arena.open(device, byte_limit: 1048576)?
+    for epoch in UInt64(0)..2 {
+        let arena_left = tensor.matrix_in(arena.handle(), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])?
+        let arena_right = tensor.matrix_in(arena.handle(), [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]])?
+        let answer = compute(arena_left, arena_right)?
+        defer let host = gpu.download(answer)?
+        println("Arena epoch {epoch + 1}: {host[0]}")?
+        if host[0].to_bits() != reference.to_bits() {
+            return .Ok(2)
+        }
+        &arena.reset()?
+    }
+    .Ok(0)
 }
 
 test "GPU pipeline matches the complete host algorithm" {

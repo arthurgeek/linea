@@ -54,6 +54,8 @@ struct gpu_device {
     pthread_mutex_t references_lock;
     pthread_mutex_t queue_lock;
     unsigned long references;
+    struct linea_park storage_changed;
+    int terminal;
 };
 
 struct gpu_buffer {
@@ -64,6 +66,16 @@ struct gpu_buffer {
     unsigned long bytes;
     unsigned long references;
     unsigned long in_flight;
+    struct gpu_arena *arena;
+    struct gpu_buffer *block, *next, *reuse_next;
+    unsigned long offset, capacity, allocated, cursor;
+};
+
+struct gpu_arena {
+    struct gpu_device *device;
+    struct gpu_buffer *blocks, *views, *current;
+    unsigned long limit, committed, pending;
+    int draining;
 };
 
 static long gpu_error(VkResult status) {
@@ -78,6 +90,7 @@ static void device_destroy(struct gpu_device *d) {
     if (d->library) dlclose(d->library);
     if (pthread_mutex_destroy(&d->queue_lock) != 0) abort();
     if (pthread_mutex_destroy(&d->references_lock) != 0) abort();
+    linea_park_destroy(&d->storage_changed);
     free(d);
 }
 
@@ -113,6 +126,8 @@ long linea_gpu_open(void) {
         free(d);
         return -lock_status;
     }
+    lock_status = linea_park_init(&d->storage_changed);
+    if (lock_status != 0) { pthread_mutex_destroy(&d->queue_lock); pthread_mutex_destroy(&d->references_lock); free(d); return -lock_status; }
     d->references = 1;
     long error = -ENODEV;
     VkExtensionProperties *extensions = NULL;
@@ -221,6 +236,7 @@ fail:
 void linea_gpu_buffer_drop(unsigned long buffer) {
     struct gpu_buffer *b = (struct gpu_buffer *)(uintptr_t)buffer;
     struct gpu_device *d = b->device;
+    if (b->arena) return;
     if (pthread_mutex_lock(&d->references_lock) != 0) abort();
     int last = --b->references == 0;
     if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
@@ -232,7 +248,8 @@ void linea_gpu_buffer_drop(unsigned long buffer) {
     linea_gpu_close((unsigned long)(uintptr_t)d);
 }
 
-long linea_gpu_buffer_new(unsigned long device, unsigned long bytes) {
+static long buffer_new(unsigned long device, unsigned long bytes, unsigned long budget, int *over_budget) {
+    if (over_budget) *over_budget = 0;
     struct gpu_device *d = (struct gpu_device *)(uintptr_t)device;
     if (bytes > d->properties.limits.maxStorageBufferRange) return -EOVERFLOW;
     struct gpu_buffer *b = calloc(1, sizeof(*b));
@@ -240,6 +257,7 @@ long linea_gpu_buffer_new(unsigned long device, unsigned long bytes) {
     device_retain(d);
     b->device = d;
     b->bytes = bytes;
+    b->capacity = bytes ? bytes : 4;
     b->references = 1;
     long error = -ENOMEM;
     VkBufferCreateInfo info = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -247,10 +265,15 @@ long linea_gpu_buffer_new(unsigned long device, unsigned long bytes) {
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
     VkBuffer made_buffer;
     VkResult r = d->api.CreateBuffer(d->logical, &info, NULL, &made_buffer);
-    if (r != VK_SUCCESS) { error = gpu_error(r); goto fail; }
+    if (r != VK_SUCCESS) { if (r == VK_ERROR_DEVICE_LOST) d->terminal = 1; error = gpu_error(r); goto fail; }
     b->buffer = made_buffer;
     VkMemoryRequirements requirements;
     d->api.GetBufferMemoryRequirements(d->logical, b->buffer, &requirements);
+    if (requirements.size > budget || requirements.size > ULONG_MAX) {
+        if (over_budget) *over_budget = 1;
+        error = -ENOMEM; goto fail;
+    }
+    b->allocated = (unsigned long)requirements.size;
     uint32_t memory_type = UINT32_MAX;
     for (uint32_t i = 0; i < d->memory.memoryTypeCount; ++i) {
         if ((requirements.memoryTypeBits & (1u << i)) &&
@@ -264,13 +287,13 @@ long linea_gpu_buffer_new(unsigned long device, unsigned long bytes) {
         .allocationSize = requirements.size, .memoryTypeIndex = memory_type };
     VkDeviceMemory made_memory;
     r = d->api.AllocateMemory(d->logical, &allocation, NULL, &made_memory);
-    if (r != VK_SUCCESS) { error = gpu_error(r); goto fail; }
+    if (r != VK_SUCCESS) { if (r == VK_ERROR_DEVICE_LOST) d->terminal = 1; error = gpu_error(r); goto fail; }
     b->memory = made_memory;
     r = d->api.BindBufferMemory(d->logical, b->buffer, b->memory, 0);
-    if (r != VK_SUCCESS) { error = gpu_error(r); goto fail; }
+    if (r != VK_SUCCESS) { if (r == VK_ERROR_DEVICE_LOST) d->terminal = 1; error = gpu_error(r); goto fail; }
     void *made_mapping;
     r = d->api.MapMemory(d->logical, b->memory, 0, VK_WHOLE_SIZE, 0, &made_mapping);
-    if (r != VK_SUCCESS) { error = gpu_error(r); goto fail; }
+    if (r != VK_SUCCESS) { if (r == VK_ERROR_DEVICE_LOST) d->terminal = 1; error = gpu_error(r); goto fail; }
     b->mapped = made_mapping;
     if ((uintptr_t)b > LONG_MAX) { error = -EOVERFLOW; goto fail; }
     return (long)(uintptr_t)b;
@@ -279,19 +302,146 @@ fail:
     return error;
 }
 
+long linea_gpu_buffer_new(unsigned long device, unsigned long bytes) {
+    struct gpu_device *d = (struct gpu_device *)(uintptr_t)device;
+    linea_park_lock(&d->storage_changed);
+    long result = d->terminal ? -EIO : buffer_new(device, bytes, ULONG_MAX, NULL);
+    linea_park_unlock(&d->storage_changed);
+    return result;
+}
+
+static unsigned long gcd(unsigned long a, unsigned long b) {
+    while (b) { unsigned long rem = a % b; a = b; b = rem; }
+    return a;
+}
+static int view_alignment(struct gpu_device *d, unsigned long *answer) {
+    unsigned long alignment = 4;
+    VkDeviceSize limits[2] = { d->properties.limits.minStorageBufferOffsetAlignment,
+        d->properties.limits.nonCoherentAtomSize };
+    for (unsigned i = 0; i < 2; ++i) {
+        if (limits[i] > ULONG_MAX) return 0;
+        unsigned long part = (unsigned long)limits[i];
+        if (!part) part = 1;
+        unsigned long factor = part / gcd(alignment, part);
+        if (alignment > ULONG_MAX / factor) return 0;
+        alignment *= factor;
+    }
+    *answer = alignment; return 1;
+}
+long linea_gpu_arena_new(unsigned long device, unsigned long limit) {
+    struct gpu_device *d = (struct gpu_device *)(uintptr_t)device;
+    struct gpu_arena *a = calloc(1, sizeof(*a));
+    if (!a) return -ENOMEM;
+    if ((uintptr_t)a > LONG_MAX) { free(a); return -EOVERFLOW; }
+    device_retain(d); a->device = d; a->limit = limit;
+    return (long)(uintptr_t)a;
+}
+long linea_gpu_arena_buffer_new(unsigned long arena, unsigned long bytes) {
+    struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)arena;
+    struct gpu_device *d = a->device;
+    unsigned long alignment, extent = bytes ? bytes : 4;
+    if (extent > d->properties.limits.maxStorageBufferRange || !view_alignment(d, &alignment)) return -EOVERFLOW;
+    linea_park_lock(&d->storage_changed);
+    long result = -ENOMEM;
+    if (d->terminal) { result = -EIO; goto done; }
+    if (a->draining) { result = -EBUSY; goto done; }
+    struct gpu_buffer *view = calloc(1, sizeof(*view));
+    if (!view) goto done;
+    if ((uintptr_t)view > LONG_MAX) { free(view); result = -EOVERFLOW; goto done; }
+    struct gpu_buffer *block;
+    unsigned long offset = 0;
+    /* The reuse chain advances monotonically per epoch: successful reservations
+     * visit each retained block at most once, then use the current block. */
+    for (block = a->current; block; block = block->reuse_next) {
+        unsigned long gap = (alignment - block->cursor % alignment) % alignment;
+        if (gap > block->capacity - block->cursor) continue;
+        offset = block->cursor + gap;
+        if (extent <= block->capacity - offset) break;
+    }
+    if (!block) {
+        unsigned long remaining = a->limit - a->committed;
+        unsigned long preferred = a->committed < 65536 ? 65536 : a->committed;
+        if (preferred < extent) preferred = extent;
+        if (preferred > remaining) preferred = remaining;
+        if (preferred > d->properties.limits.maxStorageBufferRange) preferred = d->properties.limits.maxStorageBufferRange;
+        if (preferred < extent) { free(view); goto done; }
+        int over_budget = 0;
+        result = buffer_new((unsigned long)(uintptr_t)d, preferred, remaining, &over_budget);
+        if (over_budget && preferred != extent)
+            result = buffer_new((unsigned long)(uintptr_t)d, extent, remaining, NULL);
+        if (result < 0) { free(view); goto done; }
+        block = (struct gpu_buffer *)(uintptr_t)result;
+        block->next = a->blocks; a->blocks = block;
+        a->committed += block->allocated; offset = 0;
+    }
+    /* Commit only after metadata and all Vulkan setup succeed. Atom alignment
+     * of the next start reserves the current view's entire cache atom. */
+    a->current = block;
+    block->cursor = offset + extent;
+    view->device = d; view->arena = a; view->block = block;
+    view->buffer = block->buffer; view->memory = block->memory;
+    view->mapped = (unsigned char *)block->mapped + offset;
+    view->offset = offset; view->bytes = bytes; view->allocated = block->allocated;
+    view->next = a->views; a->views = view;
+    result = (long)(uintptr_t)view;
+done:
+    linea_park_unlock(&d->storage_changed); return result;
+}
+static void arena_rewind(struct gpu_arena *a) {
+    while (a->views) { struct gpu_buffer *next = a->views->next; free(a->views); a->views = next; }
+    for (struct gpu_buffer *b = a->blocks; b; b = b->next) { b->cursor = 0; b->reuse_next = b->next; }
+    a->current = a->blocks;
+}
+long linea_gpu_arena_reset(unsigned long arena) {
+    struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)arena;
+    struct gpu_device *d = a->device;
+    linea_park_lock(&d->storage_changed);
+    while (a->draining) (void)linea_park(&d->storage_changed, 0);
+    a->draining = 1;
+    while (a->pending) (void)linea_park(&d->storage_changed, 0);
+    if (pthread_mutex_lock(&d->references_lock) != 0) abort();
+    arena_rewind(a);
+    if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
+    a->draining = 0; long result = d->terminal ? -EIO : 0;
+    linea_unpark(&d->storage_changed);
+    linea_park_unlock(&d->storage_changed); return result;
+}
+void linea_gpu_arena_drop(unsigned long arena) {
+    struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)arena;
+    struct gpu_device *d = a->device;
+    (void)linea_gpu_arena_reset(arena);
+    while (a->blocks) { struct gpu_buffer *next = a->blocks->next;
+        linea_gpu_buffer_drop((unsigned long)(uintptr_t)a->blocks); a->blocks = next; }
+    free(a); linea_gpu_close((unsigned long)(uintptr_t)d);
+}
+static VkMappedMemoryRange cache_range(struct gpu_buffer *b, unsigned long bytes) {
+    unsigned long atom = (unsigned long)b->device->properties.limits.nonCoherentAtomSize;
+    if (!atom) atom = 1;
+    unsigned long start = b->offset - b->offset % atom;
+    unsigned long end = b->offset + bytes;
+    unsigned long gap = (atom - end % atom) % atom;
+    end += gap < b->allocated - end ? gap : b->allocated - end;
+    return (VkMappedMemoryRange){ .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        .memory = b->memory, .offset = start, .size = end - start };
+}
+
 /* A host access and the reservation of a submission are one decision under
  * the device lock. The certified caller still keeps its buffer owner alive;
  * this guard serializes activity, not the lifetime of an unowned C handle. */
 static int buffer_access_begin(struct gpu_buffer *b) {
     struct gpu_device *d = b->device;
+    linea_park_lock(&d->storage_changed);
     if (pthread_mutex_lock(&d->references_lock) != 0) abort();
     if (!b->in_flight) return 1;
     if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
+    linea_park_unlock(&d->storage_changed);
     return 0;
 }
 
 static void buffer_access_end(struct gpu_buffer *b) {
-    if (pthread_mutex_unlock(&b->device->references_lock) != 0) abort();
+    struct gpu_device *d = b->device;
+    if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
+    linea_park_unlock(&d->storage_changed);
 }
 
 long linea_gpu_buffer_write(unsigned long buffer, const void *source, unsigned long bytes) {
@@ -300,8 +450,7 @@ long linea_gpu_buffer_write(unsigned long buffer, const void *source, unsigned l
     if (!bytes) return 0;
     if (!buffer_access_begin(b)) return -EBUSY;
     memcpy(b->mapped, source, bytes);
-    VkMappedMemoryRange range = { .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        .memory = b->memory, .size = VK_WHOLE_SIZE };
+    VkMappedMemoryRange range = cache_range(b, bytes);
     VkResult r = b->device->api.FlushMappedMemoryRanges(b->device->logical, 1, &range);
     buffer_access_end(b);
     return r == VK_SUCCESS ? 0 : gpu_error(r);
@@ -312,8 +461,7 @@ long linea_gpu_buffer_read(unsigned long buffer, void *destination, unsigned lon
     if (bytes > b->bytes) return -EINVAL;
     if (!bytes) return 0;
     if (!buffer_access_begin(b)) return -EBUSY;
-    VkMappedMemoryRange range = { .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        .memory = b->memory, .size = VK_WHOLE_SIZE };
+    VkMappedMemoryRange range = cache_range(b, bytes);
     VkResult r = b->device->api.InvalidateMappedMemoryRanges(b->device->logical, 1, &range);
     if (r == VK_SUCCESS) memcpy(destination, b->mapped, bytes);
     buffer_access_end(b);
@@ -322,6 +470,7 @@ long linea_gpu_buffer_read(unsigned long buffer, void *destination, unsigned lon
 
 struct gpu_submission {
     struct linea_park park;
+    struct gpu_device *device;
     struct gpu_buffer *input;
     struct gpu_buffer *output;
     struct gpu_buffer *right;
@@ -338,12 +487,11 @@ struct gpu_submission {
     long status;
 };
 
-static void submission_release(struct gpu_submission *s) {
-    linea_park_lock(&s->park);
-    int last = --s->references == 0;
-    linea_park_unlock(&s->park);
-    if (!last) return;
-    struct gpu_device *d = s->input->device;
+/* Lock order: storage_changed, then references_lock. Neither is held during
+ * queue calls, fence waits or Vulkan submission teardown. Each argument occurrence
+ * owns one pin; repeated read inputs acquire and release identically. */
+static void submission_detach(struct gpu_submission *s) {
+    struct gpu_device *d = s->device;
     if (s->fence) d->api.DestroyFence(d->logical, s->fence, NULL);
     if (s->commands) d->api.DestroyCommandPool(d->logical, s->commands, NULL);
     if (s->descriptors) d->api.DestroyDescriptorPool(d->logical, s->descriptors, NULL);
@@ -351,16 +499,36 @@ static void submission_release(struct gpu_submission *s) {
     if (s->layout) d->api.DestroyPipelineLayout(d->logical, s->layout, NULL);
     if (s->set_layout) d->api.DestroyDescriptorSetLayout(d->logical, s->set_layout, NULL);
     if (s->shader) d->api.DestroyShaderModule(d->logical, s->shader, NULL);
-    linea_gpu_buffer_drop((unsigned long)(uintptr_t)s->input);
-    linea_gpu_buffer_drop((unsigned long)(uintptr_t)s->output);
-    linea_gpu_buffer_drop((unsigned long)(uintptr_t)s->right);
-    linea_park_destroy(&s->park);
-    free(s);
+    s->fence = VK_NULL_HANDLE; s->commands = VK_NULL_HANDLE;
+    s->descriptors = VK_NULL_HANDLE; s->pipeline = VK_NULL_HANDLE;
+    s->layout = VK_NULL_HANDLE; s->set_layout = VK_NULL_HANDLE; s->shader = VK_NULL_HANDLE;
+    linea_park_lock(&d->storage_changed);
+    if (pthread_mutex_lock(&d->references_lock) != 0) abort();
+    struct gpu_buffer *buffers[3] = {s->input, s->output, s->right};
+    for (unsigned i = 0; i < 3; ++i) {
+        if (!buffers[i]->in_flight) abort();
+        --buffers[i]->in_flight;
+        if (buffers[i]->arena) { if (!buffers[i]->arena->pending) abort(); --buffers[i]->arena->pending; }
+    }
+    if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
+    for (unsigned i = 0; i < 3; ++i) linea_gpu_buffer_drop((unsigned long)(uintptr_t)buffers[i]);
+    s->input = NULL; s->output = NULL; s->right = NULL;
+    linea_unpark(&d->storage_changed);
+    linea_park_unlock(&d->storage_changed);
+}
+static void submission_release(struct gpu_submission *s) {
+    linea_park_lock(&s->park);
+    int last = --s->references == 0;
+    linea_park_unlock(&s->park);
+    if (!last) return;
+    struct gpu_device *d = s->device;
+    linea_park_destroy(&s->park); free(s);
+    linea_gpu_close((unsigned long)(uintptr_t)d);
 }
 
 static void *submission_complete(void *argument) {
     struct gpu_submission *s = argument;
-    struct gpu_device *d = s->input->device;
+    struct gpu_device *d = s->device;
     linea_park_lock(&s->park);
     while (!s->ready) (void)linea_park(&s->park, 0);
     int submitted = s->ready > 0;
@@ -374,12 +542,9 @@ static void *submission_complete(void *argument) {
          * would require a separate proof that commands no longer use them. */
         if (r != VK_SUCCESS && r != VK_ERROR_DEVICE_LOST) abort();
         s->status = r == VK_SUCCESS ? 0 : gpu_error(r);
+        if (r == VK_ERROR_DEVICE_LOST) { linea_park_lock(&d->storage_changed); d->terminal = 1; linea_park_unlock(&d->storage_changed); }
     }
-    if (pthread_mutex_lock(&d->references_lock) != 0) abort();
-    --s->input->in_flight;
-    --s->output->in_flight;
-    --s->right->in_flight;
-    if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
+    submission_detach(s);
     linea_park_lock(&s->park);
     s->done = 1;
     linea_unpark(&s->park);
@@ -402,6 +567,12 @@ void linea_gpu_submission_drop(unsigned long submission) {
     submission_release((struct gpu_submission *)(uintptr_t)submission);
 }
 
+static int buffer_overlap(struct gpu_buffer *a, struct gpu_buffer *b) {
+    if (a->memory != b->memory) return 0;
+    unsigned long ae = a->bytes ? a->bytes : 4, be = b->bytes ? b->bytes : 4;
+    return a->offset < b->offset + be && b->offset < a->offset + ae;
+}
+
 /* One command path owns layouts, synchronization and completion for every
  * kernel kind. Repeated input handles deliberately acquire repeated references
  * and in-flight counts, so aliased matrix operands have symmetric settlement. */
@@ -412,7 +583,7 @@ static long gpu_dispatch(unsigned long input, unsigned long right, unsigned long
     struct gpu_buffer *b = (struct gpu_buffer *)(uintptr_t)output;
     struct gpu_buffer *c = (struct gpu_buffer *)(uintptr_t)right;
     struct gpu_device *d = a->device;
-    if (a == b || c == b || b->device != d || c->device != d ||
+    if (b->device != d || c->device != d || buffer_overlap(a, b) || buffer_overlap(c, b) ||
         !image || image_bytes < 20 || image_bytes % 4 || (uintptr_t)image % 4) return -EINVAL;
     if (groups > d->properties.limits.maxComputeWorkGroupCount[0] ||
         d->properties.limits.maxComputeWorkGroupInvocations < 64 ||
@@ -427,16 +598,27 @@ static long gpu_dispatch(unsigned long input, unsigned long right, unsigned long
     s->output = b;
     s->right = c;
     s->references = 1;
+    s->device = d; device_retain(d);
+    linea_park_lock(&d->storage_changed);
+    if (d->terminal || (a->arena && a->arena->draining) || (b->arena && b->arena->draining) || (c->arena && c->arena->draining)) {
+        long rejected = d->terminal ? -EIO : -EBUSY;
+        linea_park_unlock(&d->storage_changed); submission_release(s); return rejected;
+    }
     if (pthread_mutex_lock(&d->references_lock) != 0) abort();
     for (unsigned i = 0; i < 3; ++i) {
-        if (buffers[i]->references == ULONG_MAX) abort();
-        ++buffers[i]->references;
+        if (buffers[i]->in_flight == ULONG_MAX || buffers[i]->references == ULONG_MAX) abort();
+        ++buffers[i]->in_flight;
+        if (buffers[i]->arena) {
+            if (buffers[i]->arena->pending == ULONG_MAX) abort();
+            ++buffers[i]->arena->pending;
+        } else ++buffers[i]->references;
     }
     if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
-    if (!groups) { s->done = 1; return (long)(uintptr_t)s; }
+    linea_park_unlock(&d->storage_changed);
+    if (!groups) { submission_detach(s); s->done = 1; return (long)(uintptr_t)s; }
     long error = -EIO;
     VkResult r;
-#define GPU_CHECK(expr) do { r = (expr); if (r != VK_SUCCESS) { error = gpu_error(r); goto fail; } } while (0)
+#define GPU_CHECK(expr) do { r = (expr); if (r != VK_SUCCESS) { if (r == VK_ERROR_DEVICE_LOST) { linea_park_lock(&d->storage_changed); d->terminal = 1; linea_park_unlock(&d->storage_changed); } error = gpu_error(r); goto fail; } } while (0)
     VkShaderModuleCreateInfo shader = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .codeSize = image_bytes, .pCode = image };
     VkShaderModule made_shader;
@@ -476,7 +658,7 @@ static long gpu_dispatch(unsigned long input, unsigned long right, unsigned long
     GPU_CHECK(d->api.AllocateDescriptorSets(d->logical, &allocate, &set));
     VkDescriptorBufferInfo buffer_info[3];
     for (unsigned i = 0; i < 3; ++i)
-        buffer_info[i] = (VkDescriptorBufferInfo){ .buffer = buffers[i]->buffer,
+        buffer_info[i] = (VkDescriptorBufferInfo){ .buffer = buffers[i]->buffer, .offset = buffers[i]->offset,
             .range = buffers[i]->bytes ? buffers[i]->bytes : 4 };
     VkWriteDescriptorSet writes[3];
     for (uint32_t i = 0; i < 3; ++i)
@@ -526,20 +708,11 @@ static long gpu_dispatch(unsigned long input, unsigned long right, unsigned long
     /* Allocate completion execution before submitting commands, so failure
      * never forces a carrier to wait for a GPU merely to recover resources. */
     s->references = 2;
-    if (pthread_mutex_lock(&d->references_lock) != 0) abort();
-    for (unsigned i = 0; i < 3; ++i) {
-        if (buffers[i]->in_flight == ULONG_MAX) abort();
-        ++buffers[i]->in_flight;
-    }
-    if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
     pthread_t worker;
     status = pthread_create(&worker, &attributes, submission_complete, s);
     if (pthread_attr_destroy(&attributes) != 0) abort();
     if (status != 0) {
         s->references = 1;
-        if (pthread_mutex_lock(&d->references_lock) != 0) abort();
-        for (unsigned i = 0; i < 3; ++i) --buffers[i]->in_flight;
-        if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
         error = -status;
         goto fail;
     }
@@ -551,6 +724,7 @@ static long gpu_dispatch(unsigned long input, unsigned long right, unsigned long
     linea_park_lock(&s->park);
     s->ready = r == VK_SUCCESS ? 1 : -1;
     if (r != VK_SUCCESS) s->status = gpu_error(r);
+    if (r == VK_ERROR_DEVICE_LOST) { linea_park_lock(&d->storage_changed); d->terminal = 1; linea_park_unlock(&d->storage_changed); }
     linea_unpark(&s->park);
     linea_park_unlock(&s->park);
     if (r == VK_SUCCESS) return (long)(uintptr_t)s;
@@ -558,6 +732,7 @@ static long gpu_dispatch(unsigned long input, unsigned long right, unsigned long
     submission_release(s);
     return error;
 fail:
+    submission_detach(s);
     submission_release(s);
     return error;
 #undef GPU_CHECK
@@ -575,7 +750,8 @@ long linea_gpu_submit(unsigned long input, unsigned long output, const void *ima
 
 long linea_gpu_buffer_sized_like(unsigned long input, unsigned long bytes) {
     struct gpu_buffer *b = (struct gpu_buffer *)(uintptr_t)input;
-    return linea_gpu_buffer_new((unsigned long)(uintptr_t)b->device, bytes);
+    return b->arena ? linea_gpu_arena_buffer_new((unsigned long)(uintptr_t)b->arena, bytes) :
+        linea_gpu_buffer_new((unsigned long)(uintptr_t)b->device, bytes);
 }
 
 long linea_gpu_buffer_like(unsigned long buffer) {

@@ -1,0 +1,10 @@
+import std.mem
+
+struct Forged {}
+
+impl mem.GpuResidentBuffer for Forged {}
+
+fn main() -> UInt8 {
+    let _forged = Forged {}
+    0
+}

@@ -1,6 +1,7 @@
 // Multiply row-major matrices while their buffers stay on the GPU.
 import std.gpu
 import std.io
+import std.tensor
 import std.testing
 
 use io.IoError
@@ -21,8 +22,8 @@ test "halving preserves small Float32 readings" {
 
 fn main() -> Result[UInt8, MatrixError] {
     defer let device = gpu.Device.open()?
-    defer let left = device.matrix([[1.0, 2.0], [3.0, 4.0]])?
-    defer let right = device.matrix([[2.0, 0.0], [0.0, 3.0]])?
+    defer let left = tensor.matrix_in(device, [[1.0, 2.0], [3.0, 4.0]])?
+    defer let right = tensor.matrix_in(device, [[2.0, 0.0], [0.0, 3.0]])?
     defer let product = left.matmul(right)?
     defer let result = product.map(half)?
     defer let host = gpu.download(result)?

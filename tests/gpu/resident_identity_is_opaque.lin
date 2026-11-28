@@ -1,0 +1,6 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let _forged = mem._GpuIdentity { handle = 42 }
+    0
+}

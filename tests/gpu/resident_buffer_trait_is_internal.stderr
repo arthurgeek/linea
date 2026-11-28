@@ -1,0 +1,5 @@
+error[M-Vis]: `GpuResidentBuffer` is internal to another root
+ --> tests/gpu/resident_buffer_trait_is_internal.lin:5:10
+  |
+5 | impl mem.GpuResidentBuffer for Forged {}
+  |          ^^^^^^^^^^^^^^^^^ only modules in the same root may name it

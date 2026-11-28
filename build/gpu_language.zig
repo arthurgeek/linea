@@ -2,6 +2,7 @@ const std = @import("std");
 
 const programs = [_][]const u8{
     "runtime/tests/gpu_runtime/numerical_map.lin",
+    "runtime/tests/gpu_runtime/numerical_arena.lin",
     "runtime/tests/gpu_runtime/numerical_values.lin",
     "runtime/tests/gpu_runtime/numerical_reduce.lin",
     "runtime/tests/gpu_runtime/numerical_matmul.lin",

@@ -1,4 +1,4 @@
-error[O-Leak]: `tensor` (a linear `tensor.Tensor[Float32, 1, gpu.Storage]`) is still owned when this path leaves
+error[O-Leak]: `tensor` (a linear `tensor.Tensor[Float32, 1, gpu.Resident[mem.GpuBuffer]]`) is still owned when this path leaves
  --> tests/gpu/tensor_requires_settlement.lin:6:9
   |
 6 |     let tensor = device.upload(values.as_slice(), [UInt64(1)]).unwrap()

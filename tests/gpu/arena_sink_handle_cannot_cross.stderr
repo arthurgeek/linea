@@ -1,0 +1,7 @@
+error[O-Cross]: a task cannot take a value observing `arena`, which its creator may read too: a `gpu.Arena` is not `Shareable`
+  --> tests/gpu/arena_sink_handle_cannot_cross.lin:13:27
+   |
+13 |     let body = sink [sink handle] |sink me: Chan[End]| {
+   |                           ^^^^^^ this capture observes it
+   |
+   = help: reading this value may change it; move it into one task, or give the task a value that reading never changes

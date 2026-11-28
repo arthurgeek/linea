@@ -1,0 +1,5 @@
+error[M-Opaque]: `_GpuIdentity` is opaque outside `mem`
+ --> tests/gpu/resident_identity_is_opaque.lin:4:19
+  |
+4 |     let _forged = mem._GpuIdentity { handle = 42 }
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only its own module can build one

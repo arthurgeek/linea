@@ -393,7 +393,8 @@ pub const RawAccesses = struct {
         "parse_float32_bits", "_spawn",             "read_pipe",        "write_slice_pipe",
         "_tls_client_config", "_tls_server_config", "_tls_client_open", "_tls_receive",
         "_tls_transmit",      "_tls_decrypt",       "_tls_encrypt",     "_tls_alpn",
-        "resolve_name",       "_gpu_upload",        "_gpu_download",
+        "resolve_name",       "_gpu_upload",        "_gpu_download",    "_gpu_copy_slice",
+        "_gpu_copy_rows",
     };
 
     /// Identify private storage declarations before checking their generic signatures.

@@ -4,6 +4,10 @@
 
 int main(void) {
     assert(linea_gpu_open() == -ENODEV);
+    assert(linea_gpu_arena_new(0, 0) == -ENODEV);
+    assert(linea_gpu_arena_buffer_new(0, 0) == -ENODEV);
+    assert(linea_gpu_arena_reset(0) == -ENODEV);
+    linea_gpu_arena_drop(0);
     assert(linea_gpu_buffer_new(0, 4) == -ENODEV);
     assert(linea_gpu_buffer_write(0, 0, 0) == -ENODEV);
     assert(linea_gpu_buffer_read(0, 0, 0) == -ENODEV);
