@@ -1,0 +1,9 @@
+import std.gpu
+
+fn main() -> UInt8 {
+    let values = [Float32(1.0)]
+    defer let device = gpu.Device.open().unwrap()
+    let tensor = device.upload(values.as_slice(), [UInt64(1)]).unwrap()
+    let _dimensions = tensor.dimensions()
+    0
+}

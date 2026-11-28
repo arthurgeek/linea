@@ -1,0 +1,31 @@
+import std.gpu
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn negate(value: Float32) -> Float32 {
+    -value
+}
+
+fn main() -> UInt8 {
+    let values = [
+        Float32.from_bits(1),
+        Float32.from_bits(3),
+        Float32.from_bits(8388608),
+        Float32.from_bits(8388607),
+        Float32(1.0),
+        Float32.from_bits(2147483648),
+    ]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(6)]).unwrap()
+    defer let halved = input.map(half).unwrap()
+    defer let output = halved.map(negate).unwrap()
+    defer let host = gpu.download(output).unwrap()
+    for i in UInt64(0)..6 {
+        if host[i].to_bits() != negate(half(values[i])).to_bits() {
+            return 1
+        }
+    }
+    0
+}

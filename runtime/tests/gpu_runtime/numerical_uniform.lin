@@ -1,0 +1,40 @@
+import std.gpu
+import std.tensor
+
+fn scale(value: Float32, factor: Float32) -> Float32 { value * factor }
+fn difference(left: Float32, right: Float32) -> Float32 { left - right }
+
+struct CpuBody {}
+impl tensor.MapBody for CpuBody {
+    type Element = Float32
+    fn call(_self: Self, value: Float32) -> Float32 { value * 2.0 }
+}
+
+fn main() -> UInt8 {
+    let values = [Float32.from_bits(1), Float32.from_bits(2), Float32.from_bits(8388607), Float32.from_bits(8388608), Float32.from_bits(2147483648), Float32(2.0), Float32.from_bits(2143289345)]
+    let factors = [Float32.from_bits(1), Float32.from_bits(2147483648), Float32(0.5), Float32.from_bits(1065353217), Float32.from_bits(2143289345), Float32.from_bits(2139095040)]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(7)]).unwrap()
+    for factor in factors.as_slice() {
+        defer let output = input.map(tensor.uniform(scale, *factor)).unwrap()
+        defer let host = gpu.download(output).unwrap()
+        for index in UInt64(0)..7 {
+            if host[index].to_bits() != scale(values[index], *factor).to_bits() { return 1 }
+        }
+    }
+    let right_values: [Float32; 7] = [2.0, 1.0, -1.0, 0.5, 3.0, 4.0, 5.0]
+    defer let right = device.upload(right_values.as_slice(), [UInt64(7)]).unwrap()
+    defer let zipped = input.zip_with(right, difference).unwrap()
+    defer let host = gpu.download(zipped).unwrap()
+    for index in UInt64(0)..7 {
+        if host[index].to_bits() != difference(values[index], right_values[index]).to_bits() { return 2 }
+    }
+    defer let cpu_input = tensor.matrix([[4.0]]).unwrap()
+    defer let cpu_output = cpu_input.map(CpuBody {}).unwrap()
+    if cpu_output.values()[0] != 8.0 { return 3 }
+    let refused = match input.map(CpuBody {}) {
+        Err(reason) => reason == .UnsupportedFunction,
+        Ok(output) => { output.release(); false },
+    }
+    if refused { 0 } else { 4 }
+}

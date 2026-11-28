@@ -1,0 +1,19 @@
+import std.gpu
+
+fn combine(left: Float32, right: Float32) -> Float32 {
+    left * 0.5 + right
+}
+
+fn main() -> UInt8 {
+    let values = [Float32(1.0), 2.0, 3.0, 4.0]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(4)]).unwrap()
+    defer let result = input.reduce(Float32(0.5), combine).unwrap()
+    defer let host = gpu.download(result).unwrap()
+    let reference = combine(0.5, combine(combine(values[0], values[2]), combine(values[1], values[3])))
+    if host.length() == 1 && host[0].to_bits() == reference.to_bits() {
+        0
+    } else {
+        1
+    }
+}

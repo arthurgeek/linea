@@ -1,0 +1,86 @@
+import std.tensor
+
+use tensor.Storage
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn main() -> UInt8 {
+    let empty: [Float32; 0] = []
+    defer let zero = tensor.from_slice(empty.as_slice(), [UInt64.max, 2, 0]).unwrap()
+    if zero.values().length() != 0 {
+        return 1
+    }
+    defer let scalar = tensor.from_slice([Float32(3.0)].as_slice(), []).unwrap()
+    if scalar.values()[0] != 3.0 {
+        return 2
+    }
+    let bad = tensor.from_slice(empty.as_slice(), [UInt64.max, 2])
+    match bad {
+        Err(error) => {
+            if error != .Shape {
+                return 3
+            }
+        },
+        Ok(value) => {
+            value.release()
+            return 4
+        },
+    }
+    defer let left = tensor.matrix([[Float32(1.0), 2.0]]).unwrap()
+    defer let right = tensor.matrix([[Float32(1.0)], [Float32(2.0)]]).unwrap()
+    match left.zip_with(right, add) {
+        Err(error) => {
+            if error != .Shape {
+                return 5
+            }
+        },
+        Ok(value) => {
+            value.release()
+            return 6
+        },
+    }
+    defer let reduced = zero.reduce(Float32.from_bits(2143289345), add).unwrap()
+    if reduced.values()[0].to_bits() != 2143289345 {
+        return 7
+    }
+    defer let tall_empty = tensor.from_slice(empty.as_slice(), [UInt64.max, 0]).unwrap()
+    defer let right_empty = tensor.from_slice(empty.as_slice(), [UInt64(0), 0]).unwrap()
+    defer let product = tall_empty.matmul(right_empty).unwrap()
+    if product.values().length() != 0 || product.dimensions() != [UInt64.max, 0] {
+        return 8
+    }
+    defer let short = tensor.matrix([[Float32(1.0)]]).unwrap()
+    match storage_zip(*left.storage(), *short.storage()) {
+        Err(error) => {
+            if error != .Shape {
+                return 9
+            }
+        },
+        Ok(value) => {
+            value.release()
+            return 10
+        },
+    }
+    match storage_matmul(*left.storage(), *right.storage()) {
+        Err(error) => {
+            if error != .Shape {
+                return 11
+            }
+        },
+        Ok(value) => {
+            value.release()
+            return 12
+        },
+    }
+    0
+}
+
+fn storage_zip[S: Storage[Float32]](left: S, right: S) -> Result[S, S.Error] where carries(.Ok: left, right) {
+    left.zip_with(right, add)
+}
+
+fn storage_matmul[S: Storage[Float32]](left: S, right: S) -> Result[S, S.Error] where carries(.Ok: left, right) {
+    left.matmul(right, 2, 2, 2)
+}

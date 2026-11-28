@@ -1,0 +1,5 @@
+error[M-Opaque]: `Tensor` is opaque outside `tensor`
+ --> tests/gpu/tensor_storage_is_private.lin:7:16
+  |
+7 |     let _raw = tensor.data
+  |                ^^^^^^^^^^^ only its own module can read its parts

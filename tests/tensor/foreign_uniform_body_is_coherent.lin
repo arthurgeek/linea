@@ -1,0 +1,16 @@
+import std.tensor
+
+use tensor.MapBody
+use tensor.Uniform
+
+impl MapBody for Uniform {
+    type Element = Float32
+
+    fn call(_self: Self, value: Float32) -> Float32 {
+        value * 2.0
+    }
+}
+
+fn main() -> UInt8 {
+    0
+}

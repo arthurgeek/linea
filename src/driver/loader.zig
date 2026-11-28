@@ -7762,6 +7762,70 @@ test "the answer a fix adds after a body's last statement takes that statement's
     }
 }
 
+// Mutate the carried library itself: a program cannot redeclare these confined
+// primitives, and malformed library declarations must fail before MIR exists.
+test "slow: GPU selector declarations have their certified signatures" {
+    try slow_tests.skipUnlessRun();
+    const cases = [_]struct { before: []const u8, after: []const u8, refusal: ?Code = .t_extern }{
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .refusal = null },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(body: fn(value: Float32 = 0.0) -> Float32)", .refusal = .t_default },
+        .{ .before = "linea_gpu_reduce_function(body: fn(left: Float32, right: Float32) -> Float32)", .after = "linea_gpu_reduce_function(body: fn(left: Float32, right: Float32 = 0.0) -> Float32)", .refusal = .t_default },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(body: fn(value: Float32) -> Float32 = |value| value)", .refusal = .t_default },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(sink body: fn(value: Float32) -> Float32)" },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(body: fn(inout value: Float32) -> Float32)" },
+        .{ .before = "linea_gpu_reduce_function(body: fn(left: Float32, right: Float32) -> Float32)", .after = "linea_gpu_reduce_function(body: fn(left: Float32, sink right: Float32) -> Float32)" },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(body: inout fn(value: Float32) -> Float32)" },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32)", .after = "linea_gpu_function(body: fn(value: Float32) -> Float32 where carries(value))", .refusal = null },
+        .{ .before = "linea_gpu_function(body: fn(value: Float32) -> Float32) -> UInt64", .after = "linea_gpu_function(body: fn(value: Float32) -> Float32) -> UInt64 where carries(body)", .refusal = null },
+        .{ .before = "linea_gpu_matmul_function() -> UInt64", .after = "linea_gpu_matmul_function(count: UInt64 = 0) -> UInt64", .refusal = .t_extern_runtime },
+        .{ .before = "linea_gpu_matmul_function() -> UInt64", .after = "linea_gpu_matmul_function() -> UInt32" },
+    };
+    for (cases) |case| {
+        var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        const files = try gpa.dupe(InMemoryFile, &library.files);
+        var replaced = false;
+        for (files) |*file| {
+            if (!std.mem.eql(u8, file.path, "std/mem/gpu.lin")) continue;
+            const at = std.mem.indexOf(u8, file.text, case.before) orelse return error.TestUnexpectedResult;
+            file.text = try std.mem.concat(gpa, u8, &.{ file.text[0..at], case.after, file.text[at + case.before.len ..] });
+            replaced = true;
+        }
+        try testing.expect(replaced);
+        var table: FileTable = .empty;
+        var interner: Interner = .empty;
+        var sink = Sink.init(gpa);
+        var program = try loadFromMemory(gpa, &table, &sink, &interner, library.prelude_dir, files, .program, false, .borrow);
+        program.kind = .library;
+        var resolved = try @import("../sema/resolve.zig").resolveLibraryPrefix(gpa, &program, &interner, &sink);
+        defer resolved.deinit();
+        if (@import("../sema/typecheck.zig").typecheckLibraryPrefix(gpa, &resolved.result.expanded, &resolved.result.resolution, &sink)) |checked| {
+            var held = checked;
+            defer held.deinit();
+            try testing.expect(case.refusal == null);
+            const raw = held.typing.raw_accesses;
+            for ([_]struct { decl: DeclId, arity: ?u32 }{
+                .{ .decl = raw.gpu_function, .arity = 1 },
+                .{ .decl = raw.gpu_reduce_function, .arity = 2 },
+                .{ .decl = raw.gpu_matmul_function, .arity = null },
+            }) |selector| {
+                try testing.expect(selector.decl != .none);
+                const signature = held.typing.get(held.typing.declSignature(selector.decl)).callable;
+                try testing.expect(held.typing.validGpuSelectorSignature(signature, selector.arity));
+            }
+        } else |err| if (err != error.InvalidLibraryPrefix) return err;
+        if (case.refusal) |code| {
+            var refused = false;
+            for (sink.items()) |diagnostic| if (diagnostic.code == code) {
+                refused = true;
+            };
+            if (!refused) std.debug.print("GPU selector mutation was not refused: {s}\n", .{case.after});
+            try testing.expect(refused);
+        } else try testing.expect(!sink.hasErrors());
+    }
+}
+
 test "the library's erased closure declarations are found and certified" {
     var prefix = try LibraryPrefix.init(testing.allocator);
     defer prefix.deinit();

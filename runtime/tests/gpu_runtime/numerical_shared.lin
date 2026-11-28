@@ -1,0 +1,30 @@
+import std.gpu
+import std.tensor
+
+fn scale(value: Float32, factor: Float32) -> Float32 { value * factor }
+fn add(left: Float32, right: Float32) -> Float32 { left + right }
+
+fn compute[S: tensor.Storage[Float32]](left: tensor.Matrix[Float32, S], right: tensor.Matrix[Float32, S]) -> Result[tensor.Scalar[Float32, S], S.Error] where carries(.Ok: left, right) {
+    defer let product = left.matmul(right)?
+    defer let scaled = product.map(tensor.uniform(scale, Float32(0.5)))?
+    defer let zipped = scaled.zip_with(product, add)?
+    zipped.reduce(Float32(0.0), add)
+}
+
+fn main() -> UInt8 {
+    let a = [[Float32(1.0), 2.0, 3.0], [4.0, 5.0, 6.0]]
+    let b = [[Float32(7.0), 8.0], [9.0, 10.0], [11.0, 12.0]]
+    defer let host_left = tensor.matrix(a).unwrap()
+    defer let host_right = tensor.matrix(b).unwrap()
+    defer let cpu = compute(host_left, host_right).unwrap()
+    defer let device = gpu.Device.open().unwrap()
+    defer let left = device.matrix(a).unwrap()
+    defer let right = device.matrix(b).unwrap()
+    defer let result = compute(left, right).unwrap()
+    defer let values = gpu.download(result).unwrap()
+    let reference = cpu.values()
+    for index in UInt64(0)..1 {
+        if values[index].to_bits() != reference[index].to_bits() { return 1 }
+    }
+    if values[0] == 622.5 { 0 } else { 1 }
+}

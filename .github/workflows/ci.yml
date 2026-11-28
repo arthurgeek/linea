@@ -156,6 +156,9 @@ jobs:
       - name: Build
         run: nix develop --command zig build
 
+      - name: CPU-only build and execution
+        run: nix develop .#cpu --command bash .github/scripts/cpu-only.sh "$RUNNER_TEMP/linea-cpu-only" "$PWD/zig-out/bin/linea"
+
       # A few seconds, and part of `test` below too; run first so a grammar
       # that stopped parsing a file fails before the hour the suite takes.
       - name: Editor grammar
@@ -324,6 +327,9 @@ jobs:
             outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}-
             outcomes-${{ github.job }}-${{ matrix.sanitizer }}-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
 
+      - name: Record runner resources
+        run: .github/scripts/resource-log.sh start
+
       # Catch stack-switch and native lifetime failures before the longer
       # instrumented corpus walk.
       - name: Runtime C tests under ${{ matrix.sanitizer }}
@@ -340,7 +346,13 @@ jobs:
         # The compiler itself runs optimised with safety checks: the Debug
         # compiler's coverage belongs to `check`, and this lane's subject is the
         # runtime and the generated code under the sanitizer.
-        run: nix develop --command zig build conformance --release=safe -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}" -Dsanitize=${{ matrix.sanitizer }}
+        # Keep compiler builds and corpus walks apart, and bound both the
+        # corpus and transcript worker pools. Resource summaries leave
+        # evidence if the hosted runner stops answering during the walk.
+        run: |
+          .github/scripts/resource-log.sh follow & follower=$!
+          trap 'kill "$follower" 2>/dev/null || true' EXIT
+          nice -n 10 nix develop --command zig build conformance --release=safe -j2 -Dsequential -Dwalkers=2 -Dscratch="$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}" -Dsanitize=${{ matrix.sanitizer }}
 
       # A checked-library entry is one set of library modules, 19 to 45 MB
       # (about 21 MB on average). The corpus imports some fifty-five sets,
@@ -364,6 +376,15 @@ jobs:
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/linea-cache
             ${{ env.LINEA_SCRATCH }}-${{ github.job }}-${{ matrix.sanitizer }}/examples/outcomes
           key: ${{ steps.outcomes_restore.outputs.cache-primary-key }}
+
+      - name: Keep the resource log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-log-${{ github.job }}-${{ matrix.sanitizer }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/resource.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The optimised lanes: the unit tests built ReleaseSafe, and on a weekly or
   # manual run built ReleaseFast as well; the corpus against a ReleaseFast

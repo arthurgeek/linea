@@ -435,12 +435,10 @@ pub fn lower(
 
     return .{
         .functions = functions,
-        .zeroed_allocator = if (instances.zeroed_allocator == .none)
-            .none
-        else if (instances.lookup(instances.zeroed_allocator, &.{}, .poison, &.{})) |id|
-            FunctionId.at(id.index())
-        else
-            .none,
+        .gpu_function = functionIfReached(instances, library.raw.gpu_function),
+        .gpu_reduce_function = functionIfReached(instances, library.raw.gpu_reduce_function),
+        .gpu_matmul_function = functionIfReached(instances, library.raw.gpu_matmul_function),
+        .zeroed_allocator = functionIfReached(instances, instances.zeroed_allocator),
         .bytes = bytes,
         .statics = statics,
         .names = names,
@@ -485,6 +483,12 @@ const StaticKey = struct {
 /// Function ids are positions in discovery's table. Recursive calls therefore
 /// resolve before either body is emitted, without allowing lowering to create
 /// another instance.
+fn functionIfReached(instances: *const instantiate_mod.InstanceTable, declaration: DeclId) FunctionId {
+    if (declaration == .none) return .none;
+    const found = instances.lookup(declaration, &.{}, .poison, &.{}) orelse return .none;
+    return FunctionId.at(found.index());
+}
+
 const Mono = struct {
     gpa: std.mem.Allocator,
     /// Every distinct blob of bytes the module names, and where each sits.
@@ -5241,7 +5245,7 @@ const Lowerer = struct {
             // address has the type the `extern` declares: a function given for
             // a runtime callback may take a `mem.address.Address` where C
             // passes the `UInt64` it stands for, and its entry is the same.
-            if (self.ast.declIsExtern(named) and self.typing.get(param.ty) == .callable) {
+            if (self.ast.declIsExtern(named) and !self.library.raw.selectsGpu(named) and self.typing.get(param.ty) == .callable) {
                 const value = self.calls.functionValueOf(self.typing, self.ast.withoutGroups(a)) orelse
                     @panic("compiler defect: a callback passed to C has no fixed target");
                 const target = try self.functionTarget(value);

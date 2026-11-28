@@ -1,0 +1,244 @@
+import std.mem.address
+import std.testing
+
+extern fn linea_gpu_open() -> Int64
+
+extern fn linea_gpu_close(device: UInt64)
+
+extern fn linea_gpu_buffer_new(device: UInt64, bytes: UInt64) -> Int64
+
+extern fn linea_gpu_buffer_sized_like(buffer: UInt64, bytes: UInt64) -> Int64
+
+extern fn linea_gpu_buffer_drop(buffer: UInt64)
+
+extern fn linea_gpu_upload(buffer: UInt64, at: UInt64, bytes: UInt64) -> Int64
+
+extern fn linea_gpu_download(buffer: UInt64, at: UInt64, bytes: UInt64) -> Int64
+
+extern fn linea_gpu_map(input: UInt64, output: UInt64, kernel: UInt64, count: UInt64) -> Int64
+
+extern fn linea_gpu_map_uniform(input: UInt64, output: UInt64, kernel: UInt64, count: UInt64, uniform_bits: UInt64) -> Int64
+
+extern fn linea_gpu_zip(left: UInt64, right: UInt64, output: UInt64, kernel: UInt64, count: UInt64) -> Int64
+
+extern fn linea_gpu_reduce(input: UInt64, output: UInt64, kernel: UInt64, count: UInt64, initial_bits: UInt64) -> Int64
+
+extern fn linea_gpu_matmul(left: UInt64, right: UInt64, output: UInt64, kernel: UInt64, rows: UInt64, inner: UInt64, columns: UInt64) -> Int64
+
+extern fn linea_gpu_reduce_function(body: fn(left: Float32, right: Float32) -> Float32) -> UInt64
+
+extern fn linea_gpu_matmul_function() -> UInt64
+
+extern fn linea_gpu_wait(submission: UInt64) -> Int64
+
+extern fn linea_gpu_submission_drop(submission: UInt64)
+
+// Select the compiled device image of an ordinary numerical function. Zero
+// means the function has no implementation for the device execution profile.
+extern fn linea_gpu_function(body: fn(value: Float32) -> Float32) -> UInt64
+
+// An image token can only contain a compiler-selected descriptor. Public
+// callable traits carry this token rather than an unchecked native address.
+@(opaque, copyable)
+struct GpuKernel {
+    handle: UInt64,
+}
+
+impl GpuKernel {
+    pub fn none() -> Self {
+        .{ handle = 0 }
+    }
+
+    test "an absent GPU image is unavailable" {
+        testing.assert(!GpuKernel.none().is_available(), "an absent image became available")?
+    }
+
+    pub fn is_available(self: Self) -> Bool {
+        self.handle != 0
+    }
+
+    test "availability distinguishes an image token from an absent image" {
+        let absent = GpuKernel.none()
+        testing.assert(!absent.is_available(), "a zero token selected an image")?
+    }
+}
+
+@(opaque, linear)
+struct GpuDevice {
+    handle: UInt64,
+}
+
+impl GpuDevice {
+    internal fn open() -> Result[Self, Int64] {
+        let handle = linea_gpu_open()
+        if handle < 0 {
+            .Err(handle)
+        } else {
+            .Ok(.{ handle = UInt64(handle) })
+        }
+    }
+
+    internal fn allocate(self: Self, bytes: UInt64) -> Result[GpuBuffer, Int64] {
+        let handle = linea_gpu_buffer_new(self.handle, bytes)
+        if handle < 0 {
+            .Err(handle)
+        } else {
+            .Ok(.{ handle = UInt64(handle), bytes })
+        }
+    }
+}
+
+impl Release for GpuDevice {
+    fn release(sink self: Self) {
+        let GpuDevice { handle } = self
+        linea_gpu_close(handle)
+    }
+}
+
+@(opaque, linear)
+struct GpuBuffer {
+    handle: UInt64,
+    bytes: UInt64,
+}
+
+impl Release for GpuBuffer {
+    fn release(sink self: Self) {
+        let GpuBuffer { handle, bytes: _ } = self
+        linea_gpu_buffer_drop(handle)
+    }
+}
+
+internal fn _gpu_upload(device: GpuDevice, values: Slice[Float32]) -> Result[GpuBuffer, Int64] {
+    if values.length() > UInt64.max / 4 {
+        return .Err(-75)
+    }
+    let bytes = values.length() * 4
+    let buffer = device.allocate(bytes)?
+    let answer = linea_gpu_upload(buffer.handle, address.raw(slice_address(values)), bytes)
+    if answer < 0 {
+        buffer.release()
+        .Err(answer)
+    } else {
+        .Ok(buffer)
+    }
+}
+
+// Every bit pattern is a Float32. The runtime fills exactly the extent whose
+// slots become the returned vector, including an empty extent.
+internal fn _gpu_download(buffer: GpuBuffer) -> Result[Vec[Float32], Int64] {
+    let bytes = buffer.bytes
+    let host = match system().acquire(bytes) {
+        Ok(value) => value,
+        Err(_) => return .Err(-12),
+    }
+    let answer = linea_gpu_download(buffer.handle, address.raw(bytes_in(host, 0)), bytes)
+    if answer < 0 {
+        host.release()
+        return .Err(answer)
+    }
+    .Ok(.{ storage = Storage.from_buffer(host), len = bytes / 4 })
+}
+
+@(opaque, linear)
+struct GpuJob {
+    handle: UInt64,
+    output: GpuBuffer,
+}
+
+impl GpuJob {
+    internal fn _start(input: GpuBuffer, kernel: GpuKernel) -> Result[Self, Int64] {
+        let output = input.sized_like(input.bytes)?
+        let handle = linea_gpu_map(input.handle, output.handle, kernel.handle, input.bytes / 4)
+        _gpu_job(output, handle)
+    }
+
+    internal fn _reduce(input: GpuBuffer, kernel: GpuKernel, initial: Float32) -> Result[Self, Int64] {
+        let output = input.sized_like(4)?
+        let handle = linea_gpu_reduce(input.handle, output.handle, kernel.handle, input.bytes / 4, UInt64(initial.to_bits()))
+        _gpu_job(output, handle)
+    }
+
+    internal fn _uniform(input: GpuBuffer, kernel: GpuKernel, uniform: Float32) -> Result[Self, Int64] {
+        let output = input.sized_like(input.bytes)?
+        let handle = linea_gpu_map_uniform(input.handle, output.handle, kernel.handle, input.bytes / 4, UInt64(uniform.to_bits()))
+        _gpu_job(output, handle)
+    }
+
+    internal fn _zip(left: GpuBuffer, right: GpuBuffer, kernel: GpuKernel) -> Result[Self, Int64] {
+        if left.bytes != right.bytes {
+            return .Err(-22)
+        }
+        let output = left.sized_like(left.bytes)?
+        let handle = linea_gpu_zip(left.handle, right.handle, output.handle, kernel.handle, left.bytes / 4)
+        _gpu_job(output, handle)
+    }
+
+    internal fn _matmul(left: GpuBuffer, right: GpuBuffer, kernel: GpuKernel, rows: UInt64, inner: UInt64, columns: UInt64) -> Result[Self, Int64] {
+        if columns != 0 && rows > UInt64.max / columns {
+            return .Err(-75)
+        }
+        let count = rows * columns
+        if count > UInt64.max / 4 {
+            return .Err(-75)
+        }
+        let output = left.sized_like(count * 4)?
+        let handle = linea_gpu_matmul(left.handle, right.handle, output.handle, kernel.handle, rows, inner, columns)
+        _gpu_job(output, handle)
+    }
+
+    internal fn _wait(sink self: Self) -> Result[GpuBuffer, Int64] {
+        let GpuJob { handle, output } = self
+        let answer = linea_gpu_wait(handle)
+        linea_gpu_submission_drop(handle)
+        if answer < 0 {
+            output.release()
+            .Err(answer)
+        } else {
+            .Ok(output)
+        }
+    }
+}
+
+impl Release for GpuJob {
+    fn release(sink self: Self) {
+        let GpuJob { handle, output } = self
+        linea_gpu_submission_drop(handle)
+        output.release()
+    }
+}
+
+internal fn _gpu_kernel(body: fn(value: Float32) -> Float32) -> GpuKernel {
+    .{ handle = linea_gpu_function(body) }
+}
+
+impl GpuBuffer {
+    internal fn _length(self: Self) -> UInt64 {
+        self.bytes / 4
+    }
+
+    internal fn sized_like(self: Self, bytes: UInt64) -> Result[Self, Int64] {
+        let handle = linea_gpu_buffer_sized_like(self.handle, bytes)
+        if handle < 0 {
+            .Err(handle)
+        } else {
+            .Ok(.{ handle = UInt64(handle), bytes })
+        }
+    }
+}
+
+fn _gpu_job(sink output: GpuBuffer, handle: Int64) -> Result[GpuJob, Int64] {
+    if handle < 0 {
+        output.release()
+        .Err(handle)
+    } else {
+        .Ok(.{ handle = UInt64(handle), output })
+    }
+}
+
+internal fn _gpu_reducer(body: fn(left: Float32, right: Float32) -> Float32) -> GpuKernel {
+    .{ handle = linea_gpu_reduce_function(body) }
+}
+
+internal fn _gpu_matmul() -> GpuKernel {
+    .{ handle = linea_gpu_matmul_function() }
+}

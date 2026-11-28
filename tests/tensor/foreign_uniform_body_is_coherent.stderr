@@ -1,0 +1,5 @@
+error[M-Impl]: `Uniform` is declared in `tensor`
+ --> tests/tensor/foreign_uniform_body_is_coherent.lin:6:18
+  |
+6 | impl MapBody for Uniform {
+  |                  ^^^^^^^ the library declares both `Uniform` and `MapBody`; wrap it in a type this program declares that implements `MapBody`

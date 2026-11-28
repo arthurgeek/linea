@@ -46,6 +46,9 @@ const dumpMir = @import("../mir/dump.zig").dumpModule;
 const mlir_backend = @import("../backend/mlir.zig");
 const emitMlir = mlir_backend.emit;
 const toolchain = @import("toolchain.zig");
+const inspection = @import("inspection.zig");
+const gpu_driver = @import("gpu.zig");
+const gpu_backend = @import("../backend/gpu.zig");
 const runtime_symbols = @import("../support/runtime_symbols.zig");
 const loader = @import("loader.zig");
 const prototypes = @import("prototypes.zig");
@@ -80,7 +83,7 @@ pub const exit_io: u8 = 74;
 /// classified before this is asked.
 fn refusalStatus(tool: toolchain.Tool) u8 {
     return switch (tool) {
-        .mlir_opt, .mlir_translate => exit_defect,
+        .mlir_opt, .mlir_translate, .spirv_val => exit_defect,
         .cc => exit_io,
     };
 }
@@ -162,6 +165,65 @@ pub const Out = struct {
     }
 };
 
+/// Device inspection calls the production producer and conversion boundary,
+/// stopping before either image serialization or Vulkan validation.
+fn dumpGpuInspection(gpa: std.mem.Allocator, io: std.Io, module: *const mir.Module, sink: *Sink, definitions: []const bool, program: *const @import("../syntax/expanded_program.zig").ExpandedProgram, request: inspection.Request, display_names: ?[]const ?[]const u8, scratch: []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !?u8 {
+    if (!@import("build_options").gpu) {
+        try err.writeAll("error: GPU inspection is disabled in this compiler build\n");
+        return exit_usage;
+    }
+    const sources = (try gpu_backend.emitAllInspected(gpa, module, sink, .{
+        .definitions = definitions,
+        .display_names = display_names,
+        .software_bodies = request.scope == .all,
+        .launch_support = request.function == null,
+        .compact = request.detail == .compact,
+    })) orelse return exit_defect;
+    defer {
+        for (sources) |source| gpa.free(source.mlir);
+        gpa.free(sources);
+    }
+    if (sources.len == 0) {
+        try err.writeAll("error: no admitted GPU implementation matches the selected source functions\n");
+        return exit_usage;
+    }
+    try inspection.writeHeader(out, program, module, definitions);
+    const prefix = try toolchain.uniqueTarget(gpa, io, scratch, "linea-inspection");
+    defer gpa.free(prefix);
+    for (sources, 0..) |source, i| {
+        try out.print("// Device implementation {d}; required generated support is retained.\n", .{i});
+        if (request.stage == .lowered) {
+            try out.writeAll(source.mlir);
+            continue;
+        }
+        const input = try std.fmt.allocPrint(gpa, "{s}-{d}.mlir", .{ prefix, i });
+        defer gpa.free(input);
+        const checked = try std.fmt.allocPrint(gpa, "{s}-{d}.spirv.mlir", .{ prefix, i });
+        defer gpa.free(checked);
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = input, .data = source.mlir });
+        const failure = switch (source.format) {
+            .spirv => try toolchain.checkGpuSource(gpa, io, input, checked),
+            .staging => try toolchain.lowerStructuredGpuSource(gpa, io, input, checked),
+        };
+        if (failure) |failed| {
+            defer gpa.free(failed.output);
+            if (failed.missing) {
+                try err.print("error: '{s}' not found on PATH\n", .{failed.tool.command()});
+                return exit_io;
+            }
+            try err.writeAll(failed.output);
+            try err.print("note: inspection input retained at '{s}'\n", .{input});
+            return refusalStatus(failed.tool);
+        }
+        const text = try std.Io.Dir.cwd().readFileAlloc(io, checked, gpa, .unlimited);
+        defer gpa.free(text);
+        try out.writeAll(text);
+        std.Io.Dir.cwd().deleteFile(io, input) catch {};
+        std.Io.Dir.cwd().deleteFile(io, checked) catch {};
+    }
+    return null;
+}
+
 /// Renders what a compile reported. Every command that compiles renders
 /// through this once: where it goes on to run what it built, before running
 /// it, so its notes precede the program's own output; otherwise as it exits.
@@ -214,6 +276,21 @@ const dump_commands = [_]cli.Command{
     .{ .tag = .dump_inferred, .debug = true, .name = "dump-inferred", .operand = "<file>", .help = "print the source with what the checker settled written in" },
     .{ .tag = .dump_mono, .debug = true, .name = "dump-mono", .operand = "<file>", .help = "print the program with its generics gone" },
     .{
+        .tag = .dump_mlir,
+        .debug = true,
+        .name = "dump-mlir",
+        .operand = "<path>",
+        .help = "inspect source-focused MLIR (not a standalone executable)",
+        .options = &.{
+            .{ .name = "--scope", .arity = .value, .metavar = "user|all", .help = "definitions to show (default: user; all primary project modules)" },
+            .{ .name = "--target", .arity = .value, .metavar = "host|gpu", .help = "backend to inspect (default: host)" },
+            .{ .name = "--stage", .arity = .value, .metavar = "lowered|spirv", .help = "stop at this stage (default: lowered; spirv requires gpu)" },
+            .{ .name = "--function", .arity = .value, .metavar = "<qualified-source-function>", .help = "show this source function's concrete instances" },
+            .{ .name = "--detail", .arity = .value, .metavar = "compact|full", .help = "presentation detail (default: compact)" },
+            .{ .name = "--locations", .arity = .flag, .help = "include inline source locations (default: off)" },
+        },
+    },
+    .{
         .tag = .dump_asm,
         .debug = true,
         .name = "dump-asm",
@@ -262,7 +339,7 @@ fn defaultOptLevel(tag: cli.Tag) []const u8 {
 /// The switch names every command, so a new one is decided here.
 fn holdsCDeclarations(tag: cli.Tag) bool {
     return switch (tag) {
-        .check, .run, .build, .@"test", .emit_mlir, .dump_asm => true,
+        .check, .run, .build, .@"test", .emit_mlir, .dump_mlir, .dump_asm => true,
         .fmt, .lsp, .init, .dump_tokens, .dump_ast, .dump_expanded, .dump_mir, .dump_inferred, .dump_mono => false,
     };
 }
@@ -374,28 +451,260 @@ const BuildRequest = struct {
     foreign_symbols: []const mlir_backend.ForeignSymbol = &.{},
 };
 
-/// Writes IR and assembles it, and for a program links it against the
-/// runtime. A library is left as its object, which links nothing, so no
-/// runtime is looked for.
-///
-/// Returns a status when the build could not finish, and null when it did.
-/// A tool's own message is quoted rather than summarised, because a user
-/// should not have to run the tool again to find out why it refused -- but the
-/// line saying which tool failed is ours, since the tool does not know it is
-/// part of a Linea build.
-fn compileArtifact(
+/// Source ownership ends before the host artifact pipeline. GPU serialization,
+/// C-header probes and inspection commands still run while their source facts
+/// are needed; the large host conversion/link and test children do not.
+const Frontend = struct {
+    arena: std.heap.ArenaAllocator,
+    active: bool = true,
+
+    fn init(backing: std.mem.Allocator) Frontend {
+        return .{ .arena = .init(backing) };
+    }
+    fn allocator(self: *Frontend) std.mem.Allocator {
+        std.debug.assert(self.active);
+        return self.arena.allocator();
+    }
+    fn finish(self: *Frontend) void {
+        if (self.active) {
+            self.arena.deinit();
+            self.active = false;
+        }
+    }
+    fn deinit(self: *Frontend) void {
+        self.finish();
+    }
+};
+
+/// Serialized MLIR is the compiler/tool boundary. No source, semantic table,
+/// MIR, sink, writer or GPU image bytes cross it. Only owned build/run inputs do.
+const NativeAction = struct {
+    const Test = @import("../sema/resolve.zig").Resolution.Test;
+    const Execution = union(enum) {
+        build,
+        tests: struct { all: []const Test, root: []const u8, filter: []const u8 },
+        program: struct { args: []const []const u8, output: ?toolchain.RunOutput = null },
+    };
+    options: toolchain.Options,
+    gpu_functions: []const mir.FunctionId = &.{},
+    keep: bool,
+    execution: Execution,
+
+    /// Input slices may belong to preparation. The returned action owns every
+    /// slice it reads after the frontend endpoint, including nested strings.
+    fn retained(self: NativeAction, gpa: std.mem.Allocator) !NativeAction {
+        const options = try retainOptions(gpa, self.options);
+        errdefer freeOptions(gpa, options);
+        const functions = try gpa.dupe(mir.FunctionId, self.gpu_functions);
+        errdefer gpa.free(functions);
+        const execution: Execution = switch (self.execution) {
+            .build => .build,
+            .tests => |job| blk: {
+                const all = try retainTests(gpa, job.all);
+                errdefer freeTests(gpa, all);
+                const root = try gpa.dupe(u8, job.root);
+                errdefer gpa.free(root);
+                const filter = try gpa.dupe(u8, job.filter);
+                break :blk .{ .tests = .{ .all = all, .root = root, .filter = filter } };
+            },
+            .program => |job| blk: {
+                const args = try retainStrings(gpa, job.args);
+                errdefer freeStrings(gpa, args);
+                var output = job.output;
+                if (output) |*paths| {
+                    paths.directory = try gpa.dupe(u8, paths.directory);
+                    errdefer gpa.free(paths.directory);
+                    paths.path = try gpa.dupe(u8, paths.path);
+                }
+                break :blk .{ .program = .{ .args = args, .output = output } };
+            },
+        };
+        return .{ .options = options, .gpu_functions = functions, .keep = self.keep, .execution = execution };
+    }
+
+    fn deinit(self: NativeAction, gpa: std.mem.Allocator) void {
+        freeOptions(gpa, self.options);
+        gpa.free(self.gpu_functions);
+        switch (self.execution) {
+            .build => {},
+            .tests => |job| {
+                freeTests(gpa, job.all);
+                gpa.free(job.root);
+                gpa.free(job.filter);
+            },
+            .program => |job| {
+                freeStrings(gpa, job.args);
+                if (job.output) |output| output.deinit(gpa);
+            },
+        }
+    }
+
+    /// These temporary artifacts were always removed on test/run returns,
+    /// including native failure. A build retains failing intermediates.
+    fn cleanup(self: *NativeAction, gpa: std.mem.Allocator, io: std.Io) void {
+        switch (self.execution) {
+            .build => {},
+            .tests => {
+                std.Io.Dir.cwd().deleteFile(io, self.options.out_path) catch {};
+                self.options.mid.remove(io);
+                gpu_driver.removeFunctionInputs(gpa, io, self.options.out_path, self.gpu_functions);
+            },
+            .program => |*job| if (job.output) |*output| output.remove(io),
+        }
+    }
+
+    fn execute(self: *NativeAction, gpa: std.mem.Allocator, io: std.Io, err: *std.Io.Writer) !u8 {
+        if (try toolchain.build(gpa, io, self.options)) |failure| {
+            defer gpa.free(failure.output);
+            if (failure.missing) {
+                try err.print("error: {s} is not installed\n", .{failure.tool.command()});
+                return exit_io;
+            }
+            try err.print("error: {s} failed\n", .{failure.tool.command()});
+            if (failure.output.len > 0) try err.writeAll(failure.output);
+            return refusalStatus(failure.tool);
+        }
+        if (!self.keep) {
+            self.options.mid.remove(io);
+            gpu_driver.removeFunctionInputs(gpa, io, self.options.out_path, self.gpu_functions);
+        }
+        switch (self.execution) {
+            .tests => |job| {
+                var stdout: Out = .{};
+                const w = stdout.open(io, std.Io.File.stdout());
+                defer stdout.flush() catch {};
+                const passed = try runner.run(gpa, io, self.options.out_path, job.all, std.Thread.getCpuCount() catch 1, job.root, job.filter, w);
+                try stdout.flush();
+                return if (passed) exit_ok else exit_diagnostics;
+            },
+            .program => |job| {
+                try err.flush();
+                toolchain.replaceWith(gpa, io, self.options.out_path, job.args) catch {};
+                try err.print("error: cannot execute '{s}'\n", .{self.options.out_path});
+                return exit_io;
+            },
+            .build => {
+                if (self.options.artifact == .object and self.options.link.len > 0) {
+                    try err.print("note: link '{s}' with", .{self.options.out_path});
+                    for (self.options.link) |name| try err.print(" -l{s}", .{name});
+                    try err.writeAll("\n");
+                }
+                return exit_ok;
+            },
+        }
+    }
+
+    fn retainStrings(gpa: std.mem.Allocator, strings: []const []const u8) ![][]const u8 {
+        const result = try gpa.alloc([]const u8, strings.len);
+        var filled: usize = 0;
+        errdefer {
+            for (result[0..filled]) |text| gpa.free(text);
+            gpa.free(result);
+        }
+        for (strings, result) |text, *owned| {
+            owned.* = try gpa.dupe(u8, text);
+            filled += 1;
+        }
+        return result;
+    }
+    fn freeStrings(gpa: std.mem.Allocator, strings: []const []const u8) void {
+        for (strings) |text| gpa.free(text);
+        gpa.free(strings);
+    }
+    fn retainTests(gpa: std.mem.Allocator, tests: []const Test) ![]Test {
+        const result = try gpa.dupe(Test, tests);
+        var filled: usize = 0;
+        errdefer {
+            for (result[0..filled]) |test_case| gpa.free(test_case.qualified_name);
+            gpa.free(result);
+        }
+        for (result) |*test_case| {
+            test_case.qualified_name = try gpa.dupe(u8, test_case.qualified_name);
+            filled += 1;
+        }
+        return result;
+    }
+    fn freeTests(gpa: std.mem.Allocator, tests: []const Test) void {
+        for (tests) |test_case| gpa.free(test_case.qualified_name);
+        gpa.free(tests);
+    }
+    fn retainOptions(gpa: std.mem.Allocator, options: toolchain.Options) !toolchain.Options {
+        var result = options;
+        result.out_path = try gpa.dupe(u8, options.out_path);
+        errdefer gpa.free(result.out_path);
+        result.mid.ir = try gpa.dupe(u8, options.mid.ir);
+        errdefer gpa.free(result.mid.ir);
+        result.mid.lowered = try gpa.dupe(u8, options.mid.lowered);
+        errdefer gpa.free(result.mid.lowered);
+        result.mid.assembly = try gpa.dupe(u8, options.mid.assembly);
+        errdefer gpa.free(result.mid.assembly);
+        result.runtime_path = if (options.runtime_path) |path| try gpa.dupe(u8, path) else null;
+        errdefer if (result.runtime_path) |path| gpa.free(path);
+        result.opt = try gpa.dupe(u8, options.opt);
+        errdefer gpa.free(result.opt);
+        result.sanitize = if (options.sanitize) |name| try gpa.dupe(u8, name) else null;
+        errdefer if (result.sanitize) |name| gpa.free(name);
+        result.native = try retainStrings(gpa, options.native);
+        errdefer freeStrings(gpa, result.native);
+        result.link = try retainStrings(gpa, options.link);
+        return result;
+    }
+    fn freeOptions(gpa: std.mem.Allocator, options: toolchain.Options) void {
+        options.mid.deinit(gpa);
+        gpa.free(options.out_path);
+        if (options.runtime_path) |path| gpa.free(path);
+        gpa.free(options.opt);
+        if (options.sanitize) |name| gpa.free(name);
+        freeStrings(gpa, options.native);
+        freeStrings(gpa, options.link);
+    }
+};
+
+fn retainNativeAction(source: std.mem.Allocator, durable: std.mem.Allocator, io: std.Io, borrowed: NativeAction) !NativeAction {
+    var prepared = borrowed;
+    errdefer if (prepared.execution == .tests) prepared.cleanup(source, io);
+    return borrowed.retained(durable);
+}
+
+const PreparedGpu = union(enum) { images: []gpu_backend.Image, stop: u8 };
+
+fn prepareGpu(gpa: std.mem.Allocator, io: std.Io, module: *const mir.Module, sink: *Sink, prefix: []const u8, err: *std.Io.Writer, retain_failure: bool) !PreparedGpu {
+    return switch (try gpu_driver.prepare(gpa, io, module, sink, prefix, true, retain_failure)) {
+        .images => |images| .{ .images = images },
+        .defect => .{ .stop = exit_defect },
+        .failure => |failure| blk: {
+            defer gpa.free(failure.output);
+            if (failure.missing) {
+                try err.print("error: {s} is not installed\n", .{failure.tool.command()});
+                break :blk .{ .stop = exit_io };
+            }
+            try err.print("error: {s} failed\n", .{failure.tool.command()});
+            try err.writeAll(failure.output);
+            break :blk .{ .stop = refusalStatus(failure.tool) };
+        },
+    };
+}
+
+const ArtifactPreparation = union(enum) { stop: u8, ready: NativeAction };
+
+/// Serialize host IR while MIR, diagnostics and image bytes are live, then
+/// retain only native inputs. A stop status is rendered/reported before the
+/// source arena ends; a ready action runs host tools after that endpoint.
+fn prepareArtifact(
     gpa: std.mem.Allocator,
+    durable: std.mem.Allocator,
     io: std.Io,
     environ: std.process.Environ,
     err: *std.Io.Writer,
     req: BuildRequest,
-) !?u8 {
+    execution: NativeAction.Execution,
+) !ArtifactPreparation {
     const runtime: ?[]const u8 = switch (req.artifact) {
         .executable => try toolchain.findRuntime(gpa, io, environ, req.storage) orelse {
             try err.print("error: cannot find {s} beside the compiler\n", .{
                 req.storage.archive(),
             });
-            return exit_io;
+            return .{ .stop = exit_io };
         },
         .object => null,
     };
@@ -409,7 +718,7 @@ fn compileArtifact(
     // a build naming another would link it and leave the program unwatched.
     if (sanitize) |named| if (mlir_backend.Sanitizer.named(named) == null) {
         try err.print("error: {s}={s} names a sanitizer the compiler cannot instrument for; use address or thread\n", .{ toolchain.sanitize_override, named });
-        return exit_usage;
+        return .{ .stop = exit_usage };
     };
     if (req.storage == .checked and sanitize == null) if (runtime) |path| {
         const bytes = std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited) catch "";
@@ -422,10 +731,18 @@ fn compileArtifact(
     const mid = try toolchain.Intermediates.of(gpa, req.out_path);
     defer mid.deinit(gpa);
 
+    const gpu_images = switch (try prepareGpu(gpa, io, req.mir, req.sink, req.out_path, err, execution != .tests)) {
+        .images => |images| images,
+        .stop => |status| return .{ .stop = status },
+    };
+    defer gpu_driver.deinitImages(gpa, gpu_images);
+    var handed_off = false;
+    defer if (execution == .tests and !handed_off) gpu_driver.removeInputs(gpa, io, req.out_path, gpu_images);
+
     {
         const file = std.Io.Dir.cwd().createFile(io, mid.ir, .{}) catch {
             try err.print("error: cannot write '{s}'\n", .{mid.ir});
-            return exit_io;
+            return .{ .stop = exit_io };
         };
         defer file.close(io);
 
@@ -438,10 +755,11 @@ fn compileArtifact(
         // program: it wrote nothing, and what it wrote nothing about is in the
         // sink for the renderer at the end of the run.
         if (!try emitMlir(gpa, if (callable_proof) &hashed.writer else writer, req.mir, req.table, req.sink, .{
+            .gpu_images = gpu_images,
             .sanitize = mlir_backend.Sanitizer.named(sanitize),
             .migratable_task_entries = req.artifact == .executable,
             .foreign_symbols = req.foreign_symbols,
-        })) return exit_defect;
+        })) return .{ .stop = exit_defect };
         if (callable_proof) try hashed.writer.flush();
         try out.flush();
         if (callable_proof) {
@@ -475,32 +793,45 @@ fn compileArtifact(
         .native = req.native,
         .link = req.link,
     };
-    const failure = try toolchain.build(gpa, io, build_opts);
-
-    if (failure) |f| {
-        if (f.missing) {
-            try err.print("error: {s} is not installed\n", .{f.tool.command()});
-            return exit_io;
-        }
-        try err.print("error: {s} failed\n", .{f.tool.command()});
-        if (f.output.len > 0) try err.writeAll(f.output);
-        return refusalStatus(f.tool);
-    }
-
-    if (!req.keep) mid.remove(io);
-    return null;
+    const functions = try gpa.alloc(mir.FunctionId, gpu_images.len);
+    defer gpa.free(functions);
+    for (gpu_images, functions) |image, *function| function.* = image.function;
+    const borrowed: NativeAction = .{ .options = build_opts, .gpu_functions = functions, .keep = req.keep, .execution = execution };
+    const owned = try retainNativeAction(gpa, durable, io, borrowed);
+    handed_off = true;
+    return .{ .ready = owned };
 }
 
 pub fn run(process: std.process.Init) !u8 {
-    const gpa = process.arena.allocator();
+    const retained = process.arena.allocator();
+    var stderr: Out = .{};
+    const err = stderr.open(process.io, std.Io.File.stderr());
+    defer stderr.flush() catch {};
+    var frontend = Frontend.init(process.gpa);
+    defer frontend.deinit();
+    var pending: ?NativeAction = null;
+    defer if (pending) |*action| {
+        action.cleanup(retained, process.io);
+        action.deinit(retained);
+    };
+    // Preparation's source-owned defers run before its arena ends. The
+    // continuation contains no pointer into those representations or writers.
+    const status = try prepare(process, frontend.allocator(), retained, &stderr, &pending);
+    frontend.finish();
+    if (pending) |*action| {
+        std.debug.assert(status == exit_ok);
+        return action.execute(retained, process.io, err);
+    }
+    return status;
+}
+
+fn prepare(process: std.process.Init, gpa: std.mem.Allocator, durable: std.mem.Allocator, stderr: *Out, pending: *?NativeAction) !u8 {
     const io = process.io;
 
-    const args = try process.minimal.args.toSlice(gpa);
+    const args = try process.minimal.args.toSlice(durable);
 
     const stderr_file = std.Io.File.stderr();
-    var stderr: Out = .{};
     const stderr_w = stderr.open(io, stderr_file);
-    defer stderr.flush() catch {};
 
     const global_help = args.len == 2 and
         (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "help"));
@@ -572,6 +903,7 @@ pub fn run(process: std.process.Init) !u8 {
     // before anything trusts it.
     var purpose: Purpose = if (cmd.tag == .@"test") .tests else .program;
     var path: ?[]const u8 = null;
+    var inspect: inspection.Request = .{};
 
     var it: cli.Iterator = .{ .spec = spec, .command = cmd, .args = args[2..] };
     while (it.next()) |item| switch (item) {
@@ -584,7 +916,31 @@ pub fn run(process: std.process.Init) !u8 {
             path = p;
         },
         .option => |o| {
-            if (std.mem.eql(u8, o.name, "-o")) {
+            if (std.mem.eql(u8, o.name, "--scope")) {
+                inspect.scope = std.meta.stringToEnum(inspection.Scope, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --scope value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--target")) {
+                inspect.target = std.meta.stringToEnum(inspection.Target, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --target value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--stage")) {
+                inspect.stage = std.meta.stringToEnum(inspection.Stage, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --stage value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--function")) {
+                inspect.function = o.value;
+            } else if (std.mem.eql(u8, o.name, "--detail")) {
+                inspect.detail = std.meta.stringToEnum(inspection.Detail, o.value) orelse {
+                    try stderr_w.writeAll("error: invalid --detail value\n");
+                    return exit_usage;
+                };
+            } else if (std.mem.eql(u8, o.name, "--locations")) {
+                inspect.locations = true;
+            } else if (std.mem.eql(u8, o.name, "-o")) {
                 out_path = o.value;
             } else if (std.mem.eql(u8, o.name, "-O")) {
                 if (!knownOptLevel(o.value)) {
@@ -620,6 +976,13 @@ pub fn run(process: std.process.Init) !u8 {
         return exit_usage;
     }
 
+    if (cmd.tag == .dump_mlir) {
+        if (inspect.problem()) |problem| {
+            try stderr_w.print("error: {s}\n", .{problem});
+            return exit_usage;
+        }
+    }
+
     // What the program being run is started with, which is empty for every
     // command that runs nothing. Read off the iterator rather than scanned for
     // here: where the separator sits is the iterator's answer, and a second
@@ -653,6 +1016,7 @@ pub fn run(process: std.process.Init) !u8 {
     // Not a debugging aid: this is the compiler's output in another form,
     // and the shape a person reads when generated code misbehaves.
     const is_emit_mlir = cmd.tag == .emit_mlir;
+    const is_dump_mlir = expose_dumps and cmd.tag == .dump_mlir;
     const is_test = cmd.tag == .@"test";
     const is_build = cmd.tag == .build;
     const is_check = cmd.tag == .check;
@@ -661,7 +1025,7 @@ pub fn run(process: std.process.Init) !u8 {
     defer table.deinit(gpa);
 
     var sink = Sink.init(gpa);
-    const report: Report = .{ .gpa = gpa, .io = io, .file = stderr_file, .out = &stderr, .color = color, .error_format = error_format };
+    const report: Report = .{ .gpa = gpa, .io = io, .file = stderr_file, .out = stderr, .color = color, .error_format = error_format };
     var interner: Interner = .empty;
 
     // Whether the backend refused to emit what it was handed. Tracked apart
@@ -919,6 +1283,12 @@ pub fn run(process: std.process.Init) !u8 {
                         defer gpa.free(target);
                         const mid = try toolchain.Intermediates.of(gpa, target);
                         defer mid.deinit(gpa);
+                        const gpu_images = switch (try prepareGpu(gpa, io, &lowered, &sink, target, stderr_w, true)) {
+                            .images => |images| images,
+                            .stop => |status| return status,
+                        };
+                        defer gpu_driver.deinitImages(gpa, gpu_images);
+                        defer gpu_driver.removeInputs(gpa, io, target, gpu_images);
                         const asm_path = try std.fmt.allocPrint(gpa, "{s}.s", .{target});
                         defer {
                             mid.remove(io);
@@ -932,7 +1302,7 @@ pub fn run(process: std.process.Init) !u8 {
                             };
                             defer file.close(io);
                             var out: Out = .{};
-                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{ .foreign_symbols = foreign_symbols })) return exit_defect;
+                            if (!try emitMlir(gpa, out.open(io, file), &lowered, &table, &sink, .{ .gpu_images = gpu_images, .foreign_symbols = foreign_symbols })) return exit_defect;
                             try out.flush();
                         }
 
@@ -977,7 +1347,13 @@ pub fn run(process: std.process.Init) !u8 {
                             const target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-test");
                             defer gpa.free(target);
 
-                            const stopped = try compileArtifact(gpa, io, process.minimal.environ, stderr_w, .{
+                            const test_mid = try toolchain.Intermediates.of(gpa, target);
+                            defer test_mid.deinit(gpa);
+                            defer if (pending.* == null) {
+                                std.Io.Dir.cwd().deleteFile(io, target) catch {};
+                                test_mid.remove(io);
+                            };
+                            const prepared = try prepareArtifact(gpa, durable, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,
                                 .table = &table,
                                 .sink = &sink,
@@ -988,47 +1364,17 @@ pub fn run(process: std.process.Init) !u8 {
                                 .native = program.native,
                                 .link = program.link,
                                 .foreign_symbols = foreign_symbols,
-                            });
-
-                            // Removed whatever happened, including where the
-                            // link failed and left them: what a failed test
-                            // build leaves behind is not something anyone reads,
-                            // and it is not in a directory anyone is looking at.
-                            defer {
-                                std.Io.Dir.cwd().deleteFile(io, target) catch {};
-                                if (toolchain.Intermediates.of(gpa, target)) |mid| {
-                                    mid.remove(io);
-                                    mid.deinit(gpa);
-                                } else |_| {}
-                            }
-
-                            if (stopped) |status| {
-                                if (status != exit_defect) return status;
-                                defect = true;
-                            } else {
-                                // One compile, one link, and one child per
-                                // test. What each said is held until its line
-                                // is due, because the order they finish in is
-                                // not the order they are read in -- and written
-                                // the moment it is due, so a suite reports as
-                                // it goes.
-                                try report.emit(&table, &sink);
-                                const stdout_file = std.Io.File.stdout();
-                                var stdout: Out = .{};
-                                const stdout_w = stdout.open(io, stdout_file);
-                                const passed = try runner.run(
-                                    gpa,
-                                    io,
-                                    target,
-                                    res.tests,
-                                    std.Thread.getCpuCount() catch 1,
-                                    file_path,
-                                    filter,
-                                    stdout_w,
-                                );
-                                try stdout.flush();
-
-                                return if (passed) exit_ok else exit_diagnostics;
+                            }, .{ .tests = .{ .all = res.tests, .root = file_path, .filter = filter } });
+                            switch (prepared) {
+                                .stop => |status| {
+                                    if (status != exit_defect) return status;
+                                    defect = true;
+                                },
+                                .ready => |action| {
+                                    pending.* = action;
+                                    try report.emit(&table, &sink);
+                                    return exit_ok;
+                                },
                             }
                         }
                     }
@@ -1059,7 +1405,7 @@ pub fn run(process: std.process.Init) !u8 {
                                 return exit_io;
                             } else null;
                             defer if (run_output) |*output| {
-                                output.remove(io);
+                                if (pending.* == null) output.remove(io);
                                 output.deinit(gpa);
                             };
                             const target = if (run_output) |output| output.path else out_path orelse defaultOutputName(file_path);
@@ -1077,7 +1423,7 @@ pub fn run(process: std.process.Init) !u8 {
                                 return exit_io;
                             } else |_| {}
 
-                            const stopped = try compileArtifact(gpa, io, process.minimal.environ, stderr_w, .{
+                            const prepared = try prepareArtifact(gpa, durable, io, process.minimal.environ, stderr_w, .{
                                 .mir = &lowered,
                                 .table = &table,
                                 .sink = &sink,
@@ -1089,33 +1435,48 @@ pub fn run(process: std.process.Init) !u8 {
                                 .native = program.native,
                                 .link = program.link,
                                 .foreign_symbols = foreign_symbols,
-                            });
-
-                            // A refusal to emit falls through to the renderer
-                            // rather than returning past it: what it says is in
-                            // the sink, and a status with nothing printed under
-                            // it is the one shape of failure nobody can act on.
-                            if (stopped) |status| {
-                                if (status != exit_defect) return status;
-                                defect = true;
-                            } else if (is_run) {
-                                try report.emit(&table, &sink);
-                                // What this process wrote reaches its streams
-                                // before the program takes the process over.
-                                try stderr_w.flush();
-                                toolchain.replaceWith(gpa, io, target, program_args) catch {};
-                                try stderr_w.print(
-                                    "error: cannot execute '{s}'\n",
-                                    .{target},
-                                );
-                                return exit_io;
-                            } else if (program.kind == .library and program.link.len > 0) {
-                                // The object holds the library's C, but a
-                                // library it links is the linking program's to
-                                // name, so the line it needs is printed.
-                                try stderr_w.print("note: link '{s}' with", .{target});
-                                for (program.link) |name| try stderr_w.print(" -l{s}", .{name});
-                                try stderr_w.writeAll("\n");
+                            }, if (is_run) .{ .program = .{ .args = program_args, .output = run_output } } else .build);
+                            switch (prepared) {
+                                .stop => |status| {
+                                    if (status != exit_defect) return status;
+                                    defect = true;
+                                },
+                                .ready => |action| {
+                                    pending.* = action;
+                                    try report.emit(&table, &sink);
+                                    return exit_ok;
+                                },
+                            }
+                        }
+                    }
+                } else if (is_dump_mlir) {
+                    if (!sink.hasErrors()) {
+                        if (try lower(gpa, &settled.expanded, res, typing, disposals, &sink, purpose)) |lowered| {
+                            const definitions = inspection.select(gpa, &settled.expanded, &lowered, inspect) catch |err| switch (err) {
+                                error.OutOfMemory => return error.OutOfMemory,
+                                else => |selection_error| {
+                                    const description: []const u8 = switch (selection_error) {
+                                        error.UnknownFunction => "unknown source function",
+                                        error.AmbiguousFunction => "ambiguous source function",
+                                        error.FunctionOutsideScope => "source function outside --scope=user",
+                                        error.UnmaterializedFunction => "source function has no materialized implementation",
+                                    };
+                                    try stderr_w.print("error: {s}: '{s}'\n", .{ description, inspect.function orelse "" });
+                                    return exit_usage;
+                                },
+                            };
+                            defer gpa.free(definitions);
+                            const display_names = if (inspect.detail == .compact) try inspection.displayNames(gpa, &settled.expanded, &lowered) else null;
+                            defer if (display_names) |names| inspection.deinitNames(gpa, names);
+                            const stdout_file = std.Io.File.stdout();
+                            var stdout: Out = .{};
+                            const stdout_w = stdout.open(io, stdout_file);
+                            defer stdout.flush() catch {};
+                            if (inspect.target == .host) {
+                                try inspection.writeHeader(stdout_w, &settled.expanded, &lowered, definitions);
+                                if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .definitions = definitions, .foreign_symbols = foreign_symbols, .display_names = display_names, .compact = inspect.detail == .compact, .locations = inspect.locations })) defect = true;
+                            } else {
+                                if (try dumpGpuInspection(gpa, io, &lowered, &sink, definitions, &settled.expanded, inspect, display_names, scratchDir(process.minimal.environ), stdout_w, stderr_w)) |status| return status;
                             }
                         }
                     }
@@ -1131,7 +1492,15 @@ pub fn run(process: std.process.Init) !u8 {
                             const stdout_w = stdout.open(io, stdout_file);
                             defer stdout.flush() catch {};
 
-                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .foreign_symbols = foreign_symbols })) {
+                            const gpu_target = try toolchain.uniqueTarget(gpa, io, scratchDir(process.minimal.environ), "linea-gpu");
+                            defer gpa.free(gpu_target);
+                            const gpu_images = switch (try prepareGpu(gpa, io, &lowered, &sink, gpu_target, stderr_w, true)) {
+                                .images => |images| images,
+                                .stop => |status| return status,
+                            };
+                            defer gpu_driver.deinitImages(gpa, gpu_images);
+                            defer gpu_driver.removeInputs(gpa, io, gpu_target, gpu_images);
+                            if (!try emitMlir(gpa, stdout_w, &lowered, &table, &sink, .{ .gpu_images = gpu_images, .foreign_symbols = foreign_symbols })) {
                                 defect = true;
                             }
                         }
@@ -1175,6 +1544,25 @@ test "dumpTokens escapes newlines, tabs, quotes and backslashes" {
     defer out.deinit();
     try lexer_dump.writeEscaped(&out.writer, "a\nb\tc\"d\\e");
     try testing.expectEqualStrings("a\\nb\\tc\\\"d\\\\e", out.written());
+}
+
+test "inspection command follows debugging exposure" {
+    try testing.expect(isDebuggingAid("dump-mlir"));
+    try testing.expectEqual(expose_dumps, spec.find("dump-mlir") != null);
+}
+
+test "inspection command owns its selection options" {
+    const cmd = spec.find("dump-mlir");
+    try testing.expectEqual(expose_dumps, cmd != null);
+    if (!expose_dumps) return;
+    for ([_][]const u8{ "--scope", "--target", "--stage", "--function", "--detail", "--locations" }) |name| {
+        try testing.expectEqualStrings("dump-mlir", spec.declaredBy(name).?.name);
+        for ([_][]const u8{ "emit-mlir", "check", "run", "build" }) |other| {
+            var it: cli.Iterator = .{ .spec = spec, .command = spec.find(other).?, .args = &.{name} };
+            try testing.expect(it.next() == null);
+            try testing.expectEqualStrings("dump-mlir", it.problem.?.wrong_command.belongs_to);
+        }
+    }
 }
 
 test "run is listed as a command" {
@@ -1317,4 +1705,179 @@ test "parseColor accepts the documented values" {
     try testing.expectEqual(ColorArg.never, parseColor("never").?);
     try testing.expectEqual(ColorArg.auto, parseColor("auto").?);
     try testing.expect(parseColor("purple") == null);
+}
+
+test "driver compilation releases source storage before native action and retains test metadata" {
+    var counted = std.testing.FailingAllocator.init(testing.allocator, .{});
+    var frontend = Frontend.init(counted.allocator());
+    defer frontend.deinit();
+    const source = frontend.allocator();
+    _ = try source.alloc(u8, 65536);
+    const tests = try source.alloc(@import("../sema/resolve.zig").Resolution.Test, 1);
+    tests[0] = .{ .decl = .at(7), .expects_trap = true, .qualified_name = try source.dupe(u8, "library.owned λ") };
+    const native = try source.alloc([]const u8, 1);
+    native[0] = try source.dupe(u8, "native/shim.c");
+    const links = try source.alloc([]const u8, 1);
+    links[0] = try source.dupe(u8, "sqlite3");
+    const target = try source.dupe(u8, "/tmp/owned-test");
+    const borrowed: NativeAction = .{
+        .options = .{ .mid = try toolchain.Intermediates.of(source, target), .out_path = target, .runtime_path = try source.dupe(u8, "/tmp/runtime.a"), .opt = try source.dupe(u8, "0"), .sanitize = try source.dupe(u8, "address"), .native = native, .link = links },
+        .gpu_functions = try source.dupe(mir.FunctionId, &.{.at(3)}),
+        .keep = false,
+        .execution = .{ .tests = .{ .all = tests, .root = try source.dupe(u8, "library root"), .filter = try source.dupe(u8, "owned") } },
+    };
+    var owned = try borrowed.retained(testing.allocator);
+    defer owned.deinit(testing.allocator);
+    try testing.expect(counted.allocated_bytes > counted.freed_bytes);
+    frontend.finish();
+    // This is the production phase endpoint, before host tools or test children.
+    try testing.expectEqual(counted.allocated_bytes, counted.freed_bytes);
+    try testing.expectEqualStrings("library.owned λ", owned.execution.tests.all[0].qualified_name);
+    try testing.expect(owned.execution.tests.all[0].expects_trap);
+    try testing.expectEqualStrings("library root", owned.execution.tests.root);
+    try testing.expectEqualStrings("owned", owned.execution.tests.filter);
+    try testing.expectEqualStrings("native/shim.c", owned.options.native[0]);
+    try testing.expectEqualStrings("sqlite3", owned.options.link[0]);
+    try testing.expectEqualStrings("/tmp/runtime.a", owned.options.runtime_path.?);
+    try testing.expectEqualStrings("/tmp/owned-test.mlir", owned.options.mid.ir);
+    try testing.expectEqualStrings("address", owned.options.sanitize.?);
+    try testing.expectEqual(mir.FunctionId.at(3), owned.gpu_functions[0]);
+}
+
+test "driver compilation retains run arguments and janitor paths past source release" {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const scratch = try tmp.dir.realPathFileAlloc(io, ".", testing.allocator);
+    defer testing.allocator.free(scratch);
+    var counted = std.testing.FailingAllocator.init(testing.allocator, .{});
+    var frontend = Frontend.init(counted.allocator());
+    defer frontend.deinit();
+    const source = frontend.allocator();
+    var output = try toolchain.RunOutput.create(source, io, scratch);
+    var transferred = false;
+    defer if (!transferred) output.remove(io);
+    const args = try source.alloc([]const u8, 2);
+    args[0] = try source.dupe(u8, "arg with spaces");
+    args[1] = try source.dupe(u8, "λ");
+    const borrowed: NativeAction = .{
+        .options = .{ .mid = try toolchain.Intermediates.of(source, output.path), .out_path = output.path, .runtime_path = null, .opt = "0" },
+        .gpu_functions = &.{},
+        .keep = false,
+        .execution = .{ .program = .{ .args = args, .output = output } },
+    };
+    var owned = try borrowed.retained(testing.allocator);
+    transferred = true;
+    defer owned.deinit(testing.allocator);
+    defer owned.cleanup(testing.allocator, io);
+    frontend.finish();
+    try testing.expectEqual(counted.allocated_bytes, counted.freed_bytes);
+    try testing.expectEqualStrings("arg with spaces", owned.execution.program.args[0]);
+    try testing.expectEqualStrings("λ", owned.execution.program.args[1]);
+    try testing.expect(std.mem.startsWith(u8, owned.execution.program.output.?.directory, scratch));
+    try testing.expectEqualStrings(owned.options.out_path, owned.execution.program.output.?.path);
+    try std.Io.Dir.cwd().access(io, owned.execution.program.output.?.directory, .{});
+    owned.cleanup(testing.allocator, io);
+    try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(io, owned.execution.program.output.?.directory, .{}));
+}
+
+fn retainNativeFailureCase(gpa: std.mem.Allocator) !void {
+    const all = [_]NativeAction.Test{.{ .decl = .at(9), .qualified_name = "module.case", .expects_trap = true }};
+    const borrowed: NativeAction = .{
+        .options = .{ .mid = .{ .ir = "a.mlir", .lowered = "a.mlir.llvm", .assembly = "a.ll" }, .out_path = "a", .runtime_path = "runtime.a", .opt = "0", .sanitize = "address", .native = &.{"source.c"}, .link = &.{"sqlite3"} },
+        .gpu_functions = &.{.at(3)},
+        .keep = true,
+        .execution = .{ .tests = .{ .all = &all, .root = "root", .filter = "case" } },
+    };
+    const owned = try borrowed.retained(gpa);
+    defer owned.deinit(gpa);
+    try testing.expectEqualStrings("module.case", owned.execution.tests.all[0].qualified_name);
+}
+
+test "driver compilation retention settles independent allocation failures" {
+    try testing.checkAllAllocationFailures(testing.allocator, retainNativeFailureCase, .{});
+}
+
+fn retainNativeProgramFailureCase(gpa: std.mem.Allocator, output: toolchain.RunOutput) !void {
+    const borrowed: NativeAction = .{
+        .options = .{ .mid = .{ .ir = "run.mlir", .lowered = "run.mlir.llvm", .assembly = "run.ll" }, .out_path = output.path, .runtime_path = "runtime.a", .opt = "0" },
+        .keep = false,
+        .execution = .{ .program = .{ .args = &.{ "arg with spaces", "λ" }, .output = output } },
+    };
+    const owned = try borrowed.retained(gpa);
+    // These allocation probes do not transfer the janitor. The caller keeps
+    // that handle until a successful action is handed to native execution.
+    defer owned.deinit(gpa);
+    try testing.expectEqualStrings("arg with spaces", owned.execution.program.args[0]);
+    try testing.expectEqualStrings(output.directory, owned.execution.program.output.?.directory);
+    try testing.expectEqualStrings(output.path, owned.execution.program.output.?.path);
+}
+
+test "driver compilation program retention failures preserve the original janitor" {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(io, ".", testing.allocator);
+    defer testing.allocator.free(root);
+    var output = try toolchain.RunOutput.create(testing.allocator, io, root);
+    defer output.deinit(testing.allocator);
+    defer output.remove(io);
+    try testing.checkAllAllocationFailures(testing.allocator, retainNativeProgramFailureCase, .{output});
+    try output.janitor.stdin.?.writeStreamingAll(io, "probe\n");
+    try std.Io.Dir.cwd().access(io, output.directory, .{});
+}
+
+fn frontendFailureCase(gpa: std.mem.Allocator) !void {
+    var frontend = Frontend.init(gpa);
+    defer frontend.deinit();
+    const source = frontend.allocator();
+    _ = try source.alloc(u8, 1 << 20);
+    const root = try source.dupe(u8, "retained root");
+    const all = try source.alloc(NativeAction.Test, 1);
+    all[0] = .{ .decl = .at(3), .qualified_name = try source.dupe(u8, "retained test"), .expects_trap = false };
+    const borrowed: NativeAction = .{
+        .options = .{ .mid = .{ .ir = "a.mlir", .lowered = "a.mlir.llvm", .assembly = "a.ll" }, .out_path = "a", .runtime_path = null, .opt = "0" },
+        .keep = false,
+        .execution = .{ .tests = .{ .all = all, .root = root, .filter = "" } },
+    };
+    const owned = try borrowed.retained(testing.allocator);
+    defer owned.deinit(testing.allocator);
+    frontend.finish();
+    try testing.expectEqualStrings("retained test", owned.execution.tests.all[0].qualified_name);
+}
+
+test "driver compilation source allocation failures release its region" {
+    try testing.checkAllAllocationFailures(testing.allocator, frontendFailureCase, .{});
+}
+
+test "driver compilation failed handoff settles test artifacts and preserves failed builds" {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const directory = try tmp.dir.realPathFileAlloc(io, ".", testing.allocator);
+    defer testing.allocator.free(directory);
+    const target = try std.fs.path.join(testing.allocator, &.{ directory, "artifact" });
+    defer testing.allocator.free(target);
+    const mid = try toolchain.Intermediates.of(testing.allocator, target);
+    defer mid.deinit(testing.allocator);
+    var paths: [7][]const u8 = .{ target, mid.ir, mid.lowered, mid.assembly, undefined, undefined, undefined };
+    const suffixes = [_][]const u8{ ".gpu-7.mlir", ".gpu-7.checked.mlir", ".gpu-7.spv" };
+    for (suffixes, 4..) |suffix, i| paths[i] = try std.mem.concat(testing.allocator, u8, &.{ target, suffix });
+    defer for (paths[4..]) |path| testing.allocator.free(path);
+    for ([_]bool{ true, false }) |is_test| {
+        for (paths) |path| try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = "prepared" });
+        const borrowed: NativeAction = .{
+            .options = .{ .mid = mid, .out_path = target, .runtime_path = null, .opt = "0" },
+            .gpu_functions = &.{.at(7)},
+            .keep = false,
+            .execution = if (is_test) .{ .tests = .{ .all = &.{}, .root = "test.lin", .filter = "" } } else .build,
+        };
+        var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+        try testing.expectError(error.OutOfMemory, retainNativeAction(testing.allocator, failing.allocator(), io, borrowed));
+        for (paths) |path| {
+            if (is_test) {
+                try testing.expectError(error.FileNotFound, std.Io.Dir.cwd().access(io, path, .{}));
+            } else try std.Io.Dir.cwd().access(io, path, .{});
+        }
+    }
 }

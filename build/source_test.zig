@@ -18,7 +18,7 @@ const runtime_symbols = @import("runtime_symbols");
 test "runtime archive members have stable names and separate linkage" {
     const archive = @embedFile("runtime_archive");
     try testing.expect(std.mem.startsWith(u8, archive, "!<arch>\n"));
-    const expected = [_][]const u8{ "linea_rt.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "tls.o", "tls_config.o", "linea_float.o", "math.o" };
+    const expected = [_][]const u8{ "linea_rt.o", "gpu.o", "io.o", "net.o", "process.o", "clock.o", "task.o", "park.o", "waitset.o", "signals.o", "loop.o", "fiber.o", "completion.o", "foreign.o", "parallelism.o", "context.o", "sim.o", "tls.o", "tls_config.o", "linea_float.o", "math.o" };
     // The members of rustls-ffi's archive follow the runtime's own, which
     // `build.zig` appends after them; none takes a runtime member's name.
     var appended: usize = 0;
@@ -156,6 +156,24 @@ test "CI keeps native sanitizer tests in their matrix job before the corpus" {
         "run: nix develop --command zig build test-native-math test-native-io test-native-net test-native-process test-native-clock test-native-runtime test-native-task test-fiber-completion-backend -Dsanitize=${{ matrix.sanitizer }}",
         try onlyLineWith(sanitize, "zig build test-native-math "),
     );
+}
+
+test "CI bounds sanitizer work and retains runner resource evidence" {
+    const workflow = try std.Io.Dir.cwd().readFileAlloc(testing.io, ".github/workflows/ci.yml", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(workflow);
+    const sanitize = try workflowJob(workflow, "sanitize");
+    try testing.expectEqualStrings("timeout-minutes: 75", try onlyLineWith(sanitize, "timeout-minutes:"));
+    try testing.expect(std.mem.indexOf(u8, sanitize, "run: .github/scripts/resource-log.sh start") != null);
+    const corpus = try stepText(sanitize, "Conformance suite under ${{ matrix.sanitizer }}");
+    try testing.expect(std.mem.indexOf(u8, corpus, ".github/scripts/resource-log.sh follow") != null);
+    try testing.expectEqualStrings(
+        "nice -n 10 nix develop --command zig build conformance --release=safe -j2 -Dsequential -Dwalkers=2 -Dscratch=\"$LINEA_SCRATCH-$GITHUB_JOB-${{ matrix.sanitizer }}\" -Dsanitize=${{ matrix.sanitizer }}",
+        try onlyLineWith(corpus, "zig build conformance "),
+    );
+    const saved = try stepText(sanitize, "Keep the resource log");
+    try testing.expect(std.mem.indexOf(u8, saved, "if: always()") != null);
+    try testing.expect(std.mem.indexOf(u8, saved, "resource-log-${{ github.job }}-${{ matrix.sanitizer }}-${{ github.run_attempt }}") != null);
+    try testing.expect(std.mem.indexOf(u8, saved, "path: ${{ runner.temp }}/resource.log") != null);
 }
 
 test "both Linux fiber ABIs execute strict kernel completion regressions" {
@@ -958,6 +976,24 @@ test "conformance walks the directory it is given, or the whole corpus" {
     try testing.expectEqualDeep(test_roots.Walk.whole, try test_roots.walkOf(&.{}));
     try testing.expectEqualDeep(test_roots.Walk{ .narrowed = "tests/cmd/http_json_echo" }, try test_roots.walkOf(&.{"tests/cmd/http_json_echo"}));
     try testing.expectError(error.SeveralDirectories, test_roots.walkOf(&.{ "tests/decl", "tests/cmd" }));
+}
+
+test "both whole conformance roots forward the optional walker count" {
+    const build_zig = try std.Io.Dir.cwd().readFileAlloc(testing.io, "build.zig", testing.allocator, .limited(1 << 22));
+    defer testing.allocator.free(build_zig);
+    for ([_][]const u8{ "fn corpus(self: *const HeavySteps", "fn examples(self: *const HeavySteps" }) |method| {
+        const start = std.mem.indexOf(u8, build_zig, method) orelse return error.MissingWalk;
+        const body = source.indentedUnder(build_zig, start);
+        const guard = std.mem.indexOf(u8, body, "if (self.walkers) |n| {") orelse {
+            std.debug.print("missing optional walker count in {s}\n", .{method});
+            return error.MissingWalkerCount;
+        };
+        try testing.expectEqualStrings(
+            "            run.addArg(\"--walkers\");\n            run.addArg(b.fmt(\"{d}\", .{n}));\n",
+            source.indentedUnder(body, guard),
+        );
+        try testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "\"--walkers\""));
+    }
 }
 
 test "test suites partition the full graph without omitting or repeating roots" {
@@ -2236,6 +2272,7 @@ fn scalarOf(written: []const u8, typedefs: *const Typedefs) ?runtime_symbols.Par
         .{ "const char *", .{ .scalar = .ptr } },
         .{ "char **", .{ .scalar = .ptr } },
         .{ "void *", .{ .scalar = .ptr } },
+        .{ "const void *", .{ .scalar = .ptr } },
         .{ "void", .{ .scalar = .unit } },
         .{ "u8", .{ .scalar = .u8 } },
         .{ "i32", .{ .scalar = .i32 } },

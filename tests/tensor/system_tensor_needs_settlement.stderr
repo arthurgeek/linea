@@ -1,0 +1,9 @@
+error[O-Leak]: `_owned` (a linear `tensor.Tensor[Float32, 2, tensor.Cpu[mem.SystemAllocator]]`) is still owned when this path leaves
+ --> tests/tensor/system_tensor_needs_settlement.lin:4:9
+  |
+4 |     let _owned = tensor.matrix([[Float32(1.0)]]).unwrap()
+  |         ^^^^^^ never settled on the path that reaches the end of this block
+6 | }
+  | - the block ends here
+  |
+  = help: settle it first with `_owned.release()`

@@ -1,0 +1,10 @@
+error[T-Impl]: `MapBody` declares no `_device_kernel`
+  --> tests/tensor/public_device_hook_is_refused.lin:16:8
+   |
+16 |     fn _device_kernel(_self: Self) -> mem.GpuKernel {
+   |        ^^^^^^^^^^^^^^ declare it on the trait, or move it to an inherent `impl`
+error[T-Impl]: `BinaryBody` declares no `_device_kernel`
+  --> tests/tensor/public_device_hook_is_refused.lin:28:8
+   |
+28 |     fn _device_kernel(_self: Self) -> mem.GpuKernel {
+   |        ^^^^^^^^^^^^^^ declare it on the trait, or move it to an inherent `impl`

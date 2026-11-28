@@ -1,0 +1,27 @@
+import std.mem
+import std.tensor
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn combine(left: Float32, right: Float32) -> Float32 {
+    left * 0.5 + right
+}
+
+fn main() -> UInt8 {
+    defer let source = mem.Vec.from_fn(65, |index| Float32(index + 1)).unwrap()
+    defer let input = tensor.from_slice(source.as_slice(), [UInt64(65)]).unwrap()
+    defer let reduced = input.reduce(Float32(0.5), combine).unwrap()
+    if reduced.values()[0].to_bits() != 1140164352 {
+        return 1
+    }
+    let unusual = [Float32.from_bits(2), Float32.from_bits(2147483648), Float32.from_bits(2143289345)]
+    let original = tensor.from_slice(unusual.as_slice(), [UInt64(3)]).unwrap()
+    defer let mapped = original.map(half).unwrap()
+    original.release()
+    if mapped.values()[0].to_bits() != 1 || mapped.values()[1].to_bits() != 2147483648 || mapped.values()[2].to_bits() != 2143289344 {
+        return 2
+    }
+    0
+}

@@ -1,0 +1,279 @@
+import std.mem
+import std.testing
+
+// Storage owns numerical elements; tensors add checked dimensions. Returned
+// storage is adopted through the same shape check as an explicit constructor.
+pub trait Storage[T]: Release {
+    type Error
+
+    fn shape_error() -> Self.Error
+
+    fn length(self: Self) -> UInt64
+
+    fn map[B: MapBody](self: Self, body: B) -> Result[Self, Self.Error] where B.Element == T, carries(.Ok: self, body)
+
+    fn zip_with[B: BinaryBody](self: Self, right: Self, body: B) -> Result[Self, Self.Error] where B.Element == T, carries(.Ok: self, right, body)
+
+    fn reduce[B: BinaryBody](self: Self, initial: T, body: B) -> Result[Self, Self.Error] where B.Element == T, carries(.Ok: self, initial, body)
+
+    fn matmul(self: Self, right: Self, rows: UInt64, inner: UInt64, columns: UInt64) -> Result[Self, Self.Error] where carries(.Ok: self, right)
+}
+
+// Numerical bodies describe only CPU computation. Their sealed supertraits
+// reserve device admission to this module, independently of user overrides.
+pub trait MapBody: _DeviceMapBody {
+    type Element
+
+    fn call(self: Self, value: Self.Element) -> Self.Element where carries(self, value)
+}
+
+default impl[F: fn(value: Float32) -> Float32 + _DeviceMapBody] MapBody for F {
+    type Element = Float32
+
+    fn call(self: Self, value: Float32) -> Float32 {
+        self(value)
+    }
+}
+
+pub trait BinaryBody: _DeviceBinaryBody {
+    type Element
+
+    fn call(self: Self, left: Self.Element, right: Self.Element) -> Self.Element where carries(self, left, right)
+}
+
+default impl[F: fn(left: Float32, right: Float32) -> Float32 + _DeviceBinaryBody] BinaryBody for F {
+    type Element = Float32
+
+    fn call(self: Self, left: Float32, right: Float32) -> Float32 {
+        self(left, right)
+    }
+}
+
+@opaque
+struct Uniform {
+    body: fn(value: Float32, factor: Float32) -> Float32,
+    factor: Float32,
+}
+
+pub fn uniform(sink body: fn(value: Float32, factor: Float32) -> Float32, factor: Float32) -> Uniform {
+    .{ body, factor }
+}
+
+impl MapBody for Uniform {
+    type Element = Float32
+
+    fn call(self: Self, value: Float32) -> Float32 {
+        (self.body)(value, self.factor)
+    }
+}
+
+// A supertrait's operations can be reached through an inherited public bound.
+// Requiring this opaque witness closes that route: only this module constructs
+// one. Consumers can neither implement the internal traits nor invoke their
+// admission methods with a fabricated witness, including a contextual literal.
+@opaque
+struct _Admission { seal: UInt8 }
+
+internal struct DeviceMap {
+    kernel: mem.GpuKernel,
+    uniform: Float32,
+    uses_uniform: Bool,
+}
+
+internal trait _DeviceMapBody {
+    fn _admit_map(self: Self, permit: _Admission) -> DeviceMap
+}
+
+default impl[B] _DeviceMapBody for B {
+    fn _admit_map(_self: Self, _permit: _Admission) -> DeviceMap {
+        .{ kernel = mem.GpuKernel.none(), uniform = 0.0, uses_uniform = false }
+    }
+}
+
+impl _DeviceMapBody for fn(value: Float32) -> Float32 {
+    fn _admit_map(self: Self, _permit: _Admission) -> DeviceMap {
+        .{ kernel = mem._gpu_kernel(self), uniform = 0.0, uses_uniform = false }
+    }
+}
+
+impl _DeviceMapBody for Uniform {
+    fn _admit_map(self: Self, _permit: _Admission) -> DeviceMap {
+        .{ kernel = mem._gpu_reducer(self.body), uniform = self.factor, uses_uniform = true }
+    }
+}
+
+internal trait _DeviceBinaryBody {
+    fn _admit_binary(self: Self, permit: _Admission) -> mem.GpuKernel
+}
+
+default impl[B] _DeviceBinaryBody for B {
+    fn _admit_binary(_self: Self, _permit: _Admission) -> mem.GpuKernel {
+        mem.GpuKernel.none()
+    }
+}
+
+impl _DeviceBinaryBody for fn(left: Float32, right: Float32) -> Float32 {
+    fn _admit_binary(self: Self, _permit: _Admission) -> mem.GpuKernel {
+        mem._gpu_reducer(self)
+    }
+}
+
+internal fn _device_map[B: MapBody](body: B) -> DeviceMap {
+    _DeviceMapBody._admit_map(body, .{ seal = 0 })
+}
+
+internal fn _device_binary[B: BinaryBody](body: B) -> mem.GpuKernel {
+    _DeviceBinaryBody._admit_binary(body, .{ seal = 0 })
+}
+
+test "uniform binds a runtime value and CPU closures keep their captures" {
+    let factor = Float32(3.0)
+    let bound = uniform(_scale, factor)
+    testing.assert_eq(bound.call(Float32(2.0)), Float32(6.0), "uniform lost its factor")?
+    testing.assert_eq(_device_map(bound).uniform, factor, "trusted uniform admission changed its parameter")?
+    testing.assert(_device_map(bound).uses_uniform, "trusted uniform admission lost its operation kind")?
+    let closure = [factor] |value: Float32| value * factor
+    testing.assert_eq(closure.call(Float32(2.0)), Float32(6.0), "CPU closure lost its capture")?
+    testing.assert(!_device_map(closure).kernel.is_available(), "captured CPU closure acquired a device descriptor")?
+    let binary = [factor] |left: Float32, right: Float32| left + right * factor
+    testing.assert_eq(binary.call(Float32(2.0), Float32(4.0)), Float32(14.0), "binary CPU closure lost its capture")?
+    testing.assert(!_device_binary(binary).is_available(), "binary CPU closure acquired a device descriptor")?
+}
+
+fn _scale(value: Float32, factor: Float32) -> Float32 {
+    value * factor
+}
+
+fn _add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+// Owned storage determines settlement: system and device allocations are
+// linear, while an arena-backed tensor may be abandoned with its arena.
+@opaque
+struct Tensor[T, let rank: UInt64, S: Storage[T]] {
+    data: S,
+    shape: [UInt64; rank],
+}
+
+// These are the same tensor representation at familiar numerical ranks.
+pub alias Scalar[T, S: Storage[T]] = Tensor[T, 0, S]
+pub alias Vector[T, S: Storage[T]] = Tensor[T, 1, S]
+pub alias Matrix[T, S: Storage[T]] = Tensor[T, 2, S]
+
+impl[T, let rank: UInt64, S: Storage[T]] Tensor[T, rank, S] {
+    pub fn dimensions(self: Self) -> [UInt64; rank] {
+        copy(self.shape)
+    }
+
+    pub fn storage(self: Self) -> borrow S where borrows(self) {
+        borrow self.data
+    }
+
+    pub fn map[B: MapBody](self: Self, body: B) -> Result[Self, S.Error] where B.Element == T, carries(.Ok: self, body) {
+        let data = self.data.map(body)?
+        Tensor.from_storage(data, self.shape)
+    }
+
+    pub fn zip_with[B: BinaryBody](self: Self, right: Self, body: B) -> Result[Self, S.Error] where B.Element == T, carries(.Ok: self, right, body) {
+        if self.shape != right.shape {
+            return .Err(S.shape_error())
+        }
+        let data = self.data.zip_with(right.data, body)?
+        Tensor.from_storage(data, self.shape)
+    }
+
+    pub fn reduce[B: BinaryBody](self: Self, initial: T, body: B) -> Result[Tensor[T, 0, S], S.Error] where B.Element == T, carries(.Ok: self, initial, body) {
+        let data = self.data.reduce(initial, body)?
+        Tensor.from_storage(data, [])
+    }
+}
+
+impl[T, let rank: UInt64, S: Storage[T]] Tensor[T, rank, S] {
+    // Adopt storage only when its length matches the entire checked shape.
+    pub fn from_storage(sink data: S, shape: [UInt64; rank]) -> Result[Self, S.Error] where carries(.Ok: data) {
+        let count = element_count(shape)
+        let valid = match count { Some(length) => length == data.length(), None => false }
+        if !valid {
+            data.release()
+            return .Err(S.shape_error())
+        }
+        .Ok(.{ data, shape = copy(shape) })
+    }
+}
+
+test "tensor adoption checks storage length and accessors retain the shape" {
+    let data: Cpu[mem.SystemAllocator] = .{ values = mem.Vec.filled(1, Float32(4.0)).unwrap() }
+    let adopted: Result[Tensor[Float32, 1, Cpu[mem.SystemAllocator]], CpuError] = Tensor.from_storage(data, [UInt64(2)])
+    match adopted {
+        Err(error) => testing.assert_eq(error, CpuError.Shape, "adoption lost its shape error")?,
+        Ok(value) => {
+            value.release()
+            return testing.assert(false, "adoption accepted the wrong length")
+        },
+    }
+    let valid: Cpu[mem.SystemAllocator] = .{ values = mem.Vec.filled(1, Float32(4.0)).unwrap() }
+    defer let value: Tensor[Float32, 1, Cpu[mem.SystemAllocator]] = Tensor.from_storage(valid, [UInt64(1)]).unwrap()
+    testing.assert_eq(value.dimensions(), [UInt64(1)], "tensor changed its dimensions")?
+    testing.assert_eq((*value.storage()).values.length(), UInt64(1), "tensor lost its storage")?
+}
+
+impl[T, S: Storage[T]] Tensor[T, 2, S] {
+    pub fn matmul(self: Self, right: Self) -> Result[Self, S.Error] where carries(.Ok: self, right) {
+        let rows = self.shape[0]
+        let inner = self.shape[1]
+        let columns = right.shape[1]
+        if inner != right.shape[0] {
+            return .Err(S.shape_error())
+        }
+        if element_count([rows, columns]).is_none() {
+            return .Err(S.shape_error())
+        }
+        let data = self.data.matmul(right.data, rows, inner, columns)?
+        Tensor.from_storage(data, [rows, columns])
+    }
+}
+
+test "tensor numerical operations share shapes and complete their values" {
+    defer let left: Matrix[Float32, Cpu[mem.SystemAllocator]] = matrix([[Float32(1.0), 2.0], [Float32(3.0), 4.0]]).unwrap()
+    defer let identity = matrix([[Float32(1.0), 0.0], [Float32(0.0), 1.0]]).unwrap()
+    defer let mapped = left.map(uniform(_scale, Float32(2.0))).unwrap()
+    defer let zipped = mapped.zip_with(left, _add).unwrap()
+    defer let product = zipped.matmul(identity).unwrap()
+    defer let reduced: Scalar[Float32, Cpu[mem.SystemAllocator]] = product.reduce(Float32(1.0), _add).unwrap()
+    testing.assert_eq(product.values()[3], Float32(12.0), "matrix product lost a value")?
+    testing.assert_eq(product.dimensions(), [UInt64(2), 2], "matrix product lost its shape")?
+    testing.assert_eq(reduced.dimensions().length(), UInt64(0), "reduction did not produce a scalar")?
+    testing.assert_eq(reduced.values()[0], Float32(31.0), "reduction lost a value")?
+}
+
+impl[T, let rank: UInt64, S: Storage[T]] Release for Tensor[T, rank, S] {
+    fn release(sink self: Self) {
+        let Tensor { data, shape: _ } = self
+        data.release()
+    }
+}
+
+// Check zero dimensions before multiplying: [MAX, 2, 0] is empty. The empty
+// dimension list describes a scalar and therefore contains one element.
+pub fn element_count[let rank: UInt64](shape: [UInt64; rank]) -> Option[UInt64] {
+    for i in UInt64(0)..rank {
+        if shape[i] == 0 {
+            return .Some(0)
+        }
+    }
+    var count = UInt64(1)
+    for i in UInt64(0)..rank {
+        if count > UInt64.max / shape[i] {
+            return .None
+        }
+        count *= shape[i]
+    }
+    .Some(count)
+}
+
+test "element count handles scalar empty and overflowing dimensions" {
+    testing.assert_eq(element_count([]), .Some(UInt64(1)), "rank zero is not a scalar")?
+    testing.assert_eq(element_count([UInt64.max, 2, 0]), .Some(UInt64(0)), "zero dimensions were checked too late")?
+    testing.assert_eq(element_count([UInt64.max, 2]), .None, "shape overflow was accepted")?
+}

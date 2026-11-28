@@ -1,0 +1,11 @@
+import std.gpu
+
+fn main() -> UInt8 {
+    match gpu.Device.open() {
+        Err(reason) => if reason == .Unavailable { 0 } else { 2 },
+        Ok(device) => {
+            device.release()
+            4
+        },
+    }
+}

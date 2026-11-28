@@ -1,0 +1,12 @@
+import std.tensor
+
+struct Custom {}
+
+impl tensor._DeviceMapBody for Custom {}
+
+impl tensor._DeviceBinaryBody for Custom {}
+
+fn main() -> UInt8 {
+    let _custom = Custom {}
+    0
+}

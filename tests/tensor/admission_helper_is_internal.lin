@@ -1,0 +1,15 @@
+import std.tensor
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn main() -> UInt8 {
+    let _admission = tensor._device_map(half)
+    let _binary = tensor._device_binary(add)
+    0
+}

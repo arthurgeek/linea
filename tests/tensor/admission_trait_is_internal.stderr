@@ -1,0 +1,10 @@
+error[M-Vis]: `_DeviceMapBody` is internal to another root
+ --> tests/tensor/admission_trait_is_internal.lin:5:13
+  |
+5 | impl tensor._DeviceMapBody for Custom {}
+  |             ^^^^^^^^^^^^^^ only modules in the same root may name it
+error[M-Vis]: `_DeviceBinaryBody` is internal to another root
+ --> tests/tensor/admission_trait_is_internal.lin:7:13
+  |
+7 | impl tensor._DeviceBinaryBody for Custom {}
+  |             ^^^^^^^^^^^^^^^^^ only modules in the same root may name it

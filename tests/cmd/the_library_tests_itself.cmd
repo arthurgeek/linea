@@ -368,6 +368,10 @@ The library tests itself.
   ok    fs.skipping a directory's children leaves them out
   ok    fs.temporary names have a fixed ascii extent and a single terminator
   ok    fs.writing a file reports the bytes written
+  ok    gpu.completed map preserves GPU subnormals and refuses unsupported ordinary bodies
+  ok    gpu.matrix dimensions follow nested array lengths
+  ok    gpu.opening a device reports unavailable capability or owns a device
+  ok    gpu.upload preserves raw bits and checks zero dimensions before overflow
   ok    hash.boolean hashes distinguish values
   ok    hash.boolean queries match only the same value
   ok    hash.equal arrays hash equally
@@ -1322,6 +1326,7 @@ The library tests itself.
   ok    mem.address.nowhere is the address of no bytes
   ok    mem.all_disposed is false while an allocation is live
   ok    mem.allocating again preserves a live buffer view
+  ok    mem.an absent GPU image is unavailable
   ok    mem.an address at a number names the bytes there
   ok    mem.an arena backs another arena
   ok    mem.an arena hands out storage and gives the slab back
@@ -1337,6 +1342,7 @@ The library tests itself.
   ok    mem.arena vector discard does not invoke optional element release
   ok    mem.as_slice views only the live elements
   ok    mem.attempts count refused acquisitions too
+  ok    mem.availability distinguishes an image token from an absent image
   ok    mem.closing a descriptor the process lacks reports an error
   ok    mem.derived oom equality compares its case
   ok    mem.derived oom release consumes its case
@@ -1405,6 +1411,7 @@ The library tests itself.
   ok    mem.store_byte traps past the end
   ok    mem.take leaves the default behind
   ok    mem.typed slots move an aggregate to independent storage
+  ok    mem.vec allocator preserves the arena after the original vector ends
   ok    mem.vec append_slice copies the elements after the live ones
   ok    mem.vec append_slice in an arena keeps nothing of its source
   ok    mem.vec append_slice keeps every element across growth
@@ -1727,6 +1734,12 @@ The library tests itself.
   ok    task.map_in takes its results and tasks from its allocator
   ok    task.releasing a client leaves its owner serving
   ok    task.releasing an owner joins its task
+  ok    tensor.CPU constructors infer matrices and copy slices without borrowing their data
+  ok    tensor.CPU outputs preserve allocator refusal and can outlive the input vector
+  ok    tensor.element count handles scalar empty and overflowing dimensions
+  ok    tensor.tensor adoption checks storage length and accessors retain the shape
+  ok    tensor.tensor numerical operations share shapes and complete their values
+  ok    tensor.uniform binds a runtime value and CPU closures keep their captures
   ok    testing.a failure displays the caller's message
   ok    testing.a new recorder holds nothing
   ok    testing.a recorder keeps what was rendered into it
@@ -1979,4 +1992,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1976 passed, 0 failed
+  1989 passed, 0 failed

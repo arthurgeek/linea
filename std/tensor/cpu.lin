@@ -1,0 +1,223 @@
+import std.mem
+import std.testing
+
+use mem.Lender
+
+@derive(Equatable, Display, Debug, Release)
+pub enum CpuError {
+    Shape,
+    Allocation(mem.Oom),
+}
+
+@opaque
+struct Cpu[A: Allocator = mem.SystemAllocator] {
+    values: mem.Vec[Float32, A],
+}
+
+impl[A: Allocator] Release for Cpu[A] {
+    fn release(sink self: Self) {
+        let Cpu { values } = self
+        values.release()
+    }
+}
+
+impl[A: Allocator] Cpu[A] {
+    fn allocate(self: Self, count: UInt64) -> Result[mem.Vec[Float32, A], CpuError] where carries(.Ok: self) {
+        allocate_in(self.values.allocator(), count)
+    }
+}
+
+impl[A: Allocator] Storage[Float32] for Cpu[A] {
+    type Error = CpuError
+
+    fn shape_error() -> CpuError {
+        .Shape
+    }
+
+    fn length(self: Self) -> UInt64 {
+        self.values.length()
+    }
+
+    fn map[B: MapBody](self: Self, body: B) -> Result[Self, CpuError] where B.Element == Float32 {
+        var values = self.allocate(self.values.length())?
+        for index in UInt64(0)..self.values.length() {
+            &values.push(body.call(self.values[index])).unwrap()
+        }
+        .Ok(.{ values })
+    }
+
+    fn zip_with[B: BinaryBody](self: Self, right: Self, body: B) -> Result[Self, CpuError] where B.Element == Float32 {
+        if self.values.length() != right.values.length() {
+            return .Err(.Shape)
+        }
+        var values = self.allocate(self.values.length())?
+        for index in UInt64(0)..self.values.length() {
+            &values.push(body.call(self.values[index], right.values[index])).unwrap()
+        }
+        .Ok(.{ values })
+    }
+
+    // Mirror the device's 64 strided lanes and six descending tree stages.
+    // Missing lanes contribute no synthetic identity. Initial is applied once.
+    fn reduce[B: BinaryBody](self: Self, initial: Float32, body: B) -> Result[Self, CpuError] where B.Element == Float32 {
+        var partial: [Float32; 64] = mem.filled(Float32(0.0))
+        var present: [Bool; 64] = mem.filled(false)
+        let count = self.values.length()
+        for lane in UInt64(0)..64 {
+            if lane < count {
+                present[lane] = true
+                partial[lane] = self.values[lane]
+                var index = lane + 64
+                while index < count {
+                    partial[lane] = body.call(partial[lane], self.values[index])
+                    if count - index <= 64 {
+                        break
+                    }
+                    index += 64
+                }
+            }
+        }
+        var width = UInt64(32)
+        while width > 0 {
+            for lane in UInt64(0)..width {
+                let other = lane + width
+                if present[other] {
+                    partial[lane] = if present[lane] {
+                        body.call(partial[lane], partial[other])
+                    } else {
+                        partial[other]
+                    }
+                    present[lane] = true
+                }
+            }
+            width /= 2
+        }
+        let answer = if count == 0 {
+            initial
+        } else {
+            body.call(initial, partial[0])
+        }
+        var values = self.allocate(1)?
+        &values.push(answer).unwrap()
+        .Ok(.{ values })
+    }
+
+    fn matmul(self: Self, right: Self, rows: UInt64, inner: UInt64, columns: UInt64) -> Result[Self, CpuError] {
+        let left_count = element_count([rows, inner]) else {
+            return .Err(.Shape)
+        }
+        let right_count = element_count([inner, columns]) else {
+            return .Err(.Shape)
+        }
+        let output_count = element_count([rows, columns]) else {
+            return .Err(.Shape)
+        }
+        if left_count != self.values.length() || right_count != right.values.length() || output_count > UInt64.max / 4 {
+            return .Err(.Shape)
+        }
+        var values = self.allocate(output_count)?
+        if rows == 0 || columns == 0 {
+            return .Ok(.{ values })
+        }
+        for row in UInt64(0)..rows {
+            for column in UInt64(0)..columns {
+                var value = Float32(0.0)
+                for k in UInt64(0)..inner {
+                    value += self.values[row * inner + k] * right.values[k * columns + column]
+                }
+                &values.push(value).unwrap()
+            }
+        }
+        .Ok(.{ values })
+    }
+}
+
+// Allocate all output slots before invoking a caller's body. No later push
+// grows the vector, and errors release the empty vector before returning.
+fn allocate_in[A: Allocator](allocator: A, count: UInt64) -> Result[mem.Vec[Float32, A], CpuError] where carries(.Ok: allocator) {
+    var values: mem.Vec[Float32, A] = mem.Vec.new_in(allocator)
+    match &values.reserve(count) {
+        Err(reason) => {
+            values.release()
+            .Err(.Allocation(reason))
+        },
+        Ok(_) => .Ok(values),
+    }
+}
+
+pub fn from_slice_in[A: Allocator, let rank: UInt64](allocator: A, values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[Tensor[Float32, rank, Cpu[A]], CpuError] where carries(.Ok: allocator) {
+    let count = element_count(shape) else {
+        return .Err(.Shape)
+    }
+    if count != values.length() || count > UInt64.max / 4 {
+        return .Err(.Shape)
+    }
+    var copied = allocate_in(allocator, count)?
+    for index in UInt64(0)..count {
+        &copied.push(values[index]).unwrap()
+    }
+    .Ok(.{ data = .{ values = copied }, shape = copy(shape) })
+}
+
+pub fn from_slice[let rank: UInt64](values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[Tensor[Float32, rank, Cpu[mem.SystemAllocator]], CpuError] {
+    from_slice_in(mem.system(), values, shape)
+}
+
+pub fn matrix_in[A: Allocator, let rows: UInt64, let columns: UInt64](allocator: A, values: [[Float32; columns]; rows]) -> Result[Tensor[Float32, 2, Cpu[A]], CpuError] where carries(.Ok: allocator) {
+    let count = element_count([rows, columns]) else {
+        return .Err(.Shape)
+    }
+    if count > UInt64.max / 4 {
+        return .Err(.Shape)
+    }
+    var copied = allocate_in(allocator, count)?
+    if count == 0 {
+        return .Ok(.{ data = .{ values = copied }, shape = [rows, columns] })
+    }
+    for row in UInt64(0)..rows {
+        for column in UInt64(0)..columns {
+            &copied.push(values[row][column]).unwrap()
+        }
+    }
+    .Ok(.{ data = .{ values = copied }, shape = [rows, columns] })
+}
+
+pub fn matrix[let rows: UInt64, let columns: UInt64](values: [[Float32; columns]; rows]) -> Result[Tensor[Float32, 2, Cpu[mem.SystemAllocator]], CpuError] {
+    matrix_in(mem.system(), values)
+}
+
+test "CPU constructors infer matrices and copy slices without borrowing their data" {
+    defer let matrix_value = matrix([[Float32(1.0), 2.0], [Float32(3.0), 4.0]]).unwrap()
+    testing.assert_eq(matrix_value.dimensions(), [UInt64(2), 2], "matrix inference changed its shape")?
+    testing.assert_eq(matrix_value.values()[3], Float32(4.0), "matrix constructor changed row order")?
+    var source = [Float32(7.0)]
+    defer let copied: Vector[Float32, Cpu[mem.SystemAllocator]] = from_slice(source.as_slice(), [UInt64(1)]).unwrap()
+    source[0] = 9.0
+    testing.assert_eq(copied.values()[0], Float32(7.0), "CPU constructor borrowed its source")?
+    let empty: [Float32; 0] = []
+    defer let zero = from_slice(empty.as_slice(), [UInt64.max, 2, 0]).unwrap()
+    testing.assert_eq(zero.values().length(), UInt64(0), "empty shape acquired an element")?
+}
+
+test "CPU outputs preserve allocator refusal and can outlive the input vector" {
+    defer let arena = mem.Arena.open(mem.system(), 24)
+    let input = matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+    let refused = match input.map(|value: Float32| value) {
+        Err(error) => error == .Allocation(.Exhausted),
+        Ok(value) => {
+            value.release()
+            false
+        },
+    }
+    testing.assert(refused, "CPU map abandoned its allocator on refusal")?
+    let original = matrix([[Float32(7.0)]]).unwrap()
+    defer let output = original.map(|value: Float32| value + 1.0).unwrap()
+    original.release()
+    testing.assert_eq(output.values()[0], Float32(8.0), "CPU output borrowed the input vector")?
+}
+
+impl[let rank: UInt64, A: Allocator] Tensor[Float32, rank, Cpu[A]] {
+    pub fn values(self: Self) -> mem.Slice[Float32] where borrows(self) {
+        self.data.values.as_slice()
+    }
+}

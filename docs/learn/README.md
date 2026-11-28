@@ -14,6 +14,7 @@
 12. [A guest book](12-a-guest-book.md)
 13. [Tasks and sessions](13-tasks-and-sessions.md)
 14. [Running other programs](14-running-other-programs.md)
+15. [GPU tensors](15-gpu-tensors.md)
 
 Appendices: [Patterns the standard library repeats](patterns.md),
 [Iterator recipes](iterator-recipes.md) and [Errors the guide shows](errors.md).

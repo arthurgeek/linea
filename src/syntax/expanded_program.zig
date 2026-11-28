@@ -1081,7 +1081,7 @@ pub const ExpandedProgram = struct {
         return self.origins.get(decl);
     }
 
-    fn primaryDecl(self: *const ExpandedProgram, decl: DeclId) DeclId {
+    pub fn originalDeclId(self: *const ExpandedProgram, decl: DeclId) DeclId {
         return if (self.originOf(decl)) |origin| origin.target else decl;
     }
 
@@ -1089,14 +1089,14 @@ pub const ExpandedProgram = struct {
         if (self.originOf(decl)) |origin| {
             if (origin.derive_trait != .none) return self.source.ast.fileOf(origin.derive_trait);
         }
-        return self.source.ast.fileOfDecl(self.primaryDecl(decl));
+        return self.source.ast.fileOfDecl(self.originalDeclId(decl));
     }
 
     pub fn primarySpanOfDecl(self: *const ExpandedProgram, decl: DeclId) Span {
         if (self.originOf(decl)) |origin| {
             if (origin.derive_trait != .none) return self.source.ast.tokenSpan(origin.derive_trait);
         }
-        return self.source.ast.declSpan(self.primaryDecl(decl));
+        return self.source.ast.declSpan(self.originalDeclId(decl));
     }
 
     /// The narrowest origin recorded for a span of a generated file, and null

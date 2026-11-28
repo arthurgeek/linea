@@ -1866,9 +1866,18 @@ pub fn verdictOf(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !V
 /// allocated from `gpa`; `file` is the file the text was loaded as, and the
 /// first `loaded` diagnostics are the ones loading it reported -- lexing,
 /// parsing and the loader's own rules -- before any pass read it.
-pub const Diagnosed = struct { sink: Sink, file: FileId, loaded: usize };
+pub const Diagnosed = struct { sink: Sink, file: FileId, loaded: usize, reused_library: bool = false };
 
 pub fn diagnose(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !Diagnosed {
+    // Unit tests share the same checked prelude as other compiler fixtures.
+    // The corpus oracle still checks freshly, as the command line does.
+    const prefix = if (@import("builtin").is_test) @import("../driver/test_library.zig").get() else null;
+    return (try diagnoseWithLibrary(gpa, text, kind, prefix)).diagnosed;
+}
+
+const Diagnosis = struct { diagnosed: Diagnosed, files: FileTable };
+
+fn diagnoseWithLibrary(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind, prefix: ?*const loader.CheckedLibrary) !Diagnosis {
     var sink = Sink.init(gpa);
     var interner: Interner = .empty;
 
@@ -1878,14 +1887,92 @@ pub fn diagnose(gpa: std.mem.Allocator, text: []const u8, kind: ProgramKind) !Di
     // type rather than as the unknown variant it is.
     var table: FileTable = .empty;
     const one = [_]loader.InMemoryFile{.{ .path = "mutated.lin", .text = text }};
-    var program = try loader.loadFromMemory(gpa, &table, &sink, &interner, "mutated.lin", &one, .program, true, .borrow);
+    var program = if (prefix) |library|
+        try library.loadFromMemory(gpa, &table, &sink, &interner, "mutated.lin", &one, .program, .borrow)
+    else
+        try loader.loadFromMemory(gpa, &table, &sink, &interner, "mutated.lin", &one, .program, true, .borrow);
     // Mutations preserve the root kind even though their one-file input
     // carries no manifest.
     program.kind = kind;
     const loaded = sink.list.items.len;
-    var semantics = try loader.checkWhole(gpa, gpa, &program, &interner, &sink, .program);
+    var semantics = if (prefix) |library|
+        try library.checkWhole(gpa, gpa, &program, &interner, &sink, .program)
+    else
+        try loader.checkWhole(gpa, gpa, &program, &interner, &sink, .program);
+    const reused = semantics.reused_library;
     semantics.deinit(gpa);
-    return .{ .sink = sink, .file = program.primaryFile(), .loaded = loaded };
+    return .{ .diagnosed = .{ .sink = sink, .file = program.primaryFile(), .loaded = loaded, .reused_library = reused }, .files = table };
+}
+
+test "mutation unit checks reuse the checked prelude" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const result = try diagnose(arena.allocator(), "fn main() -> UInt8 { 0 }", .program);
+    try testing.expect(!result.sink.hasErrors());
+    try testing.expect(result.reused_library);
+}
+
+test "mutation prelude reuse preserves complete diagnostics and fresh fallback" {
+    const prefix = @import("../driver/test_library.zig").get();
+    const Case = struct {
+        text: []const u8,
+        kind: ProgramKind = .program,
+        reused: ?bool = null,
+        rejected: bool = true,
+        rule: ?@import("../diagnostics/diagnostic.zig").Code = null,
+        fixes: bool = false,
+        loading_error: bool = false,
+    };
+    const cases = [_]Case{
+        .{ .text = "fn main() -> UInt8 { 0 }", .reused = true, .rejected = false },
+        .{ .text = "fn main() -> UInt8 { let = ; 0 }", .loading_error = true },
+        .{ .text = "fn main() -> UInt8 { true }", .reused = true, .rule = .t_mismatch },
+        .{ .text =
+        \\fn shout(sink note: String) -> UInt8 {
+        \\    if note.length() > 100 {
+        \\        return 2
+        \\    }
+        \\    note.release()
+        \\    0
+        \\}
+        \\fn main() -> UInt8 {
+        \\    shout(String.new())
+        \\}
+        , .reused = true, .rule = .o_leak, .fixes = true },
+        .{ .text = "pub fn value() -> UInt8 { 0 }", .kind = .library, .reused = true, .rejected = false },
+        .{ .text = "import std.uuid\nfn main() -> UInt8 { let _value: uuid.Missing = 0; 0 }", .reused = false },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var fresh = try diagnoseWithLibrary(gpa, case.text, case.kind, null);
+        var resumed = try diagnoseWithLibrary(gpa, case.text, case.kind, prefix);
+        try testing.expect(!fresh.diagnosed.reused_library);
+        try testing.expectEqual(case.rejected, fresh.diagnosed.sink.hasErrors());
+        if (case.loading_error) try testing.expect(fresh.diagnosed.loaded > 0);
+        if (case.rule) |rule| {
+            var found = false;
+            var fixes: usize = 0;
+            for (fresh.diagnosed.sink.items()) |diagnostic| if (diagnostic.code == rule) {
+                found = true;
+                fixes += diagnostic.fixes.len;
+            };
+            try testing.expect(found);
+            if (case.fixes) try testing.expect(fixes > 0);
+        }
+        if (case.reused) |expected| try testing.expectEqual(expected, resumed.diagnosed.reused_library);
+        try testing.expectEqual(fresh.diagnosed.loaded, resumed.diagnosed.loaded);
+        try testing.expectEqualStrings(fresh.files.get(fresh.diagnosed.file).path, resumed.files.get(resumed.diagnosed.file).path);
+        try fresh.files.buildMaps(gpa);
+        try resumed.files.buildMaps(gpa);
+        var original: std.Io.Writer.Allocating = .init(gpa);
+        var continued: std.Io.Writer.Allocating = .init(gpa);
+        const render = @import("../diagnostics/render_json.zig").renderAllJson;
+        try render(&original.writer, &fresh.files, &fresh.diagnosed.sink);
+        try render(&continued.writer, &resumed.files, &resumed.diagnosed.sink);
+        try testing.expectEqualStrings(original.written(), continued.written());
+    }
 }
 
 /// Whether a space-separated list of rule names holds one.

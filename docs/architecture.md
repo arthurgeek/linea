@@ -335,6 +335,7 @@ Commands stop at the stage that supplies their result:
 | `fmt` | Formatted source after parsing; no semantic checking |
 | `check` | Diagnostics through instance discovery; exit 0 on success |
 | `emit-mlir` | Verified MLIR text |
+| `dump-mlir` | Source-focused inspection projection of production MLIR |
 | `build` | Compiled executable or library object |
 | `run` | Executes the compiled program and returns its exit status |
 
@@ -558,6 +559,17 @@ The loader owns module-loading decisions; the rest of the driver coordinates
 passes. Passes must consume the loader's recorded results without importing
 `driver/`. The driver imports every pass, so a reverse import would create a
 dependency cycle even though Zig permits such cycles between files.
+
+The command-line driver gives frontend work its own caller-owned arena. Before
+entering the host artifact pipeline, it renders source diagnostics and retains
+an owned native action: tool options and paths, program arguments or test names,
+and cleanup identifiers. Returning from preparation ends every frontend borrow
+and releases that arena before external lowering, linking and test execution.
+GPU serialization, C-header probes and inspection commands still run during
+preparation where they need source facts. The language server keeps its existing
+request lifetimes. This boundary follows ADR 0120; releasing the region proves
+allocation lifetime, rather than promising that an allocator returns pages to
+the operating system immediately.
 
 ### Resolver — `src/sema/resolve.zig`
 
@@ -2103,10 +2115,89 @@ ordinary checked-operation traps keep their existing path. The runtime writes
 the message by length, flushes standard error and aborts; it neither interprets
 the bytes as a format string nor unwinds.
 
+### Device backend — `src/backend/gpu.zig`
+
+Owns: device-profile admission and MLIR source for admitted numerical functions,
+consuming the same verified MIR as CPU emission. It introduces no semantic IR.
+Typing certifies the three private `std.mem` selectors once; instance discovery
+retains them even though their calls lower to primitives. MIR carries their
+`FunctionId`s as `gpu_function`, `gpu_reduce_function` and
+`gpu_matmul_function`. The backend reads these identities rather than recovering
+them from symbol spelling.
+
+The backend gathers unary and binary Float32 root function addresses and the
+matrix entry selected by those primitives. Admission traverses each root's call
+graph with sparse function records, function-sized block reachability maps and
+an explicit stack. It refuses recursion and operations outside the scalar
+profile. Device bodies admit Float32 and Bool values, local mutation, arithmetic,
+comparisons, branches, loops, returns and direct calls. An unavailable body
+simply has no image. The CPU backend embeds an immutable function-address/image
+table and selectors return zero for a missing entry; the library maps that to
+`GpuError.UnsupportedFunction` without changing source acceptance or running a
+CPU fallback.
+
+Float32 values travel as raw `i32` bits and Boolean registers as `i1`. Local
+slots use Function-storage memrefs; Boolean slots use `i32`, encoded and decoded
+at their stores and loads. The production `gpu/float32.mlir` functions implement
+arithmetic and comparisons with integer32 and Boolean operations only, retaining
+binary32 rounding, subnormals and canonical computed NaNs. Copies and transfers
+retain bits and negation flips the sign bit. Matrix products call strict
+multiply and add separately. Reduction uses the fixed strided/halving order
+specified in the language definition, with explicit absent-lane state.
+
+Source device functions are `func.func` with ordinary `cf` control flow and
+memref locals, staged with SPIR-V helpers, globals and wrappers in a private
+`gpu.module`. Map, reduction and matrix wrappers keep the runtime entry
+conventions; their calls to source device bodies are converted with the bodies.
+The emitter allocates through its caller and runs no subprocesses.
+
+`src/driver/gpu.zig` owns source/intermediate files and validated image buffers.
+`toolchain.gpuStructuredImage` lifts `cf` to SCF, canonicalizes, converts functions
+and generated UB placeholders, then converts the GPU module to structured
+SPIR-V. ABI lowering, VCE preparation and nested symbol DCE precede an anchored
+`snapshot-op-locations{filename=-}`: the driver captures its root-module output
+and writes the checked file. This avoids embedding a filesystem path in MLIR's
+pass-option grammar and needs no text rewriting of helper definitions. The
+arithmetic helpers are private, so nested DCE removes helpers unreachable from
+the entry point. Top-level symbol DCE removes the private staging module.
+Translation serializes the
+root SPIR-V module and `spirv-val` validates it for Vulkan 1.1 before its bytes
+are handed to CPU emission. Every tool invocation belongs to toolchain code;
+failed builds retain their inputs for diagnosis.
+
+The host embeds 24-byte immutable descriptors containing image address, byte
+length and kind. The runtime uses storage bindings input/left 0, output 1 and
+right 2, a 16-byte push-constant range and local size 64. Map uses the count
+word; binary images also expose uniform-map and zip entry points. Uniform map
+uses count and uniform bits; zip uses count and right binding 2; reduction uses
+count and initial bits; matrix multiplication uses output
+count, rows, inner dimension and columns. Runtime validation checks kind,
+extents, dimensions, overflow and common device ownership before dispatch.
+Only successful constructor outputs become owned handles, apart from a valid
+partial pipeline returned on pipeline-creation failure, which is also released.
+
+The C runtime retains the device through buffers and buffers through submissions,
+including repeated references when matrix operands alias. Queue submission is
+externally synchronized. A detached native completion thread waits for a fence;
+callers use the existing park and fiber machinery, so a pending GPU wait does not
+occupy a carrier. Failure paths release acquired resources exactly once and
+never destroy a resource still referenced by pending commands. `std.tensor`
+owns rank, shapes and completed-value operations; sequential CPU and GPU storage
+implement the same storage trait. The GPU adapter waits directly in the calling
+task. Ordinary task startup selects concurrency and execution context, without
+a delivery task, private loop or new root-executor default. Public callable
+adapters carry an opaque `mem.GpuKernel` token, not a forgeable native address.
+A `-Dgpu=false` build selects the unavailable provider behind the same runtime
+ABI, skips image preparation and omits GPU-only tool stamps and build gates. The implemented device path is Vulkan/MoltenVK, with local
+Apple hardware validation. CUDA/NVIDIA hardware execution is not verified;
+SPIR-V is this backend's lowering rather than a new language representation.
+
 ### Toolchain — `src/driver/toolchain.zig`
 
 Runs `mlir-opt` and `mlir-translate` to produce LLVM IR and `cc` to compile
-and link it with the runtime. Linea emits textual MLIR. `mlir-opt` writes its
+and link it with the runtime. Device image preparation also runs `spirv-val`;
+the shared Tool enumeration owns command spelling and outcome-cache stamps.
+Linea emits textual MLIR. `mlir-opt` writes its
 converted intermediate with `--emit-bytecode`, and `mlir-translate` reads that
 file directly and produces textual LLVM IR (ADR 0116). The intermediate remains
 a real file, including when build artefacts are kept after a failure. Decode it
@@ -2127,7 +2218,7 @@ directory, and the outcome cache keys on their bytes.
 Holds every `extern` naming a C function, and every `export` its root's C
 declares, to the prototype its root's C declarations give it
 ([T-ExternPrototype], ADR 0262). It runs in the driver for `check`, `build`,
-`run`, `test`, `emit-mlir` and `dump-asm` (`holdsCDeclarations` names every
+`run`, `test`, `emit-mlir`, `dump-mlir` and `dump-asm` (`holdsCDeclarations` names every
 command), and in the conformance runner, after
 the semantic passes accepted the program and before lowering, because it
 starts a process, which no pass may. The loader records each root's C
@@ -2362,3 +2453,42 @@ such as `< $LINEA_ROOT/tests/cmd/stdin/formats_supplied_source.stdin`, so the
 file reaches the command directly and no pipe is fed while the command writes
 output. The runner drains standard output and standard error together, so a
 child filling one pipe cannot deadlock against the other.
+
+### MLIR inspection
+
+`emit-mlir` writes the exact complete backend artifact, including dependency
+implementations and device images. `dump-mlir` is a Debug-only debugging aid, like the other dump commands. It uses
+the same producers with a
+FunctionId-indexed definition projection. Its default `--scope=user` includes
+all modules whose loaded root is primary; `--scope=all` includes dependency
+and standard-library bodies too. `--function=module.function` selects an authored
+source declaration and all its concrete instances. Instance comments distinguish
+generated bodies from declarations and display their original declaration ID,
+type arguments and receiver. Selection reads retained expansion and MIR origins,
+never generated symbol spelling.
+
+The default `--target=host --stage=lowered` externalizes omitted bodies using
+their internal signatures, including widened integers and indirect aggregate
+results. Globals, types and generated entry support remain. It never prepares
+device images. `--target=gpu --stage=lowered` stops after production device
+admission and emission. GPU `--stage=spirv` uses the production conversion
+boundary, including ABI/VCE preparation and symbol DCE, and stops before binary
+serialization and Vulkan validation. Host `--stage=spirv` is a usage error.
+`--detail=compact|full` controls presentation independently of scope. Compact
+uses a FunctionId-indexed source-name view, emits bodies before support and
+omits backend presentation attributes. Full retains backend symbols and
+attributes. `--locations` opts into inline locations independently and defaults
+to off. User scope omits generated derive bodies unless explicitly selected.
+The device software arithmetic library is externalized for user scope and
+retained for all scope, regardless of detail. Typed imports are held to the
+actual production helper headers. An explicit scalar selection needs no launch
+wrapper or its globals. No presentation option adds optimization passes.
+
+Device imports carry SPIR-V linkage attributes; required generated support is
+identified as a retained dependency closure. No dump contains image payloads.
+Inspection modules are for reading and MLIR verification, not standalone execution.
+In particular, user-scope SPIR-V linkage imports externalize helper bodies and
+are not a claim that the projection serializes into a valid Vulkan shader.
+Production images retain those bodies and pass the separate SPIR-V validator;
+success certifies only the requested stage. `build --keep` retains full exact
+compilation intermediates.

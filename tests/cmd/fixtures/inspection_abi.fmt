@@ -1,0 +1,17 @@
+struct Pair {
+    first: UInt64,
+    second: UInt64,
+}
+
+fn narrow(value: UInt8) -> UInt8 {
+    value + 1
+}
+
+fn pair(value: UInt8) -> Pair {
+    .{ first = UInt64(value), second = 4 }
+}
+
+fn main() -> UInt8 {
+    let values = pair(narrow(2))
+    UInt8(values.first)
+}

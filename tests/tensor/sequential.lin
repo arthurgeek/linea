@@ -1,0 +1,66 @@
+import std.mem
+import std.tensor
+
+use mem.Lender
+use tensor.Storage
+
+fn scale(value: Float32, factor: Float32) -> Float32 {
+    value * factor
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn combine(left: Float32, right: Float32) -> Float32 {
+    left * 0.5 + right
+}
+
+fn algorithm[S: Storage[Float32] + Release](left: tensor.Tensor[Float32, 2, S], right: tensor.Tensor[Float32, 2, S], factor: Float32) -> Result[tensor.Tensor[Float32, 0, S], S.Error] where carries(.Ok: left, right) {
+    defer let mapped = left.map(tensor.uniform(scale, factor))?
+    defer let zipped = mapped.zip_with(left, add)?
+    defer let product = zipped.matmul(right)?
+    product.reduce(Float32(0.5), combine)
+}
+
+fn host_only(value: Float32) -> Float32 {
+    defer var scratch: mem.Vec[Float32] = mem.Vec.new()
+    &scratch.push(value).unwrap()
+    scratch[0] + 1.0
+}
+
+fn main() -> UInt8 {
+    defer let left = tensor.matrix([[Float32(1.0), 2.0, 3.0], [Float32(4.0), 5.0, 6.0]]).unwrap()
+    defer let right = tensor.matrix([[Float32(1.0), 0.0], [Float32(0.0), 1.0], [Float32(1.0), 1.0]]).unwrap()
+    defer let result = algorithm(left, right, Float32(2.0)).unwrap()
+    // Product [12,15,30,33], fixed tree: combine(combine(12,30), combine(15,33)).
+    let expected = combine(Float32(0.5), combine(combine(Float32(12.0), 30.0), combine(Float32(15.0), 33.0)))
+    if result.dimensions().length() != 0 || result.values()[0].to_bits() != expected.to_bits() {
+        return 1
+    }
+    defer let mapped = left.map(host_only).unwrap()
+    if mapped.values()[5] != 7.0 {
+        return 2
+    }
+    let factor = Float32(0.5)
+    defer let captured = left.map([factor] |value: Float32| value * factor).unwrap()
+    if captured.values()[3] != 2.0 {
+        return 3
+    }
+    let offset = Float32(0.5)
+    defer let captured_zip = left.zip_with(left, [offset] |a: Float32, b: Float32| a + b + offset).unwrap()
+    if captured_zip.values()[0] != 2.5 {
+        return 5
+    }
+    defer let captured_reduce = left.reduce(Float32(0.5), [offset] |a: Float32, b: Float32| a * offset + b).unwrap()
+    if captured_reduce.values()[0] != 10.625 {
+        return 6
+    }
+    defer let arena = mem.Arena.open(mem.system(), 4096)
+    let affine = tensor.matrix_in(arena.handle(), [[Float32(7.0)]]).unwrap()
+    let derived = affine.map(host_only).unwrap()
+    if derived.values()[0] != 8.0 {
+        return 4
+    }
+    0
+}

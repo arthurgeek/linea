@@ -56,7 +56,10 @@ comptime {
     _ = @import("mir/storage.zig");
     _ = @import("mir/notes.zig");
     _ = @import("backend/mlir.zig");
+    _ = @import("backend/text.zig");
+    _ = @import("backend/gpu.zig");
     _ = @import("driver/toolchain.zig");
+    _ = @import("driver/inspection.zig");
     _ = @import("driver/prototypes.zig");
     _ = @import("support/generated_calls.zig");
     _ = @import("support/module_route.zig");
@@ -75,6 +78,7 @@ comptime {
     _ = @import("ownership/check.zig");
     _ = @import("ownership/dependencies.zig");
     _ = @import("driver/driver.zig");
+    _ = @import("driver/gpu.zig");
     _ = @import("driver/init.zig");
     _ = @import("driver/format.zig");
     _ = @import("lsp/documents.zig");

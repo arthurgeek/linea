@@ -1056,10 +1056,10 @@ const trees = [_]Tree{
     },
     .{
         .dir = "build",
-        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig" },
+        .roots = &.{ "source_test.zig", "guide_gate.zig", "example_tests.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig", "gpu_spirv_check.zig" },
         .imported_by = "build.zig",
         .layered = false,
-        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig" },
+        .test_manifests = &.{ "source_test.zig", "fiber_call_coverage.zig", "fiber_migration_metrics.zig", "fiber_scheduling_measurements.zig", "fiber_object_entry.zig", "runtime_imports.zig", "gpu_spirv_check.zig" },
     },
     .{
         .dir = "runtime",
@@ -1443,6 +1443,10 @@ const HeavySteps = struct {
         // Both corpus processes number their LSP fixtures from zero and clear
         // that directory on startup, so concurrent walks need separate roots.
         run.addArg(b.pathJoin(&.{ self.scratch, "examples" }));
+        if (self.walkers) |n| {
+            run.addArg("--walkers");
+            run.addArg(b.fmt("{d}", .{n}));
+        }
         run.addArg("--sanitize");
         run.addArg(@tagName(self.sanitize));
         if (self.update) run.addArg("--update");
@@ -1567,9 +1571,11 @@ pub fn build(b: *std.Build) void {
     //
     // Off by default and absent from the binary when off: this is for
     // answering a question, not a thing the suite carries.
+    const gpu_enabled = b.option(bool, "gpu", "Build Vulkan GPU support") orelse true;
     const profiling = b.option(bool, "tracy", "Build with Tracy zones") orelse false;
     const tracy_options = b.addOptions();
     tracy_options.addOption(bool, "tracy", profiling);
+    tracy_options.addOption(bool, "gpu", gpu_enabled);
 
     // How many walkers the corpus is divided between. Defaults to one per core.
     //
@@ -2346,8 +2352,26 @@ pub fn build(b: *std.Build) void {
     const checked_runtime_archive = checked_runtime.addOutputFileArg(runtime_symbols.checked_archive_name);
     var ordinary_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
     var checked_nonfiber_objects: std.ArrayList(*std.Build.Step.Compile) = .empty;
+    var ordinary_without_gpu: std.ArrayList(*std.Build.Step.Compile) = .empty;
+    var checked_without_gpu: std.ArrayList(*std.Build.Step.Compile) = .empty;
+    // A disabled provider has the same ABI and archive member, and needs no
+    // Vulkan paths even while the graph is being constructed.
+    const vulkan_headers = if (gpu_enabled) b.graph.environ_map.get("LINEA_VULKAN_HEADERS") orelse
+        @panic("LINEA_VULKAN_HEADERS is not set: build inside `nix develop`") else "";
+    const vulkan_loader = if (gpu_enabled) b.graph.environ_map.get("LINEA_VULKAN_LOADER") orelse
+        @panic("LINEA_VULKAN_LOADER is not set: build inside `nix develop`") else "";
+    var gpu_flags: std.ArrayList([]const u8) = .empty;
+    gpu_flags.appendSlice(b.allocator, runtime_flags.items) catch @panic("OOM");
+    if (gpu_enabled) gpu_flags.appendSlice(b.allocator, &.{
+        "-isystem", b.pathJoin(&.{ vulkan_headers, "include" }),
+        b.fmt("-DLINEA_VULKAN_LIBRARY=\"{s}/lib/{s}\"", .{
+            vulkan_loader,
+            if (runtime_target.result.os.tag == .macos) "libvulkan.1.dylib" else "libvulkan.so.1",
+        }),
+    }) catch @panic("OOM");
     const runtime_inputs = [_]struct { name: []const u8, file: std.Build.LazyPath, flags: []const []const u8, checked_flags: ?[]const []const u8 = null }{
         .{ .name = "linea_rt", .file = b.path("runtime/linea_rt.c"), .flags = runtime_flags.items, .checked_flags = checked_flags.items },
+        .{ .name = "gpu", .file = b.path(if (gpu_enabled) "runtime/gpu.c" else "runtime/gpu_unavailable.c"), .flags = gpu_flags.items },
         .{ .name = "io", .file = b.path("runtime/io.c"), .flags = runtime_flags.items },
         .{ .name = "net", .file = b.path("runtime/net.c"), .flags = runtime_flags.items },
         .{ .name = "process", .file = b.path("runtime/process.c"), .flags = runtime_flags.items },
@@ -2373,11 +2397,54 @@ pub fn build(b: *std.Build) void {
         runtime.addArtifactArg(object);
         const checked_object = if (input.checked_flags) |flags| runtimeObject(b, runtime_target, input.name, input.file, flags) else object;
         checked_runtime.addArtifactArg(checked_object);
+        if (!std.mem.eql(u8, input.name, "gpu")) {
+            ordinary_without_gpu.append(b.allocator, object) catch @panic("OOM");
+            checked_without_gpu.append(b.allocator, checked_object) catch @panic("OOM");
+        }
         if (!std.mem.eql(u8, input.name, "fiber")) {
             ordinary_nonfiber_objects.append(b.allocator, object) catch @panic("OOM");
             checked_nonfiber_objects.append(b.allocator, checked_object) catch @panic("OOM");
         }
     }
+    const gpu_checks: ?struct {
+        runtime: *std.Build.Step,
+        faults: *std.Build.Step,
+        hardware: @import("build/gpu_hardware.zig").Steps,
+    } = if (gpu_enabled) blk: {
+        const gpu_runtime_step = b.step("gpu-runtime", "Exercise production GPU buffers and asynchronous submissions on hardware");
+        const gpu_opt = b.addSystemCommand(&.{ "mlir-opt", "--no-implicit-module" });
+        gpu_opt.addFileArg(b.path("runtime/tests/gpu_runtime/copy.mlir"));
+        gpu_opt.addArg("-o");
+        const gpu_checked = gpu_opt.addOutputFileArg("runtime-copy.mlir");
+        const gpu_translate = b.addSystemCommand(&.{ "mlir-translate", "--no-implicit-module", "--serialize-spirv" });
+        gpu_translate.addFileArg(gpu_checked);
+        gpu_translate.addArg("-o");
+        const gpu_image = gpu_translate.addOutputFileArg("runtime-copy.spv");
+        const gpu_validate = b.addSystemCommand(&.{ "spirv-val", "--target-env", "vulkan1.1" });
+        gpu_validate.addFileArg(gpu_image);
+        for ([_][]const u8{ "buffers", "submission" }) |name| {
+            const link = b.addSystemCommand(&.{ "cc", "-std=c99", "-Wall", "-Wextra", "-Werror", "-UNDEBUG" });
+            if (sanitize.flag()) |selected| link.addArgs(&.{ b.fmt("-fsanitize={s}", .{selected}), "-fsanitize=undefined", "-fno-sanitize-recover=all", "-g" });
+            if (runtime_target.result.os.tag == .macos)
+                link.addArg(b.fmt("-mmacosx-version-min={f}", .{runtime_target.result.os.version_range.semver.min}));
+            link.addFileArg(b.path(b.fmt("runtime/tests/gpu_runtime/{s}.c", .{name})));
+            link.addFileInput(b.path("runtime/gpu.h"));
+            link.addFileArg(runtime_archive);
+            if (runtime_target.result.os.tag == .linux) link.addArgs(&.{ "-lpthread", "-ldl", "-lm" });
+            link.addArg("-o");
+            const executable = link.addOutputFileArg(b.fmt("gpu-runtime-{s}", .{name}));
+            const run = std.Build.Step.Run.create(b, b.fmt("run production GPU {s}", .{name}));
+            run.addFileArg(executable);
+            if (std.mem.eql(u8, name, "submission")) {
+                run.addFileArg(gpu_image);
+                run.step.dependOn(&gpu_validate.step);
+            }
+            gpu_runtime_step.dependOn(&run.step);
+        }
+        const gpu_runtime_faults = @import("build/gpu_fault.zig").add(b, runtime_archive, vulkan_headers, runtime_flags.items);
+        const gpu_hardware = @import("build/gpu_hardware.zig").add(b, runtime_archive, runtime_target, sanitize.flag());
+        break :blk .{ .runtime = gpu_runtime_step, .faults = gpu_runtime_faults, .hardware = gpu_hardware };
+    } else null;
     runtime.addFileArg(rustls.archive);
     checked_runtime.addFileArg(rustls.archive);
     const runtime_installs = [_]*std.Build.Step{
@@ -2467,6 +2534,26 @@ pub fn build(b: *std.Build) void {
     };
     const exe = heavy.compiler();
     b.installArtifact(exe);
+    const gpu_tests = b.step("test-gpu", "Verify production GPU shaders, runtime and Linea tensor programs");
+    if (gpu_checks) |checks| {
+        gpu_tests.dependOn(@import("build/gpu_language.zig").add(b, exe.getEmittedBin(), checked_runtime_archive));
+        gpu_tests.dependOn(@import("build/gpu_language.zig").addCompile(b, exe.getEmittedBin(), checked_runtime_archive));
+        gpu_tests.dependOn(checks.hardware.hardware);
+        gpu_tests.dependOn(checks.hardware.shaders);
+        gpu_tests.dependOn(checks.faults);
+        gpu_tests.dependOn(checks.runtime);
+    } else {
+        const unavailable = &b.addFail("GPU tests require a GPU-enabled build; omit -Dgpu=false").step;
+        gpu_tests.dependOn(unavailable);
+        for ([_][]const u8{ "gpu-runtime", "test-gpu-runtime", "test-gpu-kernels", "test-gpu-float32", "test-gpu-numerical", "test-gpu-shaders", "test-gpu-language", "test-gpu-compile" }) |name|
+            b.step(name, "Requires GPU support").dependOn(unavailable);
+    }
+    const cpu_only = b.step("test-cpu-only", "Execute CPU programs and verify unavailable GPU capability");
+    if (gpu_enabled) {
+        cpu_only.dependOn(&b.addFail("CPU-only tests require -Dgpu=false").step);
+    } else {
+        cpu_only.dependOn(@import("build/cpu_only.zig").add(b, exe.getEmittedBin(), runtime_archive, checked_runtime_archive, runtime_target, sanitize.flag(), .{ ordinary_without_gpu.items, checked_without_gpu.items }, rustls.archive, runtime_flags.items));
+    }
 
     const call_coverage_module = b.createModule(.{
         .root_source_file = b.path("build/fiber_call_coverage.zig"),
@@ -3453,6 +3540,10 @@ pub fn build(b: *std.Build) void {
                 step.dependOn(native_tls_step);
                 step.dependOn(native_clock_step);
                 step.dependOn(native_math_step);
+                if (gpu_checks) |checks| {
+                    step.dependOn(checks.faults);
+                    step.dependOn(checks.hardware.shaders);
+                }
                 step.dependOn(native_runtime_step);
                 step.dependOn(native_task_step);
             }

@@ -1,0 +1,23 @@
+import std.tensor
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn steal[B: tensor.MapBody](body: B) {
+    let _admission = body._admit_map(.{})
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn steal_binary[B: tensor.BinaryBody](body: B) {
+    let _admission = body._admit_binary(.{})
+}
+
+fn main() -> UInt8 {
+    steal(half)
+    steal_binary(add)
+    0
+}

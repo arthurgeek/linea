@@ -7728,6 +7728,25 @@ pub const Typing = struct {
         return self.callable_params[signature.first_param..][0..signature.param_count];
     }
 
+    /// The structural signature certified for a GPU image selector. Both
+    /// declaration checking and MIR metadata verification read this answer.
+    /// A null arity selects matrix multiplication, which takes no body.
+    pub fn validGpuSelectorSignature(self: *const Typing, signature: CallableSignature, arity: ?u32) bool {
+        if (signature.result != .u64 or signature.invocation != .read or signature.contracts.len != 0) return false;
+        const params = self.callableParams(signature);
+        const count = arity orelse return params.len == 0;
+        if (params.len != 1 or params[0].convention != .read or params[0].stable_address or params[0].default != .absent) return false;
+        const body = switch (self.get(params[0].ty)) {
+            .callable => |body| body,
+            else => return false,
+        };
+        if (body.result != .f32 or body.invocation != .read or body.contracts.len != 0 or body.param_count != count) return false;
+        for (self.callableParams(body)) |param| {
+            if (param.ty != .f32 or param.convention != .read or param.stable_address or param.default != .absent) return false;
+        }
+        return true;
+    }
+
     pub fn closureArgs(self: *const Typing, closure: ClosureType) []const TypeId {
         return self.closure_args[closure.first_arg..][0..closure.arg_count];
     }
@@ -17103,6 +17122,83 @@ test "callable parameter names do not separate types, and conversion keeps posit
     outer[0].spelling = contextual[0].spelling;
     outer[0].ty = wanted;
     try testing.expectEqual(nested_actual, try builder.internCallable(&outer, actual, &.{}, .read));
+}
+
+// Some malformed metadata has no source form: Float32 defaults are not
+// constants, and stable-address parameters arise only from borrow contracts.
+// Hold the shared predicate to these independently of source validation.
+test "GPU selector signatures retain every metadata constraint" {
+    var builder = try Typing.Builder.init(testing.allocator);
+    defer builder.deinit();
+    const scalar: CallableParam = .{ .spelling = "value", .convention = .read, .ty = .f32, .default = .absent };
+    const contract = [_]CallableContract{.{ .kind = .carries, .source = .{ .root = .{ .parameter = 0 } } }};
+    for ([_]?u32{ 1, 2, null }) |arity| {
+        const body_params = [_]CallableParam{ scalar, scalar };
+        const body = try builder.internCallable(body_params[0 .. arity orelse 0], .f32, &.{}, .read);
+        const body_param: CallableParam = .{ .spelling = "body", .convention = .read, .ty = body, .default = .absent };
+        const params: []const CallableParam = if (arity != null) &.{body_param} else &.{};
+        const selector = try builder.internCallable(params, .u64, &.{}, .read);
+        const signature = builder.get(selector).callable;
+        try testing.expect(builder.view().validGpuSelectorSignature(signature, arity));
+        for (0..3) |change| {
+            var bad = signature;
+            switch (change) {
+                0 => bad.result = .u32,
+                1 => bad.invocation = .inout,
+                2 => bad.contracts = &contract,
+                else => unreachable,
+            }
+            try testing.expect(!builder.view().validGpuSelectorSignature(bad, arity));
+        }
+        if (arity == null) {
+            const bad = try builder.internCallable(&.{body_param}, .u64, &.{}, .read);
+            try testing.expect(!builder.view().validGpuSelectorSignature(builder.get(bad).callable, arity));
+            continue;
+        }
+        for (0..5) |change| {
+            var bad = body_param;
+            switch (change) {
+                0 => bad.convention = .sink,
+                1 => bad.stable_address = true,
+                2 => bad.default = .call_site,
+                3 => bad.default = .{ .value = .{ .integer = 0 } },
+                4 => bad.ty = .u64,
+                else => unreachable,
+            }
+            const changed = try builder.internCallable(&.{bad}, .u64, &.{}, .read);
+            try testing.expect(!builder.view().validGpuSelectorSignature(builder.get(changed).callable, arity));
+        }
+        for (0..arity.?) |position| for (0..6) |change| {
+            var changed_params = body_params;
+            var result: TypeId = .f32;
+            var invocation: Convention = .read;
+            switch (change) {
+                0 => changed_params[position].convention = .inout,
+                1 => changed_params[position].stable_address = true,
+                2 => changed_params[position].default = .call_site,
+                3 => changed_params[position].ty = .f64,
+                4 => result = .f64,
+                5 => invocation = .sink,
+                else => unreachable,
+            }
+            const changed_body = try builder.internCallable(changed_params[0..arity.?], result, &.{}, invocation);
+            var changed_param = body_param;
+            changed_param.ty = changed_body;
+            const changed = try builder.internCallable(&.{changed_param}, .u64, &.{}, .read);
+            try testing.expect(!builder.view().validGpuSelectorSignature(builder.get(changed).callable, arity));
+        };
+        // Callable interning removes dependency-free scalar contracts.
+        // Inject malformed metadata directly to exercise the invariant that
+        // cannot be reached by writing such a clause in source.
+        var contracted = builder.get(body).callable;
+        contracted.contracts = &contract;
+        const contracted_body = try builder.intern(.{ .callable = contracted });
+        var contracted_param = body_param;
+        contracted_param.ty = contracted_body;
+        const contracted_selector = try builder.internCallable(&.{contracted_param}, .u64, &.{}, .read);
+        try testing.expect(!builder.view().validGpuSelectorSignature(builder.get(contracted_selector).callable, arity));
+        try testing.expect(!builder.view().validGpuSelectorSignature(signature, if (arity.? == 1) 2 else 1));
+    }
 }
 
 test "callable interning grows safely from its own parameter storage" {

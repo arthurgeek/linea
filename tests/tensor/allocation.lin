@@ -1,0 +1,42 @@
+import std.mem
+import std.tensor
+
+use mem.Lender
+
+fn identity(value: Float32) -> Float32 {
+    value
+}
+
+fn main() -> UInt8 {
+    defer let empty = mem.Arena.open(mem.system(), 0)
+    match tensor.matrix_in(empty.handle(), [[Float32(1.0)]]) {
+        Err(error) => {
+            if error != .Allocation(.Exhausted) {
+                return 1
+            }
+        },
+        Ok(value) => {
+            value.release()
+            return 2
+        },
+    }
+    // The first allocation uses the arena's remaining room. Map must reuse
+    // that allocator and report its refusal, rather than switch to system.
+    defer let arena = mem.Arena.open(mem.system(), 24)
+    let input = tensor.matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+    match input.map(identity) {
+        Err(error) => {
+            if error != .Allocation(.Exhausted) {
+                return 3
+            }
+        },
+        Ok(value) => {
+            value.release()
+            return 4
+        },
+    }
+    if input.values()[0] != 1.0 {
+        return 5
+    }
+    0
+}

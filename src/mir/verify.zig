@@ -210,7 +210,28 @@ pub fn verify(
         };
         if (!try v.verify()) ok = false;
     }
-    if (!ok or module.zeroed_allocator == .none) return ok;
+    if (!ok) return false;
+    for ([_]struct { id: FunctionId, arity: ?u32 }{
+        .{ .id = module.gpu_function, .arity = 1 },
+        .{ .id = module.gpu_reduce_function, .arity = 2 },
+        .{ .id = module.gpu_matmul_function, .arity = null },
+    }) |selector| {
+        if (selector.id == .none) continue;
+        const valid = valid: {
+            if (selector.id.index() >= module.functions.len or !module.isExternal(selector.id)) break :valid false;
+            const signature = module.types.get(module.functionOf(selector.id).signature).callable;
+            break :valid module.types.validGpuSelectorSignature(signature, selector.arity);
+        };
+        if (!valid) {
+            try sink.add(.{
+                .severity = .err,
+                .message = "compiler defect: GPU selector metadata does not name an external selector of the required shape",
+                .notes = &.{defect_note},
+            });
+            return false;
+        }
+    }
+    if (module.zeroed_allocator == .none) return true;
     const allocator = module.zeroed_allocator;
     const valid = valid: {
         if (allocator.index() >= module.functions.len or !module.isExternal(allocator)) break :valid false;
@@ -3043,6 +3064,22 @@ fn sameForeignEntry(types: *const types_mod.Typing, target: TypeId, declared: Ty
         if (address == .none or y.ty != .u64 or types.declOfType(x.ty) != address) return false;
     }
     return true;
+}
+
+test "GPU selector metadata names an external selector of the required shape" {
+    const gpa = testing.allocator;
+    inline for (.{ "gpu_function", "gpu_reduce_function", "gpu_matmul_function" }) |field| {
+        for (0..3) |kind| {
+            const functions = try gpa.dupe(Mir, &.{try pointerTarget(gpa, Harness.nullary_callable, null)});
+            var h = try Harness.init(gpa, functions);
+            defer h.deinit();
+            @field(h.module, field) = FunctionId.at(if (kind == 0) 9 else 0);
+            if (kind == 2) @constCast(h.module.external)[0] = true;
+            const got = try h.run();
+            try testing.expect(!got.ok);
+            try expectSaid(got.said, "GPU selector metadata");
+        }
+    }
 }
 
 test "emission requires external flags for every function" {

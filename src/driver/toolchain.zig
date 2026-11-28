@@ -7,15 +7,22 @@ const runtime_symbols = @import("../support/runtime_symbols.zig");
 ///
 /// All are found on `PATH`. Naming them here rather than at each call site is
 /// what lets a failure say which one failed without the caller repeating it,
-/// and it is also what the outcome cache stamps: the salt is built by walking
-/// every member, so a tool a build runs and this enum does not name is a tool a
-/// recorded outcome cannot notice moving.
+/// and it is also what the outcome cache stamps: the salt walks the tools
+/// enabled in this compiler configuration, so a tool a build runs and this
+/// enum does not name is a tool a recorded outcome cannot notice moving.
 pub const Tool = enum {
     mlir_opt,
     mlir_translate,
+    spirv_val,
     cc,
 
-    /// What to spell on the command line. Not `@tagName`, because two of these
+    /// Only tools this compiler configuration may execute belong in its
+    /// outcome-cache salt. CPU lowering still uses both MLIR tools.
+    pub fn enabled(self: Tool) bool {
+        return self != .spirv_val or @import("build_options").gpu;
+    }
+
+    /// What to spell on the command line. Not `@tagName`, because several of these
     /// are spelled with a hyphen and an enum member cannot be. Every argv
     /// below is built from this, so the name the outcome cache stamps and the
     /// name the process runs cannot drift apart.
@@ -23,6 +30,7 @@ pub const Tool = enum {
         return switch (self) {
             .mlir_opt => "mlir-opt",
             .mlir_translate => "mlir-translate",
+            .spirv_val => "spirv-val",
             .cc => "cc",
         };
     }
@@ -567,6 +575,130 @@ pub fn verifyEmitted(gpa: std.mem.Allocator, io: std.Io, path: []const u8) !?Fai
     return runTool(gpa, io, .mlir_opt, &.{ Tool.mlir_opt.command(), "-o", "/dev/null", path });
 }
 
+/// Removes unreachable private helpers and serializes an emitted SPIR-V module,
+/// then validates the image
+/// against the Vulkan 1.1 environment the runtime requests. Emission itself
+/// performs no I/O; this is the driver-owned boundary that runs every tool.
+/// The caller owns intermediate paths and retains failed inputs for diagnosis.
+pub fn gpuImage(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    source_path: []const u8,
+    checked_path: []const u8,
+    image_path: []const u8,
+) !?Failure {
+    if (try checkGpuSource(gpa, io, source_path, checked_path)) |failure| return failure;
+    return serializeGpuImage(gpa, io, checked_path, image_path);
+}
+
+/// The exact production SPIR-V preparation boundary, before serialization.
+pub fn checkGpuSource(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, checked_path: []const u8) !?Failure {
+    if (try runTool(gpa, io, .mlir_opt, &.{
+        Tool.mlir_opt.command(), "--no-implicit-module", "--pass-pipeline=spirv.module(symbol-dce)", source_path, "-o", checked_path,
+    })) |failure| return failure;
+    return null;
+}
+
+/// Lift checked scalar CFG into structured SPIR-V and remove unreachable private
+/// helpers before serializing. The anchored snapshot
+/// writes exactly the converted module to stdout, which avoids interpolating
+/// a filesystem path into MLIR's pass-option grammar.
+pub fn gpuStructuredImage(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    source_path: []const u8,
+    checked_path: []const u8,
+    image_path: []const u8,
+) !?Failure {
+    if (try lowerStructuredGpuSource(gpa, io, source_path, checked_path)) |failure| return failure;
+    return serializeGpuImage(gpa, io, checked_path, image_path);
+}
+
+/// Shared by inspection and production; never serializes or validates bytes.
+pub fn lowerStructuredGpuSource(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, checked_path: []const u8) !?Failure {
+    const pipeline = "--pass-pipeline=builtin.module(gpu.module(func.func(lift-cf-to-scf),canonicalize,convert-func-to-spirv,convert-ub-to-spirv),convert-gpu-to-spirv,spirv.module(spirv-lower-abi-attrs,spirv-update-vce,symbol-dce,snapshot-op-locations{filename=-}),symbol-dce)";
+    switch (try captureTool(gpa, io, .mlir_opt, &.{ Tool.mlir_opt.command(), "--no-implicit-module", source_path, pipeline, "-o", "/dev/null" })) {
+        .failure => |failure| return failure,
+        .output => |module| {
+            defer gpa.free(module);
+            try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = checked_path, .data = module });
+        },
+    }
+    return null;
+}
+
+fn serializeGpuImage(gpa: std.mem.Allocator, io: std.Io, checked_path: []const u8, image_path: []const u8) !?Failure {
+    if (try runTool(gpa, io, .mlir_translate, &.{
+        Tool.mlir_translate.command(), "--no-implicit-module", "--serialize-spirv", checked_path, "-o", image_path,
+    })) |failure| return failure;
+    return runTool(gpa, io, .spirv_val, &.{
+        Tool.spirv_val.command(), "--target-env", "vulkan1.1", image_path,
+    });
+}
+
+test "GPU images are serialized and checked against Vulkan" {
+    if (!@import("build_options").gpu) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const source = try tmp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(source);
+    const input = try std.fs.path.join(gpa, &.{ source, "kernel.mlir" });
+    defer gpa.free(input);
+    const checked = try std.fs.path.join(gpa, &.{ source, "kernel.checked.mlir" });
+    defer gpa.free(checked);
+    const image = try std.fs.path.join(gpa, &.{ source, "kernel.spv" });
+    defer gpa.free(image);
+    const body =
+        \\  spirv.func @orphan() "None" attributes {sym_visibility = "private"} { spirv.Return }
+        \\  spirv.func @leaf() "None" attributes {sym_visibility = "private"} { spirv.Return }
+        \\  spirv.func @linea_map() "None" {
+        \\    spirv.FunctionCall @leaf() : () -> ()
+        \\    spirv.Return
+        \\  }
+        \\  spirv.EntryPoint "GLCompute" @linea_map
+        \\  spirv.ExecutionMode @linea_map "LocalSize", 64, 1, 1
+    ;
+    const kernel = "spirv.module Logical GLSL450 requires #spirv.vce<v1.3, [Shader], []> {\n" ++ body ++ "\n}\n";
+    const staged = "module {\n gpu.module @device attributes {sym_visibility = \"private\", spirv.target_env = #spirv.target_env<#spirv.vce<v1.3, [Shader], []>, #spirv.resource_limits<>>} {\n" ++ body ++ "\n}\n}\n";
+    for ([_][]const u8{ kernel, staged }, 0..) |program, index| {
+        try tmp.dir.writeFile(io, .{ .sub_path = "kernel.mlir", .data = program });
+        const failure = if (index == 0)
+            try gpuImage(gpa, io, input, checked, image)
+        else
+            try gpuStructuredImage(gpa, io, input, checked, image);
+        if (failure) |failed| {
+            defer gpa.free(failed.output);
+            std.debug.print("{s}: {s}\n", .{ failed.tool.command(), failed.output });
+            return error.UnexpectedGpuToolFailure;
+        }
+        const prepared = try tmp.dir.readFileAlloc(io, "kernel.checked.mlir", gpa, .unlimited);
+        defer gpa.free(prepared);
+        try testing.expect(std.mem.indexOf(u8, prepared, "@orphan") == null);
+        try testing.expect(std.mem.indexOf(u8, prepared, "@leaf") != null);
+        const bytes = try tmp.dir.readFileAlloc(io, "kernel.spv", gpa, .unlimited);
+        defer gpa.free(bytes);
+        try testing.expect(bytes.len >= 20);
+        try testing.expectEqual(@as(u32, 0x07230203), std.mem.readInt(u32, bytes[0..4], .little));
+    }
+
+    // MLIR can describe and serialize this module, but Shader without an
+    // entry point is refused by SPIR-V validation. Checking only parsing or
+    // serialization would incorrectly answer success for it.
+    const no_entry =
+        \\spirv.module Logical GLSL450 requires #spirv.vce<v1.3, [Shader], []> {
+        \\  spirv.func @unused() "None" { spirv.Return }
+        \\}
+    ;
+    try tmp.dir.writeFile(io, .{ .sub_path = "kernel.mlir", .data = no_entry });
+    const refused = (try gpuImage(gpa, io, input, checked, image)) orelse return error.ExpectedGpuValidationFailure;
+    defer gpa.free(refused.output);
+    try testing.expectEqual(Tool.spirv_val, refused.tool);
+    try testing.expect(!refused.missing);
+    try testing.expect(refused.output.len > 0);
+}
+
 /// Lowers the emitted module to LLVM IR: the conversion pipeline, then the
 /// translation. The converted module uses MLIR's bytecode transport; the
 /// emitted module and translated LLVM IR remain text. The front half of a
@@ -698,33 +830,36 @@ pub fn lowerC(gpa: std.mem.Allocator, io: std.Io, include_dir: []const u8, path:
     return .{ .ir = try std.Io.Dir.cwd().readFileAlloc(io, out, gpa, .unlimited) };
 }
 
-fn runTool(
-    gpa: std.mem.Allocator,
-    io: std.Io,
-    tool: Tool,
-    argv: []const []const u8,
-) !?Failure {
+const CapturedTool = union(enum) { output: []const u8, failure: Failure };
+
+fn captureTool(gpa: std.mem.Allocator, io: std.Io, tool: Tool, argv: []const []const u8) !CapturedTool {
     const result = std.process.run(gpa, io, .{ .argv = argv }) catch |err| switch (err) {
-        error.FileNotFound => return Failure{ .tool = tool, .output = "", .missing = true },
+        error.FileNotFound => return .{ .failure = .{ .tool = tool, .output = "", .missing = true } },
         else => return err,
     };
-
     switch (result.term) {
         .exited => |code| if (code == 0) {
-            gpa.free(result.stdout);
             gpa.free(result.stderr);
-            return null;
+            return .{ .output = result.stdout };
         },
         else => {},
     }
-    // A refusing tool explains itself on whichever stream it prefers, and a
-    // user should not have to run it again to hear the one this did not read.
     if (result.stderr.len > 0) {
         gpa.free(result.stdout);
-        return Failure{ .tool = tool, .output = result.stderr };
+        return .{ .failure = .{ .tool = tool, .output = result.stderr } };
     }
     gpa.free(result.stderr);
-    return Failure{ .tool = tool, .output = result.stdout };
+    return .{ .failure = .{ .tool = tool, .output = result.stdout } };
+}
+
+fn runTool(gpa: std.mem.Allocator, io: std.Io, tool: Tool, argv: []const []const u8) !?Failure {
+    switch (try captureTool(gpa, io, tool, argv)) {
+        .failure => |failure| return failure,
+        .output => |output| {
+            gpa.free(output);
+            return null;
+        },
+    }
 }
 
 /// How a built program is named to the thing that will spawn it.
@@ -775,6 +910,7 @@ test "a tool names the program it runs" {
     // program by that name exists nowhere.
     try testing.expectEqualStrings("mlir-opt", Tool.mlir_opt.command());
     try testing.expectEqualStrings("mlir-translate", Tool.mlir_translate.command());
+    try testing.expectEqualStrings("spirv-val", Tool.spirv_val.command());
 }
 
 test "an override names the runtime instead of searching" {

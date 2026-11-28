@@ -1,0 +1,48 @@
+import std.gpu
+import std.io
+import std.session
+import std.task
+
+use session.Chan
+use session.End
+use session.Send
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn compute() -> Result[Float32, gpu.GpuError] {
+    let values = [Float32(4.0), 8.0]
+    defer let device = gpu.Device.open()?
+    defer let input = device.upload(values.as_slice(), [UInt64(2)])?
+    defer let output = input.map(half)?
+    defer let host = gpu.download(output)?
+    .Ok(host[0])
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    let execution = io.Loop.open(carriers: 1)?
+    let numerical = sink [] |sink me: Chan[Send[Result[Float32, gpu.GpuError], End]]| {
+        me.send(compute()).close()
+    }
+    let independent = sink [] |sink me: Chan[Send[UInt64, End]]| {
+        me.send(6 * 7).close()
+    }
+    let pending = task.start(numerical, on: execution).unwrap()
+    let cpu = task.start(independent, on: execution).unwrap()
+    let (answer, done) = pending.recv()
+    done.close()
+    let (cpu_value, cpu_done) = cpu.recv()
+    cpu_done.close()
+    io.println("CPU result: {cpu_value}")?
+    match answer {
+        Ok(value) => {
+            io.println("GPU result: {value}")?
+            .Ok(0)
+        },
+        Err(reason) => {
+            io.println("GPU failed: {reason}")?
+            .Ok(1)
+        },
+    }
+}

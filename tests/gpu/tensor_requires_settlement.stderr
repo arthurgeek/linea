@@ -1,0 +1,9 @@
+error[O-Leak]: `tensor` (a linear `tensor.Tensor[Float32, 1, gpu.Storage]`) is still owned when this path leaves
+ --> tests/gpu/tensor_requires_settlement.lin:6:9
+  |
+6 |     let tensor = device.upload(values.as_slice(), [UInt64(1)]).unwrap()
+  |         ^^^^^^ never settled on the path that reaches the end of this block
+9 | }
+  | - the block ends here
+  |
+  = help: settle it first with `tensor.release()`
