@@ -38,6 +38,9 @@ pub fn add(b: *std.Build, compiler: std.Build.LazyPath, runtime: std.Build.LazyP
         "gpu.matrix dimensions follow nested array lengths",
         "gpu.opening a device reports unavailable capability or owns a device",
         "gpu.upload preserves raw bits and checks zero dimensions before overflow",
+        "gpu.an arena opens without committing bytes and rejects a zero budget reservation",
+        "gpu.an arena handle copies rows directly without changing their bits",
+        "gpu.reset permits another epoch after the last observation",
     });
     step.dependOn(&library_tests.step);
     for ([_][]const u8{ "examples/gpu_readings.lin", "examples/gpu_matrix.lin", "examples/numerical_gpu.lin" }) |path| {
@@ -50,7 +53,10 @@ pub fn add(b: *std.Build, compiler: std.Build.LazyPath, runtime: std.Build.LazyP
     }
     const benchmark = hardwareTests(b, compiler, runtime, "examples/benchmark_cpu_gpu", "GPU", &.{"GPU map matches every reference result bit"});
     step.dependOn(&benchmark.step);
-    const pipeline = hardwareTests(b, compiler, runtime, "examples/tensor_pipeline.lin", "GPU", &.{"GPU pipeline matches the complete host algorithm"});
+    const pipeline = hardwareTests(b, compiler, runtime, "examples/tensor_pipeline.lin", "GPU", &.{
+        "GPU pipeline matches the complete host algorithm",
+        "GPU arena pipeline preserves the result across reset epochs",
+    });
     step.dependOn(&pipeline.step);
     return step;
 }

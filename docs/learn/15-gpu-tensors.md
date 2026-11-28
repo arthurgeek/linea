@@ -414,8 +414,9 @@ increments the skipped count, never the passed count.
 For qualification, run `linea test --deny-skips std --filter "gpu."` and
 `linea test --deny-skips examples/gpu_matrix.lin`. The `test-gpu-language`
 build target also runs strict tests for the GPU library and examples, including
-the complete host/device tensor pipeline. It requires the intended test names to
-report `ok`, so an empty selection cannot qualify. When running tests directly,
+the complete host/device tensor pipeline and two arena reset epochs with distinct
+expected results. It requires the intended test names to report `ok`, so an empty
+selection cannot qualify. When running tests directly,
 check that the expected tests appear: `--deny-skips` rejects skipped tests but
 does not reject an empty selection. A portable example may succeed after
 reporting that its device is unavailable; that is not hardware qualification.
