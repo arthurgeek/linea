@@ -7,6 +7,32 @@ import std.io
 import std.mem
 import std.num
 import std.tensor
+import std.testing
+
+test "component verification rejects missing extra and reordered answers" {
+    let empty: [Float32; 0] = []
+    testing.assert(!components_match(empty.as_slice(), 4, 0), "empty output passed a nonempty component check")?
+    testing.assert(!components_match([Float32(30), 70.0, 110.0].as_slice(), 4, 0), "truncated output passed a component check")?
+    testing.assert(components_match([Float32(30), 70.0, 110.0, 150.0].as_slice(), 4, 0), "complete component answers were refused")?
+    testing.assert(!components_match([Float32(30), 70.0, 110.0, 150.0, 0.0].as_slice(), 4, 0), "extra component output was ignored")?
+    testing.assert(!components_match([Float32(70), 30.0, 110.0, 150.0].as_slice(), 4, 0), "a checksum-preserving permutation passed")?
+}
+
+test "map verification requires exactly one answer for every input" {
+    let values = [Float32(0), 1.0]
+    let empty: [Float32; 0] = []
+    testing.assert(!mapped_answers_match(values.as_slice(), [Float32(360), 400.0, 440.0].as_slice(), matvec_row), "extra mapped output was ignored")?
+    testing.assert(!mapped_answers_match(values.as_slice(), empty.as_slice(), matvec_row), "empty mapped output passed")?
+    testing.assert(!mapped_answers_match(values.as_slice(), [Float32(360)].as_slice(), matvec_row), "truncated mapped output passed")?
+    testing.assert(mapped_answers_match(values.as_slice(), [Float32(360), 400.0].as_slice(), matvec_row), "complete mapped output was refused")?
+}
+
+test "matrix reference retains independent contraction and cancellation known answers" {
+    // These literals distinguish reverse-k accumulation and FMA contraction.
+    testing.assert_eq(reference(2, 0, Float32.from_bits(1036831949)).to_bits(), UInt32(1119527895), "matrix contraction order changed")?
+    testing.assert_eq(reference(2, 1, Float32.from_bits(1036831949)).to_bits(), UInt32(1120891044), "matrix multiply and add were contracted")?
+    testing.assert_eq(reference(2, 0, Float32.from_bits(3238107546)).to_bits(), UInt32(3258470892), "cancellation order changed")?
+}
 
 @derive(Display, Release, From[gpu.GpuError], From[io.IoError], From[mem.Oom])
 enum BenchError {
@@ -243,6 +269,65 @@ fn elementwise_operator_component(packed: Float32) -> Float32 {
     row_cell(elementwise_operator_values(component_input(packed)), packed)
 }
 
+// A separate validation corpus; timed rows/columns and performance seeds do
+// not use these inputs. The host oracle indexes a fixed raw-bit table.
+fn validation_word(index: UInt64) -> UInt32 {
+    let words: [UInt32; 23] = [0, 2147483648, 1, 2147483649, 8388607, 2155872255, 8388608, 2155872256, 1051372203, 3198855851, 1036831949, 3238107546, 1065353217, 3212836865, 1621981420, 3769465068, 2139095039, 4286578687, 2139095040, 4286578688, 2139095041, 4286578689, 2143363909]
+    words[index]
+}
+
+fn matvec_row_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    lane(matvec_row_values(value), selected)
+}
+
+fn matvec_column_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    lane(matvec_column_values(value), selected)
+}
+
+fn matvec_operator_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    lane(matvec_operator_values(value), selected)
+}
+
+fn vecmat_row_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    lane(vecmat_row_values(value), selected)
+}
+
+fn vecmat_column_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    lane(vecmat_column_values(value), selected)
+}
+
+fn vecmat_operator_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    lane(vecmat_operator_values(value), selected)
+}
+
+fn matmul_row_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    row_cell(matmul_row_values(value), selected)
+}
+
+fn matmul_column_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    column_cell(matmul_column_values(value), selected)
+}
+
+fn matmul_operator_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    row_cell(matmul_operator_values(value), selected)
+}
+
+fn elementwise_row_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    row_cell(elementwise_row_values(value), selected)
+}
+
+fn elementwise_column_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    column_cell(elementwise_column_values(value), selected)
+}
+
+fn elementwise_operator_diverse_component(value: Float32, selected: Float32) -> Float32 {
+    row_cell(elementwise_operator_values(value), selected)
+}
+
+fn validation_input_bits(value: Float32, _selected: Float32) -> Float32 {
+    value
+}
+
 // The integral part selects a component and the fractional part encodes
 // the input. Every encoded value is exact in Float32. Static lane reads
 // allow the device to expose components without a float-to-index cast.
@@ -324,6 +409,41 @@ fn reference(operation: UInt64, component: UInt64, value: Float32) -> Float32 {
     total
 }
 
+fn components_match(answers: mem.Slice[Float32], expected_length: UInt64, operation: UInt64, diverse: Bool = false) -> Bool {
+    if answers.length() != expected_length {
+        return false
+    }
+    let lanes: UInt64 = if operation < 2 {
+        4
+    } else {
+        16
+    }
+    for index in 0..answers.length() {
+        let value = if diverse {
+            Float32.from_bits(validation_word(index / lanes))
+        } else {
+            Float32(index / lanes) / 16.0
+        }
+        let expected = reference(operation, index % lanes, value)
+        if answers[index].to_bits() != expected.to_bits() {
+            return false
+        }
+    }
+    true
+}
+
+fn mapped_answers_match(values: mem.Slice[Float32], answers: mem.Slice[Float32], reference: fn(value: Float32) -> Float32) -> Bool {
+    if answers.length() != values.length() {
+        return false
+    }
+    for index in UInt64(0)..values.length() {
+        if answers[index].to_bits() != reference(values[index]).to_bits() {
+            return false
+        }
+    }
+    true
+}
+
 fn check_components(device: gpu.Device, operation: UInt64, row: fn(value: Float32) -> Float32, column: fn(value: Float32) -> Float32, actual: fn(value: Float32) -> Float32) -> Result[(), BenchError] {
     let lanes: UInt64 = if operation < 2 {
         4
@@ -340,11 +460,47 @@ fn check_components(device: gpu.Device, operation: UInt64, row: fn(value: Float3
     for body in [copy(row), copy(column), copy(actual)] {
         defer let resident = input.map(body)?
         defer let answers = gpu.download(resident)?
-        for index in 0..answers.length() {
-            let expected = reference(operation, index % lanes, Float32(index / lanes) / 16.0)
-            if answers[index].to_bits() != expected.to_bits() {
-                return .Err(.Mismatch)
-            }
+        if !components_match(answers.as_slice(), encoded.length(), operation) {
+            return .Err(.Mismatch)
+        }
+    }
+    .Ok(())
+}
+
+// Two input tensors keep raw corpus values separate from component selectors.
+// This uses existing binary device bodies; no integer/bitcast device extension.
+fn check_diverse_components(device: gpu.Device, operation: UInt64, row: fn(value: Float32, selected: Float32) -> Float32, column: fn(value: Float32, selected: Float32) -> Float32, actual: fn(value: Float32, selected: Float32) -> Float32) -> Result[(), BenchError] {
+    let lanes: UInt64 = if operation < 2 {
+        4
+    } else {
+        16
+    }
+    defer var values: mem.Vec[Float32] = mem.Vec.new()
+    defer var selectors: mem.Vec[Float32] = mem.Vec.new()
+    for n in UInt64(0)..23 {
+        for component in UInt64(0)..lanes {
+            &values.push(Float32.from_bits(validation_word(n))).settled()?
+            &selectors.push(Float32(component)).settled()?
+        }
+    }
+    defer let input = device.upload(values.as_slice(), [values.length()])?
+    defer let selected = device.upload(selectors.as_slice(), [selectors.length()])?
+    // Observe values before arithmetic can hide a tiny input in value+1.
+    defer let copied = input.zip_with(selected, validation_input_bits)?
+    defer let raw = gpu.download(copied)?
+    if raw.length() != values.length() {
+        return .Err(.Mismatch)
+    }
+    for index in UInt64(0)..values.length() {
+        if raw[index].to_bits() != values[index].to_bits() {
+            return .Err(.Mismatch)
+        }
+    }
+    for body in [copy(row), copy(column), copy(actual)] {
+        defer let resident = input.zip_with(selected, body)?
+        defer let answers = gpu.download(resident)?
+        if !components_match(answers.as_slice(), values.length(), operation, true) {
+            return .Err(.Mismatch)
         }
     }
     .Ok(())
@@ -362,12 +518,7 @@ fn measure(schedule: bench.Schedule, input: tensor.Vector[Float32, gpu.Storage],
 fn verify(input: tensor.Vector[Float32, gpu.Storage], values: mem.Vec[Float32], body: fn(value: Float32) -> Float32, reference: fn(value: Float32) -> Float32) -> Result[Bool, gpu.GpuError] {
     defer let resident = input.map(body)?
     defer let host = gpu.download(resident)?
-    for index in UInt64(0)..values.length() {
-        if host[index].to_bits() != reference(values[index]).to_bits() {
-            return .Ok(false)
-        }
-    }
-    .Ok(true)
+    .Ok(mapped_answers_match(values.as_slice(), host.as_slice(), reference))
 }
 
 fn compare(name: Str, input: tensor.Vector[Float32, gpu.Storage], values: mem.Vec[Float32], row: fn(value: Float32) -> Float32, column: fn(value: Float32) -> Float32, actual: fn(value: Float32) -> Float32) -> Result[(), BenchError] {
@@ -413,6 +564,7 @@ fn main() -> Result[UInt8, BenchError] {
     }) {
         return .Ok(usage())
     }
+    io.println("schema,matrix_values_gpu,2")?
     io.println("seed,{seed}")?
     defer var values: mem.Vec[Float32] = mem.Vec.new()
     &values.reserve(65536)?
@@ -424,6 +576,11 @@ fn main() -> Result[UInt8, BenchError] {
     check_components(device, 1, vecmat_row_component, vecmat_column_component, vecmat_operator_component)?
     check_components(device, 2, matmul_row_component, matmul_column_component, matmul_operator_component)?
     check_components(device, 3, elementwise_row_component, elementwise_column_component, elementwise_operator_component)?
+    check_diverse_components(device, 0, matvec_row_diverse_component, matvec_column_diverse_component, matvec_operator_diverse_component)?
+    check_diverse_components(device, 1, vecmat_row_diverse_component, vecmat_column_diverse_component, vecmat_operator_diverse_component)?
+    check_diverse_components(device, 2, matmul_row_diverse_component, matmul_column_diverse_component, matmul_operator_diverse_component)?
+    check_diverse_components(device, 3, elementwise_row_diverse_component, elementwise_column_diverse_component, elementwise_operator_diverse_component)?
+    io.println("validation,component_raw_bits_v2,pass")?
     if verify_only {
         return .Ok(0)
     }

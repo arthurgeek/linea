@@ -5,6 +5,22 @@ import std.env
 import std.io
 import std.mem
 import std.num
+import std.testing
+
+test "matrix layouts match an independent diverse raw-bit correctness corpus" {
+    testing.assert(validate_correctness_corpus(), "a matrix layout changed a logical component")?
+}
+
+test "finite rectangular correctness inputs do not repeat component bits" {
+    let values = correctness_fixture[17, 3](9, true)
+    for first in UInt64(0)..51 {
+        let bits = values[first / 3][first % 3].to_bits()
+        testing.assert(bits % UInt32(2147483648) < UInt32(2139095040), "finite correctness fixture contains an exceptional value")?
+        for second in (first + 1)..51 {
+            testing.assert(bits != values[second / 3][second % 3].to_bits(), "finite correctness fixture repeats a component")?
+        }
+    }
+}
 
 fn fixture[let rows: UInt64, let columns: UInt64](seed: UInt64) -> [[Float32; columns]; rows] {
     var values: [[Float32; columns]; rows] = mem.filled(mem.filled[Float32, columns](0.0))
@@ -167,6 +183,125 @@ fn reference_product[let rows: UInt64, let inner: UInt64, let columns: UInt64](l
     result
 }
 
+// These correctness inputs are independent of the small dyadic performance
+// fixture. They include non-dyadic values, cancellation, signed zeros,
+// subnormals, infinities and signaling NaNs of both signs.
+fn correctness_fixture[let rows: UInt64, let columns: UInt64](salt: UInt64, finite: Bool = false) -> [[Float32; columns]; rows] {
+    let finite_words: [UInt32; 12] = [1036831949, 3184315597, 1051372203, 3198855851, 1065353217, 3212836865, 1078530011, 3226013659, 1149239296, 3296722944, 981668463, 3129152111]
+    let words: [UInt32; 21] = [0, 2147483648, 1, 2147483649, 8388607, 2155872255, 8388608, 1065353216, 3212836864, 1051372203, 3198855851, 1621981420, 3769465068, 2139095039, 4286578687, 2139095040, 4286578688, 2139095041, 4286578689, 1065353217, 3212836865]
+    var result: [[Float32; columns]; rows] = mem.filled(mem.filled[Float32, columns](0.0))
+    for row in UInt64(0)..rows {
+        for column in UInt64(0)..columns {
+            let index = row * columns + column + salt
+            let bits = if finite {
+                // Successive table wraps get distinct low mantissa bits in
+                // this at-most-51-component corpus. The bounded adjustment
+                // cannot change any curated base's sign or exponent.
+                finite_words[index % finite_words.length()] + UInt32((index / finite_words.length()) % 256)
+            } else {
+                words[index % words.length()]
+            }
+            result[row][column] = Float32.from_bits(bits)
+        }
+    }
+    result
+}
+
+fn check_correctness_case[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float32; inner]; rows], right: [[Float32; columns]; inner], column_vector: [Float32; inner], row_vector: [Float32; rows]) -> Bool {
+    let column_left = transpose(left)
+    let column_right = transpose(right)
+    let expected = reference_product(left, right)
+    let row_result = matmul_row(left, right)
+    let column_result = matmul_column(column_left, column_right)
+    let operator_result = num.matrix(left) * num.matrix(right)
+    for row in UInt64(0)..rows {
+        for column in UInt64(0)..columns {
+            let bits = expected[row][column].to_bits()
+            if row_result[row][column].to_bits() != bits || column_result[column][row].to_bits() != bits || operator_result[row, column].to_bits() != bits {
+                return false
+            }
+        }
+    }
+    let mv_row = matvec_row(left, column_vector)
+    let mv_column = matvec_column(column_left, column_vector)
+    let mv_operator = num.matrix(left) * column_vector
+    for row in UInt64(0)..rows {
+        var total = Float32(0.0)
+        for k in UInt64(0)..inner {
+            total += left[row][k] * column_vector[k]
+        }
+        let bits = total.to_bits()
+        if mv_row[row].to_bits() != bits || mv_column[row].to_bits() != bits || mv_operator[row].to_bits() != bits {
+            return false
+        }
+    }
+    let vm_row = vecmat_row(row_vector, left)
+    let vm_column = vecmat_column(row_vector, column_left)
+    let vm_operator = row_vector * num.matrix(left)
+    for column in UInt64(0)..inner {
+        var total = Float32(0.0)
+        for k in UInt64(0)..rows {
+            total += row_vector[k] * left[k][column]
+        }
+        let bits = total.to_bits()
+        if vm_row[column].to_bits() != bits || vm_column[column].to_bits() != bits || vm_operator[column].to_bits() != bits {
+            return false
+        }
+    }
+    let row_shift = shifted(left, 0.1)
+    let column_shift = shifted(column_left, 0.1)
+    for row in UInt64(0)..rows {
+        for column in UInt64(0)..inner {
+            let bits = (left[row][column] + 0.1).to_bits()
+            if row_shift[row][column].to_bits() != bits || column_shift[column][row].to_bits() != bits {
+                return false
+            }
+        }
+    }
+    true
+}
+
+fn validate_correctness_corpus() -> Bool {
+    // Fixed known answer distinguishes increasing-k from reassociation.
+    let large = Float32.from_bits(1621981420)
+    let cancellation: [[Float32; 3]; 1] = [[large, 1.0, -large]]
+    let ones: [[Float32; 1]; 3] = [[1.0], [1.0], [1.0]]
+    let direct = reference_product(cancellation, ones)
+    if direct[0][0].to_bits() != 0 || !check_correctness_case(cancellation, ones, [Float32(1.0), 1.0, 1.0], [Float32(1.0)]) {
+        return false
+    }
+    // Rounded multiply then add is zero; contraction would retain -2^-46.
+    let a = Float32.from_bits(1065353217)
+    let b = Float32.from_bits(1065353214)
+    let rounding: [[Float32; 2]; 1] = [[-1.0, a]]
+    let factors: [[Float32; 1]; 2] = [[1.0], [b]]
+    let rounded = reference_product(rounding, factors)
+    if rounded[0][0].to_bits() != 0 || !check_correctness_case(rounding, factors, [Float32(1.0), b], [Float32(1.0)]) {
+        return false
+    }
+    // Rectangular and odd inner dimensions prevent square-only agreement.
+    if !check_correctness_case(correctness_fixture[1, 1](7), correctness_fixture[1, 1](9), correctness_fixture[1, 1](3)[0], correctness_fixture[1, 1](5)[0]) {
+        return false
+    }
+    if !check_correctness_case(correctness_fixture[2, 3](0), correctness_fixture[3, 5](5), correctness_fixture[1, 3](9)[0], correctness_fixture[1, 2](16)[0]) {
+        return false
+    }
+    if !check_correctness_case(correctness_fixture[3, 5](11), correctness_fixture[5, 2](17), correctness_fixture[1, 5](2)[0], correctness_fixture[1, 3](6)[0]) {
+        return false
+    }
+    if !check_correctness_case(correctness_fixture[2, 17](4), correctness_fixture[17, 3](13), correctness_fixture[1, 17](8)[0], correctness_fixture[1, 2](19)[0]) {
+        return false
+    }
+    // Finite cases prevent NaN propagation hiding component errors.
+    if !check_correctness_case(correctness_fixture[3, 5](1, true), correctness_fixture[5, 2](7, true), correctness_fixture[1, 5](3, true)[0], correctness_fixture[1, 3](5, true)[0]) {
+        return false
+    }
+    if !check_correctness_case(correctness_fixture[2, 17](4, true), correctness_fixture[17, 3](9, true), correctness_fixture[1, 17](2, true)[0], correctness_fixture[1, 2](8, true)[0]) {
+        return false
+    }
+    true
+}
+
 fn shape[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float32; inner]; rows], right: [[Float32; columns]; inner], name: Str, repetitions: UInt64, verify_only: Bool) -> Result[UInt8, io.IoError] {
     let column_left = transpose(left)
     let column_right = transpose(right)
@@ -233,11 +368,11 @@ fn shape[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float
         "matvec",
         [left] |iteration: UInt64| {
             let vector: [Float32; inner] = input(iteration)
-            hash(matvec_row(left, vector))
+            hash(bench.black_box(matvec_row(left, vector)))
         },
         [column_left] |iteration: UInt64| {
             let vector: [Float32; inner] = input(iteration)
-            hash(matvec_column(column_left, vector))
+            hash(bench.black_box(matvec_column(column_left, vector)))
         },
         repetitions,
     )?
@@ -248,11 +383,11 @@ fn shape[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float
         "vecmat",
         [left] |iteration: UInt64| {
             let vector: [Float32; rows] = input(iteration)
-            hash(vecmat_row(vector, left))
+            hash(bench.black_box(vecmat_row(vector, left)))
         },
         [column_left] |iteration: UInt64| {
             let vector: [Float32; rows] = input(iteration)
-            hash(vecmat_column(vector, column_left))
+            hash(bench.black_box(vecmat_column(vector, column_left)))
         },
         repetitions,
     )?
@@ -263,11 +398,11 @@ fn shape[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float
         "matmul",
         [left, right] |iteration: UInt64| {
             let varied = shifted(left, Float32(iteration % 17) / 16.0)
-            hash_matrix(matmul_row(varied, right))
+            hash_matrix(bench.black_box(matmul_row(varied, right)))
         },
         [column_left, column_right] |iteration: UInt64| {
             let varied = shifted(column_left, Float32(iteration % 17) / 16.0)
-            hash_matrix(matmul_column(varied, column_right))
+            hash_matrix(bench.black_box(matmul_column(varied, column_right)))
         },
         repetitions,
     )?
@@ -277,10 +412,10 @@ fn shape[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float
     let ew = compare(
         "elementwise",
         [left] |iteration: UInt64| {
-            hash_matrix(shifted(left, Float32(iteration % 17) / 16.0))
+            hash_matrix(bench.black_box(shifted(left, Float32(iteration % 17) / 16.0)))
         },
         [column_left] |iteration: UInt64| {
-            hash_matrix(shifted(column_left, Float32(iteration % 17) / 16.0))
+            hash_matrix(bench.black_box(shifted(column_left, Float32(iteration % 17) / 16.0)))
         },
         repetitions,
     )?
@@ -292,11 +427,11 @@ fn shape[let rows: UInt64, let inner: UInt64, let columns: UInt64](left: [[Float
         "row_vs_operator",
         [left, right] |iteration: UInt64| {
             let varied = shifted(left, Float32(iteration % 17) / 16.0)
-            hash_matrix(matmul_row(varied, right))
+            hash_matrix(bench.black_box(matmul_row(varied, right)))
         },
         [left, right] |iteration: UInt64| {
             let varied = shifted(left, Float32(iteration % 17) / 16.0)
-            let product = num.matrix(varied) * num.matrix(right)
+            let product = bench.black_box(num.matrix(varied) * num.matrix(right))
             var total = UInt64(0)
             for row in 0..left.length() {
                 for column in 0..right[0].length() {
@@ -331,7 +466,12 @@ fn main() -> Result[UInt8, io.IoError] {
     }) {
         return .Ok(usage())
     }
+    io.println("schema,matrix_layout,2")?
     io.println("seed,{seed}")?
+    if !validate_correctness_corpus() {
+        return .Ok(7)
+    }
+    io.println("validation,diverse_raw_bits_v2,pass")?
     if !verify_only {
         io.println("workload,round,repetitions,row_ns,column_ns,checksum")?
     }
