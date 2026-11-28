@@ -5019,7 +5019,13 @@ fn refusalCodes(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Co
     return try compiler_stack.run(refusalCodesHere, .{ gpa, text });
 }
 
-fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
+fn refusalCodesHere(retained: std.mem.Allocator, text: []const u8) ![]const diagnostic.Code {
+    // Each check still loads and checks a fresh library. Its compiler state
+    // must die here, rather than accumulate in a caller's permutation arena.
+    // Only pointer-free diagnostic codes cross this lifetime boundary.
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const gpa = scratch.allocator();
     const files = [_]loader.InMemoryFile{
         .{ .path = "p/linea.json", .text = "{}\n" },
         .{ .path = "p/main.lin", .text = text },
@@ -5031,7 +5037,24 @@ fn refusalCodesHere(gpa: std.mem.Allocator, text: []const u8) ![]const diagnosti
     if (!sink.hasErrors()) _ = try checkProgram(gpa, gpa, &program, &interner, &sink, .program);
     var codes: std.ArrayList(diagnostic.Code) = .empty;
     for (sink.items()) |d| if (d.severity == .err) try codes.append(gpa, d.code orelse return error.UncodedDiagnostic);
-    return codes.toOwnedSlice(gpa);
+    return retained.dupe(diagnostic.Code, codes.items);
+}
+
+test "refusal code checks retain only diagnostic codes rather than compiler scratch" {
+    var retained = std.heap.ArenaAllocator.init(testing.allocator);
+    defer retained.deinit();
+    const codes = try refusalCodes(retained.allocator(), "fn main() -> UInt8 { not_defined }");
+    try testing.expectEqualSlices(diagnostic.Code, &.{.n_undefined}, codes);
+    // Repeated declaration-order checks retain their small result arrays,
+    // never another copy of the entire parsed and checked standard library.
+    const capacity = retained.queryCapacity();
+    if (capacity > 4096) std.debug.print("refusal-code result retained {d} bytes of compiler scratch\n", .{capacity});
+    try testing.expect(capacity <= 4096);
+}
+
+test "refusal code checks release compiler scratch when the result allocation fails" {
+    var failing = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
+    try testing.expectError(error.OutOfMemory, refusalCodes(failing.allocator(), "fn main() -> UInt8 { not_defined }"));
 }
 
 test "slow: a chain of a thousand declared answers is accepted and one of a thousand and one is refused once, in either order" {
