@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    var v = [Int32(1), 2, 3, 4]
+    v.xx = [Int32(5), 6]
+    UInt8(v[0])
+}

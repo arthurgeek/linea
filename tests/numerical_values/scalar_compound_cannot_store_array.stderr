@@ -1,0 +1,6 @@
+error[T-Operands]: expected `Int16`, found `[Int16; 2]`
+ --> tests/numerical_values/scalar_compound_cannot_store_array.lin:3:14
+  |
+3 |     value += [Int16(1), 2]
+  |     ----- expected because of this operand
+  |              ^^^^^^^^^^^^^ expected `Int16`, found `[Int16; 2]`

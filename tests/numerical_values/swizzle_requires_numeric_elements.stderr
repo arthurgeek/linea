@@ -1,0 +1,5 @@
+error[T-UnknownField]: `[Str; 2]` has no field `x`
+ --> tests/numerical_values/swizzle_requires_numeric_elements.lin:3:20
+  |
+3 |     let selected = words.x
+  |                    ^^^^^^^ not a field of this value

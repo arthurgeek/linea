@@ -831,10 +831,7 @@ const Function = struct {
     /// the whole module.
     enum_parts: *Members.EnumParts,
 
-    const Location = struct {
-        block: u32 = std.math.maxInt(u32),
-        order: u32 = std.math.maxInt(u32),
-    };
+    const Location = @import("index_loops.zig").Position;
 
     /// What other functions read of this one: the types it names, its slot
     /// tables and its signature. Asked of every function before any body is
@@ -854,25 +851,27 @@ const Function = struct {
         if (!try self.references()) return false;
         if (!try self.foreignEntriesReachOnlyC()) return false;
 
-        const locations = try self.gpa.alloc(Location, self.mir.insts.len);
+        const locations = try @import("index_loops.zig").indexInstructions(self.gpa, self.mir);
         defer self.gpa.free(locations);
-        @memset(locations, .{});
-        for (0..self.mir.blocks.len) |i| {
-            const block = BlockId.at(@intCast(i));
-            for (self.mir.instsOf(block), 0..) |id, order| locations[id.index()] = .{
-                .block = @intCast(i),
-                .order = @intCast(order),
-            };
-            const terminator = self.mir.terminatorOf(block);
-            locations[terminator.index()] = .{
-                .block = @intCast(i),
-                .order = @intCast(self.mir.instsOf(block).len),
-            };
-        }
         self.locations = locations;
         defer self.locations = &.{};
 
         if (!try self.roles()) return false;
+        if (self.mir.index_loops.len == 0) {
+            if (@import("index_loops.zig").scopeError(self.mir)) |reason| {
+                try self.report(Span.empty, "invalid counted index loop: {s}", .{reason});
+                return false;
+            }
+        } else switch (try @import("index_loops.zig").analyzeUsingPositions(self.gpa, self.mir, locations)) {
+            .invalid => |reason| {
+                try self.report(Span.empty, "invalid counted index loop: {s}", .{reason});
+                return false;
+            },
+            .valid => |proof| {
+                var facts = proof;
+                facts.deinit(self.gpa);
+            },
+        }
 
         const addresses = try self.gpa.alloc(Address, self.mir.insts.len);
         defer self.gpa.free(addresses);
@@ -1071,6 +1070,12 @@ const Function = struct {
                 const operand = mir.unaryOf(id);
                 if (!try self.operandInRange(id, operand)) return false;
                 switch (mir.tagOf(id)) {
+                    .benchmark_barrier => {
+                        if (mir.typeOf(id) != .unit or mir.resultRoleOf(operand) != .managed_address) {
+                            try self.report(span, "%{d} benchmark barrier requires a managed storage address and Unit", .{id.index()});
+                            return false;
+                        }
+                    },
                     .address_bits => {
                         if (mir.typeOf(id) != .u64 or mir.resultRoleOf(id) != .value or mir.resultRoleOf(operand) != .managed_address) {
                             try self.report(span, "%{d} requires a managed storage address and a UInt64 result", .{id.index()});
@@ -1415,6 +1420,7 @@ const Function = struct {
             .store_raw,
             .storage_addr,
             .static_addr,
+            .benchmark_barrier,
             .address_bits,
             .borrow,
             .observe,
@@ -1683,7 +1689,7 @@ const Function = struct {
         if (!self.instInRange(before) or !self.instInRange(after)) return false;
         const a = self.locations[before.index()];
         const b = self.locations[after.index()];
-        return a.block != std.math.maxInt(u32) and a.block == b.block and a.order < b.order;
+        return a.block != null and a.block == b.block and a.order < b.order;
     }
 
     fn checkedRawAccess(self: *Function, id: InstId) std.mem.Allocator.Error!bool {
@@ -2002,6 +2008,7 @@ const Function = struct {
                 .store_raw,
                 .copy_value,
                 .move_value,
+                .benchmark_barrier,
                 .call_noreturn,
                 .call_indirect_noreturn,
                 .ret,
@@ -2192,7 +2199,7 @@ const Function = struct {
                     try self.namedSlot(id, mir.storeOf(id).local, "written", span);
                 },
 
-                .borrow, .address_bits => {
+                .borrow, .address_bits, .benchmark_barrier => {
                     const address = mir.unaryOf(id);
                     try self.through(id, places[address.index()], mir.typeOf(address), "observes", span);
                 },
@@ -2865,6 +2872,13 @@ pub const Harness = struct {
     /// The length both arrays above have.
     const two: TypeId = @enumFromInt(TypeId.builtins.len + 24);
 
+    /// Numerical device fixtures use these arrays as independent storage origins.
+    pub const float_pair: TypeId = @enumFromInt(TypeId.builtins.len + 25);
+    pub const float_pairs: TypeId = @enumFromInt(TypeId.builtins.len + 26);
+
+    const zero: TypeId = @enumFromInt(TypeId.builtins.len + 27);
+    pub const empty_floats: TypeId = @enumFromInt(TypeId.builtins.len + 28);
+
     /// What a synthesised signature says beyond what its slots imply: each
     /// parameter's convention, where the slot role's guess is not the one a
     /// case is about, and the clauses the storage phase reads.
@@ -2889,7 +2903,7 @@ pub const Harness = struct {
                 missing_params += function.param_count;
             }
 
-            const fixed_type_count = TypeId.builtins.len + 25;
+            const fixed_type_count = TypeId.builtins.len + 29;
             const pool = try gpa.alloc(types_mod.Type, fixed_type_count + missing_signatures);
             errdefer gpa.free(pool);
             @memcpy(pool[0..TypeId.builtins.len], &TypeId.builtins);
@@ -2908,6 +2922,10 @@ pub const Harness = struct {
             pool[@intFromEnum(callback_pair)] = .{ .struct_ = .{ .name = "CallbackPair", .first_field = 6, .field_count = 2 } };
             pool[@intFromEnum(callback_array)] = .{ .array = .{ .name = "[CallbackPair; 2]", .element = callback_pair, .length = two } };
             pool[@intFromEnum(callable_array)] = .{ .array = .{ .name = "[fn() -> UInt8; 2]", .element = nullary_callable, .length = two } };
+            pool[@intFromEnum(float_pair)] = .{ .array = .{ .name = "[Float32; 2]", .element = .f32, .length = two } };
+            pool[@intFromEnum(float_pairs)] = .{ .array = .{ .name = "[[Float32; 2]; 2]", .element = float_pair, .length = two } };
+            pool[@intFromEnum(zero)] = .{ .length = .{ .value = 0, .name = "0" } };
+            pool[@intFromEnum(empty_floats)] = .{ .array = .{ .name = "[Float32; 0]", .element = .f32, .length = zero } };
             pool[@intFromEnum(two)] = .{ .length = .{ .value = 2, .name = "2" } };
             pool[@intFromEnum(big_borrow)] = .{ .borrow = .{ .referent = big, .name = "borrow Big" } };
             pool[@intFromEnum(pair_borrow)] = .{ .borrow = .{ .referent = pair, .name = "borrow Pair" } };
@@ -6442,5 +6460,43 @@ test "float math verifies complete operand and result shapes" {
         defer h.deinit();
         const got = try h.run();
         try testing.expectEqual(case.valid, got.ok);
+    }
+}
+
+test "counted index loop scopes cannot invent a loop" {
+    const gpa = testing.allocator;
+    var function = try simpleFunction(gpa);
+    const scopes = try gpa.alloc(mir_mod.IndexLoopId, function.blocks.len);
+    @memset(scopes, .none);
+    scopes[function.entry.index()] = .at(0);
+    function.block_index_loops = scopes;
+    const functions = try gpa.dupe(Mir, &.{function});
+    var h = try Harness.init(gpa, functions);
+    defer h.deinit();
+    const checked = try h.run();
+    try testing.expect(!checked.ok);
+    try expectSaid(checked.said, "index loop");
+}
+
+test "benchmark barrier requires a managed source and returns no value" {
+    const gpa = testing.allocator;
+    for ([_]bool{ false, true }) |managed| {
+        for ([_]TypeId{ .u64, .unit }) |result| {
+            var b = Builder.init(gpa);
+            defer b.deinit();
+            b.return_type = .u8;
+            const block = try b.addBlock();
+            const slot = try b.addLocal(.u8, .value);
+            const initial = try b.addInst(block, .{ .tag = .constant, .ty = .u8, .span = Span.empty, .data = .{ .constant = 7 } });
+            _ = try b.addInst(block, .{ .tag = .store, .ty = .u8, .span = Span.empty, .data = .{ .store = .{ .local = slot, .value = initial } } });
+            const address = if (managed) try b.addInst(block, .{ .tag = .addr_of, .ty = .u8, .result_role = .managed_address, .span = Span.empty, .data = .{ .local = slot } }) else initial;
+            _ = try b.addInst(block, .{ .tag = .benchmark_barrier, .ty = result, .span = Span.empty, .data = .{ .unary = address } });
+            _ = try b.setTerminator(block, .{ .tag = .ret, .ty = .unit, .span = Span.empty, .data = .{ .unary = initial } });
+            var h = try Harness.init(gpa, try oneFunction(gpa, try b.finish(block, .from(0))));
+            defer h.deinit();
+            const got = try h.run();
+            try testing.expectEqual(managed and result == .unit, got.ok);
+            if (!got.ok) try expectSaid(got.said, "benchmark barrier requires a managed storage address and Unit");
+        }
     }
 }

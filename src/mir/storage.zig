@@ -1887,6 +1887,10 @@ pub const Phase = struct {
                 try self.set(slotEntity(st.local), .{ .deps = self.deps[v], .stale = self.stale[v] });
                 if (self.settled_places.items.len != 0) try self.refillSettledIn(slotEntity(st.local));
             },
+            .benchmark_barrier => {
+                const a = mir.unaryOf(id);
+                try self.use(id, a, self.base[a.index()], mir.typeOf(a), false);
+            },
             .borrow, .address_bits => {
                 const a = mir.unaryOf(id);
                 const b = self.base[a.index()];

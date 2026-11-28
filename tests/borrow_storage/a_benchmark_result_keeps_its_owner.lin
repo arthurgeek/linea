@@ -1,0 +1,8 @@
+import std.bench
+
+fn main() -> UInt8 {
+    let owner = "parcel".to_owned().unwrap()
+    let observed = bench.black_box(owner.view())
+    owner.release()
+    UInt8(observed.length())
+}

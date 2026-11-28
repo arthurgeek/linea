@@ -276,7 +276,15 @@ pub const Ast = struct {
     /// Whether this function is a test: one the compiler writes the only call
     /// to, and which nothing that ships contains.
     pub fn declIsTest(self: *const Ast, id: DeclId) bool {
-        return self.decls.items(.is_test)[id.index()];
+        return self.decls.items(.case_kind)[id.index()] == .test_;
+    }
+
+    pub fn declIsBenchmark(self: *const Ast, id: DeclId) bool {
+        return self.decls.items(.case_kind)[id.index()] == .benchmark;
+    }
+
+    pub fn declIsCase(self: *const Ast, id: DeclId) bool {
+        return self.decls.items(.case_kind)[id.index()] != .ordinary;
     }
 
     /// Whether this test was written with a trap expectation.
@@ -348,7 +356,7 @@ pub const Ast = struct {
     /// call, so no path through the type or the trait reaches it. Every
     /// question about membership asks this, so that is decided here once.
     pub fn memberOwner(self: *const Ast, id: DeclId) TokenId {
-        if (self.declIsTest(id)) return .none;
+        if (self.declIsCase(id)) return .none;
         return self.declOwner(id);
     }
 
@@ -2508,7 +2516,11 @@ pub const Ast = struct {
         }
 
         pub fn markTest(self: *Builder, d: DeclId, is_test: bool) void {
-            self.decls.items(.is_test)[d.index()] = is_test;
+            self.decls.items(.case_kind)[d.index()] = if (is_test) .test_ else .ordinary;
+        }
+
+        pub fn markBenchmark(self: *Builder, d: DeclId) void {
+            self.decls.items(.case_kind)[d.index()] = .benchmark;
         }
 
         pub fn markExpectedTrap(self: *Builder, d: DeclId, expects_trap: bool) void {

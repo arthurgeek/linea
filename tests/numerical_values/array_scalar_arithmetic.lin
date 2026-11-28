@@ -1,0 +1,24 @@
+fn main() -> UInt8 {
+    let a = [Float32(2.0), 4.0, 8.0]
+    let right_sum = a + 2.0
+    let left_sum = 2.0 + a
+    let right_difference = a - 2.0
+    let left_difference = 2.0 - a
+    let right_product = a * 2.0
+    let left_product = 2.0 * a
+    let right_quotient = a / 2.0
+    let left_quotient = 16.0 / a
+    if right_sum[2] != 10.0 || left_sum[0] != 4.0 {
+        return 1
+    }
+    if right_difference[1] != 2.0 || left_difference[2] != -6.0 {
+        return 2
+    }
+    if right_product[2] != 16.0 || left_product[1] != 8.0 {
+        return 3
+    }
+    if right_quotient[0] != 1.0 || left_quotient[1] != 4.0 {
+        return 4
+    }
+    0
+}

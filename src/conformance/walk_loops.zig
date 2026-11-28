@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const testing = std.testing;
+const slow_tests = @import("../support/slow_tests.zig");
 
 const Span = @import("../support/span.zig").Span;
 const Sink = @import("../diagnostics/sink.zig").Sink;
@@ -285,12 +286,15 @@ const Writer = struct {
             .sequence => {
                 try w.print("var {s}{d} = Sequence.iterate(", .{ held, n });
                 try self.part(f.callee);
-                try w.print(")\n    loop {{ match Iterator.next(&{s}{d}) {{ ", .{ held, n });
+                // A Unit walk remains a statement even as an implicit test's
+                // tail. Bind the expanded loop's Unit so the test's Result
+                // expectation cannot flow into its bare break.
+                try w.print(")\n    let {s}{d}_done = loop {{ match Iterator.next(&{s}{d}) {{ ", .{ held, n, held, n });
                 try self.arm(f.args[0], f.args[1], n);
                 try w.writeAll(", None => { break }, } }");
             },
             .lent => {
-                try w.writeAll("loop { match Iterator.next(&");
+                try w.print("let {s}{d}_done = loop {{ match Iterator.next(&", .{ held, n });
                 try self.part(self.semantics.ast.unaryOperand(f.callee));
                 try w.writeAll(") { ");
                 try self.arm(f.args[0], f.args[1], n);
@@ -445,6 +449,38 @@ test "a walk over a sequence is written out as the loop that drives its iterator
     // differ in the loop and nothing else.
     try testing.expect(std.mem.indexOf(u8, got, "Some(x) => {\n        total += x\n    }") != null);
     try testing.expect(try checks(gpa, got));
+}
+
+test "slow: expanded tail walks retain implicit test success" {
+    try slow_tests.skipUnlessRun();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const source =
+        \\test "sequence tail" {
+        \\    for value in UInt64(0)..3 {
+        \\        let _value = value
+        \\    }
+        \\}
+        \\test "lent tail" {
+        \\    var pending = UInt64(0)..3
+        \\    for value in &pending {
+        \\        let _value = value
+        \\    }
+        \\}
+        \\fn ordinary() {
+        \\    for value in UInt64(0)..3 {
+        \\        let _value = value
+        \\    }
+        \\}
+        \\fn main() -> UInt8 {
+        \\    ordinary()
+        \\    0
+        \\}
+    ;
+    try testing.expect(try checks(gpa, source));
+    const rewritten = (try writeOutText(gpa, source)).?;
+    try testing.expect(try checks(gpa, rewritten));
 }
 
 test "a lent walk is written out as the loop that calls next through the lend" {

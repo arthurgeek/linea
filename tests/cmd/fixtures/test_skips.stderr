@@ -1,0 +1,5 @@
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/cmd/fixtures/test_skips/main.lin:1:12
+  |
+1 | import std.testing
+  |            ^^^^^^^ found 0

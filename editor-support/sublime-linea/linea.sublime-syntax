@@ -310,6 +310,8 @@ contexts:
       scope: keyword.control.import.linea
     - match: '\b(let|var)\b'
       scope: storage.type.linea
+    - match: '\bbench\b(?=\s+")'
+      scope: keyword.declaration.function.linea
     - match: '\b(pub|internal|export|test|trap|phantom)\b'
       scope: storage.modifier.linea
     # A convention decides what a call may do to its argument, so it reads as a

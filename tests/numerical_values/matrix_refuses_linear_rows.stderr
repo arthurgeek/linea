@@ -1,0 +1,5 @@
+error[T-Bound]: `T` requires `Copyable`, and `Ticket` does not have that capability
+ --> tests/numerical_values/matrix_refuses_linear_rows.lin:7:23
+  |
+7 |     let _matrix = num.matrix(rows)
+  |                       ^^^^^^ mark `Ticket` `@copyable`

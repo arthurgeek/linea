@@ -1881,6 +1881,8 @@ test "example roots: the tests a run reported are read from its closing line" {
     try testing.expectEqual(@as(?usize, 0), source.testsReported("0 passed, 0 failed\n"));
     try testing.expectEqual(@as(?usize, 0), source.testsReported("no tests found in examples/hello.lin\n"));
     try testing.expectEqual(@as(?usize, 5), source.testsReported("x\n4 passed, 1 failed"));
+    try testing.expectEqual(@as(?usize, 7), source.testsReported("4 passed, 1 failed, 2 skipped\n"));
+    try testing.expectEqual(@as(?usize, 2), source.testsReported("0 passed, 0 failed, 2 skipped\n"));
     try testing.expectEqual(@as(?usize, null), source.testsReported("error[N-Undefined]: no such name\n"));
     try testing.expectEqual(@as(?usize, null), source.testsReported(""));
 }
@@ -3225,6 +3227,27 @@ test "the guide gate: a run command between a program and its output chooses the
     try testing.expectEqual(@as(usize, 0), reading.problems.len);
     try testing.expectEqual(source.GuideCommand.@"test", reading.programs[0].command);
     try testing.expectEqualStrings("tiles.lin", reading.programs[0].target);
+}
+
+test "the guide gate: a skipped test summary selects the test command" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const reading = readFixture(arena.allocator(),
+        \\```linea
+        \\import std.testing
+        \\test "needs hardware" { return .Err(testing.skip("unavailable")) }
+        \\```
+        \\
+        \\```text
+        \\SKIP  needs hardware
+        \\        unavailable
+        \\
+        \\0 passed, 0 failed, 1 skipped
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(source.GuideCommand.@"test", reading.programs[0].command);
 }
 
 test "the guide gate: labelled files make one project that runs from its main file" {

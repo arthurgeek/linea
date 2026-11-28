@@ -37,7 +37,10 @@ impl Device {
     test "opening a device reports unavailable capability or owns a device" {
         match Device.open() {
             Ok(device) => device.release(),
-            Err(error) => testing.assert(error == .Unavailable || error == .Allocation || match error { Runtime(code) => code < 0, _ => false }, "device opening lost its failure reason")?,
+            Err(error) => {
+                testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+                return .Err(testing.skip("GPU device unavailable"))
+            },
         }
         .Ok(())
     }
@@ -57,7 +60,13 @@ impl Device {
     }
 
     test "upload preserves raw bits and checks zero dimensions before overflow" {
-        defer let device = match Device.open() { Ok(value) => value, Err(_) => return .Ok(()) }
+        defer let device = match Device.open() {
+            Ok(value) => value,
+            Err(error) => {
+                testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+                return .Err(testing.skip("GPU device unavailable"))
+            },
+        }
         let values = [Float32.from_bits(2), Float32.from_bits(2143289345), Float32.from_bits(2147483648)]
         defer let input = device.upload(values.as_slice(), [UInt64(3)]).unwrap()
         defer let host = download(input).unwrap()
@@ -90,7 +99,13 @@ impl Device {
     }
 
     test "matrix dimensions follow nested array lengths" {
-        defer let device = match Device.open() { Ok(value) => value, Err(_) => return .Ok(()) }
+        defer let device = match Device.open() {
+            Ok(value) => value,
+            Err(error) => {
+                testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+                return .Err(testing.skip("GPU device unavailable"))
+            },
+        }
         defer let matrix = device.matrix([[Float32(1.0), 2.0], [3.0, 4.0]]).unwrap()
         testing.assert_eq(matrix.dimensions(), [UInt64(2), 2], "matrix constructor lost dimensions")?
         defer let host = download(matrix).unwrap()
@@ -189,7 +204,13 @@ pub fn download[let rank: UInt64](value: tensor.Tensor[Float32, rank, Storage]) 
 }
 
 test "completed map preserves GPU subnormals and refuses unsupported ordinary bodies" {
-    defer let device = match Device.open() { Ok(value) => value, Err(_) => return .Ok(()) }
+    defer let device = match Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
     let values = [Float32.from_bits(2), Float32(4.0)]
     defer let input = device.upload(values.as_slice(), [UInt64(2)]).unwrap()
     defer let output = input.map(_half).unwrap()

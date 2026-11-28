@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    let right = 1 + [2, 3]
+    let left = [2, 3] + 1
+    if right[0] != 3 || right[1] != 4 || left[0] != 3 || left[1] != 4 {
+        return 1
+    }
+    let expected: [Float32; 2] = 1.0 + [2.0, 3.0]
+    if expected[0] != 3.0 || expected[1] != 4.0 {
+        return 2
+    }
+    0
+}

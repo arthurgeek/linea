@@ -1476,9 +1476,9 @@ const Property = enum {
     /// dropped an argument; a run of names read from the wrong end.
     settled_refs,
 
-    /// Every float literal a case spells reaches the backend as the double it
-    /// means: the emitted constant's spelling parses back to the same bits
-    /// the literal's own text does.
+    /// Every float literal in a materialized case body reaches the backend
+    /// with the bits its source denotes: the emitted constant's spelling
+    /// parses back to the same bits the literal's own text does.
     ///
     /// The constant crosses the pipeline as text twice -- the literal in, the
     /// spelling out -- and each crossing is a parse someone can get wrong. A
@@ -1838,86 +1838,83 @@ test "the two corpus tallies account for the corpus exactly" {
 /// Both sides through one call, so a chance cannot be recorded on neither --
 /// which is the only way the two can stop accounting for the corpus without
 /// the corpus itself having changed.
-/// Property: every float literal the case spells reaches the backend as the
-/// double it means. The literal's own text and the emitted `d_` spelling are
-/// parsed by one routine and compared as bits, so a spelling that is merely
-/// close -- rounded through too few digits -- fails here even where every
-/// eval comparison happens to tolerate it.
+/// Property: a float literal in a materialized body reaches the backend with
+/// the bits its source denotes. The source text is parsed independently of
+/// lowering and compared with the emitted constant's bits, so losing precision
+/// fails even where an eval comparison would tolerate the difference.
 ///
 /// Answers whether the case gave the property anything to read: a case with
-/// no float literal is the caller's to pass over.
+/// no selected float literal is the caller's to pass over.
 ///
-/// Only the case's own files. The tree carries the library beside them, and
-/// a library literal reaches the backend only where something instantiates
-/// the function holding it -- so a literal in an unused `std` body would
-/// fail every case that imports the prelude and calls nothing over floats.
-///
-/// And only what an ordinary build emits. A test's body is checked and left
-/// out of the artefact, so a float literal inside one reaches no backend and
-/// has no constant to be found -- the same reason as above, arrived at from the
-/// other side. Without this the property reads a case declaring a test over
-/// floats as a compiler that stopped emitting them.
+/// Source literals outside function declarations retain their own obligations.
+/// A function's literals are checked only where discovery materialized its body;
+/// tests, benchmarks and their private helpers may be checked without being
+/// emitted by an ordinary build. Generated bodies use the expanded tree's IDs
+/// and the source provenance that expansion recorded for their declarations.
 fn checkFloatRoundTrip(
     gpa: std.mem.Allocator,
     failures: *std.ArrayList(Failure),
     display_path: []const u8,
-    ast: *const Ast,
-    table: *const FileTable,
+    program: *const ExpandedProgram,
+    module: *const MirModule,
     case: *const Case,
     ir_text: []const u8,
 ) !bool {
-    // What a test declares, which an ordinary build does not emit.
-    //
-    // **Bound:** the declarations of one case, walked once, and the tests among
-    // them held against each literal. A case declares a handful of each and
-    // neither grows with the program being compiled.
-    var untested: std.ArrayList(token.TokenRange) = .empty;
-    defer untested.deinit(gpa);
+    const ast = &program.ast;
+    var own_paths: std.StringHashMapUnmanaged(void) = .empty;
+    defer own_paths.deinit(gpa);
+    for (case.files) |file| try own_paths.put(gpa, file.path, {});
+
+    var materialized = try gpa.alloc(bool, ast.tokenCount());
+    defer gpa.free(materialized);
+    @memset(materialized, false);
+    for (ast.parts) |part| {
+        if (own_paths.contains(part.path)) @memset(materialized[part.token_start..part.token_end], true);
+    }
+    // Function ranges are disjoint. Each is cleared once and restored at most
+    // once, regardless of how many concrete instances discovery materialized.
+    // Storage is linear in this program's tokens and declarations.
+    var seen = try ast.declTable(gpa, bool, false);
+    defer seen.deinit(gpa);
     for (0..ast.declCount()) |d| {
         const id = node_mod.DeclId.at(@intCast(d));
-        if (!ast.declIsTest(id)) continue;
-        try untested.append(gpa, ast.declTokens(id));
+        if (ast.declTag(id) != .function) continue;
+        const range = ast.declTokens(id);
+        @memset(materialized[range.start.index()..range.end.index()], false);
+    }
+    for (0..module.functions.len) |f| {
+        const decl = module.originOf(.at(@intCast(f))).decl;
+        if (decl == .none or seen.get(decl)) continue;
+        seen.set(decl, true);
+        if (ast.declTag(decl) != .function) continue;
+        const source_decl = if (program.originOf(decl)) |origin|
+            (if (origin.template_member != .none) origin.template_member else origin.target)
+        else
+            decl;
+        const source_path = program.source.ast.partOf(program.source.ast.declTokens(source_decl).start).path;
+        if (!own_paths.contains(source_path)) continue;
+        const range = ast.declTokens(decl);
+        @memset(materialized[range.start.index()..range.end.index()], true);
     }
 
     var any = false;
     const tags = ast.tokens.items(.tag);
-    for (ast.parts) |part| {
-        const path = table.get(part.file).path;
-        const own = for (case.files) |cf| {
-            if (std.mem.eql(u8, cf.path, path)) break true;
-        } else false;
-        if (!own) continue;
-
-        for (part.token_start..part.token_end) |i| {
-            if (tags[i] != .float_literal) continue;
-            if (spelledInATest(untested.items, i)) continue;
-            const text = ast.tokenText(TokenId.at(@intCast(i)));
-            // An unfinished literal's bytes parse to nothing; its case is
-            // rejected and never reaches this property.
-            // The property reads tokens, not types, so a literal is held to a
-            // constant of either float width that rounds it once.
-            const wide = std.fmt.parseFloat(f64, text) catch continue;
-            const narrow = std.fmt.parseFloat(f32, text) catch continue;
-            any = true;
-            if (!irHoldsFloat(ir_text, @bitCast(wide), "f64") and !irHoldsFloat(ir_text, @as(u32, @bitCast(narrow)), "f32")) {
-                try failures.append(gpa, .{
-                    .path = display_path,
-                    .what = "a float literal's constant reaches the backend changed",
-                    .expected = try std.fmt.allocPrint(gpa, "an `f64` or `f32` constant holding the bits of `{s}`", .{text}),
-                    .actual = "no emitted constant holds those bits",
-                });
-            }
+    for (tags, 0..) |tag, i| {
+        if (tag != .float_literal or !materialized[i]) continue;
+        const text = ast.tokenText(TokenId.at(@intCast(i)));
+        const wide = std.fmt.parseFloat(f64, text) catch continue;
+        const narrow = std.fmt.parseFloat(f32, text) catch continue;
+        any = true;
+        if (!irHoldsFloat(ir_text, @bitCast(wide), "f64") and !irHoldsFloat(ir_text, @as(u32, @bitCast(narrow)), "f32")) {
+            try failures.append(gpa, .{
+                .path = display_path,
+                .what = "a float literal's constant reaches the backend changed",
+                .expected = try std.fmt.allocPrint(gpa, "an `f64` or `f32` constant holding the bits of `{s}`", .{text}),
+                .actual = "no emitted constant holds those bits",
+            });
         }
     }
     return any;
-}
-
-/// Whether a token sits inside one of the declarations a build leaves out.
-fn spelledInATest(tests: []const token.TokenRange, at: usize) bool {
-    for (tests) |r| {
-        if (at >= r.start.index() and at < r.end.index()) return true;
-    }
-    return false;
 }
 
 /// Whether any constant of MLIR float type `float_type` in the emitted text
@@ -1942,6 +1939,49 @@ fn irHoldsFloat(ir_text: []const u8, want_bits: u64, float_type: []const u8) boo
         if (bits == want_bits) return true;
     }
     return false;
+}
+
+test "float round trip follows materialized helpers and detects changed reachable constants" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const files = [_]InMemoryFile{
+        .{ .path = "project/linea.json", .text = "{ \"kind\": \"library\" }" },
+        .{ .path = "project/main.lin", .text =
+        \\export fn ordinary() -> Float64 { reachable(UInt8(0)) }
+        \\fn reachable[T](_value: T) -> Float64 { 0.5 }
+        \\export fn narrow() -> Float64 { Float64(Float32(0.375)) }
+        \\trait Valued { fn value(self: Self) -> Float64 }
+        \\template impl Valued { fn value(_self: Self) -> Float64 { 0.625 } }
+        \\@derive(Valued)
+        \\struct Marker {}
+        \\export fn generated() -> Float64 { Valued.value(Marker {}) }
+        \\fn test_value() -> Float64 { 0.75 }
+        \\test "a helper reached only by a test" { let _value = test_value() }
+        },
+    };
+    var checked = try lsp_analysis.of(gpa, testing.allocator, test_library.get(), &files, "project");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+    const module = (try lower(gpa, &checked.semantics.expanded, &checked.semantics.res, &checked.semantics.typing, &checked.semantics.disposals, &checked.sink, .program)).?;
+    var ir: std.Io.Writer.Allocating = .init(gpa);
+    try testing.expect(try emitMlir(gpa, &ir.writer, &module, &checked.table, &checked.sink, .{}));
+    const case: Case = .{ .display_path = "project", .stem = "project", .entry = "project", .files = &files };
+    var failures: std.ArrayList(Failure) = .empty;
+    try testing.expect(try checkFloatRoundTrip(gpa, &failures, "project", &checked.semantics.expanded, &module, &case, ir.written()));
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+    for ([_][2][]const u8{
+        .{ "0x3FE0000000000000", "0x3FD0000000000000" }, // Generic helper: 0.5 -> 0.25.
+        .{ "0x3EC00000", "0x3E800000" }, // Float32: 0.375 -> 0.25.
+        .{ "0x3FE4000000000000", "0x3FEC000000000000" }, // Generated member: 0.625 -> 0.875.
+    }) |mutation| {
+        const changed = try std.mem.replaceOwned(u8, gpa, ir.written(), mutation[0], mutation[1]);
+        try testing.expect(!std.mem.eql(u8, ir.written(), changed));
+        failures.clearRetainingCapacity();
+        try testing.expect(try checkFloatRoundTrip(gpa, &failures, "project", &checked.semantics.expanded, &module, &case, changed));
+        try testing.expectEqual(@as(usize, 1), failures.items.len);
+        try testing.expectEqualStrings("a float literal's constant reaches the backend changed", failures.items[0].what);
+    }
 }
 
 /// Whether a node was written in the text a property is holding.
@@ -13316,7 +13356,7 @@ fn ownSettledRef(ast: *const Ast, in_library: []const bool, ref: node_mod.TypeRe
 /// could get wrong without this noticing.
 ///
 /// **Bound:** one pass over written types, declarations, statements and
-/// expressions, visiting each lambda parameter once. Library rows are excluded
+/// expressions and callable headers, visiting each parameter once. Library rows are excluded
 /// by their file metadata. Work is linear in the loaded source.
 fn settledRefsWritten(ast: *const Ast, program: *const Program, in_library: []const bool) u32 {
     var n: u32 = 0;
@@ -13375,6 +13415,16 @@ fn settledRefsWritten(ast: *const Ast, program: *const Program, in_library: []co
             if (ownSettledRef(ast, in_library, param.written)) n += 1;
         }
         if (ownSettledRef(ast, in_library, lambda.result)) n += 1;
+    }
+
+    // Callable headers live outside the argument table, including structural
+    // bounds and callables nested inside another written type. Count each
+    // header once; its nested type arguments were counted from type_refs.
+    for (ast.callable_types) |callable| {
+        for (ast.params[callable.params.start..callable.params.end]) |param| {
+            if (ownSettledRef(ast, in_library, param.written)) n += 1;
+        }
+        if (ownSettledRef(ast, in_library, callable.result)) n += 1;
     }
 
     return n;
@@ -13841,7 +13891,7 @@ fn checkSettledRefs(
     }
 }
 
-/// The arguments each named bound gives its trait, held to what settles them.
+/// The types a named or structural callable bound gives, held to what settles them.
 fn heldBoundArguments(
     gpa: std.mem.Allocator,
     work: *SettledRefWork,
@@ -13852,12 +13902,30 @@ fn heldBoundArguments(
     owner: node_mod.DeclId,
     bounds: []const node_mod.TraitBound,
 ) !void {
-    for (bounds) |bound| {
-        if (bound.kind != .named) continue;
-        for (ast.typeArgs(bound.named.args)) |a| {
+    for (bounds) |bound| switch (bound.kind) {
+        .named => for (ast.typeArgs(bound.named.args)) |a| {
             try heldToWhatSettles(gpa, work, ast, program, typing, in_library, owner, a);
-        }
+        },
+        .callable => try heldCallableSignature(gpa, work, ast, program, typing, in_library, owner, ast.callableTypeById(bound.callable)),
+    };
+}
+
+/// The parameter and answer types a structural callable writes, wherever
+/// that signature occurs. Type arguments are visited by heldToWhatSettles.
+fn heldCallableSignature(
+    gpa: std.mem.Allocator,
+    work: *SettledRefWork,
+    ast: *const Ast,
+    program: *const Program,
+    typing: *const Typing,
+    in_library: []const bool,
+    owner: ?node_mod.DeclId,
+    callable: node_mod.CallableType,
+) std.mem.Allocator.Error!void {
+    for (ast.params[callable.params.start..callable.params.end]) |param| {
+        try heldToWhatSettles(gpa, work, ast, program, typing, in_library, owner, param.written);
     }
+    try heldToWhatSettles(gpa, work, ast, program, typing, in_library, owner, callable.result);
 }
 
 fn heldBodyAnnotation(
@@ -13894,6 +13962,9 @@ fn heldToWhatSettles(
     owner: ?node_mod.DeclId,
     ref: node_mod.TypeRef,
 ) !void {
+    if (ref.kind == .callable) {
+        try heldCallableSignature(gpa, work, ast, program, typing, in_library, owner, ast.callableType(ref));
+    }
     if (ref.kind == .selection) {
         try heldToWhatSettles(gpa, work, ast, program, typing, in_library, owner, ast.selectionBase(ref));
     }
@@ -23624,7 +23695,7 @@ fn checkCase(
                     resumed_emission_compared = true;
                 }
 
-                float_literals_survive = try checkFloatRoundTrip(gpa, &w.failures, display_path, &ast, &table, &case, ir.written());
+                float_literals_survive = try checkFloatRoundTrip(gpa, &w.failures, display_path, &settled.expanded, &mir, &case, ir.written());
 
                 // Which streams this case records, read once: the same answer
                 // says whether the case is built at all, which of its goldens
@@ -23926,8 +23997,8 @@ fn checkCase(
     }
     backend_zone.end();
 
-    // Property: every float literal the case spells reaches the backend as
-    // the double it means. Checked where the case emitted and spelled one;
+    // Property: every float literal in a materialized case body reaches the
+    // backend as the double it means. Checked where the case emitted one;
     // a rejected case, one the backend refused, or one with no float in it
     // gives the property nothing to read and is passed over.
     const finish_zone = tracy.beginZone(@src(), "case.finish");
@@ -24076,6 +24147,35 @@ test "recovery answers retain results rather than compilation regions" {
     }
     // Four small label/rule lists need less than one MiB of retained storage.
     try testing.expect(counted.took < 1 << 20);
+}
+
+test "callable signatures receive every settled-reference oracle visit" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var checked = try lsp_analysis.of(gpa, gpa, test_library.get(), &.{.{ .path = "main.lin", .text =
+        \\trait Has { type Item: Copyable }
+        \\fn _invoke[T: Has, F: fn(item: T.Item) -> Result[T.Item, UInt8]](_operation: F, _call: fn(item: T.Item) -> T.Item) {
+        \\    let _cell: Option[fn(item: T.Item) -> T.Item] = .None
+        \\}
+        \\fn main() -> UInt8 { 0 }
+    }}, "main.lin");
+    defer checked.deinit();
+    try testing.expect(!checked.sink.hasErrors());
+    var failures: std.ArrayList(Failure) = .empty;
+    var properties: std.EnumMap(Property, u32) = .{};
+    var passed_over: std.EnumMap(Property, u32) = .{};
+    var declined: PassedSettledRefs = .{};
+    const in_library = try libraryFiles(gpa, &checked.program);
+    const written = settledRefsWritten(&checked.program.ast, &checked.program, in_library);
+    try checkSettledRefs(gpa, &failures, &properties, &passed_over, &declined, "main.lin", &checked.program, &checked.semantics.res, &checked.semantics.typing, in_library);
+    // Each callable writes one parameter and one answer reference: in a
+    // structural bound, a function parameter and a nested body annotation.
+    try testing.expectEqual(@as(u32, 6), written);
+    try testing.expectEqual(@as(usize, 0), failures.items.len);
+    try testing.expectEqual(written, (properties.get(.settled_refs) orelse 0) + (passed_over.get(.settled_refs) orelse 0));
+    try testing.expectEqual(written, properties.get(.settled_refs) orelse 0);
+    try testing.expectEqual(@as(u32, 6), declined.through_a_bound);
 }
 
 test "body type annotations receive every settled-reference oracle visit" {

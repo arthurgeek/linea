@@ -1,0 +1,21 @@
+import std.num
+
+fn scale[T: Integer, let rows: UInt64, let columns: UInt64](value: num.Matrix[T, rows, columns], factor: T) -> num.Matrix[T, rows, columns] {
+    value * factor
+}
+
+fn main() -> UInt8 {
+    var value = num.matrix([[Int16(1), 2], [3, 4]])
+    value *= 2
+    value += num.matrix([[Int16(1), 1], [1, 1]])
+    value -= num.matrix([[Int16(1), 0], [0, 1]])
+    let doubled = scale(value, Int16(2))
+    if doubled[0, 0] != 4 || doubled[0, 1] != 10 || doubled[1, 0] != 14 || doubled[1, 1] != 16 {
+        return 1
+    }
+    value *= num.matrix([[Int16(1), 0], [0, 1]])
+    if value[1, 1] != 8 {
+        return 2
+    }
+    0
+}

@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let values = [Int32(1), 2]
+    let seen = borrow values.yx.x
+    UInt8(*seen)
+}

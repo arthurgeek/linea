@@ -895,7 +895,7 @@ simulated sockets cannot be used outside their simulation.
 
 `linea test <path>` takes a file or a project directory; given a directory, it
 runs the tests of every module beneath it. The report lists each test with
-`ok` or `FAIL`, what a failing assertion said, and a count, and the command
+`ok`, `FAIL` or `SKIP`, the failure or skip reason, and separate counts. The command
 exits with status 1 when any test failed, so a script or a CI job can rely on
 it.
 
@@ -938,6 +938,37 @@ ok    1\.5 rounds up to 2
 
 `linea test --filter '1\.5' rounding.lin` runs the second test alone, while
 `--filter '1.5'` matches no name and says so.
+
+## Unavailable prerequisites
+
+A test that needs unavailable hardware returns `.Err(testing.skip(reason))`.
+It uses the ordinary `testing.Failure` result, so deferred cleanup still runs:
+
+```linea
+import std.testing
+
+test "requires an unavailable capability" {
+    return .Err(testing.skip("GPU device unavailable"))
+}
+```
+
+```text
+SKIP  requires an unavailable capability
+        GPU device unavailable
+
+0 passed, 0 failed, 1 skipped
+```
+
+A skip never counts as a pass. Ordinary `linea test` succeeds when every selected
+test passed or skipped. `linea test --deny-skips <path>` exits with status 1
+when any selected test skips; use it for hardware qualification. Filtering
+happens before execution, so a skipped test outside the filter does not affect
+that command. A test expecting a trap cannot pass or skip by returning.
+
+`testing.Failure.is_skip()` distinguishes this outcome from assertions and
+allocation refusals. Custom `Display` error types keep their ordinary failure
+meaning, even when their displayed text says `Unavailable`. Only skip a known
+missing prerequisite; allocation, submission and computation errors fail tests.
 
 ## What you have seen
 

@@ -1,0 +1,5 @@
+error[T-ArrayLength]: an array's length is part of its type, so a literal has as many elements as the type says
+ --> tests/numerical_values/array_operand_match_arms_keep_shapes.lin:5:14
+  |
+5 |         _ => [4, 5, 6],
+  |              ^^^^^^^^^ this has 3, and the type says 2

@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let v = [Int32(1), 2]
+    UInt8(v.z)
+}

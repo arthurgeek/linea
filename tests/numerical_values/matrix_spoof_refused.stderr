@@ -1,0 +1,5 @@
+error[T-Operands]: `Matrix` is not a number
+ --> tests/numerical_values/matrix_spoof_refused.lin:7:26
+  |
+7 |     let _product = value * value
+  |                          ^ arithmetic is defined over integers

@@ -1,0 +1,12 @@
+import std.num
+
+struct Ticket { number: UInt8 }
+
+fn _release_affine(sink matrix: num.Matrix[Ticket, 2, 3]) {
+    matrix.release()
+}
+
+fn main() -> UInt8 {
+    defer let matrix = num.matrix([[UInt8(1), 2]])
+    matrix[0, 1] - 2
+}

@@ -2,6 +2,7 @@ const std = @import("std");
 
 const programs = [_][]const u8{
     "runtime/tests/gpu_runtime/numerical_map.lin",
+    "runtime/tests/gpu_runtime/numerical_values.lin",
     "runtime/tests/gpu_runtime/numerical_reduce.lin",
     "runtime/tests/gpu_runtime/numerical_matmul.lin",
     "runtime/tests/gpu_runtime/numerical_control_flow.lin",
@@ -13,6 +14,7 @@ const programs = [_][]const u8{
     "runtime/tests/gpu_runtime/numerical_identity.lin",
     "examples/gpu_readings.lin",
     "examples/gpu_matrix.lin",
+    "examples/numerical_gpu.lin",
     "examples/tensor_pipeline.lin",
 };
 
@@ -26,6 +28,14 @@ pub fn add(b: *std.Build, compiler: std.Build.LazyPath, runtime: std.Build.LazyP
             if (variant != 0) run.addArgs(&.{ "--", "another-argument" });
             step.dependOn(&run.step);
         }
+    }
+    // A hardware qualification must execute the authored tests too: status
+    // 77 is explicit unavailable capability, never a qualified hardware pass.
+    for ([_][]const u8{ "std", "examples/gpu_readings.lin", "examples/gpu_matrix.lin", "examples/numerical_gpu.lin", "examples/benchmark_cpu_gpu" }) |path| {
+        const run = command(b, compiler, runtime, "test", path);
+        run.addArg("--deny-skips");
+        if (std.mem.eql(u8, path, "std")) run.addArgs(&.{ "--filter", "gpu." });
+        step.dependOn(&run.step);
     }
     return step;
 }

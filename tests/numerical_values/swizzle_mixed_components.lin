@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let v = [Int32(1), 2, 3, 4]
+    let pair = v.xr
+    UInt8(pair[0])
+}

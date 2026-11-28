@@ -1,0 +1,25 @@
+struct Grid { cells: [[UInt8; 2]; 2] }
+
+impl Index[(UInt16, UInt16)] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Self, i: (UInt16, UInt16)) -> UInt8 where carries(self) {
+        self.cells[i._0][i._1]
+    }
+}
+
+impl Index[(UInt64, UInt64)] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Self, i: (UInt64, UInt64)) -> UInt8 where carries(self) {
+        self.cells[i._0][i._1]
+    }
+}
+
+fn main() -> UInt8 {
+    let value = Grid { cells = [[1, 2], [3, 4]] }
+    if value[UInt64(0), 1] != 2 {
+        return 1
+    }
+    0
+}

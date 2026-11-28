@@ -54,7 +54,7 @@ pub fn add(b: *std.Build, compiler: std.Build.LazyPath, ordinary: std.Build.Lazy
         native.addFileArg(executable);
         native.expectExitCode(0);
         step.dependOn(&native.step);
-        for ([_][]const u8{ "runtime/tests/cpu_only/public_gpu.lin", "tests/tensor/sequential.lin", "tests/tensor/shapes.lin", "tests/fibers_public/execution.lin", "tests/fibers_public/simulation_children.lin" }) |path| {
+        for ([_][]const u8{ "runtime/tests/cpu_only/public_gpu.lin", "tests/tensor/sequential.lin", "tests/tensor/shapes.lin", "tests/numerical_values/matrix_arithmetic.lin", "tests/numerical_values/array_subarray_compound.lin", "tests/fibers_public/execution.lin", "tests/fibers_public/simulation_children.lin" }) |path| {
             const run = b.addSystemCommand(&.{"env"});
             run.addPrefixedFileArg("LINEA_RUNTIME=", runtime);
             run.addFileArg(compiler);

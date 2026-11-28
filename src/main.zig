@@ -53,11 +53,13 @@ comptime {
     _ = @import("mir/lower.zig");
     _ = @import("mir/dump.zig");
     _ = @import("mir/verify.zig");
+    _ = @import("mir/index_loops.zig");
     _ = @import("mir/storage.zig");
     _ = @import("mir/notes.zig");
     _ = @import("backend/mlir.zig");
     _ = @import("backend/text.zig");
     _ = @import("backend/gpu.zig");
+    _ = @import("backend/gpu_ranges.zig");
     _ = @import("driver/toolchain.zig");
     _ = @import("driver/inspection.zig");
     _ = @import("driver/prototypes.zig");

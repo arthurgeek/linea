@@ -56,6 +56,59 @@ Symbolic numeric arithmetic and conversions retain runtime checks. Their
 nonconstant classification is shared with the constant memo so defaults cannot
 reuse an earlier syntax-only fold, including through grouped expressions.
 
+A comma-separated index key uses the existing tuple-literal node, retaining
+its bracket opener so formatting preserves its spelling. Parsing retains the
+alternate type-argument reading. Only a single index expression can share one
+length-argument node; a tuple key is distinct from a list of separate length
+arguments. Tuple-key arity is checked when typing selects that value reading,
+without imposing a tuple arity on a function's type arguments.
+
+Numeric component selection records a sparse `Typing.swizzles` row containing
+the base expression, receiver type, observation count and up to four component
+indexes. Retention relocates the expression identity. Ownership and lowering
+consume this answer rather than reinterpreting component spelling. A scalar
+selection names an array element; a gather reads its source and creates an
+independent array. Scatter assignment snapshots the right operand before
+observing the destination base, then gathers scalar values before any store.
+No multi-component selection is represented as a contiguous place projection.
+Call exclusivity compares component sets against the same element identities
+used by indexing.
+
+The retained type pool records the canonical `std.num.Matrix` declaration.
+Its matrix query validates the generic nested-array representation and returns
+element, dimensions and storage order. Typing and MIR lowering consume that
+query; matching names or equal concrete dimensions establish no identity.
+Matrix arithmetic emits bounded output/contraction loops and reuses checked
+scalar operations. Array and matrix results construct their first component
+before the remaining loop, so an enclosing source loop begins a new value before
+a possible zero-iteration edge. Matrix products initialize positive-zero cells,
+then visit the contiguous result axis inside the contraction loop. Every cell
+still receives k in increasing order. Fixed Matrix and resident tensor storage
+remain row-major after CPU/GPU measurements (ADR 0317); nested-array ABI is
+unchanged. MIR retains a counted-loop witness for each generated index
+counter: its initialization, header load and limit, guarded body, step and exit.
+Blocks name their innermost counted loop; depth-first intervals answer nesting
+in constant time. Functions without counted loops retain no scope table.
+
+`mir/index_loops.zig` independently validates the witness against instructions,
+all counter accesses and every control-flow edge. No other entry into a guarded
+body, counter write or counter address is admitted. Its function-sized indexes
+are linear in instructions, locals, blocks and loops. Instruction-position
+indexing is shared with the verifier rather than recomputed inside that pass.
+A header counter can equal the limit; only a use inside its guarded body has
+the strict upper bound. Empty bodies have no reachable use. This records an
+existing lowering guarantee without changing source UInt64 semantics. Named `dot` and `hadamard` remain ordinary library functions.
+
+Numeric array arithmetic reads element and shape information from the recorded
+expression types. An arithmetic operand context supplies the scalar element
+type while preserving whether the expression produces a scalar or an array;
+it is not a conversion or a shape coercion. Ownership observes both operands.
+MIR evaluates them once and emits a bounded loop of the existing checked scalar
+operations, so instruction count does not expand with the type's array length.
+The shared constant folder interns integer-array results in the existing
+constant graph; typing checks each constant lane against its element range and
+reports the first invalid operation in index order.
+
 A name written after a type's name that some trait declares, and that the
 type's namespace holds as an operation or not at all, is not resolved by the
 resolver: whether the type's own operation or a trait's answers depends on
@@ -794,6 +847,14 @@ The provided array rows are the three `Index` rows. `Equatable`, `Equivalent`,
 library over `[T; n]`, in each trait's own module, and are selected like any
 written implementation; the `Index` rows keep a witness array type and skip
 the header's length, since they have no declaration to own parameters.
+
+Host benchmark observation has a single typed storage operand. The checker
+certifies the private generic declaration in `std.bench`, and lowering records a
+`benchmark_barrier` on the managed address. MIR verification checks the operand
+role, extent and storage lifetime. Host emission passes the address to empty
+side-effecting inline assembly with a memory clobber. Every concrete type uses
+the same pointer constraint when it has bytes to observe. No runtime ABI or
+device instruction is involved.
 
 ### Type checker — `src/sema/typecheck.zig`
 
@@ -2130,7 +2191,32 @@ matrix entry selected by those primitives. Admission traverses each root's call
 graph with sparse function records, function-sized block reachability maps and
 an explicit stack. It refuses recursion and operations outside the scalar
 profile. Device bodies admit Float32 and Bool values, local mutation, arithmetic,
-comparisons, branches, loops, returns and direct calls. An unavailable body
+comparisons, branches, loops, returns and direct calls. Local fixed Float32
+arrays and certified fixed matrices use Function-storage word memrefs. Internal
+helpers accept independent copies of numeric aggregate arguments and write
+aggregate results into caller-owned buffers. Admission checks the convention
+and stable-address requirement of every parameter. An `inout` or stable-address
+parameter requires a caller-visible address that this ABI cannot supply (ADR
+0316). Scalar operations consume value registers. Managed addresses carry an
+allocation origin and a byte-offset interval. Each indirect access proves word
+alignment and containment for the width its instruction reads or writes. Each
+copy proves those facts at both ends for its full width, including copies into
+caller argument and return buffers. Within one allocation the byte ranges must
+be disjoint or designate the same fixed starting address.
+
+`backend/gpu_ranges.zig` derives integer intervals from the existing MIR and its
+verified generated-loop witnesses. Only exactly representable values use device
+i32 arithmetic; narrowing overflow, unknown values and unproved checks refuse
+admission. Erasing a MIR check requires a nonempty interval for an operand of
+the check's result type. An overflow or conversion check to UInt64 requires
+an exact UInt64 operand representable in UInt32. For arithmetic this includes
+proving that every possible mathematical result fits before narrowing. A
+division-by-zero check also requires a strictly positive lower bound. An index
+bounds or misaligned-access check requires its Boolean predicate to be
+identically true. Every other check kind refuses admission. Proven branch
+conditions share one query between reachability and emission, including empty
+generated loops. Source UInt64 semantics and the
+scalar kernel ABI are unchanged (ADR 0315). An unavailable body
 simply has no image. The CPU backend embeds an immutable function-address/image
 table and selectors return zero for a missing entry; the library maps that to
 `GpuError.UnsupportedFunction` without changing source acceptance or running a

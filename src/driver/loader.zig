@@ -567,7 +567,7 @@ fn loadInputs(
     // Idempotent, because a module already loaded is returned rather than
     // loaded twice -- one directory is one module however many routes reach
     // it, and this is another route.
-    if (purpose == .tests and !entry_is_file) {
+    if (purpose != .program and !entry_is_file) {
         for (sorted) |f| {
             // A named module's tests are its own and those beneath it.
             if (module) |named| if (!within(dirOf(f.path), named)) continue;
@@ -7661,6 +7661,48 @@ fn checkedWithLibrary(prefix: *LibraryPrefix, gpa: std.mem.Allocator, sink: *Sin
     return checkProgram(gpa, gpa, program, names, sink, .program);
 }
 
+test "empty and singleton numerical outputs have no zero-trip remainder loop" {
+    var prefix = try LibraryPrefix.init(testing.allocator);
+    defer prefix.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink: Sink = .init(gpa);
+    var semantics = try checkedWithLibrary(&prefix, gpa, &sink,
+        \\import std.num
+        \\fn factor(inout n: UInt8) -> UInt8 { n += 1; n }
+        \\fn main() -> UInt8 {
+        \\    var n = UInt8(0)
+        \\    let a: [UInt8; 0] = []
+        \\    let _empty_array = a * factor(&n)
+        \\    let _one_array = [UInt8(2)] * factor(&n)
+        \\    let empty: num.Matrix[UInt8, 1, 0] = num.matrix([[]])
+        \\    let one = num.matrix([[UInt8(2)]])
+        \\    let _empty_matrix = empty * factor(&n)
+        \\    let _one_matrix = one + one
+        \\    let _empty_product = one * empty
+        \\    let _one_product = one * one
+        \\    n - 3
+        \\}
+    );
+    defer semantics.deinit(gpa);
+    try testing.expect(!sink.hasErrors());
+    var module = (try @import("../mir/lower.zig").lowerProgram(gpa, &semantics.expanded, &semantics.res, &semantics.typing, &semantics.disposals, &sink, .program)) orelse return error.TestUnexpectedResult;
+    defer module.deinit(gpa);
+    const main = module.functionOf(module.entry);
+    var calls: usize = 0;
+    for (main.insts.items(.tag), 0..) |tag, i| {
+        const id = @import("../mir/mir.zig").InstId.at(@intCast(i));
+        if (tag == .call and std.mem.endsWith(u8, module.nameOf(main.callOf(id).func), ";factor")) calls += 1;
+        if (tag == .div or tag == .rem) {
+            const divisor = main.binaryOf(id).rhs;
+            try testing.expect(main.tagOf(divisor) != .constant or main.constantOf(divisor) != 0);
+        }
+    }
+    try testing.expectEqual(@as(usize, 3), calls);
+    for (main.index_loops) |loop| try testing.expect(main.constantOf(loop.limit) > 0);
+}
+
 test "an array's comparison selects the library's implementation for arrays" {
     var prefix = try LibraryPrefix.init(testing.allocator);
     defer prefix.deinit();
@@ -7854,8 +7896,8 @@ test "every declaration the raw-access table names is one the library declares" 
     defer arena.deinit();
     const gpa = arena.allocator();
     var sink: Sink = .init(gpa);
-    // `std.ffi` and `std.http` hold declarations the table names, and only a
-    // root the manifest grants `extern` imports `std.ffi`.
+    // Load the modules declaring every privileged entry. Only a root the
+    // manifest grants `extern` imports `std.ffi`.
     const table = try gpa.create(FileTable);
     table.* = .empty;
     const names = try gpa.create(Interner);
@@ -7863,7 +7905,7 @@ test "every declaration the raw-access table names is one the library declares" 
     const program = try gpa.create(Program);
     program.* = try prefix.loadFromMemory(gpa, table, &sink, names, "main.lin", &.{
         .{ .path = "linea.json", .text = "{ \"extern\": [\".\"] }" },
-        .{ .path = "main.lin", .text = "import std.ffi\nimport std.http\nfn _views(_bytes: ffi.Bytes, _status: http.Status) {}\nfn main() -> UInt8 { 0 }" },
+        .{ .path = "main.lin", .text = "import std.ffi\nimport std.http\nimport std.bench\nfn _views(_bytes: ffi.Bytes, _status: http.Status, _schedule: bench.Schedule) {}\nfn main() -> UInt8 { 0 }" },
     }, .program, .borrow);
     const semantics = try checkProgram(gpa, gpa, program, names, &sink, .program);
     try testing.expect(!sink.hasErrors());

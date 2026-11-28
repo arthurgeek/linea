@@ -10,6 +10,7 @@ const Outcome = struct {
     /// transcript prints. Borrowed from the resolution that spelled it.
     qualified_name: []const u8,
     passed: bool,
+    skipped: bool = false,
     /// What the child wrote to standard error, which is where a failure
     /// explains itself. Empty for a test that passed.
     detail: []const u8,
@@ -63,12 +64,12 @@ const TestGroup = struct {
     }
 };
 
-const TestResult = struct { term: std.process.Child.Term, stderr: []const u8 };
+const TestResult = struct { term: std.process.Child.Term, stdout: []const u8, stderr: []const u8 };
 
 /// Runs one test binary in the run's process group and keeps what it wrote to
 /// standard error, bounded by `output_kept`. Standard output is read and
 /// dropped: what a test writes there is its own.
-fn runTest(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, group: std.posix.pid_t) !TestResult {
+fn runTest(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, group: std.posix.pid_t, keep_stdout: bool) !TestResult {
     var child = try std.process.spawn(io, .{
         .argv = argv,
         .stdin = .ignore,
@@ -92,7 +93,7 @@ fn runTest(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, group: 
     }
     try streams.checkAnyError();
     const term = try child.wait(io);
-    return .{ .term = term, .stderr = try streams.toOwnedSlice(1) };
+    return .{ .term = term, .stdout = if (keep_stdout) try streams.toOwnedSlice(0) else "", .stderr = try streams.toOwnedSlice(1) };
 }
 
 /// Whether a child's result satisfies its declaration.
@@ -132,6 +133,42 @@ fn isRuntimeTrap(detail: []const u8) bool {
     return line != 0 and column != 0;
 }
 
+/// Each measured case has one process and the machine to itself within
+/// this invocation. Only the library reads the clock; startup and reporting
+/// take place outside the measured callbacks.
+pub fn runBenchmarks(gpa: std.mem.Allocator, io: std.Io, binary: []const u8, all: []const Test, root: []const u8, filter: []const u8, w: *std.Io.Writer) !bool {
+    const spawn_as = try toolchain.spawnName(gpa, binary);
+    defer gpa.free(spawn_as);
+    var group = try TestGroup.open(io);
+    defer group.close(io);
+    var measured: usize = 0;
+    var failed: usize = 0;
+    for (all) |case| {
+        if (std.mem.indexOf(u8, case.qualified_name, filter) == null) continue;
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        const result = runTest(arena.allocator(), io, &.{ spawn_as, case.qualified_name }, group.pgid(), true) catch |err| {
+            failed += 1;
+            try w.print("bench {s} ... FAILED ({s})\n", .{ case.qualified_name, @errorName(err) });
+            try w.flush();
+            continue;
+        };
+        try w.writeAll(result.stdout);
+        if (passedWith(false, result.term, result.stderr)) {
+            measured += 1;
+        } else {
+            failed += 1;
+            try w.print("bench {s} ... FAILED\n", .{case.qualified_name});
+        }
+        try w.writeAll(result.stderr);
+        try w.flush();
+    }
+    if (measured + failed == 0) try w.print("no benchmark name in {s} holds \"{f}\"\n", .{ root, std.zig.fmtString(filter) });
+    try w.print("{d} measured, {d} failed\n", .{ measured, failed });
+    try w.flush();
+    return failed == 0;
+}
+
 /// Runs and reports every test whose name holds `filter`, every test where it
 /// is empty, up to `jobs` at a time, and returns whether all passed.
 ///
@@ -152,6 +189,7 @@ pub fn run(
     jobs: usize,
     root: []const u8,
     filter: []const u8,
+    deny_skips: bool,
     w: *std.Io.Writer,
 ) !bool {
     // Nothing failed, so the run succeeds, as `go test` does for a package
@@ -240,13 +278,17 @@ pub fn run(
                 // that misbehaved. Standard output is asked for and dropped:
                 // what a test writes there is its own, and letting it reach the
                 // transcript would mix it into results a runner is reading.
-                const result = runTest(a, io_, &.{ binary_, tests_[at].qualified_name }, group_) catch {
+                const result = runTest(a, io_, &.{ binary_, tests_[at].qualified_name }, group_, false) catch {
                     out_[at].passed = false;
                     out_[at].detail = "the test could not be run";
                     // A transcript that cannot be written is not a test that
                     // failed, and there is nowhere left to report it anyway.
                     script_.completed(at) catch {};
                     continue;
+                };
+                out_[at].skipped = !tests_[at].expects_trap and switch (result.term) {
+                    .exited => |code| code == 77,
+                    else => false,
                 };
                 out_[at].passed = passedWith(tests_[at].expects_trap, result.term, result.stderr);
                 out_[at].detail = if (out_[at].passed)
@@ -288,7 +330,7 @@ pub fn run(
 
     try script.finish();
 
-    for (out) |o| if (!o.passed) return false;
+    for (out) |o| if (!o.passed and (!o.skipped or deny_skips)) return false;
     return true;
 }
 
@@ -319,6 +361,7 @@ const Transcript = struct {
     at: usize = 0,
     passed: usize = 0,
     failed: usize = 0,
+    skipped: usize = 0,
     w: *std.Io.Writer,
     io: std.Io,
     /// Several workers finish at once and each may make a run of results due,
@@ -375,7 +418,7 @@ const Transcript = struct {
         self.ready[index] = true;
         while (self.at < self.order.len and self.ready[self.order[self.at]]) : (self.at += 1) {
             const o = self.outcomes[self.order[self.at]];
-            if (o.passed) self.passed += 1 else self.failed += 1;
+            if (o.skipped) self.skipped += 1 else if (o.passed) self.passed += 1 else self.failed += 1;
             try writeResult(self.w, o);
         }
         // Flushed per result rather than at the end, because a transcript
@@ -389,7 +432,9 @@ const Transcript = struct {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
 
-        try self.w.print("\n{d} passed, {d} failed\n", .{ self.passed, self.failed });
+        try self.w.print("\n{d} passed, {d} failed", .{ self.passed, self.failed });
+        if (self.skipped != 0) try self.w.print(", {d} skipped", .{self.skipped});
+        try self.w.writeAll("\n");
         try self.w.flush();
     }
 };
@@ -400,7 +445,7 @@ fn writeResult(w: *std.Io.Writer, o: Outcome) std.Io.Writer.Error!void {
         try w.print("ok    {s}\n", .{o.qualified_name});
         return;
     }
-    try w.print("FAIL  {s}\n", .{o.qualified_name});
+    try w.print("{s}  {s}\n", .{ if (o.skipped) @as([]const u8, "SKIP") else "FAIL", o.qualified_name });
 
     // What the child said, indented under the name it belongs to. A failure
     // several tests deep in a transcript is read by looking for its name, and

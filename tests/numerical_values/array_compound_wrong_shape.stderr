@@ -1,0 +1,5 @@
+error[T-Operands]: arithmetic operands `[Int32; 3]` and `[Int32; 1]` are incompatible
+ --> tests/numerical_values/array_compound_wrong_shape.lin:3:12
+  |
+3 |     target += [Int32(4)]
+  |            ^^ both operands need the same scalar type; two array operands also need the same length

@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `[Int16; 2]`, found `Int16`
+ --> tests/numerical_values/array_generic_call_keeps_explicit_type.lin:7:48
+  |
+1 | fn identity[T: Copyable](value: T) -> T {
+  |                          ----- expected because of this parameter
+7 |     let result = values + identity[[Int16; 2]](1 + 2)
+  |                                                ^^^^^ expected `[Int16; 2]`, found `Int16`

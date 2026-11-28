@@ -1,0 +1,24 @@
+fn main() -> UInt8 {
+    let v = [Int32(10), 20, 30, 40]
+    let x = v.x
+    let pair = v.yx
+    let repeated = v.xx
+    let reversed = v.wzyx
+    let colors = v.bgra
+    if x != 10 || pair[0] != 20 || pair[1] != 10 {
+        return 1
+    }
+    if repeated[0] != 10 || repeated[1] != 10 {
+        return 2
+    }
+    if reversed[0] != 40 || reversed[3] != 10 {
+        return 3
+    }
+    if colors[0] != 30 || colors[1] != 20 || colors[2] != 10 || colors[3] != 40 {
+        return 4
+    }
+    if v[0] != 10 || v[3] != 40 {
+        return 5
+    }
+    0
+}

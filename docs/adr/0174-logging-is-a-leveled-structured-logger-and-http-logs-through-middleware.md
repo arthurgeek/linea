@@ -4,6 +4,7 @@ Status: Accepted — 2026-09-25. Builds on
 [0154](0154-sockets-and-http-follow-go.md) and
 [0171](0171-the-standard-library-is-an-ordinary-library.md).
 Extended by [0180](0180-state-is-lent-down-through-every-handler.md).
+Duration display clause superseded by [0321](0321-duration-units-are-shared-with-benchmark-reports.md).
 
 ## Context
 

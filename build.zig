@@ -2545,7 +2545,7 @@ pub fn build(b: *std.Build) void {
     } else {
         const unavailable = &b.addFail("GPU tests require a GPU-enabled build; omit -Dgpu=false").step;
         gpu_tests.dependOn(unavailable);
-        for ([_][]const u8{ "gpu-runtime", "test-gpu-runtime", "test-gpu-kernels", "test-gpu-float32", "test-gpu-numerical", "test-gpu-shaders", "test-gpu-language", "test-gpu-compile" }) |name|
+        for ([_][]const u8{ "gpu-runtime", "test-gpu-runtime", "test-gpu-kernels", "test-gpu-float32", "test-gpu-numerical", "test-gpu-shaders", "test-gpu-language", "test-gpu-compile", "bench-matrix-layout-gpu" }) |name|
             b.step(name, "Requires GPU support").dependOn(unavailable);
     }
     const cpu_only = b.step("test-cpu-only", "Execute CPU programs and verify unavailable GPU capability");

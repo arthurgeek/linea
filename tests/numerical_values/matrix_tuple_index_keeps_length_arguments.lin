@@ -1,0 +1,11 @@
+fn area[let rows: UInt64, let columns: UInt64](values: [[UInt8; columns]; rows]) -> UInt8 {
+    UInt8(values.length() * values[0].length())
+}
+
+fn main() -> UInt8 {
+    let direct = area[2, 3]([[UInt8(1), 2, 3], [4, 5, 6]])
+    let rows: UInt64 = 2
+    let columns: UInt64 = 3
+    let named = area[rows, columns]([[UInt8(1), 2, 3], [4, 5, 6]])
+    direct + named - 12
+}

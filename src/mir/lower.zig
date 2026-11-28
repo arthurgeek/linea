@@ -137,7 +137,6 @@ pub fn lower(
         .raw = typing.raw_accesses,
         .float_math = typing.float_math,
         .report = generatedCall(program, "report"),
-        .ran = generatedCall(program, "ran"),
         .selected = generatedCall(program, "selected"),
         .no_such_test = generatedCall(program, "no_such_test"),
         .formatting = FormattingDecls.init(ast, resolution),
@@ -191,10 +190,10 @@ pub fn lower(
     // declares one. Discovery has already included every test and generated
     // library call it makes. It is held rather than appended because its index
     // has to follow every source function.
-    const dispatches = purpose == .tests;
+    const dispatches = purpose != .program;
     var dispatcher: ?Mir = if (!dispatches) null else try buildDispatcher(
         gpa,
-        ast,
+        program,
         resolution,
         typing,
         disposals,
@@ -864,7 +863,6 @@ const LibraryDecls = struct {
     /// selected, what its answer becomes, and what an unusable command line
     /// says. Found by module and name exactly as `report` is, because they are
     /// the same kind of thing -- a declaration only generated code calls.
-    ran: DeclId = DeclId.none,
     selected: DeclId = DeclId.none,
     no_such_test: DeclId = DeclId.none,
     /// Found through the prelude, which is what a program's own names resolve
@@ -911,7 +909,7 @@ const LibraryDecls = struct {
 /// wrongly, which is why the cases covering it run it.
 fn buildDispatcher(
     gpa: std.mem.Allocator,
-    ast: *const Ast,
+    program: *const ExpandedProgram,
     resolution: *const Resolution,
     typing: *const Typing,
     disposals: *const DisposalPlan,
@@ -921,6 +919,8 @@ fn buildDispatcher(
     mono: *Mono,
     library: LibraryDecls,
 ) !Mir {
+    const ast = &program.ast;
+    const reporters = instantiate_mod.CaseReporters.init(program);
     var b = Mir.Builder.init(gpa);
     errdefer b.deinit();
 
@@ -1005,7 +1005,8 @@ fn buildDispatcher(
         // answer differently and each instantiates it for itself.
         l.block = runs;
         const answered = try l.callLibrary(t.decl, &.{}, &.{}, answers, span);
-        const status = try l.callLibrary(library.ran, &.{held}, &.{answered}, .u8, span);
+        const reporter = reporters.select(ast.declIsBenchmark(t.decl), typing, held);
+        const status = try l.callLibrary(reporter, reporters.arguments(ast.declIsBenchmark(t.decl), typing, &held), if (ast.declIsBenchmark(t.decl)) &.{ name, answered } else &.{answered}, .u8, span);
         _ = try b.setTerminator(l.block, .{
             .tag = .ret,
             .ty = .unit,
@@ -1493,6 +1494,7 @@ const Lowerer = struct {
             .store_raw,
             .copy_value,
             .move_value,
+            .benchmark_barrier,
             .call_noreturn,
             .call_indirect_noreturn,
             .ret,
@@ -1779,12 +1781,11 @@ const Lowerer = struct {
                 }
                 const v = try self.expr(operand);
                 if (try self.typeAt(operand) == .never) break :blk v;
-                const r = try self.emit(.neg, ty, span, .{ .unary = v });
-                // A float negation flips a sign bit and nothing can escape:
-                // IEEE 754 defines the result for every input, so there is no
-                // range to hold it to.
-                if (ty.isFloat()) break :blk r;
-                break :blk self.check(r, ty, self.opSpan(id), .overflow);
+                if (self.types().matrixInfo(ty) != null)
+                    break :blk self.matrixArithmetic(.negate, self.opSpan(id), ty, span, v, .none);
+                if (self.types().get(ty) == .array)
+                    break :blk self.arrayArithmetic(.negate, self.opSpan(id), ty, span, v, .none);
+                break :blk self.negateValue(v, ty, self.opSpan(id), span);
             },
 
             // A comparison yields `Bool`, so no range check follows it: its
@@ -2817,10 +2818,61 @@ const Lowerer = struct {
     /// a binder already emits, at a different offset.
     fn selection(self: *Lowerer, id: ExprId, ty: TypeId, span: Span, dest: ?*Dest) std.mem.Allocator.Error!InstId {
         if (self.res.targetOf(id) != BindingId.none) return self.variantRef(id, ty, span, dest);
+        if (self.typing.swizzleOf(id)) |swizzle| {
+            const base = try self.swizzleBase(swizzle, span);
+            return self.readSwizzle(swizzle, base, ty, span, dest);
+        }
 
         const address = try self.selectedAddress(id, span);
         if (ty == .never) return address;
         return self.readThrough(address, ty, span);
+    }
+
+    fn swizzleBase(self: *Lowerer, swizzle: types_mod.Swizzle, span: Span) !InstId {
+        const held = try self.typeAt(swizzle.base);
+        const value = try self.expr(swizzle.base);
+        return self.observeLayers(value, held, swizzle.observations, span);
+    }
+
+    fn swizzleLaneAddress(self: *Lowerer, swizzle: types_mod.Swizzle, base: InstId, lane: u8, span: Span) !InstId {
+        const receiver = try self.substituted(swizzle.receiver);
+        const array = self.types().get(receiver).array;
+        if (lane < self.types().concreteCount(array.length))
+            return self.fieldAddr(base, array.element, @intCast(self.types().strideOf(array.element) * lane), .at(lane), span);
+        const index = try self.emit(.constant, .u64, span, .{ .constant = lane });
+        return self.arrayElementAddress(base, receiver, .{ .held = .{ .value = index, .ty = .u64 } }, .u64, span);
+    }
+
+    fn readSwizzle(self: *Lowerer, swizzle: types_mod.Swizzle, base: InstId, ty: TypeId, span: Span, dest: ?*Dest) !InstId {
+        if (swizzle.count == 1)
+            return self.readThrough(try self.swizzleLaneAddress(swizzle, base, swizzle.lanes[0], span), ty, span);
+        const element = self.types().get(ty).array.element;
+        const result = try self.baseFor(ty, span, dest);
+        for (swizzle.lanes[0..swizzle.count], 0..) |lane, i| {
+            const value = try self.readThrough(try self.swizzleLaneAddress(swizzle, base, lane, span), element, span);
+            const at = try self.fieldAddr(result, element, @intCast(self.types().strideOf(element) * i), .at(@intCast(i)), span);
+            try self.writeThrough(at, element, value, span);
+        }
+        return result;
+    }
+
+    fn snapshotSwizzleOperand(self: *Lowerer, value: InstId, ty: TypeId, span: Span) !InstId {
+        if (self.types().get(ty) != .array) return value;
+        const result = try self.baseFor(ty, span, null);
+        if (self.carriesBytes(ty))
+            _ = try self.emit(.copy_value, ty, span, .{ .binary = .{ .lhs = result, .rhs = value } });
+        return result;
+    }
+
+    fn writeSwizzle(self: *Lowerer, swizzle: types_mod.Swizzle, base: InstId, value: InstId, ty: TypeId, span: Span) !void {
+        const element = self.types().get(ty).array.element;
+        var values: [4]InstId = @splat(.none);
+        for (values[0..swizzle.count], 0..) |*lane, i| {
+            const at = try self.fieldAddr(value, element, @intCast(self.types().strideOf(element) * i), .at(@intCast(i)), span);
+            lane.* = try self.readThrough(at, element, span);
+        }
+        for (swizzle.lanes[0..swizzle.count], values[0..swizzle.count]) |lane, scalar|
+            try self.writeThrough(try self.swizzleLaneAddress(swizzle, base, lane, span), element, scalar, span);
     }
 
     /// `.{ x = 1 }`. A slot, filled in, handed on by address.
@@ -4470,6 +4522,11 @@ const Lowerer = struct {
         lhs: InstId,
         operand: InstId,
     ) std.mem.Allocator.Error!InstId {
+        if (self.types().matrixInfo(self.b.insts.items(.ty)[lhs.index()]) != null or
+            self.types().matrixInfo(self.b.insts.items(.ty)[operand.index()]) != null)
+            return self.matrixArithmetic(op, checked_at, ty, span, lhs, operand);
+        if (self.types().get(ty) == .array)
+            return self.arrayArithmetic(op, checked_at, ty, span, lhs, operand);
         var rhs = operand;
 
         // The divisor is tested before the division rather than after, because
@@ -4497,6 +4554,247 @@ const Lowerer = struct {
         return self.check(r, ty, checked_at, .overflow);
     }
 
+    fn negateValue(self: *Lowerer, value: InstId, ty: TypeId, checked_at: Span, span: Span) !InstId {
+        const result = try self.emit(.neg, ty, span, .{ .unary = value });
+        // Float negation flips a sign bit, preserving every NaN payload.
+        if (ty.isFloat()) return result;
+        return self.check(result, ty, checked_at, .overflow);
+    }
+
+    const NumericLoop = struct { witness: mir_mod.IndexLoopId, counter: LocalId, position: InstId, header: BlockId, exit: BlockId };
+
+    fn numericLoop(self: *Lowerer, count: u64, span: Span) !NumericLoop {
+        const counter = try self.b.addLocal(.u64, .value);
+        try self.storeLocal(counter, .u64, span, try self.emit(.constant, .u64, span, .{ .constant = 0 }));
+        const initialize = InstId.at(@intCast(self.b.insts.len - 1));
+        const header = try self.b.addBlock();
+        const body = try self.b.addBlock();
+        const exit = try self.b.addBlock();
+        try self.jumpTo(header, span);
+        self.block = header;
+        const position = try self.loadLocal(counter, .u64, span);
+        const limit = try self.emit(.constant, .u64, span, .{ .constant = @intCast(count) });
+        const more = try self.emit(.cmp_lt, .bool_, span, .{ .binary = .{ .lhs = position, .rhs = limit } });
+        _ = try self.b.setTerminator(self.block, .{
+            .tag = .branch,
+            .ty = .unit,
+            .span = span,
+            .data = .{ .branch = .{ .cond = more, .then_block = body, .else_block = exit } },
+        });
+        const witness = try self.b.beginIndexLoop(.{
+            .parent = self.b.current_index_loop,
+            .initialize = initialize,
+            .position = position,
+            .limit = limit,
+            .header = header,
+            .body = body,
+            .exit = exit,
+        });
+        self.block = body;
+        return .{ .witness = witness, .counter = counter, .position = position, .header = header, .exit = exit };
+    }
+
+    fn endNumericLoop(self: *Lowerer, loop: NumericLoop, span: Span) !void {
+        const one = try self.emit(.constant, .u64, span, .{ .constant = 1 });
+        const next = try self.emit(.add, .u64, span, .{ .binary = .{ .lhs = loop.position, .rhs = one } });
+        try self.storeLocal(loop.counter, .u64, span, next);
+        const step = InstId.at(@intCast(self.b.insts.len - 1));
+        try self.jumpTo(loop.header, span);
+        self.b.endIndexLoop(loop.witness, step);
+        self.block = loop.exit;
+    }
+
+    fn numericIndex(self: *Lowerer, op: Inst.Tag, lhs: InstId, rhs: InstId, span: Span) !InstId {
+        return self.emit(op, .u64, span, .{ .binary = .{ .lhs = lhs, .rhs = rhs } });
+    }
+
+    fn numericComponentAddress(self: *Lowerer, value: InstId, element: TypeId, row: InstId, column: InstId, span: Span) !?InstId {
+        const ty = self.b.insts.items(.ty)[value.index()];
+        var index = row;
+        if (self.types().matrixInfo(ty)) |matrix| {
+            const width = try self.emit(.constant, .u64, span, .{ .constant = self.types().concreteCount(if (matrix.column_major) matrix.rows else matrix.columns) });
+            index = try self.numericIndex(.add, try self.numericIndex(.mul, if (matrix.column_major) column else row, width, span), if (matrix.column_major) row else column, span);
+        } else if (self.types().get(ty) != .array) return null;
+        const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(element) });
+        const offset = try self.numericIndex(.mul, index, stride, span);
+        return try self.emit(.field_addr, element, span, .{ .field = .{ .base = value, .offset = offset } });
+    }
+
+    fn numericComponent(self: *Lowerer, value: InstId, element: TypeId, row: InstId, column: InstId, span: Span) !InstId {
+        const address = (try self.numericComponentAddress(value, element, row, column, span)) orelse return value;
+        return self.readThrough(address, element, span);
+    }
+
+    /// Output cells and contraction lanes are loops, so matrix dimensions do
+    /// not expand the MIR. Each accumulation starts at positive zero and
+    /// performs separately checked multiplication and addition in lane order.
+    fn matrixArithmetic(self: *Lowerer, op: syntax_node.Expr.Tag, checked_at: Span, ty: TypeId, span: Span, lhs: InstId, rhs: InstId) !InstId {
+        if (op == .mul) {
+            const left = self.types().matrixInfo(self.b.insts.items(.ty)[lhs.index()]);
+            const right = self.types().matrixInfo(self.b.insts.items(.ty)[rhs.index()]);
+            if (left != null and right != null)
+                return self.matrixProduct(checked_at, ty, span, lhs, rhs, left.?, right.?);
+        }
+        const output = self.types().matrixInfo(ty);
+        const result = try self.baseFor(ty, span, null);
+        const rows = if (output) |shape| self.types().concreteCount(shape.rows) else self.types().concreteCount(self.types().get(ty).array.length);
+        const columns = if (output) |shape| self.types().concreteCount(shape.columns) else 1;
+        const count = @as(u64, rows) * columns;
+        if (count == 0) return result;
+        const zero = try self.emit(.constant, .u64, span, .{ .constant = 0 });
+        try self.matrixArithmeticCell(op, checked_at, ty, span, lhs, rhs, result, zero);
+        if (count == 1) return result;
+        const cells = try self.numericLoop(count - 1, span);
+        const one = try self.emit(.constant, .u64, span, .{ .constant = 1 });
+        const position = try self.numericIndex(.add, cells.position, one, span);
+        try self.matrixArithmeticCell(op, checked_at, ty, span, lhs, rhs, result, position);
+        try self.endNumericLoop(cells, span);
+        return result;
+    }
+
+    // Visit the contiguous result axis innermost while each cell still sees
+    // k in increasing order. Independent cells may use hardware vector lanes;
+    // contraction within a cell remains separately rounded and ordered.
+    fn matrixProduct(self: *Lowerer, checked_at: Span, ty: TypeId, span: Span, lhs: InstId, rhs: InstId, left: types_mod.Typing.MatrixInfo, right: types_mod.Typing.MatrixInfo) std.mem.Allocator.Error!InstId {
+        const output = self.types().matrixInfo(ty).?;
+        const rows = self.types().concreteCount(left.rows);
+        const columns = self.types().concreteCount(right.columns);
+        const inner = self.types().concreteCount(left.columns);
+        const count = @as(u64, rows) * columns;
+        const result = try self.baseFor(ty, span, null);
+        if (count == 0) return result;
+        const zero = try self.emit(.constant, left.element, span, .{ .constant = 0 });
+        const start = try self.emit(.constant, .u64, span, .{ .constant = 0 });
+        const first = try self.emit(.field_addr, left.element, span, .{ .field = .{ .base = result, .offset = start } });
+        try self.writeThrough(first, left.element, zero, span);
+        if (count > 1) {
+            const initialize = try self.numericLoop(count - 1, span);
+            const one = try self.emit(.constant, .u64, span, .{ .constant = 1 });
+            const cell = try self.numericIndex(.add, initialize.position, one, span);
+            const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(left.element) });
+            const offset = try self.numericIndex(.mul, cell, stride, span);
+            const address = try self.emit(.field_addr, left.element, span, .{ .field = .{ .base = result, .offset = offset } });
+            try self.writeThrough(address, left.element, zero, span);
+            try self.endNumericLoop(initialize, span);
+        }
+
+        const outer = try self.numericLoop(if (output.column_major) columns else rows, span);
+        const lane = try self.numericLoop(inner, span);
+        const across = try self.numericLoop(if (output.column_major) rows else columns, span);
+        const row = if (output.column_major) across.position else outer.position;
+        const column = if (output.column_major) outer.position else across.position;
+        const a = try self.numericComponent(lhs, left.element, row, lane.position, span);
+        const b = try self.numericComponent(rhs, left.element, lane.position, column, span);
+        const product = try self.arithmetic(.mul, checked_at, left.element, span, a, b);
+        const destination = (try self.numericComponentAddress(result, left.element, row, column, span)).?;
+        const old = try self.readThrough(destination, left.element, span);
+        const sum = try self.arithmetic(.add, checked_at, left.element, span, old, product);
+        try self.writeThrough(destination, left.element, sum, span);
+        try self.endNumericLoop(across, span);
+        try self.endNumericLoop(lane, span);
+        try self.endNumericLoop(outer, span);
+        return result;
+    }
+
+    fn matrixArithmeticCell(self: *Lowerer, op: syntax_node.Expr.Tag, checked_at: Span, ty: TypeId, span: Span, lhs: InstId, rhs: InstId, result: InstId, position: InstId) std.mem.Allocator.Error!void {
+        const left = self.types().matrixInfo(self.b.insts.items(.ty)[lhs.index()]);
+        const right = if (rhs == .none) null else self.types().matrixInfo(self.b.insts.items(.ty)[rhs.index()]);
+        const output = self.types().matrixInfo(ty);
+        const matrix = left orelse right.?;
+        const element = matrix.element;
+        const rows = if (output) |shape| self.types().concreteCount(shape.rows) else self.types().concreteCount(self.types().get(ty).array.length);
+        const columns = if (output) |shape| self.types().concreteCount(shape.columns) else 1;
+        const width = try self.emit(.constant, .u64, span, .{ .constant = if (output != null and output.?.column_major) rows else columns });
+        const first = try self.numericIndex(.div, position, width, span);
+        const second = try self.numericIndex(.rem, position, width, span);
+        const row = if (output != null and output.?.column_major) second else first;
+        const column = if (output != null and output.?.column_major) first else second;
+        const lhs_ty = self.b.insts.items(.ty)[lhs.index()];
+        const rhs_ty = if (rhs == .none) TypeId.unit else self.b.insts.items(.ty)[rhs.index()];
+        const contraction = op == .mul and (self.types().get(lhs_ty) == .array or self.types().get(rhs_ty) == .array);
+        const value = if (contraction) blk: {
+            const accumulator = try self.b.addLocal(element, .value);
+            try self.storeLocal(accumulator, element, span, try self.emit(.constant, element, span, .{ .constant = 0 }));
+            const lanes = try self.numericLoop(self.types().concreteCount(if (left != null) matrix.columns else matrix.rows), span);
+            const a = try self.numericComponent(lhs, element, if (left != null) row else lanes.position, lanes.position, span);
+            const b = try self.numericComponent(rhs, element, lanes.position, position, span);
+            const product = try self.arithmetic(.mul, checked_at, element, span, a, b);
+            const sum = try self.arithmetic(.add, checked_at, element, span, try self.loadLocal(accumulator, element, span), product);
+            try self.storeLocal(accumulator, element, span, sum);
+            try self.endNumericLoop(lanes, span);
+            break :blk try self.loadLocal(accumulator, element, span);
+        } else blk: {
+            const a = try self.numericComponent(lhs, element, row, column, span);
+            if (op == .negate) break :blk try self.negateValue(a, element, checked_at, span);
+            const b = try self.numericComponent(rhs, element, row, column, span);
+            break :blk try self.arithmetic(op, checked_at, element, span, a, b);
+        };
+        const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(element) });
+        const offset = try self.numericIndex(.mul, position, stride, span);
+        const address = try self.emit(.field_addr, element, span, .{ .field = .{ .base = result, .offset = offset } });
+        try self.writeThrough(address, element, value, span);
+    }
+
+    /// Numeric arrays iterate without expanding their length into MIR.
+    /// Each lane uses the same checked scalar operation as a written scalar.
+    fn arrayArithmetic(
+        self: *Lowerer,
+        op: syntax_node.Expr.Tag,
+        checked_at: Span,
+        ty: TypeId,
+        span: Span,
+        lhs: InstId,
+        rhs: InstId,
+    ) std.mem.Allocator.Error!InstId {
+        const array = self.types().get(ty).array;
+        const base = try self.baseFor(ty, span, null);
+        const count = self.types().concreteCount(array.length);
+        // Construct the first lane before the remaining loop. This begins a
+        // new value each time an enclosing source loop reuses this slot;
+        // the loop's zero-iteration edge cannot retain its previous move.
+        if (count == 0) return base;
+        const zero = try self.emit(.constant, .u64, span, .{ .constant = 0 });
+        try self.arrayArithmeticLane(op, checked_at, array.element, span, lhs, rhs, base, zero);
+        if (count == 1) return base;
+        const loop = try self.numericLoop(count - 1, span);
+        const one = try self.emit(.constant, .u64, span, .{ .constant = 1 });
+        const position = try self.emit(.add, .u64, span, .{ .binary = .{ .lhs = loop.position, .rhs = one } });
+        const stride = try self.emit(.constant, .u64, span, .{ .constant = self.types().strideOf(array.element) });
+        const offset = try self.emit(.mul, .u64, span, .{ .binary = .{ .lhs = position, .rhs = stride } });
+        try self.arrayArithmeticLane(op, checked_at, array.element, span, lhs, rhs, base, offset);
+        try self.endNumericLoop(loop, span);
+        return base;
+    }
+
+    fn arrayArithmeticLane(
+        self: *Lowerer,
+        op: syntax_node.Expr.Tag,
+        checked_at: Span,
+        element: TypeId,
+        span: Span,
+        lhs: InstId,
+        rhs: InstId,
+        base: InstId,
+        offset: InstId,
+    ) std.mem.Allocator.Error!void {
+        const left = try self.arrayArithmeticOperand(lhs, element, offset, span);
+        const result = if (op == .negate)
+            try self.negateValue(left, element, checked_at, span)
+        else blk: {
+            const right = try self.arrayArithmeticOperand(rhs, element, offset, span);
+            break :blk try self.arithmetic(op, checked_at, element, span, left, right);
+        };
+        const destination = try self.emit(.field_addr, element, span, .{ .field = .{ .base = base, .offset = offset } });
+        try self.writeThrough(destination, element, result, span);
+    }
+
+    fn arrayArithmeticOperand(self: *Lowerer, value: InstId, element: TypeId, offset: InstId, span: Span) !InstId {
+        const ty = self.b.insts.items(.ty)[value.index()];
+        if (self.types().get(ty) != .array) return value;
+        const at = try self.emit(.field_addr, element, span, .{ .field = .{ .base = value, .offset = offset } });
+        return self.readThrough(at, element, span);
+    }
+
     /// `p += e`, and the three like it.
     ///
     /// The place is evaluated to an address once, and the read, the arithmetic
@@ -4513,6 +4811,15 @@ const Lowerer = struct {
         // The operand first, as an assignment evaluates its value first.
         const operand = try self.expr(a.rhs);
         if (try self.typeAt(a.rhs) == .never) return operand;
+
+        if (self.typing.swizzleOf(lhs)) |swizzle| if (swizzle.count > 1) {
+            const right = try self.snapshotSwizzleOperand(operand, try self.typeAt(a.rhs), span);
+            const base = try self.swizzleBase(swizzle, span);
+            const was = try self.readSwizzle(swizzle, base, ty, span, null);
+            const value = try self.arithmetic(op, self.opSpan(id), ty, span, was, right);
+            try self.writeSwizzle(swizzle, base, value, ty, span);
+            return self.nothing(.unit, span);
+        };
 
         // A path is an address, and one address serves the read and the write.
         if (self.ast.isSelection(lhs)) {
@@ -4560,6 +4867,12 @@ const Lowerer = struct {
             const ty = try self.typeAt(lhs);
             const value = try self.expr(a.rhs);
             if (try self.typeAt(a.rhs) == .never) return value;
+            if (self.typing.swizzleOf(lhs)) |swizzle| if (swizzle.count > 1) {
+                const snapshot = try self.snapshotSwizzleOperand(value, ty, span);
+                const base = try self.swizzleBase(swizzle, span);
+                try self.writeSwizzle(swizzle, base, snapshot, ty, span);
+                return self.nothing(.unit, span);
+            };
             const at = try self.placeAddress(lhs, span);
             if (at == InstId.none) return self.poison(span);
             if (ty == .never) return at;
@@ -4619,6 +4932,13 @@ const Lowerer = struct {
     }
 
     fn selectedAddress(self: *Lowerer, id: ExprId, span: Span) !InstId {
+        if (self.typing.swizzleOf(id)) |swizzle| {
+            if (swizzle.count != 1) {
+                const ty = try self.typeAt(id);
+                return self.readSwizzle(swizzle, try self.swizzleBase(swizzle, span), ty, span, null);
+            }
+            return self.swizzleLaneAddress(swizzle, try self.swizzleBase(swizzle, span), swizzle.lanes[0], span);
+        }
         const projection = self.typing.placeProjection(id) orelse return self.poison(span);
         const held = try self.typeAt(projection.base);
         const value = try self.expr(projection.base);
@@ -4661,6 +4981,29 @@ const Lowerer = struct {
     /// because the slot the path names is filled by a literal, exactly as the
     /// path written out by hand does.
     fn spliced(self: *Lowerer, id: ExprId) ExprId {
+        const selected = self.ast.withoutGroups(id);
+        if (self.typing.placeProjection(selected)) |projection| if (projection.observations == 0) {
+            if (projection.field) |field| if (self.slotAt(projection.base)) |slot_index| {
+                const slot = self.splices.items.items[slot_index];
+                if (slot.value == .none and slot.wrote != .none) {
+                    const tuple = self.ast.withoutGroups(slot.wrote);
+                    if (self.ast.exprTag(tuple) == .tuple_literal) {
+                        const instance = self.types().instanceOf(projection.receiver);
+                        const parts = self.ast.call(tuple).args;
+                        if (instance != null and self.types().isTupleDecl(instance.?.decl) and field.index() < parts.len) {
+                            // Skip the aggregate only when every component is
+                            // a published constant. Otherwise its other effects
+                            // must run before the first bounds check.
+                            for (parts) |part| {
+                                if (self.typing.foldedIndex(self.ast.withoutGroups(part)) == null) return id;
+                            }
+                            self.splices.items.items[slot_index].read = true;
+                            return parts[field.index()];
+                        }
+                    }
+                }
+            };
+        };
         const at = self.slotAt(id) orelse return id;
         // A slot filled with a value has no expression to fold, and the name
         // itself is the only thing left to read -- which folds to nothing, as
@@ -5308,6 +5651,10 @@ const Lowerer = struct {
 
         if (d == self.library.raw.stride) {
             return self.emit(.constant, .u64, span, .{ .constant = @max(self.types().layoutOf(settled[0]).size, 1) });
+        }
+        if (d == self.library.raw.benchmark_barrier) {
+            if (self.types().layoutOf(settled[0]).size != 0) _ = try self.emit(.benchmark_barrier, .unit, span, .{ .unary = args.items[0] });
+            return self.emit(.constant, .unit, span, .{ .constant = 0 });
         }
         if (d == self.library.raw.array_filled) return self.filledArray(ty, settled[0], args.items[0], span);
         if (d == self.library.raw.closure_size)
@@ -6652,7 +6999,7 @@ test "result and slot roles survive lowering" {
                         saw_field_address = true;
                     }
                 },
-                .store, .store_indirect, .store_raw, .copy_value, .move_value, .ret, .jump, .branch, .trap => try testing.expectEqual(mir_mod.ResultRole.none, f.resultRoleOf(id)),
+                .store, .store_indirect, .store_raw, .copy_value, .move_value, .benchmark_barrier, .ret, .jump, .branch, .trap => try testing.expectEqual(mir_mod.ResultRole.none, f.resultRoleOf(id)),
                 .call => {
                     const want: mir_mod.ResultRole = if (module.returnsIndirectly(f.callOf(id).func)) .managed_address else .value;
                     try testing.expectEqual(want, f.resultRoleOf(id));

@@ -1,0 +1,16 @@
+fn bump(inout values: [Int32; 2], inout calls: UInt64) -> Int32 {
+    values[0] = 40
+    calls += 1
+    1
+}
+
+fn main() -> UInt8 {
+    var values = [Int32(2), 3]
+    var calls = UInt64(0)
+    let snapshot = copy(values)
+    let result = snapshot + bump(&values, &calls)
+    if result[0] != 3 || result[1] != 4 || values[0] != 40 || calls != 1 {
+        return 1
+    }
+    0
+}

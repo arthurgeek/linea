@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/borrow_storage/a_benchmark_result_keeps_its_owner.lin:6:5
+  |
+6 |     owner.release()
+  |     ^^^^^ keep this place available until the last use of its observation
+7 |     UInt8(observed.length())
+  |           -------- the observation is still used here

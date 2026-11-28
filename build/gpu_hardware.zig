@@ -41,6 +41,28 @@ fn numericalSource(b: *std.Build, reduction: ?[]const u8, extra: []const u8) []c
     return b.fmt("spirv.module Logical GLSL450 requires #spirv.vce<v1.3, [Shader], []> {{\n{s}\n{s}\n{s}\n{s}\n}}\n", .{ globals, helpers, extra, wrapper });
 }
 
+// Keep the production algorithm and arithmetic; change only physical indexing.
+fn columnMatmulSource(b: *std.Build) []const u8 {
+    const row = numericalSource(b, null, "");
+    const header = "      %row = spirv.UDiv %i, %columns : i32\n" ++
+        "      %column = spirv.UMod %i, %columns : i32\n" ++
+        "      %base = spirv.IMul %row, %inner : i32";
+    const column_header = "      %rows = spirv.UDiv %n, %columns : i32\n" ++
+        "      %row = spirv.UMod %i, %rows : i32\n" ++
+        "      %column = spirv.UDiv %i, %rows : i32\n" ++
+        "      %base = spirv.IMul %column, %inner : i32";
+    const body = "        %ai = spirv.IAdd %base, %k : i32\n" ++
+        "        %bbase = spirv.IMul %k, %columns : i32\n" ++
+        "        %bi = spirv.IAdd %bbase, %column : i32";
+    const column_body = "        %abase = spirv.IMul %k, %rows : i32\n" ++
+        "        %ai = spirv.IAdd %abase, %row : i32\n" ++
+        "        %bi = spirv.IAdd %base, %k : i32";
+    if (std.mem.count(u8, row, header) != 1 or std.mem.count(u8, row, body) != 1)
+        @panic("matrix layout benchmark must match the production indexing");
+    const with_header = std.mem.replaceOwned(u8, b.allocator, row, header, column_header) catch @panic("OOM");
+    return std.mem.replaceOwned(u8, b.allocator, with_header, body, column_body) catch @panic("OOM");
+}
+
 fn shader(b: *std.Build, checker: *std.Build.Step.Compile, name: []const u8, text: []const u8, barriers: usize) Shader {
     const source = b.addWriteFiles().add(b.fmt("{s}.mlir", .{name}), text);
     const opt = b.addSystemCommand(&.{ "mlir-opt", "--no-implicit-module", "--pass-pipeline=spirv.module(symbol-dce)" });
@@ -156,6 +178,14 @@ pub fn add(
     matrices.addFileArg(matmul.bytes);
     matrices.step.dependOn(matmul.validation);
     shaders.dependOn(matmul.validation);
+    const layout = b.step("bench-matrix-layout-gpu", "Measure strict row/column matrix layouts on a real GPU");
+    const column_matmul = shader(b, checker, "matmul-column-layout", columnMatmulSource(b), 0);
+    const layout_run = harness(b, archive, target, null, "matrix-layout-gpu", "bench/matrix_layout_gpu.c", &.{"runtime/gpu.h"});
+    layout_run.addFileArg(matmul.bytes);
+    layout_run.addFileArg(column_matmul.bytes);
+    layout_run.step.dependOn(matmul.validation);
+    layout_run.step.dependOn(column_matmul.validation);
+    layout.dependOn(&layout_run.step);
     const counted = shader(b, checker, "reduce-count-calls", numericalSource(b, "linea_count_add", @embedFile("../runtime/tests/gpu_numerical/count_calls.mlir")), 7);
     matrices.addFileArg(counted.bytes);
     matrices.step.dependOn(counted.validation);

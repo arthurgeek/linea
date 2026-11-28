@@ -16,12 +16,15 @@ pub use mem.SharedTestAllocator
 pub use mem.SharedTestHandle
 
 // A Failure is a failed assertion carrying the caller's message, or a
-// refused allocation a test reports with `refused`. Its representation is
-// private so failures are created through assertions and `refused`.
+// refused allocation reported with `refused`, or an unavailable prerequisite
+// reported with `skip`. Its representation is private.
+@(copyable, derive(Equatable))
+enum FailureKind { Assertion, Refusal, Skipped }
+
 @(opaque, copyable)
 struct Failure {
     said: Str,
-    refusal: Bool,
+    kind: FailureKind,
 }
 
 impl Display for Failure {
@@ -31,7 +34,7 @@ impl Display for Failure {
 }
 
 test "a failure displays the caller's message" -> Result[(), Failure] {
-    let failure = Failure { said = "the expected message", refusal = false }
+    let failure = Failure { said = "the expected message", kind = .Assertion }
     // This capacity leaves spare bytes beyond the complete failure message.
     var writer = allocated(Recorder.of(256), "the display recorder was refused")?
     let wrote = failure.fmt(&writer).is_ok()
@@ -46,13 +49,61 @@ test "a failure displays the caller's message" -> Result[(), Failure] {
 // `each_allocation_failure` can return its refusal through the same error
 // type as its assertions.
 pub fn refused(said: Str) -> Failure where carries(said) {
-    .{ said = copy(said), refusal = true }
+    .{ said = copy(said), kind = .Refusal }
+}
+
+// Report an unavailable prerequisite without claiming the test passed.
+// Return `.Err(skip(reason))`; `--deny-skips` rejects this outcome.
+pub fn skip(said: Str) -> Failure where carries(said) {
+    .{ said = copy(said), kind = .Skipped }
+}
+
+test "skip preserves its reason without reporting an allocation refusal" -> Result[(), Failure] {
+    let failure = skip("the required device is unavailable")
+    assert(failure.kind == .Skipped, "skip changed its outcome kind")?
+    assert(failure.said == "the required device is unavailable", "skip lost its original reason")?
+    assert(!failure.is_refusal(), "skip became an allocation refusal")?
+    .Ok(())
+}
+
+// Only the canonical Failure has a skip outcome. Custom Display errors keep
+// their ordinary failure semantics. Status 77 is the test subprocess protocol.
+fn ran_failure(r: Result[(), Failure]) -> UInt8 {
+    match read r {
+        Ok(_) => 0,
+        Err(error) => {
+            if error.is_skip() {
+                core.eprintln(error)
+                77
+            } else {
+                core.eprintln("error: {error}")
+                1
+            }
+        },
+    }
 }
 
 impl Failure {
+    pub fn is_skip(self: Self) -> Bool {
+        self.kind == .Skipped
+    }
+
+    test "is_skip accepts only a skipped prerequisite" -> Result[(), Failure] {
+        let skipped = skip("missing prerequisite")
+        let refusal = refused("allocation refused")
+        let assertion = match assert(false, "wrong result") {
+            Err(failure) => failure,
+            Ok(_) => return assert(false, "a false assertion passed"),
+        }
+        assert(skipped.is_skip(), "a skipped prerequisite was not a skip")?
+        assert(!refusal.is_skip(), "an allocation refusal became a skip")?
+        assert(!assertion.is_skip(), "an assertion failure became a skip")?
+        .Ok(())
+    }
+
     // Return whether this failure reports a refused allocation.
     pub fn is_refusal(self: Self) -> Bool {
-        self.refusal
+        self.kind == .Refusal
     }
 
     test "a refused failure is a refusal and an assertion is not" -> Result[(), Failure] {
@@ -121,7 +172,7 @@ pub fn assert(held: Bool, said: Str) -> Result[(), Failure] where carries(.Err: 
     if held {
         .Ok(())
     } else {
-        .Err(.{ said = copy(said), refusal = false })
+        .Err(.{ said = copy(said), kind = .Assertion })
     }
 }
 
@@ -129,12 +180,12 @@ pub fn assert(held: Bool, said: Str) -> Result[(), Failure] where carries(.Err: 
 test "an assertion checks its condition and preserves the message" -> Result[(), Failure] {
     match assert(true, "held") {
         Ok(_) => {},
-        Err(_) => return .Err(.{ said = "a true condition failed", refusal = false }),
+        Err(_) => return .Err(.{ said = "a true condition failed", kind = .Assertion }),
     }
     match assert(false, "did not hold") {
-        Ok(_) => return .Err(.{ said = "a false condition passed", refusal = false }),
+        Ok(_) => return .Err(.{ said = "a false condition passed", kind = .Assertion }),
         Err(e) => if e.said != "did not hold" {
-            return .Err(.{ said = "assertion lost its message", refusal = false })
+            return .Err(.{ said = "assertion lost its message", kind = .Assertion })
         },
     }
     .Ok(())
@@ -147,7 +198,7 @@ pub fn assert_eq[T: Equatable + Debug](got: T, want: T, said: Str) -> Result[(),
         return .Ok(())
     }
     core.eprintln("expected {want:?}, got {got:?}")
-    .Err(.{ said = copy(said), refusal = false })
+    .Err(.{ said = copy(said), kind = .Assertion })
 }
 
 // Check the result and message; command tests check the printed values.
@@ -240,7 +291,7 @@ pub fn assert_ok_eq[T: Equatable + Debug, E: Debug](got: Result[T, E], want: T, 
         Ok(value) => assert_eq(value, want, said),
         Err(error) => {
             core.eprintln("expected Ok({want:?}), got Err({error:?})")
-            return .Err(.{ said = copy(said), refusal = false })
+            return .Err(.{ said = copy(said), kind = .Assertion })
         },
     }
 }
@@ -270,7 +321,7 @@ pub fn assert_err[T: Debug, E](got: Result[T, E], said: Str) -> Result[(), Failu
         Err(_) => .Ok(()),
         Ok(value) => {
             core.eprintln("expected an error, got Ok({value:?})")
-            return .Err(.{ said = copy(said), refusal = false })
+            return .Err(.{ said = copy(said), kind = .Assertion })
         },
     }
 }
@@ -307,7 +358,7 @@ test "an error is accepted and a success is reported" -> Result[(), Failure] {
 // so they may change what they own or a place they are lent.
 pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocator: TestHandle[H]) -> Result[(), E], R: inout fn(error: E) -> Bool](backing: H, inout body: F, inout is_refusal: R) -> Result[UInt64, Failure] where carries() {
     let counting = TestAllocator.open(backing) else |_| {
-        return .Err(.{ said = "the backing refused the allocation log", refusal = false })
+        return .Err(.{ said = "the backing refused the allocation log", kind = .Assertion })
     }
     let succeeded = match &body(counting.handle()) {
         Ok(_) => true,
@@ -319,9 +370,9 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
         let left_live = counting.outstanding() != 0
         counting.release()
         if left_live {
-            return .Err(.{ said = "the run with nothing refused did not succeed, and left an allocation live", refusal = false })
+            return .Err(.{ said = "the run with nothing refused did not succeed, and left an allocation live", kind = .Assertion })
         }
-        return .Err(.{ said = "the run with nothing refused did not succeed", refusal = false })
+        return .Err(.{ said = "the run with nothing refused did not succeed", kind = .Assertion })
     }
     // A buffer the run left live is one the backing let it drop; over a
     // backing whose buffers owe their disposal, releasing the test allocator
@@ -329,12 +380,12 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
     let attempts = counting.attempts()
     counting.release()
     if attempts == 0 {
-        return .Err(.{ said = "the run with nothing refused attempted no allocation", refusal = false })
+        return .Err(.{ said = "the run with nothing refused attempted no allocation", kind = .Assertion })
     }
 
     for attempt in 1..=attempts {
         let log = TestAllocator.open(backing, fail_at: .Some(attempt)) else |_| {
-            return .Err(.{ said = "the backing refused the allocation log", refusal = false })
+            return .Err(.{ said = "the backing refused the allocation log", kind = .Assertion })
         }
         let outcome = &body(log.handle())
         let accepted = match read outcome {
@@ -347,7 +398,7 @@ pub fn each_allocation_failure[H: Allocator, E: Discardable, F: inout fn(allocat
         log.release()
         if !accepted {
             core.eprintln("attempt {attempt} of {attempts} failed with an error that is not a refusal")
-            return .Err(.{ said = "a refused run failed with an error that is not a refusal", refusal = false })
+            return .Err(.{ said = "a refused run failed with an error that is not a refusal", kind = .Assertion })
         }
     }
 

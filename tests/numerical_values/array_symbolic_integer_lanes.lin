@@ -1,0 +1,12 @@
+fn shifted[T: Integer](values: [T; 1]) -> [T; 1] {
+    let result = ([127] + 1) + values
+    result
+}
+
+fn main() -> UInt8 {
+    let result = shifted([UInt8(1)])
+    if result[0] != 129 {
+        return 1
+    }
+    0
+}

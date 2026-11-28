@@ -1,0 +1,223 @@
+import std.gpu
+import std.num
+import std.tensor
+
+fn vector_math(value: Float32) -> Float32 {
+    let lanes = [value, 1.0, 2.0, 3.0] * 2.0
+    lanes.x + lanes.z
+}
+
+fn rearrange(value: Float32) -> Float32 {
+    var lanes = [value, 1.0, 2.0, 3.0]
+    lanes.xy = lanes.yx
+    lanes.zw += [4.0, 5.0]
+    lanes.xy[1] * lanes.z + lanes.yx[1]
+}
+
+fn empty_math(value: Float32) -> Float32 {
+    let empty: [Float32; 0] = []
+    let scaled = empty * value
+    let _negated = -scaled
+    value
+}
+
+fn pair_copy(values: [Float32; 2]) -> [Float32; 2] {
+    copy(values)
+}
+
+fn pair_sink(sink values: [Float32; 2]) -> [Float32; 2] {
+    values
+}
+
+fn array_calls(value: Float32) -> Float32 {
+    let copied = pair_sink(pair_copy([value, 1.0]))
+    copied.x
+}
+
+fn matrix_cell(value: Float32) -> Float32 {
+    let matrix = num.matrix([[value, 1.0], [2.0, 3.0]])
+    matrix[0, 0] + matrix[1, 1]
+}
+
+fn matrix_math(value: Float32) -> Float32 {
+    let left = num.matrix([[value, 2.0], [3.0, 4.0]])
+    let right: num.Matrix[Float32, 2, 2] = num.matrix([[1.0, 2.0], [3.0, 4.0]])
+    let product = left * right
+    let projected = product * [value, 1.0]
+    projected.x + projected.y
+}
+
+fn ordered_product(magnitude: Float32) -> Float32 {
+    let row = num.matrix([[magnitude, 1.0, -magnitude]])
+    let column = num.matrix([[Float32(1.0)], [1.0], [1.0]])
+    let product = row * column
+    product[0, 0]
+}
+
+fn overflowing_product(magnitude: Float32) -> Float32 {
+    let row = num.matrix([[magnitude, magnitude]])
+    let column = num.matrix([[Float32(2.0)], [-2.0]])
+    let product = row * column
+    product[0, 0]
+}
+
+fn single_product(left: Float32, right: Float32) -> Float32 {
+    let product = num.matrix([[left]]) * num.matrix([[right]])
+    product[0, 0]
+}
+
+fn dot_product(value: Float32) -> Float32 {
+    num.dot([value, 2.0, 3.0], [1.0, 0.5, 2.0])
+}
+
+fn matches_device(input: tensor.Vector[Float32, gpu.Storage], values: [Float32; 6], body: fn(value: Float32) -> Float32) -> Result[Bool, gpu.GpuError] {
+    defer let result = input.map(body)?
+    defer let host = gpu.download(result)?
+    for index in UInt64(0)..6 {
+        if host[index].to_bits() != body(values[index]).to_bits() {
+            return .Ok(false)
+        }
+    }
+    .Ok(true)
+}
+
+fn strict_products(device: gpu.Device) -> Bool {
+    let values = [
+        Float32(16777216.0),
+        Float32.from_bits(2139095039),
+        Float32.from_bits(2),
+        Float32.from_bits(3),
+        Float32.from_bits(2147483648),
+        Float32.from_bits(2141266757),
+        Float32.from_bits(2139095040),
+    ]
+    defer let input = device.upload(values.as_slice(), [UInt64(7)]).unwrap()
+    defer let ordered = input.map(ordered_product).unwrap()
+    defer let ordered_host = gpu.download(ordered).unwrap()
+    if ordered_host[0].to_bits() != 0 {
+        return false
+    }
+    defer let overflowed = input.map(overflowing_product).unwrap()
+    defer let overflowed_host = gpu.download(overflowed).unwrap()
+    if overflowed_host[1].to_bits() != 2143289344 {
+        return false
+    }
+    let factors: [Float32; 7] = [1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 0.0]
+    defer let right = device.upload(factors.as_slice(), [UInt64(7)]).unwrap()
+    defer let products = input.zip_with(right, single_product).unwrap()
+    defer let host = gpu.download(products).unwrap()
+    // The singleton contraction adds its rounded product to positive zero.
+    let expected: [UInt32; 7] = [1266679808, 2139095039, 1, 2, 0, 2143289344, 2143289344]
+    for i in UInt64(0)..7 {
+        if host[i].to_bits() != expected[i] {
+            return false
+        }
+    }
+    true
+}
+
+fn main() -> UInt8 {
+    let values = [
+        Float32.from_bits(1),
+        Float32.from_bits(3),
+        Float32.from_bits(8388607),
+        Float32.from_bits(2147483648),
+        Float32.from_bits(2141266757),
+        Float32(1.25),
+    ]
+    defer let device = gpu.Device.open().unwrap()
+    defer let input = device.upload(values.as_slice(), [UInt64(6)]).unwrap()
+    let vector = match matches_device(input, values, vector_math) {
+        Ok(value) => value,
+        Err(reason) => {
+            return if reason == .UnsupportedFunction {
+                91
+            } else {
+                92
+            }
+        },
+    }
+    if !vector {
+        return 1
+    }
+    let shuffled = match matches_device(input, values, rearrange) {
+        Ok(value) => value,
+        Err(reason) => {
+            return if reason == .UnsupportedFunction {
+                93
+            } else {
+                94
+            }
+        },
+    }
+    if !shuffled {
+        return 2
+    }
+    let empty = match matches_device(input, values, empty_math) {
+        Ok(value) => value,
+        Err(reason) => {
+            return if reason == .UnsupportedFunction {
+                99
+            } else {
+                100
+            }
+        },
+    }
+    if !empty {
+        return 5
+    }
+    let copied = match matches_device(input, values, array_calls) {
+        Ok(value) => value,
+        Err(reason) => {
+            return if reason == .UnsupportedFunction {
+                101
+            } else {
+                102
+            }
+        },
+    }
+    if !copied {
+        return 6
+    }
+    let matrix = match matches_device(input, values, matrix_math) {
+        Ok(value) => value,
+        Err(reason) => {
+            return if reason == .UnsupportedFunction {
+                95
+            } else {
+                96
+            }
+        },
+    }
+    if !matrix {
+        return 3
+    }
+    let cell = match matches_device(input, values, matrix_cell) {
+        Ok(value) => value,
+        Err(reason) => {
+            return if reason == .UnsupportedFunction {
+                103
+            } else {
+                104
+            }
+        },
+    }
+    if !cell {
+        return 7
+    }
+    if !strict_products(device) {
+        return 9
+    }
+    if dot_product(1.25) != 8.25 {
+        return 8
+    }
+    match input.map(dot_product) {
+        Err(UnsupportedFunction) => {},
+        Err(_error) => return 98,
+        Ok(tensor) => {
+            tensor.release()
+            return 97
+        },
+    }
+    0
+}

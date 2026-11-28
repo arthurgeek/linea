@@ -1,0 +1,13 @@
+fn pair(inout first: Int32, second: [Int32; 2]) -> Int32 {
+    first += second[0] + second[1]
+    first
+}
+
+fn main() -> UInt8 {
+    var values = [Int32(1), 2, 3, 4]
+    let result = pair(&values.x, values.yz)
+    if result != 6 {
+        return 1
+    }
+    0
+}

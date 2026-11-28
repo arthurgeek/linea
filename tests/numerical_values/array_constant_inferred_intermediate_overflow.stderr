@@ -1,0 +1,5 @@
+error[T-Overflow]: element 0 of this operation overflows `Int8`
+ --> tests/numerical_values/array_constant_inferred_intermediate_overflow.lin:1:21
+  |
+1 | let result = ([127] + 1) + [Int8(-1)]
+  |                     ^ the result is not representable

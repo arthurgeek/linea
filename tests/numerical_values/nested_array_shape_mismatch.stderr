@@ -1,0 +1,5 @@
+error[T-Operands]: arithmetic operands `[Int32; 1]` and `[Int32; 3]` are incompatible
+ --> tests/numerical_values/nested_array_shape_mismatch.lin:7:34
+  |
+7 |     let result = matrix * (short + full)
+  |                                  ^ both operands need the same scalar type; two array operands also need the same length

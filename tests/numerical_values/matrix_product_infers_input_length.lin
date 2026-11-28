@@ -1,0 +1,20 @@
+import std.mem
+import std.num
+
+fn project(matrix: num.Matrix[Int32, 2, 3]) -> [Int32; 2] {
+    matrix * mem.filled(Int32(1))
+}
+
+fn project_generic[let rows: UInt64, let columns: UInt64](matrix: num.Matrix[Int32, rows, columns]) -> [Int32; rows] {
+    matrix * mem.filled(Int32(1))
+}
+
+fn main() -> UInt8 {
+    let matrix = num.matrix([[Int32(1), 2, 3], [4, 5, 6]])
+    let result = project(matrix)
+    let generic = project_generic(matrix)
+    if result[0] != 6 || result[1] != 15 || generic[0] != 6 || generic[1] != 15 {
+        return 1
+    }
+    0
+}

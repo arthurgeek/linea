@@ -136,7 +136,7 @@ fn writeInst(
         .source_site => try w.print(" {s}", .{@tagName(mir.siteOf(id))}),
         .static_addr => try w.print(" s{d}", .{mir.staticOf(id)}),
         .load, .addr_of => try w.print(" ${d}", .{mir.localOf(id).index()}),
-        .load_indirect, .borrow, .observe, .address_bits => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
+        .load_indirect, .borrow, .observe, .address_bits, .benchmark_barrier => try w.print(" %{d}", .{mir.unaryOf(id).index()}),
         .load_raw, .storage_addr => try w.print(" %{d}", .{mir.rawAccessOf(id).address.index()}),
         .store_raw => {
             const raw = mir.rawAccessOf(id);

@@ -1,0 +1,13 @@
+import std.num
+
+fn main() -> UInt8 {
+    var value: num.Matrix[Float32, 2, 3] = num.matrix([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    if value[1, 2] != 6.0 {
+        return 1
+    }
+    value[0, 1] = 9.0
+    if value[0, 1] != 9.0 {
+        return 2
+    }
+    0
+}

@@ -1,0 +1,31 @@
+struct Grid {
+    integers: [UInt8; 2],
+    floats: [UInt8; 2],
+}
+
+impl Index[(UInt64, UInt64)] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Self, i: (UInt64, UInt64)) -> UInt8 where carries(self) {
+        self.integers[i._0 + i._1]
+    }
+}
+
+impl Index[(Float64, Float64)] for Grid {
+    type Elem = UInt8
+
+    proj at(inout self: Self, _i: (Float64, Float64)) -> UInt8 where carries(self) {
+        self.floats[1]
+    }
+}
+
+fn main() -> UInt8 {
+    let value = Grid { integers = [1, 2], floats = [8, 9] }
+    if value[0.0, 1.0] != 9 {
+        return 1
+    }
+    if value[0, 1] != 2 {
+        return 2
+    }
+    0
+}

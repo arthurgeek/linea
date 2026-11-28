@@ -31,3 +31,19 @@ fn main() -> Result[UInt8, MatrixError] {
     println("[{host[2]}, {host[3]}]")?
     .Ok(0)
 }
+
+test "GPU computation returns the expected values" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    defer let left = device.matrix([[Float32(1.0), 2.0], [3.0, 4.0]]).unwrap()
+    defer let right = device.matrix([[Float32(2.0), 0.0], [0.0, 3.0]]).unwrap()
+    defer let product = left.matmul(right).unwrap()
+    defer let result = product.map(half).unwrap()
+    defer let host = gpu.download(result).unwrap()
+    testing.assert_eq(host.as_slice(), [Float32(1.0), 3.0, 3.0, 6.0].as_slice(), "GPU matrix product and map")?
+}

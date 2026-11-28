@@ -1,0 +1,41 @@
+import std.testing
+import std.io
+
+@copyable
+enum CustomError { Unavailable }
+
+impl Display for CustomError {
+    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] {
+        "GPU capability unavailable: original reason".fmt(&w)
+    }
+}
+
+fn cleanup() {
+    io.eprintln("cleanup ran")
+}
+
+test "available passes" {
+    let skipped = testing.skip("reason")
+    let refused = testing.refused("refusal")
+    testing.assert(skipped.is_skip(), "skip marker was lost")?
+    testing.assert(!skipped.is_refusal(), "skip became allocation refusal")?
+    testing.assert(refused.is_refusal(), "refusal marker was lost")?
+    testing.assert(!refused.is_skip(), "allocation refusal became skip")?
+}
+
+test "capability skips" {
+    defer cleanup()
+    return .Err(testing.skip("GPU capability unavailable: original reason"))
+}
+
+test "assertion fails" {
+    testing.assert(false, "real assertion failure")?
+}
+
+test "custom unavailable fails" -> Result[(), CustomError] {
+    .Err(.Unavailable)
+}
+
+test trap "trap cannot skip" {
+    return .Err(testing.skip("a trap test returned a skip"))
+}

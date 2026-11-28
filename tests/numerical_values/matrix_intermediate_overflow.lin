@@ -1,0 +1,12 @@
+import std.num
+
+fn value() -> Int8 {
+    100
+}
+
+fn main() -> UInt8 {
+    let left = num.matrix([[value(), value()]])
+    let right = num.matrix([[Int8(2)], [-2]])
+    let _product = left * right
+    0
+}

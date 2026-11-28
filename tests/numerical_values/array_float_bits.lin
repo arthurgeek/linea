@@ -1,0 +1,29 @@
+fn main() -> UInt8 {
+    let inputs = [Float32.from_bits(2), Float32.from_bits(2147483648), Float32.from_bits(2139169605)]
+    let half = inputs * 0.5
+    if half[0].to_bits() != 1 {
+        return 1
+    }
+    if half[1].to_bits() != 2147483648 {
+        return 2
+    }
+    if half[2].to_bits() != 2143289344 {
+        return 3
+    }
+    let negative = -inputs
+    if negative[0].to_bits() != 2147483650 {
+        return 4
+    }
+    if negative[1].to_bits() != 0 {
+        return 5
+    }
+    if negative[2].to_bits() != 4286653253 {
+        return 6
+    }
+    let double_inputs = [Float64.from_bits(2), Float64.from_bits(9223372036854775808)]
+    let double_half = double_inputs / 2.0
+    if double_half[0].to_bits() != 1 || double_half[1].to_bits() != 9223372036854775808 {
+        return 7
+    }
+    0
+}

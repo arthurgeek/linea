@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let result = [true, false] + [false, true]
+    if result[0] {
+        1
+    } else {
+        0
+    }
+}

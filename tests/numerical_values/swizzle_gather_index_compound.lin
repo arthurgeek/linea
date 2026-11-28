@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    var values = [Int32(1), 2]
+    values.yx[0] += 9
+    UInt8(values.y)
+}

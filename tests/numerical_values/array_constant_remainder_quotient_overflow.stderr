@@ -1,0 +1,5 @@
+error[T-Overflow]: element 0 of this operation overflows `Int8`
+ --> tests/numerical_values/array_constant_remainder_quotient_overflow.lin:1:27
+  |
+1 | let result = [Int8(-128)] % [Int8(-1)]
+  |                           ^ the quotient is not representable

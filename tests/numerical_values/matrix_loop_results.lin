@@ -1,0 +1,19 @@
+import std.num
+
+fn main() -> UInt8 {
+    var total = Int32(0)
+    for iteration in UInt64(0)..3 {
+        let left = num.matrix([[Int32(iteration), 1], [2, 3]])
+        let right = num.matrix([[Int32(2), 1], [0, 4]])
+        let sum = left + right
+        let product = left * right
+        let scaled = left * 2
+        let negative = -left
+        let vector = left * [Int32(1), 2]
+        total += sum[0, 0] + product[1, 1] + scaled[1, 0] + negative[0, 1] + vector[1]
+    }
+    if total != 84 {
+        return 1
+    }
+    0
+}

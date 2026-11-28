@@ -16,3 +16,5 @@
 (template_requirement) @parameter.inside @parameter.around
 
 (line_comment) @comment.inside @comment.around
+
+(benchmark_declaration body: (block) @function.inside) @function.around

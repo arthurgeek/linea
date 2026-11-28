@@ -708,6 +708,8 @@ fn typecheckInternal(
             .str_decl = preludeDecl(ast, resolution, "Str"),
             .location_decl = preludeDecl(ast, resolution, "Location"),
             .result_decl = preludeDecl(ast, resolution, "Result"),
+            .benchmark_measurement = program.libraryDeclIn("bench", "Measurement"),
+            .benchmark_error_release = program.libraryDeclIn("release", "Release"),
             .display_decl = formatting.display.trait,
             .formatting = formatting,
             .equatable_decl = equatableDecl(ast, resolution),
@@ -751,6 +753,7 @@ fn typecheckInternal(
     // The resolver settled which declarations tuple syntax names; the pool
     // spells their instances as tuples.
     c.builder.tuple_decls = resolution.tuple_decls;
+    c.builder.matrix_decl = intrinsics.structIn(program, ast, "num", "Matrix");
     c.builder.open_types = &c.open_types;
     defer gpa.free(c.constraint_subjects);
     defer gpa.free(c.expression_owners);
@@ -765,6 +768,7 @@ fn typecheckInternal(
     defer c.length_reads.deinit(gpa);
     defer c.selected_places.deinit(gpa);
     defer c.place_projections.deinit(gpa);
+    defer c.swizzles.deinit(gpa);
     defer c.implicit_test_successes.deinit(gpa);
     defer c.try_conversions.deinit(gpa);
     defer c.field_names.deinit(gpa);
@@ -1759,11 +1763,11 @@ fn typecheckInternal(
                     .reason = .return_type,
                     .alias = c.aliasHeading(d, written_return),
                 };
-            } else if (ast.declIsTest(d)) .{
+            } else if (ast.declIsCase(d)) .{
                 .ty = try returnType(&c, d),
                 .at = .{ .file = ast.fileOfDecl(d), .span = ast.tokenSpan(ast.declName(d)) },
                 .reason = .return_type,
-                .unit_test_success = true,
+                .unit_test_success = ast.declIsTest(d),
             } else if (ast.declTag(d) == .function and written_return.isOmitted()) .{
                 .ty = try c.declaredResultType(d),
                 .at = .{ .file = ast.fileOfDecl(d), .span = ast.tokenSpan(ast.declName(d)) },
@@ -2015,6 +2019,8 @@ fn typecheckInternal(
     c.try_conversions = .empty;
     typing.place_projections = c.place_projections;
     c.place_projections = .empty;
+    typing.swizzles = c.swizzles;
+    c.swizzles = .empty;
     typing.field_names = c.field_names;
     c.field_names = .empty;
     typing.type_selections = c.type_selections;
@@ -5803,6 +5809,15 @@ fn returnType(c: *Checker, d: node.DeclId) !TypeId {
     // declaration keeps the one result type it was declared with.
     if (c.ast.declIsSignature(d))
         return c.declResultOf(c.program.moduleOf(d), d);
+    if (c.ast.declIsBenchmark(d) and !c.ast.declReturnRef(d).wasWritten()) {
+        if (c.default_benchmark_result) |settled| return settled;
+        const measurement = c.benchmark_measurement orelse return .poison;
+        const failure = c.program.libraryDeclIn("mem", "Oom") orelse return .poison;
+        const result = c.result_decl orelse return .poison;
+        const made = try c.builder.instantiate(c.type_of_decl.get(result), result, &.{ c.type_of_decl.get(measurement), c.type_of_decl.get(failure) });
+        c.default_benchmark_result = made;
+        return made;
+    }
     if (c.ast.declIsTest(d) and !c.ast.declReturnRef(d).wasWritten()) {
         if (c.default_test_result) |settled| return settled;
         const failure = c.program.libraryDeclIn("testing", "Failure") orelse return .poison;
@@ -5856,6 +5871,9 @@ const Expected = struct {
     /// A generic callable bound supplies context while preserving the value's
     /// intrinsic signature or unique closure type.
     callable_context: bool = false,
+    /// An arithmetic operand may be a scalar or an array of that scalar.
+    /// This supplies element context without converting either value's shape.
+    elementwise_operand: bool = false,
     /// The function whose generic callable bound supplied this context, which
     /// a report about how the callback is called names.
     callee: node.DeclId = .none,
@@ -6557,6 +6575,7 @@ const Checker = struct {
     length_reads: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     selected_places: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     place_projections: std.AutoHashMapUnmanaged(ExprId, types_mod.PlaceProjection) = .empty,
+    swizzles: std.AutoHashMapUnmanaged(ExprId, types_mod.Swizzle) = .empty,
     implicit_test_successes: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     try_conversions: std.AutoHashMapUnmanaged(ExprId, types_mod.TryConversion) = .empty,
     field_names: std.AutoHashMapUnmanaged(TokenId, types_mod.FieldIdentity) = .empty,
@@ -6763,6 +6782,7 @@ const Checker = struct {
     /// failure is handled with `let … else` only where it is one of these.
     statement_value: ?StatementValue = null,
     default_test_result: ?TypeId = null,
+    default_benchmark_result: ?TypeId = null,
     /// Local context for a call under one or more success projections.
     /// The target prevents its argument calls from inheriting this constraint.
     success_expected: ?SuccessExpectation = null,
@@ -6795,6 +6815,8 @@ const Checker = struct {
     /// second operand of `panic(message, at)` reports.
     location_decl: ?node.DeclId = null,
     result_decl: ?node.DeclId = null,
+    benchmark_measurement: ?DeclId = null,
+    benchmark_error_release: ?DeclId = null,
     /// The trait a failure leaving the entry point must implement, so that it
     /// can be rendered on the way out. Named by the prelude, as `Result` is.
     display_decl: ?node.DeclId = null,
@@ -7013,7 +7035,7 @@ const Checker = struct {
         @memcpy(self.binding_owners[0..prefix.seed.binding_owners.len], prefix.seed.binding_owners);
         for (prefix.seed.declarations, 0..) |checked, i| self.defaults_folded[i] = checked;
         for (0..saved.binding_types.len()) |i| self.constant_taken[i] = self.res.kindOf(BindingId.at(@intCast(i))) == .constant;
-        inline for (.{ "literal_values", "conversion_targets", "integer_properties", "length_reads", "selected_places", "place_projections", "implicit_test_successes", "try_conversions", "field_names", "type_selections", "value_names_in_type_slots", "contract_variants", "readonly_places", "carried_places", "borrowed_temporaries", "interpolation_positions", "refused", "folded_indices", "constant_values", "field_name_spellings", "variant_uses", "part_selections", "contract_parameters", "traversal_positions", "binding_labels" }) |field| {
+        inline for (.{ "literal_values", "conversion_targets", "integer_properties", "length_reads", "selected_places", "place_projections", "swizzles", "implicit_test_successes", "try_conversions", "field_names", "type_selections", "value_names_in_type_slots", "contract_variants", "readonly_places", "carried_places", "borrowed_temporaries", "interpolation_positions", "refused", "folded_indices", "constant_values", "field_name_spellings", "variant_uses", "part_selections", "contract_parameters", "traversal_positions", "binding_labels" }) |field| {
             @field(self, field) = try @field(saved, field).clone(gpa);
         }
         var plans = saved.constant_materializations.iterator();
@@ -7952,6 +7974,8 @@ const Checker = struct {
         /// its own: what it reaches is the implementation's path to decide and
         /// the site's number is not it.
         element: ?i128,
+        /// Components gathered or scattered by a numeric swizzle.
+        components: u8,
 
         /// Whether two steps may be the same step.
         ///
@@ -7968,6 +7992,15 @@ const Checker = struct {
                         const a = mine orelse return true;
                         const b = theirs orelse return true;
                         return a == b;
+                    },
+                    .components => return other.conflicts(self),
+                    else => return false,
+                },
+                .components => |mine| switch (other) {
+                    .components => |theirs| return mine & theirs != 0,
+                    .element => |index| {
+                        const lane = index orelse return true;
+                        return lane >= 0 and lane < 4 and mine & (@as(u8, 1) << @as(u3, @intCast(lane))) != 0;
                     },
                     else => return false,
                 },
@@ -14180,8 +14213,10 @@ const Checker = struct {
         defer self.gpa.free(found);
 
         // Prefer arguments with known types before contextual constructors.
-        for ([_]bool{ true, false }) |speaking| {
-            if (!speaking) {
+        const operand = try self.operandArgumentContext(id, d, signature.result, expected);
+        for (argument_inference_passes) |pass| {
+            if (pass == .operand and operand == null) continue;
+            if (pass == .contextual) {
                 @memset(found, .poison);
                 try self.settleResultContexts(signature.result, &.{.{ .owner = d, .generics = self.ast.declTypeParams(d), .found = found }}, expected, self.successExpectationAt(id), self.failureExpectationAt(id), self.methodExpectationAt(id), .{ .callee = d, .args = args });
                 if (found[self_index] != .poison) {
@@ -14208,8 +14243,10 @@ const Checker = struct {
                 // mint fresh open types for its literals, and a call inside it
                 // would keep the instance it recorded the first time while
                 // this call settled the second.
-                if (!walked[j] and self.determinesItsOwnType(value) != speaking) continue;
-                const held = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
+                if (pass == .operand) {
+                    if (walked[j] or declared != operand.?.parameter) continue;
+                } else if (!walked[j] and self.determinesItsOwnType(value) != (pass == .known)) continue;
+                const held = if (walked[j]) self.builder.exprType(value) else try self.check(value, if (pass == .operand) operand.?.expected else null);
                 walked[j] = true;
                 if (held == .poison) return .{ .ty = .poison };
 
@@ -14289,11 +14326,11 @@ const Checker = struct {
             else => return out,
         };
         const settling = [_]Settling{.{ .owner = trait, .generics = params, .found = out }};
-        // Settle the trait's parameters together, from known arguments, result
-        // context, then waiting literals. Each argument is checked at most once.
+        const operand = try self.operandArgumentContext(id, d, signature.result, expected);
         var argument_poisoned = false;
-        for ([_]bool{ true, false }) |speaking| {
-            if (!speaking) {
+        for (argument_inference_passes) |pass| {
+            if (pass == .operand and operand == null) continue;
+            if (pass == .contextual) {
                 try self.settleResultContexts(signature.result, &settling, expected, self.successExpectationAt(id), self.failureExpectationAt(id), self.methodExpectationAt(id), .{ .callee = d, .args = args });
                 try self.seedTraitArgsFromImplementation(trait, signature, args, out);
             }
@@ -14304,9 +14341,11 @@ const Checker = struct {
                 if (args[j] == .none) continue;
                 if (!self.mentionsParameter(param.ty, trait, .stops)) continue;
                 const value = if (self.ast.exprTag(args[j]) == .marked) self.ast.unaryOperand(args[j]) else args[j];
-                if (self.determinesItsOwnType(value) != speaking) continue;
-                if (!speaking and !try self.hasOpenParameter(param.ty, &settling)) continue;
-                const got = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
+                if (pass == .operand) {
+                    if (walked[j] or param.ty != operand.?.parameter) continue;
+                } else if (self.determinesItsOwnType(value) != (pass == .known)) continue;
+                if (pass != .known and !try self.hasOpenParameter(param.ty, &settling)) continue;
+                const got = if (walked[j]) self.builder.exprType(value) else try self.check(value, if (pass == .operand) operand.?.expected else null);
                 walked[j] = true;
                 if (got == .poison) {
                     argument_poisoned = true;
@@ -15380,6 +15419,7 @@ const Checker = struct {
                     .{(try self.typeName(t))},
                     "the result is not representable",
                 ),
+                .array_operation => |operation| _ = try self.reportArrayOverflow(waiting.expr, t, operation.lane, operation.quotient),
                 .float_literal => unreachable,
             }
         }
@@ -15549,6 +15589,7 @@ const Checker = struct {
             const rounded = roundFloatLiteral(self.ast.tokenText(self.ast.exprMain(literal)), bits).?;
             return rounded.refusal == null;
         }
+        if (waiting.rule == .array_operation and self.isSymbolicInteger(t)) return true;
         return self.integerLiteralFits(t, waiting.value);
     }
 
@@ -18121,6 +18162,13 @@ const Checker = struct {
     /// argument records it here, whatever is called: a declared function, a
     /// callable value or a closure.
     fn lendsWritably(self: *Checker, value: ExprId) std.mem.Allocator.Error!void {
+        var steps = self.ast.placeSteps(value);
+        while (steps.next()) |step| {
+            if (self.swizzles.get(step)) |swizzle| if (swizzle.count > 1) {
+                _ = try self.report(.t_lend, value, "a multi-component swizzle is not a contiguous mutable place", .{}, "bind the gathered array to a mutable variable before lending it");
+                return;
+            };
+        }
         try self.written.append(self.gpa, .{ .at = value, .refused = "this place cannot be lent" });
     }
 
@@ -19485,7 +19533,7 @@ const Checker = struct {
         self.negated_float = .none;
 
         const text = self.ast.tokenText(self.ast.exprMain(id));
-        if (Expected.typeOf(expected)) |want| if (want.isFloat()) {
+        if (self.scalarOperandExpected(expected)) |want| if (want.isFloat()) {
             // Only an unfinished literal fails to parse, and the lexer
             // already reported it where it was written; a second message
             // here would describe one mistake twice.
@@ -19568,7 +19616,7 @@ const Checker = struct {
     }
 
     fn checkIntegerValue(self: *Checker, id: ExprId, v: i128, expected: ?Expected) std.mem.Allocator.Error!TypeId {
-        const t = if (Expected.typeOf(expected)) |want| want else try self.openLiteral();
+        const t = if (self.scalarOperandExpected(expected)) |want| want else try self.openLiteral();
         const open = self.builder.get(t) == .open_integer;
 
         // A type that is not an integer has no range for a value to be
@@ -19708,7 +19756,7 @@ const Checker = struct {
         // checked, which left every failure they close reachable through this
         // -- a structure negating its own address, an enum becoming a tag no
         // variant has and falling out of an exhaustive `match`.
-        if (!self.arithmeticHolds(inner)) {
+        if (!self.arithmeticHolds(self.arithmeticElement(inner))) {
             self.foldFailed(id, &.{operand});
             return try self.reportAtOp(
                 .t_operands,
@@ -19719,7 +19767,13 @@ const Checker = struct {
             );
         }
 
-        const t = Expected.typeOf(expected) orelse inner;
+        const t = if (expected != null and expected.?.elementwise_operand) inner else Expected.typeOf(expected) orelse inner;
+        if (self.builder.get(t) == .array)
+            return self.expect(id, try self.checkArrayArithmeticConstant(id, t), expected);
+        if (self.builder.matrixInfo(t) != null) {
+            try self.markNotConstant(id);
+            return self.expect(id, t, expected);
+        }
         if (self.isSymbolicInteger(t) and self.ast.exprTag(self.ast.withoutGroups(operand)) != .int_literal) {
             try self.markNotConstant(id);
             return try self.record(id, t);
@@ -19773,7 +19827,7 @@ const Checker = struct {
         };
         self.folds.set(id, .{ .value = v });
         try self.literal_values.put(self.gpa, id, .{ .integer = v });
-        return try self.record(id, Expected.typeOf(expected) orelse try self.openLiteral());
+        return try self.record(id, self.scalarOperandExpected(expected) orelse try self.openLiteral());
     }
 
     /// `UInt8(x)`: a call whose callee names a primitive.
@@ -20715,7 +20769,7 @@ const Checker = struct {
         try self.traversal_positions.put(self.gpa, d, .{ .array = .{ .key = key, .length = array.length, .iterator = iterator } });
     }
 
-    const IntegerIndexKey = union(enum) {
+    const LiteralIndexKey = union(enum) {
         none,
         one: TypeId,
         /// Two of the applicable keys, named in the refusal.
@@ -20747,7 +20801,32 @@ const Checker = struct {
     /// distinct candidate. Deduplication compares each candidate with those
     /// before it, so it is quadratic in that per-receiver count and
     /// independent of the program's other implementations.
-    fn integerIndexKey(self: *Checker, owner: DeclId, receiver: TypeId) std.mem.Allocator.Error!IntegerIndexKey {
+    fn integerIndexKey(self: *Checker, owner: DeclId, receiver: TypeId) std.mem.Allocator.Error!LiteralIndexKey {
+        return self.indexKeyForLiterals(owner, receiver, .integer);
+    }
+
+    const IndexKeyShape = union(enum) { integer, tuple: []const TypeId };
+
+    fn indexKeyFits(self: *Checker, owner: DeclId, key: TypeId, shape: IndexKeyShape) bool {
+        return switch (shape) {
+            .integer => self.builder.isIntegerWithin(owner, key),
+            .tuple => |actual| blk: {
+                const instance = self.builder.instanceOf(key) orelse break :blk false;
+                if (!self.builder.isTupleDecl(instance.decl)) break :blk false;
+                const components = self.builder.argsOf(instance);
+                if (components.len != actual.len) break :blk false;
+                for (components, actual) |component, found| {
+                    if (!self.builder.isIntegerWithin(owner, component)) break :blk false;
+                    if (self.builder.get(found) != .open_integer and
+                        self.builder.equatedWithin(owner, component) != self.builder.equatedWithin(owner, found)) break :blk false;
+                }
+                break :blk true;
+            },
+        };
+    }
+
+    /// Uses the same per-receiver candidate lookup for scalar and tuple literals.
+    fn indexKeyForLiterals(self: *Checker, owner: DeclId, receiver: TypeId, shape: IndexKeyShape) std.mem.Allocator.Error!LiteralIndexKey {
         const trait = self.index_decl orelse return .none;
         var candidates: std.ArrayList(TypeId) = .empty;
         defer candidates.deinit(self.gpa);
@@ -20756,7 +20835,7 @@ const Checker = struct {
             defer bounds.deinit(self.gpa);
             try self.builder.boundArgumentsWithin(owner, receiver, trait.index(), &bounds);
             for (bounds.items) |args| {
-                if (args.len == 1 and self.builder.isIntegerWithin(owner, args[0]))
+                if (args.len == 1 and self.indexKeyFits(owner, args[0], shape))
                     try candidates.append(self.gpa, args[0]);
             }
         }
@@ -20768,7 +20847,7 @@ const Checker = struct {
             const candidate = self.implementations[i];
             if (candidate.trait != trait.index() or !candidate.head.same(head)) continue;
             const args = try self.builder.receiverTraitArguments(@enumFromInt(i), receiver) orelse continue;
-            if (args.len != 1 or !self.builder.isIntegerWithin(owner, args[0])) continue;
+            if (args.len != 1 or !self.indexKeyFits(owner, args[0], shape)) continue;
             try candidates.append(self.gpa, args[0]);
             if (!ground) {
                 if (potential) |first| {
@@ -20777,7 +20856,7 @@ const Checker = struct {
             }
         }
         for (TypeId.primitives) |key| {
-            if (key.integerInfo() != null) try candidates.append(self.gpa, key);
+            if (shape == .integer and key.integerInfo() != null) try candidates.append(self.gpa, key);
         }
         var selected: ?TypeId = null;
         for (candidates.items, 0..) |key, at| {
@@ -22182,6 +22261,15 @@ const Checker = struct {
         // suite's signal that a pass swallowed an error.
         if (lhs != written) _ = try self.record(written, place);
 
+        if (self.swizzles.get(lhs)) |swizzle| {
+            if (swizzle.repeats())
+                return self.report(.t_lend, lhs, "a swizzle assignment cannot write a component twice", .{}, "use each destination component only once");
+            if (!self.isAPlace(swizzle.base))
+                return self.report(.t_lend, lhs, "a swizzle assignment requires an array place", .{}, "bind the array to a mutable variable before assigning its components");
+        } else if (place != .poison and place != .never and self.ast.exprTag(lhs) == .index and !self.isAPlace(lhs)) {
+            return self.report(.t_lend, lhs, "this indexed value is not an assignable place", .{}, "bind the array to a mutable variable before assigning its elements");
+        }
+
         // Written, so the ceiling of every projection the path runs through
         // has to admit a write. Kept until every body is checked, because a
         // projection this path composes may be declared below the line that
@@ -22218,11 +22306,22 @@ const Checker = struct {
             .ty = place,
             .at = .{ .file = self.ast.fileOfExpr(a.lhs), .span = self.ast.exprSpan(a.lhs) },
             .reason = .operand,
+            .elementwise_operand = self.builder.get(place) == .array or self.builder.matrixInfo(place) != null,
         });
         if (rhs == .poison) return try self.record(id, .poison);
         if (rhs == .never) return self.expect(id, .never, expected);
+        if (!try self.arithmeticOperandsFit(id, place, rhs)) return .poison;
 
-        if (!self.arithmeticHolds(place)) {
+        if (self.builder.matrixInfo(place) != null or self.builder.matrixInfo(rhs) != null) {
+            const result = try self.checkMatrixArithmetic(id, place, rhs, .{
+                .ty = place,
+                .at = .{ .file = self.ast.fileOfExpr(a.lhs), .span = self.ast.exprSpan(a.lhs) },
+                .reason = .operand,
+            });
+            return self.expect(id, if (result == .poison) .poison else .unit, expected);
+        }
+
+        if (!self.arithmeticHolds(self.arithmeticElement(place))) {
             return try self.reportAtOp(
                 .t_operands,
                 id,
@@ -22232,7 +22331,7 @@ const Checker = struct {
             );
         }
 
-        if (self.ast.exprTag(id) == .rem_assign and self.isFloatType(place)) {
+        if (self.ast.exprTag(id) == .rem_assign and self.isFloatType(self.arithmeticElement(place))) {
             return self.reportNoRemainder(id, place);
         }
 
@@ -22413,7 +22512,7 @@ const Checker = struct {
         // so there is nothing for an outside caller to link against. The two
         // modifiers answer the same question about who reaches a body, and
         // they answer it differently.
-        if (self.ast.declIsTest(d)) {
+        if (self.ast.declIsCase(d)) {
             try self.sink.addErrorFmt(
                 .m_export,
                 self.ast.fileOf(self.ast.declName(d)),
@@ -23016,7 +23115,7 @@ const Checker = struct {
         pub fn memberOfType(self: *const RawLayer, owner: node.DeclId, decl: node.DeclId) bool {
             if (decl == .none or owner == .none) return false;
             const c = self.checker;
-            const implementation = if (c.ast.declIsTest(owner))
+            const implementation = if (c.ast.declIsCase(owner))
                 self.heads.get(c.ast.declOwner(owner)) orelse return false
             else
                 c.enclosingRow(owner) orelse return false;
@@ -23361,7 +23460,7 @@ const Checker = struct {
             (try self.builder.baseOf(ty)) == .u64 and self.raw_accesses.address_raw != .none;
         if (!valid) return try self.reportAtToken(.t_borrow_contract, self.ast.declName(d), "the Address certificate requires an opaque copyable newtype over a number", "declare `@(opaque, copyable) type Address[phantom T] = UInt64` beside `nowhere` and `raw`", null);
         for (self.program.declsOf(self.program.moduleOf(d))) |member| {
-            if (member == d or self.ast.declIsTest(member) or self.ast.declTag(member) == .import_) continue;
+            if (member == d or self.ast.declIsCase(member) or self.ast.declTag(member) == .import_) continue;
             const named = self.ast.declName(member);
             if (named != .none and self.ast.declTag(member) == .function) {
                 const name = self.ast.tokenText(named);
@@ -23541,7 +23640,7 @@ const Checker = struct {
         if (signature != .callable) return false;
         const raw = self.raw_accesses;
         const contracts = signature.callable.contracts;
-        if (d == raw.stride or d == raw.number_address or raw.processText(d) != null) return contracts.len == 0;
+        if (d == raw.benchmark_barrier or d == raw.stride or d == raw.number_address or raw.processText(d) != null) return contracts.len == 0;
         // Each slot holds a copy of the value, so the array carries what the
         // value carries, and no more.
         if (d == raw.array_filled) {
@@ -23578,11 +23677,16 @@ const Checker = struct {
         if (!self.validStorageEffects(d)) return false;
         const raw = self.raw_accesses;
         if (d == raw.span or d == raw.buffer_span or d == raw.subspan or d == raw.slice_place or d == raw.view_place or raw.processText(d) != null) return self.validSpanSignature(d);
-        const count: usize = if (d == raw.stride or d == raw.slice_address or d == raw.number_address) 1 else 2;
+        const count: usize = if (d == raw.benchmark_barrier or d == raw.stride or d == raw.slice_address or d == raw.number_address) 1 else 2;
         const tps = self.ast.declTypeParams(d);
         if (tps.len != count or self.ast.declVisibility(d) != .private) return false;
         const result = try self.declaredResultType(d);
         const ps = self.ast.declParams(d);
+        if (d == raw.benchmark_barrier) {
+            return tps[0].kind == .type and tps[0].bounds.len() == 0 and !tps[0].default.wasWritten() and !tps[0].phantom and
+                self.ast.declWherePredicates(d).len == 0 and ps.len == 1 and ps[0].convention == .inout and ps[0].default == .none and
+                result == .unit and try self.declaredParamType(d, 0) == self.param_types[d.index()][0];
+        }
         if (d == raw.array_filled) {
             // `array_filled[T: Copyable, let n: UInt64](value: T) -> [T; n]`.
             const element = self.param_types[d.index()][0];
@@ -24832,7 +24936,8 @@ const Checker = struct {
         if (id == ExprId.none) return;
         _ = try self.record(id, .unit);
         switch (self.ast.exprTag(id)) {
-            .field, .grouped, .negate => try self.recordTypeWrittenAsIndex(self.ast.unaryOperand(id)),
+            .tuple_literal => for (self.ast.call(id).args) |component| try self.recordTypeWrittenAsIndex(component),
+            .field, .grouped, .negate, .borrow => try self.recordTypeWrittenAsIndex(self.ast.unaryOperand(id)),
             .index, .add, .sub, .mul, .div, .rem => {
                 const b = self.ast.binary(id);
                 try self.recordTypeWrittenAsIndex(b.lhs);
@@ -27154,14 +27259,6 @@ const Checker = struct {
             };
 
             if (marked and p.convention == .inout) try self.decideMark(if (written_mark) a else id, .lent);
-            // A place passed `inout` is lent with `&`. Whether an unmarked
-            // argument is a place is known once its selections are checked, so
-            // one that names a binding is refused here and any other below.
-            const unmarked_place = p.convention == .inout and !marked and self.isAPlace(a);
-            if (unmarked_place) {
-                arguments_valid = false;
-                try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
-            }
             switch (p.convention) {
                 .inout => {},
                 // Neither lends: `read` may not be written through and `sink`
@@ -27222,6 +27319,12 @@ const Checker = struct {
             // marks, so nothing below it sees a distinct kind of value.
             if (written_mark) _ = try self.record(a, at);
             if (marked) try self.lendsWritably(value);
+            // Selection facts distinguish a gathered value from an addressable place.
+            const unmarked_place = p.convention == .inout and !marked and self.isAPlace(a);
+            if (unmarked_place) {
+                arguments_valid = false;
+                try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
+            }
             if (p.convention == .inout and !marked and !unmarked_place and !try self.lendsTemporary(a, at)) {
                 arguments_valid = false;
                 try self.reportUnmarkedPlace(a, if (receiver) named else null, declared);
@@ -27389,7 +27492,13 @@ const Checker = struct {
     fn placeStep(self: *const Checker, id: ExprId) ?Step {
         const at = self.ast.withoutGroups(id);
         switch (self.ast.exprTag(at)) {
-            .field => return .{ .field = self.ast.tokenName(self.ast.exprMain(at)) },
+            .field => {
+                if (self.swizzles.get(at)) |swizzle| {
+                    if (swizzle.count == 1) return .{ .element = swizzle.lanes[0] };
+                    return .{ .components = swizzle.mask() };
+                }
+                return .{ .field = self.ast.tokenName(self.ast.exprMain(at)) };
+            },
             .dereference => return .observed,
             .index => return .{ .element = self.settledElement(at) },
             .name_ref => {
@@ -27990,11 +28099,16 @@ const Checker = struct {
         // A constant is held in static storage for the whole program, so it is
         // a place a borrow may observe with no limit, whether it is written
         // bare or reached through a module or a type.
-        if (self.res.constantReached(self.ast, operand)) return true;
         var steps = self.ast.placeSteps(operand);
+        var observed = false;
         while (steps.next()) |step| {
-            if ((if (self.place_projections.get(step)) |projection| projection.observations > 0 else false) or self.carried_places.contains(step)) return true;
+            if (self.swizzles.get(step)) |swizzle| {
+                if (swizzle.count > 1) return false;
+                observed = observed or swizzle.observations > 0;
+            }
+            observed = observed or (if (self.place_projections.get(step)) |projection| projection.observations > 0 else false) or self.carried_places.contains(step);
         }
+        if (self.res.constantReached(self.ast, operand) or observed) return true;
         const at = steps.at;
         if (self.ast.exprTag(at) != .name_ref) return false;
         const binding = self.res.targetOf(at);
@@ -28153,6 +28267,7 @@ const Checker = struct {
     fn checkSelection(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         _ = self.selected_places.remove(id);
         _ = self.place_projections.remove(id);
+        _ = self.swizzles.remove(id);
         const base = self.ast.unaryOperand(id);
 
         if (self.res.integerSelection(id)) |selected| {
@@ -28333,6 +28448,23 @@ const Checker = struct {
         of = adjustment.receiver;
 
         const name = self.ast.tokenText(self.ast.exprMain(id));
+
+        if (self.builder.get(of) == .array) {
+            const array = self.builder.get(of).array;
+            if (array.element == .poison) return self.record(id, .poison);
+            if (self.arithmeticHolds(array.element)) {
+                if (types_mod.Swizzle.fromName(base, of, adjustment.observations, name)) |swizzle| {
+                    if (self.builder.arrayCount(array.length)) |count| {
+                        for (swizzle.lanes[0..swizzle.count], 0..) |lane, i| if (lane >= count)
+                            return self.report(.t_index, id, "component `{s}` is outside an array of {d} elements", .{ name[i .. i + 1], count }, "select a component the array contains");
+                    }
+                    try self.swizzles.put(self.gpa, id, swizzle);
+                    if (adjustment.observations > 0) try self.readonly_places.put(self.gpa, id, {});
+                    const result = if (swizzle.count == 1) array.element else try self.builder.arrayOf(array.element, swizzle.count);
+                    return self.finishSelection(id, result, expected);
+                }
+            }
+        }
 
         const wanted = self.ast.tokenName(self.ast.exprMain(id));
         const field = (try self.builder.lookupField(of, name));
@@ -29795,8 +29927,12 @@ const Checker = struct {
         return self.expect(id, ty, expected);
     }
 
-    fn checkArrayLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
+    fn checkArrayLiteral(self: *Checker, id: ExprId, context: ?Expected) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
+        var expected = context;
+        if (expected) |*want| if (want.elementwise_operand and self.arithmeticHolds(self.arithmeticElement(want.ty))) {
+            want.ty = try self.builder.arrayOf(self.arithmeticElement(want.ty), @intCast(c.args.len));
+        };
 
         if (Expected.typeOf(expected)) |want| {
             if (want == .poison) {
@@ -29952,6 +30088,15 @@ const Checker = struct {
     /// value can name it.
     fn checkTupleLiteral(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         const c = self.ast.call(id);
+        // A bracket can instead hold a function's type arguments. Its tuple
+        // arity is checked only after that reading has been ruled out.
+        if (self.ast.tokenTag(self.ast.exprMain(id)) == .l_bracket and !node.isTupleArity(c.args.len)) {
+            for (c.args) |a| _ = try self.check(a, null);
+            return self.report(.s_tuple, id, "a tuple has two to eight components", .{}, if (c.args.len < node.min_tuple_arity)
+                "drop the comma for one index, or add a second component"
+            else
+                "give a struct names past eight parts");
+        }
 
         // An arity the parser refused was reported at the `(`; one the
         // prelude declares no type for is reported here. The components are
@@ -30166,6 +30311,10 @@ const Checker = struct {
     /// rather than folding the operand again.
     fn noteFoldedIndex(self: *Checker, operand: ExprId) std.mem.Allocator.Error!void {
         const written = self.ast.withoutGroups(operand);
+        if (self.ast.exprTag(written) == .tuple_literal) {
+            for (self.ast.call(written).args) |component| try self.noteFoldedIndex(component);
+            return;
+        }
         const counted = if (self.ast.exprTag(written) == .from_end) self.ast.withoutGroups(self.ast.unaryOperand(written)) else written;
         const value = self.folds.get(counted).valueOf() orelse return;
         const whole = std.math.cast(u64, value) orelse return;
@@ -31040,7 +31189,7 @@ const Checker = struct {
         // A key whose type is still open takes the one integer key the
         // container is indexed by, as a literal written there would; with
         // several it needs a type now.
-        const index = if (self.builder.get(checked_index) == .open_integer) switch (try self.integerIndexKey(self.generic, head)) {
+        const scalar_index = if (self.builder.get(checked_index) == .open_integer) switch (try self.integerIndexKey(self.generic, head)) {
             .one => |key| settled: {
                 _ = try self.meet(checked_index, key, self.literalSite(b.rhs));
                 break :settled try self.builder.resolveOpen(checked_index, &self.open_types);
@@ -31056,6 +31205,8 @@ const Checker = struct {
             .many => try self.forceInteger(checked_index, self.literalSite(b.rhs)),
         } else checked_index;
 
+        const index = try self.settleTupleIndexLiterals(b.rhs, head, scalar_index);
+        if (index == .poison) return self.record(id, .poison);
         return switch (try self.projectionAt(id, head, index)) {
             .place => |settled| self.finishSelection(id, settled, expected),
             // No library declaring the trait, so no type implements it and the
@@ -31114,6 +31265,41 @@ const Checker = struct {
         /// left to report.
         unusable,
     };
+
+    /// Settle open integer components from the receiver's compatible tuple
+    /// keys, preserving every component whose type is already known.
+    fn settleTupleIndexLiterals(self: *Checker, at: ExprId, receiver: TypeId, key: TypeId) std.mem.Allocator.Error!TypeId {
+        const resolved = try self.builder.resolveOpen(key, &self.open_types);
+        const instance = self.builder.instanceOf(resolved) orelse return resolved;
+        if (!self.builder.isTupleDecl(instance.decl)) return resolved;
+        const args = self.builder.argsOf(instance);
+        if (!node.isTupleArity(args.len)) return resolved;
+        var actual: [node.max_tuple_arity]TypeId = undefined;
+        @memcpy(actual[0..args.len], args);
+        var unsettled = false;
+        for (actual[0..args.len]) |component| {
+            if (self.builder.get(component) == .open_integer) {
+                unsettled = true;
+            } else if (!self.builder.isIntegerWithin(self.generic, component)) {
+                return self.forceInteger(resolved, self.literalSite(at));
+            }
+        }
+        if (!unsettled) return resolved;
+        return switch (try self.indexKeyForLiterals(self.generic, receiver, .{ .tuple = actual[0..args.len] })) {
+            .none => self.forceInteger(resolved, self.literalSite(at)),
+            .one => |wanted| settled: {
+                if (!try self.meet(resolved, wanted, self.literalSite(at))) break :settled .poison;
+                break :settled self.builder.resolveOpen(resolved, &self.open_types);
+            },
+            .many => |keys| self.report(
+                .t_infer,
+                at,
+                "`{s}` is indexed by more than one integer-tuple type, including `{s}` and `{s}`",
+                .{ (try self.typeName(receiver)), (try self.typeName(keys[0])), (try self.typeName(keys[1])) },
+                "write the key with the type you mean",
+            ),
+        };
+    }
 
     fn projectionAt(
         self: *Checker,
@@ -31908,6 +32094,27 @@ const Checker = struct {
         );
     }
 
+    fn checkBenchmarkAnswer(self: *Checker, d: DeclId) !void {
+        const at = self.ast.declName(d);
+        const measurement = self.benchmark_measurement orelse
+            return self.sink.addError(.s_test, self.ast.fileOfDecl(d), self.ast.tokenSpan(at), "a benchmark returns a measurement from `std.bench`", "import `std.bench` to measure the work");
+        const answer = self.decl_returns.get(d);
+        if (answer == .poison) return;
+        const carrier = try self.carrierOf(answer);
+        if (carrier == null or carrier.?.kind != .result or
+            self.view().variantFieldType(answer, carrier.?.success, 0) != self.type_of_decl.get(measurement))
+        {
+            return self.sink.addError(.s_test, self.ast.fileOfDecl(d), self.ast.tokenSpan(at), "a benchmark answers `Result[bench.Measurement, E]`", "return the measurement from `bench.iter` or `bench.try_iter`");
+        }
+        const failure = self.view().variantFieldType(answer, carrier.?.failure, 0);
+        try self.checkFailureRenders(d, at, failure, "a benchmark's error must implement `Display`");
+        if (failure != .poison and (try self.builder.capabilityOf(failure)) == .linear) {
+            const release = self.benchmark_error_release orelse return;
+            if (!try implementsAnyOf(self.gpa, &self.impl_index, self.implementations, &self.builder, release, failure))
+                try self.sink.addError(.t_bound, self.ast.fileOfDecl(d), self.ast.tokenSpan(at), "a benchmark's linear error must implement `Release`", "the runner releases this error after reporting it");
+        }
+    }
+
     /// What a test answers.
     ///
     /// The entry point's rule with `()` where the exit status goes: a test has
@@ -31916,7 +32123,7 @@ const Checker = struct {
     fn checkTestAnswers(self: *Checker) std.mem.Allocator.Error!void {
         for (0..self.ast.declCount()) |i| {
             const d = node.DeclId.at(@intCast(i));
-            if (!self.ast.declIsTest(d)) continue;
+            if (!self.ast.declIsCase(d)) continue;
             // An `extern` is a function by tag, so the tag alone does not
             // settle it, and the parser has already refused the modifier here.
             if (self.ast.declTag(d) != .function) continue;
@@ -31927,6 +32134,10 @@ const Checker = struct {
             // type was written" is what let the entry point's own rule be
             // bypassed by answering `[UInt8; 3]`. The same guard here would
             // buy the same bypass.
+            if (self.ast.declIsBenchmark(d)) {
+                try self.checkBenchmarkAnswer(d);
+                continue;
+            }
             const written = self.ast.declReturnRef(d);
             if (!written.wasWritten()) continue;
 
@@ -39173,12 +39384,15 @@ const Checker = struct {
         var refused_declared: std.ArrayList(TypeId) = .empty;
         defer refused_declared.deinit(self.gpa);
 
-        // Known arguments settle parameters first, then the expected result
-        // supplies remaining context. Only unconstrained literals default.
-        // Arguments whose parameter is settled wait for the ordinary argument
-        // check below, which propagates that type into the expression.
-        for ([_]bool{ true, false }, 0..) |speaking, pass| {
-            if (pass == 1) try self.settleCallResult(d, args, settling, expected, self.successExpectationAt(id), self.failureExpectationAt(id), self.methodExpectationAt(id));
+        // Known arguments settle parameters first. Where an arithmetic
+        // result supplies only an element, check the arguments naming that
+        // parameter before result context can settle its entire type.
+        // Arguments already settled wait for the exact argument check below.
+        const operand = try self.operandArgumentContext(id, d, null, expected);
+        for (argument_inference_passes) |pass| {
+            if (pass == .operand and operand == null) continue;
+            const speaking = pass == .known;
+            if (pass == .contextual) try self.settleCallResult(d, args, settling, expected, self.successExpectationAt(id), self.failureExpectationAt(id), self.methodExpectationAt(id));
             const supplied_count = if (written_slots) |order| order.len else args.len;
             for (0..supplied_count) |index| {
                 const j: usize = if (written_slots) |order| order[index].? else index;
@@ -39193,8 +39407,9 @@ const Checker = struct {
                 // Self or trait-argument inference may already have checked
                 // this expression. Its recorded type still settles method
                 // parameters; only evaluation is skipped.
-                if (pass != 0 and walked[j]) continue;
+                if (!speaking and walked[j]) continue;
                 const declared = try paramType(self, d, j);
+                if (pass == .operand and declared != operand.?.parameter) continue;
                 const value = if (self.ast.exprTag(a) == .marked) self.ast.unaryOperand(a) else a;
                 const lengths: LengthEvidence = .{ .position = j, .declaration = d, .explicit = written.len > 0, .settling = settling };
                 if (speaking and try self.settleLiteralLengths(a, declared, lengths) == .conflict) return null;
@@ -39208,7 +39423,7 @@ const Checker = struct {
                 // wrong with it a second time.
                 if (!self.mentionsSettling(declared, settling)) continue;
 
-                if (!walked[j] and self.determinesItsOwnType(value) != speaking) continue;
+                if (!walked[j] and pass != .operand and self.determinesItsOwnType(value) != speaking) continue;
 
                 // A parameter something else settled is one this argument has
                 // nothing to add to, and checking it here would ask it for a
@@ -39218,14 +39433,14 @@ const Checker = struct {
 
                 const previous = self.success_expected;
                 defer self.success_expected = previous;
-                if (!speaking) if (try self.siblingLengthHint(value, declared, lengths)) |hint| {
+                if (pass == .contextual) if (try self.siblingLengthHint(value, declared, lengths)) |hint| {
                     self.success_expected = .{
                         .target = self.ast.withoutGroups(value),
                         .depth = 0,
                         .expected = .{ .ty = hint, .reason = .parameter, .at = self.locOf(a), .inference = settling },
                     };
                 };
-                const observed = if (walked[j]) self.builder.exprType(value) else try self.check(value, null);
+                const observed = if (walked[j]) self.builder.exprType(value) else try self.check(value, if (pass == .operand) operand.?.expected else null);
                 const got = if (over != .none and readsSelf(self.ast, params[j])) try self.inherentReceiver(d, observed) else observed;
                 walked[j] = true;
                 if (got == .poison) {
@@ -40116,6 +40331,30 @@ const Checker = struct {
         return try self.throughValue(signature, lists, .{ found[0], found[1], found[2] });
     }
 
+    const argument_inference_passes = [_]enum { known, operand, contextual }{ .known, .operand, .contextual };
+
+    const OperandArgumentContext = struct { parameter: TypeId, expected: Expected };
+
+    /// When the result names one parameter directly, an argument naming
+    /// that same parameter can use the element context to decide its type.
+    /// If no such argument settles it, the ordinary result inference still
+    /// has its array length or scalar type available.
+    fn operandArgumentContext(
+        self: *Checker,
+        id: ExprId,
+        d: node.DeclId,
+        declared_result: ?TypeId,
+        expected: ?Expected,
+    ) std.mem.Allocator.Error!?OperandArgumentContext {
+        const success = if (expected == null or expected.?.ty == .poison) self.successExpectationAt(id) else null;
+        const want = if (success) |payload| payload.expected else expected orelse return null;
+        if (!want.elementwise_operand or want.ty == .poison) return null;
+        const result = declared_result orelse try returnType(self, d);
+        const parameter = if (success) |payload| (try self.successType(result, payload.depth)) orelse return null else result;
+        if (self.builder.get(parameter) != .parameter) return null;
+        return .{ .parameter = parameter, .expected = want };
+    }
+
     fn settleCallResult(
         self: *Checker,
         d: node.DeclId,
@@ -40321,13 +40560,23 @@ const Checker = struct {
                 1 => (try self.successType(result, success.?.depth)) orelse continue,
                 else => unreachable,
             };
+            // Two array types can settle an open length as well as an
+            // element. With a scalar on either side, only the element
+            // determines a parameter. Matrix products can change both
+            // dimensions, so a matrix context also gives only an element.
+            const elements_only = want.elementwise_operand and
+                (self.builder.matrixInfo(answers) != null or self.builder.matrixInfo(want.ty) != null or
+                    self.builder.isIntegerWithin(call.callee, answers) or
+                    (self.builder.get(answers) == .array and self.builder.get(want.ty) != .array));
+            const declared = if (elements_only) self.arithmeticElement(answers) else answers;
+            const supplied = if (elements_only) self.arithmeticElement(want.ty) else want.ty;
             for (settling) |s| {
                 var ignored: ?Clash = null;
                 // A sibling's count may be known while its element type is
                 // still open in the enclosing call. Only its known parts
                 // can determine the result of this one.
                 const open = if (index == 1 and success.?.depth == 0) want.inference else null;
-                _ = try self.settleByInContext(answers, want.ty, s.owner, s.found, &ignored, .matching, open);
+                _ = try self.settleByInContext(declared, supplied, s.owner, s.found, &ignored, .matching, open);
             }
         }
         if (failure) |want| {
@@ -41003,7 +41252,9 @@ const Checker = struct {
         // cannot settle itself; the first arm with a real type replaces it,
         // so the arms after that still have to agree, as an `if`'s do.
         if (body == .never) return;
-        if (settled.*) |context| if (!context.unit_test_success and context.ty != .poison) return;
+        // An arithmetic operand's context names an element, leaving the
+        // first completing arm to settle the match's actual shape.
+        if (settled.*) |context| if (!context.unit_test_success and !context.elementwise_operand and context.ty != .poison) return;
         if (body == .poison and settled.* != null) return;
         settled.* = .{ .ty = body, .at = self.locOf(self.resultOf(body_expr)), .reason = .arm };
     }
@@ -41056,6 +41307,85 @@ const Checker = struct {
 
     fn arithmeticHolds(self: *const Checker, t: TypeId) bool {
         return t == .poison or self.isFloatType(t) or self.builder.get(t) == .open_integer or self.builder.isIntegerWithin(self.generic, t);
+    }
+
+    fn arithmeticElement(self: *const Checker, t: TypeId) TypeId {
+        if (self.builder.matrixInfo(t)) |matrix| return matrix.element;
+        return switch (self.builder.get(t)) {
+            .array => |array| array.element,
+            else => t,
+        };
+    }
+
+    fn scalarOperandExpected(self: *const Checker, expected: ?Expected) ?TypeId {
+        const want = expected orelse return null;
+        return if (want.elementwise_operand) self.arithmeticElement(want.ty) else want.ty;
+    }
+
+    fn checkArrayArithmeticConstant(self: *Checker, id: ExprId, ty: TypeId) std.mem.Allocator.Error!TypeId {
+        const array = self.builder.get(ty).array;
+        if (self.isSymbolicInteger(array.element)) {
+            try self.markNotConstant(id);
+            return ty;
+        }
+        const value = try self.worth(id);
+        if (value == .not_constant) {
+            try self.markNotConstant(id);
+            return ty;
+        }
+        const op = self.ast.exprTag(id);
+        const first = try self.worth(if (op == .negate) self.ast.unaryOperand(id) else self.ast.binary(id).lhs);
+        const second: constfold.Value = if (op == .negate) .not_constant else try self.worth(self.ast.binary(id).rhs);
+        const count = self.builder.arrayCount(array.length) orelse return ty;
+        for (0..count) |lane| {
+            const before = constfold.arithmeticLane(&self.folded.pool, first, lane) orelse return ty;
+            var after: ?i128 = if (op == .negate) constfold.arithmetic(.sub, 0, before) else null;
+            if (op != .negate) {
+                const right = constfold.arithmeticLane(&self.folded.pool, second, lane) orelse return ty;
+                if ((op == .div or op == .rem) and right == 0) {
+                    self.folds.set(id, .absent);
+                    return self.reportAtOp(.t_divide_by_zero, id, "division by zero in element {d}", .{lane}, "the right operand is zero");
+                }
+                after = constfold.arithmetic(op, before, right);
+                if (op == .rem) {
+                    const quotient = constfold.arithmetic(.div, before, right);
+                    if (!try self.arrayLaneFits(id, array.element, lane, quotient, true)) return .poison;
+                }
+            }
+            if (!try self.arrayLaneFits(id, array.element, lane, after, false)) return .poison;
+        }
+        // The shared folder retains aggregate data; the scalar fold table
+        // records membership without pretending an array is one integer.
+        self.folds.set(id, .absent);
+        return ty;
+    }
+
+    fn arrayLaneFits(self: *Checker, id: ExprId, element: TypeId, lane: usize, value: ?i128, quotient: bool) !bool {
+        if (value) |number| {
+            if (self.builder.get(element) == .open_integer) {
+                try self.open_types.awaitRange(self.gpa, .{
+                    .v = self.builder.get(element).open_integer,
+                    .expr = id,
+                    .value = number,
+                    .rule = .{ .array_operation = .{ .lane = lane, .quotient = quotient } },
+                });
+                return true;
+            }
+            if (self.builder.holds(element, number)) return true;
+        }
+        self.folds.set(id, .absent);
+        _ = try self.reportArrayOverflow(id, element, lane, quotient);
+        return false;
+    }
+
+    fn reportArrayOverflow(self: *Checker, id: ExprId, element: TypeId, lane: usize, quotient: bool) !TypeId {
+        return self.reportAtOp(
+            .t_overflow,
+            id,
+            "element {d} of this operation overflows `{s}`",
+            .{ lane, try self.typeName(element) },
+            if (quotient) "the quotient is not representable" else "the result is not representable",
+        );
     }
 
     /// Whether `t` is a float type, or a float literal's type its uses have
@@ -41335,6 +41665,51 @@ const Checker = struct {
         return self.expect(id, .bool_, expected);
     }
 
+    fn arithmeticOperandsFit(self: *Checker, id: ExprId, lhs: TypeId, rhs: TypeId) std.mem.Allocator.Error!bool {
+        const both_arrays = self.builder.get(lhs) == .array and self.builder.get(rhs) == .array;
+        if (try self.meet(self.arithmeticElement(lhs), self.arithmeticElement(rhs), self.literalSite(id)) and
+            (!both_arrays or try self.meet(lhs, rhs, self.literalSite(id)))) return true;
+        const operands = self.ast.binary(id);
+        self.foldFailed(id, &.{ operands.lhs, operands.rhs });
+        _ = try self.reportAtOp(.t_operands, id, "arithmetic operands `{s}` and `{s}` are incompatible", .{ try self.typeName(lhs), try self.typeName(rhs) }, "both operands need the same scalar type; two array operands also need the same length");
+        return false;
+    }
+
+    fn checkMatrixArithmetic(self: *Checker, id: ExprId, lhs: TypeId, rhs: TypeId, expected: ?Expected) !TypeId {
+        const left = self.builder.matrixInfo(lhs);
+        const right = self.builder.matrixInfo(rhs);
+        const op = self.ast.exprTag(id).compounds() orelse self.ast.exprTag(id);
+        const matrix = left orelse right.?;
+        var result: TypeId = .poison;
+        if (self.arithmeticHolds(matrix.element)) {
+            if (left != null and right != null) {
+                const a = left.?;
+                const b = right.?;
+                if (op == .mul) {
+                    if (try self.meet(a.columns, b.rows, self.literalSite(id))) {
+                        const instance = self.builder.instanceOf(lhs).?;
+                        result = try self.builder.instantiate(instance.template, instance.decl, &.{ a.element, a.rows, b.columns });
+                    }
+                } else if ((op == .add or op == .sub) and try self.meet(lhs, rhs, self.literalSite(id))) {
+                    result = lhs;
+                }
+            } else {
+                const other = if (left != null) rhs else lhs;
+                if (self.builder.get(other) == .array) {
+                    const vector = self.builder.get(other).array;
+                    const inner = if (left != null) matrix.columns else matrix.rows;
+                    if (op == .mul and try self.meet(inner, vector.length, self.literalSite(id)))
+                        result = try self.builder.arrayOfLength(matrix.element, if (left != null) matrix.rows else matrix.columns);
+                } else if (op == .mul) {
+                    result = if (left != null) lhs else rhs;
+                }
+            }
+        }
+        self.foldFailed(id, &.{ self.ast.binary(id).lhs, self.ast.binary(id).rhs });
+        if (result == .poison) return self.reportAtOp(.t_operands, id, "this operation is not defined for `{s}` and `{s}`", .{ try self.typeName(lhs), try self.typeName(rhs) }, "matrix products need matching inner dimensions; addition and subtraction need identical matrix types");
+        return self.expect(id, result, expected);
+    }
+
     fn checkBinary(self: *Checker, id: ExprId, expected: ?Expected) std.mem.Allocator.Error!TypeId {
         const b = self.ast.binary(id);
 
@@ -41343,25 +41718,39 @@ const Checker = struct {
         // after both operands, so a divergent operand can make the operation
         // `Never` before a value-type mismatch is considered.
         const operand_expected = if (expected) |want|
-            if (self.arithmeticHolds(want.ty)) want else null
+            if (self.arithmeticHolds(self.arithmeticElement(want.ty))) blk: {
+                var operand = want;
+                operand.elementwise_operand = true;
+                break :blk operand;
+            } else null
         else
             null;
         const checked_lhs = try self.check(b.lhs, operand_expected);
         // The right operand is checked against the left's type when nothing
         // flowed in, which is what makes operands agree without promotion. An
         // open left operand is settled by that check where the right has a type.
-        const rhs = try self.check(b.rhs, if (checked_lhs == .never) null else operand_expected orelse Expected{
+        var rhs_expected = operand_expected orelse Expected{
             .ty = checked_lhs,
             .at = .{ .file = self.ast.fileOfExpr(b.lhs), .span = self.ast.exprSpan(b.lhs) },
             .reason = .operand,
-        });
+            .elementwise_operand = true,
+        };
+        // An array operand supplies its own length. In a nested operation
+        // the surrounding length may belong to a product's output instead.
+        if (self.builder.get(checked_lhs) == .array) rhs_expected.ty = checked_lhs;
+        if (self.ast.exprTag(id) == .mul) {
+            if (self.builder.matrixInfo(checked_lhs)) |matrix| {
+                // A vector input contracts columns; the surrounding result
+                // has rows and cannot supply this operand's array length.
+                rhs_expected.ty = try self.builder.arrayOfLength(matrix.element, matrix.columns);
+            }
+        }
+        const rhs = try self.check(b.rhs, if (checked_lhs == .never) null else rhs_expected);
         const lhs = try self.builder.resolveOpen(checked_lhs, &self.open_types);
 
-        // Disagreeing operands are already reported by the check above: the
-        // right is checked against the left, so a mismatch is caught where it
-        // is found and under the rule the expectation names. A second test
-        // here could only fire where that check let a type through, which is
-        // where the two would have disagreed about the language.
+        // Context settles scalar elements. The operator owns compatibility:
+        // a result shape need not be either matrix/vector operand's shape,
+        // and two array operands must still agree under a Matrix context.
         if (lhs == .poison or rhs == .poison) {
             self.foldFailed(id, &.{ b.lhs, b.rhs });
             return try self.record(id, .poison);
@@ -41371,7 +41760,13 @@ const Checker = struct {
             return self.expect(id, .never, expected);
         }
 
-        if (!self.arithmeticHolds(lhs)) {
+        if (!try self.arithmeticOperandsFit(id, lhs, rhs)) return .poison;
+        if (self.builder.matrixInfo(lhs) != null or self.builder.matrixInfo(rhs) != null)
+            return self.checkMatrixArithmetic(id, lhs, rhs, expected);
+
+        const result_type = if (self.builder.get(rhs) == .array) rhs else lhs;
+        const element = self.arithmeticElement(result_type);
+        if (!self.arithmeticHolds(element)) {
             self.foldFailed(id, &.{ b.lhs, b.rhs });
             return try self.reportAtOp(
                 .t_operands,
@@ -41382,14 +41777,16 @@ const Checker = struct {
             );
         }
 
-        if (self.ast.exprTag(id) == .rem and self.isFloatType(lhs)) {
+        if (self.ast.exprTag(id) == .rem and self.isFloatType(element)) {
             self.foldFailed(id, &.{ b.lhs, b.rhs });
             return self.reportNoRemainder(id, lhs);
         }
 
+        if (self.builder.get(result_type) == .array)
+            return self.expect(id, try self.checkArrayArithmeticConstant(id, result_type), expected);
         if (self.isSymbolicInteger(lhs)) {
             try self.markNotConstant(id);
-            return self.expect(id, lhs, expected);
+            return self.expect(id, result_type, expected);
         }
 
         if (self.folds.get(b.lhs).valueOf()) |a| {
@@ -41461,18 +41858,20 @@ const Checker = struct {
             // remains Never in the expression table, so it cannot choose an
             // open type during inference.
             if (want.ty != .poison and actual != .poison and actual != .never and actual != want.ty) {
-                if (!try self.meet(actual, want.ty, self.literalSite(id))) {
+                const compare_actual = if (want.elementwise_operand) self.arithmeticElement(actual) else actual;
+                const compare_want = if (want.elementwise_operand) self.arithmeticElement(want.ty) else want.ty;
+                if (!try self.meet(compare_actual, compare_want, self.literalSite(id))) {
                     // Named by what each side settled on, where it settled.
                     var settled_want = want;
-                    settled_want.ty = try self.builder.resolveOpen(want.ty, &self.open_types);
-                    const chosen: ?Label = switch (self.builder.get(actual)) {
+                    settled_want.ty = try self.builder.resolveOpen(compare_want, &self.open_types);
+                    const chosen: ?Label = switch (self.builder.get(compare_actual)) {
                         .open_integer, .open_float => |v| try self.chosenLabel(v),
-                        else => switch (self.builder.get(want.ty)) {
+                        else => switch (self.builder.get(compare_want)) {
                             .open_integer, .open_float => |v| try self.chosenLabel(v),
                             else => null,
                         },
                     };
-                    return try self.reportMismatchChosen(id, try self.builder.resolveOpen(actual, &self.open_types), settled_want, "", chosen);
+                    return try self.reportMismatchChosen(id, try self.builder.resolveOpen(compare_actual, &self.open_types), settled_want, "", chosen);
                 }
                 return try self.record(id, try self.builder.resolveOpen(actual, &self.open_types));
             }
@@ -45600,6 +45999,31 @@ test "typed storage intrinsics reject a scalar replacement signature" {
     resolved.modules[0].externs = true;
     _ = try typecheckTree(gpa, &resolved, &sink);
     try testing.expect(diagnosticSays(&sink, .t_extern, "compiler-defined signature"));
+}
+
+test "benchmark barrier certifies its private generic inout signature" {
+    for ([_][]const u8{
+        "extern fn benchmark_barrier[T](value: T)",
+        "extern fn benchmark_barrier[T](inout value: UInt64)",
+        "extern fn benchmark_barrier[T](inout value: T) -> UInt64",
+        "pub extern fn benchmark_barrier[T](inout value: T)",
+        "extern fn benchmark_barrier[T: Copyable](inout value: T)",
+    }) |declaration| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink = Sink.init(gpa);
+        const source: Source = .{ .path = "bench.lin", .text = declaration };
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        var ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        var resolved = try resolveTree(gpa, &ast, &sink);
+        resolved.modules[0].name = "bench";
+        resolved.modules[0].library = true;
+        resolved.modules[0].externs = true;
+        _ = try typecheckTree(gpa, &resolved, &sink);
+        try testing.expect(diagnosticSays(&sink, .t_extern, "compiler-defined signature"));
+    }
 }
 
 test "an ordinary library function is not a typed storage intrinsic" {

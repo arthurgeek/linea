@@ -12,6 +12,7 @@
 // two handoffs. On a loop the two tasks may share a carrier or not, and a
 // round trip between carriers waits for the kernel to wake one, so its
 // minimum and median can lie far apart.
+import std.bench
 import std.env
 import std.io
 import std.mem
@@ -19,7 +20,6 @@ import std.session
 import std.task
 import std.time
 
-use io.IoError
 use io.println
 use session.Chan
 use session.Choose
@@ -110,62 +110,50 @@ fn one() -> UInt64 {
     1
 }
 
-// Sort `kept` in place, smallest first.
-fn sort(inout kept: mem.Vec[UInt64]) {
-    let n = kept.length()
-    for i in 1..n {
-        var j = i
-        while j > 0 && kept[j - 1] > kept[j] {
-            let before = kept[j - 1]
-            kept[j - 1] = kept[j]
-            kept[j] = before
-            j -= 1
-        }
-    }
+@derive(Display, Release, From[io.IoError], From[mem.Oom])
+enum BenchError {
+    Output(io.IoError),
+    Allocation(mem.Oom),
 }
 
-// Write the fastest, median and 90th-percentile times of `ordered`, and
-// answer the median.
-fn summary(name: Str, inout ordered: mem.Vec[UInt64]) -> Result[UInt64, IoError] {
-    sort(&ordered)
-    let n = ordered.length()
-    let low = ordered[0]
-    let median = ordered[n / 2]
-    let high = ordered[n * 9 / 10]
-    println("  {name}: min {low / 1000} us, median {median / 1000} us, p90 {high / 1000} us")?
-    .Ok(median)
+// Print the raw samples before sorting their storage for order statistics.
+fn summary(name: Str, inout samples: mem.Vec[UInt64]) -> Result[UInt64, BenchError] {
+    for round in UInt64(0)..samples.length() {
+        println("{name},{round},{samples[round]} ns")?
+    }
+    let stats = bench.summarize(&samples).unwrap()
+    println("  {name}: min {stats.minimum} ns, median {stats.median} ns, p90 {stats.p90} ns, max {stats.maximum} ns")?
+    .Ok(stats.median)
 }
 
 // Time the three designs over `count` items, `rounds` times each.
-fn measure(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
+fn measure(count: UInt64, rounds: UInt64) -> Result[(), BenchError] {
     defer var fixed: mem.Vec[UInt64] = mem.Vec.new()
     defer var mapped: mem.Vec[UInt64] = mem.Vec.new()
     defer var gathered: mem.Vec[UInt64] = mem.Vec.new()
     var check = UInt64(0)
-    for round in 0..rounds {
-        for turn in 0..3 {
-            let which = (round + turn) % 3
+    let schedule = bench.Schedule.new(warmups: 0, repetitions: 1, samples: rounds, cases: 3).unwrap()
+    for round in 0..schedule.rounds() {
+        for turn in 0..schedule.cases() {
+            let which = schedule.case_at(round, turn).unwrap()
             let items = numbers(count)
             if which == 0 {
-                let started = time.Instant.now()
-                let results = fixed_chunks(items, 8)
-                &fixed.push(time.Instant.now().since(started).nanoseconds()).unwrap()
+                let (elapsed, results) = bench.measure_once(sink [sink items] || fixed_chunks(items, 8))
                 check += results[count - 1]
                 results.release()
+                &fixed.push(elapsed).settled()?
             } else if which == 1 {
-                let started = time.Instant.now()
-                let results = task.map(.Threads(8), items, plus_one)
-                &mapped.push(time.Instant.now().since(started).nanoseconds()).unwrap()
+                let (elapsed, results) = bench.measure_once(sink [sink items] || task.map(.Threads(8), items, plus_one))
                 check += results[count - 1]
                 results.release()
+                &mapped.push(elapsed).settled()?
             } else {
                 items.release()
                 let all_jobs = jobs(count)
-                let started = time.Instant.now()
-                let results: mem.Vec[UInt64] = task.all(.Threads(8), all_jobs)
-                &gathered.push(time.Instant.now().since(started).nanoseconds()).unwrap()
+                let (elapsed, results) = bench.measure_once(sink [sink all_jobs] || -> mem.Vec[UInt64] task.all(.Threads(8), all_jobs))
                 check += results[count - 1]
                 results.release()
+                &gathered.push(elapsed).settled()?
             }
         }
     }
@@ -179,7 +167,7 @@ fn measure(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
 
 // Walk a lazy map over `count` items on two workers: every item is one
 // handoff to a worker and one answer back.
-fn handoffs(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
+fn handoffs(count: UInt64, rounds: UInt64) -> Result[(), BenchError] {
     defer var times: mem.Vec[UInt64] = mem.Vec.new()
     var total = UInt64(0)
     for _ in 0..rounds {
@@ -188,11 +176,10 @@ fn handoffs(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
         for result in &walked {
             total += result
         }
-        &times.push((time.Instant.now().since(started).nanoseconds()) / count).unwrap()
+        &times.push((time.Instant.now().since(started).nanoseconds()) / count).settled()?
     }
-    sort(&times)
-    let n = times.length()
-    println("lazy_map at max 2, {count} items (check {total}): min {times[0]} ns, median {times[n / 2]} ns, max {times[n - 1]} ns an item")?
+    println("lazy_map at max 2, {count} items (check {total}), ns per item:")?
+    let _median = summary("lazy_map", &times)?
     .Ok(())
 }
 
@@ -240,24 +227,24 @@ fn ping[H](sink peer: Chan[Pinger, H], left: UInt64) -> Chan[Pinger, H] {
 
 // Time `count` round trips between a task and an echo it starts: every round
 // trip is two handoffs, one each way.
-fn round_trips(count: UInt64, rounds: UInt64) -> Result[(), IoError] {
+fn round_trips(count: UInt64, rounds: UInt64) -> Result[(), BenchError] {
     defer var times: mem.Vec[UInt64] = mem.Vec.new()
     for _ in 0..rounds {
         let body = sink [] |sink me: Chan[Echo]| echo(me)
         let peer = task.start(body).unwrap()
         let started = time.Instant.now()
         let after = ping(peer, count)
-        &times.push(time.Instant.now().since(started).nanoseconds() / count).unwrap()
+        let elapsed = time.Instant.now().since(started).nanoseconds() / count
         after.enter().choose_right().close()
+        &times.push(elapsed).settled()?
     }
-    sort(&times)
-    let n = times.length()
-    println("session round trip, {count} in a row: min {times[0]} ns, median {times[n / 2]} ns, max {times[n - 1]} ns")?
+    println("session round trip, {count} in a row, ns per round trip:")?
+    let _median = summary("round trip", &times)?
     .Ok(())
 }
 
 // Every measurement, on whatever Io the caller runs on.
-fn measure_all() -> Result[(), IoError] {
+fn measure_all() -> Result[(), BenchError] {
     measure(10000, 200)?
     measure(100000, 60)?
     handoffs(20000, 7)?
@@ -266,25 +253,16 @@ fn measure_all() -> Result[(), IoError] {
 
 // Every measurement inside a task started on a loop of `carriers` carriers,
 // so the tasks each design starts are fibers of that loop.
-fn measure_on_loop(carriers: UInt64) -> Result[(), IoError] {
+fn measure_on_loop(carriers: UInt64) -> Result[(), BenchError] {
     let looped = io.Loop.open(carriers: carriers)?
     println("on a loop of {carriers} carriers:")?
-    let body = sink [] |sink me: Chan[Send[Bool, End]]| {
-        let measured = match measure_all() {
-            Ok(_) => true,
-            Err(_) => false,
-        }
-        me.send(measured).close()
-    }
+    let body = sink [] |sink me: Chan[Send[Result[(), BenchError], End]]| me.send(measure_all()).close()
     let (measured, done) = task.start(body, on: looped).unwrap().recv()
     done.close()
-    if !measured {
-        println("the measurements on the loop could not be written")?
-    }
-    .Ok(())
+    measured
 }
 
-fn main() -> Result[UInt8, IoError] {
+fn main() -> Result[UInt8, BenchError] {
     println("on the system Io, a thread per task:")?
     measure_all()?
     measure_on_loop(8)?

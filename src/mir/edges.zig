@@ -26,6 +26,7 @@ pub fn witnessOf(tag: Inst.Tag) []const u8 {
         .source_site,
         .static_addr,
         .address_bits,
+        .benchmark_barrier,
         .load,
         .store,
         .add,

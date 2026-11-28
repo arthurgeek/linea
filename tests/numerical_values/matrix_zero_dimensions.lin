@@ -1,0 +1,8 @@
+import std.num
+
+fn main() -> UInt8 {
+    let _no_rows: num.Matrix[Float32, 0, 3] = num.matrix([])
+    let _no_columns: num.Matrix[Int16, 2, 0] = num.matrix([[], []])
+    let _empty: num.Matrix[UInt8, 0, 0] = num.matrix([])
+    0
+}

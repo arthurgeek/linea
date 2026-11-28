@@ -1,0 +1,26 @@
+struct Grid {
+    cells: [[Int32; 3]; 2],
+}
+
+impl Index[(UInt64, UInt64)] for Grid {
+    type Elem = Int32
+
+    proj at(inout self: Self, i: (UInt64, UInt64)) -> Int32 where carries(self) {
+        self.cells[i._0][i._1]
+    }
+}
+
+fn main() -> UInt8 {
+    var grid = Grid { cells = [[Int32(1), 2, 3], [4, 5, 6]] }
+    if grid[
+        UInt64(1), // the last row
+        UInt64(2),
+    ] != 6 {
+        return 1
+    }
+    grid[UInt64(0), UInt64(1)] = 9
+    if grid[(UInt64(0), UInt64(1))] != 9 {
+        return 2
+    }
+    0
+}

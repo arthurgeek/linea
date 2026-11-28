@@ -1,0 +1,10 @@
+import std.testing
+import std.io
+
+fn main() -> UInt8 {
+    let owner = String.from_parts(["the required ", "device is unavailable"].as_slice()).unwrap()
+    let failure = testing.skip(owner.view())
+    owner.release()
+    io.eprintln(failure)
+    0
+}

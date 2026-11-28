@@ -2177,6 +2177,12 @@ const FunctionEmitter = struct {
                 try self.here(span);
             },
 
+            .benchmark_barrier => {
+                try self.w.writeAll("    llvm.inline_asm has_side_effects \"\", \"r,~{memory}\" ");
+                try self.writeValue(mir.unaryOf(id));
+                try self.w.writeAll(" : (!llvm.ptr) -> ()");
+                try self.here(span);
+            },
             .address_bits => {
                 try self.w.print("    %v{d} = llvm.ptrtoint ", .{id.index()});
                 try self.writeValue(mir.unaryOf(id));

@@ -1,0 +1,32 @@
+import std.num
+
+fn project(matrix: num.Matrix[Int32, 2, 3], vector: [Int32; 3]) -> [Int32; 2] {
+    matrix * vector
+}
+
+fn reverse(vector: [Int32; 2], matrix: num.Matrix[Int32, 2, 3]) -> [Int32; 3] {
+    vector * matrix
+}
+
+fn generic_project[let rows: UInt64, let columns: UInt64](matrix: num.Matrix[Int32, rows, columns], vector: [Int32; columns]) -> [Int32; rows] {
+    matrix * vector
+}
+
+fn generic_reverse[let rows: UInt64, let columns: UInt64](vector: [Int32; rows], matrix: num.Matrix[Int32, rows, columns]) -> [Int32; columns] {
+    vector * matrix
+}
+
+fn main() -> UInt8 {
+    let matrix = num.matrix([[Int32(1), 2, 3], [4, 5, 6]])
+    let column = project(matrix, [1, 2, 3])
+    let row = reverse([2, 3], matrix)
+    let generic_column = generic_project(matrix, [1, 2, 3])
+    let generic_row = generic_reverse([2, 3], matrix)
+    if generic_column[1] != 32 || generic_row[2] != 24 {
+        return 2
+    }
+    if column[0] != 14 || column[1] != 32 || row[0] != 14 || row[1] != 19 || row[2] != 24 {
+        return 1
+    }
+    0
+}

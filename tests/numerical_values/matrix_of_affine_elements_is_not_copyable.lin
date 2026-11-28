@@ -1,0 +1,11 @@
+import std.num
+
+struct Ticket { number: UInt8 }
+
+fn _duplicate(value: num.Matrix[Ticket, 1, 1]) -> num.Matrix[Ticket, 1, 1] {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    0
+}

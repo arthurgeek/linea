@@ -1,0 +1,16 @@
+import std.num
+
+fn bump(inout matrix: num.Matrix[Int32, 1, 2]) -> Int32 {
+    matrix[0, 0] = 40
+    1
+}
+
+fn main() -> UInt8 {
+    var matrix = num.matrix([[Int32(2), 3]])
+    let result = matrix * bump(&matrix)
+    if result[0, 0] == 40 {
+        0
+    } else {
+        1
+    }
+}

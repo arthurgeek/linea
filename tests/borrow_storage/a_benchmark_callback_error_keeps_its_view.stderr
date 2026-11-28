@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/borrow_storage/a_benchmark_callback_error_keeps_its_view.lin:11:5
+   |
+11 |     owner.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+12 |     match result {
+   |           ------ the observation is still used here

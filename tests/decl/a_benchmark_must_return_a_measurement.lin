@@ -1,0 +1,29 @@
+import std.bench
+import std.mem
+
+bench "an integer is not a measurement" -> Result[UInt64, mem.Oom] {
+    .Ok(bench.black_box(UInt64(7)))
+}
+
+struct Measurement { value: UInt64 }
+
+bench "a local nominal lookalike" -> Result[Measurement, mem.Oom] {
+    .Ok(.{ value = 11 })
+}
+
+@linear
+struct Unsettled {}
+
+impl Display for Unsettled {
+    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] {
+        "unsettled".fmt(&w)
+    }
+}
+
+bench "a linear failure needs settlement" -> Result[bench.Measurement, Unsettled] {
+    .Err(.{})
+}
+
+fn main() -> UInt8 {
+    0
+}

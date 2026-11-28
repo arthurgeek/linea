@@ -8,6 +8,9 @@ Builds on [0060](0060-a-library-declaration-is-named-through-the-prelude.md),
 [0179](0179-the-prelude-holds-the-core-vocabulary-and-yields-to-a-module.md)
 and [0188](0188-the-unit-value-is-written-as-its-type.md).
 
+Extended by [0313](0313-index-brackets-can-hold-a-tuple-key.md), which adds
+direct tuple keys inside index brackets.
+
 ## Context
 
 Adapters that pair values, functions with two results and loops over pairs

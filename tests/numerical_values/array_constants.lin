@@ -1,0 +1,18 @@
+let shifted: [Int16; 3] = [Int16(2), -6, 12] + 2
+
+let multiplied: [Int16; 3] = shifted * [Int16(3), 2, -4]
+
+let negative: [Int16; 3] = -shifted
+
+fn main() -> UInt8 {
+    if shifted[0] != 4 || shifted[1] != -4 || shifted[2] != 14 {
+        return 1
+    }
+    if multiplied[0] != 12 || multiplied[1] != -8 || multiplied[2] != -56 {
+        return 2
+    }
+    if negative[0] != -4 || negative[1] != 4 || negative[2] != -14 {
+        return 3
+    }
+    0
+}

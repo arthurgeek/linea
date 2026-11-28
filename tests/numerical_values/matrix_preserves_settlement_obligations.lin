@@ -1,0 +1,12 @@
+import std.num
+
+@linear
+struct Ticket { number: UInt8 }
+
+fn _discard(sink matrix: num.Matrix[Ticket, 1, 1]) {
+    let _ = matrix
+}
+
+fn main() -> UInt8 {
+    0
+}

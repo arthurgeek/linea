@@ -1,0 +1,35 @@
+// Apply ordinary scalar rules to fixed arrays and rearrange components.
+import std.io
+import std.num
+import std.testing
+
+fn advance(position: [Float32; 3], velocity: [Float32; 3], time: Float32) -> [Float32; 3] {
+    position + velocity * time
+}
+
+test "array arithmetic leaves its inputs available" {
+    let position = [Float32(2.0), 3.0, 4.0]
+    let moved = advance(position, [Float32(1.0), 2.0, 3.0], 2.0)
+    testing.assert_eq(position[0], 2.0, "position remains unchanged")?
+    testing.assert_eq(moved[0], 4.0, "movement uses the scalar time")?
+}
+
+fn main() -> Result[UInt8, io.IoError] {
+    var point = advance([2.0, 3.0, 4.0], [1.0, 2.0, 3.0], 2.0)
+    point.xy = point.yx
+    io.println("[{point.x}, {point.y}, {point.z}]")?
+    let translation = num.matrix([[1.0, 0.0, point.x], [0.0, 1.0, point.y]])
+    io.println("translation: {translation[0, 2]}, {translation[1, 2]}")?
+    let transformed = translation * [1.0, 2.0, 1.0]
+    io.println("transformed: {transformed.x}, {transformed.y}")?
+    .Ok(0)
+}
+
+test "matrix products contract dimensions instead of multiplying components" {
+    let a = num.matrix([[1.0, 2.0], [3.0, 4.0]])
+    let b = num.matrix([[2.0, 0.0], [0.0, 3.0]])
+    let product = a * b
+    let corresponding = num.hadamard(a, b)
+    testing.assert_eq(product[0, 1], 6.0, "matrix product sums inner components")?
+    testing.assert_eq(corresponding[0, 1], 0.0, "hadamard multiplies corresponding components")?
+}

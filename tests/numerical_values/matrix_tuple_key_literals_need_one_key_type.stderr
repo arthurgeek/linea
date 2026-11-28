@@ -1,0 +1,5 @@
+error[T-Infer]: `Grid` is indexed by more than one integer-tuple type, including `(UInt16, UInt16)` and `(UInt64, UInt64)`
+  --> tests/numerical_values/matrix_tuple_key_literals_need_one_key_type.lin:21:10
+   |
+21 |     value[0, 1]
+   |          ^^^^^^ write the key with the type you mean

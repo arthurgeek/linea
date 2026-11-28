@@ -135,12 +135,12 @@ pub fn forFile(
         // A tuple, unit or callable head has no name token: it is named as
         // written.
         const headed = ast.declTag(d) == .impl_;
-        // A test is named by its string, shown after `test` as it is written
+        // A case is named by its string, shown after its prefix as written
         // so the outline tells it from a function of the same words.
         const name = if (headed)
             try gpa.dupe(u8, ast.implHeadText(d))
-        else if (ast.declIsTest(d))
-            try std.fmt.allocPrint(gpa, "test {s}", .{ast.tokenText(ast.declName(d))})
+        else if (ast.declIsCase(d))
+            try std.fmt.allocPrint(gpa, "{s} {s}", .{ if (ast.declIsBenchmark(d)) "bench" else "test", ast.tokenText(ast.declName(d)) })
         else
             try gpa.dupe(u8, ast.tokenText(ast.declName(d)));
         symbol.* = .{
@@ -401,4 +401,17 @@ test "the outline is the file's declarations, not its module's" {
     // The first line of *that* file, not wherever it sits in the module's
     // token stream.
     try testing.expectEqual(@as(u32, 0), found[0].range.start.line);
+}
+
+test "benchmark declarations have named function symbols" {
+    const gpa = testing.allocator;
+    var checked = try analysis_mod.of(gpa, gpa, test_library.get(), &.{
+        .{ .path = "main.lin", .text = "bench \"measured work\" {}\n" },
+    }, "main.lin");
+    defer checked.deinit();
+    const found = try forFile(gpa, &checked, checked.fileNamed("main.lin").?, .@"utf-16");
+    defer free(gpa, found);
+    try testing.expectEqual(@as(usize, 1), found.len);
+    try testing.expectEqualStrings("bench \"measured work\"", found[0].name);
+    try testing.expectEqual(lsp.types.SymbolKind.Function, found[0].kind);
 }

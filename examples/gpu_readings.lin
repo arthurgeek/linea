@@ -23,13 +23,50 @@ test "calibration ignores negative readings" {
     testing.assert_eq(calibrate(8.0), 4.0, "positive readings should be halved")?
 }
 
-fn main() -> Result[UInt8, ReadingsError] {
+// The caller supplies discovery and computation explicitly. Opening fails before
+// invoking the callback, so applications can test unavailable hardware directly.
+fn compute_with_device[O: fn() -> Result[gpu.Device, gpu.GpuError], C: inout fn(device: gpu.Device) -> Result[Float32, gpu.GpuError]](open: O, inout compute: C) -> Result[Float32, gpu.GpuError] where carries() {
+    defer let device = open()?
+    &compute(device)
+}
+
+fn calibrated_total(device: gpu.Device) -> Result[Float32, gpu.GpuError] {
     let values = [Float32(-2.0), 4.0, 6.0, 8.0]
-    defer let device = gpu.Device.open()?
     defer let input = device.upload(values.as_slice(), [UInt64(4)])?
     defer let readings = input.map(calibrate)?
     defer let total = readings.reduce(Float32(0.0), add)?
     defer let host = gpu.download(total)?
-    println("Calibrated total: {host[0]}")?
+    .Ok(host[0])
+}
+
+fn main() -> Result[UInt8, ReadingsError] {
+    let total = compute_with_device(gpu.Device.open, calibrated_total)?
+    println("Calibrated total: {total}")?
     .Ok(0)
+}
+
+test "GPU computation returns the expected values" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    let total = calibrated_total(device).unwrap()
+    testing.assert_eq(total, Float32(9.0), "GPU calibrated total")?
+}
+
+test "unavailable opener never invokes GPU computation" {
+    var calls = UInt64(0)
+    let result = compute_with_device(
+        || -> Result[gpu.Device, gpu.GpuError] { .Err(.Unavailable) },
+        inout [inout calls] |_device| -> Result[Float32, gpu.GpuError] {
+            calls += 1
+            .Ok(0.0)
+        },
+    )
+    let want: Result[Float32, gpu.GpuError] = .Err(.Unavailable)
+    testing.assert_eq(result, want, "unavailable capability was lost")?
+    testing.assert_eq(calls, UInt64(0), "computation ran without a device")?
 }

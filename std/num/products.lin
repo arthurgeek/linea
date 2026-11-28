@@ -1,0 +1,25 @@
+// Combine lanes in index order, starting at the element type's zero.
+// Each multiplication and addition uses the element's ordinary contract.
+pub fn dot[T: Additive + Multiplicative + Copyable, let length: UInt64](left: [T; length], right: [T; length]) -> T where carries(left, right) {
+    var result = T.zero()
+    for index in 0..length {
+        add_product(&result, left[index], right[index])
+    }
+    result
+}
+
+// Multiply corresponding matrix components without contracting dimensions.
+pub fn hadamard[T: Multiplicative + Copyable, let rows: UInt64, let columns: UInt64](left: Matrix[T, rows, columns], right: Matrix[T, rows, columns]) -> Matrix[T, rows, columns] where carries(left, right) {
+    var result = copy(left)
+    for row in 0..rows {
+        for column in 0..columns {
+            result.data[row][column] = copy(left.data[row][column]).multiply(copy(right.data[row][column]))
+        }
+    }
+    result
+}
+
+// Settle and replace one accumulator value through an exclusive lend.
+fn add_product[T: Additive + Multiplicative + Copyable](inout result: T, left: T, right: T) where retains(result: left, right) {
+    result = result.add(copy(left).multiply(copy(right)))
+}

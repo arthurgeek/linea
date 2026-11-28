@@ -1,0 +1,6 @@
+error[T-Operands]: expected `num.Matrix[Int16, 2, 3]`, found `num.Matrix[Int16, 2, 2]`
+ --> tests/numerical_values/matrix_compound_cannot_change_columns.lin:5:5
+  |
+5 |     matrix *= num.matrix([[Int16(1), 2], [0, 1], [1, 0]])
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `num.Matrix[Int16, 2, 3]`, found `num.Matrix[Int16, 2, 2]`
+  |     ------ expected because of this operand

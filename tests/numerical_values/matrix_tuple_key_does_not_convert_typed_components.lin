@@ -1,0 +1,6 @@
+import std.num
+
+fn main() -> UInt8 {
+    let value = num.matrix([[UInt8(1), 2], [3, 4]])
+    value[UInt32(0), UInt64(1)]
+}

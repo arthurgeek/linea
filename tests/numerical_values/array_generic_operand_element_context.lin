@@ -1,0 +1,11 @@
+fn zeros[T: Integer]() -> [T; 2] {
+    [0, 0]
+}
+
+fn main() -> UInt8 {
+    let shifted = Int16(2) + zeros()
+    if shifted[0] != 2 || shifted[1] != 2 {
+        return 1
+    }
+    0
+}

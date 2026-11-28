@@ -29,7 +29,13 @@ pub const Pending = struct {
     /// Which rule the value answers to: a literal as written, a negation, or
     /// the result of an arithmetic operation. A float literal carries no
     /// folded value: its text is rounded again at the type it finally has.
-    rule: enum { literal, negation, operation, float_literal },
+    rule: union(enum) {
+        literal,
+        negation,
+        operation,
+        array_operation: struct { lane: usize, quotient: bool },
+        float_literal,
+    },
 };
 
 /// Which types a variable may settle on. A literal's variable must settle on a
@@ -72,7 +78,7 @@ pub const OpenTypes = struct {
     named: std.ArrayList(TypeId) = .empty,
     origin_of: std.ArrayList(?Origin) = .empty,
     body_created: std.ArrayList(u32) = .empty,
-    /// One entry per open literal, in the order the literals were checked.
+    /// Folded results in the order they were checked.
     pending: std.ArrayList(Pending) = .empty,
 
     pub fn deinit(self: *OpenTypes, gpa: Allocator) void {

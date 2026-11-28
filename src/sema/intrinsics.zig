@@ -325,6 +325,7 @@ pub const RawAccesses = struct {
     /// `mem.array_filled`, the `[T; n]` holding `n` copies of a copyable
     /// value, which lowering writes with a counted loop.
     array_filled: DeclId = DeclId.none,
+    benchmark_barrier: DeclId = DeclId.none,
     take: DeclId = DeclId.none,
     put: DeclId = DeclId.none,
     place: DeclId = DeclId.none,
@@ -486,6 +487,7 @@ pub const RawAccesses = struct {
             .argument_span = rawAccessDecl(program, ast, "argument_span", 1),
             .environment_span = rawAccessDecl(program, ast, "environment_span", 1),
             .stride = rawAccessDecl(program, ast, "slot_stride", 1),
+            .benchmark_barrier = privateExternIn(program, ast, "bench", "benchmark_barrier", 1),
             .array_filled = rawAccessDecl(program, ast, "array_filled", 1),
             .take = rawAccessDecl(program, ast, "slot_take", 2),
             .put = rawAccessDecl(program, ast, "slot_put", 3),
@@ -821,7 +823,7 @@ pub const RawAccesses = struct {
     };
 
     pub fn typed(self: RawAccesses, d: DeclId) bool {
-        return d != DeclId.none and (self.selectsGpu(d) or d == self.stride or d == self.array_filled or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
+        return d != DeclId.none and (self.selectsGpu(d) or d == self.stride or d == self.array_filled or d == self.benchmark_barrier or d == self.take or d == self.put or d == self.place or d == self.span or d == self.buffer_span or d == self.subspan or d == self.slice_place or d == self.view_place or d == self.address_in or d == self.owned_address_in or d == self.slice_address or d == self.number_address or self.processText(d) != null or self.erasure(d));
     }
 
     /// The runtime declarations a process-text span reads: how many entries
@@ -890,7 +892,7 @@ pub fn memberOf(program: *const ExpandedProgram, ast: *const Ast, module_name: [
 
 /// The library struct `name` of `module_name`. An implementation for a type
 /// is named by its head, so the first declaration with the name may be one.
-fn structIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
+pub fn structIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
     const declared = program.libraryDeclIn(module_name, name) orelse return .none;
     for (program.declsOf(program.moduleOf(declared))) |d| {
         const named = ast.declName(d);
@@ -901,7 +903,7 @@ fn structIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []con
 }
 
 /// The library function `name` of `module_name` that is no type's member.
-fn moduleFunction(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
+pub fn moduleFunction(program: *const ExpandedProgram, ast: *const Ast, module_name: []const u8, name: []const u8) DeclId {
     const declared = program.libraryDeclIn(module_name, name) orelse return .none;
     for (program.declsOf(program.moduleOf(declared))) |d| {
         const named = ast.declName(d);
@@ -924,7 +926,11 @@ fn testIn(program: *const ExpandedProgram, ast: *const Ast, module_name: []const
 }
 
 fn rawAccessDecl(program: *const ExpandedProgram, ast: *const Ast, name: []const u8, arity: usize) DeclId {
-    const d = program.libraryDeclIn("mem", name) orelse return DeclId.none;
+    return privateExternIn(program, ast, "mem", name, arity);
+}
+
+fn privateExternIn(program: *const ExpandedProgram, ast: *const Ast, module: []const u8, name: []const u8, arity: usize) DeclId {
+    const d = program.libraryDeclIn(module, name) orelse return DeclId.none;
     if (!ast.declIsExtern(d) or ast.declParams(d).len != arity) return DeclId.none;
     return d;
 }

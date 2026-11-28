@@ -1,0 +1,13 @@
+fn bump(inout values: [Int32; 2]) -> Int32 {
+    values[0] = 40
+    1
+}
+
+fn add_first(values: [Int32; 2], amount: Int32) -> Int32 {
+    values[0] + amount
+}
+
+fn main() -> UInt8 {
+    var values = [Int32(2), 3]
+    UInt8(add_first(values, bump(&values)))
+}

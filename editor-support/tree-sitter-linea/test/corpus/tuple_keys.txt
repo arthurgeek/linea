@@ -1,0 +1,26 @@
+==================
+Tuple keys in index brackets
+==================
+
+fn main() {
+    let cell = grid[row(), column()]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (let_statement
+        (identifier)
+        (index_expression
+          (identifier)
+          (tuple_expression
+            (call_expression
+              (identifier)
+              (argument_list))
+            (call_expression
+              (identifier)
+              (argument_list))))))))

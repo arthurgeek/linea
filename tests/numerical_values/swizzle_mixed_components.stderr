@@ -1,0 +1,5 @@
+error[T-UnknownField]: `[Int32; 4]` has no field `xr`
+ --> tests/numerical_values/swizzle_mixed_components.lin:3:16
+  |
+3 |     let pair = v.xr
+  |                ^^^^ not a field of this value

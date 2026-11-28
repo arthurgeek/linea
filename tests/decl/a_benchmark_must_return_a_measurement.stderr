@@ -1,0 +1,15 @@
+error[S-Test]: a benchmark answers `Result[bench.Measurement, E]`
+ --> tests/decl/a_benchmark_must_return_a_measurement.lin:4:7
+  |
+4 | bench "an integer is not a measurement" -> Result[UInt64, mem.Oom] {
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ return the measurement from `bench.iter` or `bench.try_iter`
+error[S-Test]: a benchmark answers `Result[bench.Measurement, E]`
+  --> tests/decl/a_benchmark_must_return_a_measurement.lin:10:7
+   |
+10 | bench "a local nominal lookalike" -> Result[Measurement, mem.Oom] {
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^ return the measurement from `bench.iter` or `bench.try_iter`
+error[T-Bound]: a benchmark's linear error must implement `Release`
+  --> tests/decl/a_benchmark_must_return_a_measurement.lin:23:7
+   |
+23 | bench "a linear failure needs settlement" -> Result[bench.Measurement, Unsettled] {
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the runner releases this error after reporting it

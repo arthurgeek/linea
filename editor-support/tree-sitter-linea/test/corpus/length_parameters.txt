@@ -91,11 +91,12 @@ fn make[let n: UInt64](items: Ring[2 + 2]) -> Ring[n] {
     (block
       (expression_statement
         (call_expression
-          (identifier)
-          (type_arguments
-            (type_identifier)
-            (binary_expression
-              (integer_literal)
-              (integer_literal)))
+          (instantiation_expression
+            (identifier)
+            (type_arguments
+              (type_identifier)
+              (binary_expression
+                (integer_literal)
+                (integer_literal))))
           (argument_list
             (identifier)))))))

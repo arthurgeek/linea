@@ -1,0 +1,13 @@
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let values = [Int16(1), 2]
+    let shifted = values + identity(1 + 2)
+    let widened = Int16(1) + identity([1, 2] + 1)
+    if shifted[0] != 4 || shifted[1] != 5 || widened[0] != 3 || widened[1] != 4 {
+        return 1
+    }
+    0
+}

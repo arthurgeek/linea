@@ -1,0 +1,8 @@
+import std.num
+
+fn main() -> UInt8 {
+    var value = UInt8(5)
+    let matrix = num.matrix([[borrow value]])
+    value = 7
+    *matrix[0, 0]
+}

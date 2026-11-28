@@ -1,0 +1,7 @@
+import std.bench
+//         ^ variable
+bench "measured work" {
+// <- keyword.function
+//    ^ string
+    bench.black_box(1)
+}

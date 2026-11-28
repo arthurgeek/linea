@@ -1,0 +1,20 @@
+fn first(values: borrow [Int32; 4]) -> borrow Int32 where carries(values) {
+    borrow values.x
+}
+
+fn identity(values: borrow [Int32; 4]) -> borrow [Int32; 4] where carries(values) {
+    copy(values)
+}
+
+fn main() -> UInt8 {
+    let values = [Int32(7), 2, 3, 4]
+    let seen = first(borrow values)
+    if *seen != 7 {
+        return 1
+    }
+    let selected = borrow identity(borrow values).x
+    if *selected != 7 {
+        return 2
+    }
+    0
+}

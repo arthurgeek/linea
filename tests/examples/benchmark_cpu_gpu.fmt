@@ -1,0 +1,299 @@
+import std.bench
+import std.gpu
+import std.io
+import std.session
+import std.task
+import std.mem
+import std.testing
+import std.tensor
+
+use session.Chan
+use session.Send
+use session.End
+
+test "CPU map retains every raw result bit" {
+    let values = [Float32(-2.0), -0.5, 0.0, 0.5, 2.0]
+    // Reference words from independently rounding each arithmetic step to f32.
+    let expected: [UInt32; 5] = [3097652694, 3088853574, 0, 949631515, 1073741824]
+    defer let input = tensor.from_slice(values.as_slice(), [UInt64(5)]).unwrap()
+    defer let output = evolve(input).unwrap()
+    for index in UInt64(0)..5 {
+        testing.assert_eq(output.values()[index].to_bits(), expected[index], "CPU map changed a reference result bit")?
+    }
+    testing.assert_eq(evolve_value(0.0).to_bits(), Float32(0.0).to_bits(), "zero is a fixed point")?
+    testing.assert_eq(evolve_value(2.0).to_bits(), Float32(2.0).to_bits(), "two is a fixed point")?
+}
+
+@derive(Display, Release, From[gpu.GpuError], From[tensor.CpuError], From[mem.Oom], From[io.IoError], From[task.PrepareError], From[bench.SampleError[gpu.GpuError]], From[bench.SampleError[tensor.CpuError]])
+enum BenchError {
+    Gpu(gpu.GpuError),
+    Cpu(tensor.CpuError),
+    Allocation(mem.Oom),
+    GpuSample(bench.SampleError[gpu.GpuError]),
+    CpuSample(bench.SampleError[tensor.CpuError]),
+    Execution(io.IoError),
+    Task(task.PrepareError),
+    Mismatch,
+}
+
+// Each stage rounds its three products and sum separately in Float32.
+fn stage(value: Float32) -> Float32 {
+    value * 0.75 + (value * value) * 0.125
+}
+
+fn four_stages(value: Float32) -> Float32 {
+    stage(stage(stage(stage(value))))
+}
+
+// A bounded nonlinear recurrence: 32 dependent stages per element.
+fn evolve_value(initial: Float32) -> Float32 {
+    let first = four_stages(four_stages(initial))
+    let second = four_stages(four_stages(first))
+    let third = four_stages(four_stages(second))
+    four_stages(four_stages(third))
+}
+
+// One ordinary generic algorithm, instantiated with either storage type.
+fn evolve[S: tensor.Storage[Float32]](input: tensor.Vector[Float32, S]) -> Result[tensor.Vector[Float32, S], S.Error] where carries(.Ok: input) {
+    input.map(evolve_value)
+}
+
+// 65,536 elements = 256 KiB of input and 256 KiB of output per iteration.
+fn inputs() -> Result[mem.Vec[Float32], mem.Oom] {
+    var values: mem.Vec[Float32] = mem.Vec.new()
+    match &values.reserve(65536) {
+        Err(error) => {
+            values.release()
+            return .Err(error)
+        },
+        Ok(_) => (),
+    }
+    for index in UInt64(0)..65536 {
+        &values.push(Float32(index % 257) / 128.0 - 1.0).unwrap()
+    }
+    .Ok(values)
+}
+
+fn verify_cpu(input: tensor.Vector[Float32, tensor.Cpu], values: mem.Slice[Float32]) -> Result[(), BenchError] {
+    defer let output = evolve(input)?
+    for index in UInt64(0)..values.length() {
+        if output.values()[index].to_bits() != evolve_value(values[index]).to_bits() {
+            return .Err(.Mismatch)
+        }
+    }
+    .Ok(())
+}
+
+fn verify_gpu(input: tensor.Vector[Float32, gpu.Storage], values: mem.Slice[Float32]) -> Result[(), BenchError] {
+    defer let cpu = tensor.from_slice(values, [values.length()])?
+    defer let expected = evolve(cpu)?
+    defer let output = evolve(input)?
+    defer let actual = gpu.download(output)?
+    for index in UInt64(0)..values.length() {
+        if actual[index].to_bits() != expected.values()[index].to_bits() {
+            return .Err(.Mismatch)
+        }
+    }
+    .Ok(())
+}
+
+test "GPU map matches every reference result bit" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "opening GPU failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    defer let values = inputs().unwrap()
+    defer let input = device.upload(values.as_slice(), [values.length()]).unwrap()
+    verify_gpu(input, values.as_slice()).unwrap()
+}
+
+bench "CPU sequential 65536 x 32 stages" -> Result[bench.Measurement, BenchError] {
+    defer let values = bench.black_box(inputs()?)
+    defer let input = tensor.from_slice(values.as_slice(), [values.length()])?
+    verify_cpu(input, values.as_slice())?
+    .Ok(
+        bench.try_iter(
+            [input] |iteration| -> Result[UInt32, tensor.CpuError] {
+                defer let output = bench.black_box(evolve(input)?)
+                .Ok(output.values()[iteration % output.values().length()].to_bits())
+            },
+        )?,
+    )
+}
+
+bench "GPU resident 65536 x 32 stages" -> Result[bench.Measurement, BenchError] {
+    defer let values = bench.black_box(inputs()?)
+    defer let device = gpu.Device.open()?
+    defer let input = device.upload(values.as_slice(), [values.length()])?
+    verify_gpu(input, values.as_slice())?
+    .Ok(
+        bench.try_iter(
+            [input] |_iteration| -> Result[(), gpu.GpuError] {
+                // map returns only after completion; release belongs to this timing.
+                defer let output = bench.black_box(evolve(input)?)
+                .Ok(())
+            },
+        )?,
+    )
+}
+
+bench "GPU upload compute download 65536 x 32 stages" -> Result[bench.Measurement, BenchError] {
+    defer let values = bench.black_box(inputs()?)
+    defer let device = gpu.Device.open()?
+    {
+        defer let input = device.upload(values.as_slice(), [values.length()])?
+        verify_gpu(input, values.as_slice())?
+    }
+    .Ok(
+        bench.try_iter(
+            [device, values] |iteration| -> Result[UInt32, gpu.GpuError] {
+                defer let input = device.upload(bench.black_box(values.as_slice()), [values.length()])?
+                defer let output = evolve(input)?
+                defer let host = bench.black_box(gpu.download(output)?)
+                .Ok(host[iteration % host.length()].to_bits())
+            },
+        )?,
+    )
+}
+
+test "CPU chunk policies preserve inputs order and every result bit" {
+    defer let values = inputs().unwrap()
+    for policy in [task.Policy.Sequential, .Threads(4)] {
+        let jobs = chunk_inputs(values.as_slice()).unwrap()
+        let first = task.map(copy(policy), jobs, checked_system_chunk)
+        verify_chunks(first, values.as_slice()).unwrap()
+        defer let results = run_chunks(policy, first)
+        verify_chunks(results, values.as_slice()).unwrap()
+    }
+    verify_fiber_chunks().unwrap()
+}
+
+@derive(Release)
+struct Chunk {
+    index: UInt64,
+    input: [Float32; 1024],
+    output: [Float32; 1024],
+}
+
+fn chunk_inputs(values: mem.Slice[Float32]) -> Result[mem.Vec[Chunk], mem.Oom] {
+    var chunks: mem.Vec[Chunk] = mem.Vec.new()
+    match &chunks.reserve(64) {
+        Err(error) => {
+            chunks.release()
+            return .Err(error)
+        },
+        Ok(_) => (),
+    }
+    for index in UInt64(0)..64 {
+        var chunk = Chunk { index, input = mem.filled(Float32(0.0)), output = mem.filled(Float32(0.0)) }
+        for lane in UInt64(0)..1024 {
+            chunk.input[lane] = values[index * 1024 + lane]
+        }
+        &chunks.push(chunk).unwrap()
+    }
+    .Ok(chunks)
+}
+
+fn evolve_chunk(sink chunk: Chunk) -> Chunk {
+    var result = chunk
+    for lane in UInt64(0)..1024 {
+        result.output[lane] = evolve_value(result.input[lane])
+    }
+    result
+}
+
+fn run_chunks(sink policy: task.Policy, sink chunks: mem.Vec[Chunk]) -> mem.Vec[Chunk] {
+    task.map(policy, chunks, evolve_chunk)
+}
+
+fn verify_chunks(chunks: mem.Vec[Chunk], values: mem.Slice[Float32]) -> Result[(), BenchError] {
+    defer let cpu = tensor.from_slice(values, [values.length()])?
+    defer let expected = evolve(cpu)?
+    if chunks.length() != 64 {
+        return .Err(.Mismatch)
+    }
+    for index in UInt64(0)..64 {
+        if chunks[index].index != index {
+            return .Err(.Mismatch)
+        }
+        for lane in UInt64(0)..1024 {
+            let flat = index * 1024 + lane
+            if chunks[index].input[lane].to_bits() != values[flat].to_bits() || chunks[index].output[lane].to_bits() != expected.values()[flat].to_bits() {
+                return .Err(.Mismatch)
+            }
+        }
+    }
+    .Ok(())
+}
+
+fn checked_system_chunk(sink chunk: Chunk) -> Chunk {
+    testing.assert(task.current_carrier().is_none(), "system chunk ran as a fiber").unwrap()
+    evolve_chunk(chunk)
+}
+
+fn checked_fiber_chunk(sink chunk: Chunk) -> Chunk {
+    testing.assert(task.current_carrier().is_some(), "chunk did not run as a fiber").unwrap()
+    evolve_chunk(chunk)
+}
+
+fn verify_fiber_chunks() -> Result[(), BenchError] {
+    let execution = io.Loop.open(carriers: 4)?
+    let body = sink [] |sink me: Chan[Send[Result[(), BenchError], End]]| {
+        let result = check_fiber_chunks()
+        me.send(result).close()
+    }
+    let (result, done) = task.start(body, on: execution)?.recv()
+    done.close()
+    result
+}
+
+fn check_fiber_chunks() -> Result[(), BenchError] {
+    defer let values = inputs()?
+    let jobs = chunk_inputs(values.as_slice())?
+    let first = task.map(.Threads(4), jobs, checked_fiber_chunk)
+    match verify_chunks(first, values.as_slice()) {
+        Err(error) => {
+            first.release()
+            return .Err(error)
+        },
+        Ok(_) => (),
+    }
+    defer let results = run_chunks(.Threads(4), first)
+    verify_chunks(results, values.as_slice())
+}
+
+fn measure_chunked(policy: task.Policy) -> Result[bench.Measurement, BenchError] {
+    defer let values = bench.black_box(inputs()?)
+    defer var chunks = run_chunks(copy(policy), chunk_inputs(values.as_slice())?)
+    verify_chunks(chunks, values.as_slice())?
+    .Ok(
+        bench.iter(
+            inout [inout chunks, policy] |iteration| {
+                let previous = chunks
+                chunks = bench.black_box(run_chunks(copy(policy), previous))
+                chunks[iteration % 64].output[iteration % 1024].to_bits()
+            },
+        )?,
+    )
+}
+
+bench "CPU chunks sequential 64 x 1024 x 32 stages" -> Result[bench.Measurement, BenchError] {
+    measure_chunked(.Sequential)
+}
+
+bench "CPU chunks 4 OS threads 64 x 1024 x 32 stages" -> Result[bench.Measurement, BenchError] {
+    measure_chunked(.Threads(4))
+}
+
+bench "CPU chunks 4 fibers 4 carriers 64 x 1024 x 32 stages" -> Result[bench.Measurement, BenchError] {
+    let execution = io.Loop.open(carriers: 4)?
+    let body = sink [] |sink me: Chan[Send[Result[bench.Measurement, BenchError], End]]| {
+        me.send(measure_chunked(.Threads(4))).close()
+    }
+    let (result, done) = task.start(body, on: execution)?.recv()
+    done.close()
+    result
+}

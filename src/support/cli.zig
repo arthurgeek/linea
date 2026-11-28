@@ -74,6 +74,7 @@ pub const Tag = enum {
     dump_mlir,
     build,
     @"test",
+    bench,
     fmt,
     lsp,
     init,

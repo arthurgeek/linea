@@ -1775,7 +1775,7 @@ const Printer = struct {
         // A test is named by the string after `test` and takes no parameter
         // list. One the parser refused for any of that never reaches here,
         // since a file it refused is not formatted.
-        const named_test = self.ast.declIsTest(d) and self.ast.tokenTag(self.ast.declName(d)) == .string_literal;
+        const named_test = self.ast.declIsCase(d) and self.ast.tokenTag(self.ast.declName(d)) == .string_literal;
         if (named_test) {
             try self.write(self.ast.tokenText(self.ast.declName(d)));
         } else {
@@ -2009,8 +2009,8 @@ const Printer = struct {
     /// written to expect a trap. Reprinted wherever they were written,
     /// including on forms the language refuses, because the tokens still exist.
     fn writeIsTest(self: *Printer, d: DeclId) Error!void {
-        if (!self.ast.declIsTest(d)) return;
-        try self.write("test ");
+        if (!self.ast.declIsCase(d)) return;
+        try self.write(if (self.ast.declIsBenchmark(d)) "bench " else "test ");
         if (self.ast.declExpectsTrap(d)) try self.write("trap ");
     }
 
@@ -2784,8 +2784,9 @@ const Printer = struct {
             .array, .tuple => {},
         }
 
-        const parens = kind == .call or kind == .tuple;
-        const brackets = kind == .array;
+        const tuple_key = kind == .tuple and self.ast.tokenTag(self.ast.exprMain(e)) == .l_bracket;
+        const parens = kind == .call or (kind == .tuple and !tuple_key);
+        const brackets = kind == .array or tuple_key;
         // A literal's `..base` is one more element, written after its fields.
         const base = if (kind == .literal) self.ast.structLiteralBase(e) else null;
         const count = (c.args.len + stride - 1) / stride + @intFromBool(receiver != ExprId.none) + @intFromBool(base != null);
@@ -3179,6 +3180,8 @@ const Printer = struct {
                 try self.writeExpr(b.lhs);
                 if (self.ast.exprTag(b.rhs) == .err) {
                     try self.writeTypeList(self.ast.typeArgs(self.ast.bracketTypes(e).?), self.ast.exprMain(e), true);
+                } else if (self.ast.exprTag(b.rhs) == .tuple_literal and self.ast.tokenTag(self.ast.exprMain(b.rhs)) == .l_bracket) {
+                    try self.writeExpr(b.rhs);
                 } else {
                     try self.write("[");
                     try self.writeExpr(b.rhs);
@@ -6040,4 +6043,35 @@ test "attached derive environment keeps both equality sides" {
         \\struct Product[I: Source] { value: I.Item }
         \\
     );
+}
+
+test "benchmark declarations survive formatting twice" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const written =
+        \\import std.bench
+        \\
+        \\// Setup is outside the measured callback.
+        \\bench "sum" {
+        \\    let input = 42
+        \\    bench.iter(input)
+        \\}
+        \\
+        \\bench "custom" -> Result[bench.Measurement, Failure] {
+        \\    bench.iter(work)
+        \\}
+        \\
+        \\impl Value {
+        \\    bench "member" {
+        \\        bench.iter(work)
+        \\    }
+        \\}
+        \\
+        \\trait Marker {
+        \\    bench "trait" {}
+        \\}
+        \\
+    ;
+    try check(arena.allocator(), written, written);
+    _ = try checkProperties(arena.allocator(), written);
 }

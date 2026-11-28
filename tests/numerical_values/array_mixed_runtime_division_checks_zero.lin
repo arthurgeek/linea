@@ -1,0 +1,8 @@
+fn divisor() -> Int16 {
+    0
+}
+
+fn main() -> UInt8 {
+    let result = [Int16(8), 6] / divisor()
+    UInt8(result[0])
+}

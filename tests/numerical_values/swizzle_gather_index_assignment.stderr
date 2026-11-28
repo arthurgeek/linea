@@ -1,0 +1,5 @@
+error[T-Lend]: this indexed value is not an assignable place
+ --> tests/numerical_values/swizzle_gather_index_assignment.lin:3:5
+  |
+3 |     values.yx[0] = 9
+  |     ^^^^^^^^^^^^ bind the array to a mutable variable before assigning its elements

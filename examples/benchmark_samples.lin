@@ -1,0 +1,36 @@
+// Time 10,000 integer squares per batch. Each number below includes the loop,
+// result observation and checksum update. One warmup batch precedes the three
+// batches reported in chronological order.
+import std.bench
+import std.io
+import std.mem
+
+@derive(Display, Release, From[io.IoError], From[mem.Oom])
+enum Error {
+    Output(io.IoError),
+    Allocation(mem.Oom),
+}
+
+fn main() -> Result[UInt8, Error] {
+    let schedule = bench.Schedule.new(warmups: 1, repetitions: 10000, samples: 3, cases: 1).unwrap()
+    defer var samples: mem.Vec[UInt64] = mem.Vec.new()
+    var checksum: UInt64 = 0
+    for round in 0..schedule.rounds() {
+        let elapsed = schedule.measure(
+            inout [inout checksum] |iteration| {
+                checksum += bench.black_box(iteration * iteration)
+            },
+        )
+        let _index = schedule.sample_index(round) else {
+            continue
+        }
+        &samples.push(elapsed).settled()?
+    }
+    io.println("{samples.length()} samples, {schedule.repetitions()} iterations per batch, checksum {checksum}")?
+    for index in 0..samples.length() {
+        io.println("sample {index}: {samples[index]} ns per batch")?
+    }
+    let stats = bench.summarize(&samples).unwrap()
+    io.println("min {stats.minimum} ns, median {stats.median} ns, p90 {stats.p90} ns per batch")?
+    .Ok(0)
+}

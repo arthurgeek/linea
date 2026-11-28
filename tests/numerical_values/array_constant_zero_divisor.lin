@@ -1,0 +1,5 @@
+let result = [Int16(2), 3] / [Int16(1), 0]
+
+fn main() -> UInt8 {
+    UInt8(result[0])
+}

@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    let words = ["red", "green"]
+    let selected = words.x
+    UInt8(selected.length())
+}

@@ -1,0 +1,58 @@
+// Reuse ordinary fixed-value arithmetic inside a resident tensor map.
+import std.gpu
+import std.io
+import std.num
+import std.testing
+
+@derive(Display, Release, From[gpu.GpuError], From[io.IoError])
+enum ExampleError {
+    Gpu(gpu.GpuError),
+    Output(io.IoError),
+}
+
+fn project(point: [Float32; 2]) -> [Float32; 2] {
+    let transform: num.Matrix[Float32, 2, 2] = num.matrix([[2.0, 1.0], [-1.0, 3.0]])
+    transform * point
+}
+
+fn calibrate(value: Float32) -> Float32 {
+    let projected = project([value, 1.0])
+    projected.x + projected.y
+}
+
+test "calibration uses the same ordinary CPU function" {
+    testing.assert_eq(calibrate(-2.0), 2.0, "negative input")?
+    testing.assert_eq(calibrate(2.0), 6.0, "positive input")?
+}
+
+fn main() -> Result[UInt8, ExampleError] {
+    let values: [Float32; 3] = [-2.0, 0.0, 2.0]
+    defer let device = gpu.Device.open()?
+    defer let input = device.upload(values.as_slice(), [UInt64(3)])?
+    defer let result = input.map(calibrate)?
+    defer let host = gpu.download(result)?
+    for index in UInt64(0)..3 {
+        if host[index].to_bits() != calibrate(values[index]).to_bits() {
+            return .Ok(1)
+        }
+    }
+    io.println("{host[0]}, {host[1]}, {host[2]}")?
+    .Ok(0)
+}
+
+test "GPU computation returns the expected values" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    let values: [Float32; 3] = [-2.0, 0.0, 2.0]
+    defer let input = device.upload(values.as_slice(), [UInt64(3)]).unwrap()
+    defer let result = input.map(calibrate).unwrap()
+    defer let host = gpu.download(result).unwrap()
+    for index in UInt64(0)..3 {
+        testing.assert_eq(host[index].to_bits(), calibrate(values[index]).to_bits(), "GPU and CPU calibration disagree")?
+    }
+}

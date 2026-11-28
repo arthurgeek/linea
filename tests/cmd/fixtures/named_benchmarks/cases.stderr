@@ -1,0 +1,5 @@
+error[S-Entry]: a program declares exactly one `main`
+ --> tests/cmd/fixtures/named_benchmarks/cases.lin:1:12
+  |
+1 | import std.bench
+  |            ^^^^^ found 0
