@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/gpu/arena_reset_live_tensor.lin:8:5
+  |
+8 |     &arena.reset().unwrap()
+  |     ^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+9 |     let _dimensions = value.dimensions()
+  |                       ----- the observation is still used here

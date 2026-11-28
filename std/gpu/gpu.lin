@@ -2,6 +2,8 @@ import std.mem
 import std.tensor
 import std.testing
 
+use tensor.AllocationDomain
+
 @(copyable, derive(Equatable, Equivalent, Display, Debug, Release))
 pub enum GpuError {
     Unavailable,
@@ -46,17 +48,7 @@ impl Device {
     }
 
     pub fn upload[let rank: UInt64](self: Self, values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[tensor.Tensor[Float32, rank, Storage], GpuError] {
-        let count = tensor.element_count(shape) else {
-            return .Err(.Shape)
-        }
-        if count != values.length() || count > UInt64.max / 4 {
-            return .Err(.Shape)
-        }
-        let data = match mem._gpu_upload(self.resource, values) {
-            Ok(buffer) => Storage { buffer },
-            Err(code) => return .Err(runtime_error(code)),
-        }
-        tensor.Tensor.from_storage(data, shape)
+        tensor.from_slice_in(self, values, shape)
     }
 
     test "upload preserves raw bits and checks zero dimensions before overflow" {
@@ -80,22 +72,7 @@ impl Device {
     }
 
     pub fn matrix[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[tensor.Tensor[Float32, 2, Storage], GpuError] {
-        let count = tensor.element_count([rows, columns]) else {
-            return .Err(.Shape)
-        }
-        if count > UInt64.max / 4 {
-            return .Err(.Shape)
-        }
-        defer var flat: mem.Vec[Float32, mem.SystemAllocator] = mem.Vec.new()
-        match &flat.reserve(count) { Ok(_) => {}, Err(_) => return .Err(.Allocation) }
-        if count != 0 {
-            for row in UInt64(0)..rows {
-                for column in UInt64(0)..columns {
-                    &flat.push(values[row][column]).unwrap()
-                }
-            }
-        }
-        self.upload(flat.as_slice(), [rows, columns])
+        tensor.matrix_in(self, values)
     }
 
     test "matrix dimensions follow nested array lengths" {
@@ -119,6 +96,30 @@ impl Device {
     }
 }
 
+impl tensor.AllocationDomain for Device {
+    type Store = Storage
+
+    fn copy_slice(self: Self, values: mem.Slice[Float32]) -> Result[Storage, GpuError] where carries() {
+        if values.length() > UInt64.max / 4 {
+            return .Err(.Shape)
+        }
+        match mem._gpu_upload(self.resource, values) {
+            Ok(buffer) => .Ok(.{ buffer }),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+
+    fn copy_rows[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[Storage, GpuError] where carries() {
+        if tensor.float_count([rows, columns]) == .None {
+            return .Err(.Shape)
+        }
+        match self.resource._upload_rows(values) {
+            Ok(buffer) => .Ok(.{ buffer }),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+}
+
 impl Release for Device {
     fn release(sink self: Self) {
         let Device { resource } = self
@@ -126,27 +127,150 @@ impl Release for Device {
     }
 }
 
-// Storage owns a device allocation; shape and operations belong to std.tensor.
+// Arenas retain their device and own their descriptors until reset or release.
 @(opaque, linear)
-struct Storage {
-    buffer: mem.GpuBuffer,
+struct Arena {
+    resource: mem.GpuArena,
 }
 
-impl Release for Storage {
+impl Arena {
+    pub fn open(device: Device, byte_limit: UInt64) -> Result[Self, GpuError] {
+        match mem.GpuArena.open(device.resource, byte_limit) {
+            Ok(resource) => .Ok(.{ resource }),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+
+    test "an arena opens without committing bytes and rejects a zero budget reservation" {
+        defer let device = match Device.open() {
+            Ok(device) => device,
+            Err(error) => {
+                testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+                return .Err(testing.skip("GPU device unavailable"))
+            },
+        }
+        defer let arena = Arena.open(device, 0).unwrap()
+        match tensor.matrix_in(arena.handle(), [[Float32(1.0)]]) {
+            Err(error) => testing.assert_eq(error, GpuError.Allocation, "zero budget was not an allocation error")?,
+            Ok(value) => {
+                value.release()
+                testing.assert(false, "zero budget acquired storage")?
+            },
+        }
+    }
+
+    pub fn handle(self: Self) -> ArenaHandle where borrows(self) {
+        .{ resource = self.resource.handle() }
+    }
+
+    test "an arena handle copies rows directly without changing their bits" {
+        defer let device = match Device.open() {
+            Ok(device) => device,
+            Err(error) => {
+                testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+                return .Err(testing.skip("GPU device unavailable"))
+            },
+        }
+        defer let arena = Arena.open(device, 65536).unwrap()
+        let rows = [[Float32.from_bits(2), Float32.from_bits(2143289345)], [Float32.from_bits(2147483648), Float32(4.0)]]
+        let input = tensor.matrix_in(arena.handle(), rows).unwrap()
+        defer let host = download(input).unwrap()
+        for row in UInt64(0)..2 {
+            for column in UInt64(0)..2 {
+                testing.assert_eq(host[row * 2 + column].to_bits(), rows[row][column].to_bits(), "arena upload changed a row's raw bits")?
+            }
+        }
+        let empty: [[Float32; 0]; 1] = [[]]
+        let zero = tensor.matrix_in(arena.handle(), empty).unwrap()
+        defer let empty_host = download(zero).unwrap()
+        testing.assert_eq(empty_host.length(), UInt64(0), "empty arena rows acquired an element")?
+    }
+
+    pub fn reset(inout self: Self) -> Result[(), GpuError] {
+        match &self.resource.reset() {
+            Ok(_) => .Ok(()),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+
+    test "reset permits another epoch after the last observation" {
+        defer let device = match Device.open() {
+            Ok(device) => device,
+            Err(error) => {
+                testing.assert_eq(error, GpuError.Unavailable, "GPU device opening failed")?
+                return .Err(testing.skip("GPU device unavailable"))
+            },
+        }
+        defer var arena = Arena.open(device, 65536).unwrap()
+        let first = tensor.matrix_in(arena.handle(), [[Float32(3.0)]]).unwrap()
+        testing.assert_eq(first.dimensions(), [UInt64(1), 1], "first epoch lost its shape")?
+        &arena.reset().unwrap()
+        let second = tensor.matrix_in(arena.handle(), [[Float32(7.0)]]).unwrap()
+        defer let host = download(second).unwrap()
+        testing.assert_eq(host[0], Float32(7.0), "reset left the previous epoch's value")?
+    }
+}
+
+impl Release for Arena {
     fn release(sink self: Self) {
-        let Storage { buffer } = self
+        let Arena { resource } = self
+        resource.release()
+    }
+}
+
+@(opaque, copyable)
+struct ArenaHandle {
+    resource: mem.GpuArenaHandle,
+}
+
+impl tensor.AllocationDomain for ArenaHandle {
+    type Store = ArenaStorage
+
+    fn copy_slice(self: Self, values: mem.Slice[Float32]) -> Result[ArenaStorage, GpuError] where carries(.Ok: self) {
+        if values.length() > UInt64.max / 4 {
+            return .Err(.Shape)
+        }
+        match self.resource._upload(values) {
+            Ok(buffer) => .Ok(.{ buffer }),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+
+    fn copy_rows[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[ArenaStorage, GpuError] where carries(.Ok: self) {
+        if tensor.float_count([rows, columns]) == .None {
+            return .Err(.Shape)
+        }
+        match self.resource._upload_rows(values) {
+            Ok(buffer) => .Ok(.{ buffer }),
+            Err(code) => .Err(runtime_error(code)),
+        }
+    }
+}
+
+// Storage owns a device allocation; shape and operations belong to std.tensor.
+@opaque
+struct Resident[B: mem.GpuResidentBuffer] {
+    buffer: B,
+}
+
+pub alias Storage = Resident[mem.GpuBuffer]
+pub alias ArenaStorage = Resident[mem.GpuArenaView]
+
+impl[B: mem.GpuResidentBuffer] Release for Resident[B] {
+    fn release(sink self: Self) {
+        let Resident { buffer } = self
         buffer.release()
     }
 }
 
-fn completed(sink job: mem.GpuJob) -> Result[Storage, GpuError] {
+fn completed[B: mem.GpuResidentBuffer](sink job: mem.GpuJob[B]) -> Result[Resident[B], GpuError] where carries(.Ok: job) {
     match job._wait() {
         Ok(buffer) => .Ok(.{ buffer }),
         Err(code) => .Err(runtime_error(code)),
     }
 }
 
-impl tensor.Storage[Float32] for Storage {
+impl[R: mem.GpuResidentBuffer] tensor.Storage[Float32] for Resident[R] {
     type Error = GpuError
 
     fn shape_error() -> GpuError {
@@ -196,7 +320,7 @@ impl tensor.Storage[Float32] for Storage {
     }
 }
 
-pub fn download[let rank: UInt64](value: tensor.Tensor[Float32, rank, Storage]) -> Result[mem.Vec[Float32, mem.SystemAllocator], GpuError] {
+pub fn download[B: mem.GpuResidentBuffer, let rank: UInt64](value: tensor.Tensor[Float32, rank, Resident[B]]) -> Result[mem.Vec[Float32, mem.SystemAllocator], GpuError] {
     match mem._gpu_download((*value.storage()).buffer) {
         Ok(values) => .Ok(values),
         Err(code) => .Err(runtime_error(code)),

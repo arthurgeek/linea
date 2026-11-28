@@ -4,7 +4,7 @@ import std.tensor
 use tensor.Storage
 
 @derive(Equatable, Release)
-enum ShapeError { Shape }
+enum ShapeError { Shape, Refused }
 
 struct Bad { values: mem.Vec[Float32, mem.TestHandle[mem.SystemAllocator]] }
 
@@ -47,6 +47,25 @@ fn wrong(allocator: mem.TestHandle[mem.SystemAllocator]) -> Result[Bad, ShapeErr
     .Ok(.{ values = mem.Vec.filled_in(allocator, 2, Float32(7.0)).unwrap() })
 }
 
+struct WrongLength {
+    allocator: mem.TestHandle[mem.SystemAllocator],
+}
+
+impl tensor.AllocationDomain for WrongLength {
+    type Store = Bad
+
+    fn copy_slice(self: Self, values: mem.Slice[Float32]) -> Result[Bad, ShapeError] where carries(.Ok: self) {
+        if values.length() == 0 {
+            return .Err(.Refused)
+        }
+        wrong(self.allocator)
+    }
+
+    fn copy_rows[let rows: UInt64, let columns: UInt64](self: Self, _values: [[Float32; columns]; rows]) -> Result[Bad, ShapeError] where carries(.Ok: self) {
+        wrong(self.allocator)
+    }
+}
+
 fn identity(value: Float32) -> Float32 {
     value
 }
@@ -67,6 +86,26 @@ fn rejected[let rank: UInt64](sink answer: Result[tensor.Tensor[Float32, rank, B
 
 fn main() -> UInt8 {
     defer let log = mem.TestAllocator.open(mem.system()).unwrap()
+    let domain = WrongLength { allocator = log.handle() }
+    if !rejected(tensor.matrix_in(domain, [[Float32(1.0)]])) || !log.all_disposed() {
+        return 32
+    }
+    if !rejected(tensor.from_slice_in(domain, [Float32(1.0)].as_slice(), [UInt64(1)])) || !log.all_disposed() {
+        return 64
+    }
+    let empty: [Float32; 0] = []
+    if !rejected(tensor.from_slice_in(domain, empty.as_slice(), [UInt64(1)])) || log.attempts() != 2 {
+        return 65
+    }
+    match tensor.from_slice_in(domain, empty.as_slice(), [UInt64.max, 2, 0]) {
+        Err(error) => if error != .Refused {
+            return 66
+        },
+        Ok(value) => {
+            value.release()
+            return 67
+        },
+    }
     let data = Bad { values = mem.Vec.filled_in(log.handle(), 1, Float32(1.0)).unwrap() }
     let input: tensor.Tensor[Float32, 2, Bad] = tensor.Tensor.from_storage(data, [UInt64(1), 1]).unwrap()
     var failures = UInt8(0)

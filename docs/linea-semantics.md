@@ -7349,9 +7349,37 @@ allocations require settlement, while arena-backed storage keeps the arena's
 borrowing and affine rules. Rank fixes the length of `dimensions()`' runtime
 `[UInt64; rank]`. Storage is contiguous and row-major.
 
-`tensor.from_slice[_in](values, shape)` copies values to CPU storage, with an
-explicit allocator for the `_in` form. `device.upload(values, shape)` copies
-to device storage. Both check that the entire shape's element count equals the
+`tensor.from_slice(values, shape)` and `tensor.matrix(rows)` copy to system CPU
+storage. Their `_in` forms take an allocation domain as the first argument.
+`tensor.AllocationDomain` selects a Float32 storage type through `Store`.
+A host allocator `A` selects `Cpu[A]` and `CpuError`, and `gpu.Device`
+selects independently owned `gpu.Storage` and `GpuError`. The returned tensor
+carries the domain's dependencies. A device buffer retains its native device
+and can allocate subsequent results after the public device owner is released.
+`gpu.ArenaHandle` selects affine `gpu.ArenaStorage`, whose handle contains a
+borrow of its arena. `gpu.Arena.open(device, byte_limit)` owns an independent
+linear arena; `arena.handle()` borrows it. Each reservation, including an empty
+one, retains the handle. Numerical outputs use the left input's allocation
+domain and retain their inputs' conservative carried dependencies. Ordinary
+[O-Borrow] and [O-Cross] rules refuse resetting, moving or releasing an arena
+while an observation is later used, and refuse sharing observations of its
+unshareable allocation state across tasks. `arena.reset()` takes `inout` access,
+parks until native use has completed and detached, and rewinds its retained
+blocks. A completed native submission retains no arena metadata.
+
+The byte limit counts actual committed device-memory allocation sizes, including
+driver rounding and padding. Opening commits no blocks; reset retains the
+high-water allocation for reuse, while release frees it. Each empty reservation
+still consumes four descriptor bytes. Refusal to fit is `GpuError.Allocation`.
+An upload failure after reservation can consume that range until reset. Host
+metadata and independent system allocations are outside the cap
+([ADR 0322](adr/0322-device-allocation-domains-retain-arena-observations.md)).
+
+The constructor checks the shape before asking the domain to copy the source,
+then adopts the returned storage through the same checked `Tensor.from_storage`
+as other tensor operations. `device.upload(values, shape)` and
+`device.matrix(rows)` call the corresponding device-domain constructors.
+Slice construction checks that the entire shape's element count equals the
 slice length and that its byte extent is representable. Any zero dimension
 makes the count zero, including `[UInt64.max, 2, 0]`; rank zero has one element.
 The nested-array `tensor.matrix[_in]` and `device.matrix` constructors infer both

@@ -2443,6 +2443,9 @@ pub fn build(b: *std.Build) void {
         }
         const gpu_runtime_faults = @import("build/gpu_fault.zig").add(b, runtime_archive, vulkan_headers, runtime_flags.items);
         const gpu_hardware = @import("build/gpu_hardware.zig").add(b, runtime_archive, runtime_target, sanitize.flag());
+        const gpu_arena = @import("build/gpu_arena.zig").add(b, runtime_archive, gpu_flags.items, gpu_image);
+        gpu_arena.dependOn(&gpu_validate.step);
+        gpu_hardware.hardware.dependOn(gpu_arena);
         break :blk .{ .runtime = gpu_runtime_step, .faults = gpu_runtime_faults, .hardware = gpu_hardware };
     } else null;
     runtime.addFileArg(rustls.archive);
@@ -2545,7 +2548,7 @@ pub fn build(b: *std.Build) void {
     } else {
         const unavailable = &b.addFail("GPU tests require a GPU-enabled build; omit -Dgpu=false").step;
         gpu_tests.dependOn(unavailable);
-        for ([_][]const u8{ "gpu-runtime", "test-gpu-runtime", "test-gpu-kernels", "test-gpu-float32", "test-gpu-numerical", "test-gpu-shaders", "test-gpu-language", "test-gpu-compile", "bench-matrix-layout-gpu" }) |name|
+        for ([_][]const u8{ "gpu-runtime", "test-gpu-runtime", "test-gpu-kernels", "test-gpu-float32", "test-gpu-numerical", "test-gpu-shaders", "test-gpu-arena", "test-gpu-language", "test-gpu-compile", "bench-matrix-layout-gpu" }) |name|
             b.step(name, "Requires GPU support").dependOn(unavailable);
     }
     const cpu_only = b.step("test-cpu-only", "Execute CPU programs and verify unavailable GPU capability");

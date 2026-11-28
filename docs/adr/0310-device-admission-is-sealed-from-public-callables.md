@@ -3,6 +3,7 @@
 Status: Accepted — 2026-11-26. Extends
 [0309](0309-tensors-separate-storage-from-numerical-operations.md)'s numerical
 callable and storage boundaries without changing its completed-value API.
+Extended by [0322](0322-device-allocation-domains-retain-arena-observations.md).
 
 ## Context
 

@@ -1,9 +1,13 @@
-# Only these four results vary with host capability. Preserve every other byte.
+# Only the named GPU results vary with host capability. Preserve every other byte.
 BEGIN {
+    gpu["gpu.an arena handle copies rows directly without changing their bits"] = 1
+    gpu["gpu.an arena opens without committing bytes and rejects a zero budget reservation"] = 1
+    gpu["gpu.reset permits another epoch after the last observation"] = 1
     gpu["gpu.completed map preserves GPU subnormals and refuses unsupported ordinary bodies"] = 1
     gpu["gpu.matrix dimensions follow nested array lengths"] = 1
     gpu["gpu.opening a device reports unavailable capability or owns a device"] = 1
     gpu["gpu.upload preserves raw bits and checks zero dimensions before overflow"] = 1
+    for (name in gpu) named_gpu++
 }
 substr($0, 7) in gpu {
     name = substr($0, 7)
@@ -22,7 +26,7 @@ substr($0, 7) in gpu {
     summaries++
     skipped = NF == 6 ? $5 : 0
     if ($3 != 0 || $1 + skipped != expected || skipped != skipped_gpu) bad = 1
-    print "non-GPU: " $1 - (4 - skipped_gpu) " passed, " $3 " failed"
+    print "non-GPU: " $1 - (named_gpu - skipped_gpu) " passed, " $3 " failed"
     next
 }
 { pending_skip = 0; print }

@@ -1,0 +1,108 @@
+// Strict hardware qualification: capability failures propagate from main.
+import std.gpu
+import std.mem
+import std.tensor
+
+fn half(value: Float32) -> Float32 {
+    value * 0.5
+}
+
+fn add(left: Float32, right: Float32) -> Float32 {
+    left + right
+}
+
+fn same[let rank: UInt64](resident: tensor.Tensor[Float32, rank, gpu.ArenaStorage], reference: tensor.Tensor[Float32, rank, tensor.Cpu[mem.SystemAllocator]]) -> Result[Bool, gpu.GpuError] {
+    defer let host = gpu.download(resident)?
+    let expected = reference.values()
+    if host.length() != expected.length() {
+        return .Ok(false)
+    }
+    for index in UInt64(0)..host.length() {
+        if host[index].to_bits() != expected[index].to_bits() {
+            return .Ok(false)
+        }
+    }
+    .Ok(true)
+}
+
+fn main() -> Result[UInt8, gpu.GpuError] {
+    let left_rows = [[Float32(1.0), 2.0, 3.0], [4.0, 5.0, 6.0]]
+    let right_rows = [[Float32(7.0), 8.0], [9.0, 10.0], [11.0, 12.0]]
+    defer let host_left = tensor.matrix(left_rows).unwrap()
+    defer let host_right = tensor.matrix(right_rows).unwrap()
+    defer let host_product = host_left.matmul(host_right).unwrap()
+    defer let host_map = host_product.map(half).unwrap()
+    defer let host_zip = host_map.zip_with(host_product, add).unwrap()
+    defer let host_total = host_zip.reduce(0.0, add).unwrap()
+
+    defer let device = gpu.Device.open()?
+    defer var left_arena = gpu.Arena.open(device, 1048576)?
+    defer var right_arena = gpu.Arena.open(device, 1048576)?
+    device.release()
+    for _ in UInt64(0)..3 {
+        let left = tensor.matrix_in(left_arena.handle(), left_rows)?
+        let right = tensor.matrix_in(right_arena.handle(), right_rows)?
+        let product = left.matmul(right)?
+        if !same(product, host_product)? {
+            return .Ok(1)
+        }
+        let mapped = product.map(half)?
+        if !same(mapped, host_map)? {
+            return .Ok(2)
+        }
+        let zipped = mapped.zip_with(product, add)?
+        if !same(zipped, host_zip)? {
+            return .Ok(3)
+        }
+        let total = zipped.reduce(0.0, add)?
+        if !same(total, host_total)? {
+            return .Ok(4)
+        }
+        &left_arena.reset()?
+        &right_arena.reset()?
+    }
+
+    // A zero axis wins over overflowing preceding dimensions. An empty
+    // reservation can still reduce to its initial value on the real device.
+    let no_values: [Float32; 0] = []
+    let empty = tensor.from_slice_in(left_arena.handle(), no_values.as_slice(), [UInt64.max, 2, 0])?
+    let initial = empty.reduce(7.0, add)?
+    defer let initial_host = gpu.download(initial)?
+    if initial_host.length() != 1 || initial_host[0].to_bits() != Float32(7.0).to_bits() {
+        return .Ok(5)
+    }
+    match tensor.from_slice_in(left_arena.handle(), no_values.as_slice(), [UInt64.max, 2]) {
+        Err(Shape) => {},
+        Err(error) => return .Err(error),
+        Ok(value) => {
+            value.release()
+            return .Ok(6)
+        },
+    }
+    &left_arena.reset()?
+
+    defer let another_device = gpu.Device.open()?
+    defer let another_arena = gpu.Arena.open(another_device, 1048576)?
+    let local = tensor.matrix_in(left_arena.handle(), [[Float32(1.0)]])?
+    let foreign = tensor.matrix_in(another_arena.handle(), [[Float32(2.0)]])?
+    match local.zip_with(foreign, add) {
+        Err(Runtime(-22)) => {},
+        Err(error) => return .Err(error),
+        Ok(value) => {
+            value.release()
+            return .Ok(7)
+        },
+    }
+    defer var no_capacity = gpu.Arena.open(another_device, 0)?
+    let empty_rows: [[Float32; 0]; 1] = [[]]
+    match tensor.matrix_in(no_capacity.handle(), empty_rows) {
+        Err(Allocation) => {},
+        Err(error) => return .Err(error),
+        Ok(value) => {
+            value.release()
+            return .Ok(8)
+        },
+    }
+    &no_capacity.reset()?
+    .Ok(0)
+}

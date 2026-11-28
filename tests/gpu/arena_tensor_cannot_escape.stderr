@@ -1,0 +1,7 @@
+error[O-Escapes]: this boundary carries an observation from an owner its signature does not permit
+ --> tests/gpu/arena_tensor_cannot_escape.lin:6:5
+  |
+6 |     tensor.matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ escape observations only from the signature's declared sources
+  |
+  = help: `arena` belongs to `escape` and ends when it returns, so nothing returned may observe it

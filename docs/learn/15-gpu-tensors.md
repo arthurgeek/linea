@@ -51,7 +51,7 @@ results on the device. The two functions above can also be called normally on
 the CPU.
 
 Each operation returns a completed tensor or an error. Waiting suspends the
-calling fiber through its existing executor. Device storage is linear:
+calling fiber through its existing executor. Independent device storage is linear:
 `defer let` releases its allocation. CPU storage preserves its allocator's
 settlement and borrowing rules. There are no implicit transfers or CPU fallbacks.
 Use ordinary tasks when operations should run concurrently.
@@ -80,20 +80,24 @@ fn main() -> Result[UInt8, tensor.CpuError] {
 
 `values()` borrows CPU storage. GPU storage requires an explicit download.
 `tensor.matrix_in(allocator, values)` and `tensor.from_slice_in(allocator,
-values, shape)` preserve the supplied allocator's lifetime and settlement rules.
-An arena-backed tensor borrows its arena and may be abandoned with it; a
-system-backed tensor owns an allocation and must be settled.
+values, shape)` select storage through the first argument. Pass a host
+allocator to copy the data into CPU storage, an open `gpu.Device` for independent
+device storage, or `arena.handle()` for storage borrowing a device arena. A host arena's tensor borrows the arena and can be discarded
+with it. System CPU and device tensors own allocations that must be settled.
+A device tensor can allocate further results after its original device owner
+has been released.
 
 A numerical algorithm can be generic over storage rather than fixed to a GPU.
 The public `examples/tensor_pipeline.lin` example calls one `compute` function on
-CPU storage, then explicitly opens a device and uploads the same inputs. It
+CPU storage, then explicitly opens a device and uploads the same inputs through
+the shared constructors. It also runs twice in an explicit device arena. It
 reports an unavailable capability at that call site; other GPU errors propagate.
 The CPU computation is an independent demonstration, not a fallback for a failed
 GPU request.
 
 <!-- guide: excerpt examples/tensor_pipeline.lin -->
 ```linea
-// Run one numerical pipeline on host storage and an explicitly opened device.
+// Run one numerical pipeline on host, system-device and arena-device storage.
 import std.gpu
 import std.io
 import std.tensor
@@ -139,27 +143,83 @@ fn main() -> Result[UInt8, PipelineError] {
         },
         Err(error) => return .Err(.Gpu(error)),
     }
-    defer let left = device.upload(host_left.values(), host_left.dimensions())?
-    defer let right = device.upload(host_right.values(), host_right.dimensions())?
+    defer let left = tensor.from_slice_in(device, host_left.values(), host_left.dimensions())?
+    defer let right = tensor.from_slice_in(device, host_right.values(), host_right.dimensions())?
     defer let result = compute(left, right)?
     defer let values = gpu.download(result)?
     println("GPU: {values[0]}")?
-    .Ok(
-        if values[0].to_bits() == reference.to_bits() {
-            0
-        } else {
-            1
-        },
-    )
+    if values[0].to_bits() != reference.to_bits() {
+        return .Ok(1)
+    }
+
+    defer var arena = gpu.Arena.open(device, byte_limit: 1048576)?
+    for epoch in UInt64(0)..2 {
+        let arena_left = tensor.matrix_in(arena.handle(), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])?
+        let arena_right = tensor.matrix_in(arena.handle(), [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]])?
+        let answer = compute(arena_left, arena_right)?
+        defer let host = gpu.download(answer)?
+        println("Arena epoch {epoch + 1}: {host[0]}")?
+        if host[0].to_bits() != reference.to_bits() {
+            return .Ok(2)
+        }
+        &arena.reset()?
+    }
+    .Ok(0)
 }
 ```
 
-Both paths produce `622.5` on a supported device. Without GPU capability, the
+The CPU, independent GPU storage and both arena epochs produce `622.5` on a
+supported device. Without GPU capability, the
 program still demonstrates the CPU pipeline and prints `GPU: unavailable`.
 Only construction and observation choose placement. `compute` performs no
 hidden transfer, and the final comparison checks exact Float32 bits.
 
-Use `defer let value = operation()?` for an owned result that stays in the scope.
+## Bounded device arenas
+
+`gpu.Arena.open(device, byte_limit)` owns blocks independently of the public
+device owner. Its byte limit counts actual committed device memory, including
+driver rounding and alignment, so usable tensor bytes can be smaller. Opening
+commits no memory; capacity grows lazily and an allocation that cannot fit returns
+`GpuError.Allocation`. An empty tensor still reserves four descriptor bytes, so
+a zero-capacity arena cannot hold even an empty tensor. If an upload fails after
+reservation, that range may stay occupied until reset.
+
+The repeated-batch part of the pipeline allocates temporaries through the handle
+and resets after each download:
+
+<!-- guide: excerpt examples/tensor_pipeline.lin -->
+```linea
+defer var arena = gpu.Arena.open(device, byte_limit: 1048576)?
+for epoch in UInt64(0)..2 {
+    let arena_left = tensor.matrix_in(arena.handle(), [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])?
+    let arena_right = tensor.matrix_in(arena.handle(), [[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]])?
+    let answer = compute(arena_left, arena_right)?
+    defer let host = gpu.download(answer)?
+    println("Arena epoch {epoch + 1}: {host[0]}")?
+    if host[0].to_bits() != reference.to_bits() {
+        return .Ok(2)
+    }
+    &arena.reset()?
+}
+```
+
+`arena.handle()` borrows the arena. Every tensor built with it, and the results
+of its operations, preserve that borrow. The arena owns the reservations, so
+these tensors are affine: the example uses `let` for them. Copying a handle keeps
+the same borrow and does not create another arena. Inputs from different arenas
+of one device can be combined; the result allocates from the left input's arena.
+
+`&arena.reset()?` requires exclusive access. Resetting, moving or releasing an
+arena while a tensor or handle is used afterwards is rejected by the ownership
+checker. After the final observation, reset waits for native use by parking the
+calling fiber, then invalidates the old reservations and rewinds its retained
+blocks. Reset retains the arena's high-water physical allocation for the next
+epoch; releasing the arena frees it. Downloads are independent host vectors, so
+their lifetime does not prevent reset. Handles observing the unshareable arena
+cannot cross into another task; an unobserved arena owner can move into a task.
+
+Use `defer let value = operation()?` for a linear result that stays in the scope.
+Generic code also uses it so one algorithm accepts both storage families.
 The `defer` settles it on success and early returns; `?` propagates allocation,
 shape and execution failures. A `main` returning `Result[UInt8, E]` reports its
 error through the ordinary `Display` implementation. Match an error only when
@@ -215,6 +275,7 @@ executes the product and map, downloads and checks all four results:
 // Multiply row-major matrices while their buffers stay on the GPU.
 import std.gpu
 import std.io
+import std.tensor
 import std.testing
 
 use io.IoError
@@ -235,8 +296,8 @@ test "halving preserves small Float32 readings" {
 
 fn main() -> Result[UInt8, MatrixError] {
     defer let device = gpu.Device.open()?
-    defer let left = device.matrix([[1.0, 2.0], [3.0, 4.0]])?
-    defer let right = device.matrix([[2.0, 0.0], [0.0, 3.0]])?
+    defer let left = tensor.matrix_in(device, [[1.0, 2.0], [3.0, 4.0]])?
+    defer let right = tensor.matrix_in(device, [[2.0, 0.0], [0.0, 3.0]])?
     defer let product = left.matmul(right)?
     defer let result = product.map(half)?
     defer let host = gpu.download(result)?
@@ -353,8 +414,9 @@ increments the skipped count, never the passed count.
 For qualification, run `linea test --deny-skips std --filter "gpu."` and
 `linea test --deny-skips examples/gpu_matrix.lin`. The `test-gpu-language`
 build target also runs strict tests for the GPU library and examples, including
-the complete host/device tensor pipeline. It requires the intended test names to
-report `ok`, so an empty selection cannot qualify. When running tests directly,
+the complete host/device tensor pipeline and two arena reset epochs with distinct
+expected results. It requires the intended test names to report `ok`, so an empty
+selection cannot qualify. When running tests directly,
 check that the expected tests appear: `--deny-skips` rejects skipped tests but
 does not reject an empty selection. A portable example may succeed after
 reporting that its device is unavailable; that is not hardware qualification.

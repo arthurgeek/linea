@@ -1,0 +1,13 @@
+import std.gpu
+import std.tensor
+
+fn escape(device: gpu.Device) -> tensor.Matrix[Float32, gpu.ArenaStorage] {
+    defer let arena = gpu.Arena.open(device, 65536).unwrap()
+    tensor.matrix_in(arena.handle(), [[Float32(1.0)]]).unwrap()
+}
+
+fn main() -> UInt8 {
+    defer let device = gpu.Device.open().unwrap()
+    let _value = escape(device)
+    0
+}

@@ -17,7 +17,7 @@ static VkResult VKAPI_CALL fake_EnumeratePhysicalDevices(VkInstance instance, ui
 }
 static void VKAPI_CALL fake_GetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties* pProperties) {
     (void)physicalDevice; (void)pProperties;
-    memset(pProperties, 0, sizeof(*pProperties)); pProperties->apiVersion = VK_API_VERSION_1_1; pProperties->vendorID = 0x106b; pProperties->deviceType = state.unsuitable_device ? VK_PHYSICAL_DEVICE_TYPE_CPU : VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU; pProperties->limits.maxStorageBufferRange = 4096; pProperties->limits.maxComputeWorkGroupCount[0] = 65535; pProperties->limits.maxComputeWorkGroupInvocations = 64; pProperties->limits.maxComputeWorkGroupSize[0] = 64;
+    memset(pProperties, 0, sizeof(*pProperties)); pProperties->apiVersion = VK_API_VERSION_1_1; pProperties->vendorID = 0x106b; pProperties->deviceType = state.unsuitable_device ? VK_PHYSICAL_DEVICE_TYPE_CPU : VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU; pProperties->limits.maxStorageBufferRange = 1048576; pProperties->limits.minStorageBufferOffsetAlignment = state.descriptor_align; pProperties->limits.nonCoherentAtomSize = state.atom; pProperties->limits.maxComputeWorkGroupCount[0] = 65535; pProperties->limits.maxComputeWorkGroupInvocations = 64; pProperties->limits.maxComputeWorkGroupSize[0] = 64;
 }
 static void VKAPI_CALL fake_GetPhysicalDeviceMemoryProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceMemoryProperties* pMemoryProperties) {
     (void)physicalDevice; (void)pMemoryProperties;
@@ -45,7 +45,7 @@ static void VKAPI_CALL fake_GetDeviceQueue(VkDevice device, uint32_t queueFamily
 }
 static VkResult VKAPI_CALL fake_CreateBuffer(VkDevice device, const VkBufferCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkBuffer* pBuffer) {
     (void)device; (void)pCreateInfo; (void)pAllocator; (void)pBuffer;
-    VkResult r = tick("CreateBuffer"); *pBuffer = HANDLE(VkBuffer, r == VK_SUCCESS ? acquired(BUFFER, 0) : 0xdead); return r;
+    VkResult r = tick("CreateBuffer"); *pBuffer = HANDLE(VkBuffer, r == VK_SUCCESS ? acquired(BUFFER, 0) : 0xdead); if (r == VK_SUCCESS) state.objects[ID(*pBuffer)].size = pCreateInfo->size; return r;
 }
 static void VKAPI_CALL fake_DestroyBuffer(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks* pAllocator) {
     (void)device; (void)buffer; (void)pAllocator;
@@ -53,11 +53,11 @@ static void VKAPI_CALL fake_DestroyBuffer(VkDevice device, VkBuffer buffer, cons
 }
 static void VKAPI_CALL fake_GetBufferMemoryRequirements(VkDevice device, VkBuffer buffer, VkMemoryRequirements* pMemoryRequirements) {
     (void)device; (void)buffer; (void)pMemoryRequirements;
-    memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements)); pMemoryRequirements->size = 256; pMemoryRequirements->alignment = 4; pMemoryRequirements->memoryTypeBits = 1;
+    memset(pMemoryRequirements, 0, sizeof(*pMemoryRequirements)); VkDeviceSize size = state.objects[ID(buffer)].size; VkDeviceSize round = state.requirement_round; pMemoryRequirements->size = ((size + round - 1) / round) * round + state.requirement_extra; state.objects[ID(buffer)].requirements = pMemoryRequirements->size; pMemoryRequirements->alignment = 4; pMemoryRequirements->memoryTypeBits = 1;
 }
 static VkResult VKAPI_CALL fake_AllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo, const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory) {
     (void)device; (void)pAllocateInfo; (void)pAllocator; (void)pMemory;
-    VkResult r = tick("AllocateMemory"); *pMemory = HANDLE(VkDeviceMemory, r == VK_SUCCESS ? acquired(MEMORY, 0) : 0xdead); return r;
+    ++state.memory_calls; VkResult r = tick("AllocateMemory"); *pMemory = HANDLE(VkDeviceMemory, r == VK_SUCCESS ? acquired(MEMORY, 0) : 0xdead); if (r == VK_SUCCESS) { struct object *m = &state.objects[ID(*pMemory)]; m->size = pAllocateInfo->allocationSize; m->bytes = calloc(1, (size_t)m->size); REQUIRE(m->bytes != NULL); } return r;
 }
 static void VKAPI_CALL fake_FreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator) {
     (void)device; (void)memory; (void)pAllocator;
@@ -65,7 +65,7 @@ static void VKAPI_CALL fake_FreeMemory(VkDevice device, VkDeviceMemory memory, c
 }
 static VkResult VKAPI_CALL fake_BindBufferMemory(VkDevice device, VkBuffer buffer, VkDeviceMemory memory, VkDeviceSize memoryOffset) {
     (void)device; (void)buffer; (void)memory; (void)memoryOffset;
-    VkResult r = tick("BindBufferMemory"); if (r == VK_SUCCESS) state.objects[ID(buffer)].bound = ID(memory); return r;
+    VkResult r = tick("BindBufferMemory"); if (r == VK_SUCCESS) { REQUIRE(memoryOffset == 0); REQUIRE(state.objects[ID(memory)].size >= state.objects[ID(buffer)].requirements); state.objects[ID(buffer)].bound = ID(memory); } return r;
 }
 static VkResult VKAPI_CALL fake_MapMemory(VkDevice device, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize size, VkMemoryMapFlags flags, void** ppData) {
     (void)device; (void)memory; (void)offset; (void)size; (void)flags; (void)ppData;
@@ -77,15 +77,15 @@ static void VKAPI_CALL fake_UnmapMemory(VkDevice device, VkDeviceMemory memory) 
 }
 static VkResult VKAPI_CALL fake_FlushMappedMemoryRanges(VkDevice device, uint32_t memoryRangeCount, const VkMappedMemoryRange* pMemoryRanges) {
     (void)device;
-    REQUIRE(memoryRangeCount == 1 && pMemoryRanges[0].offset == 0 && pMemoryRanges[0].size == VK_WHOLE_SIZE);
+    REQUIRE(memoryRangeCount == 1); const VkMappedMemoryRange *range = pMemoryRanges; VkDeviceSize size = state.objects[ID(range->memory)].size; REQUIRE(range->offset <= size); if (range->size != VK_WHOLE_SIZE) { REQUIRE(range->size <= size - range->offset); REQUIRE(range->offset % state.atom == 0); REQUIRE(range->size % state.atom == 0 || range->offset + range->size == size); }
     REQUIRE(state.objects[ID(pMemoryRanges[0].memory)].mapped);
-    return host_range("FlushMappedMemoryRanges");
+    state.last_flush = pMemoryRanges[0]; return host_range("FlushMappedMemoryRanges");
 }
 static VkResult VKAPI_CALL fake_InvalidateMappedMemoryRanges(VkDevice device, uint32_t memoryRangeCount, const VkMappedMemoryRange* pMemoryRanges) {
     (void)device;
-    REQUIRE(memoryRangeCount == 1 && pMemoryRanges[0].offset == 0 && pMemoryRanges[0].size == VK_WHOLE_SIZE);
+    REQUIRE(memoryRangeCount == 1); const VkMappedMemoryRange *range = pMemoryRanges; VkDeviceSize size = state.objects[ID(range->memory)].size; REQUIRE(range->offset <= size); if (range->size != VK_WHOLE_SIZE) { REQUIRE(range->size <= size - range->offset); REQUIRE(range->offset % state.atom == 0); REQUIRE(range->size % state.atom == 0 || range->offset + range->size == size); }
     REQUIRE(state.objects[ID(pMemoryRanges[0].memory)].mapped);
-    return host_range("InvalidateMappedMemoryRanges");
+    state.last_invalidate = pMemoryRanges[0]; return host_range("InvalidateMappedMemoryRanges");
 }
 static VkResult VKAPI_CALL fake_CreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkShaderModule* pShaderModule) {
     (void)device; (void)pCreateInfo; (void)pAllocator; (void)pShaderModule;
@@ -133,7 +133,12 @@ static VkResult VKAPI_CALL fake_AllocateDescriptorSets(VkDevice device, const Vk
 }
 static void VKAPI_CALL fake_UpdateDescriptorSets(VkDevice device, uint32_t descriptorWriteCount, const VkWriteDescriptorSet* pDescriptorWrites, uint32_t descriptorCopyCount, const VkCopyDescriptorSet* pDescriptorCopies) {
     (void)device; (void)descriptorWriteCount; (void)pDescriptorWrites; (void)descriptorCopyCount; (void)pDescriptorCopies;
-    REQUIRE(descriptorWriteCount == 3); for (unsigned i = 0; i < descriptorWriteCount; ++i) { REQUIRE(pDescriptorWrites[i].dstBinding == i); REQUIRE(pDescriptorWrites[i].pBufferInfo->range != 0); }
+    REQUIRE(descriptorWriteCount == 3); for (unsigned i = 0; i < descriptorWriteCount; ++i) { REQUIRE(pDescriptorWrites[i].dstBinding == i); REQUIRE(pDescriptorWrites[i].pBufferInfo->range != 0);
+        const VkDescriptorBufferInfo *info = pDescriptorWrites[i].pBufferInfo;
+        REQUIRE(info->offset % state.descriptor_align == 0);
+        REQUIRE(info->offset <= state.objects[ID(info->buffer)].size);
+        REQUIRE(info->range <= state.objects[ID(info->buffer)].size - info->offset);
+        state.objects[ID(pDescriptorWrites[i].dstSet)].bindings[i] = *info; }
 }
 static VkResult VKAPI_CALL fake_CreateCommandPool(VkDevice device, const VkCommandPoolCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkCommandPool* pCommandPool) {
     (void)device; (void)pCreateInfo; (void)pAllocator; (void)pCommandPool;
@@ -141,7 +146,10 @@ static VkResult VKAPI_CALL fake_CreateCommandPool(VkDevice device, const VkComma
 }
 static void VKAPI_CALL fake_DestroyCommandPool(VkDevice device, VkCommandPool commandPool, const VkAllocationCallbacks* pAllocator) {
     (void)device; (void)commandPool; (void)pAllocator;
-    released(ID(commandPool), COMMAND_POOL);
+    lock_state();
+    if (state.teardown_gate) { state.teardown_entered = 1; changed(); struct timespec end = deadline();
+        while (!state.allow_teardown) wait_changed(&end); }
+    unlock_state(); released(ID(commandPool), COMMAND_POOL);
 }
 static VkResult VKAPI_CALL fake_AllocateCommandBuffers(VkDevice device, const VkCommandBufferAllocateInfo* pAllocateInfo, VkCommandBuffer* pCommandBuffers) {
     (void)device; (void)pAllocateInfo; (void)pCommandBuffers;
@@ -171,8 +179,8 @@ static void VKAPI_CALL fake_CmdBindPipeline(VkCommandBuffer commandBuffer, VkPip
 
 }
 static void VKAPI_CALL fake_CmdBindDescriptorSets(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t firstSet, uint32_t descriptorSetCount, const VkDescriptorSet* pDescriptorSets, uint32_t dynamicOffsetCount, const uint32_t* pDynamicOffsets) {
-    (void)commandBuffer; (void)pipelineBindPoint; (void)layout; (void)firstSet; (void)descriptorSetCount; (void)pDescriptorSets; (void)dynamicOffsetCount; (void)pDynamicOffsets;
-
+    (void)pipelineBindPoint; (void)layout; (void)firstSet; (void)dynamicOffsetCount; (void)pDynamicOffsets;
+    REQUIRE(descriptorSetCount == 1); state.objects[ID(commandBuffer)].bound = ID(*pDescriptorSets);
 }
 static void VKAPI_CALL fake_CmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout layout, VkShaderStageFlags stageFlags, uint32_t offset, uint32_t size, const void* pValues) {
     (void)commandBuffer; (void)layout; (void)stageFlags; (void)offset; (void)size; (void)pValues;
@@ -195,13 +203,35 @@ static void VKAPI_CALL fake_DestroyFence(VkDevice device, VkFence fence, const V
     (void)device; (void)fence; (void)pAllocator;
     released(ID(fence), FENCE);
 }
+/* Count use per fence and per resource, including repeated bindings and two
+ * simultaneous jobs. A global pending bit cannot validate shared-block use. */
+static void pending_resources(unsigned fence, int delta) {
+    struct object *command = &state.objects[state.objects[fence].bound];
+    struct object *set = &state.objects[command->bound];
+    command->pending += delta; state.objects[command->owner].pending += delta;
+    set->pending += delta; state.objects[set->owner].pending += delta;
+    for (unsigned i = 0; i < 3; ++i) {
+        struct object *buffer = &state.objects[ID(set->bindings[i].buffer)];
+        buffer->pending += delta; state.objects[buffer->bound].pending += delta;
+    }
+}
 static VkResult VKAPI_CALL fake_QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence) {
     (void)queue; (void)submitCount; (void)pSubmits; (void)fence;
-    VkResult r = tick("QueueSubmit"); if (r == VK_SUCCESS) { lock_state(); REQUIRE(!state.gpu_pending); if (state.host_active) state.submit_host_overlap = 1; state.gpu_pending = 1; unlock_state(); } return r;
+    VkResult r = tick("QueueSubmit"); if (r == VK_SUCCESS) { lock_state(); REQUIRE(!state.objects[ID(fence)].pending); state.objects[ID(fence)].pending = 1; state.objects[ID(fence)].bound = ID(*pSubmits->pCommandBuffers); pending_resources(ID(fence), 1); if (state.host_active) state.submit_host_overlap = 1; ++state.gpu_pending; unlock_state(); } return r;
 }
 static VkResult VKAPI_CALL fake_WaitForFences(VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout) {
     (void)device; (void)fenceCount; (void)pFences; (void)waitAll; (void)timeout;
-    REQUIRE(fenceCount == 1 && waitAll && timeout == UINT64_MAX); struct timespec end = deadline(); lock_state(); REQUIRE(state.gpu_pending); state.wait_entered = 1; changed(); while (!state.allow_completion) wait_changed(&end); state.gpu_pending = 0; VkResult result = state.wait_result; changed(); unlock_state(); return result;
+    REQUIRE(fenceCount == 1 && waitAll && timeout == UINT64_MAX);
+    struct timespec end = deadline(); lock_state(); unsigned fence = ID(*pFences);
+    REQUIRE(state.objects[fence].pending);
+    state.wait_entered = 1; state.fence_entered[fence] = 1; changed();
+    while (state.selective_completion ? !state.fence_allowed[fence] : !state.allow_completion) wait_changed(&end);
+    VkResult result = state.wait_result;
+    /* Timeout/allocation failure does not prove that queued work completed. */
+    if (result == VK_SUCCESS || result == VK_ERROR_DEVICE_LOST) {
+        pending_resources(fence, -1); state.objects[fence].pending = 0; --state.gpu_pending;
+    }
+    changed(); unlock_state(); return result;
 }
 static void *test_dlsym(void *library, const char *name) {
     REQUIRE(library == &state); lock_state(); unsigned call = ++state.dlsym_calls; int missing = state.fail_symbol == call; unlock_state(); if (missing) return NULL;

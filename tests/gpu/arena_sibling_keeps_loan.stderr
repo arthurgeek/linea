@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+  --> tests/gpu/arena_sibling_keeps_loan.lin:9:5
+   |
+9  |     arena.release()
+   |     ^^^^^ keep this place available until the last use of its observation
+10 |     let _dimensions = sibling.dimensions()
+   |                       ------- the observation is still used here

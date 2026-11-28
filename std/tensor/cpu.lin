@@ -145,41 +145,39 @@ fn allocate_in[A: Allocator](allocator: A, count: UInt64) -> Result[mem.Vec[Floa
     }
 }
 
-pub fn from_slice_in[A: Allocator, let rank: UInt64](allocator: A, values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[Tensor[Float32, rank, Cpu[A]], CpuError] where carries(.Ok: allocator) {
-    let count = element_count(shape) else {
-        return .Err(.Shape)
+impl[A: Allocator] AllocationDomain for A {
+    type Store = Cpu[A]
+
+    fn copy_slice(self: Self, values: mem.Slice[Float32]) -> Result[Cpu[A], CpuError] where carries(.Ok: self) {
+        let count = values.length()
+        if count > UInt64.max / 4 {
+            return .Err(.Shape)
+        }
+        var copied = allocate_in(self, count)?
+        for index in UInt64(0)..count {
+            &copied.push(values[index]).unwrap()
+        }
+        .Ok(.{ values = copied })
     }
-    if count != values.length() || count > UInt64.max / 4 {
-        return .Err(.Shape)
+
+    fn copy_rows[let rows: UInt64, let columns: UInt64](self: Self, values: [[Float32; columns]; rows]) -> Result[Cpu[A], CpuError] where carries(.Ok: self) {
+        let count = float_count([rows, columns]) else {
+            return .Err(.Shape)
+        }
+        var copied = allocate_in(self, count)?
+        if count != 0 {
+            for row in UInt64(0)..rows {
+                for column in UInt64(0)..columns {
+                    &copied.push(values[row][column]).unwrap()
+                }
+            }
+        }
+        .Ok(.{ values = copied })
     }
-    var copied = allocate_in(allocator, count)?
-    for index in UInt64(0)..count {
-        &copied.push(values[index]).unwrap()
-    }
-    .Ok(.{ data = .{ values = copied }, shape = copy(shape) })
 }
 
 pub fn from_slice[let rank: UInt64](values: mem.Slice[Float32], shape: [UInt64; rank]) -> Result[Tensor[Float32, rank, Cpu[mem.SystemAllocator]], CpuError] {
     from_slice_in(mem.system(), values, shape)
-}
-
-pub fn matrix_in[A: Allocator, let rows: UInt64, let columns: UInt64](allocator: A, values: [[Float32; columns]; rows]) -> Result[Tensor[Float32, 2, Cpu[A]], CpuError] where carries(.Ok: allocator) {
-    let count = element_count([rows, columns]) else {
-        return .Err(.Shape)
-    }
-    if count > UInt64.max / 4 {
-        return .Err(.Shape)
-    }
-    var copied = allocate_in(allocator, count)?
-    if count == 0 {
-        return .Ok(.{ data = .{ values = copied }, shape = [rows, columns] })
-    }
-    for row in UInt64(0)..rows {
-        for column in UInt64(0)..columns {
-            &copied.push(values[row][column]).unwrap()
-        }
-    }
-    .Ok(.{ data = .{ values = copied }, shape = [rows, columns] })
 }
 
 pub fn matrix[let rows: UInt64, let columns: UInt64](values: [[Float32; columns]; rows]) -> Result[Tensor[Float32, 2, Cpu[mem.SystemAllocator]], CpuError] {

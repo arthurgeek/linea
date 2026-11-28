@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/gpu/arena_move_live_tensor.lin:8:17
+  |
+8 |     let moved = arena
+  |                 ^^^^^ keep this place available until the last use of its observation
+9 |     let _dimensions = value.dimensions()
+  |                       ----- the observation is still used here

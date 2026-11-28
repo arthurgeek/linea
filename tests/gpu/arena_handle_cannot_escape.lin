@@ -1,0 +1,12 @@
+import std.gpu
+
+fn escape(device: gpu.Device) -> gpu.ArenaHandle {
+    defer let arena = gpu.Arena.open(device, 65536).unwrap()
+    arena.handle()
+}
+
+fn main() -> UInt8 {
+    defer let device = gpu.Device.open().unwrap()
+    let _handle = escape(device)
+    0
+}

@@ -1,0 +1,5 @@
+error[T-Bound]: `B` requires `GpuResidentBuffer`, and `Forged` does not implement it
+  --> tests/gpu/resident_rejects_forged_buffer.lin:22:29
+   |
+22 |     let _forged: Option[gpu.Resident[Forged]] = .None
+   |                             ^^^^^^^^ implement it for that type

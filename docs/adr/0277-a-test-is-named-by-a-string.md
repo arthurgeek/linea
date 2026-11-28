@@ -1,7 +1,8 @@
 # 277. A test is named by a string
 
 Status: Accepted — 2026-11-16; supersedes the function-modifier premise of
-0084 and the namespace clauses of 0247 and 0269
+0084 and the namespace clauses of 0247 and 0269. Extended by
+[0320](0320-a-skipped-test-is-reported-and-hardware-qualification-rejects-it.md).
 
 ## Context
 

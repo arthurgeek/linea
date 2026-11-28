@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/gpu/arena_reset_live_handle.lin:8:5
+  |
+8 |     &arena.reset().unwrap()
+  |     ^^^^^^^^^^^^^^ keep this place available until the last use of its observation
+9 |     let _value = tensor.matrix_in(handle, [[Float32(1.0)]]).unwrap()
+  |                                   ------ the observation is still used here

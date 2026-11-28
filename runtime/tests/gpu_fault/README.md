@@ -12,7 +12,7 @@ inject CPU allocation, device mutex initialization, pthread attribute and
 completion-thread creation failures. The actual archive supplies park, fiber,
 task and session implementations unchanged.
 
-The 102 isolated cases check:
+The isolated cases check:
 
 - A standard platform Vulkan loader with the build-host path absent; a
   build-pinned fallback only when the standard loader cannot be opened; no
@@ -21,6 +21,10 @@ The 102 isolated cases check:
   allocation; missing/unsuitable devices and compute queues; device mutexes.
 - Buffer creation, allocation, bind and mapping failures. Failed output handles
   are poisoned, so publishing a failed constructor's output fails immediately.
+- Arena physical caps, rounded memory requirements, aligned view ranges and
+  zero-byte descriptors. Recoverable preferred-block host/device allocation
+  failures retry the exact extent; a failed retry publishes no arena state.
+  Device loss, other API errors and invalid extents do not trigger a retry.
 - Shader, descriptor layout, pipeline layout, pipeline, descriptor pool/set,
   command pool/buffer, begin/end, fence and QueueSubmit failures. Pipeline error
   outputs include both null and a valid partial pipeline needing destruction.
@@ -49,6 +53,45 @@ signals its condition. Both callbacks assert the same loop identity and OS
 carrier thread. Thus CPU progress requires the awaiting task to release its
 carrier. Both task handles are joined and every GPU owner is settled. The loop
 itself is process-lifetime, as defined by the runtime API.
+
+The arena teardown test holds command-pool destruction after fence completion.
+Reset and release each run on a real single-carrier loop and must stay parked
+until another task on that carrier opens the gate. Before that task opens it,
+it checks that the arena is draining, its pending pins and view metadata remain
+intact, and its cursor and committed bytes have not changed. Same-arena native
+allocation/submission return Busy, while a second arena on the same device can
+allocate. After reset or release returns, the retained public job has no buffer
+pins; it is settled only after the arena metadata is released. These native
+Busy checks do not add a source operation: public borrowing still forbids reset
+or release across a live arena observation.
+
+Review replays checked the corresponding pre-gate assertions with isolated
+premature-rewind, cursor-reuse and partial-pin-detachment mutants. Production
+source was left unchanged by these negative-control runs. The harness does not force every
+cross-arena fence-completion order or simultaneous resets of one owner, and the
+host-copy race uses system buffers rather than claiming a reset/host-copy race
+through invalidated arena handles.
+
+Arena-specific repeated-input tests assert occurrence-based accounting: a zip
+reading the same view twice holds two input pins, one output pin and three
+arena pending occurrences. Completion must clear every occurrence and all job
+view references before reset/reuse. A two-arena test uses individually gated
+fences: one cross-arena job completes while a repeated-input job in the other
+arena remains blocked. Both arena orderings are exercised. The completed arena
+can reset, allocate and release while the other retains exactly its own three
+pins; both arenas outlive the original device handle. This proves those two
+controlled orders, not every cross-arena schedule.
+
+Indeterminate fence timeout and host-allocation failure also run in isolated
+arena subprocesses. The fake driver keeps queued resources pending for those
+answers. A test-only wrapper observes the actual production abort boundary in
+ordinary thread context, checks unchanged arena view metadata/cursor, all three
+pins, live job references and the pending fence, then calls real abort. The
+parent requires SIGABRT, so neither an ordinary error return nor successful
+settlement/reuse is accepted. Isolated production-source mutants that deduplicate
+an alias pin, omit an alias detach, rewind before abort, treat indeterminate
+completion as success, or miss cross-arena detach fail the corresponding
+permanent assertions. These mutants never replace production source.
 
 Synchronization uses predicates and condition variables, with ten-second
 operation deadlines and a native thirty-second watchdog. There are no arbitrary
