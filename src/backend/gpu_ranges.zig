@@ -269,6 +269,48 @@ test "device index ranges consume verified loop witnesses without truncation" {
     }
 }
 
+test "device nested index ranges preserve guarded bounds and empty derived facts" {
+    const gpa = std.testing.allocator;
+    for ([_]u64{ 0, 1, 4 }) |outer_count| {
+        for ([_]u64{ 0, 1, 3 }) |inner_count| {
+            var mir = try loops_mod.Test.nested(gpa, outer_count, inner_count);
+            defer mir.deinit(gpa);
+            var ranges = (try Ranges.init(gpa, &mir)).?;
+            defer ranges.deinit(gpa);
+            const outer = mir.index_loops[0];
+            const inner = mir.index_loops[1];
+            const outer_in_inner = ranges.at(outer.position, inner.position).?;
+            try std.testing.expectEqual(outer_count == 0, outer_in_inner.empty);
+            try std.testing.expectEqual(@as(u32, @intCast(outer_count -| 1)), outer_in_inner.max);
+            // Exiting only the inner loop retains the enclosing guard. The
+            // outer exit, in contrast, permits the final counter value.
+            const inner_exit = mir.terminatorOf(inner.exit);
+            try std.testing.expectEqual(outer_in_inner, ranges.at(outer.position, inner_exit).?);
+            const outer_exit = ranges.at(outer.position, mir.terminatorOf(outer.exit)).?;
+            try std.testing.expect(!outer_exit.empty);
+            try std.testing.expectEqual(@as(u32, @intCast(outer_count)), outer_exit.max);
+            var checked: usize = 0;
+            for (mir.instsOf(inner.body)) |inst| {
+                if (mir.tagOf(inst) != .check) continue;
+                checked += 1;
+                const sum = mir.checkOf(inst).value;
+                const derived = ranges.at(sum, inst).?;
+                const empty = outer_count == 0 or inner_count == 0;
+                try std.testing.expectEqual(empty, derived.empty);
+                if (empty) {
+                    // An unreachable arithmetic result is never an ordinary
+                    // zero value that can discharge an executable check.
+                    try std.testing.expect(ranges.at(inst, inst) == null);
+                } else {
+                    try std.testing.expectEqual(@as(u32, @intCast(outer_count + inner_count - 2)), derived.max);
+                    try std.testing.expectEqual(derived, ranges.at(inst, inst).?);
+                }
+            }
+            try std.testing.expectEqual(@as(usize, 1), checked);
+        }
+    }
+}
+
 test "device index checks require exact values and satisfied predicates" {
     const span = @import("../support/span.zig").Span.empty;
     const TypeId = @import("../sema/types.zig").TypeId;

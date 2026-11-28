@@ -299,4 +299,83 @@ pub const Test = struct {
     pub fn counted(gpa: std.mem.Allocator, count: u64) !Mir {
         return fixture(gpa, count, .none);
     }
+
+    pub fn nested(gpa: std.mem.Allocator, outer_count: u64, inner_count: u64) !Mir {
+        var builder = Mir.Builder.init(gpa);
+        defer builder.deinit();
+        const entry = try builder.addBlock();
+        const exit = try nestedLoop(&builder, entry, outer_count, inner_count, null);
+        _ = try builder.setTerminator(exit, .{ .tag = .ret, .ty = .unit, .span = .empty, .data = .{ .unary = .none } });
+        return builder.finish(entry, .from(0));
+    }
+
+    fn nestedLoop(builder: *Mir.Builder, entry: BlockId, count: u64, child_count: ?u64, enclosing_position: ?InstId) !BlockId {
+        const counter = try builder.addLocal(.u64, .value);
+        const header = try builder.addBlock();
+        const body = try builder.addBlock();
+        const exit = try builder.addBlock();
+        const zero = try builder.addInst(entry, .{ .tag = .constant, .ty = .u64, .span = .empty, .data = .{ .constant = 0 } });
+        const initialize = try builder.addInst(entry, .{ .tag = .store, .ty = .u64, .span = .empty, .data = .{ .store = .{ .local = counter, .value = zero } } });
+        _ = try builder.setTerminator(entry, .{ .tag = .jump, .ty = .unit, .span = .empty, .data = .{ .target = header } });
+        const position = try builder.addInst(header, .{ .tag = .load, .ty = .u64, .span = .empty, .data = .{ .local = counter } });
+        const limit = try builder.addInst(header, .{ .tag = .constant, .ty = .u64, .span = .empty, .data = .{ .constant = count } });
+        const guard = try builder.addInst(header, .{ .tag = .cmp_lt, .ty = .bool_, .span = .empty, .data = .{ .binary = .{ .lhs = position, .rhs = limit } } });
+        _ = try builder.setTerminator(header, .{ .tag = .branch, .ty = .unit, .span = .empty, .data = .{ .branch = .{ .cond = guard, .then_block = body, .else_block = exit } } });
+        const loop = try builder.beginIndexLoop(.{ .parent = builder.current_index_loop, .initialize = initialize, .position = position, .limit = limit, .header = header, .body = body, .exit = exit });
+        if (enclosing_position) |outer| {
+            const sum = try builder.addInst(body, .{ .tag = .add, .ty = .u64, .span = .empty, .data = .{ .binary = .{ .lhs = outer, .rhs = position } } });
+            _ = try builder.addInst(body, .{ .tag = .check, .ty = .u64, .span = .empty, .data = .{ .check = .{ .value = sum, .kind = .overflow } } });
+        }
+        const step_block = if (child_count) |child| try nestedLoop(builder, body, child, null, position) else body;
+        const one = try builder.addInst(step_block, .{ .tag = .constant, .ty = .u64, .span = .empty, .data = .{ .constant = 1 } });
+        const next = try builder.addInst(step_block, .{ .tag = .add, .ty = .u64, .span = .empty, .data = .{ .binary = .{ .lhs = position, .rhs = one } } });
+        const step = try builder.addInst(step_block, .{ .tag = .store, .ty = .u64, .span = .empty, .data = .{ .store = .{ .local = counter, .value = next } } });
+        _ = try builder.setTerminator(step_block, .{ .tag = .jump, .ty = .unit, .span = .empty, .data = .{ .target = header } });
+        builder.endIndexLoop(loop, step);
+        return exit;
+    }
 };
+
+test "nested counted witnesses reject counter interference and uninitialized header entry" {
+    const gpa = std.testing.allocator;
+    const MutationKind = enum { none, shared_counter, outer_write, bypass_initialization, exit_reenters_inner_header, wrong_parent, truncated_scope };
+    for (std.meta.tags(MutationKind)) |mutation| {
+        var mir = try Test.nested(gpa, 4, 3);
+        defer mir.deinit(gpa);
+        const outer = mir.index_loops[0];
+        const inner = mir.index_loops[1];
+        switch (mutation) {
+            .none => {},
+            .shared_counter => mir.insts.items(.data)[inner.position.index()] = .{ .local = mir.localOf(outer.position) },
+            .outer_write => {
+                for (mir.instsOf(inner.body)) |inst| {
+                    if (mir.tagOf(inst) != .check) continue;
+                    mir.insts.items(.tag)[inst.index()] = .store;
+                    mir.insts.items(.data)[inst.index()] = .{ .store = .{ .local = mir.localOf(outer.position), .value = outer.position } };
+                }
+            },
+            .bypass_initialization => mir.insts.items(.data)[mir.terminatorOf(outer.header).index()] = .{ .branch = .{ .cond = mir.branchOf(mir.terminatorOf(outer.header)).cond, .then_block = inner.header, .else_block = outer.exit } },
+            .exit_reenters_inner_header => {
+                const terminal = mir.terminatorOf(outer.exit);
+                mir.insts.items(.tag)[terminal.index()] = .jump;
+                mir.insts.items(.data)[terminal.index()] = .{ .target = inner.header };
+            },
+            .wrong_parent => @constCast(mir.index_loops)[1].parent = .none,
+            .truncated_scope => @constCast(mir.index_loops)[0].past_last = 1,
+        }
+        var result = try analyze(gpa, &mir);
+        if (result == .valid) {
+            defer result.valid.deinit(gpa);
+            try std.testing.expectEqual(MutationKind.none, mutation);
+            const bounds = result.valid.counterBound(outer.position, inner.step).?;
+            try std.testing.expectEqual(@as(u64, 3), bounds.max);
+            try std.testing.expect(!bounds.empty);
+        } else {
+            try std.testing.expect(mutation != .none);
+            if (mutation == .outer_write)
+                try std.testing.expectEqualStrings("index loop counter has another access", result.invalid);
+            if (mutation == .exit_reenters_inner_header)
+                try std.testing.expectEqualStrings("index loop has an unguarded control-flow edge", result.invalid);
+        }
+    }
+}
