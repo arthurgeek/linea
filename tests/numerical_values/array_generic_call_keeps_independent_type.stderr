@@ -1,0 +1,7 @@
+error[T-Mismatch]: expected `[Int16; 2]`, found `Int16`
+ --> tests/numerical_values/array_generic_call_keeps_independent_type.lin:7:36
+  |
+1 | fn first_of[T: Copyable](value: T, _other: T) -> T where carries(value) {
+  |                          ----- expected because of this parameter
+7 |     let result = values + first_of(1 + 2, values)
+  |                                    ^^^^^ expected `[Int16; 2]`, found `Int16`

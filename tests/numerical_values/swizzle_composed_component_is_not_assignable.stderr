@@ -1,0 +1,5 @@
+error[T-Lend]: a swizzle assignment requires an array place
+ --> tests/numerical_values/swizzle_composed_component_is_not_assignable.lin:3:5
+  |
+3 |     values.yx.x = 5
+  |     ^^^^^^^^^^^ bind the array to a mutable variable before assigning its components

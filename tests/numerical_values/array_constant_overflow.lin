@@ -1,0 +1,5 @@
+let result = [Int8(127), 1] + [Int8(1), 2]
+
+fn main() -> UInt8 {
+    UInt8(result[0])
+}

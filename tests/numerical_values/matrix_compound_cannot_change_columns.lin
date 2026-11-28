@@ -1,0 +1,7 @@
+import std.num
+
+fn main() -> UInt8 {
+    var matrix = num.matrix([[Int16(1), 2, 3], [4, 5, 6]])
+    matrix *= num.matrix([[Int16(1), 2], [0, 1], [1, 0]])
+    UInt8(matrix[0, 0])
+}

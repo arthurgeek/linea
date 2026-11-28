@@ -1,0 +1,5 @@
+error[T-Bound]: `Matrix[UInt8, 2, 2]` does not implement `Index[(UInt32, UInt64)]`
+ --> tests/numerical_values/matrix_tuple_key_does_not_convert_typed_components.lin:5:5
+  |
+5 |     value[UInt32(0), UInt64(1)]
+  |     ^^^^^ the library declares both `num.Matrix[UInt8, 2, 2]` and `Index[(UInt32, UInt64)]`; wrap it in a type this program declares that implements `Index[(UInt32, UInt64)]`

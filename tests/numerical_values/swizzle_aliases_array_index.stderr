@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+ --> tests/numerical_values/swizzle_aliases_array_index.lin:8:27
+  |
+8 |     UInt8(pair(&values.x, values[0]))
+  |                --------- mutated by this argument
+  |                           ^^^^^^^^^ already passed `&` here

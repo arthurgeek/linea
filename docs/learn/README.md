@@ -15,6 +15,8 @@
 13. [Tasks and sessions](13-tasks-and-sessions.md)
 14. [Running other programs](14-running-other-programs.md)
 15. [GPU tensors](15-gpu-tensors.md)
+16. [Numerical values](16-numerical-values.md)
+17. [Measuring a workload](17-benchmarks.md)
 
 Appendices: [Patterns the standard library repeats](patterns.md),
 [Iterator recipes](iterator-recipes.md) and [Errors the guide shows](errors.md).

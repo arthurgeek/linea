@@ -1,0 +1,5 @@
+error[T-Operands]: arithmetic operands `[Int32; 2]` and `[Int32; 1]` are incompatible
+ --> tests/numerical_values/array_shapes_must_match.lin:2:32
+  |
+2 |     let result = [Int32(1), 2] + [Int32(3)]
+  |                                ^ both operands need the same scalar type; two array operands also need the same length

@@ -1,0 +1,7 @@
+error[T-Arms]: expected `Int16`, found `[Int16; 2]`
+ --> tests/numerical_values/array_operand_if_arms_keep_shapes.lin:5:12
+  |
+3 |     let result = values + if values[0] == 1 {
+  |                                             - this arm settled the type
+5 |     } else {
+  |            ^ the arms disagree

@@ -1,0 +1,16 @@
+import std.num
+
+@linear
+struct Ticket { number: UInt8 }
+
+fn _discard(sink matrix: num.Matrix[Ticket, 0, 1]) {
+    let _ = matrix
+}
+
+fn _duplicate(matrix: num.Matrix[Ticket, 1, 0]) -> num.Matrix[Ticket, 1, 0] {
+    copy(matrix)
+}
+
+fn main() -> UInt8 {
+    0
+}

@@ -1,0 +1,40 @@
+==================
+Benchmarks keep bench contextual
+==================
+
+import std.bench
+bench "sum" {}
+fn work() { bench.black_box(1) }
+impl Value { bench "member" {} }
+trait Marker { bench "trait" {} }
+
+---
+
+(source_file
+  (import_declaration
+    (identifier)
+    (identifier))
+  (benchmark_declaration
+    (string_literal)
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (identifier))
+          (argument_list
+            (integer_literal))))))
+  (impl_block
+    (type_identifier)
+    (benchmark_declaration
+      (string_literal)
+      (block)))
+  (trait_declaration
+    (type_identifier)
+    (benchmark_declaration
+      (string_literal)
+      (block))))

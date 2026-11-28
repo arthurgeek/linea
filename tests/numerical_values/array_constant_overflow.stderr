@@ -1,0 +1,5 @@
+error[T-Overflow]: element 0 of this operation overflows `Int8`
+ --> tests/numerical_values/array_constant_overflow.lin:1:29
+  |
+1 | let result = [Int8(127), 1] + [Int8(1), 2]
+  |                             ^ the result is not representable

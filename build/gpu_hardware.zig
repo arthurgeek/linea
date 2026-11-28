@@ -43,6 +43,10 @@ fn numericalSource(b: *std.Build, reduction: ?[]const u8, extra: []const u8) []c
 
 fn shader(b: *std.Build, checker: *std.Build.Step.Compile, name: []const u8, text: []const u8, barriers: usize) Shader {
     const source = b.addWriteFiles().add(b.fmt("{s}.mlir", .{name}), text);
+    return shaderFile(b, checker, name, source, barriers);
+}
+
+fn shaderFile(b: *std.Build, checker: *std.Build.Step.Compile, name: []const u8, source: std.Build.LazyPath, barriers: usize) Shader {
     const opt = b.addSystemCommand(&.{ "mlir-opt", "--no-implicit-module", "--pass-pipeline=spirv.module(symbol-dce)" });
     opt.addFileArg(source);
     opt.addArg("-o");
@@ -156,6 +160,25 @@ pub fn add(
     matrices.addFileArg(matmul.bytes);
     matrices.step.dependOn(matmul.validation);
     shaders.dependOn(matmul.validation);
+    const layout = b.step("bench-matrix-layout-gpu", "Measure strict row/column matrix layouts on a real GPU");
+    const layout_generator = b.addExecutable(.{
+        .name = "gpu-matrix-layout",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("build/gpu_matrix_layout.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseSafe,
+        }),
+    });
+    const generate_layout = b.addRunArtifact(layout_generator);
+    generate_layout.addFileArg(b.addWriteFiles().add("matmul-row-layout.mlir", numericalSource(b, null, "")));
+    const column_source = generate_layout.addOutputFileArg("matmul-column-layout.mlir");
+    const column_matmul = shaderFile(b, checker, "matmul-column-layout", column_source, 0);
+    const layout_run = harness(b, archive, target, null, "matrix-layout-gpu", "bench/matrix_layout_gpu.c", &.{"runtime/gpu.h"});
+    layout_run.addFileArg(matmul.bytes);
+    layout_run.addFileArg(column_matmul.bytes);
+    layout_run.step.dependOn(matmul.validation);
+    layout_run.step.dependOn(column_matmul.validation);
+    layout.dependOn(&layout_run.step);
     const counted = shader(b, checker, "reduce-count-calls", numericalSource(b, "linea_count_add", @embedFile("../runtime/tests/gpu_numerical/count_calls.mlir")), 7);
     matrices.addFileArg(counted.bytes);
     matrices.step.dependOn(counted.validation);

@@ -1,0 +1,28 @@
+fn main() -> UInt8 {
+    let a = [Int32(2), -6, 12]
+    let b = [Int32(3), 2, -4]
+    let sum = a + b
+    let difference = a - b
+    let product = a * b
+    let quotient = a / b
+    let remainder = a % b
+    if sum[0] != 5 || sum[1] != -4 || sum[2] != 8 {
+        return 1
+    }
+    if difference[0] != -1 || difference[1] != -8 || difference[2] != 16 {
+        return 2
+    }
+    if product[0] != 6 || product[1] != -12 || product[2] != -48 {
+        return 3
+    }
+    if quotient[0] != 0 || quotient[1] != -3 || quotient[2] != -3 {
+        return 4
+    }
+    if remainder[0] != 2 || remainder[1] != 0 || remainder[2] != 0 {
+        return 5
+    }
+    if a[1] != -6 || b[2] != -4 {
+        return 6
+    }
+    0
+}

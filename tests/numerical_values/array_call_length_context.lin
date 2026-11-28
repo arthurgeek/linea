@@ -1,0 +1,10 @@
+import std.mem
+
+fn main() -> UInt8 {
+    let values = [Int32(2), 3, 4]
+    let result = values + mem.filled(5)
+    if result[0] != 7 || result[2] != 9 {
+        return 1
+    }
+    0
+}

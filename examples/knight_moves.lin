@@ -89,8 +89,16 @@ fn reach_from_a_corner(side: UInt64 = standard_side) -> Result[Reach, Oom] {
         // Eight moves combine two squares on one axis and one on the other.
         // Signed offsets represent moves in all directions. Check the new
         // row and column before converting them to unsigned square indexes.
-        let down = [-2, -2, -1, -1, 1, 1, 2, 2]
-        let across = [-1, 1, -2, 2, -2, 2, -1, 1]
+        let moves: [[Int64; 2]; 8] = [
+            [-2, -1],
+            [-2, 1],
+            [-1, -2],
+            [-1, 2],
+            [1, -2],
+            [1, 2],
+            [2, -1],
+            [2, 1],
+        ]
 
         // Process squares in queue order, adding unvisited neighbours at
         // the back. This reaches each square by a shortest path.
@@ -104,9 +112,10 @@ fn reach_from_a_corner(side: UInt64 = standard_side) -> Result[Reach, Oom] {
             let so_far = distance[square]
             let (row, column) = square_to_row_col(square, side)
 
-            for m in 0..down.length() {
-                let r = row + down[m]
-                let c = column + across[m]
+            for m in 0..moves.length() {
+                let next_position = [row, column] + moves[m]
+                let r = next_position.x
+                let c = next_position.y
                 if r >= 0 && r < Int64(side) && c >= 0 && c < Int64(side) {
                     let next = UInt64(r) * side + UInt64(c)
                     if distance[next] == unreached {

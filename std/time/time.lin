@@ -24,6 +24,8 @@ let nanoseconds_per_millisecond: UInt64 = 1000000
 
 let nanoseconds_per_second: UInt64 = 1000000000
 
+let nanoseconds_per_minute: UInt64 = 60000000000
+
 let seconds_per_day: UInt64 = 86400
 
 // 0000-01-01T00:00:00Z is 62,167,219,200 seconds before the Unix epoch, and
@@ -338,7 +340,7 @@ impl Instant {
 
 // `Duration` is a span of time in nanoseconds. Display writes it in the
 // largest unit below it, with the fraction that is not zero: `0s`, `750ns`,
-// `12.5µs`, `3.25ms`, `2s`, `90.125s`. Seconds are the largest unit.
+// `12.5µs`, `3.25ms`, `2s`, `1min30.125s`. Minutes retain the exact remainder.
 @(opaque, copyable, derive(Equatable, Comparable, Debug))
 struct Duration {
     nanoseconds: UInt64,
@@ -615,38 +617,55 @@ impl Backoff {
 
 impl Display for Duration {
     fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
-        let length = self.nanoseconds
+        var length = self.nanoseconds
+        if length >= nanoseconds_per_minute {
+            let minutes = length / nanoseconds_per_minute
+            minutes.fmt(&w)?
+            &w.write_str("min")?
+            length %= nanoseconds_per_minute
+            if length == 0 {
+                return .Ok(())
+            }
+        }
         if length == 0 {
             return &w.write_str("0s")
         }
-        if length < nanoseconds_per_microsecond {
-            return "{length}ns".fmt(&w)
-        }
-        if length < nanoseconds_per_millisecond {
-            return write_in_unit(length, nanoseconds_per_microsecond, 3, "µs", &w)
-        }
-        if length < nanoseconds_per_second {
-            return write_in_unit(length, nanoseconds_per_millisecond, 6, "ms", &w)
-        }
-        write_in_unit(length, nanoseconds_per_second, 9, "s", &w)
+        let (per_unit, unit) = duration_unit(length)
+        write_in_unit(length, per_unit, unit, &w)
+    }
+}
+
+// One unit choice serves exact durations and fractional benchmark averages.
+internal fn duration_unit(nanoseconds: UInt64) -> (UInt64, Str) {
+    if nanoseconds >= nanoseconds_per_minute {
+        (nanoseconds_per_minute, "min")
+    } else if nanoseconds >= nanoseconds_per_second {
+        (nanoseconds_per_second, "s")
+    } else if nanoseconds >= nanoseconds_per_millisecond {
+        (nanoseconds_per_millisecond, "ms")
+    } else if nanoseconds >= nanoseconds_per_microsecond {
+        (nanoseconds_per_microsecond, "µs")
+    } else {
+        (1, "ns")
     }
 }
 
 // Write `length` nanoseconds as a count of `per_unit` nanoseconds, then the
-// remainder as a decimal fraction of `digits` digits with its trailing zeros
-// dropped, then `unit`.
-fn write_in_unit[W: Writer](length: UInt64, per_unit: UInt64, digits: UInt64, unit: Str, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
+// remainder one decimal digit at a time, stopping after its last nonzero
+// digit. This helper receives only the power-of-ten units below one minute.
+fn write_in_unit[W: Writer](length: UInt64, per_unit: UInt64, unit: Str, inout w: W) -> Result[(), W.Error] where carries(.Err: w) {
     let whole = length / per_unit
     var fraction = length % per_unit
-    var width = digits
     whole.fmt(&w)?
     if fraction != 0 {
-        while fraction % 10 == 0 {
-            fraction /= 10
-            width -= 1
-        }
         &w.write_str(".")?
-        fmt.write_integer(fraction, fmt.Spec { zero = true, ..fmt.Spec.padded(width) }, &w)?
+        var scale = per_unit / 10
+        while fraction != 0 {
+            let digit = fraction / scale
+            digit.fmt(&w)?
+            fraction %= scale
+            scale /= 10
+        }
     }
     &w.write_str(unit)
 }
@@ -659,8 +678,16 @@ test "a duration displays in the largest unit below it" {
     duration_displays_as(3250000, "3.25ms", "milliseconds changed")?
     duration_displays_as(1000001, "1.000001ms", "a fraction with leading zeros changed")?
     duration_displays_as(2000000000, "2s", "whole seconds changed")?
-    duration_displays_as(90125000000, "90.125s", "seconds past a minute changed")?
+    duration_displays_as(90125000000, "1min30.125s", "seconds past a minute changed")?
     .Ok(())
+}
+
+test "a duration displays minutes without losing its remainder" {
+    duration_displays_as(60000000000, "1min", "a whole minute changed")?
+    duration_displays_as(90125000000, "1min30.125s", "a minute's remaining seconds changed")?
+    duration_displays_as(60000000001, "1min1ns", "a minute's remaining nanosecond changed")?
+    duration_displays_as(1000010, "1.00001ms", "leading and trailing fractional zeros changed")?
+    duration_displays_as(18446744073709551615, "307445734min33.709551615s", "the largest duration changed")?
 }
 
 // `duration_displays_as` checks that a duration of `nanoseconds` displays as

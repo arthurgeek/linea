@@ -1,0 +1,22 @@
+fn position(inout calls: UInt64) -> UInt64 {
+    calls += 1
+    0
+}
+
+fn operand(inout calls: UInt64) -> [Int32; 2] {
+    calls += 10
+    [Int32(calls), 2]
+}
+
+fn main() -> UInt8 {
+    var calls = UInt64(0)
+    var rows = [[Int32(1), 2], [Int32(3), 4]]
+    rows[position(&calls)] += operand(&calls)
+    if calls != 11 || rows[0][0] != 11 || rows[0][1] != 4 {
+        return 1
+    }
+    if rows[1][0] != 3 || rows[1][1] != 4 {
+        return 2
+    }
+    0
+}

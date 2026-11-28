@@ -1,0 +1,5 @@
+error[T-Index]: component `z` is outside an array of 2 elements
+ --> tests/numerical_values/swizzle_outside_array.lin:3:11
+  |
+3 |     UInt8(v.z)
+  |           ^^^ select a component the array contains

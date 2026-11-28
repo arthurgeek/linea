@@ -60,6 +60,7 @@ module.exports = grammar({
     [$.call_type_arguments, $.call_generic_arguments],
     [$._result_type, $._call_listed_type],
     [$._expression, $._call_type],
+    [$._expression, $.call_type_arguments],
     [$._expression, $._call_type, $.literal_type],
     [$._result_type, $._expression, $._call_type, $.literal_type],
     [$._result_type, $._expression, $._call_type],
@@ -80,6 +81,7 @@ module.exports = grammar({
     _declaration: $ => choice(
       $.function_declaration,
       $.test_declaration,
+      $.benchmark_declaration,
       $.extern_declaration,
       $.enum_declaration,
       $.struct_declaration,
@@ -149,10 +151,13 @@ module.exports = grammar({
       optional($.type_arguments),
     ),
 
+    // A written type may put its arguments on the next line. Both opener
+    // tokens are admitted: a shared same-line token must not force a nested
+    // written type down the expression-only generic reading.
     // `[UInt8, Cell[T]]`. An argument is itself a written type, so this nests,
     // or a length: `Ring[UInt8, 16]`. A length parameter's name reads as a
     // type name here, as the grammar does not know case.
-    type_arguments: $ => seq('[', commaSep1(choice($._type, $.integer_literal, $.binary_expression)), ']'),
+    type_arguments: $ => seq(choice('[', postfixBracket()), commaSep1(choice($._type, $.integer_literal, $.binary_expression)), ']'),
 
     // An `extern` declares an operation without a source body, so
     // it is a header ended by a line break the way a trait's signature is.
@@ -188,6 +193,17 @@ module.exports = grammar({
       optional('export'),
       'test',
       optional('trap'),
+      field('name', $.string_literal),
+      optional(seq('->', field('return_type', $._result_type))),
+      optional($.where_clause),
+      field('body', $.block),
+    ),
+
+    // Contextual: a quoted name follows only in declaration position.
+    benchmark_declaration: $ => seq(
+      optional($.visibility),
+      optional('export'),
+      'bench',
       field('name', $.string_literal),
       optional(seq('->', field('return_type', $._result_type))),
       optional($.where_clause),
@@ -375,7 +391,7 @@ module.exports = grammar({
       field('trait', $.trait_reference),
       optional($.template_requirements),
       '{',
-      repeat(choice($.function_declaration, $.test_declaration)),
+      repeat(choice($.function_declaration, $.test_declaration, $.benchmark_declaration)),
       '}',
     ),
 
@@ -470,7 +486,7 @@ module.exports = grammar({
       optional(seq(':', sep1($.bound, '+'))),
       optional($.where_clause),
       '{',
-      repeat(choice($.signature, $.provided_operation, $.projection_signature, $.associated_type, $.test_declaration)),
+      repeat(choice($.signature, $.provided_operation, $.projection_signature, $.associated_type, $.test_declaration, $.benchmark_declaration)),
       '}',
     ),
 
@@ -844,8 +860,9 @@ module.exports = grammar({
     // item, `parse[UInt16]()` as much as `steps[at](5)`, are an index to this
     // grammar: which of the two they are depends on what the name before them
     // reaches, which only the compiler knows. The highlight queries colour a
-    // capitalised index before a call as a type. Brackets whose contents
-    // cannot be one expression are type arguments.
+    // capitalised index before a call as a type. A comma-separated run may
+    // also be a tuple index key; ambiguous type-shaped runs retain a type
+    // argument reading, while value-only components require an index.
     call_expression: $ => choice(
       prec(9, seq(field('callee', $._expression), $.argument_list)),
       prec(9, seq(field('callee', $._expression), field('type_arguments', alias($.call_type_arguments, $.type_arguments)), $.argument_list)),
@@ -858,19 +875,20 @@ module.exports = grammar({
     // type arguments; `create[UInt8]` stays an index to this grammar.
     instantiation_expression: $ => prec(9, seq(field('function', $._expression), field('type_arguments', alias($.call_type_arguments, $.type_arguments)))),
 
-    // Contents no index can have: two or more types, a type followed by a
-    // comma, or one type that is no expression. A generic type here carries
+    // Type-argument contents, including runs also shaped as tuple index keys.
+    // A generic type here carries
     // no precedence of its own: `a[b[1]]` reads `b[` as an index as readily
     // as a type's arguments, and a precedence would settle that before the
     // `1` shows which it is. A list may also hold a length written as a
-    // number, `first[UInt8, 3]`; one number alone stays an index.
-    call_type_arguments: $ => seq('[', choice(
+    // number, `first[UInt8, 3]`; one number alone stays an index. This is a
+    // postfix opener, so a next-line array cannot become type arguments.
+    call_type_arguments: $ => seq(postfixBracket(), choice(
       seq(choice($._call_listed_type, $.integer_literal, $.binary_expression), repeat1(seq(',', choice($._call_listed_type, $.integer_literal, $.binary_expression))), optional(',')),
       seq(choice($._call_listed_type, $.integer_literal, $.binary_expression), ','),
       $._type_only,
     ), ']'),
-    // A type among several, or before a comma: the comma shows the brackets
-    // hold types, so each may be any type a signature writes. A selected,
+    // A type among several, or before a comma, in the type-argument reading
+    // of a bracket. A selected,
     // parenthesised, tuple or borrowed type alone in the brackets reads as an
     // index, since each is spelled as an expression is. Their parts are
     // listed types too, and not `_type`, whose generic type carries a
@@ -899,7 +917,7 @@ module.exports = grammar({
     _type_only: $ => choice($.array_type, $.callable_type, $.unit_type, alias($.call_only_generic_type, $.generic_type)),
     call_only_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_type_arguments, $.type_arguments)),
     call_generic_type: $ => seq(field('name', alias($.identifier, $.type_identifier)), alias($.call_generic_arguments, $.type_arguments)),
-    call_generic_arguments: $ => seq('[', commaSep1(choice($._call_listed_type, $.integer_literal, $.binary_expression)), ']'),
+    call_generic_arguments: $ => seq(choice('[', postfixBracket()), commaSep1(choice($._call_listed_type, $.integer_literal, $.binary_expression)), ']'),
 
     // `Name?(e)`, a newtype's construction declining. One node, because the
     // parser reads it as one form and not as a `?` applied to something that
@@ -912,7 +930,15 @@ module.exports = grammar({
       $.argument_list,
     )),
 
-    index_expression: $ => prec(10, seq(field('head', $._expression), '[', field('index', $._expression), ']')),
+    // Like a call's `(`, a postfix `[` stays on its head's line. A bracket
+    // on the next line begins an array statement, including a nested array.
+    index_expression: $ => prec(10, seq(
+      field('head', $._expression), postfixBracket(),
+      field('index', choice($._expression, alias($._tuple_index, $.tuple_expression))),
+      ']',
+    )),
+
+    _tuple_index: $ => seq($._expression, ',', commaSep1($._expression)),
 
     // `f(a, b: 2)`. An argument may restate the parameter it fills, so each
     // element is a bare expression or a name followed by one.
@@ -1280,6 +1306,13 @@ function rawString(n) {
 // Closed type attributes have their own position before this prefix.
 function modifiers($) {
   return [optional($.visibility), optional('export')];
+}
+
+// Postfix brackets follow their head on the same line, with the same inline
+// whitespace as argument_list. Keep written-type brackets separate: unlike a
+// value suffix, a type's arguments may begin on the next line.
+function postfixBracket() {
+  return alias(token.immediate(prec(1, /[ \t]*\[/)), '[');
 }
 
 function commaSep(rule) {

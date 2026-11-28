@@ -1,0 +1,16 @@
+import std.bench
+
+fn main() -> UInt8 {
+    let owner = "parcel".to_owned().unwrap()
+    let view = owner.view()
+    let result = bench.try_iter(
+        [view] |_iteration: UInt64| -> Result[UInt8, Str] {
+            .Err(copy(view))
+        },
+    )
+    owner.release()
+    match result {
+        Err(Work(text)) => UInt8(text.length()),
+        _ => 0,
+    }
+}

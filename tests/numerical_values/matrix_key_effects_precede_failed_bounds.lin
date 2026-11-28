@@ -1,0 +1,13 @@
+import std.io
+import std.num
+
+fn column() -> UInt64 {
+    io.println("index evaluated").unwrap()
+    0
+}
+
+fn main() -> UInt8 {
+    let matrix = num.matrix([[Int32(1), 2], [3, 4]])
+    let _value = matrix[2, column()]
+    0
+}

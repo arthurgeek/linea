@@ -97,6 +97,7 @@ GPU request.
 import std.gpu
 import std.io
 import std.tensor
+import std.testing
 
 use io.IoError
 use io.println
@@ -205,8 +206,9 @@ dimension produces positive zeros; zero output rows or columns produce an empty
 matrix.
 
 The [complete matrix example](../../examples/gpu_matrix.lin) multiplies two
-matrices, maps over the resident product, and downloads once. Its small unit
-test checks the ordinary `half` function on the CPU:
+matrices, maps over the resident product, and downloads once. Its CPU test
+checks the ordinary `half` function. A separate GPU test uploads both matrices,
+executes the product and map, downloads and checks all four results:
 
 <!-- guide: excerpt examples/gpu_matrix.lin -->
 ```linea
@@ -338,6 +340,35 @@ hardware. The [language definition](../linea-semantics.md#device-tensors) gives
 the exact reduction order, and [ADR 0308](../adr/0308-device-tensors-run-ordinary-numerical-functions.md)
 records the device boundary. [ADR 0309](../adr/0309-tensors-separate-storage-from-numerical-operations.md)
 records shared storage and completed-value operations.
+
+## Test both available and unavailable devices
+
+Run `linea test examples/gpu_matrix.lin` or `linea test std --filter "gpu."` for real-device
+tests. They open a device and execute the operations they assert. Only
+`GpuError.Unavailable` returns `.Err(testing.skip("GPU device unavailable"))`.
+Allocation and runtime errors fail; a CPU scalar test does not establish GPU
+execution. A skipped GPU test appears as `SKIP` with its original reason and
+increments the skipped count, never the passed count.
+
+For qualification, run `linea test --deny-skips std --filter "gpu."` and
+`linea test --deny-skips examples/gpu_matrix.lin`. The `test-gpu-language`
+build target also runs strict tests for the GPU library and examples, including
+the complete host/device tensor pipeline. It requires the intended test names to
+report `ok`, so an empty selection cannot qualify. When running tests directly,
+check that the expected tests appear: `--deny-skips` rejects skipped tests but
+does not reject an empty selection. A portable example may succeed after
+reporting that its device is unavailable; that is not hardware qualification.
+These checks compile device images, upload, submit, wait and download; they cost
+substantially more than scalar CPU tests. The compile-only target establishes
+compilation, not execution.
+
+Application tests can force the unavailable path without changing device
+discovery globally. [The readings example](../../examples/gpu_readings.lin)
+passes an opener and a computation into `compute_with_device`. Its deterministic
+test supplies an opener answering `.Err(.Unavailable)`, then checks both the
+original error and that the computation callback was never invoked. No device
+is fabricated and the test needs no GPU. Its real GPU test independently checks
+the calibrated total after upload, map, reduction and download.
 
 ## Confirm GPU execution
 

@@ -2886,6 +2886,34 @@ pub const PlaceProjection = struct {
     field: ?FieldOrdinal = null,
 };
 
+/// A numerical component selection. Lane numbers are coordinates in the
+/// receiver's array, not references into syntax or another representation.
+pub const Swizzle = struct {
+    base: ExprId,
+    receiver: TypeId,
+    observations: u32,
+    lanes: [4]u8 = @splat(0),
+    count: u8,
+
+    pub fn fromName(base: ExprId, receiver: TypeId, observations: u32, name: []const u8) ?Swizzle {
+        if (name.len == 0 or name.len > 4) return null;
+        const family: []const u8 = if (std.mem.indexOfScalar(u8, "xyzw", name[0]) != null) "xyzw" else "rgba";
+        var result: Swizzle = .{ .base = base, .receiver = receiver, .observations = observations, .count = @intCast(name.len) };
+        for (name, 0..) |letter, i| result.lanes[i] = @intCast(std.mem.indexOfScalar(u8, family, letter) orelse return null);
+        return result;
+    }
+
+    pub fn mask(self: Swizzle) u8 {
+        var used: u8 = 0;
+        for (self.lanes[0..self.count]) |lane| used |= @as(u8, 1) << @as(u3, @intCast(lane));
+        return used;
+    }
+
+    pub fn repeats(self: Swizzle) bool {
+        return @popCount(self.mask()) != self.count;
+    }
+};
+
 pub const ReceiverAdjustment = struct {
     observations: u32,
     receiver: TypeId,
@@ -7060,6 +7088,7 @@ pub const Typing = struct {
     /// mismatches. Rejected selection steps have no entry.
     selected_places: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     place_projections: std.AutoHashMapUnmanaged(ExprId, PlaceProjection) = .empty,
+    swizzles: std.AutoHashMapUnmanaged(ExprId, Swizzle) = .empty,
     implicit_test_successes: std.AutoHashMapUnmanaged(ExprId, TypeId) = .empty,
     /// Every `?` that converts its error through `From`. A `?` absent here
     /// returns its operand's error unchanged.
@@ -7153,6 +7182,7 @@ pub const Typing = struct {
     /// way, so a symbol and a report name one tuple alike before and after
     /// monomorphisation.
     tuple_decls: [node.max_tuple_arity - 1]DeclId = [_]DeclId{DeclId.none} ** (node.max_tuple_arity - 1),
+    matrix_decl: DeclId = .none,
     /// Trusted scalar math declarations with fully validated signatures.
     float_math: @import("intrinsics.zig").FloatMath = .{},
     expr_types: []const TypeId,
@@ -7551,6 +7581,7 @@ pub const Typing = struct {
         self.length_reads.deinit(gpa);
         self.selected_places.deinit(gpa);
         self.place_projections.deinit(gpa);
+        self.swizzles.deinit(gpa);
         self.implicit_test_successes.deinit(gpa);
         self.try_conversions.deinit(gpa);
         self.field_names.deinit(gpa);
@@ -8343,6 +8374,46 @@ pub const Typing = struct {
         return lookupInstance(self.instance_of, self.instances, t);
     }
 
+    pub const MatrixInfo = struct {
+        element: TypeId,
+        rows: TypeId,
+        columns: TypeId,
+        column_major: bool,
+    };
+
+    /// Nominal identity and generic representation are checked together. The
+    /// template parameters distinguish storage order even for square matrices.
+    pub fn matrixInfo(self: *const Typing, t: TypeId) ?MatrixInfo {
+        const instance = self.instanceOf(t) orelse return null;
+        if (self.matrix_decl == .none or instance.decl != self.matrix_decl) return null;
+        const args = self.argsOf(instance);
+        if (args.len != 3) return null;
+        const structure = switch (self.get(instance.template)) {
+            .struct_ => |value| value,
+            else => return null,
+        };
+        if (structure.field_count != 1) return null;
+        const outer = switch (self.get(self.fields.items(.ty)[structure.first_field])) {
+            .array => |value| value,
+            else => return null,
+        };
+        const inner = switch (self.get(outer.element)) {
+            .array => |value| value,
+            else => return null,
+        };
+        const element = self.get(inner.element);
+        const first = self.get(outer.length);
+        const second = self.get(inner.length);
+        if (element != .parameter or first != .parameter or second != .parameter) return null;
+        for ([_]Type{ element, first, second }) |part|
+            if (part.parameter.owner != instance.decl.index()) return null;
+        if (element.parameter.index != 0 or element.parameter.length or
+            !first.parameter.length or !second.parameter.length) return null;
+        const column_major = first.parameter.index == 2 and second.parameter.index == 1;
+        if (!column_major and !(first.parameter.index == 1 and second.parameter.index == 2)) return null;
+        return .{ .element = args[0], .rows = args[1], .columns = args[2], .column_major = column_major };
+    }
+
     /// Whether `t` is an instantiation whose parts are not written yet.
     ///
     /// The checker writes them on first need and writes every one a later
@@ -8561,6 +8632,10 @@ pub const Typing = struct {
 
     pub fn placeProjection(self: *const Typing, expression: ExprId) ?PlaceProjection {
         return self.place_projections.get(expression);
+    }
+
+    pub fn swizzleOf(self: *const Typing, expression: ExprId) ?Swizzle {
+        return self.swizzles.get(expression);
     }
 
     pub fn observedReceiver(self: *const Typing, held: TypeId) ReceiverAdjustment {
@@ -9806,6 +9881,7 @@ pub const Typing = struct {
         /// `Typing.tuple_decls`: the declarations whose instances are spelled
         /// as tuples.
         tuple_decls: [node.max_tuple_arity - 1]DeclId = [_]DeclId{DeclId.none} ** (node.max_tuple_arity - 1),
+        matrix_decl: DeclId = .none,
         observation_traits: []const bool = &.{},
         closure_args: std.ArrayList(TypeId) = .empty,
         interned_closures: Chain(.newest_first) = .empty,
@@ -10144,6 +10220,11 @@ pub const Typing = struct {
         /// where the type is not one.
         pub fn instanceOf(self: *const Builder, t: TypeId) ?Instance {
             return lookupInstance(self.instance_of.items, self.instances.items, t);
+        }
+
+        pub fn matrixInfo(self: *const Builder, t: TypeId) ?Typing.MatrixInfo {
+            const typing = self.view();
+            return typing.matrixInfo(t);
         }
 
         /// The declaration a type came from, as `Typing.declOfType` answers it.
@@ -13332,6 +13413,7 @@ pub const Typing = struct {
                 .constant_pool = self.constant_pool.*,
                 .raw_accesses = .{ .storage = self.certified_storage, .buffer = self.certified_buffer, .slice = self.certified_slice, .address = self.certified_address, .carried = self.certified_carried, .protocol_dual = self.certified_protocol_dual, .protocol_step = self.certified_protocol_step, .closure_entry_type = self.certified_closure_entry, .closure = self.certified_closure, .endpoint = self.certified_endpoint, .foreign_bytes = self.certified_foreign_bytes, .c_text = self.certified_c_text, .c_text_list = self.certified_c_text_list },
                 .tuple_decls = self.tuple_decls,
+                .matrix_decl = self.matrix_decl,
                 .implementation_selections = self.implementation_selections,
                 .closure_release = self.closure_release,
                 .open_types = self.open_types,
@@ -15174,6 +15256,7 @@ pub const Typing = struct {
                 .implementation_selections = implementation_selections,
                 .closure_release = self.closure_release,
                 .tuple_decls = self.tuple_decls,
+                .matrix_decl = self.matrix_decl,
                 // Empty here and filled by the checker, which allocated it and
                 // owns it. This pass only ever borrowed it to read.
                 .decl_returns = .empty,
@@ -15286,6 +15369,7 @@ pub const Typing = struct {
             b.certified_closure = t.raw_accesses.closure;
             b.certified_endpoint = t.raw_accesses.endpoint;
             b.tuple_decls = t.tuple_decls;
+            b.matrix_decl = t.matrix_decl;
             b.implementations_settled = true;
             b.implementation_selections = try t.implementation_selections.clone(gpa);
             try b.pool.appendSlice(gpa, t.pool);
@@ -18181,4 +18265,40 @@ test "a long callable interned after an allocation was refused still has its sha
         try testing.expect(b.pool.items[@intFromEnum(id)].callable.shape_of != .poison);
         if (first) |_| break else |_| {}
     }
+}
+
+test "retained typing preserves certified matrix identity and generic representation" {
+    const gpa = testing.allocator;
+    var builder = try Typing.Builder.init(gpa);
+    defer builder.deinit();
+    const decl = DeclId.at(3);
+    const element = try builder.intern(.{ .parameter = .{ .name = "T", .owner = decl.index(), .index = 0 } });
+    const rows = try builder.intern(.{ .parameter = .{ .name = "rows", .owner = decl.index(), .index = 1, .length = true } });
+    const columns = try builder.intern(.{ .parameter = .{ .name = "columns", .owner = decl.index(), .index = 2, .length = true } });
+    const nested = try builder.arrayOfLength(try builder.arrayOfLength(element, columns), rows);
+    const template = try builder.addStruct("Matrix", .copyable, &.{.{ .name = "data", .ty = nested }});
+    try builder.noteTemplate(decl, 0, template);
+    const count = try builder.lengthOf(2);
+    const matrix = try builder.instantiate(template, decl, &.{ .f32, count, count });
+    try testing.expect(builder.matrixInfo(matrix) == null);
+    builder.matrix_decl = decl;
+    const info = builder.matrixInfo(matrix).?;
+    try testing.expectEqual(TypeId.f32, info.element);
+    try testing.expect(!info.column_major);
+    const fields = builder.get(template).struct_;
+    const column_storage = try builder.arrayOfLength(try builder.arrayOfLength(element, rows), columns);
+    builder.fields.slice().items(.ty)[fields.first_field] = column_storage;
+    try testing.expect(builder.matrixInfo(matrix).?.column_major);
+    // Equal concrete dimensions cannot certify a malformed generic template.
+    const wrong = try builder.arrayOfLength(try builder.arrayOfLength(element, rows), rows);
+    builder.fields.slice().items(.ty)[fields.first_field] = wrong;
+    try testing.expect(builder.matrixInfo(matrix) == null);
+    builder.fields.slice().items(.ty)[fields.first_field] = nested;
+    try builder.setExprCount(0);
+    var finished = try builder.finish(.empty);
+    defer finished.deinit(gpa);
+    var reopened = try Typing.Builder.reopen(gpa, &finished);
+    defer reopened.deinit();
+    try testing.expectEqual(decl, reopened.matrix_decl);
+    try testing.expectEqual(info, reopened.matrixInfo(matrix).?);
 }

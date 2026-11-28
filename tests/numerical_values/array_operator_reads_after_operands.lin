@@ -1,0 +1,14 @@
+fn bump(inout values: [Int32; 2]) -> Int32 {
+    values[0] = 40
+    1
+}
+
+fn main() -> UInt8 {
+    var values = [Int32(2), 3]
+    let result = values + bump(&values)
+    if result[0] == 41 {
+        0
+    } else {
+        1
+    }
+}

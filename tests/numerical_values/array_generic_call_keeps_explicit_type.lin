@@ -1,0 +1,9 @@
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let values = [Int16(1), 2]
+    let result = values + identity[[Int16; 2]](1 + 2)
+    UInt8(result[0])
+}

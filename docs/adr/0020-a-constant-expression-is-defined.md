@@ -5,6 +5,7 @@ Date: 2026-07-25
 ## Status
 
 Accepted; extended by 0059 and 0078; extended by [0140](0140-aggregate-constants-retain-checked-construction-plans.md)
+and [0311](0311-numeric-arrays-apply-scalar-arithmetic-elementwise.md).
 
 ## Context
 

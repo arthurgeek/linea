@@ -1,0 +1,8 @@
+fn main() -> UInt8 {
+    let values: [Int16; 0] = []
+    let result = values / 0
+    if result.length() != 0 {
+        return 1
+    }
+    0
+}

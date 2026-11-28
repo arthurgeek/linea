@@ -1,0 +1,9 @@
+struct Matrix {
+    data: [[Float32; 2]; 2],
+}
+
+fn main() -> UInt8 {
+    let value = Matrix { data = [[1.0, 2.0], [3.0, 4.0]] }
+    let _product = value * value
+    0
+}

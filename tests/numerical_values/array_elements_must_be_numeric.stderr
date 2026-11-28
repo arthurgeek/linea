@@ -1,0 +1,5 @@
+error[T-Operands]: `[Bool; 2]` is not a number
+ --> tests/numerical_values/array_elements_must_be_numeric.lin:2:32
+  |
+2 |     let result = [true, false] + [false, true]
+  |                                ^ an array compares through its elements, so their type must implement the trait

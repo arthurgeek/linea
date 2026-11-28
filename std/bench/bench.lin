@@ -1,0 +1,220 @@
+import std.mem
+import std.testing
+import std.time
+
+// The host compiler emits an opaque use of the address of the live value.
+extern fn benchmark_barrier[T](inout value: T)
+
+// Return the same owned value, preserving its bits and carried observations.
+// The host optimizer must materialize its storage and may assume nothing
+// about its contents after the barrier. A handle observes its descriptor;
+// use the operation that waits for or reads the underlying work as needed.
+pub fn black_box[T](sink value: T) -> T where carries(value) {
+    var kept = value
+    benchmark_barrier(&kept)
+    kept
+}
+
+// A warmup round runs each case once, just as a recorded round does. Each
+// batch runs the requested number of repetitions on the calling task.
+@(opaque, copyable)
+struct Schedule {
+    warmup_count: UInt64,
+    batch_size: UInt64,
+    sample_count: UInt64,
+    case_count: UInt64,
+}
+
+impl Schedule {
+    pub fn new(warmups: UInt64, repetitions: UInt64, samples: UInt64, cases: UInt64) -> Option[Self] {
+        if repetitions == 0 || samples == 0 || cases == 0 || warmups > UInt64.max - samples {
+            return .None
+        }
+        .Some(.{ warmup_count = warmups, batch_size = repetitions, sample_count = samples, case_count = cases })
+    }
+
+    pub fn rounds(self: Self) -> UInt64 {
+        self.warmup_count + self.sample_count
+    }
+
+    pub fn warmups(self: Self) -> UInt64 {
+        self.warmup_count
+    }
+
+    pub fn samples(self: Self) -> UInt64 {
+        self.sample_count
+    }
+
+    pub fn repetitions(self: Self) -> UInt64 {
+        self.batch_size
+    }
+
+    pub fn cases(self: Self) -> UInt64 {
+        self.case_count
+    }
+
+    // Out-of-range and warmup rounds have no recorded sample.
+    pub fn sample_index(self: Self, round: UInt64) -> Option[UInt64] {
+        if round < self.warmup_count || round >= self.rounds() {
+            return .None
+        }
+        .Some(round - self.warmup_count)
+    }
+
+    // Rotate the starting case by one every round. A complete cycle puts
+    // each case in each position once. Both indices are zero-based.
+    pub fn case_at(self: Self, round: UInt64, turn: UInt64) -> Option[UInt64] {
+        if round >= self.rounds() || turn >= self.case_count {
+            return .None
+        }
+        let first = round % self.case_count
+        let remaining = self.case_count - first
+        .Some(
+            if turn < remaining {
+                first + turn
+            } else {
+                turn - remaining
+            },
+        )
+    }
+
+    // Measure one batch in nanoseconds. Each invocation gets an opaque
+    // iteration number. The timer observes each discardable result. Settle
+    // owned resources inside the callback or return them from measure_once.
+    pub fn measure[T: Discardable, F: inout fn(iteration: UInt64) -> T](self: Self, inout body: F) -> UInt64 {
+        let start = time.Instant.now()
+        for iteration in UInt64(0)..self.batch_size {
+            let _observed = black_box(&body(black_box(iteration)))
+        }
+        time.Instant.now().since(start).nanoseconds()
+    }
+
+    // Stop at the first failed invocation and return its original error.
+    pub fn try_measure[E, T: Discardable, F: inout fn(iteration: UInt64) -> Result[T, E]](self: Self, inout body: F) -> Result[UInt64, E] {
+        let start = time.Instant.now()
+        for iteration in UInt64(0)..self.batch_size {
+            let _observed = black_box(&body(black_box(iteration))?)
+        }
+        .Ok(time.Instant.now().since(start).nanoseconds())
+    }
+}
+
+// Time a single call, then hand its result back for inspection or release.
+// The observation happens before the end timestamp.
+pub fn measure_once[T, F: sink fn() -> T](sink body: F) -> (UInt64, T) where carries(body) {
+    let start = time.Instant.now()
+    let answer = black_box(body())
+    (time.Instant.now().since(start).nanoseconds(), answer)
+}
+
+@(copyable, derive(Equatable, Debug))
+struct Summary {
+    minimum: UInt64,
+    median: UInt64,
+    p90: UInt64,
+    maximum: UInt64,
+}
+
+// Sort the supplied samples in place. The median and p90 are elements at
+// zero-based floor(n/2) and floor(9*n/10). Empty input has no statistics.
+pub fn summarize[A: Allocator](inout elapsed: mem.Vec[UInt64, A]) -> Option[Summary] {
+    let n = elapsed.length()
+    if n == 0 {
+        return .None
+    }
+    &elapsed.sort()
+    let high = n / 10 * 9 + n % 10 * 9 / 10
+    .Some(.{ minimum = elapsed[0], median = elapsed[n / 2], p90 = elapsed[high], maximum = elapsed[n - 1] })
+}
+
+test "benchmark schedule validates counts and rotates measured and warmup rounds" {
+    testing.assert(Schedule.new(0, 0, 1, 1).is_none() && Schedule.new(0, 1, 0, 1).is_none() && Schedule.new(0, 1, 1, 0).is_none() && Schedule.new(UInt64.max, 1, 1, 1).is_none(), "invalid counts accepted")?
+    let schedule = Schedule.new(1, 4, 3, 3).unwrap()
+    testing.assert(schedule.sample_index(0).is_none() && schedule.sample_index(4).is_none() && schedule.sample_index(3).unwrap() == 2, "sample bounds changed")?
+    for round in 0..schedule.rounds() {
+        for turn in 0..schedule.cases() {
+            testing.assert_eq(schedule.case_at(round, turn).unwrap(), (round + turn) % 3, "wrong case")?
+        }
+    }
+    let large = Schedule.new(0, UInt64.max, UInt64.max, UInt64.max).unwrap()
+    testing.assert_eq(large.case_at(UInt64.max - 1, UInt64.max - 1).unwrap(), UInt64.max - 2, "rotation overflowed")?
+}
+
+fn observe_iteration(iteration: UInt64) {
+    let _value = black_box(iteration)
+}
+
+test "benchmark callbacks accept functions, closures and return the first error" {
+    let schedule = Schedule.new(0, 5, 1, 1).unwrap()
+    let _function_time = schedule.measure(observe_iteration)
+    let offset: UInt64 = 9
+    let _closure_time = schedule.measure(
+        [offset] |iteration| {
+            let _sum = black_box(offset + iteration)
+        },
+    )
+    var calls: UInt64 = 0
+    let failed = schedule.try_measure(
+        inout [inout calls] |iteration| -> Result[(), UInt64] {
+            calls += 1
+            if iteration == 2 {
+                return .Err(37)
+            }
+            .Ok(())
+        },
+    )
+    let expected: Result[UInt64, UInt64] = .Err(37)
+    testing.assert_eq(failed, expected, "callback error changed")?
+    testing.assert_eq(calls, UInt64(3), "work continued after a failure")?
+    let resource_error = schedule.try_measure(
+        |iteration| -> Result[(), mem.Vec[UInt64]] {
+            var resource: mem.Vec[UInt64] = mem.Vec.new()
+            &resource.push(iteration + 9).unwrap()
+            .Err(resource)
+        },
+    )
+    let received = match resource_error {
+        Ok(_) => false,
+        Err(owner) => {
+            let matches = owner[0] == 9
+            owner.release()
+            matches
+        },
+    }
+    testing.assert(received, "the first failed callback's owned error did not reach its caller")?
+}
+
+test "benchmark observation preserves aggregate floating bits and returns each owner" {
+    let words: [UInt32; 3] = [2147483648, 2143289415, 1]
+    let result = black_box([Float32.from_bits(words[0]), Float32.from_bits(words[1]), Float32.from_bits(words[2])])
+    for i in UInt64(0)..3 {
+        testing.assert_eq(result[i].to_bits(), words[i], "observation changed a float")?
+    }
+    var numbers: mem.Vec[UInt64] = mem.Vec.new()
+    &numbers.push(91).unwrap()
+    let (_elapsed, returned) = measure_once(sink [sink numbers] || numbers)
+    let value = returned[0]
+    returned.release()
+    testing.assert_eq(value, UInt64(91), "the caller lost its result")?
+}
+
+test "benchmark statistics sort elapsed times and use the upper median" {
+    defer var samples: mem.Vec[UInt64] = mem.Vec.new()
+    testing.assert(summarize(&samples).is_none(), "empty input returned statistics")?
+    for value in [UInt64(10), 4, 3, 1, 2, 5, 6, 8, 7, 9] {
+        &samples.push(value).unwrap()
+    }
+    let got = summarize(&samples).unwrap()
+    testing.assert_eq(got, Summary { minimum = 1, median = 6, p90 = 10, maximum = 10 }, "wrong order statistics")?
+}
+
+test "benchmark observation preserves empty values and carried views" {
+    let _unit = black_box(())
+    let empty: [UInt8; 0] = []
+    let returned = black_box(empty)
+    testing.assert_eq(returned.length(), UInt64(0), "an empty array gained elements")?
+    defer var owner: mem.Vec[UInt64] = mem.Vec.new()
+    &owner.push(23).unwrap()
+    let view = black_box(owner.as_slice())
+    testing.assert_eq(view[0], UInt64(23), "an observed view lost its original storage")?
+}

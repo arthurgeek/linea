@@ -1,0 +1,12 @@
+// Build the table once. Each timed invocation reads one runtime-selected
+// element. The runner reports a duration per iteration for each named case.
+import std.bench
+
+bench "square an integer" {
+    bench.iter(|i: UInt64| i * i)
+}
+
+bench "read the squares table" {
+    let table: [UInt64; 8] = [0, 1, 4, 9, 16, 25, 36, 49]
+    bench.iter([table] |i: UInt64| table[i % 8])
+}

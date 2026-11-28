@@ -1,0 +1,9 @@
+fn change(inout value: Int32) {
+    value = 5
+}
+
+fn main() -> UInt8 {
+    var values = [Int32(1), 2]
+    change(&values.yx.x)
+    UInt8(values[0])
+}

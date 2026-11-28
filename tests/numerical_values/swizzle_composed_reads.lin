@@ -1,0 +1,17 @@
+fn change(inout value: Int32, source: Int32) -> Int32 {
+    value += source
+    value
+}
+
+fn main() -> UInt8 {
+    var v = [Int32(1), 2, 3]
+    let pair = v.xy.yx
+    let first = v.yx.x
+    let second = v.yx[1]
+    let changed = change(&v.z, v.yx.x)
+    v.y = 10
+    if pair[0] != 2 || pair[1] != 1 || first != 2 || second != 1 || changed != 5 {
+        return 1
+    }
+    0
+}

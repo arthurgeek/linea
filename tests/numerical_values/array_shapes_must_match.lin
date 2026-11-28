@@ -1,0 +1,4 @@
+fn main() -> UInt8 {
+    let result = [Int32(1), 2] + [Int32(3)]
+    UInt8(result[0])
+}

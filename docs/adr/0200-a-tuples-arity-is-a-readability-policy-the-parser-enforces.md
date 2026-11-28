@@ -4,6 +4,9 @@ Status: Accepted — 2026-10-04
 
 Extends [0199](0199-tuple-syntax-denotes-a-positional-aggregate-with-a-prelude-identity.md).
 
+Extended by [0313](0313-index-brackets-can-hold-a-tuple-key.md), which adds
+direct tuple keys inside index brackets.
+
 ## Context
 
 The language has no variadic generics, so each arity is one declaration with

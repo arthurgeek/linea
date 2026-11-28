@@ -1,0 +1,16 @@
+fn readings(inout calls: UInt64) -> [Int32; 4] {
+    calls += 1
+    [10, 20, 30, 40]
+}
+
+fn main() -> UInt8 {
+    let values = [Int32(1), 2, 3, 4]
+    var calls = UInt64(0)
+    let first = values.yx[0]
+    let third = values.wzyx[1]
+    let returned = readings(&calls).wzyx[1]
+    if first != 2 || third != 3 || returned != 30 || calls != 1 {
+        return 1
+    }
+    0
+}

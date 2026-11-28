@@ -182,3 +182,5 @@
 "borrows" @keyword.storage.modifier
 "carries" @keyword.storage.modifier
 "retains" @keyword.storage.modifier
+
+(benchmark_declaration "bench" @keyword.function)

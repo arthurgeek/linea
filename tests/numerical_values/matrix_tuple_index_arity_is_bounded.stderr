@@ -1,0 +1,5 @@
+error[S-Tuple]: a tuple has two to eight components
+ --> tests/numerical_values/matrix_tuple_index_arity_is_bounded.lin:3:11
+  |
+3 |     values[0, 1, 2, 3, 4, 5, 6, 7, 8]
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^ give a struct names past eight parts

@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/borrows/contracts/a_skip_reason_keeps_its_owner_live.lin:7:5
+  |
+7 |     owner.release()
+  |     ^^^^^ keep this place available until the last use of its observation
+8 |     io.eprintln(failure)
+  |                 ------- the observation is still used here

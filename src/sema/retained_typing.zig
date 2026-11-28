@@ -56,18 +56,17 @@ pub fn attach(gpa: Allocator, saved: *const types.Typing, relocation: Relocation
 fn attachField(comptime field: std.builtin.Type.StructField, gpa: Allocator, saved: *const types.Typing, relocation: Relocation, result: *types.Typing) !void {
     const name = field.name;
     if (comptime in(name, &.{
-        "literal_values",          "conversion_targets", "integer_properties",        "length_reads",        "selected_places",     "place_projections",
-        "implicit_test_successes", "field_names",        "type_selections",           "contract_variants",   "readonly_places",     "carried_places",
-        "borrowed_temporaries",    "constant_values",    "contract_parameters",       "variant_uses",        "part_selections",     "interpolation_positions",
-        "refused",                 "folded_indices",     "field_name_spellings",      "traversal_positions", "expansion_of_impl",   "try_conversions",
-        "declined_contracts",      "adopted_contracts",  "binding_labels",            "aliased",             "defaulted_contracts", "fixed_functions",
-        "refused_members",         "written_arrays",     "value_names_in_type_slots",
+        "literal_values",          "conversion_targets",  "integer_properties", "length_reads",      "selected_places",         "place_projections",         "swizzles",
+        "implicit_test_successes", "field_names",         "type_selections",    "contract_variants", "readonly_places",         "carried_places",            "borrowed_temporaries",
+        "constant_values",         "contract_parameters", "variant_uses",       "part_selections",   "interpolation_positions", "refused",                   "folded_indices",
+        "field_name_spellings",    "traversal_positions", "expansion_of_impl",  "try_conversions",   "declined_contracts",      "adopted_contracts",         "binding_labels",
+        "aliased",                 "defaulted_contracts", "fixed_functions",    "refused_members",   "written_arrays",          "value_names_in_type_slots",
     })) {
         @field(result, name) = try mapMap(gpa, relocation, @field(saved, name));
     } else if (comptime in(name, &.{
         "pool",            "closures",        "closure_release",             "raw_accesses", "float_math", "calls",       "recovered_call_args", "recovered_calls",
         "function_values", "implementations", "suppressed_generated_bodies", "projected",    "traversals", "expansions",  "range_places",        "postfix",
-        "named",           "templates",       "instances",                   "owned_bounds", "standins",   "tuple_decls",
+        "named",           "templates",       "instances",                   "owned_bounds", "standins",   "tuple_decls", "matrix_decl",
     })) {
         @field(result, name) = try mapValue(gpa, relocation, @field(saved, name));
     } else if (comptime in(name, &.{ "expr_types", "construction_types" })) {
@@ -264,7 +263,9 @@ test "retained typing relocates generated semantic records without changing type
     };
     const sqrt_index = @intFromEnum(@import("../support/float_math.zig").Operation.sqrt);
     saved.float_math.declarations[sqrt_index] = .at(2);
+    saved.matrix_decl = .at(2);
     try saved.literal_values.put(gpa, .at(2), .{ .integer = 7 });
+    try saved.swizzles.put(gpa, .at(3), .{ .base = .at(2), .receiver = .u16, .observations = 1, .lanes = .{ 2, 0, 0, 0 }, .count = 2 });
     try saved.contract_variants.put(gpa, .at(2), .{ .receiver = .u16, .ordinal = @enumFromInt(3) });
     try saved.traversal_positions.put(gpa, .at(2), .{ .array = .{ .key = .u64, .length = .u16, .iterator = .u32 } });
     try saved.traversal_positions.put(gpa, .at(1), .{ .expression = .at(3) });
@@ -278,12 +279,20 @@ test "retained typing relocates generated semantic records without changing type
     };
     const attached = try attach(gpa, &saved, r);
     try testing.expectEqual(node.DeclId.at(5), attached.float_math.declarations[sqrt_index]);
+    try testing.expectEqual(node.DeclId.at(5), attached.matrix_decl);
+    try testing.expectEqual(node.DeclId.at(2), saved.matrix_decl);
     try testing.expectEqual(node.DeclId.at(2), saved.float_math.declarations[sqrt_index]);
     try testing.expectEqual(@as(u32, 5), attached.pool[0].parameter.owner);
     try testing.expectEqual(node.DeclId.at(5), attached.pool[0].parameter.traits[0].trait);
     try testing.expectEqual(@as(usize, 6), attached.expr_types.len);
     try testing.expectEqual(types.TypeId.poison, attached.expr_types[2]);
     try testing.expectEqual(types.TypeId.u8, attached.expr_types[4]);
+    const swizzle = attached.swizzles.get(.at(5)).?;
+    try testing.expectEqual(node.ExprId.at(4), swizzle.base);
+    try testing.expectEqual(types.TypeId.u16, swizzle.receiver);
+    try testing.expectEqual(@as(u32, 1), swizzle.observations);
+    try testing.expectEqual(@as(u8, 2), swizzle.count);
+    try testing.expectEqualSlices(u8, &.{ 2, 0, 0, 0 }, &swizzle.lanes);
     const call = attached.call_index.callOf(&attached, .at(5)).?;
     try testing.expectEqual(node.DeclId.at(5), call.target.declared);
     try testing.expectEqual(node.ExprId.at(4), call.args[0]);

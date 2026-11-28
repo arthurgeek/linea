@@ -1,0 +1,5 @@
+let result = -[UInt8(1)]
+
+fn main() -> UInt8 {
+    result[0]
+}

@@ -28,6 +28,27 @@ fn indirect(value: Float32) -> Float32 {
     selected(value)
 }
 
+fn wide_index(value: Float32) -> Float32 {
+    let values = [value, 2.0]
+    let index = if value < 0.0 {
+        UInt64(4294967296)
+    } else {
+        UInt64(0)
+    }
+    values[index]
+}
+
+fn mutate_pair(inout values: [Float32; 2]) -> [Float32; 2] {
+    values.x *= 2.0
+    [values.x, values.y]
+}
+
+fn array_inout(value: Float32) -> Float32 {
+    var values = [value, 2.0]
+    let copied = mutate_pair(&values)
+    copied.x + values.x
+}
+
 fn refuses(input: tensor.Tensor[Float32, 2, gpu.Storage], body: fn(value: Float32) -> Float32) -> Bool {
     match input.map(body) {
         Err(reason) => reason == .UnsupportedFunction,
@@ -84,6 +105,10 @@ fn main() -> UInt8 {
     }
     if recursive(3.0) != 3.0 || mutual_left(3.0) != 3.0 || indirect(3.0) != 3.0 { return 8 }
     if !refuses(matrix, recursive) || !refuses(matrix, mutual_left) || !refuses(matrix, indirect) { return 9 }
+    if wide_index(1.0) != 1.0 { return 11 }
+    if !refuses(matrix, wide_index) { return 12 }
+    if array_inout(3.0) != 12.0 { return 13 }
+    if !refuses(matrix, array_inout) { return 14 }
     let factor = Float32(2.0)
     let captured = match matrix.map([factor] |value: Float32| value * factor) {
         Err(reason) => reason == .UnsupportedFunction,

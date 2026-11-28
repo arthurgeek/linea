@@ -5654,7 +5654,7 @@ pub fn namesTheEntryPoint(ast: *const Ast, d: DeclId) bool {
     if (ast.declTag(d) != .function) return false;
     // A function after a `test` the parser refused is still marked a test,
     // and is not a function the runtime starts.
-    if (ast.declIsTest(d)) return false;
+    if (ast.declIsCase(d)) return false;
     if (ast.memberOwner(d) != TokenId.none) return false;
     const name = ast.declName(d);
     if (ast.tokenTag(name) != .identifier) return false;
@@ -5701,7 +5701,7 @@ pub fn reachedWithoutACall(ast: *const Ast, d: DeclId, in_root: bool) bool {
 /// Declared here rather than beside lowering because this is the earliest pass
 /// that has to know: whether a root must declare `main` is a rule, and a rule
 /// answered in two places is answered twice.
-pub const Purpose = enum { program, tests };
+pub const Purpose = enum { program, tests, benchmarks };
 
 /// The name a test is known by outside the compiler.
 ///
@@ -7263,7 +7263,7 @@ const Resolver = struct {
             // A test binds no name: it is named by a string, which nothing
             // in the language can write a reference to. A type or a constant
             // written after a refused `test` is still what it declares.
-            if (self.ast.declIsTest(d) and (self.ast.declTag(d) == .function or self.ast.declTag(d) == .err)) {
+            if (self.ast.declIsCase(d) and (self.ast.declTag(d) == .function or self.ast.declTag(d) == .err)) {
                 try self.noteTest(d);
                 continue;
             }
@@ -7608,7 +7608,7 @@ const Resolver = struct {
                 }
             }
             first = t;
-            if (!recorded) continue;
+            if (!recorded or self.ast.declIsBenchmark(t.decl) != (self.purpose == .benchmarks)) continue;
 
             const qualified = try qualifiedTestName(self.gpa, self.program.root().dir, m.dir, spelled);
             errdefer self.gpa.free(qualified);
@@ -8161,7 +8161,7 @@ const Resolver = struct {
         // root that is still a library.
         // A module a named file selected is checked for what it declares; it
         // needs a `main` only to be run, which the driver asks.
-        if (found == 0 and (self.purpose == .tests or self.program.kind == .library or self.program.named_module)) return;
+        if (found == 0 and (self.purpose != .program or self.program.kind == .library or self.program.named_module)) return;
 
         const label = try std.fmt.allocPrint(self.sink.arena, "found {d}", .{found});
 
@@ -14178,7 +14178,7 @@ const Resolver = struct {
     /// it was written in instead.
     fn testHolder(self: *const Resolver) TestHolder {
         const d = self.generic;
-        if (d == DeclId.none or !self.ast.declIsTest(d)) return .none;
+        if (d == DeclId.none or !self.ast.declIsCase(d)) return .none;
         const of = self.ast.declOwner(d);
         if (of == TokenId.none) return .none;
         if (self.impl_of_head.get(of)) |impl| return .{ .impl = impl };

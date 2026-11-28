@@ -45,6 +45,17 @@ const omitted_unit_label = "a function writing no result returns `()`";
 const delimiter_unknown = std.math.maxInt(u32);
 const delimiter_invalid = delimiter_unknown - 1;
 
+/// Prefix counts make memoized expression ranges independent of nesting.
+/// Files without a caret need no range index. Construction is linear in the
+/// file's tokens; each subsequent range query is constant time.
+fn caretCounts(gpa: std.mem.Allocator, tags: []const Tag) std.mem.Allocator.Error![]u32 {
+    if (std.mem.indexOfScalar(Tag, tags, .caret) == null) return &.{};
+    const counts = try gpa.alloc(u32, tags.len + 1);
+    counts[0] = 0;
+    for (tags, 0..) |tag, i| counts[i + 1] = counts[i] + @intFromBool(tag == .caret);
+    return counts;
+}
+
 /// Parses a token stream into a syntax tree.
 ///
 /// Cannot fail on malformed input: unparseable regions become `err` nodes and
@@ -69,6 +80,8 @@ pub fn parse(
         const delimiter_ends = try gpa.alloc(u32, tokens.len);
         defer gpa.free(delimiter_ends);
         @memset(delimiter_ends, delimiter_unknown);
+        const carets = try caretCounts(gpa, tokens.items(.tag));
+        defer gpa.free(carets);
 
         var type_exprs: Parser.TypeExprs = .{};
         defer type_exprs.deinit(gpa);
@@ -80,6 +93,7 @@ pub fn parse(
             .file = file,
             .delimiter_base = 0,
             .delimiter_ends = delimiter_ends,
+            .caret_counts = carets,
             .type_exprs = &type_exprs,
         };
         try p.parseProgram();
@@ -222,6 +236,8 @@ pub const Modules = struct {
             const delimiter_ends = try self.gpa.alloc(u32, part.token_end - part.token_start);
             defer self.gpa.free(delimiter_ends);
             @memset(delimiter_ends, delimiter_unknown);
+            const carets = try caretCounts(self.gpa, self.tokens.items(.tag)[part.token_start..part.token_end]);
+            defer self.gpa.free(carets);
             var type_exprs: Parser.TypeExprs = .{};
             defer type_exprs.deinit(self.gpa);
             var p: Parser = .{
@@ -232,6 +248,7 @@ pub const Modules = struct {
                 .file = part.file,
                 .delimiter_base = part.token_start,
                 .delimiter_ends = delimiter_ends,
+                .caret_counts = carets,
                 .type_exprs = &type_exprs,
             };
             try p.parseProgram();
@@ -384,6 +401,7 @@ const Parser = struct {
     /// arguments visits each token once rather than once per possible head.
     delimiter_base: u32,
     delimiter_ends: []u32,
+    caret_counts: []const u32,
     /// The expressions written inside types read so far in this file, which
     /// another reading of the same tokens may take as they are. Outside the
     /// parser's own value, which an attempt copies and restores, so the list
@@ -621,12 +639,8 @@ const Parser = struct {
             std.meta.eql(context, self.typeExprContext()) and
             self.depth + reach <= max_nesting)
         {
-            var caret = false;
-            var scan = self.cursor;
-            scan.seek(start);
-            while (scan.index < end) : (_ = scan.advance()) {
-                if (scan.at(.caret)) caret = true;
-            }
+            const caret = self.caret_counts.len != 0 and
+                self.caret_counts[end - self.delimiter_base] != self.caret_counts[start - self.delimiter_base];
             try self.type_exprs.keep(self.gpa, .{
                 .start = start,
                 .end = end,
@@ -822,8 +836,10 @@ const Parser = struct {
             // the declaration is emitted; everything else about it is a
             // function's, so it is read here with the other prefixes and
             // refused below wherever it would say nothing.
-            const is_test = self.cursor.eat(.keyword_test) != null;
-            const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
+            const is_benchmark = self.atBenchmark();
+            if (is_benchmark) _ = self.cursor.advance();
+            const is_test = is_benchmark or self.cursor.eat(.keyword_test) != null;
+            const expects_trap = !is_benchmark and is_test and self.cursor.eat(.keyword_trap) != null;
             const default_at = if (self.atDefaultImplementation()) self.cursor.advance() else TokenId.none;
 
             // `template Label …` with its `impl` left out or misspelt is still a
@@ -882,7 +898,7 @@ const Parser = struct {
             const at_test_name = is_test and self.atTestName();
 
             const declared: ?node.DeclId = if (at_test_name)
-                try self.parseTest()
+                try self.parseCase(is_benchmark)
             else if (self.cursor.at(.keyword_fn))
                 try self.parseFunction(.top_level)
             else if (self.cursor.at(.keyword_extern))
@@ -942,10 +958,11 @@ const Parser = struct {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "a test declares no visibility",
-                        "the compiler writes the only call to a test, so nothing can import it",
+                        if (is_benchmark) "a benchmark declares no visibility" else "a test declares no visibility",
+                        if (is_benchmark) "the compiler writes the only call to a benchmark, so nothing can import it" else "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
+                if (is_benchmark and is_export) try self.reportAt(.s_test, at, "a benchmark declares no export", "the compiler writes its only call");
                 self.builder.markOwnershipPolicy(d, policy);
                 // As written, not as accepted. A modifier the language
                 // refuses is still a token the source holds, and the formatter
@@ -953,6 +970,7 @@ const Parser = struct {
                 // legal is one the formatter deletes, which turns a refused
                 // program into a different program.
                 self.builder.markTest(d, is_test);
+                if (is_benchmark) self.builder.markBenchmark(d);
                 self.builder.markExpectedTrap(d, expects_trap);
                 self.builder.markExport(d, is_export);
                 continue;
@@ -1393,29 +1411,31 @@ const Parser = struct {
             // tests, and is a member of nothing there. In a trait
             // implementation, in a template or with visibility it is refused
             // by [S-Test].
-            const is_test = self.cursor.eat(.keyword_test) != null;
-            const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
+            const is_benchmark = self.atBenchmark();
+            if (is_benchmark) _ = self.cursor.advance();
+            const is_test = is_benchmark or self.cursor.eat(.keyword_test) != null;
+            const expects_trap = !is_benchmark and is_test and self.cursor.eat(.keyword_trap) != null;
             if (is_test) {
                 if (is_template) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "a test does not sit in a template",
-                        "a template is instantiated for types that satisfy it, and the compiler calls a test",
+                        if (is_benchmark) "a benchmark does not sit in a template" else "a test does not sit in a template",
+                        if (is_benchmark) "a template is instantiated for types that satisfy it, and the compiler calls a benchmark" else "a template is instantiated for types that satisfy it, and the compiler calls a test",
                     );
                 } else if (trait_ref.name != TokenId.none) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "a test does not sit in a trait implementation",
+                        if (is_benchmark) "a benchmark does not sit in a trait implementation" else "a test does not sit in a trait implementation",
                         "a trait implementation declares only what the trait requires",
                     );
                 } else if (visibility != .private) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "a test declares no visibility",
-                        "the compiler writes the only call to a test, so nothing can import it",
+                        if (is_benchmark) "a benchmark declares no visibility" else "a test declares no visibility",
+                        if (is_benchmark) "the compiler writes the only call to a benchmark, so nothing can import it" else "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
                 if (!self.atTestName()) {
@@ -1432,7 +1452,7 @@ const Parser = struct {
             const declares_a_traversal = self.atTraversal();
 
             const declared: ?node.DeclId = if (is_test and self.atTestName())
-                try self.parseTest()
+                try self.parseCase(is_benchmark)
             else if (self.cursor.at(.keyword_fn))
                 try self.parseFunction(.member)
             else if (self.atProjection())
@@ -1505,13 +1525,14 @@ const Parser = struct {
                 // of nothing, so no trait's signatures are paired with it.
                 if (!is_test) self.builder.markTrait(d, trait_ref);
                 self.builder.markTest(d, is_test);
+                if (is_benchmark) self.builder.markBenchmark(d);
                 self.builder.markExpectedTrap(d, expects_trap);
             } else {
                 // A `test` that names no string was reported where it was
                 // read, and is one mistake.
                 if (!is_test) try self.reportAt(.s_entry, at, "an impl holds functions, projections, traversals, constants and types", "expected `fn`, `proj`, `trav`, `let` or `type` here");
                 while (!self.cursor.atEnd() and !self.cursor.at(.r_brace) and
-                    !self.cursor.at(.keyword_fn) and !self.cursor.at(.keyword_let) and
+                    !self.cursor.at(.keyword_fn) and !self.cursor.at(.keyword_let) and !self.atBenchmark() and
                     !self.atProjection() and !self.atTraversal() and !self.atAssociatedType() and
                     !(is_test and self.cursor.at(.l_brace)))
                 {
@@ -2616,7 +2637,8 @@ const Parser = struct {
             const after_visibility: u32 = @intFromBool(has_visibility);
             const exports = self.cursor.peekAt(after_visibility) == .keyword_export;
             const visible = has_visibility and
-                (exports or self.cursor.peekAt(after_visibility) == .keyword_test);
+                (exports or self.cursor.peekAt(after_visibility) == .keyword_test or
+                    self.atBenchmarkAfterVisibility());
             if (visible) _ = self.cursor.advance();
             const exported = self.cursor.eat(.keyword_export);
             if (exported) |export_at| {
@@ -2627,15 +2649,17 @@ const Parser = struct {
                     "a trait declares what its implementations supply, and an export names a module's own entry point",
                 );
             }
-            const is_test = self.cursor.eat(.keyword_test) != null;
-            const expects_trap = is_test and self.cursor.eat(.keyword_trap) != null;
+            const is_benchmark = self.atBenchmark();
+            if (is_benchmark) _ = self.cursor.advance();
+            const is_test = is_benchmark or self.cursor.eat(.keyword_test) != null;
+            const expects_trap = !is_benchmark and is_test and self.cursor.eat(.keyword_trap) != null;
             if (is_test) {
                 if (visible) {
                     try self.reportAt(
                         .s_test,
                         at,
-                        "a test declares no visibility",
-                        "the compiler writes the only call to a test, so nothing can import it",
+                        if (is_benchmark) "a benchmark declares no visibility" else "a test declares no visibility",
+                        if (is_benchmark) "the compiler writes the only call to a benchmark, so nothing can import it" else "the compiler writes the only call to a test, so nothing can import it",
                     );
                 }
                 if (!self.atTestName()) {
@@ -2653,7 +2677,7 @@ const Parser = struct {
             // reports it again as a test or as a name nothing uses.
             const at_test_name = is_test and self.atTestName();
             const declared: ?node.DeclId = if (at_test_name)
-                try self.parseTest()
+                try self.parseCase(is_benchmark)
             else if (self.cursor.at(.keyword_fn))
                 try self.parseSignature()
             else if (self.atProjection())
@@ -2671,6 +2695,7 @@ const Parser = struct {
                 self.builder.markVisibility(d, .private, at);
                 self.builder.markOwner(d, name);
                 self.builder.markTest(d, at_test_name);
+                if (is_benchmark and at_test_name) self.builder.markBenchmark(d);
                 self.builder.markExpectedTrap(d, at_test_name and expects_trap);
             } else {
                 // A `test` followed by no function was reported where it was
@@ -2683,7 +2708,7 @@ const Parser = struct {
                 var depth: usize = 0;
                 while (!self.cursor.atEnd()) {
                     if (depth == 0 and (self.cursor.at(.r_brace) or self.cursor.at(.keyword_fn) or
-                        self.cursor.at(.keyword_test) or self.atProjection() or self.atAssociatedType())) break;
+                        self.cursor.at(.keyword_test) or self.atBenchmark() or self.atProjection() or self.atAssociatedType())) break;
                     if (self.cursor.at(.l_brace)) depth += 1;
                     if (self.cursor.at(.r_brace)) depth -= 1;
                     _ = self.cursor.advance();
@@ -2941,7 +2966,7 @@ const Parser = struct {
     /// Whether the cursor sits where a declaration can begin. One place, so
     /// recovery and dispatch cannot disagree about what a declaration is.
     fn atDeclaration(self: *const Parser) bool {
-        if (self.atDefaultImplementation() or self.atTemplateImplementation()) return true;
+        if (self.atDefaultImplementation() or self.atTemplateImplementation() or self.atBenchmark()) return true;
         return switch (self.cursor.peek()) {
             .keyword_pub,
             .keyword_internal,
@@ -3903,8 +3928,7 @@ const Parser = struct {
         });
     }
 
-    /// `test "name" -> R where … { … }`, read once `test` and any `trap` are
-    /// behind the cursor.
+    /// A named test or benchmark, after its contextual prefix has been read.
     ///
     /// Recorded as a function, since everything after its name is a
     /// function's: a result, a `where` the checker refuses, a body. Its name
@@ -3914,27 +3938,27 @@ const Parser = struct {
     /// Brackets or parentheses after the name are read and refused here: no
     /// call passes a test anything, and nothing settles a type parameter of
     /// one.
-    fn parseTest(self: *Parser) !node.DeclId {
+    fn parseCase(self: *Parser, is_benchmark: bool) !node.DeclId {
         const name = self.cursor.current();
-        try self.readTestName();
+        try self.readTestName(is_benchmark);
 
         // Kept on the declaration once refused, so a body naming one still
         // resolves and the refusal is the one report.
         var type_params: node.TypeParamRange = .{ .start = 0, .end = 0 };
         if (self.cursor.at(.l_bracket)) {
-            try self.reportAt(.s_test, self.cursor.current(), "a test is not generic", "the compiler writes the only call to a test, so nothing settles this");
+            try self.reportAt(.s_test, self.cursor.current(), if (is_benchmark) "a benchmark is not generic" else "a test is not generic", if (is_benchmark) "the compiler writes the only call to a benchmark, so nothing settles this" else "the compiler writes the only call to a test, so nothing settles this");
             type_params = try self.parseTypeParams(.admitted);
         }
         var params: node.ParamRange = .{ .start = 0, .end = 0 };
         if (self.cursor.at(.l_paren)) {
-            try self.reportAt(.s_test, self.cursor.current(), "a test takes no parameters", "the compiler writes the only call to a test, and has nothing to pass");
+            try self.reportAt(.s_test, self.cursor.current(), if (is_benchmark) "a benchmark takes no parameters" else "a test takes no parameters", if (is_benchmark) "the compiler writes the only call to a benchmark, and has nothing to pass" else "the compiler writes the only call to a test, and has nothing to pass");
             params = try self.parseParams(.declaration);
         }
 
         var returns: node.TypeRef = .{ .name = .none };
         if (self.cursor.eat(.arrow)) |arrow| {
             const return_type = self.cursor.current();
-            if (try self.refuseWrittenUnit(arrow, "a test writing no result answers `Result[(), testing.Failure]`", remove_written_unit, null)) {
+            if (try self.refuseWrittenUnit(arrow, if (is_benchmark) "a benchmark writing no result answers `Result[bench.Measurement, mem.Oom]`" else "a test writing no result answers `Result[(), testing.Failure]`", remove_written_unit, null)) {
                 // Read as the omitted result it should have been.
             } else if (self.cursor.at(.identifier) or self.cursor.at(.l_bracket) or
                 self.cursor.at(.l_paren) or self.startsCallableType() or self.cursor.at(.keyword_borrow))
@@ -3954,7 +3978,7 @@ const Parser = struct {
             body = try self.parseBraced("this body is never closed");
         } else {
             // At the test, since what follows it is the next declaration.
-            try self.reportAt(.s_brace, self.cursor.previousToken(), "expected `{`", "a test needs a body");
+            try self.reportAt(.s_brace, self.cursor.previousToken(), "expected `{`", if (is_benchmark) "a benchmark needs a body" else "a test needs a body");
         }
 
         return self.builder.addDecl(.{
@@ -3974,9 +3998,26 @@ const Parser = struct {
         });
     }
 
-    /// Whether the cursor is at what a test's name is written as: a string,
-    /// or the start of an interpolated or multi-line one, which are read as
-    /// the name they were meant to be and refused there.
+    /// Look through a visibility prefix without consuming it.
+    fn atBenchmarkAfterVisibility(self: *const Parser) bool {
+        var after = self.cursor;
+        _ = after.advance();
+        return benchmarkAt(&after);
+    }
+
+    fn atBenchmark(self: *const Parser) bool {
+        return benchmarkAt(&self.cursor);
+    }
+
+    fn benchmarkAt(cursor: *const Cursor) bool {
+        if (!cursor.at(.identifier) or !std.mem.eql(u8, cursor.textOf(cursor.current()), "bench")) return false;
+        return switch (cursor.peekAt(1)) {
+            .string_literal, .str_open, .string_line => true,
+            else => false,
+        };
+    }
+
+    /// A quoted case name, including malformed strings read before refusal.
     fn atTestName(self: *const Parser) bool {
         return switch (self.cursor.peek()) {
             .string_literal, .str_open, .string_line => true,
@@ -3987,7 +4028,7 @@ const Parser = struct {
     /// Reads a test's name and refuses one that cannot name a test: a string
     /// that interpolates nothing, written on one line, and one `testNameFault`
     /// finds nothing wrong with once decoded.
-    fn readTestName(self: *Parser) !void {
+    fn readTestName(self: *Parser, is_benchmark: bool) !void {
         const at = self.cursor.current();
         switch (self.cursor.peek()) {
             .string_literal => {
@@ -3999,9 +4040,9 @@ const Parser = struct {
                 if (try text_mod.decode(self.gpa, &decoded, self.cursor.textOf(at)) != null) return;
                 const fault = text_mod.testNameFault(decoded.items) orelse return;
                 try switch (fault) {
-                    .empty => self.reportAt(.s_test, at, "a test's name is not empty", "say what the test checks; `linea test` prints this name and `--filter` matches it"),
-                    .control => self.reportAt(.s_test, at, "a test's name holds no control character", "a name is printed on one line of the report and passed to the test as an argument"),
-                    .edge_space => self.reportAt(.s_test, at, "a test's name has no space at either end", "a space there prints as a name it is not; remove it"),
+                    .empty => self.reportAt(.s_test, at, if (is_benchmark) "a benchmark's name is not empty" else "a test's name is not empty", if (is_benchmark) "say what the benchmark checks; `linea bench` prints this name and `--filter` matches it" else "say what the test checks; `linea test` prints this name and `--filter` matches it"),
+                    .control => self.reportAt(.s_test, at, if (is_benchmark) "a benchmark's name holds no control character" else "a test's name holds no control character", if (is_benchmark) "a name is printed on one line of the report and passed to the benchmark as an argument" else "a name is printed on one line of the report and passed to the test as an argument"),
+                    .edge_space => self.reportAt(.s_test, at, if (is_benchmark) "a benchmark's name has no space at either end" else "a test's name has no space at either end", "a space there prints as a name it is not; remove it"),
                 };
             },
             .str_open => {
@@ -4017,11 +4058,11 @@ const Parser = struct {
                         if (depth == 0) break;
                     }
                 }
-                try self.sink.addError(.s_test, self.file, self.spanThrough(at), "a test's name interpolates nothing", "a test is named where it is written; write the name without `{…}`");
+                try self.sink.addError(.s_test, self.file, self.spanThrough(at), if (is_benchmark) "a benchmark's name interpolates nothing" else "a test's name interpolates nothing", if (is_benchmark) "a benchmark is named where it is written; write the name without `{…}`" else "a test is named where it is written; write the name without `{…}`");
             },
             .string_line => {
                 while (self.cursor.at(.string_line)) _ = self.cursor.advance();
-                try self.sink.addError(.s_test, self.file, self.spanThrough(at), "a test's name is written on one line", "write the name as one quoted string");
+                try self.sink.addError(.s_test, self.file, self.spanThrough(at), if (is_benchmark) "a benchmark's name is written on one line" else "a test's name is written on one line", "write the name as one quoted string");
             },
             else => unreachable,
         }
@@ -7368,7 +7409,7 @@ const Parser = struct {
                 // One expression that begins as a length does is both the
                 // index and the one length argument, so it is read once and
                 // the type reading names the same node.
-                const shared: ?ExprId = if (close != null and self.lengthArgumentFollows())
+                const shared: ?ExprId = if (close != null and self.lengthArgumentFollows(close.?))
                     try self.tryWholeIndex(close.?)
                 else
                     null;
@@ -7430,10 +7471,19 @@ const Parser = struct {
     /// The index inside a bracket and the `]` that closes it, the cursor on
     /// the `[`.
     fn parseIndex(self: *Parser) std.mem.Allocator.Error!ExprId {
-        _ = self.cursor.advance();
+        const open = self.cursor.advance();
         self.indexes += 1;
-        const idx = try self.parseFull();
-        self.indexes -= 1;
+        defer self.indexes -= 1;
+        var measure = Measure.begin(self);
+        defer measure.finish();
+        const idx = try self.parseTypeExpression();
+        measure.operand();
+        if (self.cursor.at(.comma)) {
+            const tuple = try self.parseTupleBefore(open, idx, .r_bracket);
+            measure.operand();
+            if (!measure.wrap()) return self.tooDeeplyNestedOver(open, open);
+            return tuple;
+        }
         if (self.cursor.eat(.r_bracket) == null) {
             try self.reportAt(
                 .s_bracket,
@@ -7494,12 +7544,14 @@ const Parser = struct {
                 parser.sink = self.saved.sink;
                 return true;
             }
-            parser.* = self.saved;
-            if (!fits) {
-                parser.builder.rollback(self.checkpoint);
-                parser.type_exprs.rollback(self.checkpoint);
-            }
+            if (fits) parser.* = self.saved else self.discard(parser);
             return fits;
+        }
+
+        fn discard(self: *Attempt, parser: *Parser) void {
+            parser.* = self.saved;
+            parser.builder.rollback(self.checkpoint);
+            parser.type_exprs.rollback(self.checkpoint);
         }
     };
 
@@ -7533,11 +7585,24 @@ const Parser = struct {
     }
 
     /// Whether the bracket the cursor is on begins with a length argument.
-    fn lengthArgumentFollows(self: *Parser) bool {
+    fn lengthArgumentFollows(self: *Parser, close: TokenId) bool {
         const on_bracket = self.cursor;
         defer self.cursor = on_bracket;
         _ = self.cursor.advance();
-        return self.startsLengthArgument();
+        if (!self.startsLengthArgument()) return false;
+        // Several arguments cannot share one length expression. Skip groups
+        // rather than speculatively parsing and discarding the entire tuple.
+        while (self.cursor.index < close.index()) {
+            switch (self.cursor.peek()) {
+                .comma => return false,
+                .l_paren, .l_bracket, .l_brace => {
+                    const end = self.delimiterEnd(self.cursor.current()) orelse return false;
+                    self.cursor.seek(@intCast(end.index() + 1));
+                },
+                else => _ = self.cursor.advance(),
+            }
+        }
+        return true;
     }
 
     /// The bracket's contents as one index expression, where they read as
@@ -7547,6 +7612,12 @@ const Parser = struct {
         var attempt: Attempt = undefined;
         attempt.begin(self);
         const idx = try self.parseIndex();
+        // A tuple key is several type arguments in the alternate reading;
+        // only a single value can share one length-argument expression.
+        if (self.builder.exprTag(idx) == .tuple_literal and self.builder.exprMain(idx) == attempt.saved.cursor.current()) {
+            attempt.discard(self);
+            return null;
+        }
         return if (attempt.finish(self, close, false)) idx else null;
     }
 
@@ -8574,6 +8645,12 @@ const Parser = struct {
     /// group. The node is built whatever its arity, so the tree holds what
     /// was written.
     fn parseTupleLiteral(self: *Parser, open: TokenId, first: ExprId) std.mem.Allocator.Error!ExprId {
+        return self.parseTupleBefore(open, first, .r_paren);
+    }
+
+    /// Tuple components use their enclosing delimiter, including a tuple key
+    /// written directly inside an index bracket.
+    fn parseTupleBefore(self: *Parser, open: TokenId, first: ExprId, closer: token.Tag) std.mem.Allocator.Error!ExprId {
         var components: std.ArrayList(ExprId) = .empty;
         defer components.deinit(self.gpa);
         try components.append(self.gpa, first);
@@ -8585,20 +8662,20 @@ const Parser = struct {
                 if (!self.listGoesOnPastARefusedLineEnd()) break;
                 went_on = true;
             }
-            if (self.cursor.at(.r_paren) or self.cursor.atEnd()) break;
-            try components.append(self.gpa, try self.parseFull());
+            if (self.cursor.at(closer) or self.cursor.atEnd()) break;
+            try components.append(self.gpa, if (closer == .r_bracket) try self.parseTypeExpression() else try self.parseFull());
         }
 
         // A tuple missing a comma or its `)` may hold more than was read, and
         // so may one with a component that took its line, so the arity of
         // neither is judged.
         const taken = self.closerMayHaveBeenTaken(went_on);
-        if (self.cursor.eat(.r_paren) != null) {
-            if (!went_on and !taken) try self.checkTupleArity(open, components.items.len, one_component_help);
+        if (self.cursor.eat(closer) != null) {
+            if (!went_on and !taken and closer == .r_paren) try self.checkTupleArity(open, components.items.len, one_component_help);
         } else if (taken) {
             // The line a refused token took may have held the `)`.
-        } else if (!try self.skipPastMissingComma(open, "a tuple separates its components with commas")) {
-            try self.reportAt(.s_paren, open, "unclosed `(`", "this tuple is never closed");
+        } else if (!try self.skipPastMissingCommaBefore(open, closer, "a tuple separates its components with commas")) {
+            try self.reportAt(if (closer == .r_bracket) .s_bracket else .s_paren, open, if (closer == .r_bracket) "unclosed `[`" else "unclosed `(`", "this tuple is never closed");
         }
 
         const id = try self.builder.addCall(open, self.rangeFrom(open), .none, components.items, &.{});
@@ -8640,9 +8717,13 @@ const Parser = struct {
     /// skipped, so the tuple still closes where it was written. False where
     /// there is no such `)`, which leaves the tuple unclosed.
     fn skipPastMissingComma(self: *Parser, open: TokenId, help: []const u8) !bool {
+        return self.skipPastMissingCommaBefore(open, .r_paren, help);
+    }
+
+    fn skipPastMissingCommaBefore(self: *Parser, open: TokenId, closer: token.Tag, help: []const u8) !bool {
         if (self.cursor.atEnd()) return false;
         const close = self.delimiterEnd(open) orelse return false;
-        try self.reportAt(.s_tuple, self.cursor.current(), "expected `,` or `)`", help);
+        try self.reportAt(.s_tuple, self.cursor.current(), if (closer == .r_bracket) "expected `,` or `]`" else "expected `,` or `)`", help);
         self.cursor.seek(@intCast(close.index() + 1));
         return true;
     }
@@ -9113,6 +9194,31 @@ test "a bracket read as types and as an index keeps one copy of an array length 
     try testing.expect(counts[1] <= counts[0] * 4);
 }
 
+test "tuple index components do not multiply alternate readings" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var counts: [2]usize = undefined;
+    for ([_]usize{ 4, 8 }, &counts) |levels, *count| {
+        var inner: std.ArrayList(u8) = .empty;
+        try inner.appendSlice(gpa, "index");
+        for (0..levels) |_| {
+            const wrapped = try std.fmt.allocPrint(gpa, "grid[{s}, 0]", .{inner.items});
+            inner.clearRetainingCapacity();
+            try inner.appendSlice(gpa, wrapped);
+        }
+        const text = try std.fmt.allocPrint(gpa, "fn main() -> UInt8 {{ {s} }}\n", .{inner.items});
+        const source: Source = .{ .path = "t.lin", .text = text };
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+        try testing.expectEqual(@as(u32, 0), sink.error_count);
+        count.* = ast.exprCount();
+    }
+    try testing.expect(counts[1] <= counts[0] * 3);
+}
+
 test "an expression inside a type is read once however long it is" {
     // A length of six hundred terms holds more tokens than the nesting limit
     // has levels, and a callable type's default is read through the same
@@ -9126,8 +9232,8 @@ test "an expression inside a type is read once however long it is" {
     try long.appendSlice(gpa, "1");
     for (0..599) |_| try long.appendSlice(gpa, " + 1");
 
-    const wraps = .{ "a[B[[UInt8; {s}]]]", "a[B[fn(x: UInt8 = {s}) -> UInt8]]" };
-    const innermost = [_][]const u8{ long.items, "0" };
+    const wraps = .{ "a[B[[UInt8; {s}]]]", "a[B[fn(x: UInt8 = {s}) -> UInt8]]", "a[B[fn(x: UInt8 = {s}) -> UInt8]]" };
+    const innermost = [_][]const u8{ long.items, "0", "values[^1]" };
     inline for (wraps, innermost) |wrap, first| {
         var counts: [2]usize = undefined;
         for ([_]usize{ 8, 16 }, &counts) |levels, *count| {
@@ -12421,11 +12527,12 @@ test "named literal lookahead crosses nested type arguments once" {
     try testing.expectEqual(@as(u32, 0), parsed.errors);
 }
 
-test "an index still takes exactly one expression" {
+test "an index accepts a tuple key as one expression" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const codes = try codesOf(arena.allocator(), "fn main() -> UInt8 { let values = [1, 2]; (values)[0, 1] }");
-    try testing.expectEqualSlices(?Code, &.{ .s_bracket, .s_separator }, codes);
+    const parsed = try parseProgramText(arena.allocator(), "fn main() -> UInt8 { let values = [1, 2]; (values)[0, 1] }");
+    try testing.expectEqual(@as(u32, 0), parsed.errors);
+    try testing.expect(std.mem.indexOf(u8, parsed.dump, "tuple_literal") != null);
 }
 
 test "field delegation parses implementation and traversal without bodies" {
@@ -12646,4 +12753,68 @@ test "inferred array lengths remain syntax rather than name expressions" {
     try testing.expectEqual(@as(u32, 0), parsed.errors);
     try testing.expect(std.mem.indexOf(u8, parsed.dump, "[[UInt8; _]; _]") != null);
     try testing.expect(std.mem.indexOf(u8, parsed.dump, "name_ref \"_\"") == null);
+}
+
+test "benchmark declarations preserve contextual bench names" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var sink = Sink.init(gpa);
+    var interner: Interner = .empty;
+    const source: Source = .{ .path = "t.lin", .text =
+        \\import std.bench
+        \\bench "sum" { bench.iter(work) }
+        \\test "ordinary" {}
+        \\fn work() { bench.black_box(1) }
+        \\struct P {}
+        \\impl P { bench "member" -> Result[bench.Measurement, Failure] { bench.iter(work) } }
+        \\trait Marker { bench "trait" { bench.iter(work) } }
+    };
+    const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+    const ast = try parse(gpa, &source, .from(0), tokens, &sink);
+    try testing.expectEqual(@as(usize, 0), sink.items().len);
+    var benchmarks: usize = 0;
+    var tests: usize = 0;
+    for (0..ast.declCount()) |i| {
+        const d = node.DeclId.at(@intCast(i));
+        if (ast.declIsBenchmark(d)) {
+            benchmarks += 1;
+            try testing.expect(ast.declIsCase(d));
+            try testing.expect(!ast.declIsTest(d));
+            try testing.expectEqual(node.Decl.Tag.function, ast.declTag(d));
+            try testing.expectEqual(TokenId.none, ast.memberOwner(d));
+            try testing.expectEqual(TokenId.none, ast.declTrait(d));
+        } else if (ast.declIsTest(d)) tests += 1;
+    }
+    try testing.expectEqual(@as(usize, 3), benchmarks);
+    try testing.expectEqual(@as(usize, 1), tests);
+}
+
+test "benchmark declarations refuse invalid case shapes" {
+    const cases = [_]struct { text: []const u8, message: []const u8 }{
+        .{ .text = "bench \"\" {}", .message = "a benchmark's name is not empty" },
+        .{ .text = "bench \" space\" {}", .message = "a benchmark's name has no space at either end" },
+        .{ .text = "bench \"generic\"[T] {}", .message = "a benchmark is not generic" },
+        .{ .text = "bench \"parameters\"(x: UInt8) {}", .message = "a benchmark takes no parameters" },
+        .{ .text = "pub bench \"visible\" {}", .message = "a benchmark declares no visibility" },
+        .{ .text = "export bench \"exported\" {}", .message = "a benchmark declares no export" },
+        .{ .text = "impl Marker for Value { bench \"member\" {} }", .message = "a benchmark does not sit in a trait implementation" },
+        .{ .text = "bench trap \"trap\" {}", .message = "a program is a list of declarations" },
+        .{ .text = "bench fn old() {}", .message = "a program is a list of declarations" },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+        var sink = Sink.init(gpa);
+        var interner: Interner = .empty;
+        const source: Source = .{ .path = "t.lin", .text = case.text };
+        const tokens = try tokenize(gpa, &source, .from(0), &sink, &interner);
+        _ = try parse(gpa, &source, .from(0), tokens, &sink);
+        var found = false;
+        for (sink.items()) |diagnostic| {
+            if (std.mem.eql(u8, diagnostic.message, case.message)) found = true;
+        }
+        try testing.expect(found);
+    }
 }

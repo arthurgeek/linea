@@ -1,0 +1,38 @@
+import std.mem
+
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn add[T: Integer, let n: UInt64](a: [T; n], b: [T; n]) -> [T; n] {
+    a + b
+}
+
+fn contextual() -> [Float32; 3] {
+    [2.0, 4.0, 8.0] + 2.0
+}
+
+fn main() -> UInt8 {
+    let a = [Float32(2.0), 4.0, 8.0]
+    let from_call = a + identity(Float32(2.0))
+    let from_expression = a + (1.0 + 1.0)
+    let from_result = contextual()
+    if from_call[2] != 10.0 || from_expression[1] != 6.0 || from_result[0] != 4.0 {
+        return 1
+    }
+    let generic = add([Int16(3), 4], [Int16(5), -2])
+    if generic[0] != 8 || generic[1] != 2 {
+        return 2
+    }
+    let empty: [Int32; 0] = []
+    let empty_sum = add(empty, empty)
+    if empty_sum.length() != 0 {
+        return 3
+    }
+    let large: [UInt32; 4096] = mem.filled(3)
+    let doubled = large + large
+    if doubled[0] != 6 || doubled[4095] != 6 {
+        return 4
+    }
+    0
+}

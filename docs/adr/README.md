@@ -64,8 +64,8 @@ true of a different implementation.
 | [0215](0215-a-type-parameter-may-default-its-argument.md) | A type parameter may default its argument | Accepted; supersedes 0206; extends 0098 and 0194; extended by 0217, 0219 and 0225 |
 | [0217](0217-a-call-leaves-an-undetermined-parameter-to-its-types-default.md) | A call leaves an undetermined parameter to its type's default | Accepted; extends 0215; extended by 0219 |
 | [0219](0219-a-function-type-parameter-and-its-parameter-may-default.md) | A function type parameter and its parameter may default | Accepted; extends 0077, 0215 and 0217; extended by 0225 |
-| [0199](0199-tuple-syntax-denotes-a-positional-aggregate-with-a-prelude-identity.md) | Tuple syntax denotes a positional aggregate whose identity is a prelude declaration | Accepted; builds on 0060, 0129, 0151, 0179 and 0188; extended by 0200 |
-| [0200](0200-a-tuples-arity-is-a-readability-policy-the-parser-enforces.md) | A tuple's arity is a readability policy the parser enforces | Accepted; extends 0199 |
+| [0199](0199-tuple-syntax-denotes-a-positional-aggregate-with-a-prelude-identity.md) | Tuple syntax denotes a positional aggregate whose identity is a prelude declaration | Accepted; builds on 0060, 0129, 0151, 0179 and 0188; extended by 0200 and 0313 |
+| [0200](0200-a-tuples-arity-is-a-readability-policy-the-parser-enforces.md) | A tuple's arity is a readability policy the parser enforces | Accepted; extends 0199; extended by 0313 |
 | [0201](0201-a-tuple-pattern-binds-by-position-and-does-not-nest.md) | A tuple pattern binds by position wherever a struct pattern binds by name, and does not nest | Accepted; extends 0129 and 0147; nesting clause and lending-walk place superseded by 0224; declaration-parameter clause superseded by 0242 |
 | [0224](0224-a-pattern-nests-wherever-a-binder-stands.md) | A pattern nests wherever a binder stands | Accepted; supersedes the nesting clause and lending-walk place of 0201; extends 0129, 0147 and 0167; extended by 0242 |
 | [0242](0242-a-parameter-may-carry-a-label-and-a-pattern.md) | A parameter may carry a label and a pattern | Accepted; supersedes the declaration-parameter clause of 0201; extends 0177 and 0224 |
@@ -76,7 +76,7 @@ true of a different implementation.
 | [0017](0017-failure-is-a-trap-or-a-value.md) | Failure is either a trap or a value, never both | Accepted; refined by 0106; extended by 0305 |
 | [0018](0018-the-integer-model.md) | Fixed-width integers, literals typed by context, conversions explicit | Accepted; extended by 0092, 0152, 0207 and 0226 |
 | [0019](0019-entry-point-is-main-returning-u8.md) | A program is `fn main() -> u8` | Superseded by 0024 |
-| [0020](0020-a-constant-expression-is-defined.md) | A constant expression is defined by the language, not discovered by a pass | Accepted; extended by 0059, 0078, 0083, 0127, 0140, 0146 and 0157 |
+| [0020](0020-a-constant-expression-is-defined.md) | A constant expression is defined by the language, not discovered by a pass | Accepted; extended by 0059, 0078, 0083, 0127, 0140, 0146, 0157 and 0311 |
 | [0058](0058-a-constant-declaration-is-a-binding-the-definition-covers.md) | A constant declaration is a binding the definition already covers | Superseded by 0059 |
 | [0059](0059-one-table-answers-both-questions-about-a-constant-expression.md) | One table answers both questions about a constant expression | Accepted; supersedes 0058, extends 0020; extended by 0127, 0140 and 0146 |
 | [0024](0024-a-program-is-a-list-of-declarations.md) | A program is a list of declarations | Accepted; supersedes 0019, extended by 0071 |
@@ -116,7 +116,17 @@ true of a different implementation.
 | [0073](0073-a-scope-exit-names-a-stretch-of-the-live-stack.md) | A scope exit names a stretch of the live stack | Accepted; refines 0066 |
 | [0074](0074-a-module-is-emitted-as-several-compilation-units.md) | A module is emitted as several compilation units | Superseded by 0094 |
 | [0075](0075-a-program-root-is-a-directory-holding-a-manifest.md) | A program root is a directory holding a manifest | Accepted; command-line-file clause superseded by 0171; extended by 0227 and 0280 |
-| [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) | An array is a value of a fixed-size type | Accepted; extended by 0083, 0137, 0149, 0166, 0172, 0198, 0207 and 0307 |
+| [0061](0061-an-array-is-a-value-of-a-fixed-size-type.md) | An array is a value of a fixed-size type | Accepted; extended by 0083, 0137, 0149, 0166, 0172, 0198, 0207, 0307 and 0311 |
+| [0311](0311-numeric-arrays-apply-scalar-arithmetic-elementwise.md) | Numeric arrays apply scalar arithmetic elementwise | Accepted; extends 0020 and 0061 |
+| [0314](0314-fixed-matrices-have-nominal-arithmetic-and-ordered-products.md) | Fixed matrices have nominal arithmetic and ordered products | Accepted |
+| [0315](0315-generated-index-loops-carry-checked-bounds-witnesses.md) | Generated index loops carry checked bounds witnesses | Accepted |
+| [0316](0316-device-aggregate-calls-use-independent-caller-storage.md) | Device aggregate calls use independent caller storage | Accepted |
+| [0317](0317-matrix-layout-follows-measured-access-patterns.md) | Matrix layout follows measured access patterns | Accepted |
+| [0318](0318-benchmark-observation-preserves-typed-storage.md) | Benchmark observation preserves typed storage | Accepted |
+| [0319](0319-named-benchmarks-return-measurements.md) | Named benchmarks return measurements | Accepted |
+| [0321](0321-duration-units-are-shared-with-benchmark-reports.md) | Duration units are shared with benchmark reports | Accepted; supersedes the duration display clause of 0174 |
+| [0312](0312-array-swizzles-gather-values-and-scatter-distinct-components.md) | Array swizzles gather values and scatter distinct components | Accepted |
+| [0313](0313-index-brackets-can-hold-a-tuple-key.md) | Index brackets can hold a tuple key | Accepted; extends 0199 and 0200 |
 | [0062](0062-an-indexed-place-is-a-place-and-every-index-is-checked.md) | An indexed place is a place, and every index is checked | Accepted; bracket clause, never implemented, replaced by 0181 |
 | [0063](0063-disposal-is-scheduled-never-inserted.md) | Disposal is scheduled, never inserted | Accepted; extends 0034, extended by 0104 and 0208, refined by 0114 |
 | [0103](0103-linear-constrains-consumption-release-grants-one-way.md) | Linear constrains consumption; Release grants one way to consume | Accepted; extends 0104 with container decisions; extended by 0124 and 0138 |
@@ -137,7 +147,8 @@ true of a different implementation.
 | [0084](0084-test-is-a-reserved-word-not-a-contextual-one.md) | `test` is a reserved word, not a contextual one | Accepted; function-modifier premise superseded by 0277 |
 | [0247](0247-a-test-in-an-impl-is-a-member-of-nothing.md) | A test in an inherent `impl` is a member of nothing | Accepted; extended by 0269; namespace clause superseded by 0277 |
 | [0269](0269-a-test-in-a-trait-declaration-is-a-member-of-nothing.md) | A test in a trait declaration is a member of nothing | Accepted; extends 0247; namespace clause superseded by 0277 |
-| [0277](0277-a-test-is-named-by-a-string.md) | A test is named by a string | Accepted; supersedes the function-modifier premise of 0084 and the namespace clauses of 0247 and 0269 |
+| [0277](0277-a-test-is-named-by-a-string.md) | A test is named by a string | Accepted; supersedes the function-modifier premise of 0084 and the namespace clauses of 0247 and 0269; extended by 0320 |
+| [0320](0320-a-skipped-test-is-reported-and-hardware-qualification-rejects-it.md) | A skipped test is reported, and hardware qualification rejects it | Accepted; extends 0277 |
 | [0304](0304-template-is-a-contextual-word.md) | `template` is a contextual word | Accepted; builds on 0084 and 0179 |
 | [0085](0085-the-library-is-imported.md) | The library is imported, and the prelude is what the syntax obliges | Accepted; reserved-root clause superseded by 0171; minimal-prelude and no-shadowing clauses superseded by 0179 |
 | [0171](0171-the-standard-library-is-an-ordinary-library.md) | The standard library is an ordinary library, known by its manifest | Accepted; supersedes clauses of 0068, 0075, 0085 and 0111; extends 0096; extended by 0229 and 0295; boolean grant superseded by 0228; direct runtime call clause superseded by 0255 |
@@ -204,7 +215,7 @@ true of a different implementation.
 | [0286](0286-a-document-decodes-into-any-allocator.md) | A JSON document decodes into an allocator of its own | Accepted; supersedes the same-allocator `from_value` sentence of 0141 |
 | [0292](0292-json-lines-are-read-lazily-one-bounded-line-at-a-time.md) | JSON Lines are read lazily, one bounded line at a time, and a failed line is an item | Accepted; extends 0141 |
 | [0154](0154-sockets-and-http-follow-go.md) | Sockets and HTTP follow Go's shape where ownership allows | Accepted; extended by 0174, 0180, 0185, 0300 and 0301; subtree clause superseded by 0222; arena-memory clause superseded by 0263; test clause superseded by 0297 |
-| [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180 |
+| [0174](0174-logging-is-a-leveled-structured-logger-and-http-logs-through-middleware.md) | Logging is a leveled, structured logger, and HTTP logs through middleware | Accepted; extends 0154; extended by 0180; duration display clause superseded by 0321 |
 | [0180](0180-state-is-lent-down-through-every-handler.md) | The application's state is lent down through every handler | Accepted; extends 0154, 0173 and 0174; extended by 0185 and 0214 |
 | [0185](0185-a-handler-reads-its-inputs-through-extractors.md) | A handler reads its inputs through extractors | Accepted; extends 0154 and 0180; refined by 0214; `Message.add_header` sentence superseded by 0297 |
 | [0222](0222-a-route-pattern-matches-its-own-path.md) | A route pattern matches its own path | Accepted; supersedes the subtree clause of 0154 |

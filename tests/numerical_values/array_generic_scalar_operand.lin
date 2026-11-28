@@ -1,0 +1,12 @@
+fn zero[T: Integer]() -> T {
+    0
+}
+
+fn main() -> UInt8 {
+    let values = [Int16(2), 3]
+    let shifted = values + zero()
+    if shifted[0] != 2 || shifted[1] != 3 {
+        return 1
+    }
+    0
+}

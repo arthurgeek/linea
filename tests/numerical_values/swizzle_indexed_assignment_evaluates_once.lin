@@ -1,0 +1,24 @@
+fn destination(inout calls: UInt64) -> UInt64 {
+    calls = calls * 10 + 2
+    0
+}
+
+fn operand(inout calls: UInt64) -> [Int32; 2] {
+    calls = calls * 10 + 1
+    [Int32(7), 8]
+}
+
+fn main() -> UInt8 {
+    var values = [[Int32(1), 2, 3, 4]]
+    var calls = UInt64(0)
+    values[destination(&calls)].yx = operand(&calls)
+    if calls != 12 || values[0][0] != 8 || values[0][1] != 7 {
+        return 1
+    }
+    calls = 0
+    values[destination(&calls)].xy += operand(&calls)
+    if calls != 12 || values[0][0] != 15 || values[0][1] != 15 {
+        return 2
+    }
+    0
+}

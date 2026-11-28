@@ -1,0 +1,9 @@
+fn fill(inout pair: [Int32; 2]) {
+    pair = [Int32(5), 6]
+}
+
+fn main() -> UInt8 {
+    var v = [Int32(1), 2, 3, 4]
+    fill(&v.xy)
+    UInt8(v[0])
+}

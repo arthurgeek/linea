@@ -1,0 +1,12 @@
+fn main() -> UInt8 {
+    var values = [Float32.from_bits(2141266757), Float32.from_bits(2147483648), Float32.from_bits(1), Float32.from_bits(0)]
+    values.xy = values.yx
+    let gathered = values.wzyx
+    if values.x.to_bits() != 2147483648 || values.y.to_bits() != 2141266757 {
+        return 1
+    }
+    if gathered[0].to_bits() != 0 || gathered[1].to_bits() != 1 || gathered[2].to_bits() != 2141266757 || gathered[3].to_bits() != 2147483648 {
+        return 2
+    }
+    0
+}

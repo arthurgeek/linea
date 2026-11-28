@@ -595,6 +595,7 @@ pub fn reachOfInst(tag: Inst.Tag) Reach {
         // generator names no library declaration, so it cannot write `Str`.
         .bytes_addr => .{ .impossible = "the generator names no library declaration, so it cannot name `Str`" },
         .address_bits => .{ .impossible = "the generator names no library declaration, so it cannot construct a checked array view" },
+        .benchmark_barrier => .{ .impossible = "the generator names no library declaration, so it cannot call `std.bench.black_box`" },
         // Emitted only where a call fills in a `Location`, the library's type.
         .source_site => .{ .impossible = "the generator names no library declaration, so it cannot name `Location`" },
         .load_raw, .store_raw, .storage_addr => .{ .impossible = "the generator names no library declaration, so it cannot name private storage operations" },

@@ -616,7 +616,7 @@ pub fn gpuStructuredImage(
 
 /// Shared by inspection and production; never serializes or validates bytes.
 pub fn lowerStructuredGpuSource(gpa: std.mem.Allocator, io: std.Io, source_path: []const u8, checked_path: []const u8) !?Failure {
-    const pipeline = "--pass-pipeline=builtin.module(gpu.module(func.func(lift-cf-to-scf),canonicalize,convert-func-to-spirv,convert-ub-to-spirv),convert-gpu-to-spirv,spirv.module(spirv-lower-abi-attrs,spirv-update-vce,symbol-dce,snapshot-op-locations{filename=-}),symbol-dce)";
+    const pipeline = "--pass-pipeline=builtin.module(gpu.module(func.func(lift-cf-to-scf),canonicalize,convert-func-to-spirv,convert-scf-to-spirv,convert-memref-to-spirv,convert-arith-to-spirv,reconcile-unrealized-casts,convert-ub-to-spirv),convert-gpu-to-spirv,spirv.module(spirv-lower-abi-attrs,spirv-update-vce,symbol-dce,snapshot-op-locations{filename=-}),symbol-dce)";
     switch (try captureTool(gpa, io, .mlir_opt, &.{ Tool.mlir_opt.command(), "--no-implicit-module", source_path, pipeline, "-o", "/dev/null" })) {
         .failure => |failure| return failure,
         .output => |module| {
@@ -662,7 +662,8 @@ test "GPU images are serialized and checked against Vulkan" {
     ;
     const kernel = "spirv.module Logical GLSL450 requires #spirv.vce<v1.3, [Shader], []> {\n" ++ body ++ "\n}\n";
     const staged = "module {\n gpu.module @device attributes {sym_visibility = \"private\", spirv.target_env = #spirv.target_env<#spirv.vce<v1.3, [Shader], []>, #spirv.resource_limits<>>} {\n" ++ body ++ "\n}\n}\n";
-    for ([_][]const u8{ kernel, staged }, 0..) |program, index| {
+    const aggregate = @embedFile("testdata/gpu_aggregate_call.mlir");
+    for ([_][]const u8{ kernel, staged, aggregate }, 0..) |program, index| {
         try tmp.dir.writeFile(io, .{ .sub_path = "kernel.mlir", .data = program });
         const failure = if (index == 0)
             try gpuImage(gpa, io, input, checked, image)
@@ -676,7 +677,8 @@ test "GPU images are serialized and checked against Vulkan" {
         const prepared = try tmp.dir.readFileAlloc(io, "kernel.checked.mlir", gpa, .unlimited);
         defer gpa.free(prepared);
         try testing.expect(std.mem.indexOf(u8, prepared, "@orphan") == null);
-        try testing.expect(std.mem.indexOf(u8, prepared, "@leaf") != null);
+        try testing.expect(std.mem.indexOf(u8, prepared, if (index == 2) "@copy_pair" else "@leaf") != null);
+        try testing.expect(std.mem.indexOf(u8, prepared, "unrealized_conversion_cast") == null);
         const bytes = try tmp.dir.readFileAlloc(io, "kernel.spv", gpa, .unlimited);
         defer gpa.free(bytes);
         try testing.expect(bytes.len >= 20);

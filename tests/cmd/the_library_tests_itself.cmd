@@ -1,7 +1,19 @@
-The library tests itself.
+The library tests itself. Only the four named GPU outcomes vary with hardware;
+GPU marks a separately validated pass or skip. The summary counts non-GPU passes;
+the normalizer rejects failures, unexpected skips and wrong total counts.
 
   $ linea test "$LINEA_ROOT"/std > out
-  $ cat out
+  $ awk -v expected=2002 -f "$LINEA_ROOT/tests/cmd/fixtures/library_gpu_outcomes.awk" out
+  ok    bench.benchmark calibration bounds the work on a clock that never advances
+  ok    bench.benchmark callback failure during calibration stops before any further invocation
+  ok    bench.benchmark callbacks accept functions, closures and return the first error
+  ok    bench.benchmark measured values retain the actual counts and full batch distribution
+  ok    bench.benchmark observation preserves aggregate floating bits and returns each owner
+  ok    bench.benchmark observation preserves empty values and carried views
+  ok    bench.benchmark report preserves fractional nanoseconds and names its statistics
+  ok    bench.benchmark report scales large per iteration durations
+  ok    bench.benchmark schedule validates counts and rotates measured and warmup rounds
+  ok    bench.benchmark statistics sort elapsed times and use the upper median
   ok    cli.cli errors display what went wrong
   ok    cli.custom_usage overrides usage output
   ok    cli.expect_end verifies all tokens consumed
@@ -368,10 +380,10 @@ The library tests itself.
   ok    fs.skipping a directory's children leaves them out
   ok    fs.temporary names have a fixed ascii extent and a single terminator
   ok    fs.writing a file reports the bytes written
-  ok    gpu.completed map preserves GPU subnormals and refuses unsupported ordinary bodies
-  ok    gpu.matrix dimensions follow nested array lengths
-  ok    gpu.opening a device reports unavailable capability or owns a device
-  ok    gpu.upload preserves raw bits and checks zero dimensions before overflow
+  GPU   gpu.completed map preserves GPU subnormals and refuses unsupported ordinary bodies
+  GPU   gpu.matrix dimensions follow nested array lengths
+  GPU   gpu.opening a device reports unavailable capability or owns a device
+  GPU   gpu.upload preserves raw bits and checks zero dimensions before overflow
   ok    hash.boolean hashes distinguish values
   ok    hash.boolean queries match only the same value
   ok    hash.equal arrays hash equally
@@ -1768,8 +1780,10 @@ The library tests itself.
   ok    testing.equality accepts values with debug without display
   ok    testing.equality checks option variants and payloads
   ok    testing.equality checks result variants and payloads
+  ok    testing.is_skip accepts only a skipped prerequisite
   ok    testing.length counts the bytes written
   ok    testing.oom_is_a_refusal accepts each refused allocation
+  ok    testing.skip preserves its reason without reporting an allocation refusal
   ok    text.a hex error displays its reason
   ok    text.a hex_digit has its value in either case
   ok    text.a length counts bytes and not characters
@@ -1889,6 +1903,7 @@ The library tests itself.
   ok    time.a deadline too far away never passes
   ok    time.a deadline's time left counts down to zero
   ok    time.a duration displays in the largest unit below it
+  ok    time.a duration displays minutes without losing its remainder
   ok    time.a duration is made from_milliseconds
   ok    time.a duration is made from_seconds
   ok    time.a duration returns its nanoseconds
@@ -1992,4 +2007,4 @@ The library tests itself.
   ok    uuid.the version is read from its four bits
   ok    uuid.v7 identifiers made in later milliseconds sort later
   
-  1989 passed, 0 failed
+  non-GPU: 1998 passed, 0 failed

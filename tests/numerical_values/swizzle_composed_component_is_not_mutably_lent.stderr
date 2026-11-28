@@ -1,0 +1,5 @@
+error[T-Lend]: a multi-component swizzle is not a contiguous mutable place
+ --> tests/numerical_values/swizzle_composed_component_is_not_mutably_lent.lin:7:13
+  |
+7 |     change(&values.yx.x)
+  |             ^^^^^^^^^^^ bind the gathered array to a mutable variable before lending it

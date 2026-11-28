@@ -1,0 +1,9 @@
+error[O-Leak]: `matrix` (a linear `num.Matrix[Ticket, 1, 1]`) is still owned when this path leaves
+ --> tests/numerical_values/matrix_preserves_settlement_obligations.lin:7:9
+  |
+7 |     let _ = matrix
+  |         ^ `_` does not settle it
+8 | }
+  | - the block ends here
+  |
+  = help: give it to something that takes it

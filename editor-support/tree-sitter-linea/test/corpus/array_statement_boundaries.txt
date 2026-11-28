@@ -1,0 +1,91 @@
+==================
+Nested array tail after a call initializer
+==================
+
+fn values() {
+    let product = left() * right()
+    [[product[0, 0]]]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (let_statement
+        (identifier)
+        (binary_expression
+          (call_expression
+            (identifier)
+            (argument_list))
+          (call_expression
+            (identifier)
+            (argument_list))))
+      (expression_statement
+        (array_literal
+          (array_literal
+            (instantiation_expression
+              (identifier)
+              (type_arguments
+                (integer_literal)
+                (integer_literal)))))))))
+
+==================
+Array tails are not generic arguments across a newline
+==================
+
+fn values() {
+    let numeric = make()
+    [1, 2]
+    let named = make()
+    [left, right]
+}
+
+---
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list)))
+      (expression_statement
+        (array_literal
+          (integer_literal)
+          (integer_literal)))
+      (let_statement
+        (identifier)
+        (call_expression
+          (identifier)
+          (argument_list)))
+      (expression_statement
+        (array_literal
+          (identifier)
+          (identifier))))))
+
+==================
+Written generic brackets may start on the next line
+==================
+
+alias Nested = Outer
+    [Inner[UInt8], Bool]
+
+---
+
+(source_file
+  (alias_declaration
+    (type_identifier)
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)))
+        (type_identifier)))))

@@ -1,0 +1,41 @@
+import std.bench
+import std.io
+import std.mem
+
+test "ordinary check" {}
+
+bench "fixed count" {
+    let plan = bench.Schedule.new(warmups: 0, repetitions: 8, samples: 3, cases: 1).unwrap()
+    bench.iter(|i: UInt64| i * i, schedule: .Some(plan))
+}
+
+bench "workload fails" -> Result[bench.Measurement, Str] {
+    .Err("fixture could not prepare its workload")
+}
+
+@linear
+struct OwnedProblem {
+    items: mem.Vec[UInt64],
+}
+
+impl Display for OwnedProblem {
+    fn fmt[W: Writer](_self: Self, inout w: W) -> Result[(), W.Error] {
+        "owned workload error".fmt(&w)
+    }
+}
+
+impl Release for OwnedProblem {
+    fn release(sink self: Self) {
+        let OwnedProblem { items } = self
+        items.release()
+        io.eprintln("released owned workload error")
+    }
+}
+
+bench "owned failure" -> Result[bench.Measurement, bench.SampleError[OwnedProblem]] {
+    bench.try_iter(
+        |_i: UInt64| -> Result[UInt8, OwnedProblem] {
+            .Err(.{ items = mem.Vec.new() })
+        },
+    )
+}

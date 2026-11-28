@@ -1009,7 +1009,7 @@ pub fn instantiate(
                 }
             }
         },
-        .tests => try seedDispatcher(&out, program, resolution, typing),
+        .tests, .benchmarks => try seedDispatcher(&out, program, resolution, typing),
     }
 
     var at: u32 = 0;
@@ -1178,7 +1178,7 @@ comptime {
 pub fn generatedCall(program: *const ExpandedProgram, name: []const u8) DeclId {
     for (generated_calls.table) |call| {
         if (!std.mem.eql(u8, call.name, name)) continue;
-        return program.libraryDeclIn(call.module, call.name) orelse DeclId.none;
+        return @import("intrinsics.zig").moduleFunction(program, &program.ast, call.module, call.name);
     }
     return DeclId.none;
 }
@@ -1204,6 +1204,40 @@ fn internRoot(
     )).id;
 }
 
+/// Generated entry functions are resolved once per dispatcher. A linear
+/// benchmark error is released after formatting. A discardable error can
+/// be reported without imposing a Release implementation.
+pub const CaseReporters = struct {
+    ordinary: DeclId,
+    failure: DeclId,
+    failure_type: DeclId,
+    measurement: DeclId,
+    owned_measurement: DeclId,
+
+    pub fn init(program: *const ExpandedProgram) CaseReporters {
+        return .{
+            .ordinary = generatedCall(program, "ran"),
+            .failure = generatedCall(program, "ran_failure"),
+            .failure_type = @import("intrinsics.zig").structIn(program, &program.ast, "testing", "Failure"),
+            .measurement = generatedCall(program, "report_measurement"),
+            .owned_measurement = generatedCall(program, "report_owned_measurement"),
+        };
+    }
+
+    pub fn isFailure(self: CaseReporters, typing: *const Typing, failure: TypeId) bool {
+        return self.failure_type != .none and typing.declOfType(failure) == self.failure_type;
+    }
+
+    pub fn arguments(self: CaseReporters, benchmark: bool, typing: *const Typing, failure: *const TypeId) []const TypeId {
+        return if (!benchmark and self.isFailure(typing, failure.*)) &.{} else failure[0..1];
+    }
+
+    pub fn select(self: CaseReporters, benchmark: bool, typing: *const Typing, failure: TypeId) DeclId {
+        if (!benchmark) return if (self.isFailure(typing, failure)) self.failure else self.ordinary;
+        return if (typing.capabilityOf(failure) == .linear) self.owned_measurement else self.measurement;
+    }
+};
+
 fn seedDispatcher(
     self: *Instantiation,
     program: *const ExpandedProgram,
@@ -1211,7 +1245,7 @@ fn seedDispatcher(
     typing: *const Typing,
 ) !void {
     const selected = generatedCall(program, "selected");
-    const ran = generatedCall(program, "ran");
+    const reporters = CaseReporters.init(program);
     for (resolution.tests) |test_case| {
         if (selected != DeclId.none) _ = try internRoot(self, program, selected, &.{});
         _ = try internRoot(self, program, test_case.decl, &.{});
@@ -1220,7 +1254,8 @@ fn seedDispatcher(
         const bad = typing.failureVariantOf(answer) orelse continue;
         if (typing.variantFieldCount(answer, bad) == 0) continue;
         const held = typing.variantFieldType(answer, bad, 0);
-        if (ran != DeclId.none) _ = try internRoot(self, program, ran, &.{held});
+        const reporter = reporters.select(program.ast.declIsBenchmark(test_case.decl), typing, held);
+        if (reporter != .none) _ = try internRoot(self, program, reporter, reporters.arguments(program.ast.declIsBenchmark(test_case.decl), typing, &held));
     }
     const no_such_test = generatedCall(program, "no_such_test");
     if (no_such_test != DeclId.none) _ = try internRoot(self, program, no_such_test, &.{});

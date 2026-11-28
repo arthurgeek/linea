@@ -489,7 +489,10 @@ A test may omit its return annotation. Its result is then
 requiring an import or introducing a source binding. Normal unit fallthrough
 and bare `return` produce `Ok(())`; explicit return values must satisfy the
 result type. Assertions still propagate with `?`, and explicit deferred cleanup
-runs on both success and failure. A written return annotation keeps its
+runs on both success and failure. Returning `Err(testing.skip(reason))` in the
+canonical `testing.Failure` result reports a skipped prerequisite, separately
+from passes and failures; `linea test --deny-skips` rejects selected skips. A
+custom Display error retains failure semantics. A written return annotation keeps its
 ordinary meaning. A function that is not a test and writes no result returns
 `()` ([S-UnitResult]).
 
@@ -506,6 +509,26 @@ the string holds it, so `my-lib/ledger` names its test `my-lib.ledger.holds`.
 The test runner reports each test by this name, ordered by it;
 `linea test --filter TEXT` runs only the tests whose names hold `TEXT`; and a
 test binary runs the test whose name it is given.
+
+A named benchmark has the same declaration sites and quoted name rules as a
+test. `bench "lookup" { … }` recognizes `bench` contextually before a string,
+so an import or local binding may still be named `bench`. Its default answer is
+`Result[bench.Measurement, mem.Oom]`. An explicit
+`-> Result[bench.Measurement, E]` accepts an error implementing `Display`; a
+linear error also implements `Release`, which the runner invokes after reporting
+it. A benchmark writes its successful measurement explicitly. A missing
+measurement, an ordinary success value or an invalid declaration is [S-Test].
+Tests and benchmarks in the same module share the rule for duplicate names.
+
+`linea bench ROOT` discovers the root's benchmark cases, including its nested
+modules. It compiles with `-O 3` by default, accepts an explicit optimization
+level, and executes each selected case in a separate process, serially.
+`--filter TEXT` selects qualified names containing the text; an empty selection
+reports zero measured cases and exits successfully. An ordinary test runs
+through `linea test`; neither command runs the other kind of case. Code in a
+benchmark's outer body runs once. `bench.iter` measures only the repeated
+callbacks, including the opaque iteration input and observed result. Setup,
+reporting, calibration probes, and warmup batches contribute no samples.
 
 A failing test's exit status is fixed and does not encode the failure's
 contents; standard error carries the description.
@@ -1744,7 +1767,10 @@ both resolve to different elements: `f(&a[0], a[1])` is disjoint, while
 `f(&a[i], a[j])` may overlap. An unresolved index is treated as possibly
 selecting any element. Indexing from the end uses the same rule: `a[^1]` and
 `a[3]` select the same element of a four-element array, so `f(&a[^1], a[3])`
-overlaps.
+overlaps. Swizzle names use the same component identities as indexes:
+`a.x`, `a.r` and `a[0]` overlap. A multi-component read overlaps a mutation
+only when their selected component sets may intersect; `a.yz` is disjoint
+from `a.x`.
 
 For a projection, `b[i]` refers to the place selected by the implementation's
 path. That place may be any part of `b`, including the receiver itself, and an
@@ -2667,11 +2693,73 @@ type it produces. Remainder follows the overflow rule for division: `a % b`
 overflows whenever the quotient `a / b` is unrepresentable, even if the
 remainder would be zero.
 
-**[T-Operands]** Binary operands must have the same type, and arithmetic
-operands must be numeric. The left operand determines the type and the right is
-checked against it; a disagreement is diagnosed at the differing operand.
-Aggregates, enum tags and `Bool` are not numeric. Unary `-e` also requires a
-numeric operand.
+**[T-Operands]** Scalar arithmetic operands must be numeric and have the same
+type. The left operand determines the type and the right is checked against it;
+a disagreement is diagnosed at the differing operand. Enum tags, `Bool` and
+aggregates other than the numeric arrays and fixed matrices described below are
+not numeric. Unary `-e` requires a numeric scalar, numeric array or numeric matrix.
+
+A fixed array of numeric scalars supports elementwise `+`, `-`, `*`, `/` and,
+for integer elements, `%`. Two array operands have the same element type and
+length. One operand may instead be a scalar of exactly the array's element type,
+on either side; its value is used at every position without changing either
+operand's type. The result has the array type. Literal context reaches the
+element type; no numeric conversion or tensor-shape broadcasting is implied.
+Unary negation and compound assignments apply the same scalar operations to
+each element.
+
+Both binary operands evaluate once, left to right, before element operations
+visit positions in increasing order. They are observed, and the result owns
+new values. Evaluating an aggregate place selects its storage; its components
+are read after both operands finish evaluating. To preserve the earlier
+contents across a later operand's mutation, bind an explicit copy before the
+operation. Argument-list exclusivity still applies to ordinary function calls.
+An empty result evaluates its operands but performs no scalar operation. Each evaluated lane retains the scalar overflow, division and
+floating-point rules. Integer-array arithmetic on constant expressions is a
+constant expression, with invalid scalar results diagnosed at the operator.
+Array arithmetic promises no particular SIMD width or hardware register layout
+([ADR 0311](adr/0311-numeric-arrays-apply-scalar-arithmetic-elementwise.md)).
+
+The library `num.Matrix[T, r, c]` has nominal numerical operations when `T`
+is a supported numeric scalar. `num.matrix(nested_rows)` constructs an inline
+value whose dimensions and element type follow its input. Matrix addition and
+subtraction require identical types. Matrix multiplication
+`Matrix[T, r, k] * Matrix[T, k, c]` yields `Matrix[T, r, c]`; multiplying a
+matrix by `[T; k]` on the right yields `[T; r]`, and `[T; r]` on the left of
+`Matrix[T, r, c]` yields `[T; c]`. A scalar of exactly `T` may multiply either
+side. Scalar addition, division, remainder and incompatible dimensions are
+[T-Operands]. Compound assignment requires the resulting destination type.
+
+Matrix operands evaluate once from left to right; results own independent
+components. Every product cell starts at positive zero and visits the inner
+index in increasing order. Scalar multiplication and addition round separately,
+with ordinary integer checks and no contraction or reassociation. An empty
+inner dimension produces zero; empty output dimensions still evaluate operands.
+These operations are not constant expressions. `num.dot` applies an ordered
+array dot product through Additive and Multiplicative; `num.hadamard` multiplies
+corresponding matrix components through Multiplicative. Matrix indexing uses the
+ordinary tuple-key Index protocol and runtime bounds checks. The compiler
+certifies the standard declaration and its generic representation; a same-named
+user type has no built-in arithmetic
+([ADR 0314](adr/0314-fixed-matrices-have-nominal-arithmetic-and-ordered-products.md)).
+
+A numeric array selects components with one to four letters from `xyzw` or
+`rgba`; the two naming families cannot mix in one selection. The letters
+name positions zero through three, and every selected position must exist
+([T-Index]). A single component is a scalar place. Multiple components gather
+an independent fixed array in written component order; repeated reads are
+permitted. A gather is a value, not a contiguous mutable projection: borrowing
+it or marking it `&` is [T-Lend]. Bind it first to observe or mutate that new
+array. An unmarked `inout` argument may mutate the gathered temporary without
+changing the source array.
+
+A swizzle assignment requires a mutable array place and distinct destination
+components; a repeated destination is [T-Lend]. Evaluate the right-hand side
+completely before evaluating the destination base, each once, then write the
+selected components. Compound assignment takes the same right-hand-side
+snapshot before reading and updating the selected components. Component copies
+preserve scalar bits, including NaN payloads and signed zeros
+([ADR 0312](adr/0312-array-swizzles-gather-values-and-scatter-distinct-components.md)).
 
 A symbolic type needs Integer evidence at its declaration, including an
 associated type constrained by a `where` predicate; an unconstrained parameter
@@ -4348,7 +4436,13 @@ traps if the index is out of bounds. Over an array whose length is a length
 parameter, every index is checked when the program runs, since the body is
 checked once for every length. Brackets before a call holding what only a
 type list can be, such as `rack.steps[UInt8, Bool](1)` where `steps` is a field,
-index nothing: only a generic function's or method's call takes types.
+index nothing: only a generic function's or method's call takes types. A tuple
+key consists of values; type names written as its components are [N-NotAValue].
+An integer tuple containing open integer components takes their types from the
+receiver's one compatible integer-tuple key. Components whose types are already
+known constrain that lookup and are never converted. Several compatible keys
+are [T-Infer]; with none, the remaining open components take their ordinary
+defaults. Non-integer tuple keys retain ordinary tuple typing.
 
 `a[^k]` selects the k-th place from the end: `a[^1]` is the last element and
 `a[^2]` the preceding one. The caret is allowed only in index position. It
@@ -4359,6 +4453,15 @@ minus `k`; `^0` is past the last element, and a count greater than the length is
 before the first. Known invalid counts are [T-Index] at the source site. Unknown
 counts are checked against one and the length at runtime, before subtraction, so
 an excessive count traps without wrapping.
+
+An index bracket may hold a tuple key directly: `value[row, column]` means
+`value[(row, column)]`. Its components use ordinary tuple typing and the same
+two-through-eight arity bound ([S-Tuple]). That bound applies when the bracket
+is selected as an index; generic function type and length argument lists retain
+their own arity. Explicit tuple parentheses and written trailing-comma layout
+are preserved. A nested array still needs one integer index at each level;
+a tuple key does not flatten its storage
+([ADR 0313](adr/0313-index-brackets-can-hold-a-tuple-key.md)).
 
 The language indexes arrays directly. For another head type, brackets select the
 place projected by its `Index` implementation. Lookup uses the trait, the index
@@ -4896,12 +4999,12 @@ path must avoid normal return; a completing tail or bare fallthrough is
 **[T-Assign]** An assignment's value must have the assigned binding's type. The
 assignment has type Unit, so `f(x = 3)` is not a value-producing comparison.
 
-A compound assignment, `p += e` or any of the four corresponding forms, also
-satisfies [T-Operands]: both operands have the same numeric type and the result
-is Unit. It is not expanded as `p = p + e`. The left place is evaluated once,
-then read, updated arithmetically and written through that same evaluation, so
-an effectful index runs once and the written element is the one read. Ordinary
-overflow and division checks still apply.
+In a compound assignment such as `p += e`, the operands must satisfy
+[T-Operands] for the corresponding arithmetic operator, and its result must
+have exactly the type of `p`. The assignment has type Unit. It evaluates `e`
+first, then evaluates the destination place once, reads it and writes the
+arithmetic result through that same place. An effectful index therefore runs
+once. Ordinary overflow and division checks apply.
 
 **[T-Discard]** An expression evaluated for its effect must satisfy Unit. A
 `Never` expression does through bottom compatibility and never reaches the next
@@ -5270,6 +5373,15 @@ declaration of one of these symbols anywhere else, even in a root granted
 `extern`, is [T-Extern]: the symbols are compiler-owned. An ordinary body with
 the same name remains an ordinary function. The runtime symbols are reserved
 against exports.
+
+The host library's `bench.black_box[T](sink value: T) -> T where carries(value)`
+returns the value with the same bits, ownership and carried observations. The
+private standard-library extern `bench.benchmark_barrier[T](inout value: T)`
+is checked under [T-Extern] for this signature, with one unconstrained type
+parameter and no defaults or contracts. It materializes that value's storage
+for an opaque host operation. A descriptor retains its original referents;
+a benchmark that measures their contents must read those contents itself.
+
 
 **[T-ExternCallback]** An `extern` may take a callback, a parameter of a plain
 `fn` type that C calls during the call through a C function pointer. Its
@@ -7307,8 +7419,19 @@ prepare device images. The default build keeps GPU support enabled.
 Device bodies are ordinary source functions over by-value Float32 and Bool
 values. The current profile admits Float32 arithmetic and comparisons, Boolean
 operations, local loads and stores, conditionals, loops, early returns and
-statically named calls whose complete reachable call graph is admitted. It
-excludes recursion, heap allocation, host I/O, `inout`, indirect calls in the
+statically named calls whose complete reachable call graph is admitted. Internal
+helpers may accept fixed Float32 arrays or fixed matrices by read or sink and
+return them by value. Arguments are independent copies; results use caller-owned
+storage. Parameters that require a stable address remain outside admission
+([ADR 0316](adr/0316-device-aggregate-calls-use-independent-caller-storage.md)).
+Local fixed Float32 arrays admit scalar operations and copies when device
+admission proves word alignment and containment within their originating
+allocation. Compiler-generated counted index loops retain independently checked
+MIR witnesses; their UInt64 values use a narrower device representation only
+where exact ranges prove it preserves the value. Unproved indexes, narrowing
+overflow and unresolved copy overlap refuse admission
+([ADR 0315](adr/0315-generated-index-loops-carry-checked-bounds-witnesses.md)).
+The profile excludes recursion, heap allocation, host I/O, `inout`, indirect calls in the
 body and captured closures. Root function values may be selected dynamically
 from ordinary named functions: the ahead-of-time table maps their CPU addresses
 to admitted images. Unsupported selection is a library error, with no CPU

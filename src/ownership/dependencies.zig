@@ -1167,6 +1167,13 @@ const Analysis = struct {
                 if (self.typing.placeProjection(step)) |projection| {
                     for (0..projection.observations) |_| path = try self.store.prepend(observed, path);
                 }
+            } else if (self.typing.swizzleOf(step)) |swizzle| {
+                const head = if (swizzle.count == 1)
+                    self.arrayElementHead(swizzle.receiver, .{ .value = swizzle.lanes[0] })
+                else
+                    element;
+                path = try self.store.prepend(head, path);
+                for (0..swizzle.observations) |_| path = try self.store.prepend(observed, path);
             } else if (self.typing.placeProjection(step)) |projection| {
                 if (projection.field != null) path = try self.store.prepend(@intFromEnum(self.ast.tokenName(self.ast.exprMain(step))), path);
                 for (0..projection.observations) |_| path = try self.store.prepend(observed, path);

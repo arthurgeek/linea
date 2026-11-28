@@ -1,0 +1,17 @@
+import std.bench
+
+fn test_value() -> Float64 {
+    0.75
+}
+
+fn bench_value() -> Float64 {
+    0.125
+}
+
+test "the test reaches its helper" {
+    let _value = test_value()
+}
+
+bench "the benchmark reaches its helper" {
+    bench.iter(|_i: UInt64| bench_value())
+}

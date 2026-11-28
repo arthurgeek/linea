@@ -1,0 +1,31 @@
+trait Echo {
+    fn echo(value: Self) -> Self
+}
+
+impl Echo for Int16 {
+    fn echo(value: Self) -> Self {
+        value
+    }
+}
+
+struct Gauge {}
+
+trait Adjust[T] {
+    fn adjust(_gauge: Self, value: T) -> T where carries(value)
+}
+
+impl Adjust[Int16] for Gauge {
+    fn adjust(_gauge: Self, value: Int16) -> Int16 {
+        value + 1
+    }
+}
+
+fn main() -> UInt8 {
+    let values = [Int16(1), 2]
+    let result = values + Echo.echo(1 + 2)
+    let adjusted = values + Adjust.adjust(Gauge {}, 1 + 2)
+    if result[0] != 4 || result[1] != 5 || adjusted[0] != 5 || adjusted[1] != 6 {
+        return 1
+    }
+    0
+}

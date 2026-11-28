@@ -12,6 +12,7 @@ const test_roots = @import("test_roots.zig");
 // Compiles the tests `pool.zig` holds beside the function they test.
 comptime {
     _ = @import("pool.zig");
+    _ = @import("gpu_matrix_layout.zig");
 }
 const runtime_symbols = @import("runtime_symbols");
 
@@ -1881,8 +1882,28 @@ test "example roots: the tests a run reported are read from its closing line" {
     try testing.expectEqual(@as(?usize, 0), source.testsReported("0 passed, 0 failed\n"));
     try testing.expectEqual(@as(?usize, 0), source.testsReported("no tests found in examples/hello.lin\n"));
     try testing.expectEqual(@as(?usize, 5), source.testsReported("x\n4 passed, 1 failed"));
+    try testing.expectEqual(@as(?usize, 7), source.testsReported("4 passed, 1 failed, 2 skipped\n"));
+    try testing.expectEqual(@as(?usize, 2), source.testsReported("0 passed, 0 failed, 2 skipped\n"));
     try testing.expectEqual(@as(?usize, null), source.testsReported("error[N-Undefined]: no such name\n"));
     try testing.expectEqual(@as(?usize, null), source.testsReported(""));
+}
+
+test "example roots: test summaries refuse malformed text and overflowing totals" {
+    for ([_][]const u8{
+        "4 passed, 1 failed, 2 skipped unexpected content",
+        "4 passed, 1 failed unexpected content",
+        "4 passed 1 failed",
+        "4 passed,, 1 failed",
+        "4 passed, 1 failed, 2 skipped,",
+        "4 passed, 1 failed, 2 skipped, 3 skipped",
+        "4 passed, 1 failed, skipped",
+        "4 passed, 1 failed, 2 skipped extra",
+    }) |text| try testing.expectEqual(@as(?usize, null), source.testsReported(text));
+    var buffer: [160]u8 = undefined;
+    const first = try std.fmt.bufPrint(&buffer, "{d} passed, 1 failed", .{std.math.maxInt(usize)});
+    try testing.expectEqual(@as(?usize, null), source.testsReported(first));
+    const skipped = try std.fmt.bufPrint(&buffer, "{d} passed, 0 failed, 1 skipped", .{std.math.maxInt(usize)});
+    try testing.expectEqual(@as(?usize, null), source.testsReported(skipped));
 }
 
 test "the quoted strings of a text are read in order" {
@@ -3225,6 +3246,27 @@ test "the guide gate: a run command between a program and its output chooses the
     try testing.expectEqual(@as(usize, 0), reading.problems.len);
     try testing.expectEqual(source.GuideCommand.@"test", reading.programs[0].command);
     try testing.expectEqualStrings("tiles.lin", reading.programs[0].target);
+}
+
+test "the guide gate: a skipped test summary selects the test command" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const reading = readFixture(arena.allocator(),
+        \\```linea
+        \\import std.testing
+        \\test "needs hardware" { return .Err(testing.skip("unavailable")) }
+        \\```
+        \\
+        \\```text
+        \\SKIP  needs hardware
+        \\        unavailable
+        \\
+        \\0 passed, 0 failed, 1 skipped
+        \\```
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), reading.problems.len);
+    try testing.expectEqual(source.GuideCommand.@"test", reading.programs[0].command);
 }
 
 test "the guide gate: labelled files make one project that runs from its main file" {

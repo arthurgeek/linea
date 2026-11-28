@@ -1,0 +1,2 @@
+trap
+linea: integer overflow at tests/numerical_values/matrix_intermediate_overflow.lin:10:25

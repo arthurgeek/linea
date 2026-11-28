@@ -1,0 +1,9 @@
+fn pair(inout first: Int32, second: Int32) -> Int32 {
+    first += second
+    first
+}
+
+fn main() -> UInt8 {
+    var values = [Int32(1), 2, 3, 4]
+    UInt8(pair(&values.x, values[0]))
+}

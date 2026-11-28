@@ -1,0 +1,12 @@
+import std.num
+
+@linear
+struct Ticket { number: UInt8 }
+
+fn _construct(rows: [[Ticket; 1]; 1]) {
+    let _matrix = num.matrix(rows)
+}
+
+fn main() -> UInt8 {
+    0
+}

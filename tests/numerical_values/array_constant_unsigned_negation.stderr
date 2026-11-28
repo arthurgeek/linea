@@ -1,0 +1,5 @@
+error[T-Overflow]: element 0 of this operation overflows `UInt8`
+ --> tests/numerical_values/array_constant_unsigned_negation.lin:1:14
+  |
+1 | let result = -[UInt8(1)]
+  |              ^ the result is not representable

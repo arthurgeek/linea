@@ -1,0 +1,7 @@
+let empty: [Int16; 0] = []
+
+let quotient = empty / 0
+
+fn main() -> UInt8 {
+    UInt8(quotient.length())
+}

@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+ --> tests/numerical_values/swizzle_overlapping_gather_argument.lin:8:34
+  |
+8 |     let result = pair(&values.x, values.xy)
+  |                       --------- mutated by this argument
+  |                                  ^^^^^^^^^ already passed `&` here

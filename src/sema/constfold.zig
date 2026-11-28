@@ -455,7 +455,7 @@ fn step(
                 .waits => |w| return .{ .waits = w },
                 .done => |v| v,
             };
-            return .{ .done = try memo.note(gpa, id, negated(inner)) };
+            return .{ .done = try memo.note(gpa, id, try negatedValue(gpa, &memo.pool, inner)) };
         },
         .add, .sub, .mul, .div, .rem => {
             const b = ast.binary(id);
@@ -467,7 +467,7 @@ fn step(
                 .waits => |w| return .{ .waits = w },
                 .done => |v| v,
             };
-            return .{ .done = try memo.note(gpa, id, combined(ast.exprTag(id), lhs, rhs)) };
+            return .{ .done = try memo.note(gpa, id, try combinedValue(gpa, &memo.pool, ast.exprTag(id), lhs, rhs)) };
         },
         // A conversion or a newtype construction of a constant expression.
         // Which names head one is the caller's answer, so a call to anything
@@ -690,6 +690,55 @@ fn negated(v: Value) Value {
         .absent, .truth, .string, .aggregate => .absent,
         .integer => |n| if (std.math.negate(n)) |r| .{ .integer = r } else |_| .absent,
     };
+}
+
+fn arrayItems(pool: *const constants.Pool, value: Value) ?[]const ConstantId {
+    if (value != .aggregate) return null;
+    return switch (pool.get(value.aggregate)) {
+        .array => |items| items,
+        else => null,
+    };
+}
+
+/// Scalar constants scale every lane; an array contributes its indexed lane.
+pub fn arithmeticLane(pool: *const constants.Pool, value: Value, lane: usize) ?i128 {
+    if (value.number()) |number| return number;
+    const items = arrayItems(pool, value) orelse return null;
+    if (lane >= items.len) return null;
+    return switch (pool.get(items[lane])) {
+        .integer => |number| number,
+        else => null,
+    };
+}
+
+fn negatedValue(gpa: std.mem.Allocator, pool: *constants.Pool, value: Value) !Value {
+    const items = arrayItems(pool, value) orelse return negated(value);
+    const result = try gpa.alloc(ConstantId, items.len);
+    defer gpa.free(result);
+    for (result, 0..) |*item, lane| {
+        const before = arithmeticLane(pool, value, lane) orelse return .absent;
+        const number = negated(.{ .integer = before }).number() orelse return .absent;
+        item.* = try pool.intern(gpa, .{ .integer = number });
+    }
+    return .{ .aggregate = try pool.intern(gpa, .{ .array = result }) };
+}
+
+fn combinedValue(gpa: std.mem.Allocator, pool: *constants.Pool, op: node.Expr.Tag, a: Value, b: Value) !Value {
+    if (a == .not_constant or b == .not_constant) return .not_constant;
+    const left = arrayItems(pool, a);
+    const right = arrayItems(pool, b);
+    const count = if (left) |items| items.len else if (right) |items| items.len else return combined(op, a, b);
+    if ((left == null and a.number() == null) or (right == null and b.number() == null)) return .absent;
+    if (left != null and right != null and left.?.len != right.?.len) return .absent;
+    const result = try gpa.alloc(ConstantId, count);
+    defer gpa.free(result);
+    for (result, 0..) |*item, lane| {
+        const first = arithmeticLane(pool, a, lane) orelse return .absent;
+        const second = arithmeticLane(pool, b, lane) orelse return .absent;
+        const number = arithmetic(op, first, second) orelse return .absent;
+        item.* = try pool.intern(gpa, .{ .integer = number });
+    }
+    return .{ .aggregate = try pool.intern(gpa, .{ .array = result }) };
 }
 
 /// A conversion reaches a number, and the number has to be one its target can
@@ -1300,6 +1349,30 @@ test "aggregate constants release partial records and alias work on allocation f
         \\let text = "hello"
         \\let leaf = .{ text = text, count = 3 }
         \\let value = .{ pair = [leaf, leaf], unit = () }
+    };
+    const ast = try treeOf(arena.allocator(), &source);
+    try testing.checkAllAllocationFailures(testing.allocator, Case.run, .{&ast});
+}
+
+test "array arithmetic constants retain values and release failed allocations" {
+    const Case = struct {
+        fn run(gpa: std.mem.Allocator, ast: *const Ast) !void {
+            var spelled = try Spelled.init(gpa, ast);
+            defer spelled.deinit(gpa);
+            var memo: Memo = .empty;
+            defer memo.deinit(gpa);
+            const value = try foldConstant(gpa, ast, spelled.names(), &memo, lastInitialiser(ast));
+            const rendered = try value.checked().?.text(gpa, &memo.pool);
+            defer gpa.free(rendered);
+            try testing.expectEqualStrings("[-9, -16]", rendered);
+        }
+    };
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const source: Source = .{ .path = "arithmetic.lin", .text =
+        \\let a = [2, 3]
+        \\let b = (a + 1) * [3, 4]
+        \\let result = -b
     };
     const ast = try treeOf(arena.allocator(), &source);
     try testing.checkAllAllocationFailures(testing.allocator, Case.run, .{&ast});

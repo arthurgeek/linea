@@ -1283,7 +1283,7 @@ const Builder = struct {
             .block, .conditional, .match_, .match_read, .unwrap_else, .loop_, .while_, .for_, .for_read, .for_inout, .return_, .break_, .continue_ => {},
             else => try self.value(id, .none),
         }
-        if (yieldsAnUnnamedValue(tag)) try self.yielded(id, position);
+        if (yieldsAnUnnamedValue(tag) or self.typing.swizzleOf(id) != null) try self.yielded(id, position);
     }
 
     /// Records a value no place names.
@@ -1413,6 +1413,7 @@ const Builder = struct {
     }
 
     fn selectionDepth(self: *const Builder, step: ExprId) u32 {
+        if (self.typing.swizzleOf(step)) |swizzle| return swizzle.observations + 1;
         if (self.typing.placeProjection(step)) |projection| {
             return projection.observations + @as(u32, @intFromBool(projection.field != null));
         }
@@ -1511,6 +1512,12 @@ const Builder = struct {
     }
 
     fn selection(self: *Builder, id: ExprId, position: Position) std.mem.Allocator.Error!void {
+        if (self.typing.swizzleOf(id)) |swizzle| {
+            // Numeric components are snapshots. A gather creates a new array
+            // rather than transferring a part of the original array.
+            try self.expr(swizzle.base, .reading);
+            return;
+        }
         var steps = self.ast.placeSteps(id);
         var depth: u32 = 0;
         var rejected = false;

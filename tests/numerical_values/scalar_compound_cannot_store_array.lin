@@ -1,0 +1,5 @@
+fn main() -> UInt8 {
+    var value = Int16(1)
+    value += [Int16(1), 2]
+    UInt8(value)
+}

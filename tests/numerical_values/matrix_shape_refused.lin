@@ -1,0 +1,8 @@
+import std.num
+
+fn main() -> UInt8 {
+    let left = num.matrix([[1.0, 2.0, 3.0]])
+    let right = num.matrix([[1.0, 2.0]])
+    let _product = left * right
+    0
+}

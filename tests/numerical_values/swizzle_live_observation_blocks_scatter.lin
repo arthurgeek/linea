@@ -1,0 +1,6 @@
+fn main() -> UInt8 {
+    var values = [Int32(1), 2, 3, 4]
+    let seen = borrow values
+    values.xy = [Int32(5), 6]
+    UInt8((*seen)[0])
+}

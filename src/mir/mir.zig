@@ -139,6 +139,9 @@ pub const Inst = struct {
         static_addr,
         /// Exposes a managed storage address for a checked span descriptor.
         address_bits,
+        /// An opaque host use of live storage. It retains no address and
+        /// transfers no ownership. The address is the sole operand.
+        benchmark_barrier,
 
         // Memory.
         load,
@@ -289,7 +292,7 @@ pub const Inst = struct {
                 .source_site => .site,
                 .static_addr => .static,
                 .load, .addr_of => .local,
-                .load_indirect, .borrow, .observe, .address_bits => .unary,
+                .load_indirect, .borrow, .observe, .address_bits, .benchmark_barrier => .unary,
                 .load_raw, .store_raw, .storage_addr => .raw_access,
                 .store_indirect, .copy_value, .move_value => .binary,
                 .field_addr => .field,
@@ -1104,7 +1107,34 @@ pub const NamedTypes = struct {
     }
 };
 
+/// A compiler-generated counted index loop, with a checked CFG witness.
+/// Its subtree is a depth-first interval, so containment is answered in O(1).
+pub const IndexLoopId = enum(u32) {
+    none = std.math.maxInt(u32),
+    _,
+    pub fn at(value: u32) IndexLoopId {
+        return @enumFromInt(value);
+    }
+    pub fn index(self: IndexLoopId) u32 {
+        return @intFromEnum(self);
+    }
+};
+
+pub const IndexLoop = struct {
+    parent: IndexLoopId,
+    past_last: u32 = 0,
+    initialize: InstId,
+    position: InstId,
+    limit: InstId,
+    step: InstId = .none,
+    header: BlockId,
+    body: BlockId,
+    exit: BlockId,
+};
+
 pub const Mir = struct {
+    index_loops: []const IndexLoop = &.{},
+    block_index_loops: []const IndexLoopId = &.{},
     insts: InstList.Slice,
     /// The instructions of every block, concatenated; each block holds a range.
     block_insts: []const InstId,
@@ -1145,6 +1175,8 @@ pub const Mir = struct {
     pub const CallSite = struct { expr: node.ExprId, call: InstId };
 
     pub fn deinit(self: *Mir, gpa: std.mem.Allocator) void {
+        gpa.free(self.index_loops);
+        gpa.free(self.block_index_loops);
         gpa.free(self.call_sites);
         self.insts.deinit(gpa);
         gpa.free(self.block_insts);
@@ -1394,6 +1426,7 @@ pub const Mir = struct {
             .source_site,
             .static_addr,
             .address_bits,
+            .benchmark_barrier,
             .load,
             .store,
             .addr_of,
@@ -1440,6 +1473,9 @@ pub const Mir = struct {
     pub const Builder = struct {
         gpa: std.mem.Allocator,
         insts: InstList = .empty,
+        index_loops: std.ArrayList(IndexLoop) = .empty,
+        block_index_loops: std.ArrayList(IndexLoopId) = .empty,
+        current_index_loop: IndexLoopId = .none,
         /// Which block holds each instruction, parallel to `insts`, and
         /// `no_block` for a terminator, which a block names rather than holds.
         ///
@@ -1469,6 +1505,8 @@ pub const Mir = struct {
         }
 
         pub fn deinit(self: *Builder) void {
+            self.index_loops.deinit(self.gpa);
+            self.block_index_loops.deinit(self.gpa);
             self.insts.deinit(self.gpa);
             self.block_of.deinit(self.gpa);
             self.terminators.deinit(self.gpa);
@@ -1485,7 +1523,31 @@ pub const Mir = struct {
         pub fn addBlock(self: *Builder) !BlockId {
             const i: u32 = @intCast(self.terminators.items.len);
             try self.terminators.append(self.gpa, .none);
+            errdefer _ = self.terminators.pop();
+            if (self.block_index_loops.items.len != 0)
+                try self.block_index_loops.append(self.gpa, self.current_index_loop);
             return BlockId.at(i);
+        }
+
+        pub fn beginIndexLoop(self: *Builder, loop: IndexLoop) !IndexLoopId {
+            std.debug.assert(loop.parent == self.current_index_loop);
+            if (self.block_index_loops.items.len == 0) {
+                try self.block_index_loops.resize(self.gpa, self.terminators.items.len);
+                @memset(self.block_index_loops.items, .none);
+            }
+            const id = IndexLoopId.at(@intCast(self.index_loops.items.len));
+            try self.index_loops.append(self.gpa, loop);
+            self.block_index_loops.items[loop.body.index()] = id;
+            self.current_index_loop = id;
+            return id;
+        }
+
+        pub fn endIndexLoop(self: *Builder, id: IndexLoopId, step: InstId) void {
+            std.debug.assert(self.current_index_loop == id);
+            const loop = &self.index_loops.items[id.index()];
+            loop.step = step;
+            loop.past_last = @intCast(self.index_loops.items.len);
+            self.current_index_loop = loop.parent;
         }
 
         pub fn addLocal(self: *Builder, ty: TypeId, role: SlotRole) !LocalId {
@@ -1504,7 +1566,7 @@ pub const Mir = struct {
             std.debug.assert(!inst.tag.isTerminator());
             var recorded = inst;
             recorded.result_role = switch (inst.tag) {
-                .store, .store_indirect, .store_raw, .copy_value, .move_value => .none,
+                .store, .store_indirect, .store_raw, .copy_value, .move_value, .benchmark_barrier => .none,
                 else => inst.result_role,
             };
             return self.push(recorded, b.index());
@@ -1749,7 +1811,14 @@ pub const Mir = struct {
             const call_sites = try self.call_sites.toOwnedSlice(self.gpa);
             errdefer self.gpa.free(call_sites);
 
+            const index_loops = try self.index_loops.toOwnedSlice(self.gpa);
+            errdefer self.gpa.free(index_loops);
+            const block_index_loops = try self.block_index_loops.toOwnedSlice(self.gpa);
+            errdefer self.gpa.free(block_index_loops);
+
             const done: Mir = .{
+                .index_loops = index_loops,
+                .block_index_loops = block_index_loops,
                 .file = file,
                 .extra = extra,
                 .param_count = self.param_count,

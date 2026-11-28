@@ -1,0 +1,22 @@
+fn values(inout calls: UInt64) -> [Int32; 2] {
+    calls += 1
+    [Int32(calls), Int32(calls) + 10]
+}
+
+fn scalar(inout calls: UInt64) -> Int32 {
+    calls += 1
+    Int32(calls)
+}
+
+fn main() -> UInt8 {
+    var calls = UInt64(0)
+    let difference = values(&calls) - values(&calls)
+    if calls != 2 || difference[0] != -1 || difference[1] != -1 {
+        return 1
+    }
+    let product = values(&calls) * scalar(&calls)
+    if calls != 4 || product[0] != 12 || product[1] != 52 {
+        return 2
+    }
+    0
+}

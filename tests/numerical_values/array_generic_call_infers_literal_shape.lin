@@ -1,0 +1,15 @@
+fn identity[T: Copyable](value: T) -> T {
+    copy(value)
+}
+
+fn main() -> UInt8 {
+    let values = [Int16(1), 2]
+    let shifted = values + identity(2)
+    let floats = [Float32(1.0), 2.0]
+    let scaled = floats * identity(2.0)
+    let pair = Int16(2) + identity([1, 2])
+    if shifted[0] != 3 || shifted[1] != 4 || scaled[1] != 4.0 || pair[1] != 4 {
+        return 1
+    }
+    0
+}

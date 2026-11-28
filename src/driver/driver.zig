@@ -102,6 +102,10 @@ fn knownOptLevel(value: []const u8) bool {
     return false;
 }
 
+test "benchmarks use the build optimization default" {
+    try std.testing.expectEqualStrings(defaultOptLevel(.build), defaultOptLevel(.bench));
+}
+
 test "an optimisation level is one the compiler will spell" {
     for ([_][]const u8{ "0", "1", "2", "3", "s", "z" }) |v| {
         try std.testing.expect(knownOptLevel(v));
@@ -323,8 +327,8 @@ fn optLevelOption(comptime default: []const u8) cli.Option {
 }
 
 /// The level a command compiles at when `-O` names none. `build` makes the
-/// program that ships, and `dump-asm` prints what it ships; `run` and `test`
-/// rebuild on every edit and so skip the optimiser.
+/// program that ships, `bench` measures that policy, and `dump-asm` prints
+/// what it ships; `run` and `test` rebuild on every edit and skip the optimiser.
 fn defaultOptLevel(tag: cli.Tag) []const u8 {
     return switch (tag) {
         .run, .@"test" => toolchain.run_level,
@@ -339,7 +343,7 @@ fn defaultOptLevel(tag: cli.Tag) []const u8 {
 /// The switch names every command, so a new one is decided here.
 fn holdsCDeclarations(tag: cli.Tag) bool {
     return switch (tag) {
-        .check, .run, .build, .@"test", .emit_mlir, .dump_mlir, .dump_asm => true,
+        .check, .run, .build, .@"test", .bench, .emit_mlir, .dump_mlir, .dump_asm => true,
         .fmt, .lsp, .init, .dump_tokens, .dump_ast, .dump_expanded, .dump_mir, .dump_inferred, .dump_mono => false,
     };
 }
@@ -397,6 +401,16 @@ pub const spec: cli.Spec = .{
             },
         },
         .{
+            .tag = .bench,
+            .name = "bench",
+            .operand = "<root>",
+            .help = "measure named benchmarks, one case at a time",
+            .options = &.{
+                optLevelOption(toolchain.build_level),
+                .{ .name = "--filter", .arity = .value, .metavar = "<text>", .help = "measure only benchmarks whose names hold this text" },
+            },
+        },
+        .{
             .tag = .@"test",
             .name = "test",
             .operand = "<root>",
@@ -404,6 +418,7 @@ pub const spec: cli.Spec = .{
             .options = &.{
                 optLevelOption(toolchain.run_level),
                 .{ .name = "--filter", .arity = .value, .metavar = "<text>", .help = "run only the tests whose names hold this text" },
+                .{ .name = "--deny-skips", .arity = .flag, .help = "fail when a selected test skips an unavailable prerequisite" },
             },
         },
         .{ .tag = .lsp, .name = "lsp", .operand = "", .help = "serve the Language Server Protocol on standard input and output", .common_options = false },
@@ -482,7 +497,13 @@ const NativeAction = struct {
     const Test = @import("../sema/resolve.zig").Resolution.Test;
     const Execution = union(enum) {
         build,
-        tests: struct { all: []const Test, root: []const u8, filter: []const u8 },
+        tests: struct {
+            all: []const Test,
+            root: []const u8,
+            filter: []const u8,
+            benchmarks: bool = false,
+            deny_skips: bool = false,
+        },
         program: struct { args: []const []const u8, output: ?toolchain.RunOutput = null },
     };
     options: toolchain.Options,
@@ -505,7 +526,7 @@ const NativeAction = struct {
                 const root = try gpa.dupe(u8, job.root);
                 errdefer gpa.free(root);
                 const filter = try gpa.dupe(u8, job.filter);
-                break :blk .{ .tests = .{ .all = all, .root = root, .filter = filter } };
+                break :blk .{ .tests = .{ .all = all, .root = root, .filter = filter, .benchmarks = job.benchmarks, .deny_skips = job.deny_skips } };
             },
             .program => |job| blk: {
                 const args = try retainStrings(gpa, job.args);
@@ -573,7 +594,10 @@ const NativeAction = struct {
                 var stdout: Out = .{};
                 const w = stdout.open(io, std.Io.File.stdout());
                 defer stdout.flush() catch {};
-                const passed = try runner.run(gpa, io, self.options.out_path, job.all, std.Thread.getCpuCount() catch 1, job.root, job.filter, w);
+                const passed = if (job.benchmarks)
+                    try runner.runBenchmarks(gpa, io, self.options.out_path, job.all, job.root, job.filter, w)
+                else
+                    try runner.run(gpa, io, self.options.out_path, job.all, std.Thread.getCpuCount() catch 1, job.root, job.filter, job.deny_skips, w);
                 try stdout.flush();
                 return if (passed) exit_ok else exit_diagnostics;
             },
@@ -897,11 +921,12 @@ fn prepare(process: std.process.Init, gpa: std.mem.Allocator, durable: std.mem.A
     var opt_level: []const u8 = defaultOptLevel(cmd.tag);
     var keep = false;
     var filter: []const u8 = "";
+    var deny_skips = false;
     var storage: toolchain.Storage = if (cmd.tag == .@"test") .checked else .unchecked;
     // What a lowering is for. Only `emit-mlir` offers the choice today, and
     // it offers it so that a test binary's generated entry point can be read
     // before anything trusts it.
-    var purpose: Purpose = if (cmd.tag == .@"test") .tests else .program;
+    var purpose: Purpose = if (cmd.tag == .@"test") .tests else if (cmd.tag == .bench) .benchmarks else .program;
     var path: ?[]const u8 = null;
     var inspect: inspection.Request = .{};
 
@@ -951,6 +976,8 @@ fn prepare(process: std.process.Init, gpa: std.mem.Allocator, durable: std.mem.A
                 opt_level = o.value;
             } else if (std.mem.eql(u8, o.name, "--keep")) {
                 keep = true;
+            } else if (std.mem.eql(u8, o.name, "--deny-skips")) {
+                deny_skips = true;
             } else if (std.mem.eql(u8, o.name, "--filter")) {
                 filter = o.value;
             } else if (std.mem.eql(u8, o.name, "--check-storage")) {
@@ -1017,7 +1044,7 @@ fn prepare(process: std.process.Init, gpa: std.mem.Allocator, durable: std.mem.A
     // and the shape a person reads when generated code misbehaves.
     const is_emit_mlir = cmd.tag == .emit_mlir;
     const is_dump_mlir = expose_dumps and cmd.tag == .dump_mlir;
-    const is_test = cmd.tag == .@"test";
+    const is_test = cmd.tag == .@"test" or cmd.tag == .bench;
     const is_build = cmd.tag == .build;
     const is_check = cmd.tag == .check;
 
@@ -1364,7 +1391,7 @@ fn prepare(process: std.process.Init, gpa: std.mem.Allocator, durable: std.mem.A
                                 .native = program.native,
                                 .link = program.link,
                                 .foreign_symbols = foreign_symbols,
-                            }, .{ .tests = .{ .all = res.tests, .root = file_path, .filter = filter } });
+                            }, .{ .tests = .{ .all = res.tests, .root = file_path, .filter = filter, .benchmarks = cmd.tag == .bench, .deny_skips = deny_skips } });
                             switch (prepared) {
                                 .stop => |status| {
                                     if (status != exit_defect) return status;
@@ -1724,7 +1751,7 @@ test "driver compilation releases source storage before native action and retain
         .options = .{ .mid = try toolchain.Intermediates.of(source, target), .out_path = target, .runtime_path = try source.dupe(u8, "/tmp/runtime.a"), .opt = try source.dupe(u8, "0"), .sanitize = try source.dupe(u8, "address"), .native = native, .link = links },
         .gpu_functions = try source.dupe(mir.FunctionId, &.{.at(3)}),
         .keep = false,
-        .execution = .{ .tests = .{ .all = tests, .root = try source.dupe(u8, "library root"), .filter = try source.dupe(u8, "owned") } },
+        .execution = .{ .tests = .{ .all = tests, .root = try source.dupe(u8, "library root"), .filter = try source.dupe(u8, "owned"), .benchmarks = true, .deny_skips = true } },
     };
     var owned = try borrowed.retained(testing.allocator);
     defer owned.deinit(testing.allocator);
@@ -1736,6 +1763,8 @@ test "driver compilation releases source storage before native action and retain
     try testing.expect(owned.execution.tests.all[0].expects_trap);
     try testing.expectEqualStrings("library root", owned.execution.tests.root);
     try testing.expectEqualStrings("owned", owned.execution.tests.filter);
+    try testing.expect(owned.execution.tests.benchmarks);
+    try testing.expect(owned.execution.tests.deny_skips);
     try testing.expectEqualStrings("native/shim.c", owned.options.native[0]);
     try testing.expectEqualStrings("sqlite3", owned.options.link[0]);
     try testing.expectEqualStrings("/tmp/runtime.a", owned.options.runtime_path.?);

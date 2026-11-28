@@ -67,12 +67,17 @@ if test -n "$gpu_control_compiler"; then
     env LINEA_RUNTIME="$cpu_archive" "$gpu_control_compiler" run runtime/tests/cpu_only/capability_unavailable.lin
   done
 fi
+env LINEA_RUNTIME="$cpu_scratch/install/lib/liblinea_rt_checked.a" \
+  "$cpu_scratch/install/bin/linea" test --deny-skips --filter CPU examples/benchmark_cpu_gpu
 zig build -Dgpu=false -j4 --cache-dir "$cpu_scratch/cache" \
   --prefix "$cpu_scratch/install" test \
   -Dtest-filter='the cache stamps every tool a build runs'
 zig build -Dgpu=false -j4 --cache-dir "$cpu_scratch/cache" \
   --prefix "$cpu_scratch/install" test \
   -Dtest-filter='CPU-only compiler gates only certified device acquisition'
+zig build -Dgpu=false -j4 --cache-dir "$cpu_scratch/cache" \
+  --prefix "$cpu_scratch/install" test \
+  -Dtest-filter='CPU-only preparation bypasses device admission independently of tool arguments'
 if test -e "$LINEA_CPU_POISON_MARKER"; then
   cat "$LINEA_CPU_POISON_MARKER" >&2
   echo 'CPU-only execution invoked a GPU tool' >&2

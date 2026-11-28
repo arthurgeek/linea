@@ -1,0 +1,20 @@
+// Fixed dimensions belong to the value's type. Components use ordinary array
+// storage and preserve the element type's copying and settlement obligations.
+@(copyable, opaque)
+@derive(Release where T: Discardable)
+struct Matrix[T, let rows: UInt64, let columns: UInt64] {
+    data: [[T; columns]; rows],
+}
+
+// Construct a value from rows, observing the input and copying its elements.
+pub fn matrix[T: Copyable, let rows: UInt64, let columns: UInt64](values: [[T; columns]; rows]) -> Matrix[T, rows, columns] where carries(values) {
+    .{ data = copy(values) }
+}
+
+impl[T, let rows: UInt64, let columns: UInt64] Index[(UInt64, UInt64)] for Matrix[T, rows, columns] {
+    type Elem = T
+
+    proj at(inout self: Self, i: (UInt64, UInt64)) -> T where carries(self) {
+        self.data[i._0][i._1]
+    }
+}

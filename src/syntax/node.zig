@@ -1092,15 +1092,16 @@ pub const Decl = struct {
     /// to forget one. What actually differs is asked by a few passes, and each
     /// asks it here.
     origin: Origin = .written,
-    /// Whether this function is a test: one the compiler writes the only call
-    /// to, and which nothing that ships contains.
+    /// Whether this function is an ordinary function, test or benchmark.
+    /// The compiler writes the only call to a test or benchmark,
+    /// and neither is included in shipped artefacts.
     ///
     /// A field beside `origin` and for its reason. What a test changes is who
     /// calls it and whether it is emitted, and everything else about the
     /// declaration is a function's -- so a tag of its own would make every
     /// reader that asks "is this a function" name two, which is one rule with
     /// two spellings and a place to forget the second.
-    is_test: bool = false,
+    case_kind: enum { ordinary, test_, benchmark } = .ordinary,
     /// Whether a test succeeds by reaching a runtime trap rather than by
     /// returning success. Meaningless for declarations that are not tests.
     expects_trap: bool = false,

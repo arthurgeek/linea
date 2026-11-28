@@ -1,0 +1,140 @@
+// Reuse ordinary fixed-value arithmetic inside a resident tensor map.
+import std.gpu
+import std.io
+import std.num
+import std.testing
+
+@derive(Display, Release, From[gpu.GpuError], From[io.IoError])
+enum ExampleError {
+    Gpu(gpu.GpuError),
+    Output(io.IoError),
+}
+
+fn project(point: [Float32; 2]) -> [Float32; 2] {
+    let transform: num.Matrix[Float32, 2, 2] = num.matrix([[2.0, 1.0], [-1.0, 3.0]])
+    transform * point
+}
+
+fn calibrate(value: Float32) -> Float32 {
+    let projected = project([value, 1.0])
+    projected.x + projected.y
+}
+
+test "calibration uses the same ordinary CPU function" {
+    testing.assert_eq(calibrate(-2.0), 2.0, "negative input")?
+    testing.assert_eq(calibrate(2.0), 6.0, "positive input")?
+}
+
+fn main() -> Result[UInt8, ExampleError] {
+    let values: [Float32; 3] = [-2.0, 0.0, 2.0]
+    defer let device = gpu.Device.open()?
+    defer let input = device.upload(values.as_slice(), [UInt64(3)])?
+    defer let result = input.map(calibrate)?
+    defer let host = gpu.download(result)?
+    for index in UInt64(0)..3 {
+        if host[index].to_bits() != calibrate(values[index]).to_bits() {
+            return .Ok(1)
+        }
+    }
+    io.println("{host[0]}, {host[1]}, {host[2]}")?
+    .Ok(0)
+}
+
+test "GPU computation returns the expected values" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    let values: [Float32; 3] = [-2.0, 0.0, 2.0]
+    defer let input = device.upload(values.as_slice(), [UInt64(3)]).unwrap()
+    defer let result = input.map(calibrate).unwrap()
+    defer let host = gpu.download(result).unwrap()
+    for index in UInt64(0)..3 {
+        testing.assert_eq(host[index].to_bits(), calibrate(values[index]).to_bits(), "GPU and CPU calibration disagree")?
+    }
+}
+
+// These are fixed numerical Matrix products inside the ordinary map body,
+// rather than the tensor storage backend's separate matmul kernel.
+fn keep_zero_columns(sink matrix: num.Matrix[Float32, 2, 0], value: Float32) -> Float32 {
+    let _ = matrix
+    value
+}
+
+fn zero_columns(value: Float32) -> Float32 {
+    let left = num.matrix([[value, 1.0], [2.0, 3.0]])
+    let right: num.Matrix[Float32, 2, 0] = num.matrix([[], []])
+    keep_zero_columns(left * right, value)
+}
+
+fn keep_zero_rows(sink matrix: num.Matrix[Float32, 0, 2], value: Float32) -> Float32 {
+    let _ = matrix
+    value
+}
+
+fn zero_rows(value: Float32) -> Float32 {
+    let left: num.Matrix[Float32, 0, 2] = num.matrix([])
+    let right = num.matrix([[value, 1.0], [2.0, 3.0]])
+    keep_zero_rows(left * right, value)
+}
+
+fn zero_inner_product() -> num.Matrix[Float32, 2, 3] {
+    let left: num.Matrix[Float32, 2, 0] = num.matrix([[], []])
+    let right: num.Matrix[Float32, 0, 3] = num.matrix([])
+    left * right
+}
+
+fn zero_inner_cell(selector: Float32) -> Float32 {
+    let result = zero_inner_product()
+    if selector < 1.0 {
+        result[0, 0]
+    } else if selector < 2.0 {
+        result[0, 1]
+    } else if selector < 3.0 {
+        result[0, 2]
+    } else if selector < 4.0 {
+        result[1, 0]
+    } else if selector < 5.0 {
+        result[1, 1]
+    } else {
+        result[1, 2]
+    }
+}
+
+test "empty fixed matrix products preserve every CPU result bit" {
+    let values = [Float32.from_bits(2147483648), 1.0, 2.0, 3.0, 4.0, Float32.from_bits(2139095041)]
+    for index in UInt64(0)..6 {
+        testing.assert_eq(zero_columns(values[index]).to_bits(), values[index].to_bits(), "zero columns changed its surviving input")?
+        testing.assert_eq(zero_rows(values[index]).to_bits(), values[index].to_bits(), "zero rows changed its surviving input")?
+        testing.assert_eq(zero_inner_cell(values[index]).to_bits(), UInt32(0), "zero inner dimension must initialize every component to positive zero")?
+    }
+}
+
+test "GPU empty fixed matrix products preserve every component bit" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    let values = [Float32.from_bits(2147483648), 1.0, 2.0, 3.0, 4.0, Float32.from_bits(2139095041)]
+    defer let input = device.upload(values.as_slice(), [UInt64(6)]).unwrap()
+    defer let columns = input.map(zero_columns).unwrap()
+    defer let rows = input.map(zero_rows).unwrap()
+    defer let inner = input.map(zero_inner_cell).unwrap()
+    defer let columns_host = gpu.download(columns).unwrap()
+    defer let rows_host = gpu.download(rows).unwrap()
+    defer let inner_host = gpu.download(inner).unwrap()
+    testing.assert_eq(columns_host.length(), UInt64(6), "zero-column map lost output lanes")?
+    testing.assert_eq(rows_host.length(), UInt64(6), "zero-row map lost output lanes")?
+    testing.assert_eq(inner_host.length(), UInt64(6), "zero-inner map lost output lanes")?
+    for index in UInt64(0)..6 {
+        testing.assert_eq(columns_host[index].to_bits(), values[index].to_bits(), "zero-column GPU product changed its surviving input")?
+        testing.assert_eq(rows_host[index].to_bits(), values[index].to_bits(), "zero-row GPU product changed its surviving input")?
+        testing.assert_eq(inner_host[index].to_bits(), UInt32(0), "zero-inner GPU product did not initialize every component to positive zero")?
+    }
+}

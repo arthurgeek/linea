@@ -1,0 +1,217 @@
+import std.io
+import std.mem
+import std.testing
+import std.time
+
+// A completed set of samples. Statistics are raw nanoseconds per batch.
+// Display scales the per-iteration average; statistics retain raw nanoseconds.
+@(opaque, copyable)
+struct Measurement {
+    plan: Schedule,
+    distribution: Summary,
+}
+
+impl Measurement {
+    pub fn schedule(self: Self) -> Schedule {
+        copy(self.plan)
+    }
+
+    pub fn statistics(self: Self) -> Summary {
+        copy(self.distribution)
+    }
+}
+
+impl Display for Measurement {
+    fn fmt[W: Writer](self: Self, inout w: W) -> Result[(), W.Error] {
+        let repetitions = self.plan.repetitions()
+        let samples = self.plan.samples()
+        let (unit_nanoseconds, unit) = time.duration_unit(self.distribution.median / repetitions)
+        let scale = Float64(repetitions) * Float64(unit_nanoseconds)
+        let median = Float64(self.distribution.median) / scale
+        let low = Float64(self.distribution.minimum) / scale
+        let high = Float64(self.distribution.p90) / scale
+        "{median:.3} {unit}/iter (min {low:.3} {unit}, p90 {high:.3} {unit}; {samples} samples x {repetitions} iterations)".fmt(&w)
+    }
+}
+
+@derive(Display, Release)
+pub enum SampleError[E] {
+    Work(E),
+    Allocation(mem.Oom),
+}
+
+// The probe history and measured round count live outside the callback.
+struct Sampling {
+    plan: Schedule,
+    probing: Bool,
+    round: UInt64,
+}
+
+impl Sampling {
+    fn start(requested: Option[Schedule]) -> Self {
+        match read requested {
+            Some(plan) => .{ plan = copy(plan), probing = false, round = 0 },
+            None => .{ plan = Schedule.new(1, 1, 9, 1).unwrap(), probing = true, round = 0 },
+        }
+    }
+
+    // A probe aims for a millisecond, up to 1,048,576 iterations. Every
+    // probe and warmup is excluded from the samples.
+    fn measured(inout self: Self, ns: UInt64) -> Bool {
+        if self.probing {
+            let reps = self.plan.repetitions()
+            if ns >= 1000000 || reps == 1048576 {
+                self.probing = false
+            } else {
+                let next: UInt64 = if reps > 1048576 / 8 {
+                    1048576
+                } else {
+                    reps * 8
+                }
+                self.plan = Schedule.new(1, next, 9, 1).unwrap()
+            }
+            return false
+        }
+        let keep = self.plan.sample_index(self.round).is_some()
+        self.round += 1
+        keep
+    }
+}
+
+// Return a measurement of an ordinary function or closure. The callback's
+// result is observed at every iteration. A linear result must be settled
+// explicitly inside the callback. Supply a schedule to skip calibration.
+pub fn iter[T: Discardable, F: inout fn(iteration: UInt64) -> T](inout work: F, schedule: Option[Schedule] = .None) -> Result[Measurement, mem.Oom] {
+    iter_in(mem.system(), &work, schedule)
+}
+
+pub fn iter_in[A: Allocator, T: Discardable, F: inout fn(iteration: UInt64) -> T](allocator: A, inout work: F, schedule: Option[Schedule] = .None) -> Result[Measurement, mem.Oom] {
+    var sampling = Sampling.start(schedule)
+    defer var elapsed: mem.Vec[UInt64, A] = mem.Vec.new_in(allocator)
+    &elapsed.reserve(sampling.plan.samples())?
+    while sampling.round < sampling.plan.rounds() {
+        let ns = sampling.plan.measure(&work)
+        if &sampling.measured(ns) {
+            &elapsed.push(ns).settled()?
+        }
+    }
+    .Ok(.{ plan = copy(sampling.plan), distribution = summarize(&elapsed).unwrap() })
+}
+
+pub fn try_iter[E, T: Discardable, F: inout fn(iteration: UInt64) -> Result[T, E]](inout work: F, schedule: Option[Schedule] = .None) -> Result[Measurement, SampleError[E]] where carries(.Err: work) {
+    try_iter_in(mem.system(), &work, schedule)
+}
+
+pub fn try_iter_in[A: Allocator, E, T: Discardable, F: inout fn(iteration: UInt64) -> Result[T, E]](allocator: A, inout work: F, schedule: Option[Schedule] = .None) -> Result[Measurement, SampleError[E]] where carries(.Err: work) {
+    var sampling = Sampling.start(schedule)
+    defer var elapsed: mem.Vec[UInt64, A] = mem.Vec.new_in(allocator)
+    match &elapsed.reserve(sampling.plan.samples()) { Ok(_) => (), Err(e) => return .Err(.Allocation(e)) }
+    while sampling.round < sampling.plan.rounds() {
+        let ns = match sampling.plan.try_measure(&work) {
+            Ok(value) => value,
+            Err(e) => return .Err(.Work(e)),
+        }
+        if &sampling.measured(ns) {
+            match &elapsed.push(ns).settled() { Ok(_) => (), Err(e) => return .Err(.Allocation(e)) }
+        }
+    }
+    .Ok(.{ plan = copy(sampling.plan), distribution = summarize(&elapsed).unwrap() })
+}
+
+// Generated benchmark dispatch hands the completed case to this function.
+// Each child reports its own output error or original workload failure.
+fn render_measurement[E: Display](name: Str, answer: Result[Measurement, E]) -> UInt8 {
+    match read answer {
+        Ok(m) => match io.println("bench {name} ... {m}") {
+            Ok(_) => 0,
+            Err(e) => {
+                io.eprintln(e)
+                1
+            },
+        },
+        Err(e) => {
+            io.eprintln(e)
+            1
+        },
+    }
+}
+
+fn report_measurement[E: Display + Discardable](name: Str, sink answer: Result[Measurement, E]) -> UInt8 {
+    render_measurement(name, answer)
+}
+
+fn report_owned_measurement[E: Display + Release](name: Str, sink answer: Result[Measurement, E]) -> UInt8 {
+    let status = render_measurement(name, answer)
+    match answer { Ok(_) => (), Err(e) => e.release() }
+    status
+}
+
+test "benchmark measured values retain the actual counts and full batch distribution" {
+    let plan = Schedule.new(1, 3, 4, 1).unwrap()
+    var calls: UInt64 = 0
+    let result = testing.allocated(
+        iter(
+            inout [inout calls] |i| {
+                calls += 1
+                i + 3
+            },
+            schedule: .Some(plan),
+        ),
+        "sample buffer allocation failed",
+    )?
+    testing.assert_eq(calls, UInt64(15), "explicit counts changed")?
+    let stats = result.statistics()
+    testing.assert(stats.minimum <= stats.median && stats.median <= stats.p90 && stats.p90 <= stats.maximum, "sample order is inconsistent")?
+    testing.assert_eq(result.schedule().repetitions(), UInt64(3), "report lost its batch size")?
+}
+
+test "benchmark calibration bounds the work on a clock that never advances" {
+    var trial = Sampling.start(.None)
+    var probes: UInt64 = 0
+    while trial.probing {
+        testing.assert(!&trial.measured(0), "a calibration probe was recorded")?
+        probes += 1
+    }
+    testing.assert_eq(probes, UInt64(8), "zero readings failed to reach the repetition cap")?
+    testing.assert_eq(trial.plan.repetitions(), UInt64(1048576), "unexpected repetition cap")?
+    testing.assert(!&trial.measured(73) && &trial.measured(11), "the warmup was counted or the first sample lost")?
+    var slow = Sampling.start(.None)
+    testing.assert(!&slow.measured(1000000) && !slow.probing && slow.plan.repetitions() == 1, "slow work repeated during calibration")?
+}
+
+test "benchmark callback failure during calibration stops before any further invocation" {
+    var called: UInt64 = 0
+    let result = try_iter(
+        inout [inout called] |_i: UInt64| -> Result[UInt64, UInt64] {
+            called += 1
+            .Err(71)
+        },
+    )
+    let original = match result { Err(Work(e)) => e, _ => UInt64(0) }
+    testing.assert_eq(original, UInt64(71), "the first probe lost its workload error")?
+    testing.assert_eq(called, UInt64(1), "the failed probe was retried or used as a sample")?
+    let owner = "sensor disconnected".to_owned().unwrap()
+    let view = owner.view()
+    let result_with_view = try_iter(
+        [view] |_i: UInt64| -> Result[UInt8, Str] {
+            .Err(copy(view))
+        },
+    )
+    let described = match result_with_view { Err(Work(reason)) => reason == "sensor disconnected", _ => false }
+    owner.release()
+    testing.assert(described, "a borrowed workload error lost its original text")?
+}
+
+test "benchmark report preserves fractional nanoseconds and names its statistics" {
+    let report: Measurement = .{ plan = Schedule.new(0, 8, 3, 1).unwrap(), distribution = .{ minimum = 0, median = 1, p90 = 3, maximum = 3 } }
+    defer var recorder = testing.Recorder.of(256).unwrap()
+    let rendered = report.fmt(&recorder).is_ok()
+    testing.assert(rendered && recorder.holds("0.125 ns/iter (min 0.000 ns, p90 0.375 ns; 3 samples x 8 iterations)"), "the fractional measurement or statistic labels changed")?
+}
+
+test "benchmark report scales large per iteration durations" {
+    let report: Measurement = .{ plan = Schedule.new(0, 1, 9, 1).unwrap(), distribution = .{ minimum = 11097000, median = 11114000, p90 = 14934000, maximum = 14934000 } }
+    defer var recorder = testing.Recorder.of(256).unwrap()
+    let rendered = report.fmt(&recorder).is_ok()
+    testing.assert(rendered && recorder.holds("11.114 ms/iter (min 11.097 ms, p90 14.934 ms; 9 samples x 1 iterations)"), "large durations were not scaled consistently")?
+}

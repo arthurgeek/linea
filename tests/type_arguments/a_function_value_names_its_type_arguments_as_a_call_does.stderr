@@ -8,8 +8,13 @@ error[T-Bound]: `W` requires `Weighed`, and `UInt8` does not implement it
    |
 22 |     let _unweighed = heaviest[UInt8]
    |                               ^^^^^ implement it for that type, or drop the bound
-error[T-Index]: this bracket holds a list, and an index is one value
-  --> tests/type_arguments/a_function_value_names_its_type_arguments_as_a_call_does.lin:24:20
+error[N-NotAValue]: `UInt8` is a type, and a type is not a value
+  --> tests/type_arguments/a_function_value_names_its_type_arguments_as_a_call_does.lin:24:27
    |
 24 |     let _indexed = values[UInt8, Bool]
-   |                    ^^^^^^^^^^^^^^^^^^^ index one position at a time, as in `grid[row][column]`
+   |                           ^^^^^ name a value of that type
+error[N-NotAValue]: `Bool` is a type, and a type is not a value
+  --> tests/type_arguments/a_function_value_names_its_type_arguments_as_a_call_does.lin:24:34
+   |
+24 |     let _indexed = values[UInt8, Bool]
+   |                                  ^^^^ name a value of that type

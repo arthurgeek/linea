@@ -1,0 +1,6 @@
+error[N-Aliased]: this names a place another argument mutates
+  --> tests/numerical_values/array_call_rejects_mutating_read.lin:12:21
+   |
+12 |     UInt8(add_first(values, bump(&values)))
+   |                     ^^^^^^ already passed `&` here
+   |                                  ------- mutated by this argument

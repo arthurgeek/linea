@@ -2,6 +2,7 @@
 import std.gpu
 import std.io
 import std.tensor
+import std.testing
 
 use io.IoError
 use io.println
@@ -55,4 +56,24 @@ fn main() -> Result[UInt8, PipelineError] {
             1
         },
     )
+}
+
+test "GPU pipeline matches the complete host algorithm" {
+    defer let device = match gpu.Device.open() {
+        Ok(value) => value,
+        Err(error) => {
+            testing.assert_eq(error, gpu.GpuError.Unavailable, "GPU device opening failed")?
+            return .Err(testing.skip("GPU device unavailable"))
+        },
+    }
+    defer let host_left = tensor.matrix([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]).unwrap()
+    defer let host_right = tensor.matrix([[7.0, 8.0], [9.0, 10.0], [11.0, 12.0]]).unwrap()
+    defer let reference = compute(host_left, host_right).unwrap()
+    defer let left = device.upload(host_left.values(), host_left.dimensions()).unwrap()
+    defer let right = device.upload(host_right.values(), host_right.dimensions()).unwrap()
+    defer let answer = compute(left, right).unwrap()
+    defer let values = gpu.download(answer).unwrap()
+    testing.assert_eq(values.length(), UInt64(1), "scalar reduction returned the wrong extent")?
+    testing.assert_eq(values[0].to_bits(), Float32(622.5).to_bits(), "GPU pipeline changed the independently known result")?
+    testing.assert_eq(values[0].to_bits(), reference.values()[0].to_bits(), "host and GPU pipelines disagree")?
 }

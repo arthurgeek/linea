@@ -1,0 +1,5 @@
+error[T-DivideByZero]: division by zero in element 1
+ --> tests/numerical_values/array_constant_zero_divisor.lin:1:28
+  |
+1 | let result = [Int16(2), 3] / [Int16(1), 0]
+  |                            ^ the right operand is zero

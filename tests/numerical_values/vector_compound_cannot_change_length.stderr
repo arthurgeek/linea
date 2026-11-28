@@ -1,0 +1,6 @@
+error[T-Operands]: expected `[Int16; 2]`, found `[Int16; 3]`
+ --> tests/numerical_values/vector_compound_cannot_change_length.lin:5:5
+  |
+5 |     vector *= num.matrix([[Int16(1), 2, 3], [4, 5, 6]])
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `[Int16; 2]`, found `[Int16; 3]`
+  |     ------ expected because of this operand

@@ -1,0 +1,22 @@
+import std.mem
+import std.num
+
+fn main() -> UInt8 {
+    let rows: [[Float32; 0]; 2] = [[], []]
+    let columns: [[Float32; 3]; 0] = []
+    let a = num.matrix(rows)
+    let b = num.matrix(columns)
+    let result = a * b
+    if result[0, 0].to_bits() != 0 || result[1, 2].to_bits() != 0 {
+        return 1
+    }
+    let vector: [Float32; 0] = []
+    let product = a * vector
+    if product[0].to_bits() != 0 || product[1].to_bits() != 0 {
+        return 2
+    }
+    let none: num.Matrix[Float32, 0, 2] = num.matrix(mem.filled[[Float32; 2], 0]([0.0, 0.0]))
+    let scaled = none * 2.0
+    let _empty = -scaled
+    0
+}

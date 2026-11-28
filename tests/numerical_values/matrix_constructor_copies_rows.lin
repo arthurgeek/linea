@@ -1,0 +1,20 @@
+import std.num
+
+fn main() -> UInt8 {
+    var rows = [[Float64(1.0), 2.0], [3.0, 4.0]]
+    var first = num.matrix(rows)
+    first[0, 1] = 9.0
+    if rows[0][1] != 2.0 {
+        return 1
+    }
+    rows[0][0] = 8.0
+    if first[0, 0] != 1.0 {
+        return 2
+    }
+    var second = copy(first)
+    second[0, 0] = 7.0
+    if first[0, 0] != 1.0 || second[0, 0] != 7.0 {
+        return 3
+    }
+    0
+}

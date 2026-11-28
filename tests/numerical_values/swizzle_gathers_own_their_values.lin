@@ -1,0 +1,31 @@
+fn pair(values: borrow [Int32; 4]) -> [Int32; 2] {
+    values.yx
+}
+
+fn generic[T: Integer, let n: UInt64](values: [T; n]) -> [T; 2] {
+    values.yx
+}
+
+fn build(inout calls: UInt64) -> [Int32; 4] {
+    calls += 1
+    [Int32(calls), 2, 3, 4]
+}
+
+fn main() -> UInt8 {
+    let values = [Int32(1), 2, 3, 4]
+    var gathered = pair(borrow values)
+    gathered.x = 9
+    if gathered[0] != 9 || gathered[1] != 1 || values[1] != 2 {
+        return 1
+    }
+    let reversed = generic([Int16(5), 6, 7])
+    if reversed[0] != 6 || reversed[1] != 5 {
+        return 2
+    }
+    var calls = UInt64(0)
+    let made = build(&calls).yx
+    if calls != 1 || made[0] != 2 || made[1] != 1 {
+        return 3
+    }
+    0
+}

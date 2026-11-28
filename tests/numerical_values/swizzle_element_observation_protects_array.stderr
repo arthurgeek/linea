@@ -1,0 +1,7 @@
+error[O-Borrow]: this operation invalidates a place that a later observation still needs
+ --> tests/numerical_values/swizzle_element_observation_protects_array.lin:4:5
+  |
+4 |     values.xy = [Int32(5), 6]
+  |     ^^^^^^^^^ keep this place available until the last use of its observation
+5 |     if *seen != 3 || values.x != 5 || values.y != 6 {
+  |        ----- the observation is still used here

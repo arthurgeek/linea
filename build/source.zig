@@ -2014,17 +2014,9 @@ fn guideCommand(body: []const u8) ?struct { command: GuideCommand, path: []const
 }
 
 /// Whether a line is the closing line of a `linea test` report, such as
-/// `3 passed, 0 failed`.
+/// `3 passed, 0 failed` or `0 passed, 0 failed, 1 skipped`.
 fn isTestSummary(line: []const u8) bool {
-    var words = std.mem.tokenizeScalar(u8, std.mem.trim(u8, line, " \t\r"), ' ');
-    const passed = words.next() orelse return false;
-    const passed_word = words.next() orelse return false;
-    const failed = words.next() orelse return false;
-    const failed_word = words.next() orelse return false;
-    if (words.next() != null) return false;
-    _ = std.fmt.parseInt(u64, passed, 10) catch return false;
-    _ = std.fmt.parseInt(u64, failed, 10) catch return false;
-    return std.mem.eql(u8, passed_word, "passed,") and std.mem.eql(u8, failed_word, "failed");
+    return testsReported(std.mem.trim(u8, line, " \t\r")) != null;
 }
 
 /// Whether a label names a manifest, which a project carries beside its
@@ -3617,18 +3609,29 @@ pub fn exampleRoots(gpa: std.mem.Allocator, entries: []const ExampleEntry) []con
 
 /// How many tests a `linea test` run reported, from its closing
 /// `N passed, M failed` line, or none from `no tests found in PATH`, which
-/// it prints instead where the root declares no test; null when the output
+/// it prints instead where the root declares no test; skipped tests count as
+/// reported, independently of their qualification outcome. Null when the output
 /// ends otherwise.
 pub fn testsReported(output: []const u8) ?usize {
     const trimmed = std.mem.trimEnd(u8, output, "\n");
     const line = std.mem.trimStart(u8, trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..], "\n");
     if (std.mem.startsWith(u8, line, "no tests found in ")) return 0;
-    var words = std.mem.tokenizeAny(u8, line, " ,\n");
-    const passed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
-    if (!std.mem.eql(u8, words.next() orelse return null, "passed")) return null;
-    const failed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
-    if (!std.mem.eql(u8, words.next() orelse return null, "failed")) return null;
-    return passed + failed;
+    var parts = std.mem.splitSequence(u8, line, ", ");
+    const passed = summaryCount(parts.next() orelse return null, " passed") orelse return null;
+    const failed = summaryCount(parts.next() orelse return null, " failed") orelse return null;
+    const total = std.math.add(usize, passed, failed) catch return null;
+    const next = parts.next() orelse return total;
+    const skipped = summaryCount(next, " skipped") orelse return null;
+    if (parts.next() != null) return null;
+    return std.math.add(usize, total, skipped) catch return null;
+}
+
+fn summaryCount(part: []const u8, suffix: []const u8) ?usize {
+    if (!std.mem.endsWith(u8, part, suffix)) return null;
+    const number = part[0 .. part.len - suffix.len];
+    if (number.len == 0) return null;
+    for (number) |digit| if (digit < '0' or digit > '9') return null;
+    return std.fmt.parseInt(usize, number, 10) catch return null;
 }
 
 /// What `unreachedSources` found wrong beneath `examples/`.

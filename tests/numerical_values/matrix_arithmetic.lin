@@ -1,0 +1,23 @@
+import std.num
+
+fn main() -> UInt8 {
+    let a = num.matrix([[Int32(1), 2, 3], [4, 5, 6]])
+    let b = num.matrix([[Int32(7), 8], [9, 10], [11, 12]])
+    let product = a * b
+    if product[0, 0] != 58 || product[0, 1] != 64 || product[1, 0] != 139 || product[1, 1] != 154 {
+        return 1
+    }
+    let scaled = 2 * a
+    let sum = a + scaled
+    let difference = sum - a
+    let negative = -difference
+    if scaled[1, 2] != 12 || sum[0, 2] != 9 || negative[1, 0] != -8 {
+        return 2
+    }
+    let right = a * [Int32(2), 3, 4]
+    let left = [Int32(2), 3] * a
+    if right[0] != 20 || right[1] != 47 || left[0] != 14 || left[2] != 24 {
+        return 3
+    }
+    0
+}

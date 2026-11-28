@@ -12,6 +12,8 @@ formatting through the slice view are added by
 is added by [0172](0172-an-array-reports-its-length.md). A length parameter, an
 array of any length, is added by
 [0307](0307-a-length-may-be-a-parameter.md).
+Numeric elementwise arithmetic is added by
+[0311](0311-numeric-arrays-apply-scalar-arithmetic-elementwise.md).
 
 ## Context
 
