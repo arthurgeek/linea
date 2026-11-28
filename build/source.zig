@@ -3616,15 +3616,22 @@ pub fn testsReported(output: []const u8) ?usize {
     const trimmed = std.mem.trimEnd(u8, output, "\n");
     const line = std.mem.trimStart(u8, trimmed[(std.mem.lastIndexOfScalar(u8, trimmed, '\n') orelse 0)..], "\n");
     if (std.mem.startsWith(u8, line, "no tests found in ")) return 0;
-    var words = std.mem.tokenizeAny(u8, line, " ,\n");
-    const passed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
-    if (!std.mem.eql(u8, words.next() orelse return null, "passed")) return null;
-    const failed = std.fmt.parseInt(usize, words.next() orelse return null, 10) catch return null;
-    if (!std.mem.eql(u8, words.next() orelse return null, "failed")) return null;
-    const next = words.next() orelse return passed + failed;
-    const skipped = std.fmt.parseInt(usize, next, 10) catch return null;
-    if (!std.mem.eql(u8, words.next() orelse return null, "skipped")) return null;
-    return passed + failed + skipped;
+    var parts = std.mem.splitSequence(u8, line, ", ");
+    const passed = summaryCount(parts.next() orelse return null, " passed") orelse return null;
+    const failed = summaryCount(parts.next() orelse return null, " failed") orelse return null;
+    const total = std.math.add(usize, passed, failed) catch return null;
+    const next = parts.next() orelse return total;
+    const skipped = summaryCount(next, " skipped") orelse return null;
+    if (parts.next() != null) return null;
+    return std.math.add(usize, total, skipped) catch return null;
+}
+
+fn summaryCount(part: []const u8, suffix: []const u8) ?usize {
+    if (!std.mem.endsWith(u8, part, suffix)) return null;
+    const number = part[0 .. part.len - suffix.len];
+    if (number.len == 0) return null;
+    for (number) |digit| if (digit < '0' or digit > '9') return null;
+    return std.fmt.parseInt(usize, number, 10) catch return null;
 }
 
 /// What `unreachedSources` found wrong beneath `examples/`.

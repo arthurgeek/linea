@@ -1887,6 +1887,24 @@ test "example roots: the tests a run reported are read from its closing line" {
     try testing.expectEqual(@as(?usize, null), source.testsReported(""));
 }
 
+test "example roots: test summaries refuse malformed text and overflowing totals" {
+    for ([_][]const u8{
+        "4 passed, 1 failed, 2 skipped unexpected content",
+        "4 passed, 1 failed unexpected content",
+        "4 passed 1 failed",
+        "4 passed,, 1 failed",
+        "4 passed, 1 failed, 2 skipped,",
+        "4 passed, 1 failed, 2 skipped, 3 skipped",
+        "4 passed, 1 failed, skipped",
+        "4 passed, 1 failed, 2 skipped extra",
+    }) |text| try testing.expectEqual(@as(?usize, null), source.testsReported(text));
+    var buffer: [160]u8 = undefined;
+    const first = try std.fmt.bufPrint(&buffer, "{d} passed, 1 failed", .{std.math.maxInt(usize)});
+    try testing.expectEqual(@as(?usize, null), source.testsReported(first));
+    const skipped = try std.fmt.bufPrint(&buffer, "{d} passed, 0 failed, 1 skipped", .{std.math.maxInt(usize)});
+    try testing.expectEqual(@as(?usize, null), source.testsReported(skipped));
+}
+
 test "the quoted strings of a text are read in order" {
     const gpa = testing.allocator;
     const rows =
