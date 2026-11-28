@@ -248,8 +248,7 @@ void linea_gpu_buffer_drop(unsigned long buffer) {
     linea_gpu_close((unsigned long)(uintptr_t)d);
 }
 
-static long buffer_new(unsigned long device, unsigned long bytes, unsigned long budget, int *over_budget) {
-    if (over_budget) *over_budget = 0;
+static long buffer_new(unsigned long device, unsigned long bytes, unsigned long budget) {
     struct gpu_device *d = (struct gpu_device *)(uintptr_t)device;
     if (bytes > d->properties.limits.maxStorageBufferRange) return -EOVERFLOW;
     struct gpu_buffer *b = calloc(1, sizeof(*b));
@@ -270,7 +269,6 @@ static long buffer_new(unsigned long device, unsigned long bytes, unsigned long 
     VkMemoryRequirements requirements;
     d->api.GetBufferMemoryRequirements(d->logical, b->buffer, &requirements);
     if (requirements.size > budget || requirements.size > ULONG_MAX) {
-        if (over_budget) *over_budget = 1;
         error = -ENOMEM; goto fail;
     }
     b->allocated = (unsigned long)requirements.size;
@@ -305,7 +303,7 @@ fail:
 long linea_gpu_buffer_new(unsigned long device, unsigned long bytes) {
     struct gpu_device *d = (struct gpu_device *)(uintptr_t)device;
     linea_park_lock(&d->storage_changed);
-    long result = d->terminal ? -EIO : buffer_new(device, bytes, ULONG_MAX, NULL);
+    long result = d->terminal ? -EIO : buffer_new(device, bytes, ULONG_MAX);
     linea_park_unlock(&d->storage_changed);
     return result;
 }
@@ -365,10 +363,11 @@ long linea_gpu_arena_buffer_new(unsigned long arena, unsigned long bytes) {
         if (preferred > remaining) preferred = remaining;
         if (preferred > d->properties.limits.maxStorageBufferRange) preferred = d->properties.limits.maxStorageBufferRange;
         if (preferred < extent) { free(view); goto done; }
-        int over_budget = 0;
-        result = buffer_new((unsigned long)(uintptr_t)d, preferred, remaining, &over_budget);
-        if (over_budget && preferred != extent)
-            result = buffer_new((unsigned long)(uintptr_t)d, extent, remaining, NULL);
+        result = buffer_new((unsigned long)(uintptr_t)d, preferred, remaining);
+        /* Preferred growth is an optimization: budget padding or recoverable
+         * host/device allocation failure may still permit the exact extent. */
+        if (result == -ENOMEM && preferred != extent)
+            result = buffer_new((unsigned long)(uintptr_t)d, extent, remaining);
         if (result < 0) { free(view); goto done; }
         block = (struct gpu_buffer *)(uintptr_t)result;
         block->next = a->blocks; a->blocks = block;

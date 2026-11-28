@@ -358,6 +358,59 @@ static void system_buffer_independence(void) {
     REQUIRE(linea_gpu_buffer_read((unsigned long)sibling, &got, 4) == 0 && got == word);
     linea_gpu_buffer_drop((unsigned long)sibling); clean();
 }
+static void arena_allocation_fallback(void) {
+    const char *stages[] = {"CreateBuffer", "AllocateMemory", "BindBufferMemory", "MapMemory"};
+    const VkResult recoverable[] = {VK_ERROR_OUT_OF_HOST_MEMORY, VK_ERROR_OUT_OF_DEVICE_MEMORY};
+    for (unsigned stage = 0; stage < sizeof(stages) / sizeof(*stages); ++stage) {
+        for (unsigned kind = 0; kind < sizeof(recoverable) / sizeof(*recoverable); ++kind) {
+            reset(); long d = device(), arena = linea_gpu_arena_new((unsigned long)d, 131072); REQUIRE(arena > 0);
+            inject(stages[stage], 1); state.fail_result = recoverable[kind];
+            long view = linea_gpu_arena_buffer_new((unsigned long)arena, 4); REQUIRE(view > 0);
+            struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)arena;
+            REQUIRE(state.named_calls == 2 && a->blocks == a->current && !a->blocks->next);
+            REQUIRE(a->blocks->capacity == 4 && a->blocks->cursor == 4);
+            REQUIRE(a->committed == 256 && a->blocks->allocated == 256);
+            uint32_t word = 0x5aabc123, got = 0;
+            REQUIRE(linea_gpu_buffer_write((unsigned long)view, &word, 4) == 0);
+            REQUIRE(linea_gpu_buffer_read((unsigned long)view, &got, 4) == 0 && got == word);
+            linea_gpu_arena_drop((unsigned long)arena); linea_gpu_close((unsigned long)d); clean();
+        }
+    }
+    /* A failed preferred-block metadata allocation is recoverable too. The
+     * already allocated view is published only after the smaller block works. */
+    reset(); long d = device(), arena = linea_gpu_arena_new((unsigned long)d, 131072); REQUIRE(arena > 0);
+    state.fail_cpu = state.cpu_calls + 2;
+    long view = linea_gpu_arena_buffer_new((unsigned long)arena, 4); REQUIRE(view > 0);
+    struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)arena;
+    REQUIRE(a->blocks->capacity == 4 && a->committed == 256);
+    linea_gpu_arena_drop((unsigned long)arena); linea_gpu_close((unsigned long)d); clean();
+    /* If the exact retry also fails, neither attempt commits arena state. */
+    reset(); d = device(); arena = linea_gpu_arena_new((unsigned long)d, 131072); REQUIRE(arena > 0);
+    a = (struct gpu_arena *)(uintptr_t)arena;
+    inject("AllocateMemory", 1); state.fail_cpu = state.cpu_calls + 3;
+    REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, 4) == -ENOMEM);
+    REQUIRE(!a->blocks && !a->current && !a->views && !a->committed);
+    state.fail_name = NULL; state.fail_cpu = 0;
+    REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, 4) > 0);
+    linea_gpu_arena_drop((unsigned long)arena); linea_gpu_close((unsigned long)d); clean();
+    /* A smaller allocation cannot recover device loss or other API errors. */
+    const VkResult refused[] = {VK_ERROR_DEVICE_LOST, VK_ERROR_INITIALIZATION_FAILED, VK_ERROR_FEATURE_NOT_PRESENT};
+    for (unsigned kind = 0; kind < sizeof(refused) / sizeof(*refused); ++kind) {
+        reset(); d = device(); arena = linea_gpu_arena_new((unsigned long)d, 131072); REQUIRE(arena > 0);
+        a = (struct gpu_arena *)(uintptr_t)arena;
+        inject("CreateBuffer", 1); state.fail_result = refused[kind];
+        REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, 4) == (kind == 2 ? -ENODEV : -EIO));
+        REQUIRE(state.named_calls == 1 && !a->blocks && !a->views && !a->committed);
+        if (kind == 0) REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, 4) == -EIO && state.named_calls == 1);
+        linea_gpu_arena_drop((unsigned long)arena); linea_gpu_close((unsigned long)d); clean();
+    }
+    reset(); d = device(); arena = linea_gpu_arena_new((unsigned long)d, 131072); REQUIRE(arena > 0);
+    unsigned calls = state.cpu_calls;
+    inject("CreateBuffer", 1); state.fail_result = VK_ERROR_DEVICE_LOST;
+    REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, ULONG_MAX) == -EOVERFLOW);
+    REQUIRE(!state.named_calls && state.cpu_calls == calls && !((struct gpu_device *)(uintptr_t)d)->terminal);
+    linea_gpu_arena_drop((unsigned long)arena); linea_gpu_close((unsigned long)d); clean();
+}
 static void arena_failures(void) {
     const char *stages[] = {"CreateBuffer", "AllocateMemory", "BindBufferMemory", "MapMemory"};
     for (unsigned stage = 0; stage < 6; ++stage) {
@@ -581,33 +634,86 @@ static void single_carrier(void) {
     end = deadline(); lock_state(); while (!state.cpu_progress || !state.gpu_done) wait_changed(&end); unlock_state();
     linea_chan_close(cpu_handle); linea_chan_close(gpu_handle); linea_gpu_submission_drop((unsigned long)job); owners(d, a, c, 0); clean();
 }
+struct arena_teardown_work {
+    unsigned long arena, other, job;
+    struct gpu_buffer *views, *block, *first, *second;
+    unsigned long cursor, committed, pending, first_pins, second_pins;
+    int drop;
+};
 static void reset_task(unsigned long endpoint, unsigned long at, unsigned long len) {
-    REQUIRE(!len); lock_state(); state.reset_entered = 1; state.gpu_carrier = pthread_self(); changed(); unlock_state();
-    REQUIRE(linea_gpu_arena_reset(at) == 0);
+    REQUIRE(!len); struct arena_teardown_work *work = (struct arena_teardown_work *)(uintptr_t)at;
+    struct gpu_device *d = ((struct gpu_arena *)(uintptr_t)work->arena)->device;
+    lock_state(); state.reset_entered = 1; state.gpu_carrier = pthread_self(); changed(); unlock_state();
+    if (work->drop) linea_gpu_arena_drop(work->arena);
+    else {
+        REQUIRE(linea_gpu_arena_reset(work->arena) == 0);
+        struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)work->arena;
+        REQUIRE(!a->views && !a->pending && !a->draining && a->blocks->cursor == 0);
+    }
+    /* Pending pins must be detached before reset/drop can return, even if the
+     * completion worker has not yet published the public job's done flag. */
+    linea_park_lock(&d->storage_changed);
+    struct gpu_submission *job = (struct gpu_submission *)(uintptr_t)work->job;
+    REQUIRE(!job->input && !job->output && !job->right);
+    linea_park_unlock(&d->storage_changed);
     lock_state(); state.reset_done = 1; changed(); unlock_state(); linea_chan_close(endpoint);
 }
 static void teardown_task(unsigned long endpoint, unsigned long at, unsigned long len) {
-    REQUIRE(!at && !len); lock_state(); REQUIRE(state.reset_entered && !state.reset_done);
-    REQUIRE(pthread_equal(state.gpu_carrier, pthread_self())); state.allow_teardown = 1; changed(); unlock_state(); linea_chan_close(endpoint);
+    REQUIRE(!len); struct arena_teardown_work *work = (struct arena_teardown_work *)(uintptr_t)at;
+    lock_state(); REQUIRE(state.reset_entered && !state.reset_done);
+    REQUIRE(pthread_equal(state.gpu_carrier, pthread_self())); unlock_state();
+    struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)work->arena;
+    struct gpu_device *d = a->device;
+    linea_park_lock(&d->storage_changed);
+    REQUIRE(a->draining && a->pending == work->pending && a->pending > 0);
+    REQUIRE(a->views == work->views && a->blocks == work->block && a->current == work->block);
+    REQUIRE(a->committed == work->committed && a->blocks->cursor == work->cursor);
+    if (pthread_mutex_lock(&d->references_lock) != 0) abort();
+    REQUIRE(work->first->in_flight == work->first_pins && work->second->in_flight == work->second_pins);
+    if (pthread_mutex_unlock(&d->references_lock) != 0) abort();
+    linea_park_unlock(&d->storage_changed);
+    /* The arena is still alive while draining: same-domain work is refused,
+     * while an independent arena on this device can allocate on this carrier. */
+    REQUIRE(linea_gpu_arena_buffer_new(work->arena, 4) == -EBUSY);
+    REQUIRE(linea_gpu_submit((unsigned long)(uintptr_t)work->first, (unsigned long)(uintptr_t)work->second,
+        image_words, sizeof(image_words), 1) == -EBUSY);
+    REQUIRE(linea_gpu_arena_buffer_new(work->other, 4) > 0);
+    lock_state(); state.allow_teardown = 1; changed(); unlock_state(); linea_chan_close(endpoint);
 }
 static void arena_teardown(void) {
-    reset(); state.teardown_gate = 1; long d = device();
-    long arena = linea_gpu_arena_new((unsigned long)d, 256); REQUIRE(arena > 0);
-    long a = linea_gpu_arena_buffer_new((unsigned long)arena, 4), b = linea_gpu_buffer_sized_like((unsigned long)a, 4);
-    REQUIRE(a > 0 && b > 0);
-    long job = linea_gpu_submit((unsigned long)a, (unsigned long)b, image_words, sizeof(image_words), 1); REQUIRE(job > 0);
-    struct timespec end = deadline(); lock_state(); while (!state.teardown_entered) wait_changed(&end); unlock_state();
-    long loop = linea_loop_open(1); REQUIRE(loop > 0);
-    long prepared = linea_task_prepare_on(256 * 1024, (unsigned long)loop); REQUIRE(prepared > 0);
-    unsigned long first = linea_task_start((unsigned long)prepared, reset_task, release_body, (unsigned long)arena, 0, 0);
-    end = deadline(); lock_state(); while (!state.reset_entered) wait_changed(&end); unlock_state();
-    prepared = linea_task_prepare_on(256 * 1024, (unsigned long)loop); REQUIRE(prepared > 0);
-    unsigned long second = linea_task_start((unsigned long)prepared, teardown_task, release_body, 0, 0, 0);
-    end = deadline(); lock_state(); while (!state.reset_done) wait_changed(&end); unlock_state();
-    REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, 4) > 0);
-    linea_gpu_arena_drop((unsigned long)arena); linea_gpu_close((unsigned long)d);
-    REQUIRE(linea_gpu_wait((unsigned long)job) == 0); linea_gpu_submission_drop((unsigned long)job);
-    linea_chan_close(first); linea_chan_close(second); clean();
+    for (unsigned drop = 0; drop < 2; ++drop) {
+        reset(); state.teardown_gate = 1; long d = device();
+        long arena = linea_gpu_arena_new((unsigned long)d, 256); REQUIRE(arena > 0);
+        long other = linea_gpu_arena_new((unsigned long)d, 256); REQUIRE(other > 0);
+        long first = linea_gpu_arena_buffer_new((unsigned long)arena, 4), second = linea_gpu_buffer_sized_like((unsigned long)first, 4);
+        REQUIRE(first > 0 && second > 0);
+        long job = linea_gpu_submit((unsigned long)first, (unsigned long)second, image_words, sizeof(image_words), 1); REQUIRE(job > 0);
+        struct timespec end = deadline(); lock_state(); while (!state.teardown_entered) wait_changed(&end); unlock_state();
+        struct gpu_arena *a = (struct gpu_arena *)(uintptr_t)arena;
+        struct arena_teardown_work work = {
+            .arena = (unsigned long)arena, .other = (unsigned long)other, .job = (unsigned long)job,
+            .views = a->views, .block = a->blocks, .first = (struct gpu_buffer *)(uintptr_t)first,
+            .second = (struct gpu_buffer *)(uintptr_t)second, .cursor = a->blocks->cursor,
+            .committed = a->committed, .pending = a->pending,
+            .first_pins = ((struct gpu_buffer *)(uintptr_t)first)->in_flight,
+            .second_pins = ((struct gpu_buffer *)(uintptr_t)second)->in_flight, .drop = drop != 0,
+        };
+        REQUIRE(work.pending && work.first_pins && work.second_pins);
+        long loop = linea_loop_open(1); REQUIRE(loop > 0);
+        long prepared = linea_task_prepare_on(256 * 1024, (unsigned long)loop); REQUIRE(prepared > 0);
+        unsigned long waiting = linea_task_start((unsigned long)prepared, reset_task, release_body, (unsigned long)(uintptr_t)&work, 0, 0);
+        end = deadline(); lock_state(); while (!state.reset_entered) wait_changed(&end); unlock_state();
+        prepared = linea_task_prepare_on(256 * 1024, (unsigned long)loop); REQUIRE(prepared > 0);
+        unsigned long release = linea_task_start((unsigned long)prepared, teardown_task, release_body, (unsigned long)(uintptr_t)&work, 0, 0);
+        end = deadline(); lock_state(); while (!state.reset_done) wait_changed(&end); unlock_state();
+        if (!drop) {
+            REQUIRE(linea_gpu_arena_buffer_new((unsigned long)arena, 4) > 0);
+            linea_gpu_arena_drop((unsigned long)arena);
+        }
+        linea_gpu_arena_drop((unsigned long)other); linea_gpu_close((unsigned long)d);
+        REQUIRE(linea_gpu_wait((unsigned long)job) == 0); linea_gpu_submission_drop((unsigned long)job);
+        linea_chan_close(waiting); linea_chan_close(release); clean();
+    }
 }
 static void fatal_fence_policy(const char *self) {
     const char *results[] = { "allocation", "timeout" };
@@ -633,7 +739,7 @@ int main(int argc, char **argv) {
     }
     fatal_fence_policy(argv[0]);
     pthread_t watcher; REQUIRE(pthread_create(&watcher, NULL, watchdog, NULL) == 0);
-    system_buffer_independence(); arena_geometry(); arena_failures(); arena_teardown(); arena_submission_paths(); loader_policy(); constructors(); dispatch_failures(); transfers(); concurrent_host_access(); narrowing(); pending_and_aliases(); single_carrier();
+    system_buffer_independence(); arena_geometry(); arena_allocation_fallback(); arena_failures(); arena_teardown(); arena_submission_paths(); loader_policy(); constructors(); dispatch_failures(); transfers(); concurrent_host_access(); narrowing(); pending_and_aliases(); single_carrier();
     REQUIRE(pthread_mutex_lock(&watchdog_lock) == 0); watchdog_finished = 1;
     REQUIRE(pthread_cond_broadcast(&watchdog_changed) == 0); REQUIRE(pthread_mutex_unlock(&watchdog_lock) == 0);
     REQUIRE(pthread_join(watcher, NULL) == 0);
