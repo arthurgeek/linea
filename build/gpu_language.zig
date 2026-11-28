@@ -40,7 +40,11 @@ pub fn add(b: *std.Build, compiler: std.Build.LazyPath, runtime: std.Build.LazyP
     });
     step.dependOn(&library_tests.step);
     for ([_][]const u8{ "examples/gpu_readings.lin", "examples/gpu_matrix.lin", "examples/numerical_gpu.lin" }) |path| {
-        const run = hardwareTests(b, compiler, runtime, path, "GPU", &.{"GPU computation returns the expected values"});
+        const expected: []const []const u8 = if (std.mem.eql(u8, path, "examples/numerical_gpu.lin"))
+            &.{ "GPU computation returns the expected values", "GPU empty fixed matrix products preserve every component bit" }
+        else
+            &.{"GPU computation returns the expected values"};
+        const run = hardwareTests(b, compiler, runtime, path, "GPU", expected);
         step.dependOn(&run.step);
     }
     const benchmark = hardwareTests(b, compiler, runtime, "examples/benchmark_cpu_gpu", "GPU", &.{"GPU map matches every reference result bit"});
