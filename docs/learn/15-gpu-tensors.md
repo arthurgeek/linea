@@ -97,6 +97,7 @@ GPU request.
 import std.gpu
 import std.io
 import std.tensor
+import std.testing
 
 use io.IoError
 use io.println
@@ -351,10 +352,15 @@ increments the skipped count, never the passed count.
 
 For qualification, run `linea test --deny-skips std --filter "gpu."` and
 `linea test --deny-skips examples/gpu_matrix.lin`. The `test-gpu-language`
-build target also runs strict tests for the GPU library and examples, so missing
-hardware fails qualification. These checks compile device images, upload,
-submit, wait and download; they cost substantially more than scalar CPU tests.
-The compile-only target establishes compilation, not execution.
+build target also runs strict tests for the GPU library and examples, including
+the complete host/device tensor pipeline. It requires the intended test names to
+report `ok`, so an empty selection cannot qualify. When running tests directly,
+check that the expected tests appear: `--deny-skips` rejects skipped tests but
+does not reject an empty selection. A portable example may succeed after
+reporting that its device is unavailable; that is not hardware qualification.
+These checks compile device images, upload, submit, wait and download; they cost
+substantially more than scalar CPU tests. The compile-only target establishes
+compilation, not execution.
 
 Application tests can force the unavailable path without changing device
 discovery globally. [The readings example](../../examples/gpu_readings.lin)

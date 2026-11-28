@@ -75,6 +75,9 @@ zig build -Dgpu=false -j4 --cache-dir "$cpu_scratch/cache" \
 zig build -Dgpu=false -j4 --cache-dir "$cpu_scratch/cache" \
   --prefix "$cpu_scratch/install" test \
   -Dtest-filter='CPU-only compiler gates only certified device acquisition'
+zig build -Dgpu=false -j4 --cache-dir "$cpu_scratch/cache" \
+  --prefix "$cpu_scratch/install" test \
+  -Dtest-filter='CPU-only preparation bypasses device admission independently of tool arguments'
 if test -e "$LINEA_CPU_POISON_MARKER"; then
   cat "$LINEA_CPU_POISON_MARKER" >&2
   echo 'CPU-only execution invoked a GPU tool' >&2

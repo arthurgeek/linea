@@ -150,3 +150,48 @@ test "driver compilation GPU preparation failures settle test inputs only" {
         }
     }
 }
+
+test "CPU-only preparation bypasses device admission independently of tool arguments" {
+    if (@import("build_options").gpu) return error.SkipZigTest;
+    const t = std.testing;
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // Missing symbol coverage is refused before the verifier reads any body.
+    // Reaching device admission therefore produces a defect, not an empty
+    // image list, without relying on a particular subprocess or argument.
+    var functions = [_]mir.Mir{.{
+        .insts = .empty,
+        .block_insts = &.{},
+        .blocks = &.{},
+        .locals = &.{},
+        .entry = .at(0),
+        .extra = &.{},
+        .param_count = 0,
+        .slot_roles = &.{},
+        .file = .none,
+        .return_type = .poison,
+        .signature = .poison,
+        .call_sites = &.{},
+    }};
+    const module: mir.Module = .{
+        .functions = &functions,
+        .external = &.{false},
+        .gpu_function = .at(0),
+        .bytes = &.{},
+        .names = &.{},
+        .origins = &.{},
+        .layouts = &.{},
+        .entry = .none,
+    };
+    var sink = Sink.init(gpa);
+    switch (try prepare(gpa, t.io, &module, &sink, "cpu-only-preparation", false, false)) {
+        .images => |images| try t.expectEqual(@as(usize, 0), images.len),
+        else => return error.UnexpectedDevicePreparation,
+    }
+    try t.expect(!sink.hasErrors());
+    // The same input really does detect admission when the driver gate is
+    // bypassed: this pure control invokes no external compiler tools.
+    try t.expect((try backend.emitAll(gpa, &module, &sink)) == null);
+    try t.expect(sink.hasErrors());
+}
